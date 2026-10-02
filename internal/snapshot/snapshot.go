@@ -42,6 +42,9 @@ type Snapshot struct {
 
 	byUser map[string]Device
 	byExt  map[string][]Device
+	// known holds extension numbers that exist but have no enabled device,
+	// so a call to them is 480 rather than 404.
+	known map[string]bool
 }
 
 // New builds a snapshot from devices; devices whose realm differs from
@@ -65,10 +68,27 @@ func (s *Snapshot) DeviceByUsername(username string) (Device, bool) {
 	return d, ok
 }
 
-// DevicesForExtension returns the enabled devices of an extension number;
-// none means the number is unknown to this snapshot.
+// DevicesForExtension returns the enabled devices of an extension number.
 func (s *Snapshot) DevicesForExtension(number string) []Device {
 	return s.byExt[number]
+}
+
+// HasExtension reports whether number is a configured extension, with or
+// without enabled devices.
+func (s *Snapshot) HasExtension(number string) bool {
+	return len(s.byExt[number]) > 0 || s.known[number]
+}
+
+// WithExtensions marks extension numbers as configured even when they have
+// no enabled device; it returns s for chaining.
+func (s *Snapshot) WithExtensions(numbers ...string) *Snapshot {
+	if s.known == nil {
+		s.known = map[string]bool{}
+	}
+	for _, n := range numbers {
+		s.known[n] = true
+	}
+	return s
 }
 
 // Usernames returns every device username in the snapshot.
@@ -86,14 +106,15 @@ type Querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// The fixed snapshot query from the shared contracts.
+// The snapshot query from the shared contracts, starting from extensions so
+// that an extension without enabled devices is still known (its device
+// columns are NULL).
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
        d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name
-FROM devices d JOIN extensions e ON e.id = d.extension_id
-WHERE d.enabled`
+FROM extensions e LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled`
 
 // Load reads the snapshot for domain in one round trip (plus one when no
-// device is enabled, to learn the revision).
+// extension exists, to learn the revision).
 func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	rows, err := db.Query(ctx, snapshotQuery)
 	if err != nil {
@@ -102,25 +123,37 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	var (
 		rev     int64
 		devices []Device
+		bare    []string
+		anyRow  bool
 	)
 	for rows.Next() {
-		var d Device
-		if err := rows.Scan(&rev, &d.ID, &d.Username, &d.Realm, &d.HA1MD5, &d.HA1SHA256, &d.Extension, &d.ExtensionName); err != nil {
+		anyRow = true
+		var (
+			d                              Device
+			id                             *int64
+			user, realm, ha1MD5, ha1SHA256 *string
+		)
+		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}
+		if id == nil { // extension with no enabled device
+			bare = append(bare, d.Extension)
+			continue
+		}
+		d.ID, d.Username, d.Realm, d.HA1MD5, d.HA1SHA256 = *id, *user, *realm, *ha1MD5, *ha1SHA256
 		devices = append(devices, d)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("snapshot: rows: %w", err)
 	}
-	if len(devices) == 0 {
+	if !anyRow {
 		if err := db.QueryRow(ctx, "SELECT config_revision FROM schema_info").Scan(&rev); err != nil {
 			return nil, fmt.Errorf("snapshot: revision: %w", err)
 		}
 	}
-	return New(rev, domain, devices), nil
+	return New(rev, domain, devices).WithExtensions(bare...), nil
 }
 
 // Channel is the NOTIFY channel hello-control signals revisions on.

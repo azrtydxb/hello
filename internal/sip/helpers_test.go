@@ -236,7 +236,8 @@ func startPBX(t *testing.T, devices []snapshot.Device, opts ...pbxOpt) *testPBX 
 	reg := prometheus.NewRegistry()
 	fs := newFakeState()
 	snaps := &fakeSnaps{}
-	snaps.p.Store(snapshot.New(1, testDomain, devices))
+	// Extension 599 exists without any enabled device.
+	snaps.p.Store(snapshot.New(1, testDomain, devices).WithExtensions(bareExtension))
 	cfg := Config{
 		NodeID: "sip-test", Domain: testDomain, AdvertisedAddr: addr, NonceSecret: []byte(testSecret),
 		MinExpires: 60 * time.Second, MaxExpires: time.Hour, RingTimeout: 5 * time.Second,

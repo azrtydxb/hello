@@ -135,6 +135,10 @@ func TestWatcherNotifyPollAndRetention(t *testing.T) {
 	if s := w.Current(); len(s.Usernames()) != 0 {
 		t.Fatalf("initial snapshot = %v", s.Usernames())
 	}
+	// An extension with no enabled device is still known (480, not 404).
+	if s := w.Current(); !s.HasExtension("100") || s.HasExtension("999") {
+		t.Fatalf("HasExtension(100)=%v HasExtension(999)=%v, want true/false", s.HasExtension("100"), s.HasExtension("999"))
+	}
 
 	start := time.Now()
 	change(t, conn, `INSERT INTO devices (extension_id, sip_username, realm, ha1_md5, ha1_sha256, enabled) VALUES

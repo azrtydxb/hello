@@ -281,6 +281,9 @@ func TestCallByeFromCallee(t *testing.T) {
 	}
 }
 
+// bareExtension is configured in every test PBX but has no enabled device.
+const bareExtension = "599"
+
 // TestCallFailureCodes fails if an unknown number, an unregistered
 // extension, all-busy forks or a ring timeout produce a code other than 404,
 // 480, 486 or 408, or if the timed-out forks are not cancelled.
@@ -295,15 +298,19 @@ func TestCallFailureCodes(t *testing.T) {
 	b1.setCallee(busy())
 	b2.setCallee(busy())
 	d1.setCallee(ringForever())
+	seen := map[string]int{}
 	for _, tc := range []struct {
 		ext, result, side string
 		code              int
 	}{
 		{"999", ResultNotFound, "system", 404},
 		{"300", ResultUnavailable, "system", 480},
+		{bareExtension, ResultUnavailable, "system", 480},
 		{"200", ResultBusy, "callee", 486},
 		{"400", ResultNoAnswer, "system", 408},
 	} {
+		seen[tc.result]++
+		want := seen[tc.result]
 		t.Run(tc.ext, func(t *testing.T) {
 			r := waitCall(t, dial(t.Context(), a, tc.ext))
 			if got := responseCode(r.err); got != tc.code {
@@ -313,7 +320,7 @@ func TestCallFailureCodes(t *testing.T) {
 			if cd.FinalStatus != tc.code || cd.TerminationSide != tc.side || cd.Destination != tc.ext || !cd.AnswerTime.IsZero() {
 				t.Fatalf("CDR = %+v", cd)
 			}
-			if v := pbx.metric(t, "hello_calls_total", map[string]string{"result": tc.result}); v != 1 {
+			if v := pbx.metric(t, "hello_calls_total", map[string]string{"result": tc.result}); v != float64(want) {
 				t.Fatalf("hello_calls_total{%s} = %v", tc.result, v)
 			}
 		})

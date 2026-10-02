@@ -111,14 +111,13 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		canceled: make(chan struct{}), stopHB: make(chan struct{}),
 	}
 	snap := s.deps.Snapshots.Current()
-	devices := snap.DevicesForExtension(c.dialled)
-	if len(devices) == 0 {
+	if !snap.HasExtension(c.dialled) {
 		s.respond(tx, req, sip.StatusNotFound, "Not Found")
 		c.record(sip.StatusNotFound, cdr.SideSystem, "unknown number", ResultNotFound)
 		return
 	}
 	var targets []livestate.Binding
-	for _, d := range devices {
+	for _, d := range snap.DevicesForExtension(c.dialled) {
 		if d.Username == dev.Username {
 			continue // never ring the calling device
 		}

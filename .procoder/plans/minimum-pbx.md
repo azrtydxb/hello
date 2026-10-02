@@ -33,8 +33,9 @@ hello-sip's snapshot query (read-only; `realm` must equal `HELLO_SIP_DOMAIN`, ot
 ```sql
 SELECT (SELECT config_revision FROM schema_info),
        d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name
-FROM devices d JOIN extensions e ON e.id = d.extension_id
-WHERE d.enabled;
+FROM extensions e LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled;
+-- Rows with NULL device columns are extensions without an enabled device:
+-- known numbers, so a call to them is 480, not 404 (amended 2026-10-02).
 ```
 
 The AOR of a device is `sip:<sip_username>@<HELLO_SIP_DOMAIN>`. A call is to an extension number; it rings every binding of every enabled device of that extension. Digest HA1 is `hex(H(sip_username ":" realm ":" secret))` for MD5 and SHA-256. A secret is 24 random bytes, base64url without padding.
