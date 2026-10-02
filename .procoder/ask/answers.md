@@ -1,8 +1,18 @@
 # What a human decided
 
-Written 2026-10-02 10:42 UTC. procoder reads this
+Written 2026-10-02 11:22 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
+
+## [decision] decisions.md
+
+Key: 06e6d3e2170c
+Question: Phase 2 trunk testing
+
+- Simulated carrier container in the lab, plus a manual check against a real trunk
+- Simulated carrier only
+
+Answer: Simulated carrier container in the lab, plus a manual check against a real trunk
 
 ## [decision] decisions.md
 
@@ -53,6 +63,16 @@ Answer: pnpm
 
 ## [decision] decisions.md
 
+Key: 2de9213b4811
+Question: Phase 2 media to carriers
+
+- Direct media (phone to carrier) as the roadmap says; anchoring waits for Phase 5
+- Pull a minimal media relay forward into Phase 2
+
+Answer: Direct media (phone to carrier) as the roadmap says; anchoring waits for Phase 5
+
+## [decision] decisions.md
+
 Key: 34cff7a7f99a
 Question: Merge PR #1
 
@@ -60,6 +80,16 @@ Question: Merge PR #1
 - Hold for your own review
 
 Answer: Squash-merge now and start the Phase 1 spec
+
+## [decision] decisions.md
+
+Key: 406a5e21d741
+Question: Phase 2 trunk registration ownership
+
+- One node registers each trunk at a time (Valkey lease, another node takes over on expiry)
+- Every node registers the trunk (several contacts at the carrier)
+
+Answer: One node registers each trunk at a time (Valkey lease, another node takes over on expiry)
 
 ## [decision] decisions.md
 
@@ -94,6 +124,16 @@ Key: 61fa8fc32239
 Question: OPEN: Migration library — goose, or golang-migrate?
 
 Answer: goose
+
+## [decision] decisions.md
+
+Key: 70635c04fd67
+Question: Phase 2 number rewriting syntax
+
+- Regex match plus replacement template with capture groups, plus simple strip/prefix fields
+- Only strip-N-digits and prefix fields
+
+Answer: Regex match plus replacement template with capture groups, plus simple strip/prefix fields
 
 ## [decision] decisions.md
 

@@ -65,3 +65,23 @@
 
 - Squash-merge now and start the Phase 2 spec
 - Hold for your own review
+
+## Phase 2 trunk registration ownership
+
+- One node registers each trunk at a time (Valkey lease, another node takes over on expiry)
+- Every node registers the trunk (several contacts at the carrier)
+
+## Phase 2 number rewriting syntax
+
+- Regex match plus replacement template with capture groups, plus simple strip/prefix fields
+- Only strip-N-digits and prefix fields
+
+## Phase 2 trunk testing
+
+- Simulated carrier container in the lab, plus a manual check against a real trunk
+- Simulated carrier only
+
+## Phase 2 media to carriers
+
+- Direct media (phone to carrier) as the roadmap says; anchoring waits for Phase 5
+- Pull a minimal media relay forward into Phase 2

@@ -32,6 +32,7 @@ x-db-env: &db-env
   HELLO_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
   HELLO_VALKEY_ADDR: valkey:6379
   HELLO_SIP_DOMAIN: hello.lab
+  HELLO_SECRET_KEY: bGFiLW9ubHktc2VjcmV0LWtleS0wMTIzNDU2Nzg5YWI= # lab-only placeholder, confirmed 2026-10-02 gitleaks:allow
 
 x-sip-env: &sip-env
   <<: *db-env

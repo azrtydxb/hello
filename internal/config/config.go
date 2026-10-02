@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/jackc/pgx/v5"
 )
@@ -39,6 +40,9 @@ type Control struct {
 	// BootstrapAdminPassword creates the first admin user when none exist.
 	BootstrapAdminPassword string
 	SessionTTL             time.Duration
+	// SecretKey (HELLO_SECRET_KEY) seals trunk passwords; identical on every
+	// hello-control and hello-sip.
+	SecretKey string
 }
 
 // SIP is hello-sip's configuration. The bind address is where the node
@@ -61,6 +65,9 @@ type SIP struct {
 	AuthFailLimit      int
 	AuthFailWindow     time.Duration
 	StateTimeout       time.Duration
+	// SecretKey (HELLO_SECRET_KEY) opens trunk passwords sealed by
+	// hello-control.
+	SecretKey string
 	// MaxCallDuration ends a connected call that has run this long (both
 	// legs get BYE), so a call whose phones vanished without BYE is cleared.
 	MaxCallDuration time.Duration
@@ -103,6 +110,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	}
 	c.Database = r.database(c.DatabaseURL)
 	r.hostPort("HELLO_VALKEY_ADDR", c.ValkeyAddr)
+	c.SecretKey = r.secretKey()
 	if c.SessionTTL == 0 {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
@@ -133,6 +141,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	}
 	c.Database = r.database(c.DatabaseURL)
 	r.hostPort("HELLO_VALKEY_ADDR", c.ValkeyAddr)
+	c.SecretKey = r.secretKey()
 	if c.NonceSecret != "" && len(c.NonceSecret) < 32 {
 		r.fail("HELLO_SIP_NONCE_SECRET", errors.New("must be at least 32 bytes"))
 	}
@@ -219,6 +228,18 @@ func (r *reader) database(dsn string) *pgx.ConnConfig {
 		r.fail("HELLO_DATABASE_URL", errors.New("malformed connection string"))
 	}
 	return db
+}
+
+// secretKey reads HELLO_SECRET_KEY and checks it is 32 bytes of base64
+// without ever echoing it.
+func (r *reader) secretKey() string {
+	k := r.required("HELLO_SECRET_KEY")
+	if k != "" {
+		if _, err := secret.New(k); err != nil {
+			r.fail("HELLO_SECRET_KEY", err)
+		}
+	}
+	return k
 }
 
 func (r *reader) hostPort(key, v string) {
