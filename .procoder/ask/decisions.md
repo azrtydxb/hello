@@ -20,3 +20,8 @@
 - Commit on branch phase-0-foundation and open a PR to main
 - Commit on the branch only, no PR yet
 - Hold — leave uncommitted for review
+
+## Merge PR #1
+
+- Squash-merge now and start the Phase 1 spec
+- Hold for your own review

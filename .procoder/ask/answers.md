@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-02 07:43 UTC. procoder reads this
+Written 2026-10-02 08:08 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -30,6 +30,16 @@ Key: 2a0645102517
 Question: OPEN: UI package manager — npm or pnpm?
 
 Answer: pnpm
+
+## [decision] decisions.md
+
+Key: 34cff7a7f99a
+Question: Merge PR #1
+
+- Squash-merge now and start the Phase 1 spec
+- Hold for your own review
+
+Answer: Squash-merge now and start the Phase 1 spec
 
 ## [decision] decisions.md
 
