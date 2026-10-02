@@ -6,24 +6,23 @@ import { json, ME, mockApi, renderApp } from "./test/api";
 describe("App navigation", () => {
   it("renders every primary nav item and marks the active one", async () => {
     mockApi(ME);
-    renderApp("/trunks");
+    renderApp("/ring-groups");
 
     const nav = await screen.findByRole("navigation", { name: "Primary" });
     const links = within(nav).getAllByRole("link");
     expect(links.map((l) => l.textContent)).toEqual(
       NAV_ITEMS.map((i) => i.label),
     );
-    expect(within(nav).getByRole("link", { name: "Trunks" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    expect(
+      within(nav).getByRole("link", { name: "Ring Groups" }),
+    ).toHaveAttribute("aria-current", "page");
     expect(
       within(nav).getByRole("link", { name: "Dashboard" }),
     ).not.toHaveAttribute("aria-current");
     expect(
-      screen.getByRole("heading", { level: 1, name: "Trunks" }),
+      screen.getByRole("heading", { level: 1, name: "Ring Groups" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Arrives in Phase 2.")).toBeInTheDocument();
+    expect(screen.getByText("Arrives in Phase 4.")).toBeInTheDocument();
   });
 
   it("lists Registrations and gives every Phase 1 page real content", async () => {
