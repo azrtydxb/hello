@@ -2,32 +2,228 @@
 package api
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 
+	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/version"
 )
 
 //go:embed openapi.json
 var openAPI []byte
 
-// Handler returns the /api/v1 routes.
-func Handler() http.Handler {
+// maxBody bounds every JSON request body.
+const maxBody = 64 << 10
+
+// liveTimeout bounds one read of the live state in Valkey.
+const liveTimeout = 2 * time.Second
+
+// Store is the persistence the API needs; *store.Store implements it.
+type Store interface {
+	auth.Lookup
+	ConfigRevision(ctx context.Context) (int64, error)
+	Audit(ctx context.Context, actor, action, resource, resourceID string) error
+
+	UserByName(ctx context.Context, username string) (int64, string, error)
+	CreateSession(ctx context.Context, userID int64, hash []byte, expires time.Time) error
+	DeleteSession(ctx context.Context, hash []byte) error
+
+	ListTokens(ctx context.Context, userID int64) ([]store.Token, error)
+	CreateToken(ctx context.Context, actor string, userID int64, name string, hash []byte) (store.Token, error)
+	DeleteToken(ctx context.Context, actor string, userID, id int64) error
+
+	ListExtensions(ctx context.Context) ([]store.Extension, error)
+	GetExtension(ctx context.Context, id int64) (store.Extension, error)
+	CreateExtension(ctx context.Context, actor, number, name string) (store.Extension, error)
+	UpdateExtension(ctx context.Context, actor string, id int64, number, name *string) (store.Extension, error)
+	DeleteExtension(ctx context.Context, actor string, id int64) error
+
+	ListDevices(ctx context.Context) ([]store.Device, error)
+	GetDevice(ctx context.Context, id int64) (store.Device, error)
+	CreateDevice(ctx context.Context, actor string, in store.NewDevice) (store.Device, error)
+	UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64) (store.Device, error)
+	RotateDeviceSecret(ctx context.Context, actor string, id int64, realm, secret string) (store.Device, error)
+	DeleteDevice(ctx context.Context, actor string, id int64) error
+
+	ListCDRs(ctx context.Context, before int64, limit int) ([]store.CDR, string, error)
+}
+
+// Live is the shared live state; *livestate.Store implements it.
+type Live interface {
+	AllBindings(ctx context.Context) ([]livestate.Binding, error)
+	Calls(ctx context.Context) ([]livestate.Call, error)
+}
+
+// Config wires the API to its dependencies.
+type Config struct {
+	Store Store
+	Live  Live
+	// SIPDomain is the realm device HA1 values are computed for.
+	SIPDomain  string
+	SessionTTL time.Duration
+	Log        *slog.Logger
+}
+
+type server struct{ Config }
+
+// Handler returns the /api/v1 routes. Every route except version, openapi
+// and login requires a session cookie or bearer token.
+func Handler(c Config) http.Handler {
+	if c.Log == nil {
+		c.Log = slog.New(slog.DiscardHandler)
+	}
+	s := &server{c}
+	authed := auth.Middleware(c.Store, c.Log)
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/version", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"version": version.Version,
-			"commit":  version.Commit,
-			// Configuration revisions arrive with Phase 3; until then the
-			// schema_info row stays at 0, so this is reported as 0.
-			"configRevision": 0,
-		})
-	})
-	mux.HandleFunc("GET /api/v1/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
+	public := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, h) }
+	private := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, authed(h)) }
+
+	public("GET /api/v1/version", s.version)
+	public("GET /api/v1/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(openAPI)
 	})
+	public("POST /api/v1/auth/login", s.login)
+	private("POST /api/v1/auth/logout", s.logout)
+	private("GET /api/v1/auth/me", s.me)
+
+	private("GET /api/v1/tokens", s.listTokens)
+	private("POST /api/v1/tokens", s.createToken)
+	private("DELETE /api/v1/tokens/{id}", s.deleteToken)
+
+	private("GET /api/v1/extensions", s.listExtensions)
+	private("POST /api/v1/extensions", s.createExtension)
+	private("GET /api/v1/extensions/{id}", s.getExtension)
+	private("PATCH /api/v1/extensions/{id}", s.updateExtension)
+	private("DELETE /api/v1/extensions/{id}", s.deleteExtension)
+
+	private("GET /api/v1/devices", s.listDevices)
+	private("POST /api/v1/devices", s.createDevice)
+	private("GET /api/v1/devices/{id}", s.getDevice)
+	private("PATCH /api/v1/devices/{id}", s.updateDevice)
+	private("DELETE /api/v1/devices/{id}", s.deleteDevice)
+	private("POST /api/v1/devices/{id}/rotate-secret", s.rotateSecret)
+
+	private("GET /api/v1/registrations", s.registrations)
+	private("GET /api/v1/calls", s.calls)
+	private("GET /api/v1/cdrs", s.cdrs)
 	return mux
+}
+
+func (s *server) version(w http.ResponseWriter, r *http.Request) {
+	rev, err := s.Store.ConfigRevision(r.Context())
+	if err != nil {
+		s.internal(w, "read config revision", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":        version.Version,
+		"commit":         version.Commit,
+		"configRevision": rev,
+	})
+}
+
+type list[T any] struct {
+	Items []T `json:"items"`
+}
+
+func items[T any](v []T) list[T] {
+	if v == nil {
+		v = []T{}
+	}
+	return list[T]{Items: v}
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": msg}})
+}
+
+func badRequest(w http.ResponseWriter, msg string) {
+	writeError(w, http.StatusBadRequest, "bad_request", msg)
+}
+
+func (s *server) internal(w http.ResponseWriter, what string, err error) {
+	s.Log.Error(what, "error", err)
+	writeError(w, http.StatusInternalServerError, "internal", "internal error")
+}
+
+// storeError answers a store failure: 404, 409 or 500.
+func (s *server) storeError(w http.ResponseWriter, what string, err error) {
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", what+": not found")
+	case errors.Is(err, store.ErrConflict):
+		writeError(w, http.StatusConflict, "conflict", what+": already exists")
+	default:
+		s.internal(w, what, err)
+	}
+}
+
+// decode reads one JSON object into v, rejecting unknown fields, trailing
+// data and bodies over maxBody. It answers 400 itself and reports false.
+func decode(w http.ResponseWriter, r *http.Request, v any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			badRequest(w, "request body too large")
+		} else {
+			badRequest(w, "invalid JSON body: "+jsonProblem(err))
+		}
+		return false
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		badRequest(w, "invalid JSON body: trailing data")
+		return false
+	}
+	return true
+}
+
+// jsonProblem describes a decode error without echoing request values.
+func jsonProblem(err error) string {
+	var syn *json.SyntaxError
+	var typ *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &syn):
+		return "syntax error at offset " + strconv.FormatInt(syn.Offset, 10)
+	case errors.As(err, &typ):
+		return "wrong type for field " + strconv.Quote(typ.Field)
+	case errors.Is(err, io.EOF):
+		return "empty body"
+	}
+	if msg := err.Error(); len(msg) < 200 {
+		return msg // e.g. json: unknown field "x"
+	}
+	return "malformed"
+}
+
+// pathID parses the {id} path value; anything but a positive integer is 404.
+func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusNotFound, "not_found", "not found")
+		return 0, false
+	}
+	return id, true
+}
+
+func actor(r *http.Request) auth.Actor {
+	a, _ := auth.ActorFrom(r.Context())
+	return a
 }
