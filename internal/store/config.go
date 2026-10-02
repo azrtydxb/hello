@@ -3,26 +3,27 @@ package store
 import (
 	"context"
 	"database/sql"
-	"strconv"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/auth"
 )
 
-// Extension is a dialable number.
+// Extension is a dialable number. ExternalNumber is the caller ID it
+// presents on outbound trunk calls ("" if none).
 type Extension struct {
-	ID        int64     `json:"id"`
-	Number    string    `json:"number"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID             int64     `json:"id"`
+	Number         string    `json:"number"`
+	Name           string    `json:"name"`
+	ExternalNumber string    `json:"externalNumber"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
-const extensionCols = `id, number, name, created_at, updated_at`
+const extensionCols = `id, number, name, external_number, created_at, updated_at`
 
 func scanExtension(r interface{ Scan(...any) error }) (Extension, error) {
 	var e Extension
-	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.CreatedAt, &e.UpdatedAt)
+	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.ExternalNumber, &e.CreatedAt, &e.UpdatedAt)
 	return e, err
 }
 
@@ -51,33 +52,55 @@ func (s *Store) GetExtension(ctx context.Context, id int64) (Extension, error) {
 }
 
 // CreateExtension inserts an extension.
-func (s *Store) CreateExtension(ctx context.Context, actor, number, name string) (Extension, error) {
+func (s *Store) CreateExtension(ctx context.Context, actor, number, name, externalNumber string, check Check) (Extension, error) {
 	var e Extension
-	err := s.configChange(ctx, actor, "create", "extension", func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "extension", check, func(tx *sql.Tx) (int64, error) {
 		var err error
 		e, err = scanExtension(tx.QueryRowContext(ctx,
-			`INSERT INTO extensions (number, name) VALUES ($1, $2) RETURNING `+extensionCols, number, name))
+			`INSERT INTO extensions (number, name, external_number) VALUES ($1, $2, $3) RETURNING `+extensionCols,
+			number, name, externalNumber))
 		return e.ID, err
 	})
 	return e, err
 }
 
-// UpdateExtension changes the fields that are not nil.
-func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, number, name *string) (Extension, error) {
+// ExtensionChange holds the fields of an extension update; nil keeps one.
+type ExtensionChange struct {
+	Number, Name, ExternalNumber *string
+}
+
+// UpdateExtension changes the fields that are not nil. Renumbering an
+// extension an inbound route rings is an *InUseError naming the routes.
+func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c ExtensionChange, check Check) (Extension, error) {
 	var e Extension
-	err := s.configChange(ctx, actor, "update", "extension", func(tx *sql.Tx) (int64, error) {
-		var err error
+	err := s.configChange(ctx, actor, "update", "extension", check, func(tx *sql.Tx) (int64, error) {
+		number, routes, err := extensionRoutes(ctx, tx, id)
+		if err != nil {
+			return id, err
+		}
+		if c.Number != nil && *c.Number != number && len(routes) > 0 {
+			return id, inUse("extension "+number, routes)
+		}
 		e, err = scanExtension(tx.QueryRowContext(ctx, `
-			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name), updated_at = now()
-			WHERE id = $1 RETURNING `+extensionCols, id, number, name))
+			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name),
+			       external_number = COALESCE($4, external_number), updated_at = now()
+			WHERE id = $1 RETURNING `+extensionCols, id, c.Number, c.Name, c.ExternalNumber))
 		return id, err
 	})
 	return e, err
 }
 
-// DeleteExtension removes an extension and, by cascade, its devices.
-func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64) error {
-	return s.configChange(ctx, actor, "delete", "extension", func(tx *sql.Tx) (int64, error) {
+// DeleteExtension removes an extension and, by cascade, its devices. An
+// extension an inbound route rings is an *InUseError naming the routes.
+func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, check Check) error {
+	return s.configChange(ctx, actor, "delete", "extension", check, func(tx *sql.Tx) (int64, error) {
+		number, routes, err := extensionRoutes(ctx, tx, id)
+		if err != nil {
+			return id, err
+		}
+		if len(routes) > 0 {
+			return id, inUse("extension "+number, routes)
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM extensions WHERE id = $1`, id)
 		if err != nil {
 			return id, err
@@ -143,7 +166,7 @@ type NewDevice struct {
 func (s *Store) CreateDevice(ctx context.Context, actor string, in NewDevice) (Device, error) {
 	md5Hex, shaHex := auth.HA1(in.SIPUsername, in.Realm, in.Secret)
 	var d Device
-	err := s.configChange(ctx, actor, "create", "device", func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "create", "device", nil, func(tx *sql.Tx) (int64, error) {
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
 			INSERT INTO devices (extension_id, sip_username, realm, ha1_md5, ha1_sha256, enabled)
@@ -157,7 +180,7 @@ func (s *Store) CreateDevice(ctx context.Context, actor string, in NewDevice) (D
 // UpdateDevice changes the fields that are not nil.
 func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enabled *bool, extensionID *int64) (Device, error) {
 	var d Device
-	err := s.configChange(ctx, actor, "update", "device", func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "update", "device", nil, func(tx *sql.Tx) (int64, error) {
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
 			UPDATE devices SET enabled = COALESCE($2, enabled), extension_id = COALESCE($3, extension_id), updated_at = now()
@@ -171,7 +194,7 @@ func (s *Store) UpdateDevice(ctx context.Context, actor string, id int64, enable
 // secret for realm.
 func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, realm, secret string) (Device, error) {
 	var d Device
-	err := s.configChange(ctx, actor, "rotate-secret", "device", func(tx *sql.Tx) (int64, error) {
+	err := s.configChange(ctx, actor, "rotate-secret", "device", nil, func(tx *sql.Tx) (int64, error) {
 		var username string
 		if err := tx.QueryRowContext(ctx, `SELECT sip_username FROM devices WHERE id = $1 FOR UPDATE`, id).Scan(&username); err != nil {
 			return id, err
@@ -188,64 +211,11 @@ func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, 
 
 // DeleteDevice removes a device.
 func (s *Store) DeleteDevice(ctx context.Context, actor string, id int64) error {
-	return s.configChange(ctx, actor, "delete", "device", func(tx *sql.Tx) (int64, error) {
+	return s.configChange(ctx, actor, "delete", "device", nil, func(tx *sql.Tx) (int64, error) {
 		res, err := tx.ExecContext(ctx, `DELETE FROM devices WHERE id = $1`, id)
 		if err != nil {
 			return id, err
 		}
 		return id, requireRow(res)
 	})
-}
-
-// CDR is one call detail record written by hello-sip.
-type CDR struct {
-	ID              int64      `json:"id"`
-	CorrelationID   string     `json:"correlationId"`
-	SIPCallID       string     `json:"sipCallId"`
-	Source          string     `json:"source"`
-	Destination     string     `json:"destination"`
-	StartTime       time.Time  `json:"startTime"`
-	RingTime        *time.Time `json:"ringTime,omitempty"`
-	AnswerTime      *time.Time `json:"answerTime,omitempty"`
-	EndTime         time.Time  `json:"endTime"`
-	DurationMs      int64      `json:"durationMs"`
-	BillableMs      int64      `json:"billableMs"`
-	SIPNode         string     `json:"sipNode"`
-	MediaMode       string     `json:"mediaMode"`
-	FinalStatus     int        `json:"finalStatus"`
-	TerminationSide string     `json:"terminationSide"`
-	FailureReason   string     `json:"failureReason"`
-}
-
-// ListCDRs returns up to limit CDRs with id below before (0 means from the
-// newest), newest first, and the cursor for the next page ("" at the end).
-func (s *Store) ListCDRs(ctx context.Context, before int64, limit int) ([]CDR, string, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, correlation_id, sip_call_id, source, destination, start_time, ring_time, answer_time,
-		       end_time, duration_ms, billable_ms, sip_node, media_mode, final_status, termination_side, failure_reason
-		FROM cdrs WHERE $1 = 0 OR id < $1 ORDER BY id DESC LIMIT $2`, before, limit+1)
-	if err != nil {
-		return nil, "", err
-	}
-	defer func() { _ = rows.Close() }()
-	out := []CDR{}
-	for rows.Next() {
-		var c CDR
-		var ring, answer sql.NullTime
-		if err := rows.Scan(&c.ID, &c.CorrelationID, &c.SIPCallID, &c.Source, &c.Destination, &c.StartTime, &ring, &answer,
-			&c.EndTime, &c.DurationMs, &c.BillableMs, &c.SIPNode, &c.MediaMode, &c.FinalStatus, &c.TerminationSide, &c.FailureReason); err != nil {
-			return nil, "", err
-		}
-		c.RingTime, c.AnswerTime = nullTime(ring), nullTime(answer)
-		out = append(out, c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, "", err
-	}
-	next := ""
-	if len(out) > limit {
-		out = out[:limit]
-		next = strconv.FormatInt(out[limit-1].ID, 10)
-	}
-	return out, next, nil
 }

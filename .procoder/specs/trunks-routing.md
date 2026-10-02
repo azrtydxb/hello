@@ -33,7 +33,7 @@ After Phase 1, Hello only connects its own extensions. A PBX earns its keep by r
   - Each trunk has a name, a mode (`registration` or `ip`), one or more destinations (`host[:port]`, priority, weight), an optional username and password, an optional realm and From domain, the registration expiry, the OPTIONS interval, and the source CIDRs it may send from.
   - It also has a maximum number of concurrent calls, a default caller ID and an enabled flag.
   - Destinations that are hostnames resolve through DNS SRV, then A/AAAA.
-  - Trunk passwords are encrypted with AES-256-GCM under `HELLO_SECRET_KEY`. They are returned only in the create response, never afterwards, and never logged.
+  - Trunk passwords are encrypted with AES-256-GCM under `HELLO_SECRET_KEY`. They are never returned by the API (only whether one is set, as `hasPassword`) and never logged (amended 2026-10-02 to match contract 7).
 - [S-2] **Trunk registration:** for each enabled `registration` trunk, exactly one SIP node holds a Valkey lease (`hello:trunkreg:{id}`) and REGISTERs to the carrier, answering its digest challenge and re-registering before expiry.
   - When the holder stops renewing, another node takes the lease and registers within one lease period.
   - The registration state (registered, failed, the last response code, the expiry) is shared in Valkey.
