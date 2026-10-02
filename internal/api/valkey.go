@@ -160,7 +160,7 @@ func (l *LazyValkey) CancelDrain(ctx context.Context, id string) error {
 	return c.members.CancelDrain(ctx, id)
 }
 
-// Publish implements MemberStore.
+// Publish implements lifecycle.Publisher.
 func (l *LazyValkey) Publish(ctx context.Context, m cluster.Member) error {
 	c, err := l.get()
 	if err != nil {
@@ -169,11 +169,30 @@ func (l *LazyValkey) Publish(ctx context.Context, m cluster.Member) error {
 	return c.members.Publish(ctx, m)
 }
 
-// Leave implements MemberStore.
+// Leave implements lifecycle.Publisher.
 func (l *LazyValkey) Leave(ctx context.Context, id string) error {
 	c, err := l.get()
 	if err != nil {
 		return err
 	}
 	return c.members.Leave(ctx, id)
+}
+
+// DrainRequested implements lifecycle.Publisher.
+func (l *LazyValkey) DrainRequested(ctx context.Context, id string) (bool, error) {
+	c, err := l.get()
+	if err != nil {
+		return false, err
+	}
+	return c.members.DrainRequested(ctx, id)
+}
+
+// Primary is the Sentinel primary's address ("" in single mode or before
+// connecting), for the lifecycle's failover count.
+func (l *LazyValkey) Primary() string {
+	c, err := l.get()
+	if err != nil {
+		return ""
+	}
+	return primary(c.c.Mode(), c.c.Nodes())
 }
