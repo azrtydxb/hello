@@ -134,7 +134,9 @@ func (s *Server) applyContacts(req *sip.Request, dev snapshot.Device, aor string
 	if h := req.GetHeader("User-Agent"); h != nil {
 		userAgent = h.Value()
 	}
-	var path []string
+	// Our own Path first: another node reaches this phone through us, over
+	// the flow it registered on (RFC 3327, RFC 5626 flow token).
+	path := []string{s.pathURI(s.flowToken(req.Source(), "udp"))}
 	for _, h := range req.GetHeaders("Path") {
 		path = append(path, h.Value())
 	}

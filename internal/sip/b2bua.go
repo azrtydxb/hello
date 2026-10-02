@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -568,7 +569,19 @@ func (l *leg) invite() (*sip.Request, error) {
 		req.SetBody(body)
 	}
 	req.SetTransport("UDP")
-	if l.binding.Source != "" {
+	switch {
+	case l.binding.ReceivedNode != s.cfg.NodeID && len(l.binding.Path) > 0:
+		// Registered through another node: only that node's flow reaches
+		// the phone, so route via its Path (it edge-proxies the INVITE).
+		var first sip.Uri
+		if err := sip.ParseUri(strings.Trim(l.binding.Path[0], "<> "), &first); err != nil {
+			return nil, err
+		}
+		for _, p := range l.binding.Path {
+			req.AppendHeader(sip.NewHeader("Route", p))
+		}
+		req.SetDestination(hostPort(first))
+	case l.binding.Source != "":
 		req.SetDestination(l.binding.Source)
 	}
 	return req, nil

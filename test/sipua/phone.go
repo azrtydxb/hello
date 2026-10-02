@@ -32,13 +32,19 @@ type Options struct {
 
 // Phone is one SIP user agent.
 type Phone struct {
-	opts     Options
-	ua       *sipgo.UserAgent
-	client   *sipgo.Client
-	server   *sipgo.Server
-	contact  sip.ContactHeader
-	dlgCli   *sipgo.DialogClientCache
-	dlgSrv   *sipgo.DialogServerCache
+	opts    Options
+	ua      *sipgo.UserAgent
+	client  *sipgo.Client
+	server  *sipgo.Server
+	contact sip.ContactHeader
+	// dua sends in-dialog requests to where the peer's messages came from
+	// when there is no Record-Route (RewriteContact), as a phone behind NAT
+	// or using an outbound proxy does: the node's Contact may name an
+	// address only reachable inside the cluster network.
+	dua      *sipgo.DialogUA
+	mu       sync.Mutex
+	srvDlg   map[string]*sipgo.DialogServerSession // by Call-ID
+	cliDlg   map[string]*sipgo.DialogClientSession // by Call-ID
 	cancel   context.CancelFunc
 	incoming chan *Incoming
 }
@@ -93,8 +99,9 @@ func New(opts Options) (*Phone, error) {
 		contact:  sip.ContactHeader{Address: sip.Uri{User: opts.User, Host: host, Port: port}},
 		incoming: make(chan *Incoming, 8),
 	}
-	p.dlgCli = sipgo.NewDialogClientCache(client, p.contact)
-	p.dlgSrv = sipgo.NewDialogServerCache(client, p.contact)
+	p.dua = &sipgo.DialogUA{Client: client, ContactHDR: p.contact, RewriteContact: true}
+	p.srvDlg = map[string]*sipgo.DialogServerSession{}
+	p.cliDlg = map[string]*sipgo.DialogClientSession{}
 	p.routes()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -116,11 +123,14 @@ func New(opts Options) (*Phone, error) {
 
 func (p *Phone) routes() {
 	p.server.OnInvite(func(req *sip.Request, tx sip.ServerTransaction) {
-		sess, err := p.dlgSrv.ReadInvite(req, tx)
+		sess, err := p.dua.ReadInvite(req, tx)
 		if err != nil {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusBadRequest, err.Error(), nil))
 			return
 		}
+		p.mu.Lock()
+		p.srvDlg[req.CallID().Value()] = sess
+		p.mu.Unlock()
 		in := &Incoming{Request: req, sess: sess, canceled: make(chan struct{}), final: make(chan struct{})}
 		tx.OnCancel(func(*sip.Request) { in.cancelOnce.Do(func() { close(in.canceled) }) })
 		_ = sess.Respond(sip.StatusTrying, "Trying", nil)
@@ -141,19 +151,30 @@ func (p *Phone) routes() {
 		}
 	})
 	p.server.OnAck(func(req *sip.Request, tx sip.ServerTransaction) {
-		_ = p.dlgSrv.ReadAck(req, tx)
+		if s, _ := p.dialogs(req); s != nil {
+			_ = s.ReadAck(req, tx)
+		}
 	})
 	p.server.OnBye(func(req *sip.Request, tx sip.ServerTransaction) {
-		if err := p.dlgSrv.ReadBye(req, tx); err == nil {
-			return
-		}
-		if err := p.dlgCli.ReadBye(req, tx); err != nil {
+		srv, cli := p.dialogs(req)
+		switch {
+		case srv != nil && srv.ReadBye(req, tx) == nil:
+		case cli != nil && cli.ReadBye(req, tx) == nil:
+		default:
 			_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist", nil))
 		}
 	})
 	p.server.OnOptions(func(req *sip.Request, tx sip.ServerTransaction) {
 		_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil))
 	})
+}
+
+// dialogs returns the server and client dialogs with req's Call-ID.
+func (p *Phone) dialogs(req *sip.Request) (*sipgo.DialogServerSession, *sipgo.DialogClientSession) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	id := req.CallID().Value()
+	return p.srvDlg[id], p.cliDlg[id]
 }
 
 // AOR is the phone's address of record.
@@ -230,10 +251,13 @@ func (p *Phone) Dial(ctx context.Context, number string, sdp []byte) (*Outgoing,
 	// Loose-routed outbound proxy (RFC 3261 §8.1.2): the INVITE and its
 	// transaction ACK/CANCEL go to the proxy, not to the request URI host.
 	req.AppendHeader(sip.NewHeader("Route", "<sip:"+p.opts.Proxy+";lr>"))
-	sess, err := p.dlgCli.WriteInvite(ctx, req)
+	sess, err := p.dua.WriteInvite(ctx, req)
 	if err != nil {
 		return nil, err
 	}
+	p.mu.Lock()
+	p.cliDlg[sess.InviteRequest.CallID().Value()] = sess
+	p.mu.Unlock()
 	out := &Outgoing{sess: sess}
 	err = sess.WaitAnswer(ctx, sipgo.AnswerOptions{Username: p.opts.User, Password: p.opts.Password})
 	var dr *sipgo.ErrDialogResponse

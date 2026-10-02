@@ -355,6 +355,40 @@ func newPhone(t *testing.T, pbx *testPBX, user, pass string) *phone {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return startPhone(t, pbx, user, pass, conn)
+}
+
+// natConn drops every datagram not from allow, like a NAT that only has a
+// mapping for the node the phone registered with.
+type natConn struct {
+	net.PacketConn
+	allow   string
+	dropped atomic.Int64
+}
+
+func (c *natConn) ReadFrom(b []byte) (int, net.Addr, error) {
+	for {
+		n, addr, err := c.PacketConn.ReadFrom(b)
+		if err != nil || addr.String() == c.allow {
+			return n, addr, err
+		}
+		c.dropped.Add(1)
+	}
+}
+
+// newNATPhone is a phone reachable only from pbx.
+func newNATPhone(t *testing.T, pbx *testPBX, user, pass string) (*phone, *natConn) {
+	t.Helper()
+	conn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nc := &natConn{PacketConn: conn, allow: pbx.addr}
+	return startPhone(t, pbx, user, pass, nc), nc
+}
+
+func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketConn) *phone {
+	t.Helper()
 	addr := conn.LocalAddr().String()
 	host, port, _ := sip.ParseAddr(addr)
 	ua, err := sipgo.NewUA(sipgo.WithUserAgent(user), sipgo.WithUserAgentHostname(testDomain),
