@@ -11,7 +11,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
       -o /out/ ./cmd/...
 
 FROM alpine:3.22 AS runtime
-RUN apk add --no-cache ca-certificates wget && adduser -D -H -u 65532 hello
+RUN apk add --no-cache ca-certificates && adduser -D -H -u 65532 hello
 USER 65532:65532
 
 FROM runtime AS hello-control

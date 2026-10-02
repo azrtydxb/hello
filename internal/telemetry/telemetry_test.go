@@ -11,7 +11,9 @@ func TestRedactURL(t *testing.T) {
 	cases := []string{
 		"postgres://hello:s3cret@db:5432/hello?sslmode=disable",
 		"postgres://db:5432/hello?user=hello&password=s3cret",
-		"postgres://hello:s3cret@db:5432/%zz", // unparseable
+		"postgres://db/hello?sslkey=k.pem&sslpassword=s3cret",
+		"host=db user=hello password=s3cret dbname=hello", // keyword/value DSN
+		"postgres://hello:s3cret@db:5432/%zz",             // unparseable
 	}
 	for _, in := range cases {
 		var buf bytes.Buffer

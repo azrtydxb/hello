@@ -50,7 +50,8 @@ cd web && pnpm install && pnpm typecheck && pnpm lint && pnpm test && pnpm dev
 `pnpm dev` proxies `/api` to `localhost:8081`, so run the lab, or
 `hello-control serve`, alongside it.
 
-Integration tests skip unless they are enabled:
+Integration tests skip unless they are enabled. The migration test creates
+and drops its own scratch database, so the URL needs `CREATEDB` rights:
 
 ```sh
 HELLO_TEST_DATABASE_URL=postgres://user:pass@localhost:5432/db?sslmode=disable go test ./test/integration/

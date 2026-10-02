@@ -39,7 +39,7 @@ export function Dashboard() {
       {state.status === "ready" && (
         <dl className="facts">
           <dt>Version</dt>
-          <dd data-testid="version">{state.info.version}</dd>
+          <dd>{state.info.version}</dd>
           <dt>Commit</dt>
           <dd>
             <code>{state.info.commit}</code>

@@ -16,6 +16,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// checkTimeout bounds one /readyz evaluation of all checks.
+const checkTimeout = 2 * time.Second
+
 // Check reports whether one dependency is usable; a nil error means ready.
 type Check func(ctx context.Context) error
 
@@ -28,7 +31,6 @@ type Server struct {
 	Log             *slog.Logger
 	DrainDelay      time.Duration
 	ShutdownTimeout time.Duration
-	CheckTimeout    time.Duration
 
 	draining atomic.Bool
 }
@@ -53,11 +55,7 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "draining"})
 		return
 	}
-	timeout := s.CheckTimeout
-	if timeout == 0 {
-		timeout = 2 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), checkTimeout)
 	defer cancel()
 	failed := map[string]string{}
 	for name, check := range s.Checks {

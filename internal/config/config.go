@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/telemetry"
+	"github.com/jackc/pgx/v5"
 )
 
 // Common holds the settings every Hello service shares.
@@ -27,6 +28,8 @@ type Common struct {
 type Control struct {
 	Common
 	DatabaseURL string
+	// Database is DatabaseURL parsed, so a malformed DSN fails at startup.
+	Database *pgx.ConnConfig
 }
 
 // SIP is hello-sip's configuration. The bind address is where the node
@@ -54,6 +57,14 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		Common:      r.common(":8081"),
 		DatabaseURL: r.required("HELLO_DATABASE_URL"),
 	}
+	if c.DatabaseURL != "" {
+		db, err := pgx.ParseConfig(c.DatabaseURL)
+		if err != nil {
+			// pgx masks the password in its parse errors.
+			r.fail("HELLO_DATABASE_URL", err)
+		}
+		c.Database = db
+	}
 	return c, r.err()
 }
 
@@ -66,18 +77,33 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		SIPBindAddr:       r.optional("HELLO_SIP_BIND_ADDR", "0.0.0.0:5060"),
 		SIPAdvertisedAddr: r.optional("HELLO_SIP_ADVERTISED_ADDR", ""),
 	}
+	bindHost, err := splitHost(c.SIPBindAddr)
+	if err != nil {
+		r.fail("HELLO_SIP_BIND_ADDR", err)
+	}
 	if c.SIPAdvertisedAddr == "" {
-		host, _, err := net.SplitHostPort(c.SIPBindAddr)
-		switch {
-		case err != nil:
-			r.fail("HELLO_SIP_BIND_ADDR", err)
-		case host == "" || net.ParseIP(host).IsUnspecified():
+		if err == nil && unspecified(bindHost) {
 			r.fail("HELLO_SIP_ADVERTISED_ADDR", errors.New("required when HELLO_SIP_BIND_ADDR is an unspecified address"))
-		default:
-			c.SIPAdvertisedAddr = c.SIPBindAddr
 		}
+		c.SIPAdvertisedAddr = c.SIPBindAddr
+	} else if host, err := splitHost(c.SIPAdvertisedAddr); err != nil {
+		r.fail("HELLO_SIP_ADVERTISED_ADDR", err)
+	} else if unspecified(host) {
+		r.fail("HELLO_SIP_ADVERTISED_ADDR", errors.New("must be a reachable address, not unspecified"))
 	}
 	return c, r.err()
+}
+
+func splitHost(hostport string) (string, error) {
+	host, port, err := net.SplitHostPort(hostport)
+	if err == nil && port == "" {
+		err = errors.New("missing port")
+	}
+	return host, err
+}
+
+func unspecified(host string) bool {
+	return host == "" || net.ParseIP(host).IsUnspecified()
 }
 
 type reader struct {

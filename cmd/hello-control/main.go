@@ -17,7 +17,7 @@ import (
 	"github.com/azrtydxb/hello/internal/ops"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/version"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 const usage = "usage: hello-control serve | migrate up | migrate status"
@@ -36,12 +36,9 @@ func run(args []string) error {
 	}
 	log := telemetry.NewLogger(os.Stderr, cfg.LogLevel, "hello-control", cfg.NodeID)
 
-	// sql.Open does not connect; an unreachable database surfaces in
+	// OpenDB does not connect; an unreachable database surfaces in
 	// readiness (serve) or as the command's error (migrate).
-	db, err := sql.Open("pgx", cfg.DatabaseURL)
-	if err != nil {
-		return fmt.Errorf("database: %s", telemetry.RedactURL(err.Error()))
-	}
+	db := stdlib.OpenDB(*cfg.Database)
 	defer func() { _ = db.Close() }()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

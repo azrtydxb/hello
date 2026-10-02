@@ -5,7 +5,9 @@ package integration
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +17,8 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/migrate"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3/lock"
 )
 
@@ -26,12 +29,13 @@ func TestMigrateIdempotentConcurrent(t *testing.T) {
 	if dsn == "" {
 		t.Skip("HELLO_TEST_DATABASE_URL not set")
 	}
+	ctx := context.Background()
+	dsn = scratchDatabase(t, ctx, dsn)
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	ctx := context.Background()
 	// Deterministic: while another session holds the migration lock,
 	// Up must wait for it rather than run.
 	if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS schema_info, goose_db_version"); err != nil {
@@ -99,6 +103,33 @@ func TestMigrateIdempotentConcurrent(t *testing.T) {
 	}
 }
 
+// scratchDatabase creates a throwaway database next to the one dsn names, so
+// the test never touches existing data, and returns its DSN.
+func scratchDatabase(t *testing.T, ctx context.Context, dsn string) string {
+	t.Helper()
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := stdlib.OpenDB(*cfg)
+	t.Cleanup(func() { _ = admin.Close() })
+	name := fmt.Sprintf("hello_it_%d", time.Now().UnixNano())
+	if _, err := admin.ExecContext(ctx, "CREATE DATABASE "+name); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.ExecContext(context.Background(), "DROP DATABASE "+name+" WITH (FORCE)"); err != nil {
+			t.Errorf("drop scratch database %s: %v", name, err)
+		}
+	})
+	u, err := url.Parse(dsn)
+	if err != nil || u.Scheme == "" {
+		t.Fatalf("HELLO_TEST_DATABASE_URL must be a postgres:// URL")
+	}
+	u.Path = "/" + name
+	return u.String()
+}
+
 func docker(t *testing.T) {
 	t.Helper()
 	if os.Getenv("HELLO_DOCKER") != "1" {
@@ -135,9 +166,14 @@ func TestImagesNonRoot(t *testing.T) {
 
 func TestLabSmoke(t *testing.T) {
 	docker(t)
-	compose := []string{"compose", "-f", filepath.Join("deploy", "docker-compose", "compose.yaml")}
+	// Own project name, so cleanup never removes a developer's running lab.
+	compose := []string{"compose", "-p", "hello-smoke", "-f", filepath.Join("deploy", "docker-compose", "compose.yaml")}
 	t.Cleanup(func() {
-		_ = exec.Command("docker", append(compose, "down", "-v")...).Run()
+		cmd := exec.Command("docker", append(compose, "down", "-v")...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Errorf("compose down: %v\n%s", err, out)
+		}
 	})
 	run(t, "docker", append(compose, "up", "-d", "--build", "--wait", "--wait-timeout", "180")...)
 

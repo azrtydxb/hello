@@ -17,22 +17,25 @@ func NewLogger(w io.Writer, level slog.Level, service, nodeID string) *slog.Logg
 	return slog.New(h).With("service", service, "node_id", nodeID)
 }
 
-// RedactURL replaces the password in a URL (e.g. a database DSN) with
-// REDACTED. Input that does not parse as a URL is redacted entirely, since
+// RedactURL replaces the passwords in a URL (e.g. a database DSN) with
+// REDACTED. Anything that is not a URL with a scheme — including a
+// keyword/value DSN like "host=db password=x" — is redacted entirely, since
 // it may still carry a secret.
 func RedactURL(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil {
+	if err != nil || u.Scheme == "" {
 		return "REDACTED"
 	}
 	if _, ok := u.User.Password(); ok {
 		u.User = url.UserPassword(u.User.Username(), "REDACTED")
 	}
 	q := u.Query()
-	if q.Has("password") {
-		q.Set("password", "REDACTED")
-		u.RawQuery = q.Encode()
+	for _, k := range []string{"password", "sslpassword"} {
+		if q.Has(k) {
+			q.Set(k, "REDACTED")
+		}
 	}
+	u.RawQuery = q.Encode()
 	return u.String()
 }
 

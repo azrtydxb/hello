@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"github.com/azrtydxb/hello/internal/config"
@@ -42,13 +41,22 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	vk := &lazyValkey{addr: cfg.ValkeyAddr}
+	// ForceSingleClient returns a client even when the first dial fails; it
+	// redials on every command, so readiness recovers once Valkey is up.
+	vk, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{cfg.ValkeyAddr}, ForceSingleClient: true})
+	if vk == nil {
+		return fmt.Errorf("valkey: %w", err)
+	}
 	defer vk.Close()
+	if err != nil {
+		log.Warn("valkey unreachable at startup", "addr", cfg.ValkeyAddr, "error", err)
+	}
+	valkeyReady := func(ctx context.Context) error { return vk.Do(ctx, vk.B().Ping().Build()).Error() }
 
 	log.Info("starting", "version", version.Version, "commit", version.Commit,
 		"sip_bind", cfg.SIPBindAddr, "sip_advertised", cfg.SIPAdvertisedAddr, "valkey", cfg.ValkeyAddr)
 	srv := &ops.Server{
-		Checks:          map[string]ops.Check{"valkey": vk.Ping},
+		Checks:          map[string]ops.Check{"valkey": valkeyReady},
 		Metrics:         telemetry.NewMetrics("hello-sip", version.Version, version.Commit),
 		Log:             log,
 		DrainDelay:      cfg.DrainDelay,
@@ -57,35 +65,4 @@ func run(args []string) error {
 	err = srv.Serve(ctx, ln)
 	log.Info("stopped", "error", err)
 	return err
-}
-
-// lazyValkey dials on first use and redials after a failed dial, so a node
-// started before Valkey becomes ready once Valkey is reachable.
-type lazyValkey struct {
-	addr   string
-	mu     sync.Mutex
-	client valkey.Client
-}
-
-func (l *lazyValkey) Ping(ctx context.Context) error {
-	l.mu.Lock()
-	if l.client == nil {
-		c, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{l.addr}, ForceSingleClient: true})
-		if err != nil {
-			l.mu.Unlock()
-			return err
-		}
-		l.client = c
-	}
-	c := l.client
-	l.mu.Unlock()
-	return c.Do(ctx, c.B().Ping().Build()).Error()
-}
-
-func (l *lazyValkey) Close() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.client != nil {
-		l.client.Close()
-	}
 }

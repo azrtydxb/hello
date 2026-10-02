@@ -40,10 +40,35 @@ func TestLoadUnspecifiedAdvertise(t *testing.T) {
 			t.Fatalf("bind %q: want error naming HELLO_SIP_ADVERTISED_ADDR, got %v", bind, err)
 		}
 	}
+	for _, bad := range []map[string]string{
+		{"HELLO_SIP_BIND_ADDR": "garbage", "HELLO_SIP_ADVERTISED_ADDR": "10.0.0.5:5060"},
+		{"HELLO_SIP_BIND_ADDR": "0.0.0.0:5060", "HELLO_SIP_ADVERTISED_ADDR": "0.0.0.0:5060"},
+		{"HELLO_SIP_BIND_ADDR": "0.0.0.0:5060", "HELLO_SIP_ADVERTISED_ADDR": "sip.example.com"},
+	} {
+		m := map[string]string{"HELLO_NODE_ID": "s1", "HELLO_VALKEY_ADDR": "v:6379"}
+		for k, v := range bad {
+			m[k] = v
+		}
+		if _, err := LoadSIP(env(m)); err == nil {
+			t.Fatalf("%v: want error, got nil", bad)
+		}
+	}
 	base["HELLO_SIP_BIND_ADDR"] = "10.0.0.5:5060"
 	c, err := LoadSIP(env(base))
 	if err != nil || c.SIPAdvertisedAddr != "10.0.0.5:5060" {
 		t.Fatalf("specific bind should default advertised: %+v %v", c, err)
+	}
+}
+
+func TestLoadMalformedDatabaseURL(t *testing.T) {
+	_, err := LoadControl(env(map[string]string{
+		"HELLO_NODE_ID": "c1", "HELLO_DATABASE_URL": "postgres://u:s3cret@db:notaport/x",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "HELLO_DATABASE_URL") {
+		t.Fatalf("want error naming HELLO_DATABASE_URL, got %v", err)
+	}
+	if strings.Contains(err.Error(), "s3cret") {
+		t.Fatalf("error leaks the password: %v", err)
 	}
 }
 
