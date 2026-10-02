@@ -114,7 +114,8 @@ func (s *Store) AcquireTrunkCall(ctx context.Context, id int64, call string, max
 
 // RefreshTrunkCall extends a held slot; ReleaseTrunkCall frees it.
 func (s *Store) RefreshTrunkCall(ctx context.Context, id int64, call string, ttl time.Duration) error {
-	return s.c.Do(ctx, s.c.B().Zadd().Key(trunkKey(id, "calls")).Xx().ScoreMember().ScoreMember(float64(time.Now().Add(ttl).UnixMilli()), call).Build()).Error()
+	exp := strconv.FormatInt(time.Now().Add(ttl).UnixMilli(), 10)
+	return refreshSlot.Exec(ctx, s.c, []string{trunkKey(id, "calls")}, []string{exp, call}).Error()
 }
 
 // ReleaseTrunkCall frees a call's slot.
@@ -123,7 +124,8 @@ func (s *Store) ReleaseTrunkCall(ctx context.Context, id int64, call string) err
 }
 
 // The slot set holds call IDs scored by their expiry (ms); expired members
-// are pruned before counting, so the count only covers live calls.
+// are pruned before counting, so the count only covers live calls. The key
+// expires with its longest-lived member: an acquire never shortens it.
 var acquireSlot = valkey.NewLuaScript(`
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
 local max = tonumber(ARGV[4])
@@ -131,7 +133,20 @@ if max > 0 and redis.call('ZSCORE', KEYS[1], ARGV[3]) == false and redis.call('Z
   return 0
 end
 redis.call('ZADD', KEYS[1], ARGV[2], ARGV[3])
-redis.call('PEXPIREAT', KEYS[1], ARGV[2])
+if tonumber(ARGV[2]) > redis.call('PEXPIRETIME', KEYS[1]) then
+  redis.call('PEXPIREAT', KEYS[1], ARGV[2])
+end
+return 1`)
+
+// refreshSlot moves a held slot's expiry to ARGV[1] (ms) and the set's own
+// expiry with it, never shortening it: the key lives as long as its
+// longest-lived member, so a long call refreshed by its heartbeat keeps
+// counting against the limit.
+var refreshSlot = valkey.NewLuaScript(`
+redis.call('ZADD', KEYS[1], 'XX', ARGV[1], ARGV[2])
+if redis.call('ZSCORE', KEYS[1], ARGV[2]) ~= false and tonumber(ARGV[1]) > redis.call('PEXPIRETIME', KEYS[1]) then
+  redis.call('PEXPIREAT', KEYS[1], ARGV[1])
+end
 return 1`)
 
 // TrunkStatus reads one trunk's shared state.

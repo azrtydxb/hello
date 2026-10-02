@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -189,6 +191,9 @@ type Watcher struct {
 	// InvalidRevision holds that revision (0 when routing is current).
 	ConfigInvalid   prometheus.Gauge
 	InvalidRevision prometheus.Gauge
+	// DNSFailures, when set, counts trunk destination lookups that failed
+	// (hello_dns_resolve_failures_total); the previous result is kept.
+	DNSFailures prometheus.Counter
 
 	// Box opens sealed trunk passwords; without it every trunk with a
 	// password is misconfigured.
@@ -222,7 +227,7 @@ func (w *Watcher) install(s *Snapshot) {
 	if rs := s.routing; rs != nil && len(rs.Errors) > 0 {
 		// Keep routing on the last good table rather than a broken one.
 		kept := "none (internal calls only)"
-		if old != nil && old.routing != nil && old.routing.Router != nil {
+		if old != nil && old.routing != nil { // a stored routing state always has a router
 			rs.Router, rs.Config, rs.Misconfigured, rs.Resolved = old.routing.Router, old.routing.Config, old.routing.Misconfigured, old.routing.Resolved
 			kept = "the last good revision"
 		} else {
@@ -425,9 +430,17 @@ func (w *Watcher) resolveOnce(ctx context.Context, r Resolver) {
 	if cur == nil || cur.routing == nil {
 		return
 	}
-	res := resolveAll(ctx, r, cur.routing.Config.Trunks)
+	res, failed := resolveAll(ctx, r, cur.routing.Config.Trunks, cur.routing.Resolved)
+	if len(failed) > 0 {
+		if w.DNSFailures != nil {
+			w.DNSFailures.Add(float64(len(failed)))
+		}
+		if w.Log != nil {
+			w.Log.Warn("trunk destination lookup failed; keeping the previous addresses", "destinations", strings.Join(failed, ", "))
+		}
+	}
 	w.resolved.Store(&res)
-	if sameResolved(res, cur.routing.Resolved) {
+	if maps.EqualFunc(res, cur.routing.Resolved, slices.Equal) {
 		return
 	}
 	w.mu.Lock()

@@ -35,16 +35,53 @@ type fakeTrunkState struct {
 	health map[int64]map[string]livestate.DestinationHealth
 	calls  map[int64]map[string]time.Time
 	down   atomic.Bool
+
+	// Test gates: acquireGate holds AcquireTrunkCall for a trunk until
+	// closed (signalling acquireBlocked); statusFail makes TrunkStatus
+	// fail for a trunk; leaseGate holds every AcquireLease until closed.
+	acquireGate    map[int64]chan struct{}
+	acquireBlocked chan int64
+	statusFail     map[int64]bool
+	leaseGate      chan struct{}
 }
 
 func newFakeTrunkState() *fakeTrunkState {
 	return &fakeTrunkState{leases: map[string]leaseRec{}, regs: map[int64]livestate.TrunkRegistration{},
-		health: map[int64]map[string]livestate.DestinationHealth{}, calls: map[int64]map[string]time.Time{}}
+		health: map[int64]map[string]livestate.DestinationHealth{}, calls: map[int64]map[string]time.Time{},
+		acquireGate: map[int64]chan struct{}{}, acquireBlocked: make(chan int64, 4), statusFail: map[int64]bool{}}
+}
+
+func (f *fakeTrunkState) gateAcquire(id int64) chan struct{} {
+	g := make(chan struct{})
+	f.mu.Lock()
+	f.acquireGate[id] = g
+	f.mu.Unlock()
+	return g
+}
+
+func (f *fakeTrunkState) failStatus(id int64, fail bool) {
+	f.mu.Lock()
+	f.statusFail[id] = fail
+	f.mu.Unlock()
+}
+
+func (f *fakeTrunkState) gateLeases() chan struct{} {
+	g := make(chan struct{})
+	f.mu.Lock()
+	f.leaseGate = g
+	f.mu.Unlock()
+	return g
 }
 
 func (f *fakeTrunkState) AcquireLease(_ context.Context, key, node string, ttl time.Duration) (bool, error) {
 	if f.down.Load() {
 		return false, errDown
+	}
+	f.mu.Lock()
+	g := f.leaseGate
+	f.mu.Unlock()
+	if g != nil {
+		<-g
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -103,6 +140,13 @@ func (f *fakeTrunkState) PutDestinationHealth(_ context.Context, id int64, h liv
 func (f *fakeTrunkState) AcquireTrunkCall(_ context.Context, id int64, call string, maxCalls int, ttl time.Duration) (bool, error) {
 	if f.down.Load() {
 		return false, errDown
+	}
+	f.mu.Lock()
+	g := f.acquireGate[id]
+	f.mu.Unlock()
+	if g != nil {
+		f.acquireBlocked <- id
+		<-g
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -171,7 +215,10 @@ func (f *fakeTrunkState) destHealth(id int64, dest string) (livestate.Destinatio
 }
 
 func (f *fakeTrunkState) TrunkStatus(_ context.Context, id int64) (livestate.TrunkStatus, error) {
-	if f.down.Load() {
+	f.mu.Lock()
+	failing := f.statusFail[id]
+	f.mu.Unlock()
+	if f.down.Load() || failing {
 		return livestate.TrunkStatus{}, errDown
 	}
 	st := livestate.TrunkStatus{TrunkID: id, Destinations: []livestate.DestinationHealth{}}
@@ -306,6 +353,7 @@ func trunkCfg(st TrunkState) pbxOpt {
 		c.TrunkLeaseRefresh, c.TrunkStatusPoll = 100*time.Millisecond, 30*time.Millisecond
 		c.TrunkAttemptTimeout, c.TrunkRetryBase, c.TrunkRetryMax = 500*time.Millisecond, 200*time.Millisecond, time.Second
 		c.TrunkOptionsTimeout = time.Second
+		c.TrunkReRegisterMin = 200 * time.Millisecond
 		c.CallHeartbeat = 50 * time.Millisecond
 	}
 }
@@ -334,6 +382,7 @@ type carrier struct {
 
 	mu       sync.Mutex
 	regs     []*sip.Request // authorized REGISTERs
+	regTimes []time.Time
 	options  int
 	dialogs  map[string]*sipgo.DialogServerSession
 	invites  chan *sip.Request
@@ -430,6 +479,7 @@ func (cr *carrier) onRegister(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	cr.mu.Lock()
 	cr.regs = append(cr.regs, req)
+	cr.regTimes = append(cr.regTimes, time.Now())
 	cr.mu.Unlock()
 	res := sip.NewResponseFromRequest(req, 200, "OK", nil)
 	if c := req.Contact(); c != nil {
@@ -509,4 +559,4 @@ func (cr *carrier) trunk(id int64, name, mode string) routing.Trunk {
 }
 
 // destKey is the health key of the carrier's destination.
-func (cr *carrier) destKey() string { return snapshot.DestKey(cr.dest()) }
+func (cr *carrier) destKey() string { return livestate.DestinationKey(cr.dest()) }

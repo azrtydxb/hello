@@ -35,7 +35,7 @@ type RoutingState struct {
 	// password does not open). Such a trunk is not registered and routing
 	// skips it.
 	Misconfigured map[int64]string
-	// Resolved maps a destination ("host:port" as configured) to the
+	// Resolved maps a destination (livestate.DestinationKey) to the
 	// addresses ("ip:port") it resolved to; empty until DNS has run.
 	Resolved map[string][]string
 	// Errors are this revision's compile errors; when set, Router and
@@ -57,10 +57,6 @@ func (s *Snapshot) WithRouting(r *RoutingState) *Snapshot {
 	s.routing = r
 	return s
 }
-
-// DestKey is the Resolved key of a destination; it is the same key the
-// trunk health uses (livestate.DestinationKey).
-func DestKey(d routing.Destination) string { return livestate.DestinationKey(d) }
 
 // loadRouting reads trunks, destinations, routes and external numbers. A
 // password that does not open marks its trunk misconfigured (logged); it is
@@ -288,7 +284,7 @@ func resolvedIPs(trunks []routing.Trunk, resolved map[string][]string) map[int64
 			if ip, err := netip.ParseAddr(d.Host); err == nil {
 				ips = append(ips, ip.Unmap())
 			}
-			for _, a := range resolved[DestKey(d)] {
+			for _, a := range resolved[livestate.DestinationKey(d)] {
 				if ap, err := netip.ParseAddrPort(a); err == nil && !slices.Contains(ips, ap.Addr().Unmap()) {
 					ips = append(ips, ap.Addr().Unmap())
 				}
@@ -310,13 +306,13 @@ type Resolver interface {
 // resolveDestination returns the "ip:port" addresses of a destination:
 // a literal IP as is; a hostname with port 0 by SRV (_sip._udp), else
 // A/AAAA on 5060; a hostname with a port by A/AAAA.
-func resolveDestination(ctx context.Context, r Resolver, d routing.Destination) []string {
+func resolveDestination(ctx context.Context, r Resolver, d routing.Destination) ([]string, error) {
 	port := d.Port
 	if ip, err := netip.ParseAddr(d.Host); err == nil {
 		if port == 0 {
 			port = 5060
 		}
-		return []string{netip.AddrPortFrom(ip, uint16(port)).String()} //nolint:gosec // port is 0..65535 by schema.
+		return []string{netip.AddrPortFrom(ip, uint16(port)).String()}, nil //nolint:gosec // port is 0..65535 by schema.
 	}
 	type target struct {
 		host string
@@ -335,10 +331,14 @@ func resolveDestination(ctx context.Context, r Resolver, d routing.Destination) 
 	} else {
 		targets = []target{{d.Host, port}}
 	}
-	var out []string
+	var (
+		out     []string
+		lastErr error
+	)
 	for _, t := range targets {
 		addrs, err := r.LookupHost(ctx, t.host)
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		for _, a := range addrs {
@@ -347,36 +347,36 @@ func resolveDestination(ctx context.Context, r Resolver, d routing.Destination) 
 			}
 		}
 	}
-	return out
+	if len(out) == 0 && lastErr != nil {
+		return nil, lastErr
+	}
+	return out, nil
 }
 
 // resolveAll resolves every destination of every trunk.
-func resolveAll(ctx context.Context, r Resolver, trunks []routing.Trunk) map[string][]string {
-	out := map[string][]string{}
+// resolveAll resolves every destination of every trunk. A lookup that
+// fails keeps that destination's previous result (a DNS hiccup must not
+// wipe a carrier's source addresses and 403 its calls); failed lists the
+// destinations that failed.
+func resolveAll(ctx context.Context, r Resolver, trunks []routing.Trunk, prev map[string][]string) (out map[string][]string, failed []string) {
+	out = map[string][]string{}
 	for _, t := range trunks {
 		for _, d := range t.Destinations {
-			k := DestKey(d)
+			k := livestate.DestinationKey(d)
 			if _, done := out[k]; done {
 				continue
 			}
 			dctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			out[k] = resolveDestination(dctx, r, d)
+			addrs, err := resolveDestination(dctx, r, d)
 			cancel()
+			if err != nil {
+				failed = append(failed, k)
+				addrs = prev[k]
+			}
+			out[k] = addrs
 		}
 	}
-	return out
-}
-
-func sameResolved(a, b map[string][]string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if !slices.Equal(v, b[k]) {
-			return false
-		}
-	}
-	return true
+	return out, failed
 }
 
 // beginner is a connection that can open the read-only, repeatable-read

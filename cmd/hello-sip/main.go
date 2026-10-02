@@ -87,7 +87,11 @@ func run(args []string) error {
 		Name: "hello_routing_config_invalid_revision",
 		Help: "The configuration revision whose routing does not compile; 0 when routing is current.",
 	})
-	metrics.Registry.MustRegister(reloadFailures, routingInvalid, routingInvalidRev)
+	dnsFailures := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "hello_dns_resolve_failures_total",
+		Help: "Trunk destination DNS lookups that failed; the previous addresses are kept.",
+	})
+	metrics.Registry.MustRegister(reloadFailures, routingInvalid, routingInvalidRev, dnsFailures)
 	sipMetrics := sip.NewMetrics(metrics.Registry)
 
 	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
@@ -108,7 +112,8 @@ func run(args []string) error {
 	}
 	live := livestate.New(vk)
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
-		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev}
+		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev,
+		DNSFailures: dnsFailures}
 	srv, err := sip.New(sip.Config{
 		NodeID: cfg.NodeID, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
 		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,

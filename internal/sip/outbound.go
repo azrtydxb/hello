@@ -87,6 +87,9 @@ func (c *call) setupOutbound(dec routing.Decision) {
 				c.addTrace(fmt.Sprintf("Trunk %s destination %s:%d skipped: down", t.Name, d.Host, d.Port))
 				continue
 			}
+			if c.stopIfCancelled() {
+				return
+			}
 			addr := s.trunks.destAddr(d)
 			c.mu.Lock()
 			l := c.addLeg(&leg{trunk: t, dest: d, addr: addr, number: dec.Number, callerID: dec.CallerID})
@@ -132,6 +135,21 @@ func (c *call) setupOutbound(dec routing.Decision) {
 		lastCode, lastReason = sip.StatusServiceUnavailable, statusText(sip.StatusServiceUnavailable)
 	}
 	c.finishOutbound(lastCode, lastReason)
+}
+
+// stopIfCancelled ends the call if the caller cancelled between attempts
+// (the CANCEL arrived while no attempt was in flight), so no further INVITE
+// goes out; it reports whether it did.
+func (c *call) stopIfCancelled() bool {
+	c.mu.Lock()
+	cancelled := c.isCancelled
+	c.mu.Unlock()
+	if !cancelled || !c.closeSetup() {
+		return false
+	}
+	c.addTrace("Caller cancelled; no further trunks tried")
+	c.end(sip.StatusRequestTerminated, cdr.SideCaller, "cancelled by caller", ResultCancelled)
+	return true
 }
 
 // failoverCodes are the decision's, or the spec defaults.
@@ -185,7 +203,10 @@ func (c *call) awaitAttempt(l *leg) (attemptOutcome, int, string) {
 				silent = nil
 				c.ringing()
 			case evChallenged:
-				silent = nil
+				// The leg resends with credentials: give the new INVITE
+				// the full attempt timeout, rather than none.
+				timer.Reset(c.s.cfg.TrunkAttemptTimeout)
+				silent = timer.C
 				c.addTrace(fmt.Sprintf("%s (%s) -> %d %s; answered with the trunk credentials (credentials: configured)",
 					l.trunk.Name, l.addr, ev.code, ev.reason))
 			case evAnswered:

@@ -98,3 +98,40 @@ func TestTrunkStatusRoundTrip(t *testing.T) {
 		t.Fatalf("health outlived its TTL: %+v", st.Destinations)
 	}
 }
+
+// TestTrunkSlotSurvivesRefreshPastTTL fails if a call slot that is kept
+// refreshed stops counting once the time since its acquire passes the TTL
+// (the set's key used to expire then), or if a later, shorter acquire
+// shortens the key's life.
+func TestTrunkSlotSurvivesRefreshPastTTL(t *testing.T) {
+	s, ctx := store(t), context.Background()
+	const ttl = 600 * time.Millisecond
+	if ok, err := s.AcquireTrunkCall(ctx, 9, "long-call", 1, ttl); err != nil || !ok {
+		t.Fatalf("first acquire = %v, %v", ok, err)
+	}
+	for range 6 { // 1.8s: three times the TTL
+		time.Sleep(300 * time.Millisecond)
+		if err := s.RefreshTrunkCall(ctx, 9, "long-call", ttl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ok, err := s.AcquireTrunkCall(ctx, 9, "second", 1, ttl); err != nil || ok {
+		t.Fatalf("second call admitted past the limit after refreshes (%v, %v)", ok, err)
+	}
+	st, err := s.TrunkStatus(ctx, 9)
+	if err != nil || st.ActiveCalls != 1 {
+		t.Fatalf("active calls = %d, %v; want 1", st.ActiveCalls, err)
+	}
+
+	// A long slot followed by a short one: the key keeps the long expiry.
+	if ok, _ := s.AcquireTrunkCall(ctx, 10, "long", 0, 5*time.Second); !ok {
+		t.Fatal("acquire long")
+	}
+	if ok, _ := s.AcquireTrunkCall(ctx, 10, "short", 0, 200*time.Millisecond); !ok {
+		t.Fatal("acquire short")
+	}
+	time.Sleep(400 * time.Millisecond)
+	if st, _ := s.TrunkStatus(ctx, 10); st.ActiveCalls != 1 {
+		t.Fatalf("after the short slot expired: active = %d, want the long one still counted", st.ActiveCalls)
+	}
+}
