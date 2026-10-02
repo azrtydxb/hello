@@ -3,38 +3,1331 @@
   "info": {
     "title": "Hello management API",
     "version": "v1",
-    "description": "hello-control REST API. Phase 0 exposes build information only."
+    "description": "hello-control REST API. Every route except version, openapi.json and auth/login requires the hello_session cookie or an `Authorization: Bearer <token>` header. Secrets (device SIP secrets, API tokens) appear only in the response that creates them."
   },
+  "security": [
+    {
+      "sessionCookie": []
+    },
+    {
+      "bearerToken": []
+    }
+  ],
   "paths": {
     "/api/v1/version": {
       "get": {
         "operationId": "getVersion",
         "summary": "Build and configuration revision of this control-plane node",
+        "tags": ["system"],
         "responses": {
           "200": {
             "description": "Version information",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Version" }
+                "schema": {
+                  "$ref": "#/components/schemas/Version"
+                }
               }
             }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "operationId": "getOpenAPI",
+        "summary": "This OpenAPI document",
+        "tags": ["system"],
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "login",
+        "summary": "Start a session; sets the hello_session cookie",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Logged in",
+            "headers": {
+              "Set-Cookie": {
+                "description": "hello_session=<value>; Path=/; HttpOnly; SameSite=Strict; Secure when the request is HTTPS",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "summary": "End the current session and clear the cookie",
+        "tags": ["auth"],
+        "responses": {
+          "204": {
+            "description": "Logged out"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "operationId": "getMe",
+        "summary": "The authenticated user",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Current user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/tokens": {
+      "get": {
+        "operationId": "listTokens",
+        "summary": "The current user's API tokens",
+        "tags": ["tokens"],
+        "responses": {
+          "200": {
+            "description": "Tokens",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Token"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createToken",
+        "summary": "Create an API token; the token is returned only in this response",
+        "tags": ["tokens"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/tokens/{id}": {
+      "delete": {
+        "operationId": "deleteToken",
+        "summary": "Revoke an API token",
+        "tags": ["tokens"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/extensions": {
+      "get": {
+        "operationId": "listExtensions",
+        "summary": "Every extension, ordered by number",
+        "tags": ["extensions"],
+        "responses": {
+          "200": {
+            "description": "Extensions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Extension"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createExtension",
+        "summary": "Create an extension",
+        "tags": ["extensions"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtensionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Extension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/extensions/{id}": {
+      "get": {
+        "operationId": "getExtension",
+        "summary": "One extension",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Extension",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Extension"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateExtension",
+        "summary": "Change an extension's number or name",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtensionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Extension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteExtension",
+        "summary": "Delete an extension and its devices",
+        "tags": ["extensions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/devices": {
+      "get": {
+        "operationId": "listDevices",
+        "summary": "Every device, ordered by SIP username",
+        "tags": ["devices"],
+        "responses": {
+          "200": {
+            "description": "Devices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Device"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createDevice",
+        "summary": "Create a device; its SIP secret is returned only in this response",
+        "tags": ["devices"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceWithSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}": {
+      "get": {
+        "operationId": "getDevice",
+        "summary": "One device (never its secret)",
+        "tags": ["devices"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Device",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Device"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateDevice",
+        "summary": "Enable, disable or move a device",
+        "tags": ["devices"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Device"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDevice",
+        "summary": "Delete a device",
+        "tags": ["devices"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/devices/{id}/rotate-secret": {
+      "post": {
+        "operationId": "rotateDeviceSecret",
+        "summary": "Replace a device's SIP secret; the new secret is returned only in this response",
+        "tags": ["devices"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Device with its new secret",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceWithSecret"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/registrations": {
+      "get": {
+        "operationId": "listRegistrations",
+        "summary": "Every registered contact binding in the cluster (from Valkey)",
+        "tags": ["live"],
+        "responses": {
+          "200": {
+            "description": "Bindings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Binding"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/calls": {
+      "get": {
+        "operationId": "listCalls",
+        "summary": "Every active call in the cluster (from Valkey)",
+        "tags": ["live"],
+        "responses": {
+          "200": {
+            "description": "Calls",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Call"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/cdrs": {
+      "get": {
+        "operationId": "listCDRs",
+        "summary": "Call detail records, newest first",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Return CDRs with an id below this one (the previous page's next)",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of CDRs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CDRPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
           }
         }
       }
     }
   },
   "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "hello_session"
+      },
+      "bearerToken": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "parameters": {
+      "id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid input",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Missing or invalid credentials",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such resource",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "A unique value is already taken",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Internal": {
+        "description": "Internal error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
     "schemas": {
       "Version": {
         "type": "object",
         "required": ["version", "commit", "configRevision"],
         "properties": {
-          "version": { "type": "string", "example": "v0.1.0" },
-          "commit": { "type": "string", "example": "c049d74" },
+          "version": {
+            "type": "string",
+            "example": "v0.1.0"
+          },
+          "commit": {
+            "type": "string",
+            "example": "c049d74"
+          },
           "configRevision": {
             "type": "integer",
             "format": "int64",
-            "example": 0
+            "example": 0,
+            "description": "schema_info.config_revision"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "bad_request",
+                  "unauthorized",
+                  "not_found",
+                  "conflict",
+                  "internal"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["username", "password"],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "format": "password"
+          }
+        }
+      },
+      "Me": {
+        "type": "object",
+        "required": ["username"],
+        "properties": {
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "TokenCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "Reception"
+          }
+        }
+      },
+      "Token": {
+        "type": "object",
+        "required": ["id", "name", "createdAt", "lastUsedAt"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "Reception"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "CreatedToken": {
+        "type": "object",
+        "required": ["id", "name", "createdAt", "lastUsedAt", "token"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "Reception"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "token": {
+            "type": "string",
+            "description": "Bearer token. Shown only once; only its SHA-256 is stored."
+          }
+        }
+      },
+      "Extension": {
+        "type": "object",
+        "required": ["id", "number", "name", "createdAt", "updatedAt"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string",
+            "pattern": "^[0-9]{2,10}$",
+            "example": "101"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "Reception"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ExtensionCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["number", "name"],
+        "properties": {
+          "number": {
+            "type": "string",
+            "pattern": "^[0-9]{2,10}$",
+            "example": "101"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "Reception"
+          }
+        }
+      },
+      "ExtensionUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string",
+            "pattern": "^[0-9]{2,10}$",
+            "example": "101"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "Reception"
+          }
+        },
+        "minProperties": 1
+      },
+      "Device": {
+        "type": "object",
+        "required": [
+          "id",
+          "extensionId",
+          "sipUsername",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sipUsername": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "example": "101-desk"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DeviceWithSecret": {
+        "type": "object",
+        "required": [
+          "id",
+          "extensionId",
+          "sipUsername",
+          "enabled",
+          "createdAt",
+          "updatedAt",
+          "secret"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sipUsername": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "example": "101-desk"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "secret": {
+            "type": "string",
+            "description": "24 random bytes, base64url without padding. Shown only once.",
+            "example": "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          }
+        }
+      },
+      "DeviceCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["extensionId", "sipUsername"],
+        "properties": {
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sipUsername": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "example": "101-desk"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "DeviceUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "minProperties": 1
+      },
+      "Binding": {
+        "type": "object",
+        "required": [
+          "aor",
+          "extension",
+          "device",
+          "contactUri",
+          "source",
+          "transport",
+          "userAgent",
+          "receivedNode",
+          "expires",
+          "updatedAt"
+        ],
+        "properties": {
+          "aor": {
+            "type": "string",
+            "example": "sip:101-desk@hello.test"
+          },
+          "extension": {
+            "type": "string"
+          },
+          "device": {
+            "type": "string"
+          },
+          "contactUri": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "ip:port the REGISTER came from"
+          },
+          "transport": {
+            "type": "string",
+            "example": "udp"
+          },
+          "userAgent": {
+            "type": "string"
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "receivedNode": {
+            "type": "string"
+          },
+          "expires": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Call": {
+        "type": "object",
+        "required": [
+          "id",
+          "sipCallId",
+          "from",
+          "to",
+          "state",
+          "node",
+          "media",
+          "startedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Correlation id"
+          },
+          "sipCallId": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["ringing", "connected"]
+          },
+          "node": {
+            "type": "string"
+          },
+          "media": {
+            "type": "string",
+            "example": "direct"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "answeredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CDR": {
+        "type": "object",
+        "required": [
+          "id",
+          "correlationId",
+          "sipCallId",
+          "source",
+          "destination",
+          "startTime",
+          "endTime",
+          "durationMs",
+          "billableMs",
+          "sipNode",
+          "mediaMode",
+          "finalStatus",
+          "terminationSide",
+          "failureReason"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "sipCallId": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ringTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "answerTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "billableMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "sipNode": {
+            "type": "string"
+          },
+          "mediaMode": {
+            "type": "string",
+            "example": "direct"
+          },
+          "finalStatus": {
+            "type": "integer"
+          },
+          "terminationSide": {
+            "type": "string",
+            "enum": ["caller", "callee", "system"]
+          },
+          "failureReason": {
+            "type": "string"
+          }
+        },
+        "description": "Null times are omitted."
+      },
+      "CDRPage": {
+        "type": "object",
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CDR"
+            }
+          },
+          "next": {
+            "type": "string",
+            "description": "Pass as before= for the next page; empty on the last page"
           }
         }
       }
