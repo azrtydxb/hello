@@ -12,6 +12,8 @@
 //	80  180 Ringing forever (until CANCEL)
 //	*   180 Ringing, then 200 OK with SDP
 //
+// POST /mode {"failWith":code} overrides every outcome with code.
+//
 // Environment: FAKE_NAME, FAKE_SIP (listen, default 0.0.0.0:5060),
 // FAKE_HTTP (default :8090), FAKE_USER and FAKE_PASSWORD (enable REGISTER
 // digest), FAKE_REALM (default carrier.test), FAKE_INVITE_AUTH ("", "401" or
@@ -62,6 +64,7 @@ type carrier struct {
 	log                                                  *slog.Logger
 
 	mu       sync.Mutex
+	failWith int // when non-zero, every INVITE is answered with this code
 	requests []Request
 	regs     map[string]time.Time // contact -> expiry
 	nonces   map[string]bool
@@ -144,6 +147,19 @@ func (c *carrier) run(ctx context.Context, sipAddr, httpAddr string) error {
 		writeJSON(w, out)
 	})
 	mux.HandleFunc("POST /call", c.placeCall)
+	// POST /mode {"failWith":503} answers every INVITE with that code;
+	// {"failWith":0} restores the scripted outcomes.
+	mux.HandleFunc("POST /mode", func(w http.ResponseWriter, r *http.Request) {
+		var m struct{ FailWith int }
+		if err := json.NewDecoder(r.Body).Decode(&m); err != nil || (m.FailWith != 0 && (m.FailWith < 400 || m.FailWith > 699)) {
+			http.Error(w, "want {failWith: 0 or 400-699}", http.StatusBadRequest)
+			return
+		}
+		c.mu.Lock()
+		c.failWith = m.FailWith
+		c.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	})
 	hs := &http.Server{Addr: httpAddr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { <-ctx.Done(); _ = hs.Close() }()
 	go func() {
@@ -270,6 +286,14 @@ func (c *carrier) onInvite(dlg *sipgo.DialogServerCache, req *sip.Request, tx si
 	var once sync.Once
 	tx.OnCancel(func(*sip.Request) { once.Do(func() { close(canceled) }) })
 	_ = sess.Respond(sip.StatusTrying, "Trying", nil)
+	c.mu.Lock()
+	failWith := c.failWith
+	c.mu.Unlock()
+	if failWith != 0 {
+		c.record(req, failWith)
+		_ = sess.Respond(failWith, "Forced Failure", nil)
+		return
+	}
 	switch suffix {
 	case "86":
 		c.record(req, 486)
