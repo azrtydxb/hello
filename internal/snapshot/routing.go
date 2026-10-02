@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/jackc/pgx/v5"
@@ -57,8 +58,9 @@ func (s *Snapshot) WithRouting(r *RoutingState) *Snapshot {
 	return s
 }
 
-// DestKey is the Resolved key of a destination.
-func DestKey(d routing.Destination) string { return d.Host + ":" + strconv.Itoa(d.Port) }
+// DestKey is the Resolved key of a destination; it is the same key the
+// trunk health uses (livestate.DestinationKey).
+func DestKey(d routing.Destination) string { return livestate.DestinationKey(d) }
 
 // loadRouting reads trunks, destinations, routes and external numbers. A
 // password that does not open marks its trunk misconfigured (logged); it is

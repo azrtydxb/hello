@@ -480,22 +480,26 @@ func (m *trunkManager) destinationDown(id int64, d routing.Destination) bool {
 		return false
 	}
 	for _, h := range st.Destinations {
-		if h.Destination == snapshot.DestKey(d) {
+		if h.Destination == livestate.DestinationKey(d) {
 			return !h.Up
 		}
 	}
 	return false // never checked: assume up
 }
 
-// usability is the routing engine's TrunkUsability for one decision:
-// enabled, not misconfigured, trunk state reachable (non-emergency), some
-// destination not known down, and (non-emergency) not full by the cached
-// count. Emergency routes ignore limits and use the last known health.
-// The slot itself is taken at attempt time.
+// usability is the routing engine's TrunkUsability for one decision. The
+// rule itself is livestate.TrunkStatus.Usability, shared with the route
+// tester; this adds what only the call path knows: a password that did not
+// open in this node's snapshot, and an unreachable trunk state (refused
+// with "state unavailable" except for emergency routes, which use the last
+// known status). The call slot is taken at attempt time.
 func (s *Server) usability(rs *snapshot.RoutingState) routing.TrunkUsability {
 	return func(id int64, emergency bool) (bool, string) {
 		t, ok := rs.Router.Trunk(id)
-		if !ok || !t.Enabled {
+		if !ok {
+			return false, "unknown trunk"
+		}
+		if !t.Enabled {
 			return false, "disabled"
 		}
 		if _, bad := rs.Misconfigured[id]; bad {
@@ -504,24 +508,10 @@ func (s *Server) usability(rs *snapshot.RoutingState) routing.TrunkUsability {
 		if s.deps.Trunks == nil {
 			return false, "state unavailable"
 		}
-		st, known, fresh := s.trunks.statusOf(id)
+		st, _, fresh := s.trunks.statusOf(id)
 		if !fresh && !emergency {
 			return false, "state unavailable"
 		}
-		if known && len(t.Destinations) > 0 {
-			down := 0
-			for _, d := range t.Destinations {
-				if s.trunks.destinationDown(id, d) {
-					down++
-				}
-			}
-			if down == len(t.Destinations) {
-				return false, "unhealthy"
-			}
-		}
-		if !emergency && known && t.MaxCalls > 0 && st.ActiveCalls >= t.MaxCalls {
-			return false, "full"
-		}
-		return true, ""
+		return st.Usability(*t, emergency)
 	}
 }
