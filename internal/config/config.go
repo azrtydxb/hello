@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/secret"
@@ -36,6 +38,10 @@ type Control struct {
 	Database *pgx.ConnConfig
 	// ValkeyAddr is read for the live registrations/calls API.
 	ValkeyAddr string
+	// ValkeySentinels and ValkeyMaster select a Sentinel-managed primary
+	// instead of ValkeyAddr (HELLO_VALKEY_SENTINELS, HELLO_VALKEY_MASTER).
+	ValkeySentinels []string
+	ValkeyMaster    string
 	// SIPDomain is the digest realm device HA1 values are computed for; it
 	// must equal hello-sip's HELLO_SIP_DOMAIN.
 	SIPDomain string
@@ -52,6 +58,8 @@ type Control struct {
 type SIP struct {
 	Common
 	ValkeyAddr        string
+	ValkeySentinels   []string
+	ValkeyMaster      string
 	SIPBindAddr       string
 	SIPAdvertisedAddr string
 	// DatabaseURL is used read-only for the configuration snapshot and to
@@ -70,6 +78,13 @@ type SIP struct {
 	// SecretKey (HELLO_SECRET_KEY) opens trunk passwords sealed by
 	// hello-control.
 	SecretKey string
+	// TrustedProxies (HELLO_SIP_TRUSTED_PROXIES) are the SIP balancers whose
+	// Path headers are stored and whose X-Hello-Client is believed.
+	TrustedProxies []netip.Prefix
+	// DrainTimeout bounds how long a draining node waits for its calls.
+	DrainTimeout time.Duration
+	// MemberHeartbeat is how often the node refreshes its membership record.
+	MemberHeartbeat time.Duration
 	// MaxCallDuration ends a connected call that has run this long (both
 	// legs get BYE), so a call whose phones vanished without BYE is cleared.
 	MaxCallDuration time.Duration
@@ -105,13 +120,13 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c := Control{
 		Common:                 r.common(":8081"),
 		DatabaseURL:            r.required("HELLO_DATABASE_URL"),
-		ValkeyAddr:             r.required("HELLO_VALKEY_ADDR"),
+		ValkeyAddr:             r.optional("HELLO_VALKEY_ADDR", ""),
 		SIPDomain:              r.required("HELLO_SIP_DOMAIN"),
 		BootstrapAdminPassword: r.optional("HELLO_BOOTSTRAP_ADMIN_PASSWORD", ""),
 		SessionTTL:             r.duration("HELLO_SESSION_TTL", 12*time.Hour),
 	}
 	c.Database = r.database(c.DatabaseURL)
-	r.hostPort("HELLO_VALKEY_ADDR", c.ValkeyAddr)
+	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
 	if c.SessionTTL == 0 {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
@@ -124,7 +139,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	r := reader{getenv: getenv}
 	c := SIP{
 		Common:             r.common(":8082"),
-		ValkeyAddr:         r.required("HELLO_VALKEY_ADDR"),
+		ValkeyAddr:         r.optional("HELLO_VALKEY_ADDR", ""),
 		SIPBindAddr:        r.optional("HELLO_SIP_BIND_ADDR", "0.0.0.0:5060"),
 		SIPAdvertisedAddr:  r.optional("HELLO_SIP_ADVERTISED_ADDR", ""),
 		DatabaseURL:        r.required("HELLO_DATABASE_URL"),
@@ -142,8 +157,14 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		r.fail("HELLO_SIP_MAX_CALL_DURATION", errors.New("must be positive"))
 	}
 	c.Database = r.database(c.DatabaseURL)
-	r.hostPort("HELLO_VALKEY_ADDR", c.ValkeyAddr)
+	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
+	c.TrustedProxies = r.prefixes("HELLO_SIP_TRUSTED_PROXIES")
+	c.DrainTimeout = r.duration("HELLO_DRAIN_TIMEOUT", 2*time.Hour)
+	c.MemberHeartbeat = r.duration("HELLO_MEMBER_HEARTBEAT", 5*time.Second)
+	if c.MemberHeartbeat == 0 {
+		r.fail("HELLO_MEMBER_HEARTBEAT", errors.New("must be positive"))
+	}
 	if c.NonceSecret != "" && len(c.NonceSecret) < 32 {
 		r.fail("HELLO_SIP_NONCE_SECRET", errors.New("must be at least 32 bytes"))
 	}
@@ -230,6 +251,51 @@ func (r *reader) database(dsn string) *pgx.ConnConfig {
 		r.fail("HELLO_DATABASE_URL", errors.New("malformed connection string"))
 	}
 	return db
+}
+
+// valkey reads either HELLO_VALKEY_ADDR or HELLO_VALKEY_SENTINELS with
+// HELLO_VALKEY_MASTER; exactly one topology must be configured.
+func (r *reader) valkey() (addr string, sentinels []string, master string) {
+	addr = r.getenv("HELLO_VALKEY_ADDR")
+	if s := r.getenv("HELLO_VALKEY_SENTINELS"); s != "" {
+		for _, a := range strings.Split(s, ",") {
+			a = strings.TrimSpace(a)
+			r.hostPort("HELLO_VALKEY_SENTINELS", a)
+			sentinels = append(sentinels, a)
+		}
+	}
+	master = r.getenv("HELLO_VALKEY_MASTER")
+	switch {
+	case addr != "" && len(sentinels) > 0:
+		r.fail("HELLO_VALKEY_ADDR", errors.New("set either HELLO_VALKEY_ADDR or HELLO_VALKEY_SENTINELS, not both"))
+	case len(sentinels) > 0 && master == "":
+		r.fail("HELLO_VALKEY_MASTER", errors.New("required with HELLO_VALKEY_SENTINELS"))
+	case len(sentinels) == 0 && master != "":
+		r.fail("HELLO_VALKEY_SENTINELS", errors.New("required with HELLO_VALKEY_MASTER"))
+	case addr == "" && len(sentinels) == 0:
+		r.fail("HELLO_VALKEY_ADDR", errors.New("required (or HELLO_VALKEY_SENTINELS with HELLO_VALKEY_MASTER)"))
+	default:
+		r.hostPort("HELLO_VALKEY_ADDR", addr)
+	}
+	return addr, sentinels, master
+}
+
+// prefixes reads a comma-separated CIDR list.
+func (r *reader) prefixes(key string) []netip.Prefix {
+	v := r.getenv(key)
+	if v == "" {
+		return nil
+	}
+	var out []netip.Prefix
+	for _, s := range strings.Split(v, ",") {
+		p, err := netip.ParsePrefix(strings.TrimSpace(s))
+		if err != nil {
+			r.fail(key, fmt.Errorf("%q is not a CIDR", strings.TrimSpace(s)))
+			continue
+		}
+		out = append(out, p.Masked())
+	}
+	return out
 }
 
 // secretKey reads HELLO_SECRET_KEY and checks it is 32 bytes of base64

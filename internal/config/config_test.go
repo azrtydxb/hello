@@ -147,3 +147,42 @@ func TestLoadMaxCallDuration(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadValkeyTopology fails if both or neither Valkey topologies are
+// accepted, if Sentinel mode lacks its master, or if a valid Sentinel list
+// is not parsed.
+func TestLoadValkeyTopology(t *testing.T) {
+	for _, bad := range []map[string]string{
+		{"HELLO_VALKEY_ADDR": ""},
+		{"HELLO_VALKEY_SENTINELS": "s1:26379", "HELLO_VALKEY_MASTER": "hello"}, // plus the base ADDR: both
+		{"HELLO_VALKEY_ADDR": "", "HELLO_VALKEY_SENTINELS": "s1:26379"},
+		{"HELLO_VALKEY_ADDR": "", "HELLO_VALKEY_MASTER": "hello"},
+		{"HELLO_VALKEY_ADDR": "", "HELLO_VALKEY_SENTINELS": "nope", "HELLO_VALKEY_MASTER": "hello"},
+	} {
+		if _, err := LoadSIP(env(bad)); err == nil {
+			t.Fatalf("%v accepted", bad)
+		}
+		if _, err := LoadControl(env(bad)); err == nil {
+			t.Fatalf("control: %v accepted", bad)
+		}
+	}
+	c, err := LoadSIP(env(map[string]string{"HELLO_VALKEY_ADDR": "", "HELLO_VALKEY_SENTINELS": "s1:26379, s2:26379", "HELLO_VALKEY_MASTER": "hello"}))
+	if err != nil || len(c.ValkeySentinels) != 2 || c.ValkeySentinels[1] != "s2:26379" || c.ValkeyMaster != "hello" {
+		t.Fatalf("sentinel config = %+v, %v", c, err)
+	}
+}
+
+// TestLoadTrustedProxies fails if a malformed CIDR is accepted or a valid
+// list is not parsed and masked.
+func TestLoadTrustedProxies(t *testing.T) {
+	if _, err := LoadSIP(env(map[string]string{"HELLO_SIP_TRUSTED_PROXIES": "10.0.0.0/8,garbage"})); err == nil || !strings.Contains(err.Error(), "HELLO_SIP_TRUSTED_PROXIES") {
+		t.Fatalf("malformed proxy CIDR accepted: %v", err)
+	}
+	c, err := LoadSIP(env(map[string]string{"HELLO_SIP_TRUSTED_PROXIES": "172.20.0.7/32, 10.1.2.3/16"}))
+	if err != nil || len(c.TrustedProxies) != 2 || c.TrustedProxies[1].String() != "10.1.0.0/16" {
+		t.Fatalf("trusted proxies = %v, %v", c.TrustedProxies, err)
+	}
+	if c.DrainTimeout != 2*time.Hour || c.MemberHeartbeat != 5*time.Second {
+		t.Fatalf("defaults = %s %s", c.DrainTimeout, c.MemberHeartbeat)
+	}
+}
