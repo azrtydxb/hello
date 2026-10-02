@@ -1,0 +1,33 @@
+package integration
+
+// This file is named to sort last: Go runs a package's tests file by file in
+// name order, and this check must see the logs of every lab test before it.
+
+import (
+	"strings"
+	"testing"
+)
+
+// TestNoSecretsInLogs checks every service's log for any
+// secret the lab tests used.
+func TestNoSecretsInLogs(t *testing.T) {
+	labUp(t)
+	out, err := compose("logs", "--no-color").CombinedOutput()
+	if err != nil {
+		t.Fatalf("compose logs: %v", err)
+	}
+	logs := string(out)
+	secrets.Lock()
+	defer secrets.Unlock()
+	checks := append([]string{labPassword, "lab-only-nonce-secret-0123456789abcdef"}, secrets.values...)
+	for _, s := range checks {
+		if s != "" && strings.Contains(logs, s) {
+			t.Errorf("a secret (%d chars) appears in the lab logs", len(s))
+		}
+	}
+	for _, marker := range []string{"response=\"", "Authorization: Digest"} {
+		if strings.Contains(logs, marker) {
+			t.Errorf("%q appears in the lab logs", marker)
+		}
+	}
+}

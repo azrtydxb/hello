@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -172,19 +171,11 @@ func TestImagesNonRoot(t *testing.T) {
 	}
 }
 
+// TestLabSmoke is the README path: the lab comes up healthy, the UI proxies
+// the API, every node is ready, and two phones on the two SIP host ports
+// complete a call.
 func TestLabSmoke(t *testing.T) {
-	docker(t)
-	// Own project name, so cleanup never removes a developer's running lab.
-	compose := []string{"compose", "-p", "hello-smoke", "-f", filepath.Join("deploy", "docker-compose", "compose.yaml")}
-	t.Cleanup(func() {
-		cmd := exec.Command("docker", append(compose, "down", "-v")...)
-		cmd.Dir = root
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Errorf("compose down: %v\n%s", err, out)
-		}
-	})
-	run(t, "docker", append(compose, "up", "-d", "--build", "--wait", "--wait-timeout", "180")...)
-
+	labUp(t)
 	client := &http.Client{Timeout: 5 * time.Second}
 	for _, url := range []string{
 		"http://localhost:8080/api/v1/version", // through the UI proxy
@@ -201,4 +192,5 @@ func TestLabSmoke(t *testing.T) {
 			t.Fatalf("GET %s = %d, want 200", url, resp.StatusCode)
 		}
 	}
+	TestLabCallAcrossNodes(t)
 }
