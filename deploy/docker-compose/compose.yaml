@@ -1,0 +1,101 @@
+# Hello development lab (spec §20): two control-plane replicas, two SIP
+# nodes, the UI, PostgreSQL and Valkey.
+#   docker compose -f deploy/docker-compose/compose.yaml up -d --build --wait
+name: hello
+
+x-control: &control
+  build: { context: ../.., target: hello-control }
+  image: hello-control:dev
+  depends_on:
+    postgres: { condition: service_healthy }
+    hello-migrate: { condition: service_completed_successfully }
+  healthcheck: &readyz
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/readyz"]
+    interval: 5s
+    timeout: 3s
+    retries: 12
+  stop_grace_period: 40s
+
+x-sip: &sip
+  build: { context: ../.., target: hello-sip }
+  image: hello-sip:dev
+  depends_on:
+    valkey: { condition: service_healthy }
+  healthcheck:
+    <<: *readyz
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/readyz"]
+  stop_grace_period: 40s
+
+x-db-env: &db-env # Lab-only credentials; never reuse outside this compose file.
+  HELLO_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: hello
+      POSTGRES_PASSWORD: hello
+      POSTGRES_DB: hello
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "hello"]
+      interval: 2s
+      retries: 30
+    volumes: [pgdata:/var/lib/postgresql]
+
+  valkey:
+    image: valkey/valkey:9-alpine
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      retries: 30
+
+  hello-migrate:
+    <<: *control
+    depends_on:
+      postgres: { condition: service_healthy }
+    command: ["migrate", "up"]
+    healthcheck: { disable: true }
+    environment:
+      <<: *db-env
+      HELLO_NODE_ID: hello-migrate
+
+  hello-control-1:
+    <<: *control
+    environment: { <<: *db-env, HELLO_NODE_ID: hello-control-1 }
+    ports: ["8081:8081"]
+
+  hello-control-2:
+    <<: *control
+    environment: { <<: *db-env, HELLO_NODE_ID: hello-control-2 }
+
+  hello-sip-1:
+    <<: *sip
+    environment:
+      HELLO_NODE_ID: hello-sip-1
+      HELLO_VALKEY_ADDR: valkey:6379
+      HELLO_SIP_ADVERTISED_ADDR: hello-sip-1:5060
+    ports: ["8082:8082"]
+
+  hello-sip-2:
+    <<: *sip
+    environment:
+      HELLO_NODE_ID: hello-sip-2
+      HELLO_VALKEY_ADDR: valkey:6379
+      HELLO_SIP_ADVERTISED_ADDR: hello-sip-2:5060
+    ports: ["8083:8082"]
+
+  hello-ui:
+    build: { context: ../../web }
+    image: hello-ui:dev
+    environment:
+      HELLO_CONTROL_UPSTREAM: http://hello-control-1:8081
+    depends_on:
+      hello-control-1: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 5s
+      retries: 12
+    ports: ["8080:8080"]
+
+volumes:
+  pgdata:

@@ -1,0 +1,43 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Hello management API",
+    "version": "v1",
+    "description": "hello-control REST API. Phase 0 exposes build information only."
+  },
+  "paths": {
+    "/api/v1/version": {
+      "get": {
+        "operationId": "getVersion",
+        "summary": "Build and configuration revision of this control-plane node",
+        "responses": {
+          "200": {
+            "description": "Version information",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Version" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Version": {
+        "type": "object",
+        "required": ["version", "commit", "configRevision"],
+        "properties": {
+          "version": { "type": "string", "example": "v0.1.0" },
+          "commit": { "type": "string", "example": "c049d74" },
+          "configRevision": {
+            "type": "integer",
+            "format": "int64",
+            "example": 0
+          }
+        }
+      }
+    }
+  }
+}

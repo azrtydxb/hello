@@ -1,0 +1,17 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - noctx
+  exclusions:
+    rules:
+      # Tests drive short-lived requests and fixed test commands.
+      - path: _test\.go
+        linters: [noctx, gosec]
+formatters:
+  enable:
+    - gofmt
