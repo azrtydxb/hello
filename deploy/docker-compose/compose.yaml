@@ -202,8 +202,11 @@ services:
 
   # The SIP edge (deploy/kamailio, plan contract 7). The official image is
   # published for amd64 only; Docker Desktop on Apple silicon emulates it.
-  # It runs as the image's unprivileged kamailio user (port 5060 needs no
-  # root). Dispatcher state: docker compose exec kamailio kamcmd dispatcher.list
+  # It runs as the image's unprivileged kamailio user (its ports need no
+  # root). Sockets: UDP 5060 for phones (host UDP 5080, advertised as
+  # KAMAILIO_PUBLIC_HOST:PORT), UDP 5070 towards the hello-sip nodes, TCP
+  # 9090 for /metrics (internal). Dispatcher state:
+  #   docker compose exec kamailio kamcmd dispatcher.list
   kamailio:
     image: ghcr.io/kamailio/kamailio:6.0.8-bookworm
     platform: linux/amd64
