@@ -25,7 +25,11 @@ type Check func(ctx context.Context) error
 // Server serves /healthz, /readyz and /metrics, plus an optional app handler
 // for every other path.
 type Server struct {
-	Checks          map[string]Check
+	// Checks are required dependencies: any failure makes /readyz 503.
+	Checks map[string]Check
+	// Optional dependencies degrade a feature but not the node: a failure
+	// is reported in the /readyz body and metrics, and /readyz stays 200.
+	Optional        map[string]Check
 	App             http.Handler
 	Metrics         *telemetry.Metrics
 	Log             *slog.Logger
@@ -57,18 +61,29 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), checkTimeout)
 	defer cancel()
-	failed := map[string]string{}
-	for name, check := range s.Checks {
-		if err := check(ctx); err != nil {
-			failed[name] = err.Error()
+	run := func(checks map[string]Check) map[string]string {
+		failed := map[string]string{}
+		for name, check := range checks {
+			err := check(ctx)
+			up := 1.0
+			if err != nil {
+				failed[name], up = err.Error(), 0
+			}
+			s.Metrics.DependencyUp.WithLabelValues(name).Set(up)
 		}
+		return failed
 	}
+	failed, degraded := run(s.Checks), run(s.Optional)
 	if len(failed) > 0 {
 		s.Metrics.NodeReady.Set(0)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "unavailable", "failed": failed})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "unavailable", "failed": failed, "degraded": degraded})
 		return
 	}
 	s.Metrics.NodeReady.Set(1)
+	if len(degraded) > 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "degraded", "degraded": degraded})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 

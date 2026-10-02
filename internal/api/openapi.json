@@ -653,6 +653,9 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         }
       }
@@ -687,6 +690,9 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
           }
         }
       }
@@ -816,6 +822,16 @@
             }
           }
         }
+      },
+      "Unavailable": {
+        "description": "Live state (Valkey) is unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     },
     "schemas": {
@@ -854,7 +870,8 @@
                   "unauthorized",
                   "not_found",
                   "conflict",
-                  "internal"
+                  "internal",
+                  "unavailable"
                 ]
               },
               "message": {

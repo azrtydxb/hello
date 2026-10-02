@@ -55,3 +55,8 @@
 
 - Push phase-1-minimum-pbx and open a PR to main
 - Hold for your review first
+
+## hello-control readiness during a Valkey outage
+
+- Ready stays green; live views return 503 and /readyz reports Valkey as degraded
+- /readyz fails while Valkey is down (all management goes out of rotation)

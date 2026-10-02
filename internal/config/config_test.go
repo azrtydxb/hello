@@ -95,6 +95,12 @@ func TestLoadMalformedValkeyAddr(t *testing.T) {
 	}
 }
 
+func TestLoadZeroSessionTTL(t *testing.T) {
+	if _, err := LoadControl(env(map[string]string{"HELLO_SESSION_TTL": "0s"})); err == nil || !strings.Contains(err.Error(), "HELLO_SESSION_TTL") {
+		t.Fatalf("zero session TTL accepted: %v", err)
+	}
+}
+
 func TestLoadDefaults(t *testing.T) {
 	c, err := LoadControl(env(map[string]string{"HELLO_NODE_ID": "c1", "HELLO_DATABASE_URL": "postgres://x"}))
 	if err != nil {

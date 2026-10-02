@@ -110,6 +110,7 @@ of replacing it.
 - **Valkey unavailable:** REGISTER gets 503 with Retry-After, INVITE gets 503, `/readyz` fails so traffic moves to a node that can reach Valkey; existing dialogs continue.
 - **PostgreSQL unavailable while hello-sip runs:** it keeps serving from its last snapshot (HA Level 1) and logs and counts reload failures. CDRs buffer in memory up to a bound, then are dropped and counted in `hello_cdr_dropped_total`.
 - **PostgreSQL unavailable at hello-sip startup:** no snapshot means `/readyz` fails until the first load succeeds.
+- **Valkey unavailable, seen from hello-control:** management stays ready (Valkey is an optional dependency): `/readyz` stays 200 and lists `valkey` under `degraded`, `hello_dependency_up{dependency="valkey"}` is 0, and the live views answer 503 `unavailable` (decided 2026-10-02).
 - **hello-control down:** registration and calling are unaffected; only management and the live views are unavailable.
 - **A SIP node dies mid-call:** its calls disappear from `/api/v1/calls` when their TTL expires; the media may continue but signaling for those dialogs is lost (stated limitation until Phase 7).
 - **A wrong `HELLO_SIP_NONCE_SECRET` on one node:** that node rejects challenges the other issued; it is detectable because test UA authentication through mixed nodes fails, and it is documented in the README.

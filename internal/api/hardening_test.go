@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,6 +25,30 @@ func (oneBinding) AllBindings(context.Context) ([]livestate.Binding, error) {
 	return []livestate.Binding{{AOR: "sip:a@hello.test", Path: []string{"<sip:10.0.0.1:5060;lr;hflow=c2VjcmV0LXRva2Vu>"}}}, nil
 }
 func (oneBinding) Calls(context.Context) ([]livestate.Call, error) { return nil, nil }
+
+type liveDown struct{}
+
+func (liveDown) AllBindings(context.Context) ([]livestate.Binding, error) {
+	return nil, errors.New("valkey: connection refused")
+}
+func (liveDown) Calls(context.Context) ([]livestate.Call, error) {
+	return nil, errors.New("valkey: connection refused")
+}
+
+// TestLiveViewsUnavailable fails if a Valkey outage turns the live views into
+// a 500 instead of a 503 with the unavailable code.
+func TestLiveViewsUnavailable(t *testing.T) {
+	h := Handler(Config{Store: tokenStore{}, Live: liveDown{}})
+	for _, path := range []string{"/api/v1/registrations", "/api/v1/calls"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer anything")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), `"unavailable"`) {
+			t.Fatalf("%s with Valkey down = %d %s, want 503 unavailable", path, rec.Code, rec.Body)
+		}
+	}
+}
 
 // TestCrossOriginRejected fails if a cross-site browser POST reaches a
 // handler, or if a same-origin or non-browser request is blocked.

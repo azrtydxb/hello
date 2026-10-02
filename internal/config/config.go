@@ -103,6 +103,9 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	}
 	c.Database = r.database(c.DatabaseURL)
 	r.hostPort("HELLO_VALKEY_ADDR", c.ValkeyAddr)
+	if c.SessionTTL == 0 {
+		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
+	}
 	return c, r.err()
 }
 

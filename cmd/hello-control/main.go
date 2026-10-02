@@ -105,6 +105,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 
 	srv := &ops.Server{
 		Checks: map[string]ops.Check{"postgres": db.PingContext},
+		// Valkey only backs the live views: its loss degrades, not fails.
+		Optional: map[string]ops.Check{"valkey": func(ctx context.Context) error {
+			return vk.Do(ctx, vk.B().Ping().Build()).Error()
+		}},
 		App: api.Handler(api.Config{
 			Store:      st,
 			Live:       livestate.New(vk),

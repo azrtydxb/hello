@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-02 10:17 UTC. procoder reads this
+Written 2026-10-02 10:26 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -23,6 +23,16 @@ Question: Phase 1 automated SIP testing
 - SIPp scenarios in a container
 
 Answer: Go test user agents built on sipgo, run in CI
+
+## [decision] decisions.md
+
+Key: 1a17adfb2c72
+Question: hello-control readiness during a Valkey outage
+
+- Ready stays green; live views return 503 and /readyz reports Valkey as degraded
+- /readyz fails while Valkey is down (all management goes out of rotation)
+
+Answer: Ready stays green; live views return 503 and /readyz reports Valkey as degraded
 
 ## [decision] decisions.md
 

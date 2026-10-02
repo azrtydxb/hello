@@ -390,13 +390,20 @@ func (s *server) registrations(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	bs, err := s.Live.AllBindings(ctx)
 	if err != nil {
-		s.internal(w, "list registrations", err)
+		s.liveDown(w, "list registrations", err)
 		return
 	}
 	for i := range bs {
 		bs[i].Path = redactPath(bs[i].Path)
 	}
 	writeJSON(w, http.StatusOK, items(bs))
+}
+
+// liveDown answers a live view while Valkey is unreachable: the rest of
+// management keeps working, so this is 503 for the view, not node failure.
+func (s *server) liveDown(w http.ResponseWriter, what string, err error) {
+	s.Log.Warn("live state unavailable", "op", what, "error", err)
+	writeError(w, http.StatusServiceUnavailable, "unavailable", "live state (Valkey) is unavailable; try again shortly")
 }
 
 // hflowRe matches the edge flow token in a Path URI; it is a routing
@@ -416,7 +423,7 @@ func (s *server) calls(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	cs, err := s.Live.Calls(ctx)
 	if err != nil {
-		s.internal(w, "list calls", err)
+		s.liveDown(w, "list calls", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, items(cs))
