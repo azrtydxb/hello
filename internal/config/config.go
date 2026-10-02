@@ -60,8 +60,9 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	if c.DatabaseURL != "" {
 		db, err := pgx.ParseConfig(c.DatabaseURL)
 		if err != nil {
-			// pgx masks the password in its parse errors.
-			r.fail("HELLO_DATABASE_URL", err)
+			// pgx's redaction of parse errors is best effort, so none of
+			// the input is echoed back.
+			r.fail("HELLO_DATABASE_URL", errors.New("malformed connection string"))
 		}
 		c.Database = db
 	}
@@ -76,6 +77,11 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		ValkeyAddr:        r.required("HELLO_VALKEY_ADDR"),
 		SIPBindAddr:       r.optional("HELLO_SIP_BIND_ADDR", "0.0.0.0:5060"),
 		SIPAdvertisedAddr: r.optional("HELLO_SIP_ADVERTISED_ADDR", ""),
+	}
+	if c.ValkeyAddr != "" {
+		if _, err := splitHost(c.ValkeyAddr); err != nil {
+			r.fail("HELLO_VALKEY_ADDR", err)
+		}
 	}
 	bindHost, err := splitHost(c.SIPBindAddr)
 	if err != nil {

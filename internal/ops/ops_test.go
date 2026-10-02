@@ -70,6 +70,70 @@ func TestMetricsEndpoint(t *testing.T) {
 	}
 }
 
+// startInFlight serves s with an app handler that blocks until release is
+// closed, starts one request against it, and returns the request's result
+// channel plus the cancel that begins shutdown.
+func startInFlight(t *testing.T, s *Server, release <-chan struct{}) (<-chan int, context.CancelFunc, <-chan error) {
+	t.Helper()
+	entered := make(chan struct{})
+	s.App = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(entered)
+		<-release
+		w.WriteHeader(http.StatusOK)
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Serve(ctx, ln) }()
+	result := make(chan int, 1)
+	go func() {
+		resp, err := http.Get("http://" + ln.Addr().String() + "/slow")
+		if err != nil {
+			result <- 0
+			return
+		}
+		_ = resp.Body.Close()
+		result <- resp.StatusCode
+	}()
+	<-entered
+	return result, cancel, done
+}
+
+func TestShutdownWaitsForInFlight(t *testing.T) {
+	s := newServer(nil)
+	release := make(chan struct{})
+	result, cancel, done := startInFlight(t, s, release)
+	cancel()
+	time.Sleep(200 * time.Millisecond) // shutdown under way, request still held
+	close(release)
+	if code := <-result; code != http.StatusOK {
+		t.Fatalf("in-flight request = %d, want 200 completed during shutdown", code)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Serve = %v, want nil", err)
+	}
+}
+
+func TestShutdownTimeoutExpires(t *testing.T) {
+	s := newServer(nil)
+	s.ShutdownTimeout = 200 * time.Millisecond
+	release := make(chan struct{})
+	defer close(release)
+	_, cancel, done := startInFlight(t, s, release)
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Serve = %v, want deadline exceeded when a request outlives the timeout", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Serve did not give up after ShutdownTimeout")
+	}
+}
+
 func TestGracefulShutdown(t *testing.T) {
 	s := newServer(nil)
 	s.DrainDelay = 300 * time.Millisecond

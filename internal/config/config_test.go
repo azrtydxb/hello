@@ -72,6 +72,15 @@ func TestLoadMalformedDatabaseURL(t *testing.T) {
 	}
 }
 
+func TestLoadMalformedValkeyAddr(t *testing.T) {
+	_, err := LoadSIP(env(map[string]string{
+		"HELLO_NODE_ID": "s1", "HELLO_VALKEY_ADDR": "valkey", "HELLO_SIP_BIND_ADDR": "10.0.0.5:5060",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "HELLO_VALKEY_ADDR") {
+		t.Fatalf("want error naming HELLO_VALKEY_ADDR, got %v", err)
+	}
+}
+
 func TestLoadDefaults(t *testing.T) {
 	c, err := LoadControl(env(map[string]string{"HELLO_NODE_ID": "c1", "HELLO_DATABASE_URL": "postgres://x"}))
 	if err != nil {
