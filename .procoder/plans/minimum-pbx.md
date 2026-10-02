@@ -65,46 +65,46 @@ Interfaces: `livestate.New(valkey.Client) *Store` with `PutBinding`, `DeleteBind
 Files: `internal/auth/` (bcrypt passwords, session and token hashing, bootstrap admin, middleware), `internal/store/` (PostgreSQL queries for users, sessions, tokens, extensions, devices, audit, cdrs, revision), `internal/api/` (handlers, OpenAPI document, tests), `cmd/hello-control/main.go` (wiring, Valkey client for live views, bootstrap on serve).
 Interfaces: produces every HTTP route in Shared contracts; consumes `livestate.Store` for registrations and calls; writes the revision bump and NOTIFY.
 
-- [ ] Implement `internal/auth`: `HashPassword`, `CheckPassword` (bcrypt), `NewToken() (plain string, hash []byte)` using 32 random bytes and SHA-256, and `Middleware(store) func(http.Handler) http.Handler`, which accepts the session cookie or a Bearer token, updates `last_used_at`, and puts the actor in the request context. Test it in `internal/auth/auth_test.go`.
-- [ ] Implement `internal/store`, with every mutation in one transaction that also inserts the audit row and runs the revision bump plus `pg_notify`. Map unique violations to a sentinel `store.ErrConflict` and missing rows to `store.ErrNotFound`.
-- [ ] Implement the handlers and add every route and schema to `internal/api/openapi.json`. Keep `TestVersionAndOpenAPI` passing and extend it to assert that every documented path is routed.
-- [ ] Write `TestAuthRequired`, `TestLoginSession`, `TestAPITokenHashed` and `TestDeviceSecretShownOnce` in `internal/api`. They need PostgreSQL through `HELLO_TEST_DATABASE_URL` and skip without it; each runs in a scratch database the same way `test/integration` already does.
-- [ ] Write `TestConfigChangeAuditedAndRevisioned` in `test/integration`.
-- [ ] Bootstrap: on `serve`, when `users` is empty and `HELLO_BOOTSTRAP_ADMIN_PASSWORD` is set, create user `admin`. Log that it happened, never the password. Prune expired sessions hourly.
-- [ ] Run `go test -race ./...` with PostgreSQL and Valkey set (all pass), then `golangci-lint run ./...` (0 issues), then `procoder check` (clean).
+- [x] Implement `internal/auth`: `HashPassword`, `CheckPassword` (bcrypt), `NewToken() (plain string, hash []byte)` using 32 random bytes and SHA-256, and `Middleware(store) func(http.Handler) http.Handler`, which accepts the session cookie or a Bearer token, updates `last_used_at`, and puts the actor in the request context. Test it in `internal/auth/auth_test.go`.
+- [x] Implement `internal/store`, with every mutation in one transaction that also inserts the audit row and runs the revision bump plus `pg_notify`. Map unique violations to a sentinel `store.ErrConflict` and missing rows to `store.ErrNotFound`.
+- [x] Implement the handlers and add every route and schema to `internal/api/openapi.json`. Keep `TestVersionAndOpenAPI` passing and extend it to assert that every documented path is routed.
+- [x] Write `TestAuthRequired`, `TestLoginSession`, `TestAPITokenHashed` and `TestDeviceSecretShownOnce` in `internal/api`. They need PostgreSQL through `HELLO_TEST_DATABASE_URL` and skip without it; each runs in a scratch database the same way `test/integration` already does.
+- [x] Write `TestConfigChangeAuditedAndRevisioned` in `test/integration`.
+- [x] Bootstrap: on `serve`, when `users` is empty and `HELLO_BOOTSTRAP_ADMIN_PASSWORD` is set, create user `admin`. Log that it happened, never the password. Prune expired sessions hourly.
+- [x] Run `go test -race ./...` with PostgreSQL and Valkey set (all pass), then `golangci-lint run ./...` (0 issues), then `procoder check` (clean).
 
 ## Task 3: SIP node (branch phase-1-sip)
 
 Files: `internal/sip/` (sipgo server and client behind Hello types, digest and nonce, registrar, B2BUA, failure mapping, metrics, log redaction), `internal/snapshot/` (load, LISTEN/NOTIFY, poll, last-good retention), `internal/cdr/` (bounded queue and background PostgreSQL writer), `cmd/hello-sip/main.go` (wiring, readiness requiring a loaded snapshot plus Valkey).
 Interfaces: consumes the snapshot query, `livestate.Store` and `config.SIP`; produces SIP on UDP, the `cdrs` rows, `hello_sip_*`/`hello_calls_total`/`hello_active_calls`/`hello_cdr_dropped_total` metrics, and `livestate` bindings and calls (heartbeat every 10s, TTL 30s).
 
-- [ ] Implement `internal/snapshot`: `Load(ctx, db) (*Snapshot, error)`, `Snapshot.DeviceByUsername`, `Snapshot.DevicesForExtension(number)`, and `Watcher.Run(ctx)`, which LISTENs on `hello_config` and polls every 30s. Retain the last good snapshot on error and expose `Ready() bool`.
-- [ ] Implement digest in `internal/sip/digest.go`: the challenge uses a stateless nonce `base64(ts || HMAC-SHA256(secret, ts||realm))` valid for 5 minutes; verify MD5 and SHA-256 (RFC 8760), with `qop=auth` and `stale=true` on expiry. Write `TestDigestMD5AndSHA256`, `TestNonceAcrossNodes` and `TestStaleNonce`.
-- [ ] Implement the registrar: authenticate, clamp Expires (423 with Min-Expires below the minimum), handle `Expires: 0` and `Contact: *`, store through `livestate.PutBinding` using `rport`/`received` as the source, and answer 200 with the current bindings.
-- [ ] Implement the failed-auth throttle with Valkey `INCR` and `EXPIRE` on `hello:authfail:{ip}`, answering 403 once the count passes the limit.
-- [ ] Implement the B2BUA: authenticate the INVITE (401), resolve the dialled extension, fork to every binding (ring all) excluding the caller's own device, take the first 2xx (ACK and BYE any later 2xx, CANCEL the other forks), relay ACK, BYE, CANCEL and in-dialog re-INVITE/UPDATE between legs, and pass SDP through unchanged. Apply the 404/480/486/408 mapping from the spec. Publish to `livestate` on ring and answer, and remove on end.
-- [ ] Implement the CDR writer: a bounded channel (1000) with a writer goroutine that retries with backoff; when the channel is full, drop and increment `hello_cdr_dropped_total`.
-- [ ] Write `TestOptionsPing` and `TestSIPMetrics` in `internal/sip`, plus unit tests for fork and cancel races using in-process sipgo UAs on loopback.
-- [ ] Run `go test -race ./...` (pass), then `golangci-lint run ./...` (0 issues), then `procoder check` (clean).
+- [x] Implement `internal/snapshot`: `Load(ctx, db) (*Snapshot, error)`, `Snapshot.DeviceByUsername`, `Snapshot.DevicesForExtension(number)`, and `Watcher.Run(ctx)`, which LISTENs on `hello_config` and polls every 30s. Retain the last good snapshot on error and expose `Ready() bool`.
+- [x] Implement digest in `internal/sip/digest.go`: the challenge uses a stateless nonce `base64(ts || HMAC-SHA256(secret, ts||realm))` valid for 5 minutes; verify MD5 and SHA-256 (RFC 8760), with `qop=auth` and `stale=true` on expiry. Write `TestDigestMD5AndSHA256`, `TestNonceAcrossNodes` and `TestStaleNonce`.
+- [x] Implement the registrar: authenticate, clamp Expires (423 with Min-Expires below the minimum), handle `Expires: 0` and `Contact: *`, store through `livestate.PutBinding` using `rport`/`received` as the source, and answer 200 with the current bindings.
+- [x] Implement the failed-auth throttle with Valkey `INCR` and `EXPIRE` on `hello:authfail:{ip}`, answering 403 once the count passes the limit.
+- [x] Implement the B2BUA: authenticate the INVITE (401), resolve the dialled extension, fork to every binding (ring all) excluding the caller's own device, take the first 2xx (ACK and BYE any later 2xx, CANCEL the other forks), relay ACK, BYE, CANCEL and in-dialog re-INVITE/UPDATE between legs, and pass SDP through unchanged. Apply the 404/480/486/408 mapping from the spec. Publish to `livestate` on ring and answer, and remove on end.
+- [x] Implement the CDR writer: a bounded channel (1000) with a writer goroutine that retries with backoff; when the channel is full, drop and increment `hello_cdr_dropped_total`.
+- [x] Write `TestOptionsPing` and `TestSIPMetrics` in `internal/sip`, plus unit tests for fork and cancel races using in-process sipgo UAs on loopback.
+- [x] Run `go test -race ./...` (pass), then `golangci-lint run ./...` (0 issues), then `procoder check` (clean).
 
 ## Task 4: UI (branch phase-1-ui)
 
 Files: `web/src/` (api client, auth context, `Login`, `Extensions`, `Devices`, `Registrations`, `Calls`, `History` pages, and tests).
 Interfaces: consumes only the HTTP JSON in Shared contracts.
 
-- [ ] Extend `web/src/api.ts` with typed calls for every route. On a 401, redirect to `/login?next=<path>`.
-- [ ] Build the Login page and auth context (`GET /api/v1/auth/me` on load) and a logout button in the nav.
-- [ ] Build the Extensions and Devices pages: list, create, edit and delete. The secret from create and rotate appears once, in a dialog with a copy button, and is cleared from state when the dialog closes or the page changes.
-- [ ] Build the Registrations and Active Calls pages (refreshed every 5s), and Call History with "older" paging using `next`.
-- [ ] Write `Devices.test.tsx` and `Login.test.tsx` with the criteria from the spec. Run a mutation check on each: remove the behaviour, confirm the test fails, restore.
-- [ ] Run `pnpm typecheck`, `pnpm lint`, `pnpm test` and `pnpm build` (all pass) and `procoder check` (clean).
+- [x] Extend `web/src/api.ts` with typed calls for every route. On a 401, redirect to `/login?next=<path>`.
+- [x] Build the Login page and auth context (`GET /api/v1/auth/me` on load) and a logout button in the nav.
+- [x] Build the Extensions and Devices pages: list, create, edit and delete. The secret from create and rotate appears once, in a dialog with a copy button, and is cleared from state when the dialog closes or the page changes.
+- [x] Build the Registrations and Active Calls pages (refreshed every 5s), and Call History with "older" paging using `next`.
+- [x] Write `Devices.test.tsx` and `Login.test.tsx` with the criteria from the spec. Run a mutation check on each: remove the behaviour, confirm the test fails, restore.
+- [x] Run `pnpm typecheck`, `pnpm lint`, `pnpm test` and `pnpm build` (all pass) and `procoder check` (clean).
 
 ## Task 5: Integration, lab and docs (branch phase-1-minimum-pbx, after merging Tasks 2–4)
 
 Files: `test/sipua/` (Go test user agent: register, call, answer, busy, hang up), `test/integration/*_test.go` (the spec's lab-level criteria), `deploy/docker-compose/compose.yaml` (SIP ports, new env), `docs/phones.md`, `README.md`.
 Interfaces: consumes everything above.
 
-- [ ] Merge `phase-1-control`, `phase-1-sip` and `phase-1-ui` into `phase-1-minimum-pbx`, resolving conflicts hunk by hunk. Then run `go test -race ./...` (pass).
-- [ ] Write `test/sipua` on sipgo, and the integration tests `TestRegisterBindings`, `TestAuthFailThrottle`, `TestCallRingAllAndHangup`, `TestCallAcrossNodes`, `TestCallFailureCodes`, `TestLiveRegistrationsAndCalls`, `TestCDRWritten`, `TestSnapshotReloadOnNotify`, `TestSnapshotSurvivesDatabaseLoss` and `TestNoSecretsInLogs` against the compose lab (`HELLO_DOCKER=1`).
-- [ ] Update compose: UDP ports 5060 and 5062, `HELLO_SIP_DOMAIN`, the nonce secret, the bootstrap password and the database URL for hello-sip. Extend `TestLabSmoke` to register two UAs and complete a call.
-- [ ] Write `docs/phones.md` and update the README configuration table. Run `HELLO_DOCKER=1 go test -timeout 20m ./test/integration/` (pass) and `procoder check` (clean).
+- [x] Merge `phase-1-control`, `phase-1-sip` and `phase-1-ui` into `phase-1-minimum-pbx`, resolving conflicts hunk by hunk. Then run `go test -race ./...` (pass).
+- [x] Write `test/sipua` on sipgo, and the integration tests `TestRegisterBindings`, `TestAuthFailThrottle`, `TestCallRingAllAndHangup`, `TestCallAcrossNodes`, `TestCallFailureCodes`, `TestLiveRegistrationsAndCalls`, `TestCDRWritten`, `TestSnapshotReloadOnNotify`, `TestSnapshotSurvivesDatabaseLoss` and `TestNoSecretsInLogs` against the compose lab (`HELLO_DOCKER=1`).
+- [x] Update compose: UDP ports 5060 and 5062, `HELLO_SIP_DOMAIN`, the nonce secret, the bootstrap password and the database URL for hello-sip. Extend `TestLabSmoke` to register two UAs and complete a call.
+- [x] Write `docs/phones.md` and update the README configuration table. Run `HELLO_DOCKER=1 go test -timeout 20m ./test/integration/` (pass) and `procoder check` (clean).

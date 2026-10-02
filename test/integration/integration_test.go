@@ -192,5 +192,5 @@ func TestLabSmoke(t *testing.T) {
 			t.Fatalf("GET %s = %d, want 200", url, resp.StatusCode)
 		}
 	}
-	TestLabCallAcrossNodes(t)
+	TestCallAcrossNodes(t)
 }

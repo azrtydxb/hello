@@ -208,7 +208,7 @@ var (
 	sdpAnswer = []byte("v=0\r\no=b 1 1 IN IP4 192.0.2.20\r\ns=-\r\nc=IN IP4 192.0.2.20\r\nt=0 0\r\nm=audio 40002 RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\n")
 )
 
-func TestLabCallAcrossNodes(t *testing.T) {
+func TestCallAcrossNodes(t *testing.T) {
 	lc := newLabClient(t)
 	caller, callee := lc.extension("desk")[0], lc.extension("desk")[0]
 	a, b := phone(t, caller, labSIP2), phone(t, callee, labSIP1)
