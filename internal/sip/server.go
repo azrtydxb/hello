@@ -71,6 +71,7 @@ type Server struct {
 	dialogs map[string]dialogRef // Call-ID -> call side
 	calls   map[*call]struct{}
 	done    chan struct{} // closed when Serve returns
+	laddr   sip.Addr      // the listening socket, for requests we originate
 }
 
 // dialogRef is one leg of a call, found by its Call-ID.
@@ -157,6 +158,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 		return err
 	}
 	s.ua, s.client = ua, client
+	if host, port, err := sip.ParseAddr(conn.LocalAddr().String()); err == nil {
+		s.laddr = sip.Addr{IP: net.ParseIP(host), Port: port, Hostname: host}
+	}
 	s.uas = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
 	s.uac = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
 
@@ -213,6 +217,12 @@ func (s *Server) wrap(h sipgo.RequestHandler) sipgo.RequestHandler {
 			if !req.IsAck() {
 				s.respond(tx, req, sip.StatusBadRequest, "Bad Request")
 			}
+			return
+		}
+		// A Route with a flow token makes this node an edge proxy for the
+		// request; a self Route without one (outbound proxy) is ignored.
+		if token, ok := edgeToken(req); ok {
+			s.proxy(req, tx, token)
 			return
 		}
 		h(req, tx)
