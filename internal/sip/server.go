@@ -47,6 +47,20 @@ type Config struct {
 	// peer set (10s); NodeTTL is how long its announcement lives (30s).
 	PeerRefresh time.Duration
 	NodeTTL     time.Duration
+
+	// Trunks. TrunkLeaseRefresh is how often a node takes or renews each
+	// trunk's lease (10s; the lease lives 3x as long). TrunkStatusPoll is
+	// how often every node reads the shared trunk status (2s).
+	// TrunkAttemptTimeout fails a trunk attempt over when the destination
+	// sends nothing beyond 100 Trying (32s, Timer B). TrunkRetryBase and
+	// TrunkRetryMax bound the registration backoff (30s, 10m).
+	// TrunkOptionsTimeout bounds one OPTIONS (5s, at most the interval).
+	TrunkLeaseRefresh   time.Duration
+	TrunkStatusPoll     time.Duration
+	TrunkAttemptTimeout time.Duration
+	TrunkRetryBase      time.Duration
+	TrunkRetryMax       time.Duration
+	TrunkOptionsTimeout time.Duration
 }
 
 // Deps are the Server's collaborators.
@@ -60,6 +74,9 @@ type Deps struct {
 	// Presence lists the cluster's SIP nodes for the edge proxy; nil means
 	// this node is alone (it never relays for another node).
 	Presence Presence
+	// Trunks is the shared trunk state; nil disables trunk calls,
+	// registration and health checks.
+	Trunks TrunkState
 }
 
 // Server is one SIP node.
@@ -85,6 +102,7 @@ type Server struct {
 	laddr   sip.Addr      // the listening socket, for requests we originate
 	peers   peers         // the cluster's SIP nodes, for the edge proxy
 	serving atomic.Bool   // the listener is up
+	trunks  *trunkManager
 }
 
 // dialogRef is one leg of a call, found by its Call-ID.
@@ -119,6 +137,12 @@ func New(cfg Config, deps Deps) (*Server, error) {
 	setDefault(&cfg.MaxCallDuration, 4*time.Hour)
 	setDefault(&cfg.PeerRefresh, 10*time.Second)
 	setDefault(&cfg.NodeTTL, 30*time.Second)
+	setDefault(&cfg.TrunkLeaseRefresh, 10*time.Second)
+	setDefault(&cfg.TrunkStatusPoll, 2*time.Second)
+	setDefault(&cfg.TrunkAttemptTimeout, 32*time.Second)
+	setDefault(&cfg.TrunkRetryBase, 30*time.Second)
+	setDefault(&cfg.TrunkRetryMax, 10*time.Minute)
+	setDefault(&cfg.TrunkOptionsTimeout, 5*time.Second)
 	if cfg.AuthFailLimit <= 0 {
 		cfg.AuthFailLimit = 10
 	}
@@ -132,6 +156,7 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		calls:   map[*call]struct{}{},
 		done:    make(chan struct{}),
 	}
+	s.trunks = newTrunkManager(s)
 	s.contact = sip.ContactHeader{Address: sip.Uri{Scheme: "sip", Host: host, Port: port, UriParams: sip.HeaderParams{{K: "transport", V: "udp"}}}}
 	return s, nil
 }
@@ -198,11 +223,20 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.recountLoop(rctx) })
 	s.bg.Go(func() { s.peerLoop(rctx) })
 
+	// Trunk holders stop before the socket closes, so they can unregister
+	// and release their leases for another node.
+	tctx, stopTrunks := context.WithCancel(context.Background())
+	trunksDone := make(chan struct{})
+	go func() { defer close(trunksDone); s.trunks.run(tctx) }()
+	defer func() { stopTrunks(); <-trunksDone }()
+
 	errc := make(chan error, 1)
 	s.serving.Store(true)
 	go func() { errc <- srv.ServeUDP(conn) }()
 	select {
 	case <-ctx.Done():
+		stopTrunks()
+		<-trunksDone
 		_ = conn.Close()
 		<-errc
 		err = nil

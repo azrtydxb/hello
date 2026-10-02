@@ -10,6 +10,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
@@ -22,14 +23,18 @@ const byeTimeout = 35 * time.Second
 // per binding of the dialled extension (B legs, UAC dialogs). It stays on
 // the node that set it up.
 type call struct {
-	s       *Server
-	id      string // correlation ID
-	callID  string // caller's Call-ID
-	caller  snapshot.Device
-	dialled string
-	start   time.Time
-	inv     *sip.Request
-	dss     *sipgo.DialogServerSession
+	s      *Server
+	id     string // correlation ID
+	callID string // caller's Call-ID
+	// The caller as presented: an extension (with its device) or a trunk's
+	// caller ID; callerDevice is never rung for this call.
+	callerNum    string
+	callerName   string
+	callerDevice string
+	dialled      string
+	start        time.Time
+	inv          *sip.Request
+	dss          *sipgo.DialogServerSession
 
 	events    chan legEvent
 	setupDone chan struct{} // closed when setup stops reading events
@@ -54,6 +59,14 @@ type call struct {
 	lateAck     bool // the winner's ACK waits for the caller's (late offer)
 	ringTime    time.Time
 	answerTime  time.Time
+	// Routing detail for the CDR; trace is the decision's trace extended
+	// with this node's attempts.
+	direction string
+	route     string
+	rewritten string
+	trunkName string
+	trace     routing.Trace
+	slotTrunk int64 // trunk whose call slot this call holds, 0 if none
 }
 
 type legEventKind int
@@ -62,12 +75,14 @@ const (
 	evRinging legEventKind = iota
 	evAnswered
 	evFailed
+	evChallenged // a trunk challenged the INVITE (code 401 or 407)
 )
 
 type legEvent struct {
-	leg  *leg
-	kind legEventKind
-	code int
+	leg    *leg
+	kind   legEventKind
+	code   int
+	reason string
 }
 
 // leg is one fork towards a callee binding.
@@ -81,6 +96,16 @@ type leg struct {
 	mu    sync.Mutex
 	dcs   *sipgo.DialogClientSession
 	acked bool
+
+	// A trunk attempt (trunk set) or a SIP URI target (uri set); neither
+	// means a phone binding.
+	trunk     *routing.Trunk
+	dest      routing.Destination
+	addr      string
+	number    string
+	callerID  string
+	uri       *sip.Uri
+	abandoned bool // guarded by c.mu: failed over, may no longer win
 }
 
 func (l *leg) session() *sipgo.DialogClientSession {
@@ -97,6 +122,11 @@ func isInDialog(req *sip.Request) bool {
 // handleInvite sets up a call, or relays a re-INVITE within an existing one.
 // It stays blocked until the caller has a final response (sipgo terminates
 // the server transaction when the handler returns).
+//
+// An INVITE without credentials from a trunk's source is an inbound trunk
+// call; one that does not even claim to be a phone of this domain is
+// refused (403, counted by the failed-auth throttle). Everything else goes
+// through digest authentication as a device.
 func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	if isInDialog(req) {
 		s.handleInDialog(req, tx)
@@ -108,23 +138,102 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, sip.StatusLoopDetected, "Loop Detected")
 		return
 	}
-	dev, snap, ok := s.authenticate(req, tx)
+	snap := s.deps.Snapshots.Current() // one snapshot for the whole request
+	if snap == nil {
+		s.unavailable(tx, req)
+		return
+	}
+	if req.GetHeader("Authorization") == nil {
+		if t, ok := s.trunkSource(req, snap); ok {
+			s.inboundCall(req, tx, snap, t)
+			return
+		}
+		if !s.looksLikePhone(req, snap) {
+			s.authFailed(tx, req, sourceIP(req), "INVITE from a source that is neither a trunk nor a phone", false)
+			return
+		}
+	}
+	dev, ok := s.verify(req, tx, snap)
 	if !ok {
 		return
 	}
-	c := &call{
-		s: s, id: newID(), callID: req.CallID().Value(), caller: dev,
-		dialled: req.Recipient.User, start: time.Now(), inv: req,
+	c := s.newCall(req)
+	c.callerNum, c.callerName, c.callerDevice = dev.Extension, dev.ExtensionName, dev.Username
+	dec := s.decide(snap.Routing(), routing.Call{
+		FromExtension: dev.Extension, Number: c.dialled, CallerID: dev.Extension,
+		SIPDomain: req.Recipient.Host, Header: headerOf(req), At: time.Now(),
+	})
+	s.dispatch(c, req, tx, snap, dec)
+}
+
+func (s *Server) newCall(req *sip.Request) *call {
+	return &call{
+		s: s, id: newID(), callID: req.CallID().Value(),
+		dialled: req.Recipient.User, start: time.Now(), inv: req, direction: cdr.DirectionInternal,
 		canceled: make(chan struct{}), stopHB: make(chan struct{}), setupDone: make(chan struct{}),
 	}
-	if !snap.HasExtension(c.dialled) {
-		s.respond(tx, req, sip.StatusNotFound, "Not Found")
-		c.record(sip.StatusNotFound, cdr.SideSystem, "unknown number", ResultNotFound)
-		return
+}
+
+func headerOf(req *sip.Request) func(string) string {
+	return func(name string) string {
+		if h := req.GetHeader(name); h != nil {
+			return h.Value()
+		}
+		return ""
 	}
+}
+
+// decide runs the routing engine, timed for hello_route_decision_seconds.
+func (s *Server) decide(rs *snapshot.RoutingState, c routing.Call) routing.Decision {
+	start := time.Now()
+	d := rs.Router.Decide(c, s.usability(rs))
+	s.m.RouteDecision.Observe(time.Since(start).Seconds())
+	return d
+}
+
+// dispatch carries out a routing decision.
+func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot, dec routing.Decision) {
+	c.trace = append(c.trace, dec.Trace...)
+	c.route, c.rewritten = dec.Route, dec.Number
+	switch {
+	case dec.Kind == routing.KindOutbound:
+		if c.direction == cdr.DirectionInternal {
+			c.direction = cdr.DirectionOutbound
+		}
+		if c.begin(req, tx) {
+			c.setupOutbound(dec)
+		}
+	case (dec.Kind == routing.KindInternal || dec.Kind == routing.KindInbound) && dec.Extension != "":
+		c.ringExtension(req, tx, snap, dec.Extension)
+	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
+		c.ringURI(req, tx, dec.SIPURI)
+	default:
+		code, reason := dec.RejectCode, dec.Reason
+		if code < 300 {
+			code = sip.StatusNotFound
+		}
+		if reason == "" {
+			reason = "no route"
+		}
+		result := ResultFailed
+		switch code {
+		case sip.StatusNotFound:
+			result = ResultNotFound
+		case sip.StatusServiceUnavailable, sip.StatusTemporarilyUnavailable:
+			result = ResultUnavailable
+		}
+		s.respond(tx, req, code, statusText(code))
+		c.record(code, cdr.SideSystem, reason, result)
+	}
+}
+
+// ringExtension forks to every binding of the extension's enabled devices
+// except the caller's own (Phase 1 ring-all).
+func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot, ext string) {
+	s := c.s
 	var targets []livestate.Binding
-	for _, d := range snap.DevicesForExtension(c.dialled) {
-		if d.Username == dev.Username {
+	for _, d := range snap.DevicesForExtension(ext) {
+		if d.Username == c.callerDevice {
 			continue // never ring the calling device
 		}
 		ctx, cancel := s.stateCtx()
@@ -142,10 +251,57 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		c.record(sip.StatusTemporarilyUnavailable, cdr.SideSystem, "no registered device", ResultUnavailable)
 		return
 	}
+	if !c.begin(req, tx) {
+		return
+	}
+	c.mu.Lock()
+	for _, b := range targets {
+		c.addLeg(&leg{binding: b})
+	}
+	legs := c.legs
+	c.mu.Unlock()
+	for _, l := range legs {
+		go l.run()
+	}
+	c.setup(len(legs))
+}
+
+// ringURI sends the call to a SIP URI (an inbound route's destination, such
+// as a voice agent).
+func (c *call) ringURI(req *sip.Request, tx sip.ServerTransaction, raw string) {
+	var u sip.Uri
+	if err := sip.ParseUri(strings.TrimSuffix(strings.TrimPrefix(raw, "<"), ">"), &u); err != nil {
+		c.s.respond(tx, req, sip.StatusInternalServerError, "Server Internal Error")
+		c.record(sip.StatusInternalServerError, cdr.SideSystem, "bad SIP URI destination", ResultFailed)
+		return
+	}
+	if !c.begin(req, tx) {
+		return
+	}
+	c.mu.Lock()
+	l := c.addLeg(&leg{uri: &u})
+	c.mu.Unlock()
+	go l.run()
+	c.setup(1)
+}
+
+// addLeg registers a new leg of the call; c.mu must be held.
+func (c *call) addLeg(l *leg) *leg {
+	ctx, cancel := context.WithCancel(context.Background())
+	l.c, l.callID, l.ctx, l.cancel = c, newID(), ctx, cancel
+	c.legs = append(c.legs, l)
+	c.s.bind(l.callID, dialogRef{c: c, leg: l})
+	return l
+}
+
+// begin takes over the caller's INVITE as a dialog, watches for CANCEL and
+// publishes the call; false means it has already answered the caller.
+func (c *call) begin(req *sip.Request, tx sip.ServerTransaction) bool {
+	s := c.s
 	dss, err := s.uas.ReadInvite(req, tx)
 	if err != nil {
 		s.respond(tx, req, sip.StatusBadRequest, "Bad Request")
-		return
+		return false
 	}
 	c.dss = dss
 	if !tx.OnCancel(func(*sip.Request) {
@@ -157,23 +313,16 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	s.bind(c.callID, dialogRef{c: c})
 	s.m.ActiveCalls.Inc()
+	c.events = make(chan legEvent, 16)
 	c.publish()
 	go c.heartbeat()
+	return true
+}
 
-	c.events = make(chan legEvent, len(targets)+4)
+func (c *call) addTrace(text string) {
 	c.mu.Lock()
-	for _, b := range targets {
-		ctx, cancel := context.WithCancel(context.Background())
-		l := &leg{c: c, binding: b, callID: newID(), ctx: ctx, cancel: cancel}
-		c.legs = append(c.legs, l)
-		s.bind(l.callID, dialogRef{c: c, leg: l})
-	}
-	legs := c.legs
+	c.trace.Add(text)
 	c.mu.Unlock()
-	for _, l := range legs {
-		go l.run()
-	}
-	c.setup(len(legs))
 }
 
 // setup waits for the first fork to answer, every fork to fail, the caller
@@ -255,12 +404,27 @@ func (c *call) closeSetup() bool {
 func (c *call) claim(l *leg) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.setupClosed || c.winner != nil {
+	if c.setupClosed || c.winner != nil || l.abandoned {
 		return false
 	}
 	c.winner = l
 	c.answerTime = time.Now()
 	return true
+}
+
+// abandon stops l from winning (it was failed over); false means it has
+// already won.
+func (c *call) abandon(l *leg) bool {
+	c.mu.Lock()
+	won := c.winner == l
+	if !won {
+		l.abandoned = true
+	}
+	c.mu.Unlock()
+	if !won {
+		l.cancel()
+	}
+	return !won
 }
 
 func (c *call) cancelForks(except *leg) {
@@ -316,6 +480,7 @@ func (c *call) answer(w *leg) {
 		c.end(sip.StatusRequestTerminated, cdr.SideCaller, "cancelled by caller", ResultCancelled)
 		return
 	}
+	c.addTrace("Call established")
 	c.publish()
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", bres.Body())
 	if ct := bres.ContentType(); ct != nil {
@@ -427,6 +592,7 @@ func (c *call) end(status int, side, reason, result string) {
 		}
 		c.s.m.ActiveCalls.Dec()
 		c.unpublish()
+		c.releaseSlot()
 		c.record(status, side, reason, result)
 	})
 }
@@ -454,21 +620,28 @@ func (c *call) release() {
 	}
 }
 
-// record counts the attempt and queues its CDR.
+// record counts the attempt and queues its CDR. An attempt that did not
+// connect ends its trace with the reason, which is the CDR's explanation.
 func (c *call) record(status int, side, reason, result string) {
 	end := time.Now()
 	c.mu.Lock()
 	ring, answer := c.ringTime, c.answerTime
 	if result != ResultAnswered {
 		answer = time.Time{}
+		if reason != "" {
+			c.trace.Add(fmt.Sprintf("Call not connected: %s (%d %s)", reason, status, statusText(status)))
+		}
 	}
-	c.mu.Unlock()
+	trace := append(routing.Trace(nil), c.trace...)
 	r := cdr.Record{
-		CorrelationID: c.id, SIPCallID: c.callID, Source: c.caller.Extension, Destination: c.dialled,
+		CorrelationID: c.id, SIPCallID: c.callID, Source: c.callerNum, Destination: c.dialled,
 		StartTime: c.start, RingTime: ring, AnswerTime: answer, EndTime: end,
 		DurationMs: end.Sub(c.start).Milliseconds(), SIPNode: c.s.cfg.NodeID, MediaMode: "direct",
 		FinalStatus: status, TerminationSide: side, FailureReason: reason,
+		Direction: c.direction, OriginalDestination: c.dialled, RewrittenDestination: c.rewritten,
+		Route: c.route, Trunk: c.trunkName, Trace: trace,
 	}
+	c.mu.Unlock()
 	if !answer.IsZero() {
 		r.BillableMs = end.Sub(answer).Milliseconds()
 	}
@@ -485,7 +658,7 @@ func (c *call) live() livestate.Call {
 		state, answered = "connected", c.answerTime
 	}
 	return livestate.Call{
-		ID: c.id, SIPCallID: c.callID, From: c.caller.Extension, To: c.dialled, State: state,
+		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, State: state,
 		Node: c.s.cfg.NodeID, Media: "direct", StartedAt: c.start, AnsweredAt: answered,
 	}
 }
@@ -517,6 +690,7 @@ func (c *call) heartbeat() {
 			return
 		case <-t.C:
 			c.publish()
+			c.refreshSlot()
 		}
 	}
 }
@@ -535,7 +709,9 @@ func contain(log interface{ Error(string, ...any) }, what string) {
 func (l *leg) run() {
 	reported := false
 	report := func(ev legEvent) {
-		reported = true
+		if ev.kind == evAnswered || ev.kind == evFailed {
+			reported = true
+		}
 		l.c.report(ev)
 	}
 	defer func() {
@@ -566,15 +742,23 @@ func (l *leg) drive(report func(legEvent)) {
 	l.mu.Lock()
 	l.dcs = dcs
 	l.mu.Unlock()
-	err = dcs.WaitAnswer(l.ctx, sipgo.AnswerOptions{OnResponse: func(r *sip.Response) error {
-		if r.StatusCode > 100 && r.StatusCode < 200 {
+	opts := sipgo.AnswerOptions{OnResponse: func(r *sip.Response) error {
+		switch {
+		case r.StatusCode > 100 && r.StatusCode < 200:
 			select {
 			case l.c.events <- legEvent{leg: l, kind: evRinging}:
 			default:
 			}
+		case l.trunk != nil && (r.StatusCode == sip.StatusUnauthorized || r.StatusCode == sip.StatusProxyAuthRequired):
+			report(legEvent{leg: l, kind: evChallenged, code: r.StatusCode, reason: r.Reason})
 		}
 		return nil
-	}})
+	}}
+	if l.trunk != nil {
+		// A carrier's 401 or 407 is answered with the trunk credentials.
+		opts.Username, opts.Password = l.trunk.Username, l.trunk.Password
+	}
+	err = dcs.WaitAnswer(l.ctx, opts)
 	if res := dcs.InviteResponse; err == nil || (res != nil && res.IsSuccess()) {
 		if l.c.claim(l) {
 			report(legEvent{leg: l, kind: evAnswered})
@@ -584,15 +768,15 @@ func (l *leg) drive(report func(legEvent)) {
 		l.bye()
 		return
 	}
-	code := sip.StatusTemporarilyUnavailable
+	code, reason := sip.StatusTemporarilyUnavailable, ""
 	var de *sipgo.ErrDialogResponse
 	switch {
 	case errors.As(err, &de):
-		code = de.Res.StatusCode
+		code, reason = de.Res.StatusCode, de.Res.Reason
 	case errors.Is(err, sip.ErrTransactionTimeout):
 		code = sip.StatusRequestTimeout
 	}
-	report(legEvent{leg: l, kind: evFailed, code: code})
+	report(legEvent{leg: l, kind: evFailed, code: code, reason: reason})
 }
 
 // report hands a fork's outcome to setup, or drops it when setup has
@@ -609,16 +793,33 @@ func (c *call) report(ev legEvent) {
 func (l *leg) invite() (*sip.Request, error) {
 	c, s := l.c, l.c.s
 	var ruri sip.Uri
-	if err := sip.ParseUri(l.binding.ContactURI, &ruri); err != nil {
-		return nil, err
+	switch {
+	case l.trunk != nil:
+		ruri = sip.Uri{Scheme: "sip", User: l.number, Host: l.dest.Host, Port: l.dest.Port}
+	case l.uri != nil:
+		ruri = *l.uri.Clone()
+	default:
+		if err := sip.ParseUri(l.binding.ContactURI, &ruri); err != nil {
+			return nil, err
+		}
 	}
 	req := sip.NewRequest(sip.INVITE, ruri)
 	from := &sip.FromHeader{
-		DisplayName: c.caller.ExtensionName,
-		Address:     sip.Uri{Scheme: "sip", User: c.caller.Extension, Host: s.cfg.Domain},
+		DisplayName: c.callerName,
+		Address:     sip.Uri{Scheme: "sip", User: c.callerNum, Host: s.cfg.Domain},
 		Params:      sip.HeaderParams{{K: "tag", V: sip.GenerateTagN(16)}},
 	}
 	to := &sip.ToHeader{Address: sip.Uri{Scheme: "sip", User: c.dialled, Host: s.cfg.Domain}}
+	switch {
+	case l.trunk != nil:
+		// The carrier sees the decision's caller ID in the trunk's domain
+		// and the rewritten number.
+		from.DisplayName = ""
+		from.Address = sip.Uri{Scheme: "sip", User: l.callerID, Host: trunkDomain(*l.trunk)}
+		to.Address = sip.Uri{Scheme: "sip", User: l.number, Host: ruri.Host}
+	case l.uri != nil:
+		to.Address = *ruri.Clone()
+	}
 	callID := sip.CallIDHeader(l.callID)
 	req.AppendHeader(from)
 	req.AppendHeader(to)
@@ -639,6 +840,10 @@ func (l *leg) invite() (*sip.Request, error) {
 	}
 	req.SetTransport("UDP")
 	switch {
+	case l.trunk != nil:
+		req.SetDestination(l.addr)
+	case l.uri != nil:
+		// sipgo resolves the URI's host.
 	case l.binding.ReceivedNode != s.cfg.NodeID && len(l.binding.Path) > 0:
 		// Registered through another node: only that node's flow reaches
 		// the phone, so route via its Path (it edge-proxies the INVITE).
