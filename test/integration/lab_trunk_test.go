@@ -384,16 +384,21 @@ func TestInboundRouting(t *testing.T) {
 	did := "+9714555" + randDigits(4)
 	lc.inbound(did, backup, d.Extension, nil)
 	// A closed schedule must not match: this DID's only route is open on
-	// every day except today (UTC), all day.
+	// every day except today, all day. A named zone also proves the shipped
+	// images can load IANA time zones (they carry no zoneinfo files).
+	dubai, err := time.LoadLocation("Asia/Dubai")
+	if err != nil {
+		t.Fatal(err)
+	}
 	closedDID := "+9714556" + randDigits(4)
 	var otherDays []int
 	for d := range 7 {
-		if time.Weekday(d) != time.Now().UTC().Weekday() {
+		if time.Weekday(d) != time.Now().In(dubai).Weekday() {
 			otherDays = append(otherDays, d)
 		}
 	}
 	lc.inbound(closedDID, backup, d.Extension, map[string]any{"schedule": map[string]any{
-		"timeZone": "UTC", "windows": []map[string]any{{"days": otherDays, "start": "00:00", "end": "23:59"}},
+		"timeZone": "Asia/Dubai", "windows": []map[string]any{{"days": otherDays, "start": "00:00", "end": "23:59"}},
 	}})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
