@@ -85,3 +85,8 @@
 
 - Direct media (phone to carrier) as the roadmap says; anchoring waits for Phase 5
 - Pull a minimal media relay forward into Phase 2
+
+## Phase 2 delivery
+
+- Push phase-2-trunks-routing and open a PR to main
+- Hold for your review first

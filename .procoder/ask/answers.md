@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-02 11:22 UTC. procoder reads this
+Written 2026-10-02 20:37 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -175,6 +175,16 @@ Question: Phase 0 delivery
 - Hold — leave uncommitted for review
 
 Answer: Commit on branch phase-0-foundation and open a PR to main
+
+## [decision] decisions.md
+
+Key: bc412d83b326
+Question: Phase 2 delivery
+
+- Push phase-2-trunks-routing and open a PR to main
+- Hold for your review first
+
+Answer: Push phase-2-trunks-routing and open a PR to main
 
 ## [decision] decisions.md
 
