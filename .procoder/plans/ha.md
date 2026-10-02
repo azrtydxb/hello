@@ -12,7 +12,7 @@ Losing any single hello-sip node, the Valkey primary, PostgreSQL or the control 
 - **Kamailio:** load-balances phones over READY hello-sip nodes (`dispatcher`, with OPTIONS probes) and becomes the edge: Path on REGISTER, Record-Route on INVITE, NAT handling, and the original client address in `X-Hello-Client`.
 - **Every Hello node** publishes membership (`internal/cluster`) and runs a lifecycle state machine. Readiness and its OPTIONS answer follow that state, so Kamailio and load balancers see draining and unhealthy nodes.
 - **Valkey** is reached through `internal/vkconn`, either one instance or Sentinel.
-- **Failure suite:** `test/failure` injects each failure from the spec into the compose lab.
+- **Failure suite:** `test/integration/failure_test.go` injects each failure from the spec into the compose lab.
 
 ## Constraints
 
@@ -132,15 +132,15 @@ Interfaces: contracts 7 and 8.
 
 ## Task 6: Failure suite and docs (lead, branch phase-3-ha)
 
-Files: `test/failure/` (harness and tests), `docs/ha.md`, `README.md`, `test/integration/` (smoke through Kamailio).
+Files: `test/integration/failure_test.go` (harness and tests), `docs/ha.md`, `README.md`, `test/integration/` (smoke through Kamailio).
 Interfaces: consumes everything above.
 
 - [ ] Merge the sip, control, ui and infra branches, and run the gate.
-- [ ] Write the `test/failure` harness:
+- [ ] Write the `test/integration/failure_test.go` harness:
   - phones through Kamailio (host 5080)
   - helpers for killing and restarting containers, disconnecting from and reconnecting to a network, and stopping and starting PostgreSQL
   - a wait-until-READY helper using `/api/v1/cluster`
 - [ ] Write the tests from spec S-10: `TestDrainKeepsCallsAndExits`, `TestKamailioBalancesAndPaths`, `TestKillSIPNodeDuring{Register,Ringing,Call}`, `TestValkeyFailover`, `TestPostgresOutage`, `TestControlPlaneRestart`, `TestPartitionFromValkey` and `TestRollingUpgrade`.
 - [ ] Write `docs/ha.md`: the architecture, the S-9 dependency-failure table (normative, one row per case), drain and rolling-upgrade procedures, the manual Kamailio-loss procedure, and production guidance (two or more Kamailio behind a VIP or SRV, Sentinel sizing, PostgreSQL HA for Phase 6).
 - [ ] Extend `TestLabSmoke` to register and call through Kamailio, and update the README (topology, ports, env).
-- [ ] Run `HELLO_DOCKER=1 go test -timeout 40m ./test/integration/ ./test/failure/` (pass), then the full gate.
+- [ ] Run `HELLO_DOCKER=1 go test -timeout 40m ./test/integration/ ./test/integration/failure_test.go` (pass), then the full gate.
