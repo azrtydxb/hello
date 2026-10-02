@@ -37,7 +37,11 @@ type call struct {
 	maxTimer  *time.Timer // ends a connected call at MaxCallDuration
 	cancelMu  sync.Once
 	stopHB    chan struct{}
-	endOnce   sync.Once
+	// pubMu orders live-call writes: publish and the final delete never
+	// overlap, and nothing is published once the call has ended, so an
+	// in-flight heartbeat cannot resurrect an ended call.
+	pubMu   sync.Mutex
+	endOnce sync.Once
 
 	mu          sync.Mutex
 	legs        []*leg
@@ -422,13 +426,21 @@ func (c *call) end(status int, side, reason, result string) {
 			c.release()
 		}
 		c.s.m.ActiveCalls.Dec()
-		ctx, cancel := c.s.stateCtx()
-		if err := c.s.deps.State.DeleteCall(ctx, c.id); err != nil {
-			c.s.log.Warn("could not remove live call", "correlation_id", c.id, "error", err)
-		}
-		cancel()
+		c.unpublish()
 		c.record(status, side, reason, result)
 	})
+}
+
+// unpublish removes the live call, after any publish in flight; ended is
+// already set, so none can follow.
+func (c *call) unpublish() {
+	c.pubMu.Lock()
+	defer c.pubMu.Unlock()
+	ctx, cancel := c.s.stateCtx()
+	defer cancel()
+	if err := c.s.deps.State.DeleteCall(ctx, c.id); err != nil {
+		c.s.log.Warn("could not remove live call", "correlation_id", c.id, "error", err)
+	}
 }
 
 // release stops routing in-dialog requests to this call.
@@ -479,6 +491,14 @@ func (c *call) live() livestate.Call {
 }
 
 func (c *call) publish() {
+	c.pubMu.Lock()
+	defer c.pubMu.Unlock()
+	c.mu.Lock()
+	ended := c.ended
+	c.mu.Unlock()
+	if ended {
+		return
+	}
 	ctx, cancel := c.s.stateCtx()
 	defer cancel()
 	if err := c.s.deps.State.PutCall(ctx, c.live(), c.s.cfg.CallTTL); err != nil {

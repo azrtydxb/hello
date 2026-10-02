@@ -71,3 +71,17 @@ func TestCallsTTL(t *testing.T) {
 		t.Fatalf("call outlived its TTL: %v", got)
 	}
 }
+
+// TestBindingAlwaysHasTTL fails if PutBinding can leave a field without its
+// expiry.
+func TestBindingAlwaysHasTTL(t *testing.T) {
+	s, ctx := store(t), context.Background()
+	b := Binding{AOR: "sip:x@hello.test", ContactURI: "sip:x@10.0.0.1:5060", Expires: time.Now().Add(time.Minute)}
+	if err := s.PutBinding(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	ttls, err := s.c.Do(ctx, s.c.B().Hpttl().Key(regPrefix+b.AOR).Fields().Numfields(1).Field(b.ContactURI).Build()).AsIntSlice()
+	if err != nil || len(ttls) != 1 || ttls[0] <= 0 || ttls[0] > 60000 {
+		t.Fatalf("HPTTL = %v, %v; want within a minute", ttls, err)
+	}
+}
