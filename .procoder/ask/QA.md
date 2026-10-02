@@ -1,6 +1,6 @@
 # Questions procoder cannot answer for you
 
-Written 2026-10-02 08:14 UTC.
+Written 2026-10-02 09:21 UTC.
 
 Answer each one by writing a line beginning `Answer: ` under it, then
 hand the file back with `procoder ask --file .procoder/ask/QA.md`.
@@ -8,40 +8,10 @@ Leave the `Key:` lines alone — they are what ties an answer to its question.
 
 ## Q1: [decision] decisions.md
 
-Key: 17469bfde72e
-Question: Phase 1 automated SIP testing
+Key: f9afd6b87078
+Question: Phase 1 cross-node delivery to NAT'd phones
 
-- Go test user agents built on sipgo, run in CI
-- SIPp scenarios in a container
+- Route via the registering node (Path + flow token, RFC 3327/5626 style)
+- Test only without NAT (test phones inside the compose network); defer to Phase 3
 
-Answer: Go test user agents built on sipgo, run in CI
-
-## Q2: [decision] decisions.md
-
-Key: 4852be1d915c
-Question: Phase 1 call model
-
-- B2BUA (signaling only, SDP passed through, media direct)
-- Stateful record-routing proxy
-
-Answer: B2BUA (signaling only, SDP passed through, media direct)
-
-## Q3: [decision] decisions.md
-
-Key: 8efe37eb2d42
-Question: Phase 1 management API auth
-
-- Local users with sessions and API tokens, no roles yet
-- Single bootstrap admin token from env
-
-Answer: Local users with sessions and API tokens, no roles yet
-
-## Q4: [decision] decisions.md
-
-Key: e776054b2093
-Question: Phase 1 registration store
-
-- Valkey from Phase 1 (cluster-wide, HA-ready)
-- In-memory per node until Phase 3
-
-Answer: Valkey from Phase 1 (cluster-wide, HA-ready)
+Answer: Route via the registering node (Path + flow token, RFC 3327/5626 style)

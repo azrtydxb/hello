@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -42,6 +43,13 @@ type Phone struct {
 	incoming chan *Incoming
 }
 
+func init() {
+	// HELLO_SIPUA_DEBUG=1 prints every SIP message sent and received.
+	if os.Getenv("HELLO_SIPUA_DEBUG") == "1" {
+		sip.SIPDebug = true
+	}
+}
+
 // New starts a phone listening on opts.Listen.
 func New(opts Options) (*Phone, error) {
 	if opts.Listen == "" {
@@ -53,15 +61,21 @@ func New(opts Options) (*Phone, error) {
 	}
 	host, portStr, _ := net.SplitHostPort(addr)
 	port, _ := strconv.Atoi(portStr)
+	listenAddr := addr
 	if opts.ContactHost != "" {
 		host = opts.ContactHost
+	} else if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		host = "127.0.0.1" // never advertise an unspecified address
 	}
 
 	ua, err := sipgo.NewUA(sipgo.WithUserAgent("hello-sipua/" + opts.User))
 	if err != nil {
 		return nil, err
 	}
-	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname(host), sipgo.WithClientPort(port))
+	// Send from the listening socket, as a real phone does, with rport so a
+	// server behind NAT answers the observed source.
+	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname(host), sipgo.WithClientPort(port),
+		sipgo.WithClientConnectionAddr(listenAddr), sipgo.WithClientNAT())
 	if err != nil {
 		_ = ua.Close()
 		return nil, err

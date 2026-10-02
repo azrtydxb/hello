@@ -45,3 +45,8 @@
 
 - Go test user agents built on sipgo, run in CI
 - SIPp scenarios in a container
+
+## Phase 1 cross-node delivery to NAT'd phones
+
+- Route via the registering node (Path + flow token, RFC 3327/5626 style)
+- Test only without NAT (test phones inside the compose network); defer to Phase 3

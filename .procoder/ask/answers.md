@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-02 08:14 UTC. procoder reads this
+Written 2026-10-02 09:21 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -115,3 +115,13 @@ Question: Phase 1 registration store
 - In-memory per node until Phase 3
 
 Answer: Valkey from Phase 1 (cluster-wide, HA-ready)
+
+## [decision] decisions.md
+
+Key: f9afd6b87078
+Question: Phase 1 cross-node delivery to NAT'd phones
+
+- Route via the registering node (Path + flow token, RFC 3327/5626 style)
+- Test only without NAT (test phones inside the compose network); defer to Phase 3
+
+Answer: Route via the registering node (Path + flow token, RFC 3327/5626 style)
