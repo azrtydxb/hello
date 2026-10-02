@@ -26,7 +26,7 @@ type TrunkState interface {
 	PutTrunkRegistration(ctx context.Context, id int64, r livestate.TrunkRegistration, ttl time.Duration) error
 	PutDestinationHealth(ctx context.Context, id int64, h livestate.DestinationHealth, ttl time.Duration) error
 	AcquireTrunkCall(ctx context.Context, id int64, call string, max int, ttl time.Duration) (bool, error)
-	RefreshTrunkCall(ctx context.Context, id int64, call string, ttl time.Duration) error
+	RefreshTrunkCall(ctx context.Context, id int64, call string, max int, ttl time.Duration) (livestate.SlotRefresh, error)
 	ReleaseTrunkCall(ctx context.Context, id int64, call string) error
 	TrunkStatus(ctx context.Context, id int64) (livestate.TrunkStatus, error)
 }

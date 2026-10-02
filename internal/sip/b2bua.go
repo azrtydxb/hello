@@ -66,7 +66,7 @@ type call struct {
 	rewritten string
 	trunkName string
 	trace     routing.Trace
-	slotTrunk int64 // trunk whose call slot this call holds, 0 if none
+	slots     []heldSlot // trunk call slots held, released when the attempt ends
 }
 
 type legEventKind int
@@ -609,7 +609,6 @@ func (c *call) end(status int, side, reason, result string) {
 		}
 		c.s.m.ActiveCalls.Dec()
 		c.unpublish()
-		c.releaseSlot()
 		c.record(status, side, reason, result)
 	})
 }
@@ -640,6 +639,7 @@ func (c *call) release() {
 // record counts the attempt and queues its CDR. An attempt that did not
 // connect ends its trace with the reason, which is the CDR's explanation.
 func (c *call) record(status int, side, reason, result string) {
+	c.releaseSlots() // every way an attempt ends passes here exactly once
 	end := time.Now()
 	c.mu.Lock()
 	ring, answer := c.ringTime, c.answerTime
@@ -707,7 +707,7 @@ func (c *call) heartbeat() {
 			return
 		case <-t.C:
 			c.publish()
-			c.refreshSlot()
+			c.refreshSlots()
 		}
 	}
 }

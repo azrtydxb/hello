@@ -39,6 +39,7 @@ type Metrics struct {
 	TrunkOptionsLatency *prometheus.GaugeVec   // trunk, destination: last OPTIONS round trip
 	TrunkCalls          *prometheus.CounterVec // trunk, result
 	TrunkActiveCalls    *prometheus.GaugeVec   // trunk: cluster-wide
+	TrunkSlotOvercommit *prometheus.CounterVec // trunk: lost slots re-added over max_calls
 	RouteDecision       prometheus.Histogram
 }
 
@@ -90,12 +91,16 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.TrunkActiveCalls = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "hello_trunk_active_calls", Help: "Calls holding a slot on the trunk, cluster-wide.",
 	}, []string{"trunk"})
+	m.TrunkSlotOvercommit = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_trunk_slot_overcommit_total",
+		Help: "Established calls whose lost trunk slot was re-added although the trunk was full.",
+	}, []string{"trunk"})
 	m.RouteDecision = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name: "hello_route_decision_seconds", Help: "Time to take a routing decision.",
 		Buckets: []float64{.00001, .00005, .0001, .00025, .0005, .001, .0025, .005, .01},
 	})
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
-		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.RouteDecision)
+		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision)
 	return m
 }
 

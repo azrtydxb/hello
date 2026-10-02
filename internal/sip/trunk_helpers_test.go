@@ -166,16 +166,30 @@ func (f *fakeTrunkState) AcquireTrunkCall(_ context.Context, id int64, call stri
 	return true, nil
 }
 
-func (f *fakeTrunkState) RefreshTrunkCall(_ context.Context, id int64, call string, ttl time.Duration) error {
+func (f *fakeTrunkState) RefreshTrunkCall(_ context.Context, id int64, call string, maxCalls int, ttl time.Duration) (livestate.SlotRefresh, error) {
 	if f.down.Load() {
-		return errDown
+		return 0, errDown
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if _, ok := f.calls[id][call]; ok {
-		f.calls[id][call] = time.Now().Add(ttl)
+	if f.calls[id] == nil {
+		f.calls[id] = map[string]time.Time{}
 	}
-	return nil
+	r := livestate.SlotRefreshed
+	if _, ok := f.calls[id][call]; !ok {
+		r = livestate.SlotReacquired
+		live := 0
+		for _, exp := range f.calls[id] {
+			if exp.After(time.Now()) {
+				live++
+			}
+		}
+		if maxCalls > 0 && live >= maxCalls {
+			r = livestate.SlotOvercommitted
+		}
+	}
+	f.calls[id][call] = time.Now().Add(ttl)
+	return r, nil
 }
 
 func (f *fakeTrunkState) ReleaseTrunkCall(_ context.Context, id int64, call string) error {

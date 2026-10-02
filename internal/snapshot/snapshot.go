@@ -451,6 +451,10 @@ func (w *Watcher) resolveOnce(ctx context.Context, r Resolver) {
 	if len(next.routing.Errors) > 0 {
 		return // it compiled before; keep it rather than fail on DNS data
 	}
+	// A DNS-only rebuild of a frozen (last good) table keeps the current
+	// revision's compile errors: they mark routing as frozen, which makes
+	// calls check this revision's extensions before the old table.
+	next.routing.Errors = cur.routing.Errors
 	w.cur.Store(&next)
 	if w.Log != nil {
 		w.Log.Info("trunk destinations resolved", "revision", next.Revision, "destinations", len(res))

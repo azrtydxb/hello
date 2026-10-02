@@ -112,10 +112,36 @@ func (s *Store) AcquireTrunkCall(ctx context.Context, id int64, call string, max
 	return n == 1, nil
 }
 
-// RefreshTrunkCall extends a held slot; ReleaseTrunkCall frees it.
-func (s *Store) RefreshTrunkCall(ctx context.Context, id int64, call string, ttl time.Duration) error {
-	exp := strconv.FormatInt(time.Now().Add(ttl).UnixMilli(), 10)
-	return refreshSlot.Exec(ctx, s.c, []string{trunkKey(id, "calls")}, []string{exp, call}).Error()
+// SlotRefresh is the outcome of RefreshTrunkCall.
+type SlotRefresh int
+
+const (
+	// SlotRefreshed: the slot was held and now lives until the new expiry.
+	SlotRefreshed SlotRefresh = 1
+	// SlotReacquired: the slot had vanished (a Valkey outage longer than the
+	// TTL, or a restart) and was taken again within max.
+	SlotReacquired SlotRefresh = 2
+	// SlotOvercommitted: the slot had vanished and the trunk was full
+	// meanwhile; the slot was added anyway (see RefreshTrunkCall).
+	SlotOvercommitted SlotRefresh = 3
+)
+
+// RefreshTrunkCall extends call's slot on trunk id to ttl from now. A slot
+// that has vanished is taken again under the same rule as AcquireTrunkCall
+// (max 0 = unlimited); if the trunk is full it is added anyway and
+// reported SlotOvercommitted: the call is established and live, so it must
+// keep counting — leaving it uncounted would admit even more calls — and
+// dropping a connected call is worse than briefly exceeding max_calls.
+// ReleaseTrunkCall frees the slot.
+func (s *Store) RefreshTrunkCall(ctx context.Context, id int64, call string, max int, ttl time.Duration) (SlotRefresh, error) {
+	now := time.Now()
+	n, err := refreshSlot.Exec(ctx, s.c, []string{trunkKey(id, "calls")}, []string{
+		strconv.FormatInt(now.Add(ttl).UnixMilli(), 10), call, strconv.FormatInt(now.UnixMilli(), 10), strconv.Itoa(max),
+	}).AsInt64()
+	if err != nil {
+		return 0, fmt.Errorf("livestate: trunk %d slot refresh: %w", id, err)
+	}
+	return SlotRefresh(n), nil
 }
 
 // ReleaseTrunkCall frees a call's slot.
@@ -138,16 +164,23 @@ if tonumber(ARGV[2]) > redis.call('PEXPIRETIME', KEYS[1]) then
 end
 return 1`)
 
-// refreshSlot moves a held slot's expiry to ARGV[1] (ms) and the set's own
-// expiry with it, never shortening it: the key lives as long as its
-// longest-lived member, so a long call refreshed by its heartbeat keeps
-// counting against the limit.
+// refreshSlot moves call ARGV[2]'s slot expiry to ARGV[1] (ms) and the
+// set's own expiry with it, never shortening it, so a long call refreshed
+// by its heartbeat keeps counting. A missing slot is re-added: 2 when it
+// fits under max ARGV[4] (expired members, before ARGV[3], pruned first),
+// 3 when the trunk is full (added anyway, see RefreshTrunkCall).
 var refreshSlot = valkey.NewLuaScript(`
-redis.call('ZADD', KEYS[1], 'XX', ARGV[1], ARGV[2])
-if redis.call('ZSCORE', KEYS[1], ARGV[2]) ~= false and tonumber(ARGV[1]) > redis.call('PEXPIRETIME', KEYS[1]) then
+local result = 1
+if redis.call('ZSCORE', KEYS[1], ARGV[2]) == false then
+  redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[3])
+  local max = tonumber(ARGV[4])
+  if max > 0 and redis.call('ZCARD', KEYS[1]) >= max then result = 3 else result = 2 end
+end
+redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2])
+if tonumber(ARGV[1]) > redis.call('PEXPIRETIME', KEYS[1]) then
   redis.call('PEXPIREAT', KEYS[1], ARGV[1])
 end
-return 1`)
+return result`)
 
 // TrunkStatus reads one trunk's shared state.
 func (s *Store) TrunkStatus(ctx context.Context, id int64) (TrunkStatus, error) {
