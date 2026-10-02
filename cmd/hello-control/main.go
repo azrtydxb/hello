@@ -18,6 +18,7 @@ import (
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/ops"
+	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/version"
@@ -99,7 +100,14 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		log.Warn("valkey unreachable at startup; live views unavailable until it is", "addr", cfg.ValkeyAddr, "error", err)
 	}
 
-	st := store.New(db)
+	// config.LoadControl has already checked the key's shape.
+	box, err := secret.New(cfg.SecretKey)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("HELLO_SECRET_KEY: %w", err)
+	}
+	st := store.New(db).WithSecretBox(box)
+	live := livestate.New(vk)
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
 
@@ -111,7 +119,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		}},
 		App: api.Handler(api.Config{
 			Store:      st,
-			Live:       livestate.New(vk),
+			Live:       live,
+			Trunks:     live,
 			SIPDomain:  cfg.SIPDomain,
 			SessionTTL: cfg.SessionTTL,
 			Log:        log,
