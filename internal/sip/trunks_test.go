@@ -548,3 +548,29 @@ func TestTrunkFreedSlotUsedAtOnce(t *testing.T) {
 	hangup(t, second.dcs)
 	pbx.nextCDR(t)
 }
+
+// TestFrozenRoutingStillFindsNewExtensions fails if, while routing is
+// frozen on the last good table, an extension added since is not rung
+// internally but routed out to a carrier.
+func TestFrozenRoutingStillFindsNewExtensions(t *testing.T) {
+	cr := newCarrier(t, "acct", "pw")
+	r := &fakeRouter{extensions: map[string]bool{"100": true}, trunks: []routing.Trunk{cr.trunk(1, "carrier", "ip")}}
+	r.decide = outboundVia(r, "+971300", "+97140000100", false, nil, 1) // the old table: 300 is external
+	devs := append(callerDevices(), dev(3, "c1", "300", "pc"))
+	frozen := func(_ *Config, d *Deps) {
+		d.Snapshots.(*fakeSnaps).p.Load().WithRouting(&snapshot.RoutingState{Router: r, Config: routing.Config{Trunks: r.trunks},
+			Errors: []routing.FieldError{{Path: "inbound[0].destination", Message: "extension does not exist"}}})
+	}
+	pbx := startPBX(t, devs, trunkCfg(newFakeTrunkState()), frozen)
+	a, c := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "c1", "pc")
+	a.register(t)
+	c.register(t)
+	res := waitCall(t, dial(t.Context(), a, "300"))
+	if res.err != nil {
+		t.Fatalf("call to the new extension: %v", res.err)
+	}
+	waitReq(t, c.invites, "INVITE to the new extension")
+	noReq(t, cr.invites, 100*time.Millisecond, "INVITE to the carrier for an internal extension")
+	hangup(t, res.dcs)
+	wantTrace(t, pbx.nextCDR(t).Trace, `Internal extension lookup "300" -> extension 300`)
+}

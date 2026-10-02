@@ -15,6 +15,7 @@ import (
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // TrunkState is the shared trunk state (leases, registration, health, call
@@ -39,8 +40,18 @@ type trunkManager struct {
 	mu   sync.Mutex
 	held map[int64]*heldTrunk
 
-	status   atomic.Pointer[map[int64]livestate.TrunkStatus]
-	statusAt atomic.Int64 // unix ms of the last fully successful poll
+	status atomic.Pointer[map[int64]cachedStatus]
+	// series are the metric label values this node has set, so those of
+	// deleted or renamed trunks and destinations can be dropped.
+	series map[string]map[string]bool // trunk name -> destinations
+}
+
+// cachedStatus is one trunk's last read status. A failed read keeps the
+// previous status and marks it failing; it stays usable for 3 polls.
+type cachedStatus struct {
+	st      livestate.TrunkStatus
+	at      time.Time // last successful read
+	failing bool
 }
 
 type heldTrunk struct {
@@ -51,7 +62,7 @@ type heldTrunk struct {
 }
 
 func newTrunkManager(s *Server) *trunkManager {
-	return &trunkManager{s: s, held: map[int64]*heldTrunk{}}
+	return &trunkManager{s: s, held: map[int64]*heldTrunk{}, series: map[string]map[string]bool{}}
 }
 
 func (m *trunkManager) state() TrunkState { return m.s.deps.Trunks }
@@ -62,12 +73,27 @@ func (m *trunkManager) run(ctx context.Context) {
 	if m.state() == nil {
 		return
 	}
+	// The status poll has its own goroutine: a slow lease operation or
+	// holder shutdown (unregistering) must not let the cache go stale.
+	m.poll(ctx)
+	pollDone := make(chan struct{})
+	go func() {
+		defer close(pollDone)
+		t := time.NewTicker(m.s.cfg.TrunkStatusPoll)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				m.poll(ctx)
+			}
+		}
+	}()
+	defer func() { <-pollDone }()
 	lease := time.NewTicker(m.s.cfg.TrunkLeaseRefresh)
 	defer lease.Stop()
-	poll := time.NewTicker(m.s.cfg.TrunkStatusPoll)
-	defer poll.Stop()
 	m.leases(ctx)
-	m.poll(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -75,8 +101,6 @@ func (m *trunkManager) run(ctx context.Context) {
 			return
 		case <-lease.C:
 			m.leases(ctx)
-		case <-poll.C:
-			m.poll(ctx)
 		}
 	}
 }
@@ -228,7 +252,7 @@ func (m *trunkManager) putRegistration(t routing.Trunk, r livestate.TrunkRegistr
 // else host:port as configured (sipgo resolves it then).
 func (m *trunkManager) destAddr(d routing.Destination) string {
 	if rs := m.routing(); rs != nil {
-		if a := rs.Resolved[snapshot.DestKey(d)]; len(a) > 0 {
+		if a := rs.Resolved[livestate.DestinationKey(d)]; len(a) > 0 {
 			return a[0]
 		}
 	}
@@ -297,7 +321,9 @@ func (m *trunkManager) registerLoop(ctx context.Context, t routing.Trunk) {
 			exp := time.Now().Add(granted)
 			m.putRegistration(t, livestate.TrunkRegistration{State: "registered", LastCode: code, Expires: exp},
 				max(granted, 3*m.s.cfg.TrunkLeaseRefresh))
-			wait = granted * 8 / 10
+			// At 80% of the expiry, but never sooner than the floor: a carrier
+			// granting seconds must not make us REGISTER in a tight loop.
+			wait = max(granted*8/10, m.s.cfg.TrunkReRegisterMin)
 		} else {
 			registered = false
 			m.s.log.Warn("trunk registration failed", "trunk", t.Name, "code", code, "error", err, "retry_in", backoff.String())
@@ -401,7 +427,7 @@ func (m *trunkManager) options(ctx context.Context, t routing.Trunk, d routing.D
 	if ctx.Err() != nil {
 		return
 	}
-	h := livestate.DestinationHealth{Destination: snapshot.DestKey(d), CheckedAt: time.Now()}
+	h := livestate.DestinationHealth{Destination: livestate.DestinationKey(d), CheckedAt: time.Now()}
 	if err == nil {
 		h.Up, h.LastCode, h.Latency = true, res.StatusCode, time.Since(start)
 	}
@@ -420,27 +446,70 @@ func (m *trunkManager) poll(ctx context.Context) {
 	if rs == nil {
 		return
 	}
-	out := map[int64]livestate.TrunkStatus{}
-	if old := m.status.Load(); old != nil {
-		for k, v := range *old {
-			out[k] = v // keep last known on error
-		}
+	var old map[int64]cachedStatus
+	if p := m.status.Load(); p != nil {
+		old = *p
 	}
-	ok := true
+	out := make(map[int64]cachedStatus, len(rs.Config.Trunks))
 	for _, t := range rs.Config.Trunks {
 		pctx, cancel := context.WithTimeout(ctx, max(m.s.cfg.StateTimeout, time.Second))
 		st, err := m.state().TrunkStatus(pctx, t.ID)
 		cancel()
 		if err != nil {
-			ok = false
+			prev := old[t.ID] // keep the last known status, judged per trunk
+			prev.failing = true
+			out[t.ID] = prev
 			continue
 		}
-		out[t.ID] = st
+		out[t.ID] = cachedStatus{st: st, at: time.Now()}
 		m.setMetrics(t, st)
 	}
 	m.status.Store(&out)
-	if ok {
-		m.statusAt.Store(time.Now().UnixMilli())
+	m.pruneSeries(rs.Config.Trunks)
+}
+
+// pruneSeries drops the metric series of trunks and destinations that are
+// no longer configured (deleted or renamed).
+func (m *trunkManager) pruneSeries(trunks []routing.Trunk) {
+	want := map[string]map[string]bool{}
+	for _, t := range trunks {
+		ds := map[string]bool{}
+		for _, d := range t.Destinations {
+			ds[livestate.DestinationKey(d)] = true
+		}
+		want[t.Name] = ds
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for name, dests := range m.series {
+		wd, ok := want[name]
+		if !ok {
+			for _, v := range []interface {
+				DeletePartialMatch(prometheus.Labels) int
+			}{m.s.m.TrunkStatus, m.s.m.TrunkRegistered, m.s.m.TrunkOptionsLatency, m.s.m.TrunkCalls, m.s.m.TrunkActiveCalls} {
+				v.DeletePartialMatch(prometheus.Labels{"trunk": name})
+			}
+			delete(m.series, name)
+			continue
+		}
+		for d := range dests {
+			if !wd[d] {
+				m.s.m.TrunkStatus.DeleteLabelValues(name, d)
+				m.s.m.TrunkOptionsLatency.DeleteLabelValues(name, d)
+				delete(dests, d)
+			}
+		}
+	}
+}
+
+func (m *trunkManager) noteSeries(trunk, dest string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.series[trunk] == nil {
+		m.series[trunk] = map[string]bool{}
+	}
+	if dest != "" {
+		m.series[trunk][dest] = true
 	}
 }
 
@@ -451,7 +520,16 @@ func (m *trunkManager) setMetrics(t routing.Trunk, st livestate.TrunkStatus) {
 	}
 	m.s.m.TrunkRegistered.WithLabelValues(t.Name).Set(reg)
 	m.s.m.TrunkActiveCalls.WithLabelValues(t.Name).Set(float64(st.ActiveCalls))
+	m.noteSeries(t.Name, "")
+	configured := map[string]bool{}
+	for _, d := range t.Destinations {
+		configured[livestate.DestinationKey(d)] = true
+	}
 	for _, h := range st.Destinations {
+		if !configured[h.Destination] {
+			continue // a removed destination's record, until its TTL
+		}
+		m.noteSeries(t.Name, h.Destination)
 		up := 0.0
 		if h.Up {
 			up = 1
@@ -463,14 +541,21 @@ func (m *trunkManager) setMetrics(t routing.Trunk, st livestate.TrunkStatus) {
 
 // statusOf returns the cached status of a trunk and whether the cache is
 // fresh (the last full poll is recent, i.e. Valkey is reachable).
+//
+// Freshness is per trunk: stale only when the last read of this trunk
+// failed and its last good read is older than three polls. A trunk not read
+// yet (just added) is fresh with nothing known.
 func (m *trunkManager) statusOf(id int64) (livestate.TrunkStatus, bool, bool) {
-	fresh := time.Since(time.UnixMilli(m.statusAt.Load())) <= 3*m.s.cfg.TrunkStatusPoll
 	p := m.status.Load()
 	if p == nil {
-		return livestate.TrunkStatus{}, false, fresh
+		return livestate.TrunkStatus{}, false, true
 	}
-	st, known := (*p)[id]
-	return st, known, fresh
+	e, known := (*p)[id]
+	if !known {
+		return livestate.TrunkStatus{}, false, true
+	}
+	fresh := !e.failing || time.Since(e.at) <= 3*m.s.cfg.TrunkStatusPoll
+	return e.st, !e.at.IsZero(), fresh
 }
 
 // destinationDown reports whether the last known health of d is down.

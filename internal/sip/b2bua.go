@@ -159,10 +159,20 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	c := s.newCall(req)
 	c.callerNum, c.callerName, c.callerDevice = dev.Extension, dev.ExtensionName, dev.Username
-	dec := s.decide(snap.Routing(), routing.Call{
-		FromExtension: dev.Extension, Number: c.dialled, CallerID: dev.Extension,
-		SIPDomain: req.Recipient.Host, Header: headerOf(req), At: time.Now(),
-	})
+	rs := snap.Routing()
+	var dec routing.Decision
+	if len(rs.Errors) > 0 && snap.HasExtension(c.dialled) {
+		// Routing is frozen on the last good table, whose extension list
+		// is that older revision's. An extension of the current revision
+		// must still be found internally, never routed out to a carrier.
+		dec.Trace.Add(fmt.Sprintf("Internal extension lookup %q -> extension %s", c.dialled, c.dialled))
+		dec.Kind, dec.Extension, dec.CallerID = routing.KindInternal, c.dialled, dev.Extension
+	} else {
+		dec = s.decide(rs, routing.Call{
+			FromExtension: dev.Extension, Number: c.dialled, CallerID: dev.Extension,
+			SIPDomain: req.Recipient.Host, Header: headerOf(req), At: time.Now(),
+		})
+	}
 	s.dispatch(c, req, tx, snap, dec)
 }
 
@@ -273,6 +283,13 @@ func (c *call) ringURI(req *sip.Request, tx sip.ServerTransaction, raw string) {
 	if err := sip.ParseUri(strings.TrimSuffix(strings.TrimPrefix(raw, "<"), ">"), &u); err != nil {
 		c.s.respond(tx, req, sip.StatusInternalServerError, "Server Internal Error")
 		c.record(sip.StatusInternalServerError, cdr.SideSystem, "bad SIP URI destination", ResultFailed)
+		return
+	}
+	if u.IsEncrypted() {
+		// sips: requires TLS end to end; Hello sends SIP over UDP only.
+		c.addTrace(fmt.Sprintf("SIP URI destination %s uses sips:, which needs TLS; Hello only sends UDP", raw))
+		c.s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable")
+		c.record(sip.StatusServiceUnavailable, cdr.SideSystem, "sips: destinations are not supported", ResultFailed)
 		return
 	}
 	if !c.begin(req, tx) {

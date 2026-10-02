@@ -19,7 +19,7 @@ func (s *Server) trunkSource(req *sip.Request, snap *snapshot.Snapshot) (*routin
 	if err != nil {
 		return nil, false
 	}
-	return snap.Routing().Router.TrunkForSource(ip.Unmap(), req.Recipient.User)
+	return snap.Routing().Router.TrunkForSource(ip, req.Recipient.User) // the engine unmaps IPv4-in-IPv6
 }
 
 // looksLikePhone reports whether an INVITE without credentials claims to

@@ -61,6 +61,8 @@ type Config struct {
 	TrunkRetryBase      time.Duration
 	TrunkRetryMax       time.Duration
 	TrunkOptionsTimeout time.Duration
+	// TrunkReRegisterMin floors the re-REGISTER interval (30s).
+	TrunkReRegisterMin time.Duration
 }
 
 // Deps are the Server's collaborators.
@@ -143,6 +145,7 @@ func New(cfg Config, deps Deps) (*Server, error) {
 	setDefault(&cfg.TrunkRetryBase, 30*time.Second)
 	setDefault(&cfg.TrunkRetryMax, 10*time.Minute)
 	setDefault(&cfg.TrunkOptionsTimeout, 5*time.Second)
+	setDefault(&cfg.TrunkReRegisterMin, 30*time.Second)
 	if cfg.AuthFailLimit <= 0 {
 		cfg.AuthFailLimit = 10
 	}

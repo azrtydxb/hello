@@ -267,3 +267,35 @@ func gauge(g prometheus.Gauge) float64 {
 	_ = g.Write(&m)
 	return m.GetGauge().GetValue()
 }
+
+// TestResolverKeepsLastGoodOnFailure fails if a failed DNS lookup wipes a
+// destination's previous addresses (and with them the trunk's source
+// validation), or is not counted.
+func TestResolverKeepsLastGoodOnFailure(t *testing.T) {
+	r := &fakeResolver{hosts: map[string][]string{"plain.test": {"203.0.113.30"}}}
+	trunks := []routing.Trunk{{ID: 2, Name: "b", Mode: "ip", Enabled: true, OptionsInterval: 30 * time.Second,
+		Destinations: []routing.Destination{{Host: "plain.test", Port: 5080, Weight: 1}}}}
+	failures := prometheus.NewCounter(prometheus.CounterOpts{Name: "f"})
+	w := &Watcher{Domain: domain, Resolver: r, ResolveInterval: 20 * time.Millisecond, DNSFailures: failures}
+	w.install(New(1, domain, nil).WithRouting(buildRouting(routing.Config{Trunks: trunks, Extensions: map[string]string{}}, nil, nil)))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { w.RunResolver(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	ip := netip.MustParseAddr("203.0.113.30")
+	waitFor(t, 3*time.Second, "resolved", func() bool {
+		_, ok := w.Current().Routing().Router.TrunkForSource(ip, "")
+		return ok
+	})
+	r.mu.Lock()
+	delete(r.hosts, "plain.test") // DNS starts failing
+	r.mu.Unlock()
+	var m dto.Metric
+	waitFor(t, 3*time.Second, "failure counted", func() bool { _ = failures.Write(&m); return m.GetCounter().GetValue() >= 2 })
+	if _, ok := w.Current().Routing().Router.TrunkForSource(ip, ""); !ok {
+		t.Fatal("a failed lookup wiped the trunk's source address")
+	}
+	if got := w.Current().Routing().Resolved["plain.test:5080"]; len(got) != 1 || got[0] != "203.0.113.30:5080" {
+		t.Fatalf("resolved = %v, want the previous address kept", got)
+	}
+}
