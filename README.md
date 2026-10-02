@@ -9,8 +9,10 @@ into the call architecture. The product spec is
 either SIP node with digest authentication, and extensions call each other
 through a B2BUA, with the media flowing directly between the phones.
 Administrators sign in to manage extensions and devices and to see live
-registrations, active calls and call records. Trunks and routing arrive in
-Phase 2. To connect real phones, see [docs/phones.md](docs/phones.md).
+registrations, active calls and call records. SIP trunks, inbound and outbound
+routing with rewriting, failover and a routing trace on every call arrive in
+Phase 2. See [docs/phones.md](docs/phones.md) for phones and
+[docs/trunks.md](docs/trunks.md) for trunks.
 
 ## Layout
 
@@ -69,26 +71,27 @@ HELLO_DOCKER=1 go test -timeout 20m ./test/integration/   # images, and SIP flow
 Both services read `HELLO_*` environment variables and exit at startup,
 naming the key, if one is missing or malformed.
 
-| Variable                                          | Service | Default                                                     |
-| ------------------------------------------------- | ------- | ----------------------------------------------------------- |
-| `HELLO_NODE_ID`                                   | both    | required                                                    |
-| `HELLO_HTTP_ADDR`                                 | both    | `:8081` control, `:8082` sip                                |
-| `HELLO_LOG_LEVEL`                                 | both    | `info`                                                      |
-| `HELLO_SHUTDOWN_TIMEOUT`                          | both    | `30s`                                                       |
-| `HELLO_DRAIN_DELAY`                               | both    | `5s`: how long `/readyz` fails before the listener closes   |
-| `HELLO_DATABASE_URL`                              | both    | required; hello-sip reads devices and writes call records   |
-| `HELLO_VALKEY_ADDR`                               | both    | required; registrations and active calls                    |
-| `HELLO_SIP_DOMAIN`                                | both    | required; digest realm and AOR host, identical everywhere   |
-| `HELLO_BOOTSTRAP_ADMIN_PASSWORD`                  | control | unset; creates user `admin` when no user exists             |
-| `HELLO_SESSION_TTL`                               | control | `12h`                                                       |
-| `HELLO_SIP_BIND_ADDR`                             | sip     | `0.0.0.0:5060`                                              |
-| `HELLO_SIP_ADVERTISED_ADDR`                       | sip     | the bind address, which must then be a specific IP          |
-| `HELLO_SIP_NONCE_SECRET`                          | sip     | required, at least 32 bytes, identical on every SIP node    |
-| `HELLO_SIP_REGISTER_MIN_EXPIRES` / `_MAX_EXPIRES` | sip     | `60s` / `1h`                                                |
-| `HELLO_SIP_RING_TIMEOUT`                          | sip     | `30s`                                                       |
-| `HELLO_SIP_MAX_CALL_DURATION`                     | sip     | `4h`; a call with no BYE (phone gone) is cleared after this |
-| `HELLO_SIP_AUTH_FAIL_LIMIT` / `_WINDOW`           | sip     | `10` failures per `5m` per source IP                        |
-| `HELLO_SIP_STATE_TIMEOUT`                         | sip     | `200ms`; Valkey calls while handling SIP                    |
+| Variable                                          | Service | Default                                                                       |
+| ------------------------------------------------- | ------- | ----------------------------------------------------------------------------- |
+| `HELLO_NODE_ID`                                   | both    | required                                                                      |
+| `HELLO_HTTP_ADDR`                                 | both    | `:8081` control, `:8082` sip                                                  |
+| `HELLO_LOG_LEVEL`                                 | both    | `info`                                                                        |
+| `HELLO_SHUTDOWN_TIMEOUT`                          | both    | `30s`                                                                         |
+| `HELLO_DRAIN_DELAY`                               | both    | `5s`: how long `/readyz` fails before the listener closes                     |
+| `HELLO_DATABASE_URL`                              | both    | required; hello-sip reads devices and writes call records                     |
+| `HELLO_VALKEY_ADDR`                               | both    | required; registrations and active calls                                      |
+| `HELLO_SIP_DOMAIN`                                | both    | required; digest realm and AOR host, identical everywhere                     |
+| `HELLO_SECRET_KEY`                                | both    | required: 32 bytes, base64; encrypts trunk passwords; identical on every node |
+| `HELLO_BOOTSTRAP_ADMIN_PASSWORD`                  | control | unset; creates user `admin` when no user exists                               |
+| `HELLO_SESSION_TTL`                               | control | `12h`                                                                         |
+| `HELLO_SIP_BIND_ADDR`                             | sip     | `0.0.0.0:5060`                                                                |
+| `HELLO_SIP_ADVERTISED_ADDR`                       | sip     | the bind address, which must then be a specific IP                            |
+| `HELLO_SIP_NONCE_SECRET`                          | sip     | required, at least 32 bytes, identical on every SIP node                      |
+| `HELLO_SIP_REGISTER_MIN_EXPIRES` / `_MAX_EXPIRES` | sip     | `60s` / `1h`                                                                  |
+| `HELLO_SIP_RING_TIMEOUT`                          | sip     | `30s`                                                                         |
+| `HELLO_SIP_MAX_CALL_DURATION`                     | sip     | `4h`; a call with no BYE (phone gone) is cleared after this                   |
+| `HELLO_SIP_AUTH_FAIL_LIMIT` / `_WINDOW`           | sip     | `10` failures per `5m` per source IP                                          |
+| `HELLO_SIP_STATE_TIMEOUT`                         | sip     | `200ms`; Valkey calls while handling SIP                                      |
 
 Every SIP node must share the same `HELLO_SIP_NONCE_SECRET`. A node with a
 different one rejects digest challenges issued by the others.
