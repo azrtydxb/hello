@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-02 20:37 UTC. procoder reads this
+Written 2026-10-02 21:48 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -23,6 +23,16 @@ Question: Migration library
 - golang-migrate
 
 Answer: goose
+
+## [decision] decisions.md
+
+Key: 0bd764b7a070
+Question: Phase 3 Valkey high availability
+
+- Valkey Sentinel (primary, replica, three sentinels) in the lab, with automated failover tests
+- Single Valkey; test outage behaviour only, defer Valkey HA to Phase 6 guidance
+
+Answer: Valkey Sentinel (primary, replica, three sentinels) in the lab, with automated failover tests
 
 ## [decision] decisions.md
 
@@ -80,6 +90,16 @@ Question: Merge PR #1
 - Hold for your own review
 
 Answer: Squash-merge now and start the Phase 1 spec
+
+## [decision] decisions.md
+
+Key: 371125ececfd
+Question: Merge PR #3
+
+- Squash-merge now and start the Phase 3 (HA) spec
+- Hold for your own review
+
+Answer: Squash-merge now and start the Phase 3 (HA) spec
 
 ## [decision] decisions.md
 
@@ -178,6 +198,17 @@ Answer: Commit on branch phase-0-foundation and open a PR to main
 
 ## [decision] decisions.md
 
+Key: a29492463871
+Question: Phase 3 production SIP load balancer
+
+- Kamailio dispatcher as the SIP-aware balancer, shipped and configured in deploy/
+- A Hello-built Go balancer (hello-lb) shipped as a production component
+- Envoy UDP proxy (L4) with active health checks
+
+Answer: Kamailio dispatcher as the SIP-aware balancer, shipped and configured in deploy/ (the user requires a production-grade balancer, not lab tooling)
+
+## [decision] decisions.md
+
 Key: bc412d83b326
 Question: Phase 2 delivery
 
@@ -185,6 +216,27 @@ Question: Phase 2 delivery
 - Hold for your review first
 
 Answer: Push phase-2-trunks-routing and open a PR to main
+
+## [decision] decisions.md
+
+Key: c9c0a0c47220
+Question: Phase 3 how phones reach a surviving node
+
+- UDP load balancer in front of the SIP nodes (lab: nginx stream with health checks), single SIP address for phones
+- DNS SRV with both nodes (lab: CoreDNS); relies on phone SRV support
+- Both: load balancer by default, SRV documented as the alternative
+
+Answer: UDP load balancer in front of the SIP nodes (lab: nginx stream with health checks), single SIP address for phones
+
+## [decision] decisions.md
+
+Key: d774f897f39a
+Question: Phase 3 PostgreSQL failover
+
+- Test PostgreSQL outage and restart (SIP keeps running from its snapshot); real PG HA left to Phase 6 deployment guidance
+- Primary/replica with promotion in the lab now
+
+Answer: Test PostgreSQL outage and restart (SIP keeps running from its snapshot); real PG HA left to Phase 6 deployment guidance
 
 ## [decision] decisions.md
 
