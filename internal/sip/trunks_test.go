@@ -514,3 +514,37 @@ func TestTrunkStateUnavailable(t *testing.T) {
 	hangup(t, em.dcs)
 	pbx.nextCDR(t)
 }
+
+// TestTrunkFreedSlotUsedAtOnce fails if a trunk whose only slot was just
+// freed is skipped as full because a cached call count is stale.
+func TestTrunkFreedSlotUsedAtOnce(t *testing.T) {
+	primary, backup := newCarrier(t, "acct1", "pw1"), newCarrier(t, "acct2", "pw2")
+	tp := primary.trunk(1, "carrier-primary", "ip")
+	tp.MaxCalls = 1
+	r := &fakeRouter{extensions: map[string]bool{"100": true}, trunks: []routing.Trunk{tp, backup.trunk(2, "carrier-backup", "ip")}}
+	r.decide = outboundVia(r, "+971501234567", "+97140000100", false, nil, 1, 2)
+	st := newFakeTrunkState()
+	pbx := startPBX(t, callerDevices(), trunkCfg(st), withRouter(r, nil),
+		func(c *Config, _ *Deps) { c.TrunkStatusPoll = 400 * time.Millisecond })
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	first := waitCall(t, dial(t.Context(), a, "0501234567"))
+	if first.err != nil {
+		t.Fatal(first.err)
+	}
+	waitReq(t, primary.invites, "first call on the primary")
+	eventually(t, "the status cache sees the call", func() bool {
+		return pbx.metric(t, "hello_trunk_active_calls", map[string]string{"trunk": "carrier-primary"}) == 1
+	})
+	hangup(t, first.dcs)
+	pbx.nextCDR(t)
+	eventually(t, "slot freed", func() bool { return st.activeCalls(1) == 0 })
+	second := waitCall(t, dial(t.Context(), a, "0501234568")) // before the next poll
+	if second.err != nil {
+		t.Fatal(second.err)
+	}
+	waitReq(t, primary.invites, "second call on the primary")
+	noReq(t, backup.invites, 100*time.Millisecond, "INVITE to the backup")
+	hangup(t, second.dcs)
+	pbx.nextCDR(t)
+}

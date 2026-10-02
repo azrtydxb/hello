@@ -492,7 +492,7 @@ func (m *trunkManager) destinationDown(id int64, d routing.Destination) bool {
 // tester; this adds what only the call path knows: a password that did not
 // open in this node's snapshot, and an unreachable trunk state (refused
 // with "state unavailable" except for emergency routes, which use the last
-// known status). The call slot is taken at attempt time.
+// known status). "full" is left to the call slot taken at attempt time.
 func (s *Server) usability(rs *snapshot.RoutingState) routing.TrunkUsability {
 	return func(id int64, emergency bool) (bool, string) {
 		t, ok := rs.Router.Trunk(id)
@@ -512,6 +512,10 @@ func (s *Server) usability(rs *snapshot.RoutingState) routing.TrunkUsability {
 		if !fresh && !emergency {
 			return false, "state unavailable"
 		}
+		// Fullness is decided at attempt time by AcquireTrunkCall, which is
+		// exact; the cached count lags by up to TrunkStatusPoll and would
+		// skip a trunk whose slot was just freed.
+		st.ActiveCalls = 0
 		return st.Usability(*t, emergency)
 	}
 }
