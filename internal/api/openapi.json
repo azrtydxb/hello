@@ -3,7 +3,7 @@
   "info": {
     "title": "Hello management API",
     "version": "v1",
-    "description": "hello-control REST API. Every route except version, openapi.json and auth/login requires the hello_session cookie or an `Authorization: Bearer <token>` header. Secrets (device SIP secrets, API tokens) appear only in the response that creates them."
+    "description": "hello-control REST API. Every route except version, openapi.json and auth/login requires the hello_session cookie or an `Authorization: Bearer <token>` header. Secrets (device SIP secrets, API tokens, trunk passwords) appear only in the response that creates them; trunk passwords never appear in any response."
   },
   "security": [
     {
@@ -746,6 +746,747 @@
           }
         }
       }
+    },
+    "/api/v1/cdrs/{id}": {
+      "get": {
+        "operationId": "getCDR",
+        "summary": "One CDR with its routing trace and failure explanation",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CDR detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CDRDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/trunks": {
+      "get": {
+        "operationId": "listTrunks",
+        "summary": "Every trunk (never its password)",
+        "tags": ["trunks"],
+        "responses": {
+          "200": {
+            "description": "Trunks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Trunk"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createTrunk",
+        "summary": "Create a trunk",
+        "tags": ["trunks"],
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. 503 when this hello-control is built without the routing engine.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrunkCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trunk"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/trunks/status": {
+      "get": {
+        "operationId": "listTrunkStatus",
+        "summary": "Live registration, destination health and active calls of every trunk",
+        "tags": ["trunks"],
+        "description": "503 while Valkey is unreachable.",
+        "responses": {
+          "200": {
+            "description": "Statuses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TrunkStatus"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/trunks/{id}": {
+      "get": {
+        "operationId": "getTrunk",
+        "summary": "One trunk (never its password)",
+        "tags": ["trunks"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Trunk",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trunk"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateTrunk",
+        "summary": "Change a trunk",
+        "tags": ["trunks"],
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. Destinations and sourceCidrs, when given, replace the lists. 503 when this hello-control is built without the routing engine.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrunkUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trunk"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteTrunk",
+        "summary": "Delete a trunk",
+        "tags": ["trunks"],
+        "description": "409 while an inbound or outbound route names the trunk. 503 when this hello-control is built without the routing engine.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/routes/outbound": {
+      "get": {
+        "operationId": "listOutboundRoutes",
+        "summary": "Every outbound route in position order",
+        "tags": ["routes"],
+        "responses": {
+          "200": {
+            "description": "Routes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OutboundRoute"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createOutboundRoute",
+        "summary": "Append an outbound route",
+        "tags": ["routes"],
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. 503 when this hello-control is built without the routing engine.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutboundRouteCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboundRoute"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/routes/outbound/order": {
+      "put": {
+        "operationId": "reorderOutboundRoutes",
+        "summary": "Reorder every outbound route at once",
+        "tags": ["routes"],
+        "description": "ids must be a full permutation; the order changes atomically. 503 when this hello-control is built without the routing engine.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteOrder"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Reordered"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/routes/outbound/{id}": {
+      "get": {
+        "operationId": "getOutboundRoute",
+        "summary": "One outbound route",
+        "tags": ["routes"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboundRoute"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateOutboundRoute",
+        "summary": "Change an outbound route",
+        "tags": ["routes"],
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. 503 when this hello-control is built without the routing engine.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutboundRouteUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboundRoute"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteOutboundRoute",
+        "summary": "Delete an outbound route",
+        "tags": ["routes"],
+        "description": "503 when this hello-control is built without the routing engine.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/routes/inbound": {
+      "get": {
+        "operationId": "listInboundRoutes",
+        "summary": "Every inbound route in position order",
+        "tags": ["routes"],
+        "responses": {
+          "200": {
+            "description": "Routes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/InboundRoute"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createInboundRoute",
+        "summary": "Append an inbound route",
+        "tags": ["routes"],
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. 503 when this hello-control is built without the routing engine.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboundRouteCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundRoute"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/routes/inbound/order": {
+      "put": {
+        "operationId": "reorderInboundRoutes",
+        "summary": "Reorder every inbound route at once",
+        "tags": ["routes"],
+        "description": "ids must be a full permutation; the order changes atomically. 503 when this hello-control is built without the routing engine.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RouteOrder"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Reordered"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/routes/inbound/{id}": {
+      "get": {
+        "operationId": "getInboundRoute",
+        "summary": "One inbound route",
+        "tags": ["routes"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundRoute"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateInboundRoute",
+        "summary": "Change an inbound route",
+        "tags": ["routes"],
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. 503 when this hello-control is built without the routing engine.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboundRouteUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboundRoute"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteInboundRoute",
+        "summary": "Delete an inbound route",
+        "tags": ["routes"],
+        "description": "503 when this hello-control is built without the routing engine.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/routing/test": {
+      "post": {
+        "operationId": "testRouting",
+        "summary": "Decide a call against the saved configuration without placing it",
+        "tags": ["routing"],
+        "description": "Writes nothing. Trunk usability comes from live state; when Valkey is unreachable every enabled trunk counts as usable and the trace says so. 503 when this hello-control is built without the routing engine.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutingTestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Decision and trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingTestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -876,6 +1617,13 @@
               },
               "message": {
                 "type": "string"
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FieldError"
+                },
+                "description": "Present on validation failures: every failing field."
               }
             }
           }
@@ -971,7 +1719,14 @@
       },
       "Extension": {
         "type": "object",
-        "required": ["id", "number", "name", "createdAt", "updatedAt"],
+        "required": [
+          "id",
+          "number",
+          "name",
+          "createdAt",
+          "updatedAt",
+          "externalNumber"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -995,6 +1750,12 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "externalNumber": {
+            "type": "string",
+            "pattern": "^(\\+?[0-9]{2,20})?$",
+            "example": "+97142000000",
+            "description": "Caller ID presented on outbound trunk calls; empty for none."
           }
         }
       },
@@ -1013,6 +1774,12 @@
             "minLength": 1,
             "maxLength": 100,
             "example": "Reception"
+          },
+          "externalNumber": {
+            "type": "string",
+            "pattern": "^(\\+?[0-9]{2,20})?$",
+            "example": "+97142000000",
+            "description": "Caller ID presented on outbound trunk calls; empty for none."
           }
         }
       },
@@ -1030,6 +1797,12 @@
             "minLength": 1,
             "maxLength": 100,
             "example": "Reception"
+          },
+          "externalNumber": {
+            "type": "string",
+            "pattern": "^(\\+?[0-9]{2,20})?$",
+            "example": "+97142000000",
+            "description": "Caller ID presented on outbound trunk calls; empty for none."
           }
         },
         "minProperties": 1
@@ -1269,7 +2042,12 @@
           "mediaMode",
           "finalStatus",
           "terminationSide",
-          "failureReason"
+          "failureReason",
+          "direction",
+          "originalDestination",
+          "rewrittenDestination",
+          "route",
+          "trunk"
         ],
         "properties": {
           "id": {
@@ -1328,6 +2106,22 @@
           },
           "failureReason": {
             "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["internal", "inbound", "outbound"]
+          },
+          "originalDestination": {
+            "type": "string"
+          },
+          "rewrittenDestination": {
+            "type": "string"
+          },
+          "route": {
+            "type": "string"
+          },
+          "trunk": {
+            "type": "string"
           }
         },
         "description": "Null times are omitted."
@@ -1347,6 +2141,1052 @@
             "description": "Pass as before= for the next page; empty on the last page"
           }
         }
+      },
+      "FieldError": {
+        "type": "object",
+        "required": ["path", "message"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "example": "outbound[3].number.template"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Transform": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Strip leading digits, then add a prefix, then replace the regex match with the template (${1}, ${name}). The empty object is identity.",
+        "properties": {
+          "strip": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 32
+          },
+          "prefix": {
+            "type": "string",
+            "pattern": "^[0-9+*#]{0,32}$"
+          },
+          "regex": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Go RE2 regular expression, at most 500 characters"
+          },
+          "template": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "+971${1}"
+          }
+        }
+      },
+      "Window": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["days", "start", "end"],
+        "properties": {
+          "days": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 7,
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6
+            },
+            "description": "0 = Sunday"
+          },
+          "start": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "example": "08:00"
+          },
+          "end": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "example": "18:00",
+            "description": "End <= start crosses midnight"
+          }
+        }
+      },
+      "Schedule": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["timeZone", "windows"],
+        "properties": {
+          "timeZone": {
+            "type": "string",
+            "example": "Asia/Dubai"
+          },
+          "windows": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "$ref": "#/components/schemas/Window"
+            }
+          }
+        }
+      },
+      "Destination": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["host"],
+        "properties": {
+          "host": {
+            "type": "string",
+            "example": "sip.carrier.example"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "0 = resolve SRV, else 5060"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Lower is tried first"
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Among equal priorities; 0 or omitted means 1"
+          }
+        }
+      },
+      "Trunk": {
+        "type": "object",
+        "required": [
+          "id",
+          "hasPassword",
+          "createdAt",
+          "updatedAt",
+          "name",
+          "mode",
+          "username",
+          "realm",
+          "fromDomain",
+          "registerExpires",
+          "optionsInterval",
+          "sourceCidrs",
+          "maxCalls",
+          "defaultCallerId",
+          "enabled",
+          "destinations"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "example": "carrier-primary"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["registration", "ip"]
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "realm": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "fromDomain": {
+            "type": "string"
+          },
+          "registerExpires": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400,
+            "description": "Seconds"
+          },
+          "optionsInterval": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 3600,
+            "description": "Seconds"
+          },
+          "sourceCidrs": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "example": "203.0.113.0/24"
+            }
+          },
+          "maxCalls": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000,
+            "description": "0 = unlimited"
+          },
+          "defaultCallerId": {
+            "type": "string",
+            "pattern": "^(\\+?[0-9]{2,20})?$",
+            "example": "+97142000000"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "destinations": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/Destination"
+            }
+          },
+          "hasPassword": {
+            "type": "boolean",
+            "description": "Whether a password is set; the password itself is never returned."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TrunkCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "mode", "destinations"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "example": "carrier-primary"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["registration", "ip"]
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "realm": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "fromDomain": {
+            "type": "string"
+          },
+          "registerExpires": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400,
+            "description": "Seconds"
+          },
+          "optionsInterval": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 3600,
+            "description": "Seconds"
+          },
+          "sourceCidrs": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "example": "203.0.113.0/24"
+            }
+          },
+          "maxCalls": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000,
+            "description": "0 = unlimited"
+          },
+          "defaultCallerId": {
+            "type": "string",
+            "pattern": "^(\\+?[0-9]{2,20})?$",
+            "example": "+97142000000"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "destinations": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/Destination"
+            }
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "writeOnly": true,
+            "maxLength": 256,
+            "description": "Sealed with AES-256-GCM under HELLO_SECRET_KEY and never returned. On PATCH: omitted keeps it, \"\" clears it, a value replaces it."
+          }
+        }
+      },
+      "TrunkUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "example": "carrier-primary"
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["registration", "ip"]
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "realm": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "fromDomain": {
+            "type": "string"
+          },
+          "registerExpires": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400,
+            "description": "Seconds"
+          },
+          "optionsInterval": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 3600,
+            "description": "Seconds"
+          },
+          "sourceCidrs": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "example": "203.0.113.0/24"
+            }
+          },
+          "maxCalls": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000,
+            "description": "0 = unlimited"
+          },
+          "defaultCallerId": {
+            "type": "string",
+            "pattern": "^(\\+?[0-9]{2,20})?$",
+            "example": "+97142000000"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "destinations": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/Destination"
+            }
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "writeOnly": true,
+            "maxLength": 256,
+            "description": "Sealed with AES-256-GCM under HELLO_SECRET_KEY and never returned. On PATCH: omitted keeps it, \"\" clears it, a value replaces it."
+          }
+        }
+      },
+      "DestinationHealth": {
+        "type": "object",
+        "required": ["destination", "up", "checkedAt"],
+        "properties": {
+          "destination": {
+            "type": "string"
+          },
+          "up": {
+            "type": "boolean"
+          },
+          "lastCode": {
+            "type": "integer"
+          },
+          "latencyNs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "checkedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TrunkRegistration": {
+        "type": "object",
+        "required": ["state", "node", "updatedAt"],
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "registered",
+              "registering",
+              "failed",
+              "misconfigured",
+              "disabled"
+            ]
+          },
+          "node": {
+            "type": "string"
+          },
+          "lastCode": {
+            "type": "integer"
+          },
+          "expires": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TrunkStatus": {
+        "type": "object",
+        "required": ["trunkId", "name", "destinations", "activeCalls"],
+        "properties": {
+          "trunkId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "example": "carrier-primary"
+          },
+          "registration": {
+            "$ref": "#/components/schemas/TrunkRegistration"
+          },
+          "destinations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DestinationHealth"
+            }
+          },
+          "activeCalls": {
+            "type": "integer"
+          }
+        }
+      },
+      "OutboundRoute": {
+        "type": "object",
+        "required": [
+          "id",
+          "position",
+          "name",
+          "matchKind",
+          "match",
+          "sourceExtensions",
+          "schedule",
+          "numberTransform",
+          "callerIdTransform",
+          "trunks",
+          "failoverCodes",
+          "emergency",
+          "enabled"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "position": {
+            "type": "integer",
+            "description": "Changed only through PUT /api/v1/routes/outbound/order"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "UAE Mobile"
+          },
+          "matchKind": {
+            "type": "string",
+            "enum": ["prefix", "regex"]
+          },
+          "match": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "A prefix (0-9 + * #, empty matches all) or an RE2 regex"
+          },
+          "sourceExtensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Empty = every extension"
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Schedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "numberTransform": {
+            "$ref": "#/components/schemas/Transform"
+          },
+          "callerIdTransform": {
+            "$ref": "#/components/schemas/Transform"
+          },
+          "trunks": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Trunk ids in try order"
+          },
+          "failoverCodes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 300,
+              "maximum": 699
+            },
+            "description": "Default 408, 480, 500, 502, 503, 504"
+          },
+          "emergency": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "OutboundRouteCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "matchKind", "match", "trunks"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "UAE Mobile"
+          },
+          "matchKind": {
+            "type": "string",
+            "enum": ["prefix", "regex"]
+          },
+          "match": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "A prefix (0-9 + * #, empty matches all) or an RE2 regex"
+          },
+          "sourceExtensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Empty = every extension"
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Schedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "numberTransform": {
+            "$ref": "#/components/schemas/Transform"
+          },
+          "callerIdTransform": {
+            "$ref": "#/components/schemas/Transform"
+          },
+          "trunks": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Trunk ids in try order"
+          },
+          "failoverCodes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 300,
+              "maximum": 699
+            },
+            "description": "Default 408, 480, 500, 502, 503, 504"
+          },
+          "emergency": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "OutboundRouteUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "UAE Mobile"
+          },
+          "matchKind": {
+            "type": "string",
+            "enum": ["prefix", "regex"]
+          },
+          "match": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "A prefix (0-9 + * #, empty matches all) or an RE2 regex"
+          },
+          "sourceExtensions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Empty = every extension"
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Schedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "numberTransform": {
+            "$ref": "#/components/schemas/Transform"
+          },
+          "callerIdTransform": {
+            "$ref": "#/components/schemas/Transform"
+          },
+          "trunks": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Trunk ids in try order"
+          },
+          "failoverCodes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 300,
+              "maximum": 699
+            },
+            "description": "Default 408, 480, 500, 502, 503, 504"
+          },
+          "emergency": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "InboundRoute": {
+        "type": "object",
+        "required": [
+          "id",
+          "position",
+          "name",
+          "didKind",
+          "did",
+          "trunkId",
+          "sipDomain",
+          "headerName",
+          "headerRegex",
+          "schedule",
+          "callerIdTransform",
+          "destinationKind",
+          "destination",
+          "enabled"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "position": {
+            "type": "integer",
+            "description": "Changed only through PUT /api/v1/routes/inbound/order"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "UAE Mobile"
+          },
+          "didKind": {
+            "type": "string",
+            "enum": ["any", "exact", "prefix", "regex"]
+          },
+          "did": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "trunkId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null = any trunk"
+          },
+          "sipDomain": {
+            "type": "string"
+          },
+          "headerName": {
+            "type": "string"
+          },
+          "headerRegex": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Go RE2 regular expression, at most 500 characters"
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Schedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "callerIdTransform": {
+            "$ref": "#/components/schemas/Transform"
+          },
+          "destinationKind": {
+            "type": "string",
+            "enum": ["extension", "external", "sip_uri"]
+          },
+          "destination": {
+            "type": "string",
+            "example": "101"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "InboundRouteCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "destinationKind", "destination"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "UAE Mobile"
+          },
+          "didKind": {
+            "type": "string",
+            "enum": ["any", "exact", "prefix", "regex"]
+          },
+          "did": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "trunkId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null = any trunk"
+          },
+          "sipDomain": {
+            "type": "string"
+          },
+          "headerName": {
+            "type": "string"
+          },
+          "headerRegex": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Go RE2 regular expression, at most 500 characters"
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Schedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "callerIdTransform": {
+            "$ref": "#/components/schemas/Transform"
+          },
+          "destinationKind": {
+            "type": "string",
+            "enum": ["extension", "external", "sip_uri"]
+          },
+          "destination": {
+            "type": "string",
+            "example": "101"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "InboundRouteUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "example": "UAE Mobile"
+          },
+          "didKind": {
+            "type": "string",
+            "enum": ["any", "exact", "prefix", "regex"]
+          },
+          "did": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "trunkId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null = any trunk"
+          },
+          "sipDomain": {
+            "type": "string"
+          },
+          "headerName": {
+            "type": "string"
+          },
+          "headerRegex": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Go RE2 regular expression, at most 500 characters"
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Schedule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "callerIdTransform": {
+            "$ref": "#/components/schemas/Transform"
+          },
+          "destinationKind": {
+            "type": "string",
+            "enum": ["extension", "external", "sip_uri"]
+          },
+          "destination": {
+            "type": "string",
+            "example": "101"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RouteOrder": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ids"],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Every route id of this kind exactly once, in the new order"
+          }
+        }
+      },
+      "TraceStep": {
+        "type": "object",
+        "required": ["n", "text"],
+        "properties": {
+          "n": {
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "RoutingTestRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "number"],
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "An extension number, or trunk:<id> for an inbound call",
+            "example": "101"
+          },
+          "number": {
+            "type": "string",
+            "example": "0501234567"
+          },
+          "callerId": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Decision time; default now"
+          }
+        }
+      },
+      "RoutingDecision": {
+        "type": "object",
+        "required": [
+          "kind",
+          "extension",
+          "sipUri",
+          "number",
+          "callerId",
+          "route",
+          "trunks",
+          "rejectCode",
+          "reason"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["internal", "outbound", "inbound", "reject"]
+          },
+          "extension": {
+            "type": "string"
+          },
+          "sipUri": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "callerId": {
+            "type": "string"
+          },
+          "route": {
+            "type": "string"
+          },
+          "trunks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Trunk names in try order"
+          },
+          "rejectCode": {
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "RoutingTestResult": {
+        "type": "object",
+        "required": ["decision", "trace"],
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/RoutingDecision"
+          },
+          "trace": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TraceStep"
+            }
+          }
+        }
+      },
+      "CDRDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CDR"
+          },
+          {
+            "type": "object",
+            "required": ["trace", "explanation"],
+            "properties": {
+              "trace": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TraceStep"
+                }
+              },
+              "explanation": {
+                "type": "string",
+                "description": "For a failed call, the reason from the last trace step; empty otherwise"
+              }
+            }
+          }
+        ]
       }
     }
   }

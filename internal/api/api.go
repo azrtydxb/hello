@@ -14,6 +14,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/version"
 )
@@ -43,9 +44,9 @@ type Store interface {
 
 	ListExtensions(ctx context.Context) ([]store.Extension, error)
 	GetExtension(ctx context.Context, id int64) (store.Extension, error)
-	CreateExtension(ctx context.Context, actor, number, name string) (store.Extension, error)
-	UpdateExtension(ctx context.Context, actor string, id int64, number, name *string) (store.Extension, error)
-	DeleteExtension(ctx context.Context, actor string, id int64) error
+	CreateExtension(ctx context.Context, actor, number, name, externalNumber string, check store.Check) (store.Extension, error)
+	UpdateExtension(ctx context.Context, actor string, id int64, c store.ExtensionChange, check store.Check) (store.Extension, error)
+	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
 
 	ListDevices(ctx context.Context) ([]store.Device, error)
 	GetDevice(ctx context.Context, id int64) (store.Device, error)
@@ -55,6 +56,31 @@ type Store interface {
 	DeleteDevice(ctx context.Context, actor string, id int64) error
 
 	ListCDRs(ctx context.Context, before int64, limit int) ([]store.CDR, string, error)
+	GetCDR(ctx context.Context, id int64) (store.CDR, routing.Trace, error)
+
+	ListTrunks(ctx context.Context) ([]store.Trunk, error)
+	GetTrunk(ctx context.Context, id int64) (store.Trunk, error)
+	CreateTrunk(ctx context.Context, actor string, in store.TrunkInput, password string, check store.Check) (store.Trunk, error)
+	UpdateTrunk(ctx context.Context, actor string, id int64, pw store.PasswordChange,
+		apply func(*store.TrunkInput, bool) []routing.FieldError, check store.Check) (store.Trunk, error)
+	DeleteTrunk(ctx context.Context, actor string, id int64, check store.Check) error
+
+	ListOutboundRoutes(ctx context.Context) ([]store.OutboundRoute, error)
+	GetOutboundRoute(ctx context.Context, id int64) (store.OutboundRoute, error)
+	CreateOutboundRoute(ctx context.Context, actor string, o store.OutboundRoute, check store.Check) (store.OutboundRoute, error)
+	UpdateOutboundRoute(ctx context.Context, actor string, id int64,
+		apply func(*store.OutboundRoute) []routing.FieldError, check store.Check) (store.OutboundRoute, error)
+	DeleteOutboundRoute(ctx context.Context, actor string, id int64, check store.Check) error
+
+	ListInboundRoutes(ctx context.Context) ([]store.InboundRoute, error)
+	GetInboundRoute(ctx context.Context, id int64) (store.InboundRoute, error)
+	CreateInboundRoute(ctx context.Context, actor string, in store.InboundRoute, check store.Check) (store.InboundRoute, error)
+	UpdateInboundRoute(ctx context.Context, actor string, id int64,
+		apply func(*store.InboundRoute) []routing.FieldError, check store.Check) (store.InboundRoute, error)
+	DeleteInboundRoute(ctx context.Context, actor string, id int64, check store.Check) error
+
+	ReorderRoutes(ctx context.Context, actor, kind string, ids []int64, check store.Check) error
+	RoutingConfig(ctx context.Context) (store.RoutingSnapshot, error)
 }
 
 // Live is the shared live state; *livestate.Store implements it.
@@ -71,6 +97,12 @@ type Config struct {
 	SIPDomain  string
 	SessionTTL time.Duration
 	Log        *slog.Logger
+	// Router is the routing engine. Without one, trunk and route changes
+	// and the route tester answer 503.
+	Router Router
+	// Trunks reads trunk live state for /trunks/status and the route
+	// tester; nil behaves as Valkey unreachable.
+	Trunks TrunkLive
 }
 
 type server struct{ Config }
@@ -116,6 +148,30 @@ func Handler(c Config) http.Handler {
 	private("GET /api/v1/registrations", s.registrations)
 	private("GET /api/v1/calls", s.calls)
 	private("GET /api/v1/cdrs", s.cdrs)
+	private("GET /api/v1/cdrs/{id}", s.getCDR)
+
+	private("GET /api/v1/trunks", s.listTrunks)
+	private("POST /api/v1/trunks", s.createTrunk)
+	private("GET /api/v1/trunks/status", s.trunkStatus)
+	private("GET /api/v1/trunks/{id}", s.getTrunk)
+	private("PATCH /api/v1/trunks/{id}", s.updateTrunk)
+	private("DELETE /api/v1/trunks/{id}", s.deleteTrunk)
+
+	private("GET /api/v1/routes/outbound", s.listOutbound)
+	private("POST /api/v1/routes/outbound", s.createOutbound)
+	private("PUT /api/v1/routes/outbound/order", s.reorder(store.Outbound))
+	private("GET /api/v1/routes/outbound/{id}", s.getOutbound)
+	private("PATCH /api/v1/routes/outbound/{id}", s.updateOutbound)
+	private("DELETE /api/v1/routes/outbound/{id}", s.deleteOutbound)
+
+	private("GET /api/v1/routes/inbound", s.listInbound)
+	private("POST /api/v1/routes/inbound", s.createInbound)
+	private("PUT /api/v1/routes/inbound/order", s.reorder(store.Inbound))
+	private("GET /api/v1/routes/inbound/{id}", s.getInbound)
+	private("PATCH /api/v1/routes/inbound/{id}", s.updateInbound)
+	private("DELETE /api/v1/routes/inbound/{id}", s.deleteInbound)
+
+	private("POST /api/v1/routing/test", s.routingTest)
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.

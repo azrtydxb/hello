@@ -23,6 +23,7 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/migrate"
+	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -48,6 +49,13 @@ type env struct {
 // It skips without HELLO_TEST_DATABASE_URL.
 func newEnv(t *testing.T, live Live) *env {
 	t.Helper()
+	return newEnvConfig(t, Config{Live: live}, nil)
+}
+
+// newEnvConfig is newEnv with more of the API's dependencies: cfg's Store,
+// SIPDomain and SessionTTL are filled in, and box seals trunk passwords.
+func newEnvConfig(t *testing.T, cfg Config, box *secret.Box) *env {
+	t.Helper()
 	dsn := os.Getenv("HELLO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("HELLO_TEST_DATABASE_URL not set")
@@ -61,7 +69,7 @@ func newEnv(t *testing.T, live Live) *env {
 	if _, err := migrate.Up(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	st := store.New(db)
+	st := store.New(db).WithSecretBox(box)
 	hash, err := auth.HashPassword(testPassword)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +77,8 @@ func newEnv(t *testing.T, live Live) *env {
 	if _, err := st.CreateUser(ctx, "test", testUser, hash); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(Handler(Config{Store: st, Live: live, SIPDomain: testDomain, SessionTTL: sessionTTL}))
+	cfg.Store, cfg.SIPDomain, cfg.SessionTTL = st, testDomain, sessionTTL
+	srv := httptest.NewServer(Handler(cfg))
 	t.Cleanup(srv.Close)
 	return &env{t: t, srv: srv, db: db, st: st}
 }
