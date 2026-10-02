@@ -14,16 +14,16 @@ import (
 
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/config"
-	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/ops"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/version"
+	"github.com/azrtydxb/hello/internal/vkconn"
 	"github.com/jackc/pgx/v5/stdlib"
-	"github.com/valkey-io/valkey-go"
 )
 
 const (
@@ -32,6 +32,9 @@ const (
 	bootstrapRetry = 5 * time.Second
 	// pruneEvery is how often expired sessions are deleted.
 	pruneEvery = time.Hour
+	// memberHeartbeat is how often this node republishes its membership and
+	// refreshes the cluster metrics (cluster.TTL is three heartbeats).
+	memberHeartbeat = cluster.TTL / 3
 )
 
 const usage = "usage: hello-control serve | migrate up | migrate status"
@@ -87,18 +90,13 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		return err
 	}
 	log.Info("starting", "version", version.Version, "commit", version.Commit, "config", cfg)
-	// Valkey only backs the live views, so management starts without it.
-	// ForceSingleClient returns a client even when the first dial fails, and
-	// that client redials on every command.
-	vk, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{cfg.ValkeyAddr}, ForceSingleClient: true})
-	if vk == nil {
-		_ = ln.Close()
-		return fmt.Errorf("valkey: %w", err)
-	}
+	// Valkey backs the live views, trunk status and the cluster view, not
+	// management, so serving starts without it. In Sentinel mode vkconn.New
+	// waits for a sentinel; until it returns, those views answer 503.
+	vkc := vkconn.Config{Addr: cfg.ValkeyAddr, Sentinels: cfg.ValkeySentinels, Master: cfg.ValkeyMaster}
+	vk := api.NewLazyValkey(vkc.Sentinel())
 	defer vk.Close()
-	if err != nil {
-		log.Warn("valkey unreachable at startup; live views unavailable until it is", "addr", cfg.ValkeyAddr, "error", err)
-	}
+	go connectValkey(ctx, vkc, vk, log)
 
 	// config.LoadControl has already checked the key's shape.
 	box, err := secret.New(cfg.SecretKey)
@@ -107,25 +105,43 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		return fmt.Errorf("HELLO_SECRET_KEY: %w", err)
 	}
 	st := store.New(db).WithSecretBox(box)
-	live := livestate.New(vk)
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
 
+	metrics := telemetry.NewMetrics("hello-control", version.Version, version.Commit)
+	required := map[string]ops.Check{"postgres": db.PingContext}
+	pub := &api.Publisher{
+		ID: cfg.NodeID, HTTPAddr: cfg.HTTPAddr, Version: version.Version, StartedAt: time.Now().UTC(),
+		Heartbeat: memberHeartbeat, Revision: st.ConfigRevision, Store: vk,
+		Metrics: api.NewClusterMetrics(metrics.Registry), Log: log,
+		Required: map[string]func(context.Context) error{"postgres": db.PingContext},
+	}
+	pubCtx, stopPub := context.WithCancel(ctx)
+	pubDone := make(chan struct{})
+	go func() { defer close(pubDone); pub.Run(pubCtx) }()
+	defer func() {
+		stopPub()
+		<-pubDone
+		lctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		pub.Leave(lctx)
+	}()
+
 	srv := &ops.Server{
-		Checks: map[string]ops.Check{"postgres": db.PingContext},
-		// Valkey only backs the live views: its loss degrades, not fails.
-		Optional: map[string]ops.Check{"valkey": func(ctx context.Context) error {
-			return vk.Do(ctx, vk.B().Ping().Build()).Error()
-		}},
+		Checks: required,
+		// Valkey backs views, not management: its loss degrades, not fails.
+		Optional: map[string]ops.Check{"valkey": vk.Ping},
 		App: api.Handler(api.Config{
 			Store:      st,
-			Live:       live,
-			Trunks:     live,
+			Live:       vk,
+			Trunks:     vk,
+			Cluster:    vk,
+			Valkey:     vk,
 			SIPDomain:  cfg.SIPDomain,
 			SessionTTL: cfg.SessionTTL,
 			Log:        log,
 		}),
-		Metrics:         telemetry.NewMetrics("hello-control", version.Version, version.Commit),
+		Metrics:         metrics,
 		Log:             log,
 		DrainDelay:      cfg.DrainDelay,
 		ShutdownTimeout: cfg.ShutdownTimeout,
@@ -171,4 +187,21 @@ func pruneSessions(ctx context.Context, st *store.Store, log *slog.Logger) {
 		case <-t.C:
 		}
 	}
+}
+
+// connectValkey creates the Valkey client and installs it in vk. A single
+// instance returns at once (redialling per command if it is down); Sentinel
+// waits until a sentinel answers or ctx ends.
+func connectValkey(ctx context.Context, c vkconn.Config, vk *api.LazyValkey, log *slog.Logger) {
+	cl, err := vkconn.New(ctx, c, log)
+	if cl == nil {
+		if ctx.Err() == nil {
+			log.Error("valkey client could not be created; live and cluster views stay unavailable", "error", err)
+		}
+		return
+	}
+	if err != nil {
+		log.Warn("valkey unreachable at startup; live and cluster views unavailable until it is", "error", err)
+	}
+	vk.Set(cl)
 }

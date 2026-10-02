@@ -102,6 +102,10 @@ type Config struct {
 	// Trunks reads trunk live state for /trunks/status and the route
 	// tester; nil behaves as Valkey unreachable.
 	Trunks TrunkLive
+	// Cluster is node membership and drain requests; Valkey reports Valkey
+	// health. nil behaves as Valkey unreachable.
+	Cluster ClusterStore
+	Valkey  ValkeyStatus
 }
 
 type server struct{ Config }
@@ -174,6 +178,11 @@ func Handler(c Config) http.Handler {
 	private("DELETE /api/v1/routes/inbound/{id}", s.deleteInbound)
 
 	private("POST /api/v1/routing/test", s.routingTest)
+
+	private("GET /api/v1/cluster", s.clusterOverview)
+	private("GET /api/v1/cluster/nodes", s.clusterNodes)
+	private("POST /api/v1/cluster/nodes/{id}/drain", s.requestDrain)
+	private("DELETE /api/v1/cluster/nodes/{id}/drain", s.cancelDrain)
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.

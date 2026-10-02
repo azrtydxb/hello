@@ -1457,6 +1457,156 @@
           }
         }
       }
+    },
+    "/api/v1/cluster": {
+      "get": {
+        "operationId": "getCluster",
+        "summary": "Cluster members, dependency health and configuration revision",
+        "tags": ["cluster"],
+        "description": "Answers 200 with a dependency down, reporting it: members are empty while Valkey is unreachable, and the revision and lags are absent while PostgreSQL is.",
+        "responses": {
+          "200": {
+            "description": "Cluster view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterView"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/cluster/nodes": {
+      "get": {
+        "operationId": "listClusterNodes",
+        "summary": "Every member, live and OFFLINE",
+        "tags": ["cluster"],
+        "responses": {
+          "200": {
+            "description": "Members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ClusterMember"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/cluster/nodes/{id}/drain": {
+      "post": {
+        "operationId": "drainNode",
+        "summary": "Ask a node to drain",
+        "tags": ["cluster"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,64}$"
+            },
+            "description": "The node's HELLO_NODE_ID"
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["true"]
+            },
+            "description": "Drain even if no READY SIP node would remain"
+          }
+        ],
+        "description": "Writes a drain request the node acts on within 5s, and audits it (actor and node; action drain, or drain-force when forced). 409 when draining would leave no READY SIP node (repeat with ?force=true), or when the node is OFFLINE.",
+        "responses": {
+          "204": {
+            "description": "Drain requested"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "undrainNode",
+        "summary": "Cancel a drain request",
+        "tags": ["cluster"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,64}$"
+            },
+            "description": "The node's HELLO_NODE_ID"
+          }
+        ],
+        "description": "Withdraws the drain request and audits it (action undrain). A node that has started exiting still exits.",
+        "responses": {
+          "204": {
+            "description": "Drain cancelled"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3181,6 +3331,135 @@
             }
           }
         ]
+      },
+      "ClusterMember": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "activeCalls",
+          "registrations",
+          "version",
+          "configRevision",
+          "startedAt",
+          "heartbeat"
+        ],
+        "description": "One node's membership record (internal/cluster Member) plus its revision lag.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "HELLO_NODE_ID",
+            "example": "hello-sip-1"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["sip", "control"]
+          },
+          "state": {
+            "type": "string",
+            "enum": ["JOINING", "READY", "DRAINING", "UNHEALTHY", "OFFLINE"]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the node is not READY"
+          },
+          "sipAddr": {
+            "type": "string"
+          },
+          "httpAddr": {
+            "type": "string"
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "activeCalls": {
+            "type": "integer"
+          },
+          "registrations": {
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          },
+          "configRevision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "heartbeat": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revisionLag": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Current configuration revision minus the node's; absent while PostgreSQL is unavailable"
+          }
+        }
+      },
+      "ClusterView": {
+        "type": "object",
+        "required": ["members", "postgres", "valkey", "configRevision"],
+        "properties": {
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClusterMember"
+            },
+            "description": "Empty while Valkey is unreachable"
+          },
+          "postgres": {
+            "type": "object",
+            "required": ["up"],
+            "properties": {
+              "up": {
+                "type": "boolean"
+              },
+              "error": {
+                "type": "string"
+              }
+            }
+          },
+          "valkey": {
+            "type": "object",
+            "required": ["up", "mode"],
+            "properties": {
+              "up": {
+                "type": "boolean"
+              },
+              "mode": {
+                "type": "string",
+                "enum": ["single", "sentinel"]
+              },
+              "primary": {
+                "type": "string",
+                "description": "Sentinel's current primary (host:port), in sentinel mode"
+              },
+              "error": {
+                "type": "string"
+              }
+            }
+          },
+          "configRevision": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null while PostgreSQL is unavailable"
+          }
+        }
       }
     }
   }

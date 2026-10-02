@@ -39,9 +39,14 @@ type call struct {
 	events    chan legEvent
 	setupDone chan struct{} // closed when setup stops reading events
 	canceled  chan struct{}
-	maxTimer  *time.Timer // ends a connected call at MaxCallDuration
-	cancelMu  sync.Once
-	stopHB    chan struct{}
+	// aborted is closed when the node ends a call still being set up
+	// (drain timeout); the setup goroutine answers the caller.
+	aborted     chan struct{}
+	abortOnce   sync.Once
+	abortReason string
+	maxTimer    *time.Timer // ends a connected call at MaxCallDuration
+	cancelMu    sync.Once
+	stopHB      chan struct{}
 	// pubMu orders live-call writes: publish and the final delete never
 	// overlap, and nothing is published once the call has ended, so an
 	// in-flight heartbeat cannot resurrect an ended call.
@@ -132,6 +137,9 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		s.handleInDialog(req, tx)
 		return
 	}
+	if s.refuseIfDraining(req, tx) {
+		return
+	}
 	if _, ok := s.lookup(req.CallID().Value()); ok {
 		// Same Call-ID as a call in progress but a new transaction: a
 		// merged or looped request (RFC 3261 §8.2.2.2).
@@ -149,7 +157,7 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 			return
 		}
 		if !s.looksLikePhone(req, snap) {
-			s.authFailed(tx, req, sourceIP(req), "INVITE from a source that is neither a trunk nor a phone", false)
+			s.authFailed(tx, req, s.clientIP(req), "INVITE from a source that is neither a trunk nor a phone", false)
 			return
 		}
 	}
@@ -181,6 +189,7 @@ func (s *Server) newCall(req *sip.Request) *call {
 		s: s, id: newID(), callID: req.CallID().Value(),
 		dialled: req.Recipient.User, start: time.Now(), inv: req, direction: cdr.DirectionInternal,
 		canceled: make(chan struct{}), stopHB: make(chan struct{}), setupDone: make(chan struct{}),
+		aborted: make(chan struct{}),
 	}
 }
 
@@ -381,6 +390,12 @@ func (c *call) setup(pending int) {
 				return
 			}
 			// A fork already won; answer() sees the cancellation.
+		case <-c.aborted:
+			if c.closeSetup() {
+				c.cancelForks(nil)
+				c.abortCaller()
+				return
+			}
 		case <-timer.C:
 			if c.closeSetup() {
 				c.cancelForks(nil)
@@ -558,8 +573,36 @@ func (c *call) hangup(side string) {
 	}()
 }
 
+// abort asks the setup goroutine to end a call that is not connected yet.
+func (c *call) abort(reason string) {
+	c.abortOnce.Do(func() {
+		c.mu.Lock()
+		c.abortReason = reason
+		c.mu.Unlock()
+		close(c.aborted)
+	})
+}
+
+// abortCaller answers the caller 503 and ends an aborted call; setup has
+// closed and the forks are cancelled.
+func (c *call) abortCaller() {
+	c.mu.Lock()
+	reason := c.abortReason
+	c.mu.Unlock()
+	c.addTrace("Call ended by the node: " + reason)
+	c.respondA(sip.StatusServiceUnavailable, "Service Unavailable")
+	c.end(sip.StatusServiceUnavailable, cdr.SideSystem, reason, ResultFailed)
+}
+
 // expire ends a call that reached MaxCallDuration: BYE to both legs.
 func (c *call) expire() {
+	c.s.log.Info("call reached the maximum duration", "correlation_id", c.id, "max", c.s.cfg.MaxCallDuration.String())
+	c.endBoth("max duration")
+}
+
+// endBoth ends a connected call for a system reason (max duration, drain
+// timeout): BYE to both legs, CDR side system.
+func (c *call) endBoth(reason string) {
 	c.mu.Lock()
 	if c.hungUp || c.ended {
 		c.mu.Unlock()
@@ -568,15 +611,14 @@ func (c *call) expire() {
 	c.hungUp = true
 	w := c.winner
 	c.mu.Unlock()
-	c.s.log.Info("call reached the maximum duration", "correlation_id", c.id, "max", c.s.cfg.MaxCallDuration.String())
-	c.end(sip.StatusOK, cdr.SideSystem, "max duration", ResultAnswered)
+	c.end(sip.StatusOK, cdr.SideSystem, reason, ResultAnswered)
 	go func() {
 		defer c.release()
-		defer contain(c.s.log, "expire")
+		defer contain(c.s.log, "end both legs")
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			defer contain(c.s.log, "expire")
+			defer contain(c.s.log, "end both legs")
 			w.bye()
 		}()
 		c.byeA()
@@ -861,6 +903,17 @@ func (l *leg) invite() (*sip.Request, error) {
 		req.SetDestination(l.addr)
 	case l.uri != nil:
 		// sipgo resolves the URI's host.
+	case len(l.binding.Path) > 0 && !strings.Contains(l.binding.Path[0], "hflow="):
+		// Registered through a trusted edge proxy (Kamailio): its Path
+		// reaches the phone's NAT flow from any node (plan contract 7).
+		var first sip.Uri
+		if err := sip.ParseUri(strings.Trim(l.binding.Path[0], "<> "), &first); err != nil {
+			return nil, err
+		}
+		for _, p := range l.binding.Path {
+			req.AppendHeader(sip.NewHeader("Route", p))
+		}
+		req.SetDestination(hostPort(first))
 	case l.binding.ReceivedNode != s.cfg.NodeID && len(l.binding.Path) > 0:
 		// Registered through another node: only that node's flow reaches
 		// the phone, so route via its Path (it edge-proxies the INVITE).

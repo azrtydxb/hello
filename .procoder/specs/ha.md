@@ -91,7 +91,7 @@ Spec §17 makes HA Levels 1–3 mandatory for the first production-ready release
 
   Each row states what is detected, what the node reports (state, readiness, metrics), what still works, and how it recovers.
 
-- [S-10] **Failure-injection suite.** `test/failure/` (`HELLO_DOCKER=1`) automates each case against the lab through Kamailio:
+- [S-10] **Failure-injection suite.** `test/integration/failure_test.go` (`HELLO_DOCKER=1`) automates each case against the lab through Kamailio:
   - kill a SIP node during REGISTER, during ringing, and during a connected call
   - kill and restart the control plane
   - a PostgreSQL outage and restart
@@ -138,7 +138,7 @@ Spec §17 makes HA Levels 1–3 mandatory for the first production-ready release
   - `DELETE /api/v1/cluster/nodes/{id}/drain`
 - **SIP:** Kamailio on UDP 5080 (host) and 5060 (inside the network). The headers between Kamailio and Hello are `Path`, `Record-Route` and `X-Hello-Client`.
 - **UI:** a Cluster page at `/cluster` with drain actions.
-- **Files:** `deploy/kamailio/kamailio.cfg` (with its dispatcher list or database), `docs/ha.md`, `test/failure/`.
+- **Files:** `deploy/kamailio/kamailio.cfg` (with its dispatcher list or database), `docs/ha.md`, `test/integration/failure_test.go`.
 
 ## Data
 
@@ -187,14 +187,14 @@ The `docs/ha.md` table is normative. Its key rows:
 ## Acceptance criteria
 
 - [ ] [S-1] [S-2] `TestMembershipLifecycle` in `internal/cluster` (Valkey) passes. It fails if a node is not reported JOINING, then READY, then DRAINING, then OFFLINE with the right timings, if `/readyz` is 200 outside READY, or if an expired node is not tombstoned.
-- [ ] [S-3] `TestDrainKeepsCallsAndExits` in `test/failure` passes. It fails if, after a drain request, the draining node accepts a new INVITE, drops the active call, keeps its trunk leases, or exits before that call ends; or if, with `HELLO_DRAIN_TIMEOUT` short, it does not BYE the remaining call and exit.
+- [ ] [S-3] `TestDrainKeepsCallsAndExits` in `test/integration` (failure_test.go) passes. It fails if, after a drain request, the draining node accepts a new INVITE, drops the active call, keeps its trunk leases, or exits before that call ends; or if, with `HELLO_DRAIN_TIMEOUT` short, it does not BYE the remaining call and exit.
 - [ ] [S-4] [S-5] `TestClusterAPI` in `internal/api` passes. It fails if `/api/v1/cluster` omits a member, state, load, version, revision lag, or dependency health, if a drain request is not audited, or if draining the last READY node is not warned.
-- [ ] [S-6] [S-7] `TestKamailioBalancesAndPaths` in `test/failure` passes. It fails if phones registering through Kamailio are not spread over both nodes, if a call between phones registered on different nodes does not connect, or if failed-auth throttling keys on Kamailio's IP instead of the client's.
-- [ ] [S-10] `TestKillSIPNodeDuringRegister`, `TestKillSIPNodeDuringRinging` and `TestKillSIPNodeDuringCall` in `test/failure` pass. Each fails if, after the kill, a new REGISTER and a new call through Kamailio do not succeed within 20s. They also fail if a ringing caller is left hanging rather than getting a final response or timing out, or if the dead node's call is still listed after 40s.
-- [ ] [S-8] [S-10] `TestValkeyFailover` in `test/failure` passes. It fails if, after the Valkey primary is killed, nodes are not READY within 15s of promotion, if new registrations and calls do not succeed, or if any binding lacks a TTL.
-- [ ] [S-9] [S-10] `TestPostgresOutage` and `TestControlPlaneRestart` in `test/failure` pass. They fail if registration or calling stops while PostgreSQL or every hello-control is down, or if CDRs written during the outage are not in PostgreSQL after it returns.
-- [ ] [S-9] [S-10] `TestPartitionFromValkey` in `test/failure` passes. It fails if a SIP node disconnected from the Valkey network is not UNHEALTHY within 15s, keeps receiving new calls from Kamailio, or does not return to READY within 15s after reconnecting.
-- [ ] [S-3] [S-10] `TestRollingUpgrade` in `test/failure` passes. It fails if draining and restarting each SIP node in turn, with one long call active, drops that call or makes any new registration or call fail.
+- [ ] [S-6] [S-7] `TestKamailioBalancesAndPaths` in `test/integration` (failure_test.go) passes. It fails if phones registering through Kamailio are not spread over both nodes, if a call between phones registered on different nodes does not connect, or if failed-auth throttling keys on Kamailio's IP instead of the client's.
+- [ ] [S-10] `TestKillSIPNodeDuringRegister`, `TestKillSIPNodeDuringRinging` and `TestKillSIPNodeDuringCall` in `test/integration` (failure_test.go) pass. Each fails if, after the kill, a new REGISTER and a new call through Kamailio do not succeed within 20s. They also fail if a ringing caller is left hanging rather than getting a final response or timing out, or if the dead node's call is still listed after 40s.
+- [ ] [S-8] [S-10] `TestValkeyFailover` in `test/integration` (failure_test.go) passes. It fails if, after the Valkey primary is killed, nodes are not READY within 15s of promotion, if new registrations and calls do not succeed, or if any binding lacks a TTL.
+- [ ] [S-9] [S-10] `TestPostgresOutage` and `TestControlPlaneRestart` in `test/integration` (failure_test.go) pass. They fail if registration or calling stops while PostgreSQL or every hello-control is down, or if CDRs written during the outage are not in PostgreSQL after it returns.
+- [ ] [S-9] [S-10] `TestPartitionFromValkey` in `test/integration` (failure_test.go) passes. It fails if a SIP node disconnected from the Valkey network is not UNHEALTHY within 15s, keeps receiving new calls from Kamailio, or does not return to READY within 15s after reconnecting.
+- [ ] [S-3] [S-10] `TestRollingUpgrade` in `test/integration` (failure_test.go) passes. It fails if draining and restarting each SIP node in turn, with one long call active, drops that call or makes any new registration or call fail.
 - [ ] [S-11] `TestHAMetrics` in `internal/cluster` passes. It fails if the state, member, revision-lag and drain metrics do not move through a JOINING → READY → DRAINING cycle.
 - [ ] [S-5] `procoder test` and `procoder lint` pass over `web/`. `Cluster.test.tsx` fails if a node's state, load, version or revision lag is not shown, or if draining the last READY node doesn't ask for confirmation.
 - [ ] [S-12] `TestLabSmoke` (`HELLO_DOCKER=1`) registers phones and completes a call through Kamailio on host UDP 5080, failing otherwise. `docs/ha.md` contains every row of the S-9 table.

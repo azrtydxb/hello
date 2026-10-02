@@ -22,6 +22,9 @@ type contactReq struct {
 // handleRegister authenticates the device, applies its contacts to the AOR
 // and answers with every current binding (RFC 3261 §10.3).
 func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
+	if s.refuseIfDraining(req, tx) {
+		return
+	}
 	dev, _, ok := s.authenticate(req, tx)
 	if !ok {
 		return
@@ -184,10 +187,10 @@ func (s *Server) applyContacts(req *sip.Request, dev snapshot.Device, aor string
 				Extension:    dev.Extension,
 				Device:       dev.Username,
 				ContactURI:   c.uri,
-				Source:       req.Source(), // the packet's source: received/rport
+				Source:       s.clientSource(req), // received/rport, or the trusted proxy's X-Hello-Client
 				Transport:    "udp",
 				UserAgent:    userAgent,
-				Path:         []string{s.pathURI(s.flowToken(req.Source(), "udp", exp))},
+				Path:         s.bindingPath(req, exp),
 				ReceivedNode: s.cfg.NodeID,
 				Expires:      exp,
 				UpdatedAt:    now,
@@ -204,4 +207,21 @@ func (s *Server) applyContacts(req *sip.Request, dev snapshot.Device, aor string
 func (s *Server) stateDown(tx sip.ServerTransaction, req *sip.Request, op string, err error) {
 	s.log.Warn("live state unavailable", "op", op, "error", err)
 	s.unavailable(tx, req)
+}
+
+// bindingPath is a binding's Path. Through a trusted edge proxy it is the
+// Path the proxy added (calls reach the phone through it, from any node);
+// otherwise it is this node's own flow-token Path (direct mode), and any
+// client-supplied Path is dropped.
+func (s *Server) bindingPath(req *sip.Request, exp time.Time) []string {
+	if s.fromTrustedProxy(req) {
+		var path []string
+		for _, h := range req.GetHeaders("Path") {
+			path = append(path, h.Value())
+		}
+		if len(path) > 0 {
+			return path
+		}
+	}
+	return []string{s.pathURI(s.flowToken(req.Source(), "udp", exp))}
 }

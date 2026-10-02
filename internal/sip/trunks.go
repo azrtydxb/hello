@@ -37,8 +37,9 @@ type TrunkState interface {
 type trunkManager struct {
 	s *Server
 
-	mu   sync.Mutex
-	held map[int64]*heldTrunk
+	mu       sync.Mutex
+	held     map[int64]*heldTrunk
+	draining bool
 
 	status atomic.Pointer[map[int64]cachedStatus]
 	// series are the metric label values this node has set, so those of
@@ -117,9 +118,29 @@ func (m *trunkManager) routing() *snapshot.RoutingState {
 // stops this node's holder for it. Another node's unexpired lease is never
 // taken; when Valkey cannot be reached a running holder keeps going (its
 // registration stays valid until it expires).
+// setDraining stops (on) or resumes (off) this node's trunk work: while
+// draining it holds no trunk lease, so another node registers and checks
+// the trunks at once (plan contract 6).
+func (m *trunkManager) setDraining(on bool) {
+	m.mu.Lock()
+	was := m.draining
+	m.draining = on
+	m.mu.Unlock()
+	if on && !was {
+		m.s.log.Info("draining: releasing trunk leases")
+		m.stopAll()
+	}
+}
+
+func (m *trunkManager) isDraining() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.draining
+}
+
 func (m *trunkManager) leases(ctx context.Context) {
 	rs := m.routing()
-	if rs == nil {
+	if rs == nil || m.isDraining() {
 		return
 	}
 	ttl := 3 * m.s.cfg.TrunkLeaseRefresh
@@ -165,6 +186,14 @@ func (m *trunkManager) start(ctx context.Context, t routing.Trunk, bad string) {
 	hctx, cancel := context.WithCancel(ctx)
 	h := &heldTrunk{trunk: t, bad: bad, cancel: cancel, done: make(chan struct{})}
 	m.mu.Lock()
+	if m.draining { // a drain began after this lease was taken: give it back
+		m.mu.Unlock()
+		cancel()
+		rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = m.state().ReleaseLease(rctx, livestate.TrunkLeaseKey(t.ID), m.s.cfg.NodeID)
+		rcancel()
+		return
+	}
 	m.held[t.ID] = h
 	m.mu.Unlock()
 	m.s.log.Info("trunk lease held: registering and checking health", "trunk", t.Name)
