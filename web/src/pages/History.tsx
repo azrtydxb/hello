@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import { errorMessage, listCdrs, type CdrPage } from "../api";
 import { formatDuration, formatTime } from "../format";
 
@@ -62,6 +63,7 @@ export function History() {
           <thead>
             <tr>
               <th scope="col">Started</th>
+              <th scope="col">Direction</th>
               <th scope="col">From</th>
               <th scope="col">To</th>
               <th scope="col">Status</th>
@@ -75,7 +77,15 @@ export function History() {
           <tbody>
             {page.items.map((cdr) => (
               <tr key={cdr.id}>
-                <th scope="row">{formatTime(cdr.startTime)}</th>
+                <th scope="row">
+                  <Link
+                    to={`/history/${encodeURIComponent(String(cdr.id))}`}
+                    aria-label={`Call at ${formatTime(cdr.startTime)} from ${cdr.source} to ${cdr.destination}: details`}
+                  >
+                    {formatTime(cdr.startTime)}
+                  </Link>
+                </th>
+                <td>{cdr.direction ?? "internal"}</td>
                 <td>{cdr.source}</td>
                 <td>{cdr.destination}</td>
                 <td>{cdr.finalStatus}</td>

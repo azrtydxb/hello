@@ -119,4 +119,54 @@ describe("Extensions", () => {
     );
     expect(await screen.findByText("No extensions yet.")).toBeVisible();
   });
+  it("sets an external number on create and edit, validating it", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/extensions": () =>
+        json({ items: [{ ...EXT, externalNumber: "" }] }),
+      "POST /api/v1/extensions": () =>
+        json(
+          {
+            ...EXT,
+            id: 2,
+            number: "102",
+            name: "Desk",
+            externalNumber: "+97142000102",
+          },
+          201,
+        ),
+      "PATCH /api/v1/extensions/1": () =>
+        apiError(400, "bad_request", "invalid extension"),
+    });
+    renderApp("/extensions");
+    await screen.findByRole("row", { name: /Reception/ });
+
+    const external = screen.getByLabelText("External number");
+    fireEvent.change(external, { target: { value: "12-34" } });
+    fill("102", "Desk");
+    expect(external).toHaveAttribute("aria-invalid", "true");
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+
+    fireEvent.change(external, { target: { value: "+97142000102" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create extension" }));
+    expect(await screen.findByText("+97142000102")).toBeVisible();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      number: "102",
+      name: "Desk",
+      externalNumber: "+97142000102",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit extension 100" }));
+    fireEvent.change(
+      screen.getByLabelText("External number for extension 100"),
+      {
+        target: { value: "+97142000100" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/invalid extension/)).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({
+      externalNumber: "+97142000100",
+    });
+  });
 });

@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import { NavLink, Outlet, Route, Routes, useNavigate } from "react-router";
 import { AuthProvider, RequireAuth, useAuth } from "./auth";
 import { CURRENT_PHASE, NAV_ITEMS } from "./nav";
+import { CallDetail } from "./pages/CallDetail";
 import { Calls } from "./pages/Calls";
 import { Dashboard } from "./pages/Dashboard";
 import { Devices } from "./pages/Devices";
@@ -11,6 +12,9 @@ import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
 import { Placeholder } from "./pages/Placeholder";
 import { Registrations } from "./pages/Registrations";
+import { RouteTest } from "./pages/RouteTest";
+import { RoutesPage } from "./pages/Routes";
+import { Trunks } from "./pages/Trunks";
 
 /** Pages that have content; any other nav item renders a placeholder. */
 const PAGES: Readonly<Record<string, ComponentType>> = {
@@ -19,6 +23,8 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/registrations": Registrations,
   "/calls": Calls,
   "/history": History,
+  "/trunks": Trunks,
+  "/routes": RoutesPage,
 };
 
 function Shell() {
@@ -88,6 +94,8 @@ export function App() {
               );
             return <Route key={item.path} path={item.path} element={element} />;
           })}
+          <Route path="/routes/test" element={<RouteTest />} />
+          <Route path="/history/:id" element={<CallDetail />} />
           <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>

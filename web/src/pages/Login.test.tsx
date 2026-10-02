@@ -90,7 +90,7 @@ describe("Login", () => {
 
   it("logs out from the nav", async () => {
     const calls = mockApi({ ...ME, "POST /api/v1/auth/logout": noContent });
-    renderApp("/trunks");
+    renderApp("/ring-groups");
 
     fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
 
