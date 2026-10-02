@@ -193,10 +193,26 @@ func (s *server) getExtension(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, e)
 }
 
-const (
-	numberRule         = "number must be 2-10 digits"
-	externalNumberRule = "externalNumber must be empty or 2-20 digits with an optional leading +"
-)
+// validateExtension checks the extension fields that are not nil and trims
+// the name in place; its 400s carry error.fields like every other
+// configuration change (contract 7).
+func validateExtension(number, name, externalNumber *string) fieldErrs {
+	var f fieldErrs
+	if number != nil && !numberRe.MatchString(*number) {
+		f.add("number", "must be 2-10 digits")
+	}
+	if name != nil {
+		if n, ok := validName(*name); ok {
+			*name = n
+		} else {
+			f.add("name", "must be 1-100 printable characters")
+		}
+	}
+	if externalNumber != nil && !callerIDRe.MatchString(*externalNumber) {
+		f.add("externalNumber", "must be empty or 2-20 digits with an optional leading +")
+	}
+	return f
+}
 
 func (s *server) createExtension(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -207,17 +223,9 @@ func (s *server) createExtension(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if !numberRe.MatchString(in.Number) {
-		badRequest(w, numberRule)
-		return
-	}
-	name, ok := validName(in.Name)
-	if !ok {
-		badRequest(w, "name must be 1-100 printable characters")
-		return
-	}
-	if !callerIDRe.MatchString(in.ExternalNumber) {
-		badRequest(w, externalNumberRule)
+	name := in.Name
+	if f := validateExtension(&in.Number, &name, &in.ExternalNumber); len(f) > 0 {
+		writeFields(w, f)
 		return
 	}
 	e, err := s.Store.CreateExtension(r.Context(), actor(r).String(), in.Number, name, in.ExternalNumber, s.check())
@@ -245,21 +253,9 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "number, name or externalNumber is required")
 		return
 	}
-	if in.ExternalNumber != nil && !callerIDRe.MatchString(*in.ExternalNumber) {
-		badRequest(w, externalNumberRule)
+	if f := validateExtension(in.Number, in.Name, in.ExternalNumber); len(f) > 0 {
+		writeFields(w, f)
 		return
-	}
-	if in.Number != nil && !numberRe.MatchString(*in.Number) {
-		badRequest(w, numberRule)
-		return
-	}
-	if in.Name != nil {
-		name, ok := validName(*in.Name)
-		if !ok {
-			badRequest(w, "name must be 1-100 printable characters")
-			return
-		}
-		in.Name = &name
 	}
 	e, err := s.Store.UpdateExtension(r.Context(), actor(r).String(), id,
 		store.ExtensionChange{Number: in.Number, Name: in.Name, ExternalNumber: in.ExternalNumber}, s.check())

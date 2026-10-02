@@ -286,8 +286,14 @@ func TestReorderAtomic(t *testing.T) {
 
 	// Rejected permutations and a failing check leave everything as it was.
 	r0 := rev()
-	failCheck := func(routing.Config) []routing.FieldError {
-		return []routing.FieldError{{Path: "outbound", Message: "rejected by test"}}
+	// failAfter passes the baseline check and fails the one after the
+	// change, so the error counts as introduced by the reorder.
+	calls := 0
+	failAfter := func(routing.Config) []routing.FieldError {
+		if calls++; calls%2 == 0 {
+			return []routing.FieldError{{Path: "outbound", Message: "rejected by test"}}
+		}
+		return nil
 	}
 	for name, tc := range map[string]struct {
 		ids   []int64
@@ -297,7 +303,7 @@ func TestReorderAtomic(t *testing.T) {
 		"duplicate": {[]int64{ids[0], ids[0], ids[1], ids[2], ids[3]}, nil},
 		"unknown":   {[]int64{ids[0], ids[1], ids[2], ids[3], 999999}, nil},
 		"empty":     {[]int64{}, nil},
-		"check":     {ids, failCheck},
+		"check":     {ids, failAfter},
 	} {
 		err := st.ReorderRoutes(ctx, "test", store.Outbound, tc.ids, tc.check)
 		var v *store.ValidationError
@@ -339,5 +345,72 @@ func TestReorderAtomic(t *testing.T) {
 	}
 	if got := rev(); got != r0+int64(len(perms)) {
 		t.Fatalf("revision %d after %d reorders from %d", got, len(perms), r0)
+	}
+}
+
+// TestConfigLockSerialisesChanges fails if two configuration changes that
+// are each valid alone, but not together, can both commit. Creating an
+// inbound route to extension 101 is held inside its transaction after its
+// whole-configuration check passed; meanwhile extension 101 is deleted.
+// With the advisory lock the delete waits, then sees the route and is
+// refused; without it, the delete commits and the route rings nothing.
+func TestConfigLockSerialisesChanges(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	db, st, _ := p2Store(t, ctx)
+	compile := func(cfg routing.Config) []routing.FieldError {
+		_, errs := routing.Compile(cfg)
+		return errs
+	}
+	ext, err := st.CreateExtension(ctx, "test", "101", "Desk", "", compile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev0, err := st.ConfigRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checked, release := make(chan struct{}), make(chan struct{})
+	var calls int
+	holding := func(cfg routing.Config) []routing.FieldError {
+		errs := compile(cfg)
+		if calls++; calls == 2 { // the check after the change; the first is the baseline
+			close(checked)
+			<-release
+		}
+		return errs
+	}
+	createErr := make(chan error, 1)
+	go func() {
+		_, err := st.CreateInboundRoute(ctx, "test", store.InboundRoute{Name: "Main", DIDKind: "any",
+			DestinationKind: "extension", Destination: "101", Enabled: true}, holding)
+		createErr <- err
+	}()
+	<-checked
+	deleteErr := make(chan error, 1)
+	go func() { deleteErr <- st.DeleteExtension(ctx, "test", ext.ID, compile) }()
+	select {
+	case err := <-deleteErr:
+		close(release)
+		t.Fatalf("the delete finished (%v) while another configuration change held the lock", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	if err := <-createErr; err != nil {
+		t.Fatalf("create inbound route: %v", err)
+	}
+	if err := <-deleteErr; !errors.Is(err, store.ErrInUse) {
+		t.Fatalf("delete after the route committed = %v, want ErrInUse", err)
+	}
+	var routes, exts int
+	if err := db.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM inbound_routes), (SELECT count(*) FROM extensions)`).Scan(&routes, &exts); err != nil {
+		t.Fatal(err)
+	}
+	if routes != 1 || exts != 1 {
+		t.Fatalf("after both changes: %d routes, %d extensions; want the route and its extension", routes, exts)
+	}
+	if rev, err := st.ConfigRevision(ctx); err != nil || rev != rev0+1 {
+		t.Fatalf("revision %d -> %d (%v), want exactly one bump", rev0, rev, err)
 	}
 }

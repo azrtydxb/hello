@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
@@ -51,6 +52,15 @@ func printable(s string, maxLen int, spaces bool) bool {
 	return true
 }
 
+// minPrefixBits is the broadest source CIDR a trunk may trust: /8 for IPv4,
+// /32 for IPv6.
+func minPrefixBits(a netip.Addr) int {
+	if a.Is4() {
+		return 8
+	}
+	return 32
+}
+
 func validHost(h string) bool {
 	if _, err := netip.ParseAddr(h); err == nil {
 		return true
@@ -69,7 +79,7 @@ func validHost(h string) bool {
 
 // compileRegex checks an RE2 pattern of at most 500 characters.
 func compileRegex(f *fieldErrs, path, re string) *regexp.Regexp {
-	if len(re) > maxRegexLen {
+	if utf8.RuneCountInString(re) > maxRegexLen {
 		f.add(path, "regex is longer than %d characters", maxRegexLen)
 		return nil
 	}
@@ -238,6 +248,11 @@ func validateTrunk(in *store.TrunkInput, hasPassword bool) fieldErrs {
 			}
 			p = netip.PrefixFrom(a, a.BitLen())
 		}
+		if minBits := minPrefixBits(p.Addr()); p.Bits() < minBits {
+			f.add(fmt.Sprintf("sourceCidrs[%d]", i),
+				"is broader than /%d: every address in it could send calls to the inbound routes, and UDP source addresses can be spoofed", minBits)
+			continue
+		}
 		in.SourceCIDRs[i] = p.Masked().String()
 	}
 	if len(in.Destinations) == 0 || len(in.Destinations) > 16 {
@@ -367,8 +382,11 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 			f.add("destination", "must be 2-32 of 0-9 * # with an optional leading +")
 		}
 	case "sip_uri":
-		if !validSIPURI(in.Destination) {
-			f.add("destination", "must be a sip: or sips: URI of at most 255 characters")
+		switch {
+		case strings.HasPrefix(strings.ToLower(in.Destination), "sips:"):
+			f.add("destination", "sips: needs SIP over TLS, and Hello is UDP-only in this phase; use a sip: URI")
+		case !validSIPURI(in.Destination):
+			f.add("destination", "must be a sip: URI of at most 255 characters")
 		}
 	default:
 		f.add("destinationKind", `must be "extension", "external" or "sip_uri"`)
@@ -381,7 +399,7 @@ func validSIPURI(s string) bool {
 		return false
 	}
 	u, err := url.Parse(s)
-	if err != nil || (u.Scheme != "sip" && u.Scheme != "sips") || u.Opaque == "" {
+	if err != nil || u.Scheme != "sip" || u.Opaque == "" {
 		return false
 	}
 	host := u.Opaque

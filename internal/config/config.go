@@ -3,10 +3,12 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"strconv"
 	"time"
 
@@ -234,10 +236,17 @@ func (r *reader) database(dsn string) *pgx.ConnConfig {
 // without ever echoing it.
 func (r *reader) secretKey() string {
 	k := r.required("HELLO_SECRET_KEY")
-	if k != "" {
-		if _, err := secret.New(k); err != nil {
-			r.fail("HELLO_SECRET_KEY", err)
-		}
+	if k == "" {
+		return k
+	}
+	if _, err := secret.New(k); err != nil {
+		r.fail("HELLO_SECRET_KEY", err)
+		return k
+	}
+	// A placeholder key (all zero bytes) passes the shape check but protects
+	// nothing; refuse it rather than seal trunk passwords under it.
+	if raw, err := base64.StdEncoding.DecodeString(k); err == nil && !slices.ContainsFunc(raw, func(b byte) bool { return b != 0 }) {
+		r.fail("HELLO_SECRET_KEY", errors.New("must not be all zero bytes; generate one with: openssl rand -base64 32"))
 	}
 	return k
 }
