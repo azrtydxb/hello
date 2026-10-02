@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-02 09:21 UTC. procoder reads this
+Written 2026-10-02 10:17 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -84,6 +84,16 @@ Key: 61fa8fc32239
 Question: OPEN: Migration library — goose, or golang-migrate?
 
 Answer: goose
+
+## [decision] decisions.md
+
+Key: 7d9ccebf04dd
+Question: Phase 1 delivery
+
+- Push phase-1-minimum-pbx and open a PR to main
+- Hold for your review first
+
+Answer: Push phase-1-minimum-pbx and open a PR to main
 
 ## [decision] decisions.md
 

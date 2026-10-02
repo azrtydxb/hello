@@ -50,3 +50,8 @@
 
 - Route via the registering node (Path + flow token, RFC 3327/5626 style)
 - Test only without NAT (test phones inside the compose network); defer to Phase 3
+
+## Phase 1 delivery
+
+- Push phase-1-minimum-pbx and open a PR to main
+- Hold for your review first
