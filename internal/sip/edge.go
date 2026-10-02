@@ -133,10 +133,10 @@ func (s *Server) proxy(req *sip.Request, tx sip.ServerTransaction, token string)
 		} else {
 			dest = hostPort(out.Recipient)
 		}
-		if !s.peers.has(dest) {
+		if !s.isPeer(dest) {
 			return false
 		}
-	} else if !s.peers.has(req.Source()) {
+	} else if !s.isPeer(req.Source()) {
 		return forbid("request towards a phone from a non-peer")
 	}
 	if mf := out.MaxForwards(); mf != nil {

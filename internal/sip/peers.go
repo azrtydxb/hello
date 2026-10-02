@@ -111,9 +111,17 @@ func resolvePeers(ctx context.Context, addrs []string) peerSet {
 	return set
 }
 
-// peers is the cached peer set; it is refreshed in the background, never on
-// the request path.
-type peers struct{ p atomic.Pointer[peerSet] }
+// peers is the cached peer set, refreshed in the background every
+// PeerRefresh. A miss may trigger one extra refresh (see Server.isPeer).
+type peers struct {
+	p atomic.Pointer[peerSet]
+	// lastMiss is when a miss last forced a refresh (unix nanoseconds).
+	lastMiss atomic.Int64
+}
+
+// missRefreshEvery bounds refreshes forced by unknown sources, so a stranger
+// sending junk cannot turn every datagram into Valkey and DNS calls.
+const missRefreshEvery = time.Second
 
 func (ps *peers) set(s peerSet) { ps.p.Store(&s) }
 
@@ -144,6 +152,25 @@ func (s *Server) refreshPeers(ctx context.Context) {
 	rctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	s.peers.set(resolvePeers(rctx, addrs))
+}
+
+// isPeer reports whether addr is a cluster SIP node. On a miss it refreshes
+// the peer set at most once per missRefreshEvery and checks again: nodes
+// that start together each come up before the other has announced itself,
+// and would otherwise distrust each other until the next background refresh.
+func (s *Server) isPeer(addr string) bool {
+	if s.peers.has(addr) {
+		return true
+	}
+	now := time.Now().UnixNano()
+	last := s.peers.lastMiss.Load()
+	if now-last < int64(missRefreshEvery) || !s.peers.lastMiss.CompareAndSwap(last, now) {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout+2*time.Second)
+	defer cancel()
+	s.refreshPeers(ctx)
+	return s.peers.has(addr)
 }
 
 func (s *Server) peerLoop(ctx context.Context) {

@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-02 10:26 UTC. procoder reads this
+Written 2026-10-02 10:42 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -104,6 +104,16 @@ Question: Phase 1 delivery
 - Hold for your review first
 
 Answer: Push phase-1-minimum-pbx and open a PR to main
+
+## [decision] decisions.md
+
+Key: 8e6949c72bfe
+Question: Merge PR #2
+
+- Squash-merge now and start the Phase 2 spec
+- Hold for your own review
+
+Answer: Squash-merge now and start the Phase 2 spec
 
 ## [decision] decisions.md
 

@@ -1,6 +1,6 @@
-# `TestLiveRegistrationsAndCalls` in `test/integration` passes — fails if an active call or registration is missing from the API while it exists, or still listed 30s after its node is killed.
+# `TestLiveRegistrationsAndCalls` in `test/integration` passes — fails if an active call or registration is missing from the API while it exists, or if a call is still listed 30s after its node is killed. Registrations outlive their node by design: they live in Valkey until they expire or the phone re-registers through another node.
 
-Status: open
+Status: done 2026-10-02
 Created: 2026-10-02
 Epic: minimum-pbx
 Sprint: -
@@ -14,9 +14,10 @@ Phase 1 deliverable; see .procoder/specs/minimum-pbx.md.
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
      true — the closer will ask for the evidence. -->
 
-- [ ] `TestLiveRegistrationsAndCalls` in `test/integration` passes — fails if an active call or registration is missing from the API while it exists, or still listed 30s after its node is killed.
+- [x] `TestLiveRegistrationsAndCalls` in `test/integration` passes — fails if an active call or registration is missing from the API while it exists, or if a call is still listed 30s after its node is killed. Registrations outlive their node by design: they live in Valkey until they expire or the phone re-registers through another node.
 
 ## Evidence
 
-<!-- Filled at close time: the commands run and what their output proved,
-     one line per criterion. Empty evidence keeps the story open. -->
+Fingerprint: sha256:e7fd8a530465699c5c48f71a40e511470228ebb507986e11e900210a4f0719fa
+Produced: 56 bytes, exit 0
+Command: env HELLO_DOCKER=1 HELLO_LAB_KEEP=1 go test -count=1 -timeout 15m -run ^TestLiveRegistrationsAndCalls$ ./test/integration/

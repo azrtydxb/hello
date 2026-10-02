@@ -60,3 +60,8 @@
 
 - Ready stays green; live views return 503 and /readyz reports Valkey as degraded
 - /readyz fails while Valkey is down (all management goes out of rotation)
+
+## Merge PR #2
+
+- Squash-merge now and start the Phase 2 spec
+- Hold for your own review

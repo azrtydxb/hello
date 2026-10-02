@@ -26,5 +26,23 @@ Check every hunk for:
 - Prose and markdown: code spans unbroken, lists formatted, wording that
   says what the code actually does.
 
+Then, for services and state (added 2026-10-02 from escaped findings in
+.procoder/github/LESSONS.md):
+
+- Errors built from secret-bearing values: replaced with a static message
+  naming the key, never wrapped or echoed.
+- Config: every new key has a syntax check and a test for its malformed,
+  zero and negative forms, not only its absence.
+- Every guarantee stated in a comment has a test that creates its
+  condition (a request in flight, a race, a lost packet).
+- Authentication paths: what stops a captured credential being replayed?
+- Redaction: folded headers and every credential-bearing parameter.
+- Readiness: each dependency is classified required or optional, with
+  metrics and a test either way.
+- State changes that must hold together (value plus expiry, check plus set)
+  run atomically, and limits are enforced from that atomic result.
+- Background writers are ordered against the final delete of what they
+  write.
+
 End with a verdict line: findings counted by severity, or exactly
 "Nothing found — open the PR."
