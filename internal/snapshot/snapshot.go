@@ -174,6 +174,10 @@ type Watcher struct {
 	// goroutine, so it must not block for long.
 	OnReload func(old, cur *Snapshot)
 
+	// InitialBackoff is the first reconnect delay after a failure (1s); it
+	// doubles up to PollInterval and resets after a session that loaded.
+	InitialBackoff time.Duration
+
 	cur atomic.Pointer[Snapshot]
 	mu  sync.Mutex // serialises reload
 }
@@ -183,10 +187,6 @@ func (w *Watcher) Current() *Snapshot { return w.cur.Load() }
 
 // Ready reports whether a snapshot has been loaded.
 func (w *Watcher) Ready() bool { return w.cur.Load() != nil }
-
-// Set installs s as current, as a successful load would; for tests and
-// callers that load out of band.
-func (w *Watcher) Set(s *Snapshot) { w.install(s) }
 
 func (w *Watcher) install(s *Snapshot) {
 	w.mu.Lock()
@@ -207,17 +207,28 @@ func (w *Watcher) install(s *Snapshot) {
 	}
 }
 
+func (w *Watcher) initialBackoff() time.Duration {
+	if w.InitialBackoff > 0 {
+		return w.InitialBackoff
+	}
+	return time.Second
+}
+
 // Run watches until ctx is cancelled.
 func (w *Watcher) Run(ctx context.Context) {
 	poll := w.PollInterval
 	if poll <= 0 {
 		poll = 30 * time.Second
 	}
-	backoff := time.Second
+	backoff := w.initialBackoff()
 	for ctx.Err() == nil {
-		err := w.session(ctx, poll)
+		loaded, err := w.session(ctx, poll)
 		if ctx.Err() != nil {
 			return
+		}
+		if loaded {
+			// The session worked for a while: a fresh outage starts over.
+			backoff = w.initialBackoff()
 		}
 		w.fail("snapshot watcher disconnected", err)
 		select {
@@ -231,13 +242,13 @@ func (w *Watcher) Run(ctx context.Context) {
 
 // session connects, LISTENs, loads, and then reloads on every notification
 // or poll tick until an error occurs.
-func (w *Watcher) session(ctx context.Context, poll time.Duration) error {
+func (w *Watcher) session(ctx context.Context, poll time.Duration) (loaded bool, err error) {
 	if w.Config == nil {
-		return errors.New("no database configuration")
+		return false, errors.New("no database configuration")
 	}
 	conn, err := pgx.ConnectConfig(ctx, w.Config)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() {
 		cctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -245,20 +256,21 @@ func (w *Watcher) session(ctx context.Context, poll time.Duration) error {
 		_ = conn.Close(cctx)
 	}()
 	if _, err := conn.Exec(ctx, "LISTEN "+Channel); err != nil {
-		return err
+		return false, err
 	}
 	for {
 		if err := w.load(ctx, conn); err != nil {
-			return err
+			return loaded, err
 		}
+		loaded = true
 		wctx, cancel := context.WithTimeout(ctx, poll)
 		_, err := conn.WaitForNotification(wctx)
 		cancel()
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return loaded, ctx.Err()
 		}
 		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
-			return err
+			return loaded, err
 		}
 		// A notification or a poll tick: reload either way.
 	}

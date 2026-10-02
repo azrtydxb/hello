@@ -14,6 +14,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/snapshot"
@@ -39,6 +40,12 @@ type Config struct {
 	RetryAfter time.Duration
 	// RecountInterval is how often hello_sip_registrations is refreshed (15s).
 	RecountInterval time.Duration
+	// MaxCallDuration ends a connected call with BYE to both legs (4h).
+	MaxCallDuration time.Duration
+	// PeerRefresh is how often this node announces itself and reloads the
+	// peer set (10s); NodeTTL is how long its announcement lives (30s).
+	PeerRefresh time.Duration
+	NodeTTL     time.Duration
 }
 
 // Deps are the Server's collaborators.
@@ -49,6 +56,9 @@ type Deps struct {
 	CDRs      CDRSink
 	Metrics   *Metrics
 	Log       *slog.Logger
+	// Presence lists the cluster's SIP nodes for the edge proxy; nil means
+	// this node is alone (it never relays for another node).
+	Presence Presence
 }
 
 // Server is one SIP node.
@@ -72,6 +82,8 @@ type Server struct {
 	calls   map[*call]struct{}
 	done    chan struct{} // closed when Serve returns
 	laddr   sip.Addr      // the listening socket, for requests we originate
+	peers   peers         // the cluster's SIP nodes, for the edge proxy
+	serving atomic.Bool   // the listener is up
 }
 
 // dialogRef is one leg of a call, found by its Call-ID.
@@ -103,6 +115,9 @@ func New(cfg Config, deps Deps) (*Server, error) {
 	setDefault(&cfg.RecountInterval, 15*time.Second)
 	setDefault(&cfg.StateTimeout, 200*time.Millisecond)
 	setDefault(&cfg.RingTimeout, 30*time.Second)
+	setDefault(&cfg.MaxCallDuration, 4*time.Hour)
+	setDefault(&cfg.PeerRefresh, 10*time.Second)
+	setDefault(&cfg.NodeTTL, 30*time.Second)
 	if cfg.AuthFailLimit <= 0 {
 		cfg.AuthFailLimit = 10
 	}
@@ -164,6 +179,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	if host, port, err := sip.ParseAddr(conn.LocalAddr().String()); err == nil {
 		s.laddr = sip.Addr{IP: net.ParseIP(host), Port: port, Hostname: host}
 	}
+	s.refreshPeers(ctx) // before serving, so the edge knows its peers
 	s.uas = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
 	s.uac = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
 
@@ -179,8 +195,10 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	rctx, stop := context.WithCancel(ctx)
 	defer stop()
 	s.bg.Go(func() { s.recountLoop(rctx) })
+	s.bg.Go(func() { s.peerLoop(rctx) })
 
 	errc := make(chan error, 1)
+	s.serving.Store(true)
 	go func() { errc <- srv.ServeUDP(conn) }()
 	select {
 	case <-ctx.Done():
@@ -190,6 +208,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	case err = <-errc:
 		_ = conn.Close()
 	}
+	s.serving.Store(false)
 	stop()
 	close(s.done)
 	_ = ua.Close()
@@ -222,11 +241,15 @@ func (s *Server) wrap(h sipgo.RequestHandler) sipgo.RequestHandler {
 			}
 			return
 		}
-		// A Route with a flow token makes this node an edge proxy for the
-		// request; a self Route without one (outbound proxy) is ignored.
-		if token, ok := edgeToken(req); ok {
-			s.proxy(req, tx, token)
-			return
+		// A top Route naming this node with a flow token makes it an edge
+		// proxy for the request, except for REGISTER and OPTIONS, which
+		// are always ours. proxy declines (false) a request it must not
+		// relay, which is then handled here like any other; handlers do not
+		// use the Route header, so a self Route needs no stripping.
+		if token, ok := s.edgeToken(req); ok && req.Method != sip.REGISTER && req.Method != sip.OPTIONS {
+			if s.proxy(req, tx, token) {
+				return
+			}
 		}
 		h(req, tx)
 	}
@@ -288,14 +311,21 @@ func sourceIP(req *sip.Request) string {
 	return host
 }
 
-// authenticate runs the digest exchange for req. It returns the device on
-// success; otherwise it has already answered (401, 403 or 503).
-func (s *Server) authenticate(req *sip.Request, tx sip.ServerTransaction) (snapshot.Device, bool) {
-	snap := s.deps.Snapshots.Current()
+// authenticate runs the digest exchange for req. On success it returns the
+// device and the snapshot it was found in, which the caller keeps using so
+// one request sees one configuration; otherwise it has already answered
+// (401, 403 or 503).
+func (s *Server) authenticate(req *sip.Request, tx sip.ServerTransaction) (snapshot.Device, *snapshot.Snapshot, bool) {
+	dev, snap := snapshot.Device{}, s.deps.Snapshots.Current()
 	if snap == nil {
 		s.unavailable(tx, req)
-		return snapshot.Device{}, false
+		return dev, nil, false
 	}
+	dev, ok := s.verify(req, tx, snap)
+	return dev, snap, ok
+}
+
+func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot) (snapshot.Device, bool) {
 	ip := sourceIP(req)
 	ctx, cancel := s.stateCtx()
 	n, err := s.deps.Throttle.Failures(ctx, ip)
@@ -319,13 +349,13 @@ func (s *Server) authenticate(req *sip.Request, tx sip.ServerTransaction) (snaps
 		s.authFailed(tx, req, ip, "malformed credentials", true)
 		return snapshot.Device{}, false
 	}
-	dev, ok := snap.DeviceByUsername(creds.Username)
-	if !ok {
+	dev, known := snap.DeviceByUsername(creds.Username)
+	if !known {
 		// Unknown or disabled: no challenge would help.
 		s.authFailed(tx, req, ip, "unknown or disabled device", false)
 		return snapshot.Device{}, false
 	}
-	switch s.digest.Verify(creds, req.Method.String(), dev.HA1MD5, dev.HA1SHA256) {
+	switch s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256) {
 	case OK:
 		return dev, true
 	case Stale:
@@ -338,7 +368,7 @@ func (s *Server) authenticate(req *sip.Request, tx sip.ServerTransaction) (snaps
 
 func (s *Server) challenge(tx sip.ServerTransaction, req *sip.Request, stale bool) {
 	res := sip.NewResponseFromRequest(req, sip.StatusUnauthorized, "Unauthorized", nil)
-	for _, c := range s.digest.Challenges(stale) {
+	for _, c := range s.digest.Challenges(stale, sourceIP(req)) {
 		res.AppendHeader(sip.NewHeader("WWW-Authenticate", c))
 	}
 	s.send(tx, res)
@@ -428,6 +458,10 @@ func (s *Server) recountRegistrations(ctx context.Context) {
 	}
 	s.m.Registrations.Set(float64(n))
 }
+
+// Serving reports whether the SIP listener is running; it turns false when
+// Serve returns, including when the socket fails.
+func (s *Server) Serving() bool { return s.serving.Load() }
 
 // ActiveCalls is the number of calls this node owns.
 func (s *Server) ActiveCalls() int {

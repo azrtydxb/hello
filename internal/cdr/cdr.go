@@ -95,9 +95,6 @@ func (w *Writer) Enqueue(r Record) bool {
 	}
 }
 
-// Len is the number of queued records.
-func (w *Writer) Len() int { return len(w.queue) }
-
 const insert = `INSERT INTO cdrs (correlation_id, sip_call_id, source, destination,
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason)

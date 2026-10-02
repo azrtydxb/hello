@@ -3,6 +3,7 @@ package sip
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
@@ -41,13 +42,24 @@ type Throttle interface {
 }
 
 // ValkeyThrottle keeps the counters in Valkey at hello:authfail:{ip}; the
-// window starts at the first failure (INCR, then EXPIRE NX).
+// window starts at the first failure. Increment and expiry run as one Lua
+// script, so a key can never be left without a TTL (which would block the
+// IP for good).
 type ValkeyThrottle struct {
 	Client valkey.Client
 	Window time.Duration
 }
 
 const authFailPrefix = "hello:authfail:"
+
+// authFailScript increments KEYS[1] and gives it ARGV[1] seconds to live if
+// it has no TTL yet.
+var authFailScript = valkey.NewLuaScript(`
+local n = redis.call('INCR', KEYS[1])
+if redis.call('TTL', KEYS[1]) < 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return n`)
 
 // Failures returns the failures recorded for ip in the current window.
 func (t ValkeyThrottle) Failures(ctx context.Context, ip string) (int64, error) {
@@ -63,15 +75,9 @@ func (t ValkeyThrottle) Failures(ctx context.Context, ip string) (int64, error) 
 
 // RecordFailure counts one failure for ip.
 func (t ValkeyThrottle) RecordFailure(ctx context.Context, ip string) error {
-	key := authFailPrefix + ip
 	secs := max(int64(t.Window/time.Second), 1)
-	for _, r := range t.Client.DoMulti(ctx,
-		t.Client.B().Incr().Key(key).Build(),
-		t.Client.B().Expire().Key(key).Seconds(secs).Nx().Build(),
-	) {
-		if err := r.Error(); err != nil {
-			return fmt.Errorf("authfail incr: %w", err)
-		}
+	if err := authFailScript.Exec(ctx, t.Client, []string{authFailPrefix + ip}, []string{strconv.FormatInt(secs, 10)}).Error(); err != nil {
+		return fmt.Errorf("authfail incr: %w", err)
 	}
 	return nil
 }
