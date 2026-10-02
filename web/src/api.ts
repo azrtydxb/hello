@@ -586,10 +586,7 @@ export async function getCdr(
   cdrId: Id,
   signal?: AbortSignal,
 ): Promise<CdrDetail> {
-  const cdr = await request<CdrDetail>("GET", `/api/v1/cdrs/${id(cdrId)}`, {
-    signal,
-  });
-  return { ...cdr, trace: Array.isArray(cdr.trace) ? cdr.trace : [] };
+  return request<CdrDetail>("GET", `/api/v1/cdrs/${id(cdrId)}`, { signal });
 }
 
 // --- trunks ------------------------------------------------------------------
@@ -663,17 +660,8 @@ export const reorderRoutes = (direction: RouteDirection, ids: Id[]) =>
   request<void>("PUT", `/api/v1/routes/${direction}/order`, { body: { ids } });
 
 /** POST /api/v1/routing/test: decide a call without placing it. */
-export async function testRoute(
-  input: RouteTestRequest,
-): Promise<RouteTestResult> {
-  const res = await request<RouteTestResult>("POST", "/api/v1/routing/test", {
-    body: input,
-  });
-  return {
-    decision: res.decision,
-    trace: Array.isArray(res.trace) ? res.trace : [],
-  };
-}
+export const testRoute = (input: RouteTestRequest) =>
+  request<RouteTestResult>("POST", "/api/v1/routing/test", { body: input });
 
 /** A human-readable message for any thrown value. */
 export function errorMessage(err: unknown): string {

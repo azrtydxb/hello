@@ -29,7 +29,8 @@ export function moved<T>(
 /**
  * An ordered route list: loads it, and reorders it through
  * PUT /api/v1/routes/{direction}/order with the full permutation of ids,
- * applying the new order once the server accepts it.
+ * applying the new order once the server accepts it. If the server refuses,
+ * the list is reloaded so later moves start from the stored order.
  */
 export function useOrderedList<T extends { id: Id; position: number }>(
   direction: RouteDirection,
@@ -38,6 +39,8 @@ export function useOrderedList<T extends { id: Id; position: number }>(
   const [state, setState] = useState<OrderedState<T>>({ status: "loading" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped to re-read the list from the server (after a refused reorder).
+  const [generation, setGeneration] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -54,7 +57,7 @@ export function useOrderedList<T extends { id: Id; position: number }>(
         }
       });
     return () => controller.abort();
-  }, [load]);
+  }, [load, generation]);
 
   const items = state.status === "ready" ? state.items : [];
 
@@ -75,7 +78,12 @@ export function useOrderedList<T extends { id: Id; position: number }>(
         });
         return true;
       } catch (err) {
-        setError(`Could not reorder: ${errorMessage(err)}`);
+        // The server's order may differ from ours (another admin, a stale
+        // page): re-read it so the next move permutes what is really stored.
+        setError(
+          `Could not reorder: ${errorMessage(err)} The list was reloaded from the server.`,
+        );
+        setGeneration((g) => g + 1);
         return false;
       } finally {
         setBusy(false);

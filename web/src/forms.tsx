@@ -11,24 +11,12 @@ export interface ControlProps {
   "aria-describedby"?: string;
 }
 
-// The routing engine names some fields after its Go structs; the API's JSON
-// uses the longer names. Paths may also carry a collection prefix such as
-// "outbound[3]." (from the engine's whole-table validation).
-const ALIASES: Readonly<Record<string, string>> = {
-  number: "numberTransform",
-  callerid: "callerIdTransform",
-  callerId: "callerIdTransform",
-};
-const COLLECTION_PREFIX =
-  /^(?:trunks?|outbound|inbound|routes|extensions)\[\d+\]\.?/i;
-
-function candidates(path: string, aliasFirst: boolean): string[] {
-  let p = path.trim().replace(COLLECTION_PREFIX, "");
-  if (aliasFirst) {
-    const [first = "", ...rest] = p.split(".");
-    const alias = ALIASES[first];
-    if (alias) p = [alias, ...rest].join(".");
-  }
+// Server paths are relative to the item being saved and use the API's JSON
+// names ("numberTransform.template", "trunks[0]"), so they are matched as
+// they are. A path into some other item ("outbound[3].match") matches no
+// field and is reported at form level.
+function candidates(path: string): string[] {
+  let p = path.trim();
   // "a.b[2].c" -> "a.b[2].c", "a.b[2]", "a.b", "a"
   const out: string[] = [];
   while (p) {
@@ -48,13 +36,12 @@ function candidates(path: string, aliasFirst: boolean): string[] {
 export function mapFieldErrors(
   fields: readonly FieldError[],
   known: readonly string[],
-  { aliasTransforms = false }: { aliasTransforms?: boolean } = {},
 ): { byKey: ErrorMap; unmatched: FieldError[] } {
   const lower = new Map(known.map((k) => [k.toLowerCase(), k]));
   const byKey: Record<string, string> = {};
   const unmatched: FieldError[] = [];
   for (const fe of fields) {
-    const key = candidates(fe.path, aliasTransforms)
+    const key = candidates(fe.path)
       .map((c) => lower.get(c.toLowerCase()))
       .find((k) => k !== undefined);
     if (key === undefined) {
