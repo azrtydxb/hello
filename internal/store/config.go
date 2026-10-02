@@ -69,11 +69,18 @@ type ExtensionChange struct {
 	Number, Name, ExternalNumber *string
 }
 
-// UpdateExtension changes the fields that are not nil.
+// UpdateExtension changes the fields that are not nil. Renumbering an
+// extension an inbound route rings is an *InUseError naming the routes.
 func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c ExtensionChange, check Check) (Extension, error) {
 	var e Extension
 	err := s.configChange(ctx, actor, "update", "extension", check, func(tx *sql.Tx) (int64, error) {
-		var err error
+		number, routes, err := extensionRoutes(ctx, tx, id)
+		if err != nil {
+			return id, err
+		}
+		if c.Number != nil && *c.Number != number && len(routes) > 0 {
+			return id, inUse("extension "+number, routes)
+		}
 		e, err = scanExtension(tx.QueryRowContext(ctx, `
 			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name),
 			       external_number = COALESCE($4, external_number), updated_at = now()
@@ -83,9 +90,17 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 	return e, err
 }
 
-// DeleteExtension removes an extension and, by cascade, its devices.
+// DeleteExtension removes an extension and, by cascade, its devices. An
+// extension an inbound route rings is an *InUseError naming the routes.
 func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "extension", check, func(tx *sql.Tx) (int64, error) {
+		number, routes, err := extensionRoutes(ctx, tx, id)
+		if err != nil {
+			return id, err
+		}
+		if len(routes) > 0 {
+			return id, inUse("extension "+number, routes)
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM extensions WHERE id = $1`, id)
 		if err != nil {
 			return id, err

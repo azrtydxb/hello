@@ -18,15 +18,6 @@ type RouteTable interface {
 	Decide(routing.Call, routing.TrunkUsability) routing.Decision
 }
 
-// defaultRouter is the routing engine adapter, set by router_routing.go
-// when the engine is built in; nil otherwise.
-var defaultRouter Router
-
-// DefaultRouter returns the built-in routing engine, or nil when this build
-// does not include it. Without a Router, trunk and route changes and the
-// route tester answer 503 rather than save unvalidated configuration.
-func DefaultRouter() Router { return defaultRouter }
-
 // TrunkLive reads trunk live state; *livestate.Store implements it.
 type TrunkLive interface {
 	TrunkStatus(ctx context.Context, id int64) (livestate.TrunkStatus, error)

@@ -163,9 +163,15 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
-func newP2Env(t *testing.T, trunks TrunkLive) *p2Env {
+// newP2Env serves the API with the real routing engine, or with fakeRouter
+// when fake is set.
+func newP2Env(t *testing.T, trunks TrunkLive, fake bool) *p2Env {
 	t.Helper()
 	p := &p2Env{router: &fakeRouter{}, box: testBox(t), live: &switchLive{inner: trunks}, logs: &syncBuffer{}}
+	var router Router
+	if fake {
+		router = p.router
+	}
 	if trunks == nil {
 		p.live.down.Store(true)
 	}
@@ -175,7 +181,7 @@ func newP2Env(t *testing.T, trunks TrunkLive) *p2Env {
 		}
 	})
 	p.env = newEnvConfig(t, Config{
-		Live: noLive{}, Router: p.router, Trunks: p.live,
+		Live: noLive{}, Router: router, Trunks: p.live,
 		Log: slog.New(slog.NewTextHandler(p.logs, nil)),
 	}, p.box)
 	return p
@@ -227,7 +233,7 @@ func (e *env) auditCount() int {
 }
 
 func TestTrunkCRUDSecretHidden(t *testing.T) {
-	p := newP2Env(t, nil)
+	p := newP2Env(t, nil, false)
 	c := p.login()
 	pw := trunkPassword("primary")
 
@@ -350,7 +356,7 @@ func TestTrunkCRUDSecretHidden(t *testing.T) {
 }
 
 func TestRouteValidation(t *testing.T) {
-	p := newP2Env(t, nil)
+	p := newP2Env(t, nil, false)
 	c := p.login()
 	trunk := c.must(http.StatusCreated, "POST", "/api/v1/trunks", map[string]any{
 		"name": "peer", "mode": "ip", "destinations": []map[string]any{{"host": "10.0.0.5"}},
@@ -360,7 +366,7 @@ func TestRouteValidation(t *testing.T) {
 	ok := c.must(http.StatusCreated, "POST", "/api/v1/routes/outbound", map[string]any{
 		"name": "UAE Mobile", "matchKind": "regex", "match": `^0(?P<rest>5[0-9]{8})$`, "trunks": []any{trunk},
 		"numberTransform":   map[string]any{"regex": `^0(?P<rest>5[0-9]{8})$`, "template": "+971${rest}"},
-		"callerIdTransform": map[string]any{"regex": `^(\+?)([0-9]+)$`, "template": "$1$2"},
+		"callerIdTransform": map[string]any{"regex": `^(\+?)([0-9]+)$`, "template": "${1}${2}"},
 		"schedule":          map[string]any{"timeZone": "Asia/Dubai", "windows": []map[string]any{{"days": []int{0, 1, 2, 3, 4}, "start": "08:00", "end": "18:00"}}},
 	}).json(t)
 	for _, k := range []string{"id", "position", "name", "matchKind", "match", "sourceExtensions", "schedule", "numberTransform",
@@ -440,7 +446,7 @@ func TestRouteValidation(t *testing.T) {
 		{"header regex", map[string]any{"name": "I", "headerName": "X-Lang", "headerRegex": "(", "destinationKind": "extension", "destination": "101"}, "headerRegex"},
 		{"sip uri", map[string]any{"name": "I", "destinationKind": "sip_uri", "destination": "http://agent"}, "destination"},
 		{"unknown trunk", map[string]any{"name": "I", "trunkId": 999999, "destinationKind": "extension", "destination": "101"}, "trunkId"},
-		{"whole config: no such extension", map[string]any{"name": "I", "destinationKind": "extension", "destination": "555"}, "inbound[0].destination"},
+		{"whole config: no such extension", map[string]any{"name": "I", "destinationKind": "extension", "destination": "555"}, "destination"},
 	}
 	for _, tc := range inCases {
 		before := p.dbFingerprint()
@@ -461,23 +467,57 @@ func TestRouteValidation(t *testing.T) {
 	c.must(http.StatusCreated, "POST", "/api/v1/routes/inbound", map[string]any{
 		"name": "AI agent", "destinationKind": "sip_uri", "destination": "sip:agent@ai.example:5070;transport=udp",
 	})
-	// The whole-configuration check also guards extension changes: deleting
-	// the extension an inbound route rings is rejected and rolled back.
-	ext := c.must(http.StatusOK, "GET", "/api/v1/extensions", nil).json(t)["items"].([]any)[0].(map[string]any)
+	// A PATCH the engine rejects as a whole configuration reports the path
+	// relative to the route, and changes nothing.
 	before = p.dbFingerprint()
-	if got := fieldPaths(t, c.do("DELETE", fmt.Sprintf("/api/v1/extensions/%v", ext["id"]), nil)); !slices.Contains(got, "inbound[0].destination") {
-		t.Fatalf("deleting a routed extension: fields %v", got)
+	inPath := fmt.Sprintf("/api/v1/routes/inbound/%v", in["id"])
+	if got := fieldPaths(t, c.do("PATCH", inPath, map[string]any{"destination": "555"})); fmt.Sprint(got) != "[destination]" {
+		t.Fatalf("PATCH to a missing extension: fields %v, want [destination]", got)
 	}
 	if p.dbFingerprint() != before {
-		t.Fatal("rejected extension delete changed the database")
+		t.Fatal("a rejected PATCH changed the database")
+	}
+	// Changes that would leave an inbound route ringing nothing are refused
+	// with 409 naming the route, and roll back: deleting the extension, or
+	// renumbering it. Renaming it is fine.
+	ext := c.must(http.StatusOK, "GET", "/api/v1/extensions", nil).json(t)["items"].([]any)[0].(map[string]any)
+	extPath := fmt.Sprintf("/api/v1/extensions/%v", ext["id"])
+	before = p.dbFingerprint()
+	for _, req := range []struct {
+		method string
+		body   any
+	}{{"DELETE", nil}, {"PATCH", map[string]any{"number": "102"}}} {
+		r := c.must(http.StatusConflict, req.method, extPath, req.body)
+		if !strings.Contains(string(r.body), `extension 101 is used by route \"Main DID\"`) {
+			t.Fatalf("%s routed extension: %s", req.method, r.body)
+		}
+	}
+	if p.dbFingerprint() != before {
+		t.Fatal("a refused extension change wrote to the database")
+	}
+	c.must(http.StatusOK, "PATCH", extPath, map[string]any{"name": "Front desk", "number": "101"})
+	r := c.must(http.StatusConflict, "DELETE", fmt.Sprintf("/api/v1/trunks/%v", trunk), nil)
+	if !strings.Contains(string(r.body), `trunk \"peer\" is used by routes \"Main DID\", \"UAE Mobile\"`) {
+		t.Fatalf("delete routed trunk: %s", r.body)
 	}
 }
 
+// TestRoutingTestEndpoint fails if the route tester's answer is not the
+// engine's decision on the saved configuration with live trunk usability, or
+// if it writes anything. It runs against a recording fake (the call and
+// configuration the engine received) and against the real engine (the
+// trace equals a direct Compile and Decide on the same snapshot).
 func TestRoutingTestEndpoint(t *testing.T) {
 	addr := os.Getenv("HELLO_TEST_VALKEY_ADDR")
 	if addr == "" {
 		t.Skip("HELLO_TEST_VALKEY_ADDR not set")
 	}
+	for _, fake := range []bool{true, false} {
+		t.Run(map[bool]string{true: "fake", false: "engine"}[fake], func(t *testing.T) { testRoutingTest(t, addr, fake) })
+	}
+}
+
+func testRoutingTest(t *testing.T, addr string, fake bool) {
 	vc, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 4})
 	if err != nil {
 		t.Fatal(err)
@@ -488,7 +528,7 @@ func TestRoutingTestEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	live := livestate.New(vc)
-	p := newP2Env(t, live)
+	p := newP2Env(t, live, fake)
 	c := p.login()
 
 	c.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]any{"number": "101", "name": "Desk", "externalNumber": "+97142000101"})
@@ -535,31 +575,49 @@ func TestRoutingTestEndpoint(t *testing.T) {
 		r.Decision.Number != "+971501234567" || r.Decision.CallerID != "+97142000101" {
 		t.Fatalf("decision = %+v", r.Decision)
 	}
-	// The trace is the engine's, verbatim, and the call and configuration
-	// are what hello-sip's snapshot would hold.
-	p.router.mu.Lock()
-	wantTrace, call, cfg := p.router.lastTrace, p.router.lastCall, p.router.lastCfg
-	p.router.mu.Unlock()
-	if fmt.Sprint(r.Trace) != fmt.Sprint([]routing.Step(wantTrace)) {
-		t.Fatalf("trace %v differs from the engine's %v", r.Trace, wantTrace)
-	}
 	for _, want := range []string{"Trunk a skipped: unhealthy", "Trunk c skipped: disabled"} {
 		if !strings.Contains(fmt.Sprint(r.Trace), want) {
 			t.Fatalf("trace %v lacks %q", r.Trace, want)
 		}
 	}
 	wantAt, _ := time.Parse(time.RFC3339, at)
-	if call.FromExtension != "101" || call.FromTrunk != 0 || call.Number != "0501234567" || !call.At.Equal(wantAt) || call.SIPDomain != testDomain {
-		t.Fatalf("call = %+v", call)
-	}
-	var gotPW string
-	for _, tr := range cfg.Trunks {
-		if tr.ID == int64(b) {
-			gotPW = tr.Password
+	if fake {
+		// The trace is the engine's, verbatim, and the call and configuration
+		// are what hello-sip's snapshot would hold.
+		p.router.mu.Lock()
+		wantTrace, call, cfg := p.router.lastTrace, p.router.lastCall, p.router.lastCfg
+		p.router.mu.Unlock()
+		if fmt.Sprint(r.Trace) != fmt.Sprint([]routing.Step(wantTrace)) {
+			t.Fatalf("trace %v differs from the engine's %v", r.Trace, wantTrace)
 		}
-	}
-	if gotPW != pw || cfg.Extensions["101"] != "+97142000101" || len(cfg.Outbound) != 1 || len(cfg.Outbound[0].Trunks) != 3 {
-		t.Fatal("the tester's configuration is not the saved one (password opened, extensions, routes)")
+		if call.FromExtension != "101" || call.FromTrunk != 0 || call.Number != "0501234567" || !call.At.Equal(wantAt) || call.SIPDomain != testDomain {
+			t.Fatalf("call = %+v", call)
+		}
+		var gotPW string
+		for _, tr := range cfg.Trunks {
+			if tr.ID == int64(b) {
+				gotPW = tr.Password
+			}
+		}
+		if gotPW != pw || cfg.Extensions["101"] != "+97142000101" || len(cfg.Outbound) != 1 || len(cfg.Outbound[0].Trunks) != 3 {
+			t.Fatal("the tester's configuration is not the saved one (password opened, extensions, routes)")
+		}
+	} else {
+		// A direct Compile and Decide on the saved snapshot gives the same trace.
+		snap, err := p.st.RoutingConfig(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tbl, errs := routing.Compile(snap.Config)
+		if errs != nil {
+			t.Fatal(errs)
+		}
+		usable, note := (&server{Config{Trunks: p.live, Log: slog.New(slog.DiscardHandler)}}).usability(ctx, snap)
+		d := tbl.Decide(routing.Call{FromExtension: "101", Number: "0501234567", SIPDomain: testDomain,
+			Header: func(string) string { return "" }, At: wantAt}, usable)
+		if note != "" || fmt.Sprint(r.Trace) != fmt.Sprint([]routing.Step(d.Trace)) {
+			t.Fatalf("tester trace %v differs from the engine's %v", r.Trace, d.Trace)
+		}
 	}
 	if strings.Contains(fmt.Sprint(r), pw) {
 		t.Fatal("tester output reveals a trunk password")
@@ -580,11 +638,13 @@ func TestRoutingTestEndpoint(t *testing.T) {
 
 	// From a trunk, and rejections.
 	run(map[string]any{"from": fmt.Sprintf("trunk:%v", a), "number": "+97142000000"})
-	p.router.mu.Lock()
-	if p.router.lastCall.FromTrunk != int64(a) || p.router.lastCall.FromExtension != "" {
-		t.Errorf("from trunk: call %+v", p.router.lastCall)
+	if fake {
+		p.router.mu.Lock()
+		if p.router.lastCall.FromTrunk != int64(a) || p.router.lastCall.FromExtension != "" {
+			t.Errorf("from trunk: call %+v", p.router.lastCall)
+		}
+		p.router.mu.Unlock()
 	}
-	p.router.mu.Unlock()
 	if r := run(map[string]any{"from": "101", "number": "999"}); r.Decision.Kind != routing.KindReject || r.Decision.RejectCode != 404 {
 		t.Fatalf("unmatched = %+v", r.Decision)
 	}
@@ -621,7 +681,7 @@ func TestRoutingTestEndpoint(t *testing.T) {
 }
 
 func TestCDRDetail(t *testing.T) {
-	p := newP2Env(t, nil)
+	p := newP2Env(t, nil, false)
 	c := p.login()
 	start := time.Date(2026, 10, 2, 9, 0, 0, 0, time.UTC)
 	insert := func(corr string, status int, reason, trace string) string {
@@ -665,7 +725,7 @@ func TestCDRDetail(t *testing.T) {
 }
 
 func TestExtensionExternalNumber(t *testing.T) {
-	p := newP2Env(t, nil)
+	p := newP2Env(t, nil, false)
 	c := p.login()
 	e := c.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]any{"number": "101", "name": "Desk", "externalNumber": "+97142000101"}).json(t)
 	if e["externalNumber"] != "+97142000101" {
@@ -678,25 +738,5 @@ func TestExtensionExternalNumber(t *testing.T) {
 	c.must(http.StatusBadRequest, "PATCH", path, map[string]any{"externalNumber": "call-me"})
 	if n := c.must(http.StatusOK, "GET", "/api/v1/extensions", nil).json(t)["items"].([]any)[0].(map[string]any); n["externalNumber"] != "" {
 		t.Fatalf("listed = %v", n)
-	}
-}
-
-// TestNoRouterNoSave fails if a build without the routing engine saves a
-// trunk or route unvalidated, or runs the tester.
-func TestNoRouterNoSave(t *testing.T) {
-	e := newEnvConfig(t, Config{Live: noLive{}}, testBox(t))
-	c := e.login()
-	before := e.dbFingerprint()
-	for _, req := range []struct{ method, path string }{
-		{"POST", "/api/v1/trunks"}, {"POST", "/api/v1/routes/outbound"}, {"POST", "/api/v1/routes/inbound"},
-		{"PUT", "/api/v1/routes/outbound/order"}, {"POST", "/api/v1/routing/test"},
-	} {
-		r := c.do(req.method, req.path, map[string]any{})
-		if r.code != http.StatusServiceUnavailable {
-			t.Errorf("%s %s without a router = %d, want 503", req.method, req.path, r.code)
-		}
-	}
-	if e.dbFingerprint() != before {
-		t.Fatal("a request without a router wrote to the database")
 	}
 }

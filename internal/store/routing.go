@@ -273,17 +273,55 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 	return t, err
 }
 
+// routeNames returns the first column of query, sorted.
+func routeNames(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	slices.Sort(out)
+	return out, rows.Err()
+}
+
+// extensionRoutes names the inbound routes whose destination is the
+// extension with this id; it locks the extension row.
+func extensionRoutes(ctx context.Context, tx *sql.Tx, id int64) (string, []string, error) {
+	var number string
+	if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1 FOR UPDATE`, id).Scan(&number); err != nil {
+		return "", nil, err
+	}
+	routes, err := routeNames(ctx, tx,
+		`SELECT name FROM inbound_routes WHERE destination_kind = 'extension' AND destination = $1`, number)
+	return number, routes, err
+}
+
 // DeleteTrunk removes a trunk. A trunk an inbound or outbound route still
-// names is ErrInUse: deleting it would silently change routing.
+// names is an *InUseError naming them: deleting it would break routing (an
+// outbound route would lose a trunk, and the schema would cascade-delete
+// inbound routes).
 func (s *Store) DeleteTrunk(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "trunk", check, func(tx *sql.Tx) (int64, error) {
-		var used bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM outbound_route_trunks WHERE trunk_id = $1)
-			OR EXISTS (SELECT 1 FROM inbound_routes WHERE trunk_id = $1)`, id).Scan(&used); err != nil {
+		var name string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM trunks WHERE id = $1 FOR UPDATE`, id).Scan(&name); err != nil {
 			return id, err
 		}
-		if used {
-			return id, ErrInUse
+		routes, err := routeNames(ctx, tx, `
+			SELECT r.name FROM outbound_routes r JOIN outbound_route_trunks t ON t.route_id = r.id WHERE t.trunk_id = $1
+			UNION ALL SELECT name FROM inbound_routes WHERE trunk_id = $1`, id)
+		if err != nil {
+			return id, err
+		}
+		if len(routes) > 0 {
+			return id, inUse("trunk "+strconv.Quote(name), routes)
 		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM trunks WHERE id = $1`, id)
 		if err != nil {

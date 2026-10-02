@@ -386,7 +386,8 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "description": "Changing the number is 409 while an inbound route rings it (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields."
       },
       "delete": {
         "operationId": "deleteExtension",
@@ -409,8 +410,12 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           }
-        }
+        },
+        "description": "409 when an inbound route rings this extension; the message names the routes."
       }
     },
     "/api/v1/devices": {
@@ -817,7 +822,7 @@
         "operationId": "createTrunk",
         "summary": "Create a trunk",
         "tags": ["trunks"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. 503 when this hello-control is built without the routing engine.",
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "requestBody": {
           "required": true,
           "content": {
@@ -844,9 +849,6 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -931,7 +933,7 @@
         "operationId": "updateTrunk",
         "summary": "Change a trunk",
         "tags": ["trunks"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. Destinations and sourceCidrs, when given, replace the lists. 503 when this hello-control is built without the routing engine.",
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. Destinations and sourceCidrs, when given, replace the lists.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -967,9 +969,6 @@
           "409": {
             "$ref": "#/components/responses/Conflict"
           },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -982,7 +981,7 @@
         "operationId": "deleteTrunk",
         "summary": "Delete a trunk",
         "tags": ["trunks"],
-        "description": "409 while an inbound or outbound route names the trunk. 503 when this hello-control is built without the routing engine.",
+        "description": "409 while an inbound or outbound route names the trunk; the message names the routes.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -997,9 +996,6 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1047,7 +1043,7 @@
         "operationId": "createOutboundRoute",
         "summary": "Append an outbound route",
         "tags": ["routes"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. 503 when this hello-control is built without the routing engine.",
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1072,9 +1068,6 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -1089,7 +1082,7 @@
         "operationId": "reorderOutboundRoutes",
         "summary": "Reorder every outbound route at once",
         "tags": ["routes"],
-        "description": "ids must be a full permutation; the order changes atomically. 503 when this hello-control is built without the routing engine.",
+        "description": "ids must be a full permutation; the order changes atomically.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1106,9 +1099,6 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1155,7 +1145,7 @@
         "operationId": "updateOutboundRoute",
         "summary": "Change an outbound route",
         "tags": ["routes"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. 503 when this hello-control is built without the routing engine.",
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1188,9 +1178,6 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -1203,7 +1190,7 @@
         "operationId": "deleteOutboundRoute",
         "summary": "Delete an outbound route",
         "tags": ["routes"],
-        "description": "503 when this hello-control is built without the routing engine.",
+        "description": "",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1215,9 +1202,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1265,7 +1249,7 @@
         "operationId": "createInboundRoute",
         "summary": "Append an inbound route",
         "tags": ["routes"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. 503 when this hello-control is built without the routing engine.",
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1290,9 +1274,6 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -1307,7 +1288,7 @@
         "operationId": "reorderInboundRoutes",
         "summary": "Reorder every inbound route at once",
         "tags": ["routes"],
-        "description": "ids must be a full permutation; the order changes atomically. 503 when this hello-control is built without the routing engine.",
+        "description": "ids must be a full permutation; the order changes atomically.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1324,9 +1305,6 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1373,7 +1351,7 @@
         "operationId": "updateInboundRoute",
         "summary": "Change an inbound route",
         "tags": ["routes"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. 503 when this hello-control is built without the routing engine.",
+        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1406,9 +1384,6 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -1421,7 +1396,7 @@
         "operationId": "deleteInboundRoute",
         "summary": "Delete an inbound route",
         "tags": ["routes"],
-        "description": "503 when this hello-control is built without the routing engine.",
+        "description": "",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1433,9 +1408,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -1451,7 +1423,7 @@
         "operationId": "testRouting",
         "summary": "Decide a call against the saved configuration without placing it",
         "tags": ["routing"],
-        "description": "Writes nothing. Trunk usability comes from live state; when Valkey is unreachable every enabled trunk counts as usable and the trace says so. 503 when this hello-control is built without the routing engine.",
+        "description": "Writes nothing. Trunk usability comes from live state; when Valkey is unreachable every enabled trunk counts as usable and the trace says so.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1475,9 +1447,6 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -2148,12 +2117,13 @@
         "properties": {
           "path": {
             "type": "string",
-            "example": "outbound[3].number.template"
+            "example": "numberTransform.template"
           },
           "message": {
             "type": "string"
           }
-        }
+        },
+        "description": "One failing field. For a single trunk, route or extension create/PATCH, paths are relative to that item and use its JSON field names, e.g. \"match\", \"trunks[0]\", \"numberTransform.template\", \"schedule.timeZone\", \"destinations[1].host\". An error the whole-configuration check finds in another item keeps its full path in the routing configuration, e.g. \"outbound[3].numberTransform.template\" or \"trunks[1].destinations\" (index = position in that list as loaded), and a reorder reports \"ids\" or \"ids[i]\"."
       },
       "Transform": {
         "type": "object",
@@ -2177,7 +2147,8 @@
           "template": {
             "type": "string",
             "maxLength": 200,
-            "example": "+971${1}"
+            "example": "+971${1}",
+            "description": "Group references are ${1} or ${name}; a bare $1 is refused. Literal text is 0-9 + * #."
           }
         }
       },
@@ -2630,7 +2601,7 @@
           "match": {
             "type": "string",
             "maxLength": 500,
-            "description": "A prefix (0-9 + * #, empty matches all) or an RE2 regex"
+            "description": "A non-empty prefix (0-9 + * #) or an RE2 regex of at most 500 characters"
           },
           "sourceExtensions": {
             "type": "array",
@@ -2670,7 +2641,7 @@
             "type": "array",
             "items": {
               "type": "integer",
-              "minimum": 300,
+              "minimum": 400,
               "maximum": 699
             },
             "description": "Default 408, 480, 500, 502, 503, 504"
@@ -2701,7 +2672,7 @@
           "match": {
             "type": "string",
             "maxLength": 500,
-            "description": "A prefix (0-9 + * #, empty matches all) or an RE2 regex"
+            "description": "A non-empty prefix (0-9 + * #) or an RE2 regex of at most 500 characters"
           },
           "sourceExtensions": {
             "type": "array",
@@ -2741,7 +2712,7 @@
             "type": "array",
             "items": {
               "type": "integer",
-              "minimum": 300,
+              "minimum": 400,
               "maximum": 699
             },
             "description": "Default 408, 480, 500, 502, 503, 504"
@@ -2772,7 +2743,7 @@
           "match": {
             "type": "string",
             "maxLength": 500,
-            "description": "A prefix (0-9 + * #, empty matches all) or an RE2 regex"
+            "description": "A non-empty prefix (0-9 + * #) or an RE2 regex of at most 500 characters"
           },
           "sourceExtensions": {
             "type": "array",
@@ -2812,7 +2783,7 @@
             "type": "array",
             "items": {
               "type": "integer",
-              "minimum": 300,
+              "minimum": 400,
               "maximum": 699
             },
             "description": "Default 408, 480, 500, 502, 503, 504"

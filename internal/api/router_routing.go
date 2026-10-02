@@ -1,11 +1,9 @@
-//go:build routing_engine
-
 package api
 
 import "github.com/azrtydxb/hello/internal/routing"
 
-// engineRouter adapts routing.Compile to Router. The build tag goes away
-// when the routing engine (Phase 2 Task 2) is merged.
+// engineRouter adapts routing.Compile to Router; it is the Router Handler
+// uses unless Config names another (tests use fakes).
 type engineRouter struct{}
 
 func (engineRouter) Compile(c routing.Config) (RouteTable, []routing.FieldError) {
@@ -15,5 +13,3 @@ func (engineRouter) Compile(c routing.Config) (RouteTable, []routing.FieldError)
 	}
 	return t, errs
 }
-
-func init() { defaultRouter = engineRouter{} }

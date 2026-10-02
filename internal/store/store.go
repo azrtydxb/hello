@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/auth"
@@ -25,10 +26,40 @@ var (
 	ErrNotFound = errors.New("store: not found")
 	// ErrConflict is returned when a unique value is already taken.
 	ErrConflict = errors.New("store: conflict")
-	// ErrInUse is returned when a row cannot be deleted because a route
-	// still refers to it.
+	// ErrInUse is returned (inside an *InUseError) when a change would
+	// break a route that refers to the row.
 	ErrInUse = errors.New("store: in use")
 )
+
+// InUseError rejects a change that would leave a route pointing at nothing.
+// Its message names the routes and is safe to show to API clients.
+type InUseError struct{ Msg string }
+
+func (e *InUseError) Error() string { return e.Msg }
+
+// Unwrap makes errors.Is(err, ErrInUse) hold.
+func (e *InUseError) Unwrap() error { return ErrInUse }
+
+// inUse builds an InUseError naming up to five routes.
+func inUse(what string, routes []string) error {
+	quoted := make([]string, 0, len(routes))
+	for i, r := range routes {
+		if i == 5 {
+			quoted = append(quoted, fmt.Sprintf("and %d more", len(routes)-5))
+			break
+		}
+		quoted = append(quoted, strconv.Quote(r))
+	}
+	return &InUseError{Msg: fmt.Sprintf("%s is used by %s %s; change or delete the route first",
+		what, plural(len(routes), "route", "routes"), strings.Join(quoted, ", "))}
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
 
 // NotifyChannel is the PostgreSQL channel a configuration change notifies,
 // with the new revision as payload.
@@ -132,7 +163,11 @@ func (s *Store) configChangeID(ctx context.Context, actor, action, resource stri
 				return err
 			}
 			if fields := check(snap.Config); len(fields) > 0 {
-				return &ValidationError{Fields: fields}
+				prefix, err := configPath(ctx, tx, snap.Config, resource, id)
+				if err != nil {
+					return err
+				}
+				return &ValidationError{Fields: relative(fields, prefix)}
 			}
 		}
 		if err := insertAudit(ctx, tx, actor, action, resource, id); err != nil {
@@ -146,6 +181,62 @@ func (s *Store) configChangeID(ctx context.Context, actor, action, resource stri
 		_, err = tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, NotifyChannel, strconv.FormatInt(rev, 10))
 		return err
 	})
+}
+
+// configPath is the routing.Config path of the changed item — for example
+// "outbound[2]" or `extensions["101"]` — or "" when it has none (a delete,
+// a reorder).
+func configPath(ctx context.Context, tx *sql.Tx, cfg routing.Config, resource, id string) (string, error) {
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return "", nil
+	}
+	switch resource {
+	case "trunk":
+		for i, t := range cfg.Trunks {
+			if t.ID == n {
+				return fmt.Sprintf("trunks[%d]", i), nil
+			}
+		}
+	case "outbound_route":
+		for i, r := range cfg.Outbound {
+			if r.ID == n {
+				return fmt.Sprintf("outbound[%d]", i), nil
+			}
+		}
+	case "inbound_route":
+		for i, r := range cfg.Inbound {
+			if r.ID == n {
+				return fmt.Sprintf("inbound[%d]", i), nil
+			}
+		}
+	case "extension":
+		var number string
+		err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1`, n).Scan(&number)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "extensions[" + strconv.Quote(number) + "]", err
+	}
+	return "", nil
+}
+
+// relative rewrites the changed item's errors to paths relative to it
+// ("outbound[2].numberTransform.template" becomes
+// "numberTransform.template"), so a client maps them onto its form; errors
+// about other items keep their full path.
+func relative(fields []routing.FieldError, prefix string) []routing.FieldError {
+	if prefix == "" {
+		return fields
+	}
+	out := make([]routing.FieldError, len(fields))
+	for i, f := range fields {
+		if rest, ok := strings.CutPrefix(f.Path, prefix+"."); ok {
+			f.Path = rest
+		}
+		out[i] = f
+	}
+	return out
 }
 
 // Audit records a non-configuration event such as a login.

@@ -97,8 +97,7 @@ type Config struct {
 	SIPDomain  string
 	SessionTTL time.Duration
 	Log        *slog.Logger
-	// Router is the routing engine. Without one, trunk and route changes
-	// and the route tester answer 503.
+	// Router is the routing engine; nil means routing.Compile.
 	Router Router
 	// Trunks reads trunk live state for /trunks/status and the route
 	// tester; nil behaves as Valkey unreachable.
@@ -112,6 +111,9 @@ type server struct{ Config }
 func Handler(c Config) http.Handler {
 	if c.Log == nil {
 		c.Log = slog.New(slog.DiscardHandler)
+	}
+	if c.Router == nil {
+		c.Router = engineRouter{}
 	}
 	s := &server{c}
 	authed := auth.Middleware(c.Store, c.Log)

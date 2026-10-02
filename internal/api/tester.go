@@ -37,7 +37,7 @@ func (s *server) routingTest(w http.ResponseWriter, r *http.Request) {
 		CallerID string `json:"callerId"`
 		At       string `json:"at"`
 	}
-	if !decode(w, r, &b) || !s.needRouter(w) {
+	if !decode(w, r, &b) {
 		return
 	}
 	var f fieldErrs

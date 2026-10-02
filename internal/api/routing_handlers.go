@@ -57,36 +57,24 @@ func writeFields(w http.ResponseWriter, fields []routing.FieldError) {
 // configError answers a failed configuration change.
 func (s *server) configError(w http.ResponseWriter, what string, err error) {
 	var v *store.ValidationError
+	var used *store.InUseError
 	switch {
 	case errors.As(err, &v):
 		writeFields(w, v.Fields)
-	case errors.Is(err, store.ErrInUse):
-		writeError(w, http.StatusConflict, "conflict", what+": still used by a route")
+	case errors.As(err, &used):
+		writeError(w, http.StatusConflict, "conflict", used.Msg)
 	default:
 		s.storeError(w, what, err)
 	}
 }
 
-// check is the whole-configuration validation (stage 2), or nil without a
-// routing engine.
+// check is the whole-configuration validation (stage 2): the configuration
+// as it would be after the change must compile.
 func (s *server) check() store.Check {
-	if s.Router == nil {
-		return nil
-	}
 	return func(cfg routing.Config) []routing.FieldError {
 		_, errs := s.Router.Compile(cfg)
 		return errs
 	}
-}
-
-// needRouter answers 503 when this build has no routing engine, so no
-// trunk or route is saved without its whole-configuration check.
-func (s *server) needRouter(w http.ResponseWriter) bool {
-	if s.Router == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "the routing engine is not built into this hello-control")
-		return false
-	}
-	return true
 }
 
 // Trunks.
@@ -155,7 +143,7 @@ func (s *server) getTrunk(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) createTrunk(w http.ResponseWriter, r *http.Request) {
 	var b trunkBody
-	if !decode(w, r, &b) || !s.needRouter(w) {
+	if !decode(w, r, &b) {
 		return
 	}
 	in := store.TrunkInput{RegisterExpires: 3600, OptionsInterval: 30, Enabled: true, SourceCIDRs: []string{}}
@@ -182,7 +170,7 @@ func (s *server) updateTrunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b trunkBody
-	if !decode(w, r, &b) || !s.needRouter(w) {
+	if !decode(w, r, &b) {
 		return
 	}
 	if b.empty() {
@@ -211,7 +199,7 @@ func (s *server) updateTrunk(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) deleteTrunk(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
-	if !ok || !s.needRouter(w) {
+	if !ok {
 		return
 	}
 	if err := s.Store.DeleteTrunk(r.Context(), actor(r).String(), id, s.check()); err != nil {
@@ -313,7 +301,7 @@ func (s *server) getOutbound(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) createOutbound(w http.ResponseWriter, r *http.Request) {
 	var b outboundBody
-	if !decode(w, r, &b) || !s.needRouter(w) {
+	if !decode(w, r, &b) {
 		return
 	}
 	o := store.OutboundRoute{Enabled: true, SourceExtensions: []string{}, FailoverCodes: slices.Clone(store.DefaultFailoverCodes)}
@@ -336,7 +324,7 @@ func (s *server) updateOutbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b outboundBody
-	if !decode(w, r, &b) || !s.needRouter(w) {
+	if !decode(w, r, &b) {
 		return
 	}
 	if b.empty() {
@@ -356,7 +344,7 @@ func (s *server) updateOutbound(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) deleteOutbound(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
-	if !ok || !s.needRouter(w) {
+	if !ok {
 		return
 	}
 	if err := s.Store.DeleteOutboundRoute(r.Context(), actor(r).String(), id, s.check()); err != nil {
@@ -432,7 +420,7 @@ func (s *server) getInbound(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) createInbound(w http.ResponseWriter, r *http.Request) {
 	var b inboundBody
-	if !decode(w, r, &b) || !s.needRouter(w) {
+	if !decode(w, r, &b) {
 		return
 	}
 	in := store.InboundRoute{DIDKind: "any", Enabled: true}
@@ -455,7 +443,7 @@ func (s *server) updateInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b inboundBody
-	if !decode(w, r, &b) || !s.needRouter(w) {
+	if !decode(w, r, &b) {
 		return
 	}
 	if b.empty() {
@@ -475,7 +463,7 @@ func (s *server) updateInbound(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) deleteInbound(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
-	if !ok || !s.needRouter(w) {
+	if !ok {
 		return
 	}
 	if err := s.Store.DeleteInboundRoute(r.Context(), actor(r).String(), id, s.check()); err != nil {
@@ -491,7 +479,7 @@ func (s *server) reorder(kind string) http.HandlerFunc {
 		var b struct {
 			IDs []int64 `json:"ids"`
 		}
-		if !decode(w, r, &b) || !s.needRouter(w) {
+		if !decode(w, r, &b) {
 			return
 		}
 		if b.IDs == nil || len(b.IDs) > 10000 {

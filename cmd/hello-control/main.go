@@ -107,10 +107,6 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		return fmt.Errorf("HELLO_SECRET_KEY: %w", err)
 	}
 	st := store.New(db).WithSecretBox(box)
-	router := api.DefaultRouter()
-	if router == nil {
-		log.Warn("routing engine not built in: trunk and route changes and the route tester answer 503")
-	}
 	live := livestate.New(vk)
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
@@ -125,7 +121,6 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			Store:      st,
 			Live:       live,
 			Trunks:     live,
-			Router:     router,
 			SIPDomain:  cfg.SIPDomain,
 			SessionTTL: cfg.SessionTTL,
 			Log:        log,

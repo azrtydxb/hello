@@ -82,7 +82,9 @@ func compileRegex(f *fieldErrs, path, re string) *regexp.Regexp {
 }
 
 // templateParts splits a replacement template into its group references
-// and its literal text, using regexp.Expand's syntax ($name, ${name}, $$).
+// and its literal text. References are ${1} or ${name}; "$$" is a literal
+// "$". A bare $1 or $name is refused, as the routing engine does, because
+// "$1x" silently means "${1x}".
 func templateParts(tpl string) (refs []string, literal string, ok bool) {
 	var lit strings.Builder
 	for i := 0; i < len(tpl); i++ {
@@ -103,15 +105,7 @@ func templateParts(tpl string) (refs []string, literal string, ok bool) {
 			refs = append(refs, rest[1:end])
 			i += end + 1
 		default:
-			n := 0
-			for n < len(rest) && (rest[n] == '_' || unicode.IsLetter(rune(rest[n])) || unicode.IsDigit(rune(rest[n]))) {
-				n++
-			}
-			if n == 0 {
-				return nil, "", false
-			}
-			refs = append(refs, rest[:n])
-			i += n
+			return nil, "", false
 		}
 	}
 	return refs, lit.String(), true
@@ -141,7 +135,7 @@ func validateTransform(f *fieldErrs, path string, t routing.Transform) {
 	}
 	refs, literal, ok := templateParts(t.Template)
 	if !ok {
-		f.add(path+".template", "has a malformed group reference")
+		f.add(path+".template", "has a malformed group reference: write ${1} or ${name}")
 		return
 	}
 	if !digitsRe.MatchString(literal) {
@@ -280,8 +274,8 @@ func validateOutbound(o *store.OutboundRoute) fieldErrs {
 	}
 	switch o.MatchKind {
 	case "prefix":
-		if !digitsRe.MatchString(o.Match) {
-			f.add("match", "a prefix is up to 32 of 0-9 + * #")
+		if o.Match == "" || o.Match == "+" || !digitsRe.MatchString(o.Match) {
+			f.add("match", "a prefix is 1-32 of 0-9 + * # (a regex such as ^ matches every number)")
 		}
 	case "regex":
 		compileRegex(&f, "match", o.Match)
@@ -316,8 +310,8 @@ func validateOutbound(o *store.OutboundRoute) fieldErrs {
 	}
 	codes := map[int]bool{}
 	for i, c := range o.FailoverCodes {
-		if c < 300 || c > 699 || codes[c] {
-			f.add(fmt.Sprintf("failoverCodes[%d]", i), "must be a distinct SIP final failure code (300-699)")
+		if c < 400 || c > 699 || codes[c] {
+			f.add(fmt.Sprintf("failoverCodes[%d]", i), "must be a distinct SIP failure code (400-699)")
 		}
 		codes[c] = true
 	}
