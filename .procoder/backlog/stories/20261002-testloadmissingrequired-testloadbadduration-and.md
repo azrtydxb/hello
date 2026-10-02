@@ -1,6 +1,6 @@
 # `TestLoadMissingRequired`, `TestLoadBadDuration` and `TestLoadUnspecifiedAdvertise` in `internal/config` pass — fails if a missing key, a malformed duration, or bind `0.0.0.0` without an advertised address is accepted, or the error omits the key name.
 
-Status: open
+Status: done 2026-10-02
 Created: 2026-10-02
 Epic: foundation
 Sprint: -
@@ -14,9 +14,10 @@ Operators need misconfiguration to fail loudly at startup, naming the key, inste
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
      true — the closer will ask for the evidence. -->
 
-- [ ] `TestLoadMissingRequired`, `TestLoadBadDuration` and `TestLoadUnspecifiedAdvertise` in `internal/config` pass — fails if a missing key, a malformed duration, or bind `0.0.0.0` without an advertised address is accepted, or the error omits the key name.
+- [x] `TestLoadMissingRequired`, `TestLoadBadDuration` and `TestLoadUnspecifiedAdvertise` in `internal/config` pass — fails if a missing key, a malformed duration, or bind `0.0.0.0` without an advertised address is accepted, or the error omits the key name.
 
 ## Evidence
 
-<!-- Filled at close time: the commands run and what their output proved,
-     one line per criterion. Empty evidence keeps the story open. -->
+Fingerprint: sha256:131c34d3d1c348b92472df31b1b50fd85f3c8c7c669b4b9e68200d297a93a81d
+Produced: 54 bytes, exit 0
+Command: go test -race -count=1 ./internal/config/

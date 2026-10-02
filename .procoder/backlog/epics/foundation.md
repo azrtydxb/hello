@@ -1,6 +1,6 @@
 # foundation
 
-Status: open
+Status: done 2026-10-02
 Created: 2026-10-02
 Milestone: phase-0-foundation
 Spec: foundation @ c23a08c5e7ff
