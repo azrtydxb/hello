@@ -10,6 +10,7 @@ import {
 import { AuthProvider, RequireAuth, useAuth } from "./auth";
 import { CURRENT_PHASE, NAV_ITEMS } from "./nav";
 import { CallDetail } from "./pages/CallDetail";
+import { Cluster } from "./pages/Cluster";
 import { Calls } from "./pages/Calls";
 import { Dashboard } from "./pages/Dashboard";
 import { Devices } from "./pages/Devices";
@@ -32,6 +33,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/history": History,
   "/trunks": Trunks,
   "/routes": RoutesPage,
+  "/cluster": Cluster,
 };
 
 function Shell() {
