@@ -304,3 +304,92 @@ func TestTrustedProxyTrunkSource(t *testing.T) {
 		}
 	}
 }
+
+// TestDrainTimeoutWaitsForReInvite fails if, when the drain timeout ends a
+// call while a re-INVITE is being relayed (either direction), the BYE goes
+// out before that transaction completes, or the re-INVITE's 200 is not
+// relayed.
+func TestDrainTimeoutWaitsForReInvite(t *testing.T) {
+	for _, fromCaller := range []bool{true, false} {
+		name := "callee re-INVITEs"
+		if fromCaller {
+			name = "caller re-INVITEs"
+		}
+		t.Run(name, func(t *testing.T) {
+			pbx := startPBX(t, ringAllDevices())
+			a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
+			a.register(t)
+			b.register(t)
+			r := waitCall(t, dial(t.Context(), a, "200"))
+			if r.err != nil {
+				t.Fatal(r.err)
+			}
+			inv := waitReq(t, b.invites, "callee INVITE")
+			waitReq(t, b.acks, "callee ACK")
+
+			answerer := b // the side that answers the re-INVITE late
+			if !fromCaller {
+				answerer = a
+			}
+			hold := make(chan struct{})
+			answerer.mu.Lock()
+			answerer.reinviteHold = hold
+			answerer.mu.Unlock()
+			result := make(chan int, 1)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				var res *sip.Response
+				var err error
+				if fromCaller {
+					re := sip.NewRequest(sip.INVITE, r.dcs.InviteResponse.Contact().Address)
+					re.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+					re.SetBody([]byte(a.sdp))
+					res, err = r.dcs.Do(ctx, re)
+				} else {
+					b.mu.Lock()
+					dss := b.servers[inv.CallID().Value()]
+					b.mu.Unlock()
+					re := sip.NewRequest(sip.INVITE, inv.Contact().Address)
+					re.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+					re.SetBody([]byte(b.sdp))
+					res, err = dss.Do(ctx, re)
+				}
+				if err != nil {
+					result <- 0
+					return
+				}
+				result <- res.StatusCode
+			}()
+			waitReq(t, answerer.reinvites, "re-INVITE held at the answerer")
+			pbx.srv.HangupAll("drain timeout")
+			noReq(t, a.byes, 400*time.Millisecond, "BYE to the caller during the re-INVITE")
+			noReq(t, b.byes, 50*time.Millisecond, "BYE to the callee during the re-INVITE")
+			close(hold) // the answerer's 200 goes out now
+			select {
+			case code := <-result:
+				if code != 200 {
+					t.Fatalf("re-INVITE answer relayed as %d, want 200", code)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("re-INVITE never completed")
+			}
+			waitReq(t, a.byes, "BYE to the caller after the re-INVITE")
+			waitReq(t, b.byes, "BYE to the callee after the re-INVITE")
+			answerer.mu.Lock()
+			answered := answerer.reinviteAnswered
+			answerer.mu.Unlock()
+			for _, p := range []*phone{a, b} {
+				p.mu.Lock()
+				bye := p.byeAt
+				p.mu.Unlock()
+				if bye.Before(answered) {
+					t.Fatalf("BYE to %s at %s, before the re-INVITE's 200 at %s", p.user, bye.Format(time.StampMicro), answered.Format(time.StampMicro))
+				}
+			}
+			if cd := pbx.nextCDR(t); cd.FailureReason != "drain timeout" || cd.TerminationSide != "system" {
+				t.Fatalf("CDR = %+v", cd)
+			}
+		})
+	}
+}

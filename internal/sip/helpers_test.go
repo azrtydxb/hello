@@ -436,10 +436,15 @@ type phone struct {
 	dua     *sipgo.DialogUA
 	contact sip.ContactHeader
 
-	mu      sync.Mutex
-	callee  calleeFn
-	servers map[string]*sipgo.DialogServerSession
-	clients map[string]*sipgo.DialogClientSession
+	mu     sync.Mutex
+	callee calleeFn
+	// reinviteHold, when set, delays the 200 to re-INVITE/UPDATE until
+	// closed; reinviteAnswered is when the last such 200 was sent.
+	reinviteHold     chan struct{}
+	reinviteAnswered time.Time
+	byeAt            time.Time
+	servers          map[string]*sipgo.DialogServerSession
+	clients          map[string]*sipgo.DialogClientSession
 
 	invites   chan *sip.Request
 	reinvites chan *sip.Request
@@ -559,12 +564,21 @@ func (p *phone) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 
 func (p *phone) onReinvite(req *sip.Request, tx sip.ServerTransaction) {
 	push(p.reinvites, req)
+	p.mu.Lock()
+	hold := p.reinviteHold
+	p.mu.Unlock()
+	if hold != nil {
+		<-hold // the test decides when the 200 goes out
+	}
 	res := sip.NewResponseFromRequest(req, 200, "OK", req.Body())
 	if ct := req.ContentType(); ct != nil {
 		res.AppendHeader(sip.HeaderClone(ct))
 	}
 	res.AppendHeader(sip.HeaderClone(&p.contact))
 	_ = tx.Respond(res)
+	p.mu.Lock()
+	p.reinviteAnswered = time.Now()
+	p.mu.Unlock()
 }
 
 func (p *phone) onAck(req *sip.Request, tx sip.ServerTransaction) {
@@ -578,6 +592,9 @@ func (p *phone) onAck(req *sip.Request, tx sip.ServerTransaction) {
 }
 
 func (p *phone) onBye(req *sip.Request, tx sip.ServerTransaction) {
+	p.mu.Lock()
+	p.byeAt = time.Now()
+	p.mu.Unlock()
 	push(p.byes, req)
 	p.mu.Lock()
 	dss := p.servers[req.CallID().Value()]
