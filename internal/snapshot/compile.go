@@ -1,5 +1,3 @@
-//go:build routing_engine
-
 package snapshot
 
 import "github.com/azrtydxb/hello/internal/routing"

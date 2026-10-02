@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
@@ -182,6 +184,12 @@ type Watcher struct {
 	// doubles up to PollInterval and resets after a session that loaded.
 	InitialBackoff time.Duration
 
+	// ConfigInvalid, when set, is 1 while the current revision's routing
+	// does not compile and routing runs on the last good table;
+	// InvalidRevision holds that revision (0 when routing is current).
+	ConfigInvalid   prometheus.Gauge
+	InvalidRevision prometheus.Gauge
+
 	// Box opens sealed trunk passwords; without it every trunk with a
 	// password is misconfigured.
 	Box *secret.Box
@@ -221,8 +229,12 @@ func (w *Watcher) install(s *Snapshot) {
 			rs.Router = stubRouter{cfg: rs.Config}
 		}
 		if w.Log != nil {
-			w.Log.Error("routing configuration does not compile; keeping "+kept, "revision", s.Revision, "errors", fmt.Sprint(rs.Errors))
+			w.Log.Error("routing configuration does not compile; routing is frozen on "+kept,
+				"revision", s.Revision, "error_count", len(rs.Errors), "errors", summarise(rs.Errors))
 		}
+		w.setInvalid(1, s.Revision)
+	} else if s.routing != nil {
+		w.setInvalid(0, 0)
 	}
 	w.cur.Store(s)
 	w.triggerResolve()
@@ -342,6 +354,33 @@ func (w *Watcher) loadAll(ctx context.Context, conn Querier) (*Snapshot, error) 
 		resolved = *r
 	}
 	return s.WithRouting(buildRouting(cfg, bad, resolved)), nil
+}
+
+func (w *Watcher) setInvalid(v float64, rev int64) {
+	if w.ConfigInvalid != nil {
+		w.ConfigInvalid.Set(v)
+	}
+	if w.InvalidRevision != nil {
+		w.InvalidRevision.Set(float64(rev))
+	}
+}
+
+// summarise lists the first field errors (paths and messages only; the
+// engine's messages never carry configuration values like passwords).
+func summarise(errs []routing.FieldError) string {
+	const shown = 5
+	var b strings.Builder
+	for i, e := range errs {
+		if i == shown {
+			fmt.Fprintf(&b, "; and %d more", len(errs)-shown)
+			break
+		}
+		if i > 0 {
+			b.WriteString("; ")
+		}
+		b.WriteString(e.Path + ": " + e.Message)
+	}
+	return b.String()
 }
 
 func (w *Watcher) kick() chan struct{} {

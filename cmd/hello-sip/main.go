@@ -79,7 +79,15 @@ func run(args []string) error {
 		Name: "hello_snapshot_reload_failures_total",
 		Help: "Failed configuration snapshot connects or loads; the last good snapshot stays in use.",
 	})
-	metrics.Registry.MustRegister(reloadFailures)
+	routingInvalid := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hello_routing_config_invalid",
+		Help: "1 while the current configuration revision's routing does not compile and routing is frozen on the last good table.",
+	})
+	routingInvalidRev := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hello_routing_config_invalid_revision",
+		Help: "The configuration revision whose routing does not compile; 0 when routing is current.",
+	})
+	metrics.Registry.MustRegister(reloadFailures, routingInvalid, routingInvalidRev)
 	sipMetrics := sip.NewMetrics(metrics.Registry)
 
 	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
@@ -100,7 +108,7 @@ func run(args []string) error {
 	}
 	live := livestate.New(vk)
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
-		ReloadFailures: reloadFailures, Box: box}
+		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev}
 	srv, err := sip.New(sip.Config{
 		NodeID: cfg.NodeID, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
 		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,

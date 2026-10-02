@@ -17,6 +17,8 @@ import (
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/jackc/pgx/v5"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 func testBox(t *testing.T, fill string) *secret.Box {
@@ -62,7 +64,7 @@ func seedRouting(t *testing.T, conn *pgx.Conn, box *secret.Box) (good, bad int64
 	_, err = conn.Exec(ctx, "UPDATE trunks SET password_enc = $1 WHERE id = $2", wrongRow, bad)
 	must(err)
 	_, err = conn.Exec(ctx, `INSERT INTO trunk_destinations (trunk_id, host, port, priority, weight) VALUES
-		($1, '198.51.100.7', 5060, 1, 1), ($1, 'carrier.test', 0, 0, 5)`, good)
+		($1, '198.51.100.7', 5060, 1, 1), ($1, 'carrier.test', 0, 0, 5), ($2, '198.51.100.9', 5060, 0, 1)`, good, bad)
 	must(err)
 	var route int64
 	must(conn.QueryRow(ctx, `INSERT INTO outbound_routes (position, name, match_kind, match, number_transform, schedule, failover_codes)
@@ -100,6 +102,9 @@ func TestLoadRouting(t *testing.T) {
 		t.Fatal(err)
 	}
 	rs := s.Routing()
+	if len(rs.Errors) > 0 {
+		t.Fatalf("seed configuration does not compile: %v", rs.Errors)
+	}
 	c := rs.Config
 	if len(c.Trunks) != 2 || c.Extensions["100"] != "+97140000100" || len(c.Outbound) != 1 || len(c.Inbound) != 1 {
 		t.Fatalf("config = %+v", c)
@@ -148,7 +153,9 @@ func TestKeepLastGoodRouter(t *testing.T) {
 	orig := compile
 	t.Cleanup(func() { compile = orig })
 	var logs syncBuf
-	w := &Watcher{Domain: domain, Log: slog.New(slog.NewTextHandler(&logs, nil))}
+	invalid := prometheus.NewGauge(prometheus.GaugeOpts{Name: "i"})
+	invalidRev := prometheus.NewGauge(prometheus.GaugeOpts{Name: "r"})
+	w := &Watcher{Domain: domain, Log: slog.New(slog.NewTextHandler(&logs, nil)), ConfigInvalid: invalid, InvalidRevision: invalidRev}
 	good := buildRouting(routing.Config{Extensions: map[string]string{"100": ""}}, nil, nil)
 	w.install(New(1, domain, nil).WithRouting(good))
 
@@ -168,8 +175,18 @@ func TestKeepLastGoodRouter(t *testing.T) {
 	if d := r.Decide(routing.Call{FromExtension: "1", Number: "200"}, nil); d.Kind != routing.KindReject {
 		t.Fatalf("broken revision's routing used: %+v", d)
 	}
-	if !strings.Contains(logs.String(), "does not compile") || !strings.Contains(logs.String(), "bad regex") {
+	if !strings.Contains(logs.String(), "does not compile") || !strings.Contains(logs.String(), "outbound[0].match: bad regex") ||
+		!strings.Contains(logs.String(), "level=ERROR") {
 		t.Fatalf("not logged loudly: %s", logs.String())
+	}
+	if gauge(invalid) != 1 || gauge(invalidRev) != 2 {
+		t.Fatalf("hello_routing_config_invalid = %v (revision %v), want 1 (2)", gauge(invalid), gauge(invalidRev))
+	}
+	// A good revision clears it.
+	compile = orig
+	w.install(New(3, domain, nil).WithRouting(buildRouting(routing.Config{Extensions: map[string]string{"300": ""}}, nil, nil)))
+	if gauge(invalid) != 0 || gauge(invalidRev) != 0 {
+		t.Fatal("invalid flag not cleared by a good revision")
 	}
 }
 
@@ -206,11 +223,15 @@ func TestResolverRefreshesSourceIPs(t *testing.T) {
 		srv:   map[string][]*net.SRV{"_sip._udp.carrier.test": {{Target: "sip1.carrier.test", Port: 5070}}},
 	}
 	trunks := []routing.Trunk{
-		{ID: 1, Name: "a", Enabled: true, Destinations: []routing.Destination{{Host: "carrier.test"}}},
-		{ID: 2, Name: "b", Enabled: true, Destinations: []routing.Destination{{Host: "plain.test", Port: 5080}}},
+		{ID: 1, Name: "a", Mode: "ip", Enabled: true, OptionsInterval: 30 * time.Second, Destinations: []routing.Destination{{Host: "carrier.test", Weight: 1}}},
+		{ID: 2, Name: "b", Mode: "ip", Enabled: true, OptionsInterval: 30 * time.Second, Destinations: []routing.Destination{{Host: "plain.test", Port: 5080, Weight: 1}}},
 	}
 	w := &Watcher{Domain: domain, Resolver: r, ResolveInterval: 20 * time.Millisecond}
-	w.install(New(1, domain, nil).WithRouting(buildRouting(routing.Config{Trunks: trunks}, nil, nil)))
+	rs := buildRouting(routing.Config{Trunks: trunks, Extensions: map[string]string{}}, nil, nil)
+	if len(rs.Errors) > 0 {
+		t.Fatalf("test configuration does not compile: %v", rs.Errors)
+	}
+	w.install(New(1, domain, nil).WithRouting(rs))
 	if _, ok := w.Current().Routing().Router.TrunkForSource(netip.MustParseAddr("203.0.113.10"), ""); ok {
 		t.Fatal("resolved before DNS ran")
 	}
@@ -222,7 +243,7 @@ func TestResolverRefreshesSourceIPs(t *testing.T) {
 		tr, ok := w.Current().Routing().Router.TrunkForSource(netip.MustParseAddr("203.0.113.10"), "")
 		return ok && tr.ID == 1
 	})
-	rs := w.Current().Routing()
+	rs = w.Current().Routing()
 	if got := rs.Resolved["carrier.test:0"]; len(got) != 1 || got[0] != "203.0.113.10:5070" {
 		t.Fatalf("resolved = %v", rs.Resolved)
 	}
@@ -239,4 +260,10 @@ func TestResolverRefreshesSourceIPs(t *testing.T) {
 	if w.Current().Revision != 1 {
 		t.Fatal("resolution changed the revision")
 	}
+}
+
+func gauge(g prometheus.Gauge) float64 {
+	var m dto.Metric
+	_ = g.Write(&m)
+	return m.GetGauge().GetValue()
 }

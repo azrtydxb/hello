@@ -10,9 +10,8 @@ import (
 
 // stubRouter routes calls between internal extensions only; every other
 // call is rejected with 404. It is the router of a snapshot built by New
-// (tests), of a configuration whose first compile failed (no last good
-// table yet), and — until the engine is merged — of every build without the
-// routing_engine tag (see compile_stub.go).
+// (tests), and of a configuration whose very first revision does not
+// compile (there is no last good table to keep yet).
 type stubRouter struct {
 	snap *Snapshot
 	cfg  routing.Config

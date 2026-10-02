@@ -16,9 +16,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Router is a compiled routing table as hello-sip uses it. *routing.Table
-// satisfies it; until the engine is merged, the stub in compile_stub.go
-// does (see there).
+// Router is a compiled routing table as hello-sip uses it; *routing.Table
+// satisfies it (and stubRouter, for snapshots without a compiled table).
 type Router interface {
 	Decide(c routing.Call, usable routing.TrunkUsability) routing.Decision
 	Trunk(id int64) (*routing.Trunk, bool)
@@ -266,6 +265,10 @@ func buildRouting(cfg routing.Config, bad map[int64]string, resolved map[string]
 	cfg.ResolvedIPs = resolvedIPs(cfg.Trunks, resolved)
 	rs := &RoutingState{Config: cfg, Misconfigured: bad, Resolved: resolved}
 	rs.Router, rs.Errors = compile(cfg)
+	if rs.Router == nil {
+		// Never nil: the watcher swaps in the last good table on install.
+		rs.Router = stubRouter{cfg: cfg}
+	}
 	return rs
 }
 
