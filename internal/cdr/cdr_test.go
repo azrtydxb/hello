@@ -2,6 +2,7 @@ package cdr
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/migrate"
+	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -175,5 +177,37 @@ func TestWriterPostgres(t *testing.T) {
 	}
 	if n != 1 || ring != nil || answer == nil || !answer.Equal(r.AnswerTime) || media != "direct" || side != "caller" || billable != 8000 {
 		t.Fatalf("row: n=%d ring=%v answer=%v media=%s side=%s billable=%d", n, ring, answer, media, side, billable)
+	}
+	var dir string
+	if err := pool.QueryRow(ctx, "SELECT direction FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&dir); err != nil || dir != "internal" {
+		t.Fatalf("default direction = %q, %v", dir, err)
+	}
+
+	// An outbound call's routing detail and trace.
+	var tr routing.Trace
+	tr.Add(`Route "UAE Mobile" matched (regex ^05[0-9]{8}$)`)
+	tr.Add("carrier-backup -> 200 OK")
+	out := Record{CorrelationID: "corr-2", SIPCallID: "call-2", Source: "100", Destination: "0501234567",
+		StartTime: start, EndTime: start.Add(time.Second), SIPNode: "sip-1", FinalStatus: 200, TerminationSide: SideCaller,
+		Direction: DirectionOutbound, OriginalDestination: "0501234567", RewrittenDestination: "+971501234567",
+		Route: "UAE Mobile", Trunk: "carrier-backup", Trace: tr}
+	if err := w.write(ctx, out); err != nil {
+		t.Fatal(err)
+	}
+	var (
+		orig, rewritten, route, trunk string
+		raw                           []byte
+	)
+	if err := pool.QueryRow(ctx, `SELECT direction, original_destination, rewritten_destination, route_name, trunk_name, trace
+		FROM cdrs WHERE correlation_id = 'corr-2'`).Scan(&dir, &orig, &rewritten, &route, &trunk, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var got routing.Trace
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if dir != "outbound" || orig != "0501234567" || rewritten != "+971501234567" || route != "UAE Mobile" || trunk != "carrier-backup" ||
+		len(got) != 2 || got[1].N != 2 || got[1].Text != "carrier-backup -> 200 OK" {
+		t.Fatalf("outbound row: %s %s %s %s %s %+v", dir, orig, rewritten, route, trunk, got)
 	}
 }

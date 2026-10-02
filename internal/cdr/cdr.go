@@ -6,9 +6,11 @@ package cdr
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -16,6 +18,13 @@ import (
 // QueueSize is the number of records buffered while PostgreSQL is slow or
 // unavailable.
 const QueueSize = 1000
+
+// Call directions.
+const (
+	DirectionInternal = "internal"
+	DirectionInbound  = "inbound"
+	DirectionOutbound = "outbound"
+)
 
 // Termination sides.
 const (
@@ -41,6 +50,14 @@ type Record struct {
 	FinalStatus     int    // final SIP status sent to the caller
 	TerminationSide string // caller | callee | system
 	FailureReason   string
+	// Routing detail (Phase 2). Direction is internal, inbound or outbound;
+	// zero values store as the column defaults.
+	Direction            string
+	OriginalDestination  string
+	RewrittenDestination string
+	Route                string
+	Trunk                string
+	Trace                routing.Trace // never holds secrets
 }
 
 // Execer is the subset of a pgx pool or connection the writer needs.
@@ -97,8 +114,10 @@ func (w *Writer) Enqueue(r Record) bool {
 
 const insert = `INSERT INTO cdrs (correlation_id, sip_call_id, source, destination,
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
-    sip_node, media_mode, final_status, termination_side, failure_reason)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    sip_node, media_mode, final_status, termination_side, failure_reason,
+    direction, original_destination, rewritten_destination, route_name, trunk_name, trace)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    $16, $17, $18, $19, $20, $21)
 ON CONFLICT (correlation_id) DO NOTHING`
 
 // Run writes queued records until ctx is cancelled, retrying each with
@@ -164,9 +183,22 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	if media == "" {
 		media = "direct"
 	}
-	_, err := w.db.Exec(wctx, insert, r.CorrelationID, r.SIPCallID, r.Source, r.Destination,
+	direction := r.Direction
+	if direction == "" {
+		direction = DirectionInternal
+	}
+	trace := r.Trace
+	if trace == nil {
+		trace = routing.Trace{}
+	}
+	tj, err := json.Marshal(trace)
+	if err != nil {
+		return err
+	}
+	_, err = w.db.Exec(wctx, insert, r.CorrelationID, r.SIPCallID, r.Source, r.Destination,
 		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
-		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason)
+		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
+		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj))
 	return err
 }
 
