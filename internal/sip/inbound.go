@@ -44,6 +44,18 @@ func (s *Server) inboundCall(req *sip.Request, tx sip.ServerTransaction, snap *s
 	c.direction, c.trunkName = cdr.DirectionInbound, t.Name
 	c.callerNum, c.callerName = from.Address.User, from.DisplayName
 	c.trace.Add(fmt.Sprintf("Source %s identifies trunk %s", sourceIP(req), t.Name))
+	// An inbound call counts against its source trunk's max_calls too.
+	if ok, why := c.acquireSlot(t, false, c.id+":in"); !ok {
+		if why == "full" {
+			c.trace.Add(fmt.Sprintf("Trunk %s is at capacity", t.Name))
+			s.m.TrunkCalls.WithLabelValues(t.Name, TrunkFull).Inc()
+		} else {
+			c.trace.Add(fmt.Sprintf("Trunk %s skipped: %s", t.Name, why))
+		}
+		s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable")
+		c.record(sip.StatusServiceUnavailable, cdr.SideSystem, "source trunk "+why, ResultUnavailable)
+		return
+	}
 	dec := s.decide(snap.Routing(), routing.Call{
 		FromTrunk: t.ID, Number: req.Recipient.User, CallerID: from.Address.User,
 		SIPDomain: req.Recipient.Host, Header: headerOf(req), At: time.Now(),

@@ -299,3 +299,38 @@ func TestResolverKeepsLastGoodOnFailure(t *testing.T) {
 		t.Fatalf("resolved = %v, want the previous address kept", got)
 	}
 }
+
+// TestFrozenMarkerSurvivesDNSRebuild fails if a DNS-only rebuild of the
+// last good table, while the current revision does not compile, clears the
+// marker that routing is frozen.
+func TestFrozenMarkerSurvivesDNSRebuild(t *testing.T) {
+	orig := compile
+	t.Cleanup(func() { compile = orig })
+	r := &fakeResolver{hosts: map[string][]string{"plain.test": {"203.0.113.40"}}}
+	trunks := []routing.Trunk{{ID: 2, Name: "b", Mode: "ip", Enabled: true, OptionsInterval: 30 * time.Second,
+		Destinations: []routing.Destination{{Host: "plain.test", Port: 5080, Weight: 1}}}}
+	w := &Watcher{Domain: domain, Resolver: r, ResolveInterval: 20 * time.Millisecond}
+	w.install(New(1, domain, nil).WithRouting(buildRouting(routing.Config{Trunks: trunks, Extensions: map[string]string{}}, nil, nil)))
+
+	// Revision 2 does not compile: routing freezes on revision 1's table.
+	compile = func(routing.Config) (Router, []routing.FieldError) {
+		return nil, []routing.FieldError{{Path: "inbound[0].destination", Message: "extension does not exist"}}
+	}
+	w.install(New(2, domain, nil).WithRouting(buildRouting(routing.Config{Trunks: trunks, Extensions: map[string]string{}}, nil, nil)))
+	compile = orig // the retained good config compiles again on rebuild
+	if len(w.Current().Routing().Errors) == 0 {
+		t.Fatal("not frozen after a bad revision")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { w.RunResolver(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	waitFor(t, 3*time.Second, "DNS rebuild", func() bool {
+		_, ok := w.Current().Routing().Router.TrunkForSource(netip.MustParseAddr("203.0.113.40"), "")
+		return ok
+	})
+	if rs := w.Current().Routing(); len(rs.Errors) == 0 || w.Current().Revision != 2 {
+		t.Fatalf("DNS rebuild cleared the frozen marker (revision %d, errors %v)", w.Current().Revision, rs.Errors)
+	}
+}

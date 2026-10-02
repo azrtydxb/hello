@@ -230,12 +230,21 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	// and release their leases for another node.
 	tctx, stopTrunks := context.WithCancel(context.Background())
 	trunksDone := make(chan struct{})
-	go func() { defer close(trunksDone); s.trunks.run(tctx) }()
 	defer func() { stopTrunks(); <-trunksDone }()
 
 	errc := make(chan error, 1)
 	s.serving.Store(true)
 	go func() { errc <- srv.ServeUDP(conn) }()
+	go func() {
+		defer close(trunksDone)
+		// Requests we originate leave from the listening socket, which
+		// sipgo only knows once ServeUDP has registered it: sending
+		// earlier fails (a second bind on the port), so the first OPTIONS
+		// would mark a healthy carrier down.
+		if waitListening(tctx, ua, conn.LocalAddr().String()) {
+			s.trunks.run(tctx)
+		}
+	}()
 	select {
 	case <-ctx.Done():
 		stopTrunks()
@@ -252,6 +261,20 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	_ = ua.Close()
 	s.bg.Wait()
 	return err
+}
+
+// waitListening waits until sipgo serves the listener at addr.
+func waitListening(ctx context.Context, ua *sipgo.UserAgent, addr string) bool {
+	for {
+		if c, _ := ua.TransportLayer().GetConnection("udp", addr); c != nil {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
 }
 
 const allow = "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, UPDATE"

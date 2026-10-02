@@ -111,8 +111,8 @@ func TestTrunkSlotSurvivesRefreshPastTTL(t *testing.T) {
 	}
 	for range 6 { // 1.8s: three times the TTL
 		time.Sleep(300 * time.Millisecond)
-		if err := s.RefreshTrunkCall(ctx, 9, "long-call", ttl); err != nil {
-			t.Fatal(err)
+		if r, err := s.RefreshTrunkCall(ctx, 9, "long-call", 1, ttl); err != nil || r != SlotRefreshed {
+			t.Fatalf("refresh = %v, %v; want refreshed", r, err)
 		}
 	}
 	if ok, err := s.AcquireTrunkCall(ctx, 9, "second", 1, ttl); err != nil || ok {
@@ -133,5 +133,45 @@ func TestTrunkSlotSurvivesRefreshPastTTL(t *testing.T) {
 	time.Sleep(400 * time.Millisecond)
 	if st, _ := s.TrunkStatus(ctx, 10); st.ActiveCalls != 1 {
 		t.Fatalf("after the short slot expired: active = %d, want the long one still counted", st.ActiveCalls)
+	}
+}
+
+// TestTrunkSlotReacquiredAfterLoss fails if a refreshed call whose slot
+// vanished (Valkey restart or an outage longer than the TTL) is not counted
+// again — re-acquired when it fits, added and reported overcommitted when
+// the trunk filled meanwhile — or if a refresh of a held slot is reported
+// as anything but refreshed.
+func TestTrunkSlotReacquiredAfterLoss(t *testing.T) {
+	s, ctx := store(t), context.Background()
+	if ok, _ := s.AcquireTrunkCall(ctx, 11, "a", 1, time.Minute); !ok {
+		t.Fatal("acquire a")
+	}
+	if r, err := s.RefreshTrunkCall(ctx, 11, "a", 1, time.Minute); err != nil || r != SlotRefreshed {
+		t.Fatalf("refresh held = %v, %v", r, err)
+	}
+	// Valkey loses the set (restart without persistence).
+	if err := s.c.Do(ctx, s.c.B().Del().Key(trunkKey(11, "calls")).Build()).Error(); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := s.RefreshTrunkCall(ctx, 11, "a", 1, time.Minute); err != nil || r != SlotReacquired {
+		t.Fatalf("refresh after loss = %v, %v; want reacquired", r, err)
+	}
+	if ok, _ := s.AcquireTrunkCall(ctx, 11, "b", 1, time.Minute); ok {
+		t.Fatal("a second call was admitted: the re-acquired slot does not count")
+	}
+	// Lost again, and another call took the only slot meanwhile.
+	_ = s.c.Do(ctx, s.c.B().Del().Key(trunkKey(11, "calls")).Build()).Error()
+	if ok, _ := s.AcquireTrunkCall(ctx, 11, "c", 1, time.Minute); !ok {
+		t.Fatal("acquire c")
+	}
+	if r, err := s.RefreshTrunkCall(ctx, 11, "a", 1, time.Minute); err != nil || r != SlotOvercommitted {
+		t.Fatalf("refresh at capacity = %v, %v; want overcommitted", r, err)
+	}
+	st, _ := s.TrunkStatus(ctx, 11)
+	if st.ActiveCalls != 2 {
+		t.Fatalf("active = %d; the overcommitted call must still count", st.ActiveCalls)
+	}
+	if ok, _ := s.AcquireTrunkCall(ctx, 11, "d", 1, time.Minute); ok {
+		t.Fatal("admitted while overcommitted")
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/emiago/sipgo/sip"
 )
@@ -75,7 +76,7 @@ func (c *call) setupOutbound(dec routing.Decision) {
 		c.mu.Lock()
 		c.trunkName = t.Name
 		c.mu.Unlock()
-		if ok, why := c.acquireSlot(t, dec.Emergency); !ok {
+		if ok, why := c.acquireSlot(t, dec.Emergency, c.id); !ok {
 			c.addTrace(fmt.Sprintf("Trunk %s skipped: %s", t.Name, why))
 			if why == "full" {
 				s.m.TrunkCalls.WithLabelValues(t.Name, TrunkFull).Inc()
@@ -129,7 +130,7 @@ func (c *call) setupOutbound(dec routing.Decision) {
 			s.m.TrunkCalls.WithLabelValues(t.Name, TrunkFailover).Inc()
 			lastCode, lastReason = code, reason
 		}
-		c.releaseSlot() // this trunk did not take the call
+		c.releaseSlot(t.ID, c.id) // this trunk did not take the call
 	}
 	if lastCode == 0 {
 		lastCode, lastReason = sip.StatusServiceUnavailable, statusText(sip.StatusServiceUnavailable)
@@ -229,10 +230,19 @@ func (c *call) awaitAttempt(l *leg) (attemptOutcome, int, string) {
 	}
 }
 
-// acquireSlot counts this call against trunk t (S-9). An emergency call
-// ignores the limit and is never blocked by the trunk state being
-// unreachable.
-func (c *call) acquireSlot(t *routing.Trunk, emergency bool) (bool, string) {
+// heldSlot is one trunk call slot a call holds: its inbound source trunk
+// (member <call>:in) and the outbound trunk carrying it (member <call>).
+type heldSlot struct {
+	trunk  int64
+	name   string
+	member string
+	max    int
+}
+
+// acquireSlot counts this call against trunk t (S-9) under member. An
+// emergency call ignores the limit and is never blocked by the trunk state
+// being unreachable.
+func (c *call) acquireSlot(t *routing.Trunk, emergency bool, member string) (bool, string) {
 	st := c.s.deps.Trunks
 	if st == nil {
 		if emergency {
@@ -245,7 +255,7 @@ func (c *call) acquireSlot(t *routing.Trunk, emergency bool) (bool, string) {
 		limit = 0
 	}
 	ctx, cancel := c.s.stateCtx()
-	ok, err := st.AcquireTrunkCall(ctx, t.ID, c.id, limit, c.s.cfg.CallTTL)
+	ok, err := st.AcquireTrunkCall(ctx, t.ID, member, limit, c.s.cfg.CallTTL)
 	cancel()
 	switch {
 	case err != nil && emergency:
@@ -257,36 +267,75 @@ func (c *call) acquireSlot(t *routing.Trunk, emergency bool) (bool, string) {
 		return false, "full"
 	}
 	c.mu.Lock()
-	c.slotTrunk = t.ID
+	c.slots = append(c.slots, heldSlot{trunk: t.ID, name: t.Name, member: member, max: limit})
 	c.mu.Unlock()
 	return true, ""
 }
 
-func (c *call) releaseSlot() {
+// releaseSlot frees the slot held on trunk id under member.
+func (c *call) releaseSlot(id int64, member string) {
 	c.mu.Lock()
-	id := c.slotTrunk
-	c.slotTrunk = 0
+	var gone []heldSlot
+	kept := c.slots[:0]
+	for _, h := range c.slots {
+		if h.trunk == id && h.member == member {
+			gone = append(gone, h)
+		} else {
+			kept = append(kept, h)
+		}
+	}
+	c.slots = kept
 	c.mu.Unlock()
-	if id == 0 || c.s.deps.Trunks == nil {
+	c.freeSlots(gone)
+}
+
+// releaseSlots frees every slot the call holds; record calls it on every
+// way a call attempt ends.
+func (c *call) releaseSlots() {
+	c.mu.Lock()
+	gone := c.slots
+	c.slots = nil
+	c.mu.Unlock()
+	c.freeSlots(gone)
+}
+
+func (c *call) freeSlots(slots []heldSlot) {
+	if len(slots) == 0 || c.s.deps.Trunks == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := c.s.deps.Trunks.ReleaseTrunkCall(ctx, id, c.id); err != nil {
-		c.s.log.Warn("could not release trunk slot", "correlation_id", c.id, "error", err)
+	for _, h := range slots {
+		if err := c.s.deps.Trunks.ReleaseTrunkCall(ctx, h.trunk, h.member); err != nil {
+			c.s.log.Warn("could not release trunk slot", "correlation_id", c.id, "trunk", h.name, "error", err)
+		}
 	}
 }
 
-func (c *call) refreshSlot() {
+// refreshSlots extends every held slot with the call heartbeat. A slot the
+// trunk state lost is taken again; if the trunk filled up meanwhile it is
+// kept anyway and counted as overcommitted (see
+// livestate.RefreshTrunkCall: an established call is never dropped).
+func (c *call) refreshSlots() {
 	c.mu.Lock()
-	id := c.slotTrunk
+	slots := append([]heldSlot(nil), c.slots...)
 	c.mu.Unlock()
-	if id == 0 || c.s.deps.Trunks == nil {
+	if len(slots) == 0 || c.s.deps.Trunks == nil {
 		return
 	}
-	ctx, cancel := c.s.stateCtx()
-	defer cancel()
-	if err := c.s.deps.Trunks.RefreshTrunkCall(ctx, id, c.id, c.s.cfg.CallTTL); err != nil {
-		c.s.log.Warn("could not refresh trunk slot", "correlation_id", c.id, "error", err)
+	for _, h := range slots {
+		ctx, cancel := c.s.stateCtx()
+		r, err := c.s.deps.Trunks.RefreshTrunkCall(ctx, h.trunk, h.member, h.max, c.s.cfg.CallTTL)
+		cancel()
+		switch {
+		case err != nil:
+			c.s.log.Warn("could not refresh trunk slot", "correlation_id", c.id, "trunk", h.name, "error", err)
+		case r == livestate.SlotReacquired:
+			c.s.log.Info("trunk slot was lost and has been taken again", "correlation_id", c.id, "trunk", h.name)
+		case r == livestate.SlotOvercommitted:
+			c.s.log.Warn("trunk slot was lost and the trunk is full: keeping the call over max_calls",
+				"correlation_id", c.id, "trunk", h.name, "max_calls", h.max)
+			c.s.m.TrunkSlotOvercommit.WithLabelValues(h.name).Inc()
+		}
 	}
 }

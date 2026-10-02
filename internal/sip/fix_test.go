@@ -21,7 +21,7 @@ func TestChallengedAttemptStillTimesOut(t *testing.T) {
 	start := time.Now()
 	r := waitCall(t, dial(t.Context(), a, "0501234567"))
 	if r.err != nil {
-		t.Fatalf("call: %v", r.err)
+		t.Fatalf("call: %v\ntrace:\n%s", r.err, traceText(pbx.nextCDR(t).Trace))
 	}
 	if d := time.Since(start); d > 5*time.Second {
 		t.Fatalf("failover after a challenge took %s", d)
