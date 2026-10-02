@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
+	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/config"
+	"github.com/azrtydxb/hello/internal/lifecycle"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/ops"
 	"github.com/azrtydxb/hello/internal/secret"
@@ -24,6 +26,7 @@ import (
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/version"
+	"github.com/azrtydxb/hello/internal/vkconn"
 	sipgosip "github.com/emiago/sipgo/sip"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
@@ -50,8 +53,12 @@ func run(args []string) error {
 	// datagrams it cannot parse: keep credentials out of those.
 	sipgosip.SetDefaultLogger(slog.New(sip.NewRedactingHandler(log.With("component", "sipgo").Handler())))
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	// SIGTERM drains (see drainLoop); runCtx ends the process once the
+	// drain is over or the SIP listener dies.
+	sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	ctx, shutdown := context.WithCancel(context.Background())
+	defer shutdown()
 
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", cfg.HTTPAddr)
 	if err != nil {
@@ -62,9 +69,10 @@ func run(args []string) error {
 		_ = ln.Close()
 		return fmt.Errorf("sip listen: %w", err)
 	}
-	// ForceSingleClient returns a client even when the first dial fails; it
-	// redials on every command, so readiness recovers once Valkey is up.
-	vk, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{cfg.ValkeyAddr}, ForceSingleClient: true})
+	// One Valkey or a Sentinel-managed primary (vkconn). A single Valkey
+	// that is down still yields a client that redials, so readiness
+	// recovers once it is up.
+	vk, err := vkconn.New(sigCtx, vkconn.Config{Addr: cfg.ValkeyAddr, Sentinels: cfg.ValkeySentinels, Master: cfg.ValkeyMaster}, log.With("component", "valkey"))
 	if vk == nil {
 		return fmt.Errorf("valkey: %w", err)
 	}
@@ -118,7 +126,7 @@ func run(args []string) error {
 		NodeID: cfg.NodeID, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
 		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
-		MaxCallDuration: cfg.MaxCallDuration,
+		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
 	}, sip.Deps{
 		Snapshots: watcher, State: live, Trunks: live,
 		Throttle: sip.ValkeyThrottle{Client: vk, Window: cfg.AuthFailWindow},
@@ -129,6 +137,62 @@ func run(args []string) error {
 		return err
 	}
 	watcher.OnReload = srv.SnapshotChanged
+
+	members := cluster.New(vk)
+	machine := lifecycle.New(lifecycle.Options{
+		Member: cluster.Member{ID: cfg.NodeID, Kind: cluster.KindSIP, SIPAddr: cfg.SIPAdvertisedAddr, HTTPAddr: cfg.HTTPAddr,
+			Transports: []string{"udp"}, Version: version.Version},
+		Checks: map[string]lifecycle.Check{
+			"valkey": valkeyReady,
+			"sip": func(context.Context) error {
+				if !srv.Serving() {
+					return errors.New("SIP listener not running")
+				}
+				return nil
+			},
+			"snapshot": func(context.Context) error {
+				if !watcher.Ready() {
+					return errors.New("configuration snapshot not loaded")
+				}
+				return nil
+			},
+		},
+		Publisher: members,
+		Load: func() lifecycle.Load {
+			l := lifecycle.Load{ActiveCalls: srv.ActiveCalls(), Registrations: srv.Registrations()}
+			if s := watcher.Current(); s != nil {
+				l.ConfigRevision = s.Revision
+			}
+			return l
+		},
+		Primary:   func() string { return primaryOf(vk) },
+		Heartbeat: cfg.MemberHeartbeat,
+		Metrics:   lifecycle.NewMetrics(metrics.Registry),
+		Log:       log.With("component", "lifecycle"),
+		OnChange: func(from, to cluster.State, _ string) {
+			switch {
+			case to == cluster.Draining:
+				srv.Drain() // trunk leases go at once (contract 6)
+			case from == cluster.Draining:
+				srv.Undrain()
+			}
+		},
+	})
+	srv.SetLifecycle(machine)
+	lcCtx, stopLifecycle := context.WithCancel(context.Background())
+	lcDone := make(chan struct{})
+	go func() { machine.Run(lcCtx); close(lcDone) }()
+	go func() {
+		<-sigCtx.Done()
+		machine.Drain("SIGTERM")
+	}()
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		if machine.AwaitDrain(ctx, srv, cfg.DrainTimeout) {
+			shutdown() // drained: exit
+		}
+	}()
 
 	bg, stopBG := context.WithCancel(context.Background())
 	defer stopBG()
@@ -159,21 +223,7 @@ func run(args []string) error {
 
 	log.Info("starting", "version", version.Version, "commit", version.Commit, "config", cfg)
 	opsSrv := &ops.Server{
-		Checks: map[string]ops.Check{
-			"valkey": valkeyReady,
-			"sip": func(context.Context) error {
-				if !srv.Serving() {
-					return errors.New("SIP listener not running")
-				}
-				return nil
-			},
-			"snapshot": func(context.Context) error {
-				if !watcher.Ready() {
-					return errors.New("configuration snapshot not loaded")
-				}
-				return nil
-			},
-		},
+		Lifecycle:       machine, // /readyz follows the lifecycle state
 		Metrics:         metrics,
 		Log:             log,
 		DrainDelay:      cfg.DrainDelay,
@@ -186,10 +236,21 @@ func run(args []string) error {
 	if serr := <-sipDone; err == nil && (serr != nil || sipDied.Load()) {
 		err = fmt.Errorf("sip: listener stopped: %w", serr)
 	}
+	stopLifecycle() // leaves the cluster: listed OFFLINE from the tombstone
+	<-lcDone
 	stopBG()
 	<-watchDone
 	<-resolveDone
 	<-cdrDone
 	log.Info("stopped", "error", err, "active_calls_dropped", srv.ActiveCalls())
 	return err
+}
+
+// primaryOf is the address of the Valkey node the client sends writes to:
+// the Sentinel primary (one entry in Nodes), or the single instance.
+func primaryOf(vk valkey.Client) string {
+	for addr := range vk.Nodes() {
+		return addr
+	}
+	return ""
 }
