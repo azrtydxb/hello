@@ -15,12 +15,11 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { label: "Registrations", path: "/registrations", phase: 1 },
   { label: "Trunks", path: "/trunks", phase: 2 },
   { label: "Routes", path: "/routes", phase: 2 },
-  { label: "Dial Plans", path: "/dial-plans", phase: 2 },
   { label: "Ring Groups", path: "/ring-groups", phase: 4 },
   { label: "Voicemail", path: "/voicemail", phase: 4 },
   { label: "Active Calls", path: "/calls", phase: 1 },
   { label: "Call History", path: "/history", phase: 1 },
   { label: "Cluster", path: "/cluster", phase: 3 },
-  { label: "Diagnostics", path: "/diagnostics", phase: 2 },
+  { label: "Diagnostics", path: "/diagnostics", phase: 3 },
   { label: "System", path: "/system", phase: 3 },
 ];

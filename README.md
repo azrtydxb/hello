@@ -5,14 +5,15 @@ explainable routing, API-driven management, and high availability designed
 into the call architecture. The product spec is
 [hello-pbx-spec.md](hello-pbx-spec.md).
 
-**Status:** Phase 1 (minimum PBX). Phones register over SIP/UDP through
-either SIP node with digest authentication, and extensions call each other
-through a B2BUA, with the media flowing directly between the phones.
-Administrators sign in to manage extensions and devices and to see live
-registrations, active calls and call records. SIP trunks, inbound and outbound
-routing with rewriting, failover and a routing trace on every call arrive in
-Phase 2. See [docs/phones.md](docs/phones.md) for phones and
-[docs/trunks.md](docs/trunks.md) for trunks.
+**Status:** Phase 2 (trunks and routing). Phones register over SIP/UDP
+through either SIP node and call each other through a B2BUA. Calls reach the
+public network through SIP trunks (registration or IP-authenticated), chosen by
+ordered inbound and outbound routes that rewrite numbers and caller ID. Trunks
+are health-checked with OPTIONS, fail over to backups, respect concurrency
+limits, and every call carries a routing trace in its record. A route tester
+explains any number before it goes live. Media flows directly between the
+endpoints; anchoring arrives in Phase 5. See [docs/phones.md](docs/phones.md)
+for phones and [docs/trunks.md](docs/trunks.md) for trunks.
 
 ## Layout
 

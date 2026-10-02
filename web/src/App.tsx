@@ -1,5 +1,12 @@
 import type { ComponentType } from "react";
-import { NavLink, Outlet, Route, Routes, useNavigate } from "react-router";
+import {
+  Navigate,
+  NavLink,
+  Outlet,
+  Route,
+  Routes,
+  useNavigate,
+} from "react-router";
 import { AuthProvider, RequireAuth, useAuth } from "./auth";
 import { CURRENT_PHASE, NAV_ITEMS } from "./nav";
 import { CallDetail } from "./pages/CallDetail";
@@ -95,6 +102,11 @@ export function App() {
             return <Route key={item.path} path={item.path} element={element} />;
           })}
           <Route path="/routes/test" element={<RouteTest />} />
+          {/* Dial plans are the structured routes (spec §11). */}
+          <Route
+            path="/dial-plans"
+            element={<Navigate to="/routes" replace />}
+          />
           <Route path="/history/:id" element={<CallDetail />} />
           <Route path="*" element={<NotFound />} />
         </Route>

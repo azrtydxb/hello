@@ -79,71 +79,71 @@ Interfaces: everything listed in Shared contracts.
 Files: `internal/routing/engine.go` (Compile, Table, Decide), `transform.go`, `schedule.go`, `engine_test.go`, `bench_test.go`.
 Interfaces: produces the functions in `types.go`'s trailing comment; consumes nothing outside the stdlib.
 
-- [ ] Implement `Compile` with full validation, returning a FieldError for each problem. RE2 only, a 500-character limit, and templates may reference only groups the regex defines (numbered and named). Destination kinds are checked; `extension` must exist in `Config.Extensions`.
-- [ ] Implement `ApplyTransform` (strip, then prefix, then regex template). A result containing anything but `+`, digits, `*` and `#` is an error.
-- [ ] Implement `Schedule.Open(at)` with the time zone, cross-midnight windows and DST, and test both DST transitions in `Europe/Berlin`.
-- [ ] Implement `Decide`:
+- [x] Implement `Compile` with full validation, returning a FieldError for each problem. RE2 only, a 500-character limit, and templates may reference only groups the regex defines (numbered and named). Destination kinds are checked; `extension` must exist in `Config.Extensions`.
+- [x] Implement `ApplyTransform` (strip, then prefix, then regex template). A result containing anything but `+`, digits, `*` and `#` is an error.
+- [x] Implement `Schedule.Open(at)` with the time zone, cross-midnight windows and DST, and test both DST transitions in `Europe/Berlin`.
+- [x] Implement `Decide`:
   - **From an extension:** look up the internal extension; then match outbound routes in position order, checking enabled, source extensions, schedule and pattern; then rewrite the number and caller ID (fallbacks: the extension's external number, then the trunk default, then the extension number); then build the candidates from usability and order the destinations by priority, then weight (deterministic: a weighted order seeded by a hash of the call's number). With no usable trunk, return KindReject 503 with a reason.
   - **From a trunk:** match inbound routes in position order (enabled, trunk, DID with `+` and whitespace normalised, SIP domain, header regex, schedule). An `external` destination recurses into outbound routing as the trunk.
   - **Unmatched:** reject with 404.
   - **Trace:** every step is traced.
-- [ ] Implement `TrunkForSource`: the lowest-ID enabled trunk whose `SourceCIDRs` or `ResolvedIPs` contain the IP.
-- [ ] Write `TestRouteMatchAndRewrite`, a table of at least 40 cases covering every branch above, each asserting the decision and the exact trace text. Write `TestRoutingDecisionLatency` (`HELLO_BENCH=1`; 100 routes, p99 under 1ms) and `TestCompileValidation`. Run mutation checks on the template group check, schedule `Open` and the failover-code defaults.
-- [ ] Run `go test -race ./internal/routing/` (pass), then lint and `procoder check`.
+- [x] Implement `TrunkForSource`: the lowest-ID enabled trunk whose `SourceCIDRs` or `ResolvedIPs` contain the IP.
+- [x] Write `TestRouteMatchAndRewrite`, a table of at least 40 cases covering every branch above, each asserting the decision and the exact trace text. Write `TestRoutingDecisionLatency` (`HELLO_BENCH=1`; 100 routes, p99 under 1ms) and `TestCompileValidation`. Run mutation checks on the template group check, schedule `Open` and the failover-code defaults.
+- [x] Run `go test -race ./internal/routing/` (pass), then lint and `procoder check`.
 
 ## Task 3: Control plane (branch phase-2-control)
 
 Files: `internal/store/` (trunks, destinations, routes, order, external number, CDR fields and trace), `internal/api/` (handlers, OpenAPI, tests), `cmd/hello-control/main.go` (secret box, route tester wiring).
 Interfaces: produces the HTTP JSON in contract 7. Consumes `routing.Compile` and `Decide` (stub them against `types.go` until Task 2 lands; the merge brings the real engine), `secret.Box` and `livestate.TrunkStatus`.
 
-- [ ] Write the store functions. Each mutation runs in one transaction with the audit row and the revision bump plus NOTIFY. The trunk password is sealed with AAD `trunk:<id>` and never selected into API responses. Reorder takes a full permutation inside one transaction, using the deferred unique constraint.
-- [ ] Validate in two stages:
+- [x] Write the store functions. Each mutation runs in one transaction with the audit row and the revision bump plus NOTIFY. The trunk password is sealed with AAD `trunk:<id>` and never selected into API responses. Reorder takes a full permutation inside one transaction, using the deferred unique constraint.
+- [x] Validate in two stages:
   - **Field level:** names, CIDRs, ports, codes.
   - **Whole configuration:** `routing.Compile` on the saved configuration plus the change, and any FieldError rejects the change with 400 and `fields`.
-- [ ] Write the handlers for every route in contract 7, plus the OpenAPI entries. `TestVersionAndOpenAPI` must still route every documented operation.
-- [ ] Build the route tester: load the configuration (as hello-sip's snapshot would), `Compile`, then `Decide` with live usability. It has no side effects; `TestRoutingTestEndpoint` asserts no writes, using row counts and the audit table.
-- [ ] Write `TestTrunkCRUDSecretHidden`, `TestRouteValidation`, `TestRoutingTestEndpoint`, and a CDR detail test covering `trace` and `explanation`. Add a store integration test for reorder atomicity.
-- [ ] Run the full gate.
+- [x] Write the handlers for every route in contract 7, plus the OpenAPI entries. `TestVersionAndOpenAPI` must still route every documented operation.
+- [x] Build the route tester: load the configuration (as hello-sip's snapshot would), `Compile`, then `Decide` with live usability. It has no side effects; `TestRoutingTestEndpoint` asserts no writes, using row counts and the audit table.
+- [x] Write `TestTrunkCRUDSecretHidden`, `TestRouteValidation`, `TestRoutingTestEndpoint`, and a CDR detail test covering `trace` and `explanation`. Add a store integration test for reorder atomicity.
+- [x] Run the full gate.
 
 ## Task 4: SIP trunks (branch phase-2-sip)
 
 Files: `internal/snapshot/` (load trunks, destinations, routes and external numbers; open passwords with `secret.Box`; build `routing.Config`; `Compile` per revision, keeping the last good Table when Compile fails and logging it loudly), `internal/sip/` (trunk registrar client, OPTIONS health, trunk B2BUA legs, failover, slots, caller ID, metrics, source validation, the trace), `internal/cdr/` (new fields and trace), `cmd/hello-sip/main.go`.
 Interfaces: consumes `routing.Table` and `livestate` trunk functions; produces SIP to and from carriers, trunk metrics and CDR fields.
 
-- [ ] Build the snapshot: the Table, plus `ResolvedIPs` refreshed every 30s by DNS off the request path. A sealed password that doesn't open marks that trunk `misconfigured`; it is not dropped silently.
-- [ ] Trunk lease loop: for each enabled trunk, try `AcquireLease(TrunkLeaseKey(id), nodeID, 3×refresh)` and renew while held. The holder REGISTERs (`registration` mode, answering digest with the trunk credentials, re-registering at 80% of expiry, backing off exponentially to 10 minutes on failure) and sends OPTIONS to every destination at the interval. It publishes `PutTrunkRegistration` and `PutDestinationHealth`, and releases the lease on shutdown.
-- [ ] Outbound: when `Decide` returns `KindOutbound`, try candidates in order:
+- [x] Build the snapshot: the Table, plus `ResolvedIPs` refreshed every 30s by DNS off the request path. A sealed password that doesn't open marks that trunk `misconfigured`; it is not dropped silently.
+- [x] Trunk lease loop: for each enabled trunk, try `AcquireLease(TrunkLeaseKey(id), nodeID, 3×refresh)` and renew while held. The holder REGISTERs (`registration` mode, answering digest with the trunk credentials, re-registering at 80% of expiry, backing off exponentially to 10 minutes on failure) and sends OPTIONS to every destination at the interval. It publishes `PutTrunkRegistration` and `PutDestinationHealth`, and releases the lease on shutdown.
+- [x] Outbound: when `Decide` returns `KindOutbound`, try candidates in order:
   - `AcquireTrunkCall` before each trunk; a full trunk is skipped and traced
   - INVITE to each destination, answering 401/407 with the trunk credentials
   - on a failover code or a timeout, try the next destination, then the next trunk
   - the caller's CANCEL stops failover
   - release the slot on end, and refresh it with the heartbeat
   - present caller ID from the Decision, with From in the trunk's From domain
-- [ ] Inbound: an INVITE that does not come from a registered phone goes through `TrunkForSource(source IP)`. With no trunk it gets 403 and counts towards the throttle. Otherwise `Decide` from that trunk and route to the extension (the Phase 1 fork logic), to an external number (outbound), or to a SIP URI.
-- [ ] CDRs and trace: record direction, original and rewritten destination, route, trunk and the full trace in the CDR.
-- [ ] Metrics: everything in spec S-14.
-- [ ] Write unit tests with in-process fake carriers (a sipgo UAS on loopback) for registration, lease takeover, OPTIONS up/down, failover 503 to backup, 486 not failed over, the 407 challenge, the concurrency limit, CANCEL during failover, inbound source validation and `TestTrunkMetrics`, mutation-checked.
-- [ ] Run the full gate and the lab suite. Phase 1 lab tests must still pass.
+- [x] Inbound: an INVITE that does not come from a registered phone goes through `TrunkForSource(source IP)`. With no trunk it gets 403 and counts towards the throttle. Otherwise `Decide` from that trunk and route to the extension (the Phase 1 fork logic), to an external number (outbound), or to a SIP URI.
+- [x] CDRs and trace: record direction, original and rewritten destination, route, trunk and the full trace in the CDR.
+- [x] Metrics: everything in spec S-14.
+- [x] Write unit tests with in-process fake carriers (a sipgo UAS on loopback) for registration, lease takeover, OPTIONS up/down, failover 503 to backup, 486 not failed over, the 407 challenge, the concurrency limit, CANCEL during failover, inbound source validation and `TestTrunkMetrics`, mutation-checked.
+- [x] Run the full gate and the lab suite. Phase 1 lab tests must still pass.
 
 ## Task 5: UI (branch phase-2-ui)
 
 Files: `web/src/` (api, pages `Trunks`, `Routes`, `RouteTest`, `CallDetail`, nav, tests).
 Interfaces: consumes contract 7 only.
 
-- [ ] Trunks page: a list with live status (polling `/trunks/status` every 5s) and a create/edit form. The password field is write-only: it is shown empty with "set" or "not set", and changing it is explicit.
-- [ ] Routes page: inbound and outbound tabs with ordered lists, up and down controls, and `PUT …/order`. Transform and schedule editors, with server field errors shown on the field.
-- [ ] Route tester page: from, number and optional time inputs; shows the decision and the trace.
-- [ ] Call History row links to `/history/{id}`, which shows the CDR fields, the trace steps in order and the explanation.
-- [ ] Write `Trunks.test.tsx`, `Routes.test.tsx` and `CallDetail.test.tsx` from the spec criteria, mutation-checked.
-- [ ] Run `pnpm typecheck`, `lint`, `test` and `build`, then `procoder check`.
+- [x] Trunks page: a list with live status (polling `/trunks/status` every 5s) and a create/edit form. The password field is write-only: it is shown empty with "set" or "not set", and changing it is explicit.
+- [x] Routes page: inbound and outbound tabs with ordered lists, up and down controls, and `PUT …/order`. Transform and schedule editors, with server field errors shown on the field.
+- [x] Route tester page: from, number and optional time inputs; shows the decision and the trace.
+- [x] Call History row links to `/history/{id}`, which shows the CDR fields, the trace steps in order and the explanation.
+- [x] Write `Trunks.test.tsx`, `Routes.test.tsx` and `CallDetail.test.tsx` from the spec criteria, mutation-checked.
+- [x] Run `pnpm typecheck`, `lint`, `test` and `build`, then `procoder check`.
 
 ## Task 6: Simulated carrier, lab, docs (lead, branch phase-2-trunks-routing)
 
 Files: `test/fakecarrier/` (binary and Dockerfile target), `deploy/docker-compose/compose.yaml` (`carrier-primary` and `carrier-backup`), `test/integration/lab_trunk_test.go`, `docs/trunks.md`, `README.md`.
 Interfaces: consumes everything above.
 
-- [ ] Build the fake carrier: a registrar with digest (the user and password come from env); OPTIONS answers; outcomes keyed on the dialled number's last digits (`...00` answers, `...86` gives 486, `...03` gives 503, `...08` never answers); an optional 407 challenge on INVITE (env); and an HTTP control endpoint, `POST /call {"from","to","target"}`, that places an inbound INVITE to Hello and answers. It also records every received request for test inspection (`GET /log`).
-- [ ] Merge the routing, control, sip and ui branches, resolving conflicts hunk by hunk. Run the full gate.
-- [ ] Write the lab tests from spec S-2, S-3, S-5/S-6, S-8 to S-11 and S-16, and extend `TestNoSecretsInLogs`.
-- [ ] Write `docs/trunks.md` (adding a real trunk and running the manual check) and update the README configuration table.
-- [ ] Run `HELLO_DOCKER=1 go test -timeout 25m ./test/integration/` (pass), then the full gate.
+- [x] Build the fake carrier: a registrar with digest (the user and password come from env); OPTIONS answers; outcomes keyed on the dialled number's last digits (`...00` answers, `...86` gives 486, `...03` gives 503, `...08` never answers); an optional 407 challenge on INVITE (env); and an HTTP control endpoint, `POST /call {"from","to","target"}`, that places an inbound INVITE to Hello and answers. It also records every received request for test inspection (`GET /log`).
+- [x] Merge the routing, control, sip and ui branches, resolving conflicts hunk by hunk. Run the full gate.
+- [x] Write the lab tests from spec S-2, S-3, S-5/S-6, S-8 to S-11 and S-16, and extend `TestNoSecretsInLogs`.
+- [x] Write `docs/trunks.md` (adding a real trunk and running the manual check) and update the README configuration table.
+- [x] Run `HELLO_DOCKER=1 go test -timeout 25m ./test/integration/` (pass), then the full gate.
