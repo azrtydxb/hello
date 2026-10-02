@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -98,7 +99,9 @@ func TestLoadMalformedValkeyAddr(t *testing.T) {
 }
 
 func TestLoadSecretKey(t *testing.T) {
-	for _, bad := range []string{"", "not-base64!", base64.StdEncoding.EncodeToString([]byte("short"))} {
+	urlSafe33 := base64.URLEncoding.EncodeToString(append(bytes.Repeat([]byte{0xfb}, 32), 0xff)) // 33 bytes, '-' and '_'
+	zero := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	for _, bad := range []string{"", "not-base64!", base64.StdEncoding.EncodeToString([]byte("short")), urlSafe33, zero} {
 		_, errC := LoadControl(env(map[string]string{"HELLO_SECRET_KEY": bad}))
 		_, errS := LoadSIP(env(map[string]string{"HELLO_SECRET_KEY": bad}))
 		for _, err := range []error{errC, errS} {

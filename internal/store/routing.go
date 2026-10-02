@@ -199,13 +199,6 @@ func writeDestinations(ctx context.Context, tx *sql.Tx, id int64, ds []routing.D
 	return nil
 }
 
-func cidrs(in []string) []string {
-	if in == nil {
-		return []string{}
-	}
-	return in
-}
-
 // CreateTrunk inserts a trunk, then seals its password with the new id in
 // the same transaction.
 func (s *Store) CreateTrunk(ctx context.Context, actor string, in TrunkInput, password string, check Check) (Trunk, error) {
@@ -216,7 +209,7 @@ func (s *Store) CreateTrunk(ctx context.Context, actor string, in TrunkInput, pa
 				options_interval, source_cidrs, max_calls, default_caller_id, enabled)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11) RETURNING id`,
 			in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires, in.OptionsInterval,
-			cidrs(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled).Scan(&id); err != nil {
+			nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := s.setPassword(ctx, tx, id, password); err != nil {
@@ -256,7 +249,7 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 				from_domain = $6, register_expires = $7, options_interval = $8, source_cidrs = $9::cidr[],
 				max_calls = $10, default_caller_id = $11, enabled = $12, updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires,
-			in.OptionsInterval, cidrs(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled); err != nil {
+			in.OptionsInterval, nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled); err != nil {
 			return id, err
 		}
 		if pw.Set {
@@ -292,15 +285,17 @@ func routeNames(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]s
 	return out, rows.Err()
 }
 
-// extensionRoutes names the inbound routes whose destination is the
-// extension with this id; it locks the extension row.
+// extensionRoutes names the routes that refer to the extension with this
+// id — inbound routes ringing it and outbound routes restricted to it as a
+// source — and locks the extension row.
 func extensionRoutes(ctx context.Context, tx *sql.Tx, id int64) (string, []string, error) {
 	var number string
 	if err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1 FOR UPDATE`, id).Scan(&number); err != nil {
 		return "", nil, err
 	}
-	routes, err := routeNames(ctx, tx,
-		`SELECT name FROM inbound_routes WHERE destination_kind = 'extension' AND destination = $1`, number)
+	routes, err := routeNames(ctx, tx, `
+		SELECT name FROM inbound_routes WHERE destination_kind = 'extension' AND destination = $1
+		UNION ALL SELECT name FROM outbound_routes WHERE $1 = ANY (source_extensions)`, number)
 	return number, routes, err
 }
 

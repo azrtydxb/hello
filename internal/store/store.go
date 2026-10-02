@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -124,8 +125,9 @@ func insertAudit(ctx context.Context, q interface {
 // check each one runs sees every change committed before it.
 const configLockKey = 0x68656c6c6f636667 // "hellocfg"
 
-// Check validates the whole routing configuration as it would be after a
-// change; any FieldError rejects the change. A nil Check skips the stage.
+// Check validates the whole routing configuration. A change is rejected
+// when the configuration after it has an error the configuration before it
+// did not have. A nil Check skips the stage.
 type Check func(routing.Config) []routing.FieldError
 
 // ValidationError rejects a change, naming each failing field.
@@ -153,6 +155,17 @@ func (s *Store) configChangeID(ctx context.Context, actor, action, resource stri
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
 			return err
 		}
+		// The errors the saved configuration already has (a stricter engine
+		// release, a manual SQL edit) must not block the changes that fix
+		// them, or unrelated ones: only errors the change introduces count.
+		var baseline map[string]bool
+		if check != nil {
+			before, err := s.loadRouting(ctx, tx)
+			if err != nil {
+				return err
+			}
+			baseline = errorKeys(before.Config, check(before.Config))
+		}
 		id, err := fn(tx)
 		if err != nil {
 			return err
@@ -162,12 +175,18 @@ func (s *Store) configChangeID(ctx context.Context, actor, action, resource stri
 			if err != nil {
 				return err
 			}
-			if fields := check(snap.Config); len(fields) > 0 {
+			var fresh []routing.FieldError
+			for _, f := range check(snap.Config) {
+				if !baseline[errorKey(snap.Config, f)] {
+					fresh = append(fresh, f)
+				}
+			}
+			if len(fresh) > 0 {
 				prefix, err := configPath(ctx, tx, snap.Config, resource, id)
 				if err != nil {
 					return err
 				}
-				return &ValidationError{Fields: relative(fields, prefix)}
+				return &ValidationError{Fields: relative(fresh, prefix)}
 			}
 		}
 		if err := insertAudit(ctx, tx, actor, action, resource, id); err != nil {
@@ -181,6 +200,39 @@ func (s *Store) configChangeID(ctx context.Context, actor, action, resource stri
 		_, err = tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, NotifyChannel, strconv.FormatInt(rev, 10))
 		return err
 	})
+}
+
+// itemRe matches the slice-indexed head of a routing.Config error path.
+var itemRe = regexp.MustCompile(`^(trunks|outbound|inbound)\[([0-9]+)\]`)
+
+// errorKey identifies a FieldError by the item it is about and its field,
+// independent of the item's slice position, which shifts when another item
+// is created or deleted: "outbound[3].match" becomes "outbound#17.match".
+func errorKey(cfg routing.Config, f routing.FieldError) string {
+	m := itemRe.FindStringSubmatchIndex(f.Path)
+	if m == nil {
+		return f.Path
+	}
+	kind := f.Path[m[2]:m[3]]
+	i, _ := strconv.Atoi(f.Path[m[4]:m[5]])
+	var id int64 = -1
+	switch {
+	case kind == "trunks" && i < len(cfg.Trunks):
+		id = cfg.Trunks[i].ID
+	case kind == "outbound" && i < len(cfg.Outbound):
+		id = cfg.Outbound[i].ID
+	case kind == "inbound" && i < len(cfg.Inbound):
+		id = cfg.Inbound[i].ID
+	}
+	return kind + "#" + strconv.FormatInt(id, 10) + f.Path[m[1]:]
+}
+
+func errorKeys(cfg routing.Config, fields []routing.FieldError) map[string]bool {
+	out := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		out[errorKey(cfg, f)] = true
+	}
+	return out
 }
 
 // configPath is the routing.Config path of the changed item — for example

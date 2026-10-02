@@ -306,7 +306,8 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "description": "A 400 lists each failing field (number, name, externalNumber) in error.fields."
       }
     },
     "/api/v1/extensions/{id}": {
@@ -387,7 +388,7 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "Changing the number is 409 while an inbound route rings it (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields."
+        "description": "Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields."
       },
       "delete": {
         "operationId": "deleteExtension",
@@ -415,7 +416,7 @@
             "$ref": "#/components/responses/Conflict"
           }
         },
-        "description": "409 when an inbound route rings this extension; the message names the routes."
+        "description": "409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes."
       }
     },
     "/api/v1/devices": {
@@ -1423,7 +1424,7 @@
         "operationId": "testRouting",
         "summary": "Decide a call against the saved configuration without placing it",
         "tags": ["routing"],
-        "description": "Writes nothing. Trunk usability comes from live state; when Valkey is unreachable every enabled trunk counts as usable and the trace says so.",
+        "description": "Writes nothing. Trunk usability comes from live state; when Valkey is unreachable every enabled trunk counts as usable and the trace says so. Trunk capacity (maxCalls) is not judged from cached counts: hello-sip decides it when the call is placed, and the trace says so for every candidate trunk with a limit.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2123,7 +2124,7 @@
             "type": "string"
           }
         },
-        "description": "One failing field. For a single trunk, route or extension create/PATCH, paths are relative to that item and use its JSON field names, e.g. \"match\", \"trunks[0]\", \"numberTransform.template\", \"schedule.timeZone\", \"destinations[1].host\". An error the whole-configuration check finds in another item keeps its full path in the routing configuration, e.g. \"outbound[3].numberTransform.template\" or \"trunks[1].destinations\" (index = position in that list as loaded), and a reorder reports \"ids\" or \"ids[i]\"."
+        "description": "One failing field. For a single trunk, route or extension create/PATCH, paths are relative to that item and use its JSON field names, e.g. \"match\", \"trunks[0]\", \"numberTransform.template\", \"schedule.timeZone\", \"destinations[1].host\". An error the whole-configuration check finds in another item keeps its full path in the routing configuration, e.g. \"outbound[3].numberTransform.template\" or \"trunks[1].destinations\" (index = position in that list as loaded), and a reorder reports \"ids\" or \"ids[i]\". Only errors a change introduces reject it: errors the saved configuration already had (for example after a manual edit) do not block fixing, deleting or unrelated changes."
       },
       "Transform": {
         "type": "object",
@@ -2292,7 +2293,8 @@
             "items": {
               "type": "string",
               "example": "203.0.113.0/24"
-            }
+            },
+            "description": "Source ranges the trunk may send from; at most /8 broad for IPv4 and /32 for IPv6, since every address in them can reach the inbound routes and UDP sources can be spoofed."
           },
           "maxCalls": {
             "type": "integer",
@@ -2373,7 +2375,8 @@
             "items": {
               "type": "string",
               "example": "203.0.113.0/24"
-            }
+            },
+            "description": "Source ranges the trunk may send from; at most /8 broad for IPv4 and /32 for IPv6, since every address in them can reach the inbound routes and UDP sources can be spoofed."
           },
           "maxCalls": {
             "type": "integer",
@@ -2449,7 +2452,8 @@
             "items": {
               "type": "string",
               "example": "203.0.113.0/24"
-            }
+            },
+            "description": "Source ranges the trunk may send from; at most /8 broad for IPv4 and /32 for IPv6, since every address in them can reach the inbound routes and UDP sources can be spoofed."
           },
           "maxCalls": {
             "type": "integer",
@@ -2601,7 +2605,7 @@
           "match": {
             "type": "string",
             "maxLength": 500,
-            "description": "A non-empty prefix (0-9 + * #) or an RE2 regex of at most 500 characters"
+            "description": "A non-empty prefix (0-9 + * #) or an RE2 regex of at most 500 characters (characters, not bytes)"
           },
           "sourceExtensions": {
             "type": "array",
@@ -2672,7 +2676,7 @@
           "match": {
             "type": "string",
             "maxLength": 500,
-            "description": "A non-empty prefix (0-9 + * #) or an RE2 regex of at most 500 characters"
+            "description": "A non-empty prefix (0-9 + * #) or an RE2 regex of at most 500 characters (characters, not bytes)"
           },
           "sourceExtensions": {
             "type": "array",
@@ -2743,7 +2747,7 @@
           "match": {
             "type": "string",
             "maxLength": 500,
-            "description": "A non-empty prefix (0-9 + * #) or an RE2 regex of at most 500 characters"
+            "description": "A non-empty prefix (0-9 + * #) or an RE2 regex of at most 500 characters (characters, not bytes)"
           },
           "sourceExtensions": {
             "type": "array",
@@ -2879,7 +2883,8 @@
           },
           "destination": {
             "type": "string",
-            "example": "101"
+            "example": "101",
+            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
           },
           "enabled": {
             "type": "boolean"
@@ -2947,7 +2952,8 @@
           },
           "destination": {
             "type": "string",
-            "example": "101"
+            "example": "101",
+            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
           },
           "enabled": {
             "type": "boolean"
@@ -3015,7 +3021,8 @@
           },
           "destination": {
             "type": "string",
-            "example": "101"
+            "example": "101",
+            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
           },
           "enabled": {
             "type": "boolean"
@@ -3070,6 +3077,22 @@
             "type": "string",
             "format": "date-time",
             "description": "Decision time; default now"
+          },
+          "sipDomain": {
+            "type": "string",
+            "description": "Request-URI host of a simulated inbound call; default HELLO_SIP_DOMAIN. Without it, each inbound route with a SIP domain condition gets a trace step saying the condition was not evaluated."
+          },
+          "headers": {
+            "type": "object",
+            "maxProperties": 20,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "description": "SIP headers of a simulated inbound call (names are case-insensitive). Without them, each inbound route with a header condition gets a trace step saying it was not evaluated.",
+            "example": {
+              "X-Lang": "ar"
+            }
           }
         }
       },

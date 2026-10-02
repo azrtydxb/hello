@@ -70,7 +70,8 @@ type ExtensionChange struct {
 }
 
 // UpdateExtension changes the fields that are not nil. Renumbering an
-// extension an inbound route rings is an *InUseError naming the routes.
+// extension a route refers to (an inbound destination or an outbound
+// source extension) is an *InUseError naming the routes.
 func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c ExtensionChange, check Check) (Extension, error) {
 	var e Extension
 	err := s.configChange(ctx, actor, "update", "extension", check, func(tx *sql.Tx) (int64, error) {
@@ -91,7 +92,8 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 }
 
 // DeleteExtension removes an extension and, by cascade, its devices. An
-// extension an inbound route rings is an *InUseError naming the routes.
+// extension a route refers to (an inbound destination or an outbound
+// source extension) is an *InUseError naming the routes.
 func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "extension", check, func(tx *sql.Tx) (int64, error) {
 		number, routes, err := extensionRoutes(ctx, tx, id)
