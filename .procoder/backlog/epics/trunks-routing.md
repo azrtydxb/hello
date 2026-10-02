@@ -1,6 +1,6 @@
 # trunks-routing
 
-Status: open
+Status: done 2026-10-02
 Created: 2026-10-02
 Milestone: phase-2-trunks-routing
 Spec: trunks-routing @ 1ca89fe74a61

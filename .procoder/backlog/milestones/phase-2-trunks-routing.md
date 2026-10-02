@@ -1,6 +1,6 @@
 # Phase 2 — Trunks and Routing
 
-Status: open
+Status: done 2026-10-02
 Created: 2026-10-02
 
 ## Goal

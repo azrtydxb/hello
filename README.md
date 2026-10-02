@@ -94,6 +94,8 @@ naming the key, if one is missing or malformed.
 | `HELLO_SIP_AUTH_FAIL_LIMIT` / `_WINDOW`           | sip     | `10` failures per `5m` per source IP                                                    |
 | `HELLO_SIP_STATE_TIMEOUT`                         | sip     | `200ms`; Valkey calls while handling SIP                                                |
 
+The UI container proxies `/api` to `HELLO_CONTROL_UPSTREAM` and re-resolves it through `HELLO_DNS_RESOLVER` (default `127.0.0.11`, Docker's DNS; use your cluster DNS elsewhere).
+
 Every SIP node must share the same `HELLO_SIP_NONCE_SECRET`. A node with a
 different one rejects digest challenges issued by the others.
 

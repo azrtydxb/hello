@@ -44,5 +44,18 @@ Then, for services and state (added 2026-10-02 from escaped findings in
 - Background writers are ordered against the final delete of what they
   write.
 
+Added 2026-10-03 (Phase 2 escapes):
+
+- Runtime environment (time zones, CA certificates, DNS) proven in the shipped
+  image by a lab test, not only on the developer machine.
+- Shared state that can vanish (outage, restart, TTL) has a recovery path on
+  refresh, tested by deleting it mid-life.
+- Limits enforced on every path that consumes the resource, each tested.
+- Derived state rebuilt for one reason keeps markers set for another; test the
+  sequence.
+- UI responses applied onto the latest state by id; actions disabled until a
+  recovery reload lands.
+- Proxies re-resolve upstream names.
+
 End with a verdict line: findings counted by severity, or exactly
 "Nothing found — open the PR."

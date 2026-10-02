@@ -6,8 +6,14 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    # Re-resolve the control plane's name at request time (valid=10s):
+    # hello-control containers get new addresses when they are recreated,
+    # and a name resolved once at startup would keep pointing at a dead one.
+    resolver ${HELLO_DNS_RESOLVER} valid=10s ipv6=off;
+
     location /api/ {
-        proxy_pass ${HELLO_CONTROL_UPSTREAM};
+        set $hello_control ${HELLO_CONTROL_UPSTREAM};
+        proxy_pass $hello_control;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
