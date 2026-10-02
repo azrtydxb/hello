@@ -10,7 +10,7 @@ export interface Call {
   body: unknown;
 }
 
-type Reply = Response | (() => Response);
+type Reply = Response | (() => Response | Promise<Response>);
 /** Handlers keyed by "METHOD /path?query"; a list is consumed in order, the last repeating. */
 export type Routes = Record<string, Reply | Reply[]>;
 
