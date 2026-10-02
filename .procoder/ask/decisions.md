@@ -25,3 +25,23 @@
 
 - Squash-merge now and start the Phase 1 spec
 - Hold for your own review
+
+## Phase 1 call model
+
+- B2BUA (signaling only, SDP passed through, media direct)
+- Stateful record-routing proxy
+
+## Phase 1 registration store
+
+- Valkey from Phase 1 (cluster-wide, HA-ready)
+- In-memory per node until Phase 3
+
+## Phase 1 management API auth
+
+- Local users with sessions and API tokens, no roles yet
+- Single bootstrap admin token from env
+
+## Phase 1 automated SIP testing
+
+- Go test user agents built on sipgo, run in CI
+- SIPp scenarios in a container

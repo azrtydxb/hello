@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/migrate"
+	"github.com/azrtydxb/hello/migrations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3/lock"
@@ -38,7 +40,7 @@ func TestMigrateIdempotentConcurrent(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	// Deterministic: while another session holds the migration lock,
 	// Up must wait for it rather than run.
-	if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS schema_info, goose_db_version"); err != nil {
+	if _, err := db.ExecContext(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
 		t.Fatal(err)
 	}
 	holder, err := db.Conn(ctx)
@@ -63,9 +65,15 @@ func TestMigrateIdempotentConcurrent(t *testing.T) {
 		t.Fatalf("migrate up after lock release: %v", err)
 	}
 
-	// Behavioural: 16 replicas racing over fresh schemas apply it once.
+	// Behavioural: 16 replicas racing over fresh schemas apply each
+	// migration once.
+	files, err := fs.Glob(migrations.FS, "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := len(files)
 	for round := range 3 {
-		if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS schema_info, goose_db_version"); err != nil {
+		if _, err := db.ExecContext(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
 			t.Fatal(err)
 		}
 		var wg sync.WaitGroup
@@ -90,8 +98,8 @@ func TestMigrateIdempotentConcurrent(t *testing.T) {
 			}
 			total += counts[i]
 		}
-		if total != 1 {
-			t.Fatalf("round %d: migrations applied %d times across concurrent runners, want 1", round, total)
+		if total != want {
+			t.Fatalf("round %d: %d migrations applied across concurrent runners, want each of %d once", round, total, want)
 		}
 	}
 	if n, err := migrate.Up(ctx, db); err != nil || n != 0 {

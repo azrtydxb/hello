@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-02 08:08 UTC. procoder reads this
+Written 2026-10-02 08:14 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -13,6 +13,16 @@ Question: Migration library
 - golang-migrate
 
 Answer: goose
+
+## [decision] decisions.md
+
+Key: 17469bfde72e
+Question: Phase 1 automated SIP testing
+
+- Go test user agents built on sipgo, run in CI
+- SIPp scenarios in a container
+
+Answer: Go test user agents built on sipgo, run in CI
 
 ## [decision] decisions.md
 
@@ -43,6 +53,16 @@ Answer: Squash-merge now and start the Phase 1 spec
 
 ## [decision] decisions.md
 
+Key: 4852be1d915c
+Question: Phase 1 call model
+
+- B2BUA (signaling only, SDP passed through, media direct)
+- Stateful record-routing proxy
+
+Answer: B2BUA (signaling only, SDP passed through, media direct)
+
+## [decision] decisions.md
+
 Key: 4c87c8814e53
 Question: First build scope
 
@@ -67,6 +87,16 @@ Answer: goose
 
 ## [decision] decisions.md
 
+Key: 8efe37eb2d42
+Question: Phase 1 management API auth
+
+- Local users with sessions and API tokens, no roles yet
+- Single bootstrap admin token from env
+
+Answer: Local users with sessions and API tokens, no roles yet
+
+## [decision] decisions.md
+
 Key: 8f478deba27c
 Question: Phase 0 delivery
 
@@ -75,3 +105,13 @@ Question: Phase 0 delivery
 - Hold — leave uncommitted for review
 
 Answer: Commit on branch phase-0-foundation and open a PR to main
+
+## [decision] decisions.md
+
+Key: e776054b2093
+Question: Phase 1 registration store
+
+- Valkey from Phase 1 (cluster-wide, HA-ready)
+- In-memory per node until Phase 3
+
+Answer: Valkey from Phase 1 (cluster-wide, HA-ready)
