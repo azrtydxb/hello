@@ -75,7 +75,7 @@ CREATE TABLE cdrs (
     termination_side TEXT        NOT NULL, -- caller | callee | system
     failure_reason   TEXT        NOT NULL DEFAULT ''
 );
-CREATE INDEX cdrs_start_time ON cdrs (start_time DESC, id DESC);
+-- CDRs are paged by id (newest first), which the primary key serves.
 
 -- +goose Down
 DROP TABLE cdrs;

@@ -86,13 +86,18 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		return err
 	}
 	log.Info("starting", "version", version.Version, "commit", version.Commit, "config", cfg)
-	// valkey-go reconnects on its own once the first connection succeeds.
+	// Valkey only backs the live views, so management starts without it.
+	// ForceSingleClient returns a client even when the first dial fails, and
+	// that client redials on every command.
 	vk, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{cfg.ValkeyAddr}, ForceSingleClient: true})
-	if err != nil {
+	if vk == nil {
 		_ = ln.Close()
 		return fmt.Errorf("valkey: %w", err)
 	}
 	defer vk.Close()
+	if err != nil {
+		log.Warn("valkey unreachable at startup; live views unavailable until it is", "addr", cfg.ValkeyAddr, "error", err)
+	}
 
 	st := store.New(db)
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)

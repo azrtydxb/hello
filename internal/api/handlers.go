@@ -25,7 +25,7 @@ const maxNameLen = 100
 // validName trims a display name and checks it is 1–100 printable runes.
 func validName(s string) (string, bool) {
 	s = strings.TrimSpace(s)
-	if s == "" || utf8.RuneCountInString(s) > maxNameLen || !utf8.ValidString(s) {
+	if s == "" || utf8.RuneCountInString(s) > maxNameLen {
 		return "", false
 	}
 	for _, r := range s {
@@ -57,7 +57,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid username or password")
 			return
 		}
-	case isNotFound(err):
+	case errors.Is(err, store.ErrNotFound):
 		auth.SpendPasswordCheck(in.Password)
 		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid username or password")
 		return
@@ -393,7 +393,22 @@ func (s *server) registrations(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "list registrations", err)
 		return
 	}
+	for i := range bs {
+		bs[i].Path = redactPath(bs[i].Path)
+	}
 	writeJSON(w, http.StatusOK, items(bs))
+}
+
+// hflowRe matches the edge flow token in a Path URI; it is a routing
+// credential for the SIP nodes and is not shown to API clients.
+var hflowRe = regexp.MustCompile(`hflow=[^;>]*`)
+
+func redactPath(path []string) []string {
+	out := make([]string, len(path))
+	for i, p := range path {
+		out[i] = hflowRe.ReplaceAllString(p, "hflow=REDACTED")
+	}
+	return out
 }
 
 func (s *server) calls(w http.ResponseWriter, r *http.Request) {
@@ -437,10 +452,5 @@ func (s *server) cdrs(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "list cdrs", err)
 		return
 	}
-	if cs == nil {
-		cs = []store.CDR{}
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": cs, "next": next})
 }
-
-func isNotFound(err error) bool { return errors.Is(err, store.ErrNotFound) }

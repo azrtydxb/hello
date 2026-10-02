@@ -116,7 +116,10 @@ func Handler(c Config) http.Handler {
 	private("GET /api/v1/registrations", s.registrations)
 	private("GET /api/v1/calls", s.calls)
 	private("GET /api/v1/cdrs", s.cdrs)
-	return mux
+	// Reject cross-origin browser requests that change state (CSRF); a
+	// cookie's SameSite=Strict does not cover same-site sibling origins.
+	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.
+	return http.NewCrossOriginProtection().Handler(mux)
 }
 
 func (s *server) version(w http.ResponseWriter, r *http.Request) {
@@ -149,9 +152,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func writeError(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": msg}})
-}
+var writeError = auth.WriteError
 
 func badRequest(w http.ResponseWriter, msg string) {
 	writeError(w, http.StatusBadRequest, "bad_request", msg)

@@ -82,11 +82,11 @@ func Middleware(l Lookup, log *slog.Logger) func(http.Handler) http.Handler {
 			}
 			switch {
 			case errors.Is(err, ErrNoCredentials):
-				writeError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+				WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 				return
 			case err != nil:
 				log.Error("authenticate request", "error", err)
-				writeError(w, http.StatusInternalServerError, "internal", "internal error")
+				WriteError(w, http.StatusInternalServerError, "internal", "internal error")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), a)))
@@ -94,7 +94,8 @@ func Middleware(l Lookup, log *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-func writeError(w http.ResponseWriter, status int, code, msg string) {
+// WriteError writes the API's error envelope.
+func WriteError(w http.ResponseWriter, status int, code, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code, "message": msg}})
