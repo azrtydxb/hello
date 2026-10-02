@@ -1,12 +1,48 @@
-# Hello development lab (spec §20): two control-plane replicas, two SIP
-# nodes, the UI, PostgreSQL and Valkey.
+# Hello development lab (spec §20, HA topology .procoder/specs/ha.md S-12):
+# Kamailio in front of two SIP nodes, two control-plane replicas, the UI,
+# PostgreSQL, and Valkey with a primary, a replica and three sentinels.
 #   docker compose -f deploy/docker-compose/compose.yaml up -d --build --wait
+# Phones use Kamailio on host UDP 5080; the SIP nodes' own host ports (5060,
+# 5062) stay for direct-mode tests.
+#
+# Two networks (plan contract 8):
+#   state - PostgreSQL, Valkey and Sentinel, and the Hello services that use
+#           them. The partition test disconnects a SIP node from it.
+#   edge  - everything phones and carriers talk to: Kamailio, the SIP nodes,
+#           the control plane and UI, the simulated carriers. Fixed subnet,
+#           so Kamailio and the SIP nodes have fixed addresses. Every host
+#           port is published through it (gw_priority), so a node cut off
+#           from "state" stays reachable.
 name: hello
+
+x-valkey-env: &valkey-env
+  HELLO_VALKEY_SENTINELS: sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+  HELLO_VALKEY_MASTER: hello
+
+# Lab-only credentials and secrets; never reuse outside this compose file.
+x-db-env: &db-env
+  <<: *valkey-env
+  HELLO_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
+  HELLO_SIP_DOMAIN: hello.lab
+  HELLO_SECRET_KEY: bGFiLW9ubHktc2VjcmV0LWtleS0wMTIzNDU2Nzg5YWI= # lab-only placeholder, confirmed 2026-10-02 gitleaks:allow
+
+x-sip-env: &sip-env
+  <<: *db-env
+  HELLO_SIP_NONCE_SECRET: lab-only-nonce-secret-0123456789abcdef
+  HELLO_SIP_RING_TIMEOUT: 10s
+  # Kamailio's fixed edge address: only it may send Path and X-Hello-Client.
+  HELLO_SIP_TRUSTED_PROXIES: 10.89.53.10/32
+
+x-valkey-deps: &valkey-deps
+  sentinel-1: { condition: service_healthy }
+  sentinel-2: { condition: service_healthy }
+  sentinel-3: { condition: service_healthy }
 
 x-control: &control
   build: { context: ../.., target: hello-control }
   image: hello-control:dev
   depends_on:
+    <<: *valkey-deps
     postgres: { condition: service_healthy }
     hello-migrate: { condition: service_completed_successfully }
   healthcheck: &readyz
@@ -15,29 +51,58 @@ x-control: &control
     timeout: 3s
     retries: 12
   stop_grace_period: 40s
+  networks:
+    state: {}
+    edge: { gw_priority: 1 }
 
 x-sip: &sip
   build: { context: ../.., target: hello-sip }
   image: hello-sip:dev
   depends_on:
-    valkey: { condition: service_healthy }
+    <<: *valkey-deps
     hello-migrate: { condition: service_completed_successfully }
   healthcheck:
     <<: *readyz
     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/readyz"]
-  stop_grace_period: 40s
+  # Long enough for a test's drain to finish before Docker kills the node.
+  stop_grace_period: 120s
 
-# Lab-only credentials and secrets; never reuse outside this compose file.
-x-db-env: &db-env
-  HELLO_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
-  HELLO_VALKEY_ADDR: valkey:6379
-  HELLO_SIP_DOMAIN: hello.lab
-  HELLO_SECRET_KEY: bGFiLW9ubHktc2VjcmV0LWtleS0wMTIzNDU2Nzg5YWI= # lab-only placeholder, confirmed 2026-10-02 gitleaks:allow
+x-valkey: &valkey
+  image: valkey/valkey:9-alpine
+  healthcheck:
+    test: ["CMD", "valkey-cli", "ping"]
+    interval: 2s
+    retries: 30
+  networks: [state]
 
-x-sip-env: &sip-env
-  <<: *db-env
-  HELLO_SIP_NONCE_SECRET: lab-only-nonce-secret-0123456789abcdef
-  HELLO_SIP_RING_TIMEOUT: 10s
+x-sentinel: &sentinel
+  image: valkey/valkey:9-alpine
+  user: valkey
+  depends_on:
+    valkey-1: { condition: service_healthy }
+    valkey-2: { condition: service_healthy }
+  # Sentinel rewrites its config (current primary, known peers), so the
+  # template is copied once into the container's writable /data and the
+  # copy survives restarts; each sentinel announces its service name.
+  entrypoint:
+    - sh
+    - -c
+    - >-
+      test -f /data/sentinel.conf || {
+      cp /etc/valkey/sentinel.conf /data/sentinel.conf &&
+      echo "sentinel announce-ip $$SENTINEL_NAME" >> /data/sentinel.conf; } &&
+      exec valkey-sentinel /data/sentinel.conf
+  volumes:
+    - ../valkey/sentinel.conf:/etc/valkey/sentinel.conf:ro
+  healthcheck:
+    test:
+      [
+        "CMD-SHELL",
+        "valkey-cli -p 26379 sentinel get-master-addr-by-name hello | grep -q .",
+      ]
+    interval: 2s
+    retries: 30
+  networks: [state]
 
 services:
   postgres:
@@ -51,13 +116,40 @@ services:
       interval: 2s
       retries: 30
     volumes: [pgdata:/var/lib/postgresql]
+    networks: [state]
 
-  valkey:
-    image: valkey/valkey:9-alpine
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 2s
-      retries: 30
+  # Valkey: valkey-1 is the primary at start, valkey-2 its replica; Sentinel
+  # moves the primary role on failure. Each announces its service name, so
+  # Sentinel and Hello reach it by name whatever IP it gets.
+  valkey-1:
+    <<: *valkey
+    command: ["valkey-server", "--replica-announce-ip", "valkey-1"]
+
+  valkey-2:
+    <<: *valkey
+    command:
+      [
+        "valkey-server",
+        "--replicaof",
+        "valkey-1",
+        "6379",
+        "--replica-announce-ip",
+        "valkey-2",
+      ]
+    depends_on:
+      valkey-1: { condition: service_healthy }
+
+  sentinel-1:
+    <<: *sentinel
+    environment: { SENTINEL_NAME: sentinel-1 }
+
+  sentinel-2:
+    <<: *sentinel
+    environment: { SENTINEL_NAME: sentinel-2 }
+
+  sentinel-3:
+    <<: *sentinel
+    environment: { SENTINEL_NAME: sentinel-3 }
 
   hello-migrate:
     <<: *control
@@ -68,6 +160,7 @@ services:
     environment:
       <<: *db-env
       HELLO_NODE_ID: hello-migrate
+    networks: [state]
 
   hello-control-1:
     <<: *control
@@ -89,7 +182,11 @@ services:
       # Phones outside Docker need an address they can reach, e.g. this
       # host's LAN IP: HELLO_SIP1_ADVERTISED=192.168.1.10:5060 (docs/phones.md).
       HELLO_SIP_ADVERTISED_ADDR: ${HELLO_SIP1_ADVERTISED:-hello-sip-1:5060}
+      HELLO_DRAIN_TIMEOUT: ${HELLO_SIP1_DRAIN_TIMEOUT:-2h}
     ports: ["8082:8082", "5060:5060/udp"]
+    networks:
+      state: {}
+      edge: { ipv4_address: 10.89.53.11, gw_priority: 1 }
 
   hello-sip-2:
     <<: *sip
@@ -97,7 +194,44 @@ services:
       <<: *sip-env
       HELLO_NODE_ID: hello-sip-2
       HELLO_SIP_ADVERTISED_ADDR: ${HELLO_SIP2_ADVERTISED:-hello-sip-2:5060}
+      HELLO_DRAIN_TIMEOUT: ${HELLO_SIP2_DRAIN_TIMEOUT:-2h}
     ports: ["8083:8082", "5062:5060/udp"]
+    networks:
+      state: {}
+      edge: { ipv4_address: 10.89.53.12, gw_priority: 1 }
+
+  # The SIP edge (deploy/kamailio, plan contract 7). The official image is
+  # published for amd64 only; Docker Desktop on Apple silicon emulates it.
+  # It runs as the image's unprivileged kamailio user (port 5060 needs no
+  # root). Dispatcher state: docker compose exec kamailio kamcmd dispatcher.list
+  kamailio:
+    image: ghcr.io/kamailio/kamailio:6.0.8-bookworm
+    platform: linux/amd64
+    user: kamailio
+    environment:
+      KAMAILIO_LISTEN_IP: 10.89.53.10
+      # Where phones reach Kamailio (Record-Route facing phones). Phones on
+      # another machine need this host's LAN IP here.
+      KAMAILIO_PUBLIC_HOST: ${HELLO_KAMAILIO_PUBLIC_HOST:-127.0.0.1}
+      KAMAILIO_PUBLIC_PORT: ${HELLO_KAMAILIO_PUBLIC_PORT:-5080}
+    volumes:
+      - ../kamailio:/etc/kamailio:ro
+    # The dispatcher list names the nodes; fixed addresses keep a stopped
+    # node resolvable, so it stays in the list (inactive) and comes back.
+    extra_hosts:
+      - hello-sip-1:10.89.53.11
+      - hello-sip-2:10.89.53.12
+    depends_on:
+      hello-sip-1: { condition: service_healthy }
+      hello-sip-2: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://10.89.53.10:9090/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    ports: ["5080:5060/udp"]
+    networks:
+      edge: { ipv4_address: 10.89.53.10 }
 
   hello-ui:
     build: { context: ../../web }
@@ -111,6 +245,7 @@ services:
       interval: 5s
       retries: 12
     ports: ["8080:8080"]
+    networks: [edge]
 
   # Simulated carriers for trunk tests (test/fakecarrier; lab only).
   carrier-primary:
@@ -124,6 +259,7 @@ services:
       FAKE_INVITE_AUTH: "407"
       FAKE_CONTACT_HOST: carrier-primary
     ports: ["8091:8090"]
+    networks: [edge]
 
   carrier-backup:
     build: { context: ../.., target: fakecarrier }
@@ -132,6 +268,17 @@ services:
       FAKE_NAME: carrier-backup
       FAKE_CONTACT_HOST: carrier-backup
     ports: ["8092:8090"]
+    networks: [edge]
+
+networks:
+  state: {}
+  edge:
+    ipam:
+      config:
+        # Fixed addresses below .128; Docker assigns the rest dynamically.
+        - subnet: 10.89.53.0/24
+          ip_range: 10.89.53.128/25
+          gateway: 10.89.53.1
 
 volumes:
   pgdata:
