@@ -43,6 +43,8 @@ func RedactURL(raw string) string {
 type Metrics struct {
 	Registry  *prometheus.Registry
 	NodeReady prometheus.Gauge
+	// DependencyUp is 1 per dependency that passed its last readiness check.
+	DependencyUp *prometheus.GaugeVec
 }
 
 // NewMetrics builds a registry with Go/process collectors, hello_build_info
@@ -60,6 +62,10 @@ func NewMetrics(service, version, commit string) *Metrics {
 		Name: "hello_node_ready",
 		Help: "1 when the node passes its readiness checks and is not draining.",
 	})
-	reg.MustRegister(build, ready)
-	return &Metrics{Registry: reg, NodeReady: ready}
+	up := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hello_dependency_up",
+		Help: "1 when the dependency passed the last readiness check, else 0.",
+	}, []string{"dependency"})
+	reg.MustRegister(build, ready, up)
+	return &Metrics{Registry: reg, NodeReady: ready, DependencyUp: up}
 }

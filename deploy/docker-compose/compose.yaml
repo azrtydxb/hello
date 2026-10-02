@@ -21,13 +21,22 @@ x-sip: &sip
   image: hello-sip:dev
   depends_on:
     valkey: { condition: service_healthy }
+    hello-migrate: { condition: service_completed_successfully }
   healthcheck:
     <<: *readyz
     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/readyz"]
   stop_grace_period: 40s
 
-x-db-env: &db-env # Lab-only credentials; never reuse outside this compose file.
+# Lab-only credentials and secrets; never reuse outside this compose file.
+x-db-env: &db-env
   HELLO_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
+  HELLO_VALKEY_ADDR: valkey:6379
+  HELLO_SIP_DOMAIN: hello.lab
+
+x-sip-env: &sip-env
+  <<: *db-env
+  HELLO_SIP_NONCE_SECRET: lab-only-nonce-secret-0123456789abcdef
+  HELLO_SIP_RING_TIMEOUT: 10s
 
 services:
   postgres:
@@ -61,7 +70,10 @@ services:
 
   hello-control-1:
     <<: *control
-    environment: { <<: *db-env, HELLO_NODE_ID: hello-control-1 }
+    environment:
+      <<: *db-env
+      HELLO_NODE_ID: hello-control-1
+      HELLO_BOOTSTRAP_ADMIN_PASSWORD: hello-lab-admin
     ports: ["8081:8081"]
 
   hello-control-2:
@@ -71,18 +83,20 @@ services:
   hello-sip-1:
     <<: *sip
     environment:
+      <<: *sip-env
       HELLO_NODE_ID: hello-sip-1
-      HELLO_VALKEY_ADDR: valkey:6379
-      HELLO_SIP_ADVERTISED_ADDR: hello-sip-1:5060
-    ports: ["8082:8082"]
+      # Phones outside Docker need an address they can reach, e.g. this
+      # host's LAN IP: HELLO_SIP1_ADVERTISED=192.168.1.10:5060 (docs/phones.md).
+      HELLO_SIP_ADVERTISED_ADDR: ${HELLO_SIP1_ADVERTISED:-hello-sip-1:5060}
+    ports: ["8082:8082", "5060:5060/udp"]
 
   hello-sip-2:
     <<: *sip
     environment:
+      <<: *sip-env
       HELLO_NODE_ID: hello-sip-2
-      HELLO_VALKEY_ADDR: valkey:6379
-      HELLO_SIP_ADVERTISED_ADDR: hello-sip-2:5060
-    ports: ["8083:8082"]
+      HELLO_SIP_ADVERTISED_ADDR: ${HELLO_SIP2_ADVERTISED:-hello-sip-2:5060}
+    ports: ["8083:8082", "5062:5060/udp"]
 
   hello-ui:
     build: { context: ../../web }

@@ -1,6 +1,6 @@
 # Phase 0 — Foundation
 
-Status: open
+Status: done 2026-10-02
 Created: 2026-10-02
 
 ## Goal

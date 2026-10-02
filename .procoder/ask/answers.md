@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-02 08:08 UTC. procoder reads this
+Written 2026-10-02 10:42 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -13,6 +13,26 @@ Question: Migration library
 - golang-migrate
 
 Answer: goose
+
+## [decision] decisions.md
+
+Key: 17469bfde72e
+Question: Phase 1 automated SIP testing
+
+- Go test user agents built on sipgo, run in CI
+- SIPp scenarios in a container
+
+Answer: Go test user agents built on sipgo, run in CI
+
+## [decision] decisions.md
+
+Key: 1a17adfb2c72
+Question: hello-control readiness during a Valkey outage
+
+- Ready stays green; live views return 503 and /readyz reports Valkey as degraded
+- /readyz fails while Valkey is down (all management goes out of rotation)
+
+Answer: Ready stays green; live views return 503 and /readyz reports Valkey as degraded
 
 ## [decision] decisions.md
 
@@ -43,6 +63,16 @@ Answer: Squash-merge now and start the Phase 1 spec
 
 ## [decision] decisions.md
 
+Key: 4852be1d915c
+Question: Phase 1 call model
+
+- B2BUA (signaling only, SDP passed through, media direct)
+- Stateful record-routing proxy
+
+Answer: B2BUA (signaling only, SDP passed through, media direct)
+
+## [decision] decisions.md
+
 Key: 4c87c8814e53
 Question: First build scope
 
@@ -67,6 +97,36 @@ Answer: goose
 
 ## [decision] decisions.md
 
+Key: 7d9ccebf04dd
+Question: Phase 1 delivery
+
+- Push phase-1-minimum-pbx and open a PR to main
+- Hold for your review first
+
+Answer: Push phase-1-minimum-pbx and open a PR to main
+
+## [decision] decisions.md
+
+Key: 8e6949c72bfe
+Question: Merge PR #2
+
+- Squash-merge now and start the Phase 2 spec
+- Hold for your own review
+
+Answer: Squash-merge now and start the Phase 2 spec
+
+## [decision] decisions.md
+
+Key: 8efe37eb2d42
+Question: Phase 1 management API auth
+
+- Local users with sessions and API tokens, no roles yet
+- Single bootstrap admin token from env
+
+Answer: Local users with sessions and API tokens, no roles yet
+
+## [decision] decisions.md
+
 Key: 8f478deba27c
 Question: Phase 0 delivery
 
@@ -75,3 +135,23 @@ Question: Phase 0 delivery
 - Hold — leave uncommitted for review
 
 Answer: Commit on branch phase-0-foundation and open a PR to main
+
+## [decision] decisions.md
+
+Key: e776054b2093
+Question: Phase 1 registration store
+
+- Valkey from Phase 1 (cluster-wide, HA-ready)
+- In-memory per node until Phase 3
+
+Answer: Valkey from Phase 1 (cluster-wide, HA-ready)
+
+## [decision] decisions.md
+
+Key: f9afd6b87078
+Question: Phase 1 cross-node delivery to NAT'd phones
+
+- Route via the registering node (Path + flow token, RFC 3327/5626 style)
+- Test only without NAT (test phones inside the compose network); defer to Phase 3
+
+Answer: Route via the registering node (Path + flow token, RFC 3327/5626 style)

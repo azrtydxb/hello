@@ -56,6 +56,28 @@ func TestReadiness(t *testing.T) {
 	}
 }
 
+// TestReadinessOptional fails if an optional dependency's failure makes
+// /readyz fail, is not reported in the body and metrics, or if a required
+// failure is downgraded.
+func TestReadinessOptional(t *testing.T) {
+	down := func(context.Context) error { return errors.New("connection refused") }
+	s := newServer(nil)
+	s.Optional = map[string]Check{"valkey": down}
+	h := s.Handler()
+	code, body := get(t, h, "/readyz")
+	if code != http.StatusOK || !strings.Contains(body, `"degraded"`) || !strings.Contains(body, "valkey") {
+		t.Fatalf("readyz with optional dependency down = %d %s, want 200 reporting valkey degraded", code, body)
+	}
+	if _, m := get(t, h, "/metrics"); !strings.Contains(m, `hello_dependency_up{dependency="valkey"} 0`) {
+		t.Fatal("hello_dependency_up{valkey} not 0")
+	}
+	s2 := newServer(map[string]Check{"postgres": down})
+	s2.Optional = map[string]Check{"valkey": func(context.Context) error { return nil }}
+	if code, body := get(t, s2.Handler(), "/readyz"); code != http.StatusServiceUnavailable {
+		t.Fatalf("readyz with required dependency down = %d %s, want 503", code, body)
+	}
+}
+
 func TestMetricsEndpoint(t *testing.T) {
 	h := newServer(nil).Handler()
 	get(t, h, "/readyz") // sets hello_node_ready

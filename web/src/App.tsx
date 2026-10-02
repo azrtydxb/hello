@@ -1,10 +1,36 @@
-import { NavLink, Route, Routes } from "react-router";
-import { NAV_ITEMS } from "./nav";
+import type { ComponentType } from "react";
+import { NavLink, Outlet, Route, Routes, useNavigate } from "react-router";
+import { AuthProvider, RequireAuth, useAuth } from "./auth";
+import { CURRENT_PHASE, NAV_ITEMS } from "./nav";
+import { Calls } from "./pages/Calls";
 import { Dashboard } from "./pages/Dashboard";
+import { Devices } from "./pages/Devices";
+import { Extensions } from "./pages/Extensions";
+import { History } from "./pages/History";
+import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
 import { Placeholder } from "./pages/Placeholder";
+import { Registrations } from "./pages/Registrations";
 
-export function App() {
+/** Pages that have content; any other nav item renders a placeholder. */
+const PAGES: Readonly<Record<string, ComponentType>> = {
+  "/extensions": Extensions,
+  "/devices": Devices,
+  "/registrations": Registrations,
+  "/calls": Calls,
+  "/history": History,
+};
+
+function Shell() {
+  const { state, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  function onLogout() {
+    // Leave first, so the sign-in page carries no ?next= back into the app.
+    navigate("/login", { replace: true });
+    void signOut();
+  }
+
   return (
     <div className="shell">
       <a className="skip-link" href="#main">
@@ -22,20 +48,49 @@ export function App() {
             </li>
           ))}
         </ul>
+        <div className="session">
+          {state.status === "signedIn" && (
+            <p className="muted">Signed in as {state.username}</p>
+          )}
+          <button type="button" onClick={onLogout}>
+            Log out
+          </button>
+        </div>
       </nav>
       <main id="main" className="content" tabIndex={-1}>
-        <Routes>
-          <Route index element={<Dashboard />} />
-          {NAV_ITEMS.filter((item) => item.path !== "/").map((item) => (
-            <Route
-              key={item.path}
-              path={item.path}
-              element={<Placeholder title={item.label} phase={item.phase} />}
-            />
-          ))}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <Outlet />
       </main>
     </div>
+  );
+}
+
+/** The app: sign-in route plus the authenticated shell and its pages. */
+export function App() {
+  return (
+    <AuthProvider>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          element={
+            <RequireAuth>
+              <Shell />
+            </RequireAuth>
+          }
+        >
+          <Route index element={<Dashboard />} />
+          {NAV_ITEMS.filter((item) => item.path !== "/").map((item) => {
+            const Page = PAGES[item.path];
+            const element =
+              Page && item.phase <= CURRENT_PHASE ? (
+                <Page />
+              ) : (
+                <Placeholder title={item.label} phase={item.phase} />
+              );
+            return <Route key={item.path} path={item.path} element={element} />;
+          })}
+          <Route path="*" element={<NotFound />} />
+        </Route>
+      </Routes>
+    </AuthProvider>
   );
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/telemetry"
@@ -30,6 +31,14 @@ type Control struct {
 	DatabaseURL string
 	// Database is DatabaseURL parsed, so a malformed DSN fails at startup.
 	Database *pgx.ConnConfig
+	// ValkeyAddr is read for the live registrations/calls API.
+	ValkeyAddr string
+	// SIPDomain is the digest realm device HA1 values are computed for; it
+	// must equal hello-sip's HELLO_SIP_DOMAIN.
+	SIPDomain string
+	// BootstrapAdminPassword creates the first admin user when none exist.
+	BootstrapAdminPassword string
+	SessionTTL             time.Duration
 }
 
 // SIP is hello-sip's configuration. The bind address is where the node
@@ -39,6 +48,22 @@ type SIP struct {
 	ValkeyAddr        string
 	SIPBindAddr       string
 	SIPAdvertisedAddr string
+	// DatabaseURL is used read-only for the configuration snapshot and to
+	// insert CDRs.
+	DatabaseURL string
+	Database    *pgx.ConnConfig
+	// SIPDomain is the digest realm and the host part of every AOR.
+	SIPDomain          string
+	NonceSecret        string
+	RegisterMinExpires time.Duration
+	RegisterMaxExpires time.Duration
+	RingTimeout        time.Duration
+	AuthFailLimit      int
+	AuthFailWindow     time.Duration
+	StateTimeout       time.Duration
+	// MaxCallDuration ends a connected call that has run this long (both
+	// legs get BYE), so a call whose phones vanished without BYE is cleared.
+	MaxCallDuration time.Duration
 }
 
 // LogValue keeps the database password out of logs.
@@ -47,6 +72,21 @@ func (c Control) LogValue() slog.Value {
 		slog.String("node_id", c.NodeID),
 		slog.String("http_addr", c.HTTPAddr),
 		slog.String("database_url", telemetry.RedactURL(c.DatabaseURL)),
+		slog.String("valkey_addr", c.ValkeyAddr),
+		slog.String("sip_domain", c.SIPDomain),
+	)
+}
+
+// LogValue keeps the database password and nonce secret out of logs.
+func (c SIP) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("node_id", c.NodeID),
+		slog.String("http_addr", c.HTTPAddr),
+		slog.String("sip_bind", c.SIPBindAddr),
+		slog.String("sip_advertised", c.SIPAdvertisedAddr),
+		slog.String("sip_domain", c.SIPDomain),
+		slog.String("valkey_addr", c.ValkeyAddr),
+		slog.String("database_url", telemetry.RedactURL(c.DatabaseURL)),
 	)
 }
 
@@ -54,17 +94,17 @@ func (c Control) LogValue() slog.Value {
 func LoadControl(getenv func(string) string) (Control, error) {
 	r := reader{getenv: getenv}
 	c := Control{
-		Common:      r.common(":8081"),
-		DatabaseURL: r.required("HELLO_DATABASE_URL"),
+		Common:                 r.common(":8081"),
+		DatabaseURL:            r.required("HELLO_DATABASE_URL"),
+		ValkeyAddr:             r.required("HELLO_VALKEY_ADDR"),
+		SIPDomain:              r.required("HELLO_SIP_DOMAIN"),
+		BootstrapAdminPassword: r.optional("HELLO_BOOTSTRAP_ADMIN_PASSWORD", ""),
+		SessionTTL:             r.duration("HELLO_SESSION_TTL", 12*time.Hour),
 	}
-	if c.DatabaseURL != "" {
-		db, err := pgx.ParseConfig(c.DatabaseURL)
-		if err != nil {
-			// pgx's redaction of parse errors is best effort, so none of
-			// the input is echoed back.
-			r.fail("HELLO_DATABASE_URL", errors.New("malformed connection string"))
-		}
-		c.Database = db
+	c.Database = r.database(c.DatabaseURL)
+	r.hostPort("HELLO_VALKEY_ADDR", c.ValkeyAddr)
+	if c.SessionTTL == 0 {
+		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
 	return c, r.err()
 }
@@ -73,15 +113,31 @@ func LoadControl(getenv func(string) string) (Control, error) {
 func LoadSIP(getenv func(string) string) (SIP, error) {
 	r := reader{getenv: getenv}
 	c := SIP{
-		Common:            r.common(":8082"),
-		ValkeyAddr:        r.required("HELLO_VALKEY_ADDR"),
-		SIPBindAddr:       r.optional("HELLO_SIP_BIND_ADDR", "0.0.0.0:5060"),
-		SIPAdvertisedAddr: r.optional("HELLO_SIP_ADVERTISED_ADDR", ""),
+		Common:             r.common(":8082"),
+		ValkeyAddr:         r.required("HELLO_VALKEY_ADDR"),
+		SIPBindAddr:        r.optional("HELLO_SIP_BIND_ADDR", "0.0.0.0:5060"),
+		SIPAdvertisedAddr:  r.optional("HELLO_SIP_ADVERTISED_ADDR", ""),
+		DatabaseURL:        r.required("HELLO_DATABASE_URL"),
+		SIPDomain:          r.required("HELLO_SIP_DOMAIN"),
+		NonceSecret:        r.required("HELLO_SIP_NONCE_SECRET"),
+		RegisterMinExpires: r.duration("HELLO_SIP_REGISTER_MIN_EXPIRES", 60*time.Second),
+		RegisterMaxExpires: r.duration("HELLO_SIP_REGISTER_MAX_EXPIRES", time.Hour),
+		RingTimeout:        r.duration("HELLO_SIP_RING_TIMEOUT", 30*time.Second),
+		AuthFailLimit:      r.positiveInt("HELLO_SIP_AUTH_FAIL_LIMIT", 10),
+		AuthFailWindow:     r.duration("HELLO_SIP_AUTH_FAIL_WINDOW", 5*time.Minute),
+		StateTimeout:       r.duration("HELLO_SIP_STATE_TIMEOUT", 200*time.Millisecond),
+		MaxCallDuration:    r.duration("HELLO_SIP_MAX_CALL_DURATION", 4*time.Hour),
 	}
-	if c.ValkeyAddr != "" {
-		if _, err := splitHost(c.ValkeyAddr); err != nil {
-			r.fail("HELLO_VALKEY_ADDR", err)
-		}
+	if c.MaxCallDuration == 0 {
+		r.fail("HELLO_SIP_MAX_CALL_DURATION", errors.New("must be positive"))
+	}
+	c.Database = r.database(c.DatabaseURL)
+	r.hostPort("HELLO_VALKEY_ADDR", c.ValkeyAddr)
+	if c.NonceSecret != "" && len(c.NonceSecret) < 32 {
+		r.fail("HELLO_SIP_NONCE_SECRET", errors.New("must be at least 32 bytes"))
+	}
+	if c.RegisterMinExpires > c.RegisterMaxExpires {
+		r.fail("HELLO_SIP_REGISTER_MIN_EXPIRES", errors.New("must not exceed HELLO_SIP_REGISTER_MAX_EXPIRES"))
 	}
 	bindHost, err := splitHost(c.SIPBindAddr)
 	if err != nil {
@@ -150,6 +206,40 @@ func (r *reader) duration(key string, def time.Duration) time.Duration {
 		r.fail(key, errors.New("must not be negative"))
 	}
 	return d
+}
+
+// database parses a DSN; pgx's redaction of parse errors is best effort, so
+// none of the input is echoed back.
+func (r *reader) database(dsn string) *pgx.ConnConfig {
+	if dsn == "" {
+		return nil
+	}
+	db, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		r.fail("HELLO_DATABASE_URL", errors.New("malformed connection string"))
+	}
+	return db
+}
+
+func (r *reader) hostPort(key, v string) {
+	if v == "" {
+		return
+	}
+	if _, err := splitHost(v); err != nil {
+		r.fail(key, err)
+	}
+}
+
+func (r *reader) positiveInt(key string, def int) int {
+	v := r.getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		r.fail(key, errors.New("must be a positive integer"))
+	}
+	return n
 }
 
 func (r *reader) common(defaultHTTP string) Common {
