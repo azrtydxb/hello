@@ -14,10 +14,8 @@ import (
 
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/auth"
-	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/migrate"
-	"github.com/azrtydxb/hello/internal/ops"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
@@ -32,9 +30,6 @@ const (
 	bootstrapRetry = 5 * time.Second
 	// pruneEvery is how often expired sessions are deleted.
 	pruneEvery = time.Hour
-	// memberHeartbeat is how often this node republishes its membership and
-	// refreshes the cluster metrics (cluster.TTL is three heartbeats).
-	memberHeartbeat = cluster.TTL / 3
 )
 
 const usage = "usage: hello-control serve | migrate up | migrate status"
@@ -108,29 +103,12 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
 
-	metrics := telemetry.NewMetrics("hello-control", version.Version, version.Commit)
-	required := map[string]ops.Check{"postgres": db.PingContext}
-	pub := &api.Publisher{
-		ID: cfg.NodeID, HTTPAddr: cfg.HTTPAddr, Version: version.Version, StartedAt: time.Now().UTC(),
-		Heartbeat: memberHeartbeat, Revision: st.ConfigRevision, Store: vk,
-		Metrics: api.NewClusterMetrics(metrics.Registry), Log: log,
-		Required: map[string]func(context.Context) error{"postgres": db.PingContext},
-	}
-	pubCtx, stopPub := context.WithCancel(ctx)
-	pubDone := make(chan struct{})
-	go func() { defer close(pubDone); pub.Run(pubCtx) }()
-	defer func() {
-		stopPub()
-		<-pubDone
-		lctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		pub.Leave(lctx)
-	}()
-
-	srv := &ops.Server{
-		Checks: required,
-		// Valkey backs views, not management: its loss degrades, not fails.
-		Optional: map[string]ops.Check{"valkey": vk.Ping},
+	// The node lifecycle: JOINING until PostgreSQL first answers, READY,
+	// UNHEALTHY while it fails, DRAINING on SIGTERM or a drain request
+	// (/readyz 503, in-flight requests finish, then exit), OFFLINE after.
+	node := api.NewNode(api.NodeOptions{
+		ID: cfg.NodeID, HTTPAddr: cfg.HTTPAddr, Version: version.Version,
+		Postgres: db.PingContext, Valkey: vk, Revision: st.ConfigRevision,
 		App: api.Handler(api.Config{
 			Store:      st,
 			Live:       vk,
@@ -141,12 +119,12 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			SessionTTL: cfg.SessionTTL,
 			Log:        log,
 		}),
-		Metrics:         metrics,
+		Metrics:         telemetry.NewMetrics("hello-control", version.Version, version.Commit),
 		Log:             log,
 		DrainDelay:      cfg.DrainDelay,
 		ShutdownTimeout: cfg.ShutdownTimeout,
-	}
-	err = srv.Serve(ctx, ln)
+	})
+	err = node.Run(ctx.Done(), ln)
 	log.Info("stopped", "error", err)
 	return err
 }
