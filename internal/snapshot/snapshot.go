@@ -9,10 +9,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"net"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/routing"
+	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -45,6 +51,8 @@ type Snapshot struct {
 	// known holds extension numbers that exist but have no enabled device,
 	// so a call to them is 480 rather than 404.
 	known map[string]bool
+	// routing is the trunk and route state; nil for a snapshot from New.
+	routing *RoutingState
 }
 
 // New builds a snapshot from devices; devices whose realm differs from
@@ -178,6 +186,27 @@ type Watcher struct {
 	// doubles up to PollInterval and resets after a session that loaded.
 	InitialBackoff time.Duration
 
+	// ConfigInvalid, when set, is 1 while the current revision's routing
+	// does not compile and routing runs on the last good table;
+	// InvalidRevision holds that revision (0 when routing is current).
+	ConfigInvalid   prometheus.Gauge
+	InvalidRevision prometheus.Gauge
+	// DNSFailures, when set, counts trunk destination lookups that failed
+	// (hello_dns_resolve_failures_total); the previous result is kept.
+	DNSFailures prometheus.Counter
+
+	// Box opens sealed trunk passwords; without it every trunk with a
+	// password is misconfigured.
+	Box *secret.Box
+	// Resolver resolves trunk destinations (net.DefaultResolver); DNS runs
+	// every ResolveInterval (30s) on its own goroutine, never on the call
+	// path.
+	Resolver        Resolver
+	ResolveInterval time.Duration
+	resolveOnceInit sync.Once
+	resolveNow      chan struct{}
+	resolved        atomic.Pointer[map[string][]string]
+
 	cur atomic.Pointer[Snapshot]
 	mu  sync.Mutex // serialises reload
 }
@@ -195,7 +224,25 @@ func (w *Watcher) install(s *Snapshot) {
 	if old != nil && old.Revision == s.Revision {
 		return
 	}
+	if rs := s.routing; rs != nil && len(rs.Errors) > 0 {
+		// Keep routing on the last good table rather than a broken one.
+		kept := "none (internal calls only)"
+		if old != nil && old.routing != nil { // a stored routing state always has a router
+			rs.Router, rs.Config, rs.Misconfigured, rs.Resolved = old.routing.Router, old.routing.Config, old.routing.Misconfigured, old.routing.Resolved
+			kept = "the last good revision"
+		} else {
+			rs.Router = stubRouter{cfg: rs.Config}
+		}
+		if w.Log != nil {
+			w.Log.Error("routing configuration does not compile; routing is frozen on "+kept,
+				"revision", s.Revision, "error_count", len(rs.Errors), "errors", summarise(rs.Errors))
+		}
+		w.setInvalid(1, s.Revision)
+	} else if s.routing != nil {
+		w.setInvalid(0, 0)
+	}
 	w.cur.Store(s)
+	w.triggerResolve()
 	if w.Log != nil {
 		w.Log.Info("configuration snapshot loaded", "revision", s.Revision, "devices", len(s.byUser))
 		for _, u := range s.Skipped {
@@ -279,12 +326,139 @@ func (w *Watcher) session(ctx context.Context, poll time.Duration) (loaded bool,
 func (w *Watcher) load(ctx context.Context, conn Querier) error {
 	lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	s, err := Load(lctx, conn, w.Domain)
+	s, err := w.loadAll(lctx, conn)
 	if err != nil {
 		return err
 	}
 	w.install(s)
 	return nil
+}
+
+// loadAll reads devices and routing in one read-only transaction (when the
+// connection can open one), so both come from the same revision.
+func (w *Watcher) loadAll(ctx context.Context, conn Querier) (*Snapshot, error) {
+	q := conn
+	if b, ok := conn.(beginner); ok {
+		tx, err := b.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+		q = tx
+	}
+	s, err := Load(ctx, q, w.Domain)
+	if err != nil {
+		return nil, err
+	}
+	cfg, bad, err := loadRouting(ctx, q, w.Box, w.Log)
+	if err != nil {
+		return nil, err
+	}
+	var resolved map[string][]string
+	if r := w.resolved.Load(); r != nil {
+		resolved = *r
+	}
+	return s.WithRouting(buildRouting(cfg, bad, resolved)), nil
+}
+
+func (w *Watcher) setInvalid(v float64, rev int64) {
+	if w.ConfigInvalid != nil {
+		w.ConfigInvalid.Set(v)
+	}
+	if w.InvalidRevision != nil {
+		w.InvalidRevision.Set(float64(rev))
+	}
+}
+
+// summarise lists the first field errors (paths and messages only; the
+// engine's messages never carry configuration values like passwords).
+func summarise(errs []routing.FieldError) string {
+	const shown = 5
+	var b strings.Builder
+	for i, e := range errs {
+		if i == shown {
+			fmt.Fprintf(&b, "; and %d more", len(errs)-shown)
+			break
+		}
+		if i > 0 {
+			b.WriteString("; ")
+		}
+		b.WriteString(e.Path + ": " + e.Message)
+	}
+	return b.String()
+}
+
+func (w *Watcher) kick() chan struct{} {
+	w.resolveOnceInit.Do(func() { w.resolveNow = make(chan struct{}, 1) })
+	return w.resolveNow
+}
+
+func (w *Watcher) triggerResolve() {
+	select {
+	case w.kick() <- struct{}{}:
+	default:
+	}
+}
+
+// RunResolver resolves trunk destinations every ResolveInterval and after
+// each new revision, recompiling the routing table (same revision) when the
+// results change. It never blocks the call path.
+func (w *Watcher) RunResolver(ctx context.Context) {
+	interval := w.ResolveInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	var r Resolver = net.DefaultResolver
+	if w.Resolver != nil {
+		r = w.Resolver
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		w.resolveOnce(ctx, r)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		case <-w.kick():
+		}
+	}
+}
+
+func (w *Watcher) resolveOnce(ctx context.Context, r Resolver) {
+	cur := w.cur.Load()
+	if cur == nil || cur.routing == nil {
+		return
+	}
+	res, failed := resolveAll(ctx, r, cur.routing.Config.Trunks, cur.routing.Resolved)
+	if len(failed) > 0 {
+		if w.DNSFailures != nil {
+			w.DNSFailures.Add(float64(len(failed)))
+		}
+		if w.Log != nil {
+			w.Log.Warn("trunk destination lookup failed; keeping the previous addresses", "destinations", strings.Join(failed, ", "))
+		}
+	}
+	w.resolved.Store(&res)
+	if maps.EqualFunc(res, cur.routing.Resolved, slices.Equal) {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	cur = w.cur.Load()
+	next := *cur
+	next.routing = buildRouting(cur.routing.Config, cur.routing.Misconfigured, res)
+	if len(next.routing.Errors) > 0 {
+		return // it compiled before; keep it rather than fail on DNS data
+	}
+	// A DNS-only rebuild of a frozen (last good) table keeps the current
+	// revision's compile errors: they mark routing as frozen, which makes
+	// calls check this revision's extensions before the old table.
+	next.routing.Errors = cur.routing.Errors
+	w.cur.Store(&next)
+	if w.Log != nil {
+		w.Log.Info("trunk destinations resolved", "revision", next.Revision, "destinations", len(res))
+	}
 }
 
 func (w *Watcher) fail(msg string, err error) {

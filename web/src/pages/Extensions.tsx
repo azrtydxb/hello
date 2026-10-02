@@ -3,27 +3,46 @@ import {
   createExtension,
   deleteExtension,
   errorMessage,
+  fieldErrors,
   EXTENSION_NUMBER_PATTERN,
   listExtensions,
   updateExtension,
   type Extension,
 } from "../api";
 import { ConfirmButton } from "../components/ConfirmButton";
+import { mapFieldErrors } from "../forms";
 
 const NUMBER_HINT = "2 to 10 digits.";
+
+const EXTERNAL_NUMBER_PATTERN = /^(\+?[0-9]{2,20})?$/;
+const EXTERNAL_HINT = "Optional; presented to carriers, e.g. +97142000101.";
 
 interface Errors {
   number?: string;
   name?: string;
+  externalNumber?: string;
 }
 
-function validate(number: string, name: string): Errors {
+const hasErrors = (e: Errors) =>
+  Boolean(e.number || e.name || e.externalNumber);
+
+function validate(number: string, name: string, external: string): Errors {
   const errors: Errors = {};
   if (!EXTENSION_NUMBER_PATTERN.test(number)) {
     errors.number = "The number must be 2 to 10 digits (0–9 only).";
   }
   if (name.trim() === "") errors.name = "Enter a name.";
+  if (!EXTERNAL_NUMBER_PATTERN.test(external.trim())) {
+    errors.externalNumber =
+      "Use 2 to 20 digits, optionally starting with +, or leave it empty.";
+  }
   return errors;
+}
+
+/** Server field errors on number, name or externalNumber. */
+function serverFieldErrors(err: unknown): Errors {
+  return mapFieldErrors(fieldErrors(err), ["number", "name", "externalNumber"])
+    .byKey;
 }
 
 type ListState =
@@ -100,6 +119,7 @@ export function Extensions() {
             <tr>
               <th scope="col">Number</th>
               <th scope="col">Name</th>
+              <th scope="col">External number</th>
               <th scope="col">
                 <span className="visually-hidden">Actions</span>
               </th>
@@ -123,6 +143,7 @@ export function Extensions() {
                 <tr key={ext.id}>
                   <th scope="row">{ext.number}</th>
                   <td>{ext.name}</td>
+                  <td>{ext.externalNumber || "—"}</td>
                   <td className="row-actions">
                     <button
                       type="button"
@@ -159,6 +180,7 @@ function CreateExtension({
 }) {
   const [number, setNumber] = useState("");
   const [name, setName] = useState("");
+  const [external, setExternal] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -166,16 +188,23 @@ function CreateExtension({
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setServerError(null);
-    const found = validate(number, name);
+    const found = validate(number, name, external);
     setErrors(found);
-    if (found.number || found.name) return;
+    if (hasErrors(found)) return;
     setBusy(true);
     try {
-      const ext = await createExtension({ number, name: name.trim() });
+      const ext = await createExtension({
+        number,
+        name: name.trim(),
+        // Sent only when given, so a create without one stays the Phase 1 shape.
+        ...(external.trim() ? { externalNumber: external.trim() } : {}),
+      });
       onCreated(ext);
       setNumber("");
       setName("");
+      setExternal("");
     } catch (err) {
+      setErrors(serverFieldErrors(err));
       setServerError(errorMessage(err));
     } finally {
       setBusy(false);
@@ -228,6 +257,28 @@ function CreateExtension({
             </p>
           )}
         </div>
+        <div className="field">
+          <label htmlFor="ext-external">External number</label>
+          <input
+            id="ext-external"
+            inputMode="tel"
+            value={external}
+            onChange={(e) => setExternal(e.target.value)}
+            aria-invalid={errors.externalNumber ? true : undefined}
+            aria-describedby={
+              errors.externalNumber ? "ext-external-error" : "ext-external-hint"
+            }
+          />
+          {errors.externalNumber ? (
+            <p id="ext-external-error" className="field-error">
+              {errors.externalNumber}
+            </p>
+          ) : (
+            <p id="ext-external-hint" className="hint">
+              {EXTERNAL_HINT}
+            </p>
+          )}
+        </div>
       </div>
       {serverError && (
         <p role="alert" className="error">
@@ -252,6 +303,7 @@ function EditRow({
 }) {
   const [number, setNumber] = useState(ext.number);
   const [name, setName] = useState(ext.name);
+  const [external, setExternal] = useState(ext.externalNumber ?? "");
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -259,13 +311,17 @@ function EditRow({
 
   async function onSave() {
     setServerError(null);
-    const found = validate(number, name);
+    const found = validate(number, name, external);
     setErrors(found);
-    if (found.number || found.name) return;
-    const patch: { number?: string; name?: string } = {};
+    if (hasErrors(found)) return;
+    const patch: { number?: string; name?: string; externalNumber?: string } =
+      {};
     if (number !== ext.number) patch.number = number;
     if (name.trim() !== ext.name) patch.name = name.trim();
-    if (!patch.number && patch.name === undefined) {
+    if (external.trim() !== (ext.externalNumber ?? "")) {
+      patch.externalNumber = external.trim();
+    }
+    if (Object.keys(patch).length === 0) {
       onCancel();
       return;
     }
@@ -273,6 +329,7 @@ function EditRow({
     try {
       onSaved(await updateExtension(ext.id, patch));
     } catch (err) {
+      setErrors(serverFieldErrors(err));
       setServerError(errorMessage(err));
       setBusy(false);
     }
@@ -321,6 +378,26 @@ function EditRow({
         {errors.name && (
           <p id={`${base}-name-error`} className="field-error">
             {errors.name}
+          </p>
+        )}
+      </td>
+      <td>
+        <label className="visually-hidden" htmlFor={`${base}-external`}>
+          External number for extension {ext.number}
+        </label>
+        <input
+          id={`${base}-external`}
+          inputMode="tel"
+          value={external}
+          onChange={(e) => setExternal(e.target.value)}
+          aria-invalid={errors.externalNumber ? true : undefined}
+          aria-describedby={
+            errors.externalNumber ? `${base}-external-error` : undefined
+          }
+        />
+        {errors.externalNumber && (
+          <p id={`${base}-external-error`} className="field-error">
+            {errors.externalNumber}
           </p>
         )}
         {serverError && (

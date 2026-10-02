@@ -1,8 +1,8 @@
 // Package store is hello-control's PostgreSQL access: management users,
-// sessions, API tokens, extensions, devices, audit events, CDRs and the
-// configuration revision. Every extension or device mutation runs in one
-// transaction with its audit row, the revision bump and the NOTIFY that
-// hello-sip listens for.
+// sessions, API tokens, extensions, devices, trunks, routes, audit events,
+// CDRs and the configuration revision. Every configuration mutation runs in
+// one transaction with its whole-configuration check, its audit row, the
+// revision bump and the NOTIFY that hello-sip listens for.
 package store
 
 import (
@@ -10,10 +10,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/routing"
+	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -23,7 +27,40 @@ var (
 	ErrNotFound = errors.New("store: not found")
 	// ErrConflict is returned when a unique value is already taken.
 	ErrConflict = errors.New("store: conflict")
+	// ErrInUse is returned (inside an *InUseError) when a change would
+	// break a route that refers to the row.
+	ErrInUse = errors.New("store: in use")
 )
+
+// InUseError rejects a change that would leave a route pointing at nothing.
+// Its message names the routes and is safe to show to API clients.
+type InUseError struct{ Msg string }
+
+func (e *InUseError) Error() string { return e.Msg }
+
+// Unwrap makes errors.Is(err, ErrInUse) hold.
+func (e *InUseError) Unwrap() error { return ErrInUse }
+
+// inUse builds an InUseError naming up to five routes.
+func inUse(what string, routes []string) error {
+	quoted := make([]string, 0, len(routes))
+	for i, r := range routes {
+		if i == 5 {
+			quoted = append(quoted, fmt.Sprintf("and %d more", len(routes)-5))
+			break
+		}
+		quoted = append(quoted, strconv.Quote(r))
+	}
+	return &InUseError{Msg: fmt.Sprintf("%s is used by %s %s; change or delete the route first",
+		what, plural(len(routes), "route", "routes"), strings.Join(quoted, ", "))}
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
 
 // NotifyChannel is the PostgreSQL channel a configuration change notifies,
 // with the new revision as payload.
@@ -31,11 +68,19 @@ const NotifyChannel = "hello_config"
 
 // Store wraps the hello-control database.
 type Store struct {
-	db *sql.DB
+	db  *sql.DB
+	box *secret.Box
 }
 
 // New wraps db.
 func New(db *sql.DB) *Store { return &Store{db: db} }
+
+// WithSecretBox sets the box that seals trunk passwords and returns s.
+// Without one, setting a trunk password fails.
+func (s *Store) WithSecretBox(b *secret.Box) *Store {
+	s.box = b
+	return s
+}
 
 // mapErr turns driver errors into the package sentinels.
 func mapErr(err error) error {
@@ -75,16 +120,76 @@ func insertAudit(ctx context.Context, q interface {
 	return err
 }
 
-// configChange runs fn and, in the same transaction, records the audit
-// event, bumps the configuration revision and notifies hello-sip. fn returns
-// the affected resource's id.
-func (s *Store) configChange(ctx context.Context, actor, action, resource string, fn func(*sql.Tx) (int64, error)) error {
+// configLockKey is the transaction-scoped advisory lock every configuration
+// change takes first, so changes are serialised and the whole-configuration
+// check each one runs sees every change committed before it.
+const configLockKey = 0x68656c6c6f636667 // "hellocfg"
+
+// Check validates the whole routing configuration. A change is rejected
+// when the configuration after it has an error the configuration before it
+// did not have. A nil Check skips the stage.
+type Check func(routing.Config) []routing.FieldError
+
+// ValidationError rejects a change, naming each failing field.
+type ValidationError struct{ Fields []routing.FieldError }
+
+func (e *ValidationError) Error() string { return "store: validation failed" }
+
+// fieldError returns a ValidationError for one field.
+func fieldError(path, msg string) error {
+	return &ValidationError{Fields: []routing.FieldError{{Path: path, Message: msg}}}
+}
+
+// configChange runs fn and, in the same transaction, checks the resulting
+// routing configuration, records the audit event, bumps the configuration
+// revision and notifies hello-sip. fn returns the affected resource's id.
+func (s *Store) configChange(ctx context.Context, actor, action, resource string, check Check, fn func(*sql.Tx) (int64, error)) error {
+	return s.configChangeID(ctx, actor, action, resource, check, func(tx *sql.Tx) (string, error) {
+		id, err := fn(tx)
+		return strconv.FormatInt(id, 10), err
+	})
+}
+
+func (s *Store) configChangeID(ctx context.Context, actor, action, resource string, check Check, fn func(*sql.Tx) (string, error)) error {
 	return s.tx(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
+			return err
+		}
+		// The errors the saved configuration already has (a stricter engine
+		// release, a manual SQL edit) must not block the changes that fix
+		// them, or unrelated ones: only errors the change introduces count.
+		var baseline map[string]bool
+		if check != nil {
+			before, err := s.loadRouting(ctx, tx)
+			if err != nil {
+				return err
+			}
+			baseline = errorKeys(before.Config, check(before.Config))
+		}
 		id, err := fn(tx)
 		if err != nil {
 			return err
 		}
-		if err := insertAudit(ctx, tx, actor, action, resource, strconv.FormatInt(id, 10)); err != nil {
+		if check != nil {
+			snap, err := s.loadRouting(ctx, tx)
+			if err != nil {
+				return err
+			}
+			var fresh []routing.FieldError
+			for _, f := range check(snap.Config) {
+				if !baseline[errorKey(snap.Config, f)] {
+					fresh = append(fresh, f)
+				}
+			}
+			if len(fresh) > 0 {
+				prefix, err := configPath(ctx, tx, snap.Config, resource, id)
+				if err != nil {
+					return err
+				}
+				return &ValidationError{Fields: relative(fresh, prefix)}
+			}
+		}
+		if err := insertAudit(ctx, tx, actor, action, resource, id); err != nil {
 			return err
 		}
 		var rev int64
@@ -95,6 +200,95 @@ func (s *Store) configChange(ctx context.Context, actor, action, resource string
 		_, err = tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, NotifyChannel, strconv.FormatInt(rev, 10))
 		return err
 	})
+}
+
+// itemRe matches the slice-indexed head of a routing.Config error path.
+var itemRe = regexp.MustCompile(`^(trunks|outbound|inbound)\[([0-9]+)\]`)
+
+// errorKey identifies a FieldError by the item it is about and its field,
+// independent of the item's slice position, which shifts when another item
+// is created or deleted: "outbound[3].match" becomes "outbound#17.match".
+func errorKey(cfg routing.Config, f routing.FieldError) string {
+	m := itemRe.FindStringSubmatchIndex(f.Path)
+	if m == nil {
+		return f.Path
+	}
+	kind := f.Path[m[2]:m[3]]
+	i, _ := strconv.Atoi(f.Path[m[4]:m[5]])
+	var id int64 = -1
+	switch {
+	case kind == "trunks" && i < len(cfg.Trunks):
+		id = cfg.Trunks[i].ID
+	case kind == "outbound" && i < len(cfg.Outbound):
+		id = cfg.Outbound[i].ID
+	case kind == "inbound" && i < len(cfg.Inbound):
+		id = cfg.Inbound[i].ID
+	}
+	return kind + "#" + strconv.FormatInt(id, 10) + f.Path[m[1]:]
+}
+
+func errorKeys(cfg routing.Config, fields []routing.FieldError) map[string]bool {
+	out := make(map[string]bool, len(fields))
+	for _, f := range fields {
+		out[errorKey(cfg, f)] = true
+	}
+	return out
+}
+
+// configPath is the routing.Config path of the changed item — for example
+// "outbound[2]" or `extensions["101"]` — or "" when it has none (a delete,
+// a reorder).
+func configPath(ctx context.Context, tx *sql.Tx, cfg routing.Config, resource, id string) (string, error) {
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return "", nil
+	}
+	switch resource {
+	case "trunk":
+		for i, t := range cfg.Trunks {
+			if t.ID == n {
+				return fmt.Sprintf("trunks[%d]", i), nil
+			}
+		}
+	case "outbound_route":
+		for i, r := range cfg.Outbound {
+			if r.ID == n {
+				return fmt.Sprintf("outbound[%d]", i), nil
+			}
+		}
+	case "inbound_route":
+		for i, r := range cfg.Inbound {
+			if r.ID == n {
+				return fmt.Sprintf("inbound[%d]", i), nil
+			}
+		}
+	case "extension":
+		var number string
+		err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1`, n).Scan(&number)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "extensions[" + strconv.Quote(number) + "]", err
+	}
+	return "", nil
+}
+
+// relative rewrites the changed item's errors to paths relative to it
+// ("outbound[2].numberTransform.template" becomes
+// "numberTransform.template"), so a client maps them onto its form; errors
+// about other items keep their full path.
+func relative(fields []routing.FieldError, prefix string) []routing.FieldError {
+	if prefix == "" {
+		return fields
+	}
+	out := make([]routing.FieldError, len(fields))
+	for i, f := range fields {
+		if rest, ok := strings.CutPrefix(f.Path, prefix+"."); ok {
+			f.Path = rest
+		}
+		out[i] = f
+	}
+	return out
 }
 
 // Audit records a non-configuration event such as a login.

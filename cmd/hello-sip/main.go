@@ -19,6 +19,7 @@ import (
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/ops"
+	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/sip"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/azrtydxb/hello/internal/telemetry"
@@ -78,7 +79,19 @@ func run(args []string) error {
 		Name: "hello_snapshot_reload_failures_total",
 		Help: "Failed configuration snapshot connects or loads; the last good snapshot stays in use.",
 	})
-	metrics.Registry.MustRegister(reloadFailures)
+	routingInvalid := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hello_routing_config_invalid",
+		Help: "1 while the current configuration revision's routing does not compile and routing is frozen on the last good table.",
+	})
+	routingInvalidRev := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hello_routing_config_invalid_revision",
+		Help: "The configuration revision whose routing does not compile; 0 when routing is current.",
+	})
+	dnsFailures := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "hello_dns_resolve_failures_total",
+		Help: "Trunk destination DNS lookups that failed; the previous addresses are kept.",
+	})
+	metrics.Registry.MustRegister(reloadFailures, routingInvalid, routingInvalidRev, dnsFailures)
 	sipMetrics := sip.NewMetrics(metrics.Registry)
 
 	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
@@ -93,14 +106,21 @@ func run(args []string) error {
 	defer pool.Close()
 	cdrs := cdr.NewWriter(pool, cdr.NewDroppedCounter(metrics.Registry), log.With("component", "cdr"))
 
-	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"), ReloadFailures: reloadFailures}
+	box, err := secret.New(cfg.SecretKey)
+	if err != nil {
+		return fmt.Errorf("HELLO_SECRET_KEY: %w", err)
+	}
+	live := livestate.New(vk)
+	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
+		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev,
+		DNSFailures: dnsFailures}
 	srv, err := sip.New(sip.Config{
 		NodeID: cfg.NodeID, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
 		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration,
 	}, sip.Deps{
-		Snapshots: watcher, State: livestate.New(vk),
+		Snapshots: watcher, State: live, Trunks: live,
 		Throttle: sip.ValkeyThrottle{Client: vk, Window: cfg.AuthFailWindow},
 		CDRs:     cdrs, Metrics: sipMetrics, Log: log.With("component", "sip"),
 		Presence: sip.ValkeyPresence{Client: vk},
@@ -114,6 +134,8 @@ func run(args []string) error {
 	defer stopBG()
 	watchDone := make(chan struct{})
 	go func() { watcher.Run(bg); close(watchDone) }()
+	resolveDone := make(chan struct{})
+	go func() { watcher.RunResolver(bg); close(resolveDone) }()
 	cdrDone := make(chan struct{})
 	go func() { cdrs.Run(bg, 5*time.Second); close(cdrDone) }()
 	sipCtx, stopSIP := context.WithCancel(context.Background())
@@ -166,6 +188,7 @@ func run(args []string) error {
 	}
 	stopBG()
 	<-watchDone
+	<-resolveDone
 	<-cdrDone
 	log.Info("stopped", "error", err, "active_calls_dropped", srv.ActiveCalls())
 	return err

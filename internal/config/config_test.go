@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,7 @@ func env(m map[string]string) func(string) string {
 		"HELLO_NODE_ID": "n1", "HELLO_DATABASE_URL": "postgres://db/hello", "HELLO_VALKEY_ADDR": "v:6379",
 		"HELLO_SIP_DOMAIN": "hello.test", "HELLO_SIP_NONCE_SECRET": strings.Repeat("k", 32),
 		"HELLO_SIP_ADVERTISED_ADDR": "10.0.0.5:5060",
+		"HELLO_SECRET_KEY":          base64.StdEncoding.EncodeToString([]byte(strings.Repeat("s", 32))),
 	}
 	return func(k string) string {
 		if v, ok := m[k]; ok {
@@ -92,6 +95,23 @@ func TestLoadMalformedValkeyAddr(t *testing.T) {
 	}))
 	if err == nil || !strings.Contains(err.Error(), "HELLO_VALKEY_ADDR") {
 		t.Fatalf("want error naming HELLO_VALKEY_ADDR, got %v", err)
+	}
+}
+
+func TestLoadSecretKey(t *testing.T) {
+	urlSafe33 := base64.URLEncoding.EncodeToString(append(bytes.Repeat([]byte{0xfb}, 32), 0xff)) // 33 bytes, '-' and '_'
+	zero := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	for _, bad := range []string{"", "not-base64!", base64.StdEncoding.EncodeToString([]byte("short")), urlSafe33, zero} {
+		_, errC := LoadControl(env(map[string]string{"HELLO_SECRET_KEY": bad}))
+		_, errS := LoadSIP(env(map[string]string{"HELLO_SECRET_KEY": bad}))
+		for _, err := range []error{errC, errS} {
+			if err == nil || !strings.Contains(err.Error(), "HELLO_SECRET_KEY") {
+				t.Fatalf("secret key %q accepted: %v", bad, err)
+			}
+			if bad != "" && strings.Contains(err.Error(), bad) {
+				t.Fatalf("error echoes the key: %v", err)
+			}
+		}
 	}
 }
 

@@ -75,3 +75,39 @@ git config commit.template .procoder/github/COMMIT_TEMPLATE.md
 - Class: judgment
 - Missed by: test
 - Adaptation: REVIEW.md: limits are enforced from the atomic operation's own result, with a concurrent test.
+
+## 2026-10-03 PR #3 Copilot — the runtime images had no zoneinfo, so named schedule time zones failed validation in production
+
+- Class: mechanical
+- Missed by: test
+- Adaptation: REVIEW.md: anything that depends on the runtime environment (time zones, CA certs, DNS) is exercised in the shipped image by a lab test; TestInboundRouting uses Asia/Dubai.
+
+## 2026-10-03 PR #3 Copilot — a call slot lost during a Valkey outage was never re-acquired, so max_calls could be exceeded after recovery
+
+- Class: judgment
+- Missed by: rubric
+- Adaptation: REVIEW.md: shared state that can expire or vanish (outage, restart) has a defined recovery path on refresh, with a test that deletes it mid-life.
+
+## 2026-10-03 PR #3 Copilot — inbound trunk calls never took a slot, so max_calls only covered outbound
+
+- Class: judgment
+- Missed by: rubric
+- Adaptation: REVIEW.md: a limit is enforced on every path that consumes the resource (inbound, outbound, forwarded), with a test per direction.
+
+## 2026-10-03 PR #3 Copilot — a DNS-only rebuild of a frozen routing table cleared the frozen marker
+
+- Class: judgment
+- Missed by: test
+- Adaptation: REVIEW.md: derived state rebuilt for one reason (DNS) must preserve markers set for another (invalid revision); test the sequence, not each step alone.
+
+## 2026-10-03 PR #3 Copilot — the reorder hook overwrote edits made while a reorder was in flight, and allowed moves before recovery finished
+
+- Class: judgment
+- Missed by: test
+- Adaptation: REVIEW.md: UI state applied from a slow response is merged onto the latest state by id, and actions stay disabled until recovery lands; test with deferred responses.
+
+## 2026-10-03 PR #3 lab — nginx resolved the control plane's name once, so recreated hello-control containers left the UI proxying to a dead IP
+
+- Class: mechanical
+- Missed by: test
+- Adaptation: REVIEW.md: proxies re-resolve upstream names (resolver + variable); the lab smoke test runs against a kept, recreated lab.

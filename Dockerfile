@@ -8,11 +8,17 @@ ARG VERSION=dev
 ARG COMMIT=unknown
 RUN CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X github.com/azrtydxb/hello/internal/version.Version=${VERSION} -X github.com/azrtydxb/hello/internal/version.Commit=${COMMIT}" \
-      -o /out/ ./cmd/...
+      -o /out/ ./cmd/... ./test/fakecarrier
 
 FROM alpine:3.22 AS runtime
 RUN apk add --no-cache ca-certificates && adduser -D -H -u 65532 hello
 USER 65532:65532
+
+# Lab-only simulated SIP carrier (test/fakecarrier); never shipped.
+FROM runtime AS fakecarrier
+COPY --from=build /out/fakecarrier /usr/local/bin/fakecarrier
+EXPOSE 5060/udp 8090
+ENTRYPOINT ["fakecarrier"]
 
 FROM runtime AS hello-control
 COPY --from=build /out/hello-control /usr/local/bin/hello-control

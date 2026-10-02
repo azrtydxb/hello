@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -193,4 +194,37 @@ func TestLabSmoke(t *testing.T) {
 		}
 	}
 	TestCallAcrossNodes(t)
+	labSmokeTrunk(t)
+}
+
+// labSmokeTrunk places one outbound and one inbound call through
+// carrier-primary (registration trunk, 407-challenged INVITEs).
+func labSmokeTrunk(t *testing.T) {
+	lc := newLabClient(t)
+	primary, _ := lc.trunks(0)
+	lc.outbound("", primary)
+	eventually(t, 20*time.Second, "carrier-primary registered", func() error {
+		if st := lc.trunkStatus(primary.ID); st.Registration == nil || st.Registration.State != "registered" {
+			return errors.New("not yet")
+		}
+		return nil
+	})
+	number := "97150" + randDigits(5) + "00"
+	if code := dialOut(t, lc, "9"+number, 100*time.Millisecond); code != 200 {
+		t.Fatalf("outbound smoke call via carrier-primary = %d", code)
+	}
+
+	d := lc.devices("desk")[0]
+	p := phone(t, d, labSIP2)
+	register(t, p)
+	did := "+9714557" + randDigits(4)
+	lc.inbound(did, primary, d.Extension, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	rang := answerNext(ctx, p)
+	var res struct{ Status int }
+	carrierDo(t, primaryHTTP, "POST", "/call", map[string]any{"from": "+97145556666", "to": did, "target": "hello-sip-1:5060", "hangupAfterMs": 100}, &res)
+	if res.Status != 200 || <-rang == nil {
+		t.Fatalf("inbound smoke call from carrier-primary = %d", res.Status)
+	}
 }

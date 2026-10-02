@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { apiError, json, ME, mockApi, noContent, renderApp } from "../test/api";
 
@@ -118,5 +118,100 @@ describe("Extensions", () => {
       within(confirm).getByRole("button", { name: "Delete extension" }),
     );
     expect(await screen.findByText("No extensions yet.")).toBeVisible();
+  });
+  it("sets an external number on create and edit, validating it", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/extensions": () =>
+        json({ items: [{ ...EXT, externalNumber: "" }] }),
+      "POST /api/v1/extensions": () =>
+        json(
+          {
+            ...EXT,
+            id: 2,
+            number: "102",
+            name: "Desk",
+            externalNumber: "+97142000102",
+          },
+          201,
+        ),
+      "PATCH /api/v1/extensions/1": () =>
+        apiError(400, "bad_request", "invalid extension"),
+    });
+    renderApp("/extensions");
+    await screen.findByRole("row", { name: /Reception/ });
+
+    const external = screen.getByLabelText("External number");
+    fireEvent.change(external, { target: { value: "12-34" } });
+    fill("102", "Desk");
+    expect(external).toHaveAttribute("aria-invalid", "true");
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+
+    fireEvent.change(external, { target: { value: "+97142000102" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create extension" }));
+    expect(await screen.findByText("+97142000102")).toBeVisible();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      number: "102",
+      name: "Desk",
+      externalNumber: "+97142000102",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit extension 100" }));
+    fireEvent.change(
+      screen.getByLabelText("External number for extension 100"),
+      {
+        target: { value: "+97142000100" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/invalid extension/)).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({
+      externalNumber: "+97142000100",
+    });
+  });
+
+  it("shows server field errors on the matching extension fields", async () => {
+    const invalid = (path: string, message: string) =>
+      json(
+        {
+          error: {
+            code: "bad_request",
+            message: "invalid extension",
+            fields: [{ path, message }],
+          },
+        },
+        400,
+      );
+    mockApi({
+      ...ME,
+      "GET /api/v1/extensions": () =>
+        json({ items: [{ ...EXT, externalNumber: "" }] }),
+      "POST /api/v1/extensions": () =>
+        invalid("externalNumber", "+97142000100 is already used by 100"),
+      "PATCH /api/v1/extensions/1": () =>
+        invalid("number", "number 101 is already taken"),
+    });
+    renderApp("/extensions");
+    await screen.findByRole("row", { name: /Reception/ });
+
+    fireEvent.change(screen.getByLabelText("External number"), {
+      target: { value: "+97142000100" },
+    });
+    fill("102", "Desk");
+    const external = screen.getByLabelText("External number");
+    await waitFor(() =>
+      expect(external).toHaveAttribute("aria-invalid", "true"),
+    );
+    expect(external).toHaveAccessibleDescription(
+      "+97142000100 is already used by 100",
+    );
+    expect(screen.getByLabelText("Number")).not.toHaveAttribute("aria-invalid");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit extension 100" }));
+    const number = screen.getByLabelText("Number for extension 100");
+    fireEvent.change(number, { target: { value: "101" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(number).toHaveAttribute("aria-invalid", "true"));
+    expect(number).toHaveAccessibleDescription("number 101 is already taken");
   });
 });

@@ -32,6 +32,7 @@ x-db-env: &db-env
   HELLO_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
   HELLO_VALKEY_ADDR: valkey:6379
   HELLO_SIP_DOMAIN: hello.lab
+  HELLO_SECRET_KEY: bGFiLW9ubHktc2VjcmV0LWtleS0wMTIzNDU2Nzg5YWI= # lab-only placeholder, confirmed 2026-10-02 gitleaks:allow
 
 x-sip-env: &sip-env
   <<: *db-env
@@ -110,6 +111,27 @@ services:
       interval: 5s
       retries: 12
     ports: ["8080:8080"]
+
+  # Simulated carriers for trunk tests (test/fakecarrier; lab only).
+  carrier-primary:
+    build: { context: ../.., target: fakecarrier }
+    image: hello-fakecarrier:dev
+    environment:
+      FAKE_NAME: carrier-primary
+      FAKE_USER: hello-trunk
+      FAKE_PASSWORD: lab-only-trunk-password # gitleaks:allow
+      FAKE_REALM: carrier-primary.lab
+      FAKE_INVITE_AUTH: "407"
+      FAKE_CONTACT_HOST: carrier-primary
+    ports: ["8091:8090"]
+
+  carrier-backup:
+    build: { context: ../.., target: fakecarrier }
+    image: hello-fakecarrier:dev
+    environment:
+      FAKE_NAME: carrier-backup
+      FAKE_CONTACT_HOST: carrier-backup
+    ports: ["8092:8090"]
 
 volumes:
   pgdata:
