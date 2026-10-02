@@ -7,6 +7,7 @@ package sip
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -357,13 +358,47 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 	}
 	switch s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256) {
 	case OK:
-		return dev, true
+		return s.checkReplay(req, tx, creds.Username, creds.Nonce, creds.Cnonce, creds.Nc, dev)
 	case Stale:
 		s.challenge(tx, req, true)
 	default:
 		s.authFailed(tx, req, ip, "bad credentials", true)
 	}
 	return snapshot.Device{}, false
+}
+
+// checkReplay accepts verified credentials only if their nonce count is
+// higher than any used before with the same nonce and cnonce. qop=auth does
+// not cover the message body or Contact, so without this a captured
+// REGISTER Authorization could be replayed (from the same IP, within the
+// nonce's life) to repoint the binding.
+//
+// A replay is answered 401 stale=true and is not counted as a failed
+// attempt: the response it carries is correct, so the client (or a client
+// that reused nc by mistake) is told to retry with a fresh nonce, which
+// only the password holder can answer. The state lives in Valkey so every
+// node sees it; if Valkey is unreachable the request gets 503, as every
+// other auth-state failure on this path does.
+func (s *Server) checkReplay(req *sip.Request, tx sip.ServerTransaction, user, nonce, cnonce string, nc int, dev snapshot.Device) (snapshot.Device, bool) {
+	if len(cnonce) > 256 {
+		s.challenge(tx, req, false)
+		return snapshot.Device{}, false
+	}
+	sum := sha256.Sum256([]byte(user + "\x00" + nonce + "\x00" + cnonce))
+	ctx, cancel := s.stateCtx()
+	fresh, err := s.deps.Throttle.AdvanceNonceCount(ctx, hex.EncodeToString(sum[:16]), int64(nc), NonceValidity+nonceSkew)
+	cancel()
+	if err != nil {
+		s.log.Warn("live state unavailable", "op", "digest_nc", "error", err)
+		s.unavailable(tx, req)
+		return snapshot.Device{}, false
+	}
+	if !fresh {
+		s.log.Info("SIP digest replay refused", "method", req.Method.String(), "source", req.Source())
+		s.challenge(tx, req, true)
+		return snapshot.Device{}, false
+	}
+	return dev, true
 }
 
 func (s *Server) challenge(tx sip.ServerTransaction, req *sip.Request, stale bool) {
@@ -375,9 +410,14 @@ func (s *Server) challenge(tx sip.ServerTransaction, req *sip.Request, stale boo
 }
 
 // authFailed counts a failure for ip and answers 401 (rechallenge) or 403.
+//
+// The 401/403 decision uses the count after this failure, so concurrent bad
+// attempts that all passed the precheck cannot all be rechallenged: within
+// one window at most AuthFailLimit failed attempts from an IP get a 401,
+// every later one 403.
 func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why string, rechallenge bool) {
 	ctx, cancel := s.stateCtx()
-	err := s.deps.Throttle.RecordFailure(ctx, ip)
+	n, err := s.deps.Throttle.RecordFailure(ctx, ip)
 	cancel()
 	if err != nil {
 		s.log.Warn("live state unavailable", "op", "authfail_incr", "error", err)
@@ -385,7 +425,7 @@ func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why 
 		return
 	}
 	s.log.Info("SIP authentication failed", "method", req.Method.String(), "source", req.Source(), "reason", why)
-	if rechallenge {
+	if rechallenge && n <= int64(s.cfg.AuthFailLimit) {
 		s.challenge(tx, req, false)
 		return
 	}

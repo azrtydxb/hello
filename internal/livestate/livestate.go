@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,18 +71,21 @@ func (s *Store) PutBinding(ctx context.Context, b Binding) error {
 	if err != nil {
 		return err
 	}
-	key := regPrefix + b.AOR
-	field := bindingKey(b)
-	for _, r := range s.c.DoMulti(ctx,
-		s.c.B().Hset().Key(key).FieldValue().FieldValue(field, string(v)).Build(),
-		s.c.B().Hpexpire().Key(key).Milliseconds(ttl.Milliseconds()).Fields().Numfields(1).Field(field).Build(),
-	) {
-		if err := r.Error(); err != nil {
-			return fmt.Errorf("livestate: put binding: %w", err)
-		}
+	err = putBindingScript.Exec(ctx, s.c, []string{regPrefix + b.AOR},
+		[]string{bindingKey(b), string(v), strconv.FormatInt(max(ttl.Milliseconds(), 1), 10)}).Error()
+	if err != nil {
+		return fmt.Errorf("livestate: put binding: %w", err)
 	}
 	return nil
 }
+
+// putBindingScript sets a binding field and its expiry in one step, so a
+// field never exists without a TTL (a pipelined HSET + HPEXPIRE could leave
+// one behind if the second command failed).
+var putBindingScript = valkey.NewLuaScript(`
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+redis.call('HPEXPIRE', KEYS[1], ARGV[3], 'FIELDS', 1, ARGV[1])
+return 1`)
 
 // DeleteBinding removes one contact of an AOR.
 func (s *Store) DeleteBinding(ctx context.Context, aor, contactURI string) error {

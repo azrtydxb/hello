@@ -35,10 +35,17 @@ type CDRSink interface {
 	Enqueue(r cdr.Record) bool
 }
 
-// Throttle counts failed authentications per source IP across nodes.
+// Throttle is the cross-node authentication state: failed attempts per
+// source IP, and the highest digest nonce count seen per (user, nonce,
+// cnonce), which stops a captured Authorization header being replayed.
 type Throttle interface {
 	Failures(ctx context.Context, ip string) (int64, error)
-	RecordFailure(ctx context.Context, ip string) error
+	// RecordFailure counts one failure for ip and returns the new count.
+	RecordFailure(ctx context.Context, ip string) (int64, error)
+	// AdvanceNonceCount records nc for key if it is higher than any seen
+	// before (for ttl) and reports whether it was; a repeated or lower nc
+	// is a replay.
+	AdvanceNonceCount(ctx context.Context, key string, nc int64, ttl time.Duration) (bool, error)
 }
 
 // ValkeyThrottle keeps the counters in Valkey at hello:authfail:{ip}; the
@@ -73,11 +80,35 @@ func (t ValkeyThrottle) Failures(ctx context.Context, ip string) (int64, error) 
 	return n, nil
 }
 
-// RecordFailure counts one failure for ip.
-func (t ValkeyThrottle) RecordFailure(ctx context.Context, ip string) error {
+// RecordFailure counts one failure for ip and returns the new count.
+func (t ValkeyThrottle) RecordFailure(ctx context.Context, ip string) (int64, error) {
 	secs := max(int64(t.Window/time.Second), 1)
-	if err := authFailScript.Exec(ctx, t.Client, []string{authFailPrefix + ip}, []string{strconv.FormatInt(secs, 10)}).Error(); err != nil {
-		return fmt.Errorf("authfail incr: %w", err)
+	n, err := authFailScript.Exec(ctx, t.Client, []string{authFailPrefix + ip}, []string{strconv.FormatInt(secs, 10)}).AsInt64()
+	if err != nil {
+		return 0, fmt.Errorf("authfail incr: %w", err)
 	}
-	return nil
+	return n, nil
+}
+
+const nonceCountPrefix = "hello:digestnc:"
+
+// nonceCountScript sets KEYS[1] to ARGV[1] (for ARGV[2] ms) only if that is
+// higher than its current value; it returns 1 when it did.
+var nonceCountScript = valkey.NewLuaScript(`
+local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
+if tonumber(ARGV[1]) > cur then
+  redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+  return 1
+end
+return 0`)
+
+// AdvanceNonceCount is an atomic compare-and-set-if-greater in Valkey.
+func (t ValkeyThrottle) AdvanceNonceCount(ctx context.Context, key string, nc int64, ttl time.Duration) (bool, error) {
+	ms := max(ttl.Milliseconds(), 1)
+	ok, err := nonceCountScript.Exec(ctx, t.Client, []string{nonceCountPrefix + key},
+		[]string{strconv.FormatInt(nc, 10), strconv.FormatInt(ms, 10)}).AsInt64()
+	if err != nil {
+		return false, fmt.Errorf("digest nc: %w", err)
+	}
+	return ok == 1, nil
 }

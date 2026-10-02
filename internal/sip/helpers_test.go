@@ -46,10 +46,14 @@ type fakeState struct {
 	regs  map[string]map[string]livestate.Binding
 	calls map[string]livestate.Call
 	down  atomic.Bool
+	// putGate, when set, holds PutCall until the channel is closed;
+	// putBlocked is signalled when one is held.
+	putGate    atomic.Pointer[chan struct{}]
+	putBlocked chan struct{}
 }
 
 func newFakeState() *fakeState {
-	return &fakeState{regs: map[string]map[string]livestate.Binding{}, calls: map[string]livestate.Call{}}
+	return &fakeState{regs: map[string]map[string]livestate.Binding{}, calls: map[string]livestate.Call{}, putBlocked: make(chan struct{}, 1)}
 }
 
 func (f *fakeState) PutBinding(_ context.Context, b livestate.Binding) error {
@@ -126,6 +130,13 @@ func (f *fakeState) PutCall(_ context.Context, c livestate.Call, _ time.Duration
 	if f.down.Load() {
 		return errDown
 	}
+	if g := f.putGate.Load(); g != nil {
+		select {
+		case f.putBlocked <- struct{}{}:
+		default:
+		}
+		<-*g
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls[c.ID] = c
@@ -155,26 +166,76 @@ func (f *fakeState) Calls(context.Context) ([]livestate.Call, error) {
 type fakeThrottle struct {
 	mu   sync.Mutex
 	n    map[string]int64
+	nc   map[string]int64
 	down atomic.Bool
+	// ncDown fails only the nonce-count store.
+	ncDown atomic.Bool
+	// barrier, when set, holds Failures until that many callers are in
+	// it (or a second passes), so concurrent attempts all pass the
+	// precheck together.
+	barrier atomic.Pointer[barrier]
+}
+
+type barrier struct {
+	mu      sync.Mutex
+	need    int
+	release chan struct{}
+}
+
+func newBarrier(n int) *barrier { return &barrier{need: n, release: make(chan struct{})} }
+
+func (b *barrier) wait() {
+	b.mu.Lock()
+	b.need--
+	if b.need == 0 {
+		close(b.release)
+	}
+	b.mu.Unlock()
+	select {
+	case <-b.release:
+	case <-time.After(time.Second):
+	}
 }
 
 func (f *fakeThrottle) Failures(_ context.Context, ip string) (int64, error) {
 	if f.down.Load() {
 		return 0, errDown
 	}
+	if b := f.barrier.Load(); b != nil {
+		b.wait()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.n[ip], nil
 }
 
-func (f *fakeThrottle) RecordFailure(_ context.Context, ip string) error {
+func (f *fakeThrottle) RecordFailure(_ context.Context, ip string) (int64, error) {
 	if f.down.Load() {
-		return errDown
+		return 0, errDown
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.n == nil {
+		f.n = map[string]int64{}
+	}
 	f.n[ip]++
-	return nil
+	return f.n[ip], nil
+}
+
+func (f *fakeThrottle) AdvanceNonceCount(_ context.Context, key string, nc int64, _ time.Duration) (bool, error) {
+	if f.down.Load() || f.ncDown.Load() {
+		return false, errDown
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.nc == nil {
+		f.nc = map[string]int64{}
+	}
+	if nc <= f.nc[key] {
+		return false, nil
+	}
+	f.nc[key] = nc
+	return true, nil
 }
 
 type fakeCDRs struct {

@@ -6,14 +6,21 @@ import (
 	"regexp"
 )
 
-// authHeaderLine matches an Authorization or Proxy-Authorization header line
-// (full or folded into one string) up to the end of the line.
-var authHeaderLine = regexp.MustCompile(`(?im)^(\s*(?:proxy-)?authorization\s*:)[^\r\n]*`)
+// authHeader matches an Authorization or Proxy-Authorization header with
+// its folded continuation lines (RFC 3261 §7.3.1: a line starting with SP or
+// HTAB continues the previous header).
+var authHeader = regexp.MustCompile(`(?im)^([ \t]*(?:proxy-)?authorization[ \t]*:)[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*`)
+
+// flowParam matches the value of an hflow URI parameter: a valid flow token
+// lets a peer node reach a phone, so it is kept out of logs.
+var flowParam = regexp.MustCompile(`(?i)(\bhflow=)[^;>,\s"]*`)
 
 // RedactSIP strips the values of Authorization and Proxy-Authorization
-// headers from a raw SIP message, so it can be logged.
+// headers, folded or not, and of hflow flow tokens from a raw SIP message,
+// so it can be logged.
 func RedactSIP(msg string) string {
-	return authHeaderLine.ReplaceAllString(msg, "${1} REDACTED")
+	msg = authHeader.ReplaceAllString(msg, "${1} REDACTED")
+	return flowParam.ReplaceAllString(msg, "${1}REDACTED")
 }
 
 // redactHandler applies RedactSIP to every string in a log record. sipgo logs

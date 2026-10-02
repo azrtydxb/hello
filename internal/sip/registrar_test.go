@@ -274,8 +274,9 @@ func TestValkeyThrottleAlwaysExpires(t *testing.T) {
 	if err := c.Do(ctx, c.B().Set().Key(key).Value("3").Build()).Error(); err != nil {
 		t.Fatal(err)
 	}
-	if err := th.RecordFailure(ctx, "192.0.2.1"); err != nil {
-		t.Fatal(err)
+	got, err := th.RecordFailure(ctx, "192.0.2.1")
+	if err != nil || got != 4 {
+		t.Fatalf("RecordFailure = %d, %v; want the post-increment count 4", got, err)
 	}
 	n, _ := th.Failures(ctx, "192.0.2.1")
 	ttl, _ := c.Do(ctx, c.B().Ttl().Key(key).Build()).AsInt64()
@@ -285,7 +286,7 @@ func TestValkeyThrottleAlwaysExpires(t *testing.T) {
 	if err := c.Do(ctx, c.B().Expire().Key(key).Seconds(5).Build()).Error(); err != nil {
 		t.Fatal(err)
 	}
-	_ = th.RecordFailure(ctx, "192.0.2.1")
+	_, _ = th.RecordFailure(ctx, "192.0.2.1")
 	if ttl, _ := c.Do(ctx, c.B().Ttl().Key(key).Build()).AsInt64(); ttl > 5 {
 		t.Fatalf("a failure extended the window to %ds", ttl)
 	}
