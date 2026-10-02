@@ -152,6 +152,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 		// Send fresh requests from the listening socket, so replies and
 		// NAT pinholes use the SIP port.
 		sipgo.WithClientConnectionAddr(conn.LocalAddr().String()),
+		// rport (RFC 3581) on our Via: replies come back to the socket we
+		// sent from, even when the far side sees us through NAT.
+		sipgo.WithClientNAT(),
 		sipgo.WithClientLogger(s.log),
 	)
 	if err != nil {

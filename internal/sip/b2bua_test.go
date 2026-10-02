@@ -113,6 +113,11 @@ func testCallRingAll(t *testing.T, opt pbxOpt) {
 		if string(inv.Body()) != a.sdp {
 			t.Fatalf("fork SDP changed:\n%q\nwant\n%q", inv.Body(), a.sdp)
 		}
+		// RFC 3581: the callee must answer to our source port, not the Via
+		// port, or a NAT'd phone's reply reaches another node.
+		if v := inv.Via(); v == nil || !v.Params.Has("rport") {
+			t.Fatalf("fork Via = %v, want rport", v)
+		}
 		if p == b2x {
 			forked = inv
 		}
