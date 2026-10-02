@@ -64,17 +64,29 @@ export function RoutesPage() {
   const tab: RouteDirection =
     params.get("tab") === "inbound" ? "inbound" : "outbound";
   const [trunks, setTrunks] = useState<Trunk[]>([]);
+  const [trunkLoad, setTrunkLoad] = useState<TrunkLoad>({ status: "loading" });
+  const [trunkAttempt, setTrunkAttempt] = useState(0);
   const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   useEffect(() => {
     const controller = new AbortController();
     listTrunks(controller.signal)
-      .then(setTrunks)
-      .catch(() => {
-        // The route lists still work; the trunk picker is just empty.
+      .then((items) => {
+        setTrunks(items);
+        setTrunkLoad({ status: "ready" });
+      })
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) {
+          setTrunkLoad({ status: "error", message: errorMessage(err) });
+        }
       });
     return () => controller.abort();
-  }, []);
+  }, [trunkAttempt]);
+
+  const trunkOptions: TrunkOptions = {
+    items: trunks,
+    ready: trunkLoad.status === "ready",
+  };
 
   function select(id: RouteDirection, focus = false) {
     setParams(id === "outbound" ? {} : { tab: id }, { replace: true });
@@ -101,6 +113,26 @@ export function RoutesPage() {
       <p>
         <Link to="/routes/test">Test a number against these routes</Link>
       </p>
+      {trunkLoad.status === "error" && (
+        <div role="alert" className="error">
+          <strong>Could not load the trunk list.</strong>
+          <p>
+            {trunkLoad.message} Routes that pick a trunk cannot be saved until
+            it loads.
+          </p>
+          <p>
+            <button
+              type="button"
+              onClick={() => {
+                setTrunkLoad({ status: "loading" });
+                setTrunkAttempt((n) => n + 1);
+              }}
+            >
+              Retry loading trunks
+            </button>
+          </p>
+        </div>
+      )}
       <div role="tablist" aria-label="Route direction" className="tabs">
         {TABS.map((t) => (
           <button
@@ -129,12 +161,35 @@ export function RoutesPage() {
         className="tabpanel"
       >
         {tab === "outbound" ? (
-          <OutboundPanel trunks={trunks} />
+          <OutboundPanel trunks={trunkOptions} />
         ) : (
-          <InboundPanel trunks={trunks} />
+          <InboundPanel trunks={trunkOptions} />
         )}
       </div>
     </section>
+  );
+}
+
+type TrunkLoad =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready" };
+
+/** The trunk list as the forms see it; `ready` is false until it has loaded. */
+interface TrunkOptions {
+  items: Trunk[];
+  ready: boolean;
+}
+
+const TRUNKS_PENDING_ID = "trunks-pending";
+
+/** Why saving waits: the trunk list is still loading or failed to load. */
+function TrunksPending({ ready }: { ready: boolean }) {
+  if (ready) return null;
+  return (
+    <p id={TRUNKS_PENDING_ID} className="hint">
+      Saving is available once the trunk list has loaded.
+    </p>
   );
 }
 
@@ -376,7 +431,8 @@ function outboundKeys(d: OutboundDraft): string[] {
   ];
 }
 
-function OutboundPanel({ trunks }: { trunks: Trunk[] }) {
+function OutboundPanel({ trunks: options }: { trunks: TrunkOptions }) {
+  const trunks = options.items;
   const list = useOrderedList("outbound", listOutboundRoutes);
   const [editing, setEditing] = useState<Editing<OutboundRoute>>(null);
   const trunkName = (tid: Id) =>
@@ -388,7 +444,7 @@ function OutboundPanel({ trunks }: { trunks: Trunk[] }) {
         <OutboundForm
           key={editing.kind === "edit" ? String(editing.route.id) : "new"}
           route={editing.kind === "edit" ? editing.route : null}
-          trunks={trunks}
+          trunks={options}
           onCancel={() => setEditing(null)}
           onSaved={(r) => {
             list.upsert(r);
@@ -487,9 +543,7 @@ function useServerErrors() {
       return bad;
     },
     serverError(err: unknown, known: string[]) {
-      const mapped = mapFieldErrors(fieldErrors(err), known, {
-        aliasTransforms: true,
-      });
+      const mapped = mapFieldErrors(fieldErrors(err), known);
       setErrors(mapped.byKey);
       setUnmatched(mapped.unmatched);
       setFormError(errorMessage(err));
@@ -504,7 +558,7 @@ function OutboundForm({
   onSaved,
 }: {
   route: OutboundRoute | null;
-  trunks: Trunk[];
+  trunks: TrunkOptions;
   onCancel: () => void;
   onSaved: (r: OutboundRoute) => void;
 }) {
@@ -633,9 +687,9 @@ function OutboundForm({
 
       <TrunkPicker
         form={form}
-        trunks={trunks}
+        trunks={trunks.items}
         value={d.trunks}
-        error={v.errors.trunks}
+        errors={v.errors}
         onChange={(t) => set("trunks", t)}
       />
       <TransformEditor
@@ -662,8 +716,14 @@ function OutboundForm({
       />
 
       <FormError message={v.formError} unmatched={v.unmatched} />
+      <TrunksPending ready={trunks.ready} />
       <div className="actions start">
-        <button type="submit" className="primary" disabled={busy}>
+        <button
+          type="submit"
+          className="primary"
+          disabled={busy || !trunks.ready}
+          aria-describedby={trunks.ready ? undefined : TRUNKS_PENDING_ID}
+        >
           {route ? "Save route" : "Create route"}
         </button>
         <button type="button" disabled={busy} onClick={onCancel}>
@@ -679,15 +739,16 @@ function TrunkPicker({
   form,
   trunks,
   value,
-  error,
+  errors,
   onChange,
 }: {
   form: string;
   trunks: Trunk[];
   value: Id[];
-  error?: string;
+  errors: ErrorMap;
   onChange: (v: Id[]) => void;
 }) {
+  const error = errors.trunks;
   const [pick, setPick] = useState("");
   const selectId = fieldId(form, "trunks");
   const errorId = `${selectId}-error`;
@@ -723,34 +784,47 @@ function TrunkPicker({
         <p className="hint">No trunks chosen.</p>
       ) : (
         <ol className="picked">
-          {chosen.map((t, i) => (
-            <li key={String(t.id)}>
-              <span>{t.name}</span>
-              <button
-                type="button"
-                aria-label={`Try ${t.name} earlier`}
-                disabled={i === 0}
-                onClick={() => swap(i, i - 1)}
-              >
-                <span aria-hidden="true">↑</span>
-              </button>
-              <button
-                type="button"
-                aria-label={`Try ${t.name} later`}
-                disabled={i === chosen.length - 1}
-                onClick={() => swap(i, i + 1)}
-              >
-                <span aria-hidden="true">↓</span>
-              </button>
-              <button
-                type="button"
-                aria-label={`Remove ${t.name}`}
-                onClick={() => onChange(value.filter((_, j) => j !== i))}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
+          {chosen.map((t, i) => {
+            const itemError = errors[`trunks[${i}]`];
+            const itemErrorId = `${selectId}-${i}-error`;
+            const describedBy = itemError ? itemErrorId : undefined;
+            return (
+              <li key={String(t.id)}>
+                <span>{t.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Try ${t.name} earlier`}
+                  aria-describedby={describedBy}
+                  disabled={i === 0}
+                  onClick={() => swap(i, i - 1)}
+                >
+                  <span aria-hidden="true">↑</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Try ${t.name} later`}
+                  aria-describedby={describedBy}
+                  disabled={i === chosen.length - 1}
+                  onClick={() => swap(i, i + 1)}
+                >
+                  <span aria-hidden="true">↓</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Remove ${t.name}`}
+                  aria-describedby={describedBy}
+                  onClick={() => onChange(value.filter((_, j) => j !== i))}
+                >
+                  Remove
+                </button>
+                {itemError && (
+                  <p id={itemErrorId} className="field-error">
+                    {itemError}
+                  </p>
+                )}
+              </li>
+            );
+          })}
         </ol>
       )}
       <div className="fields">
@@ -794,7 +868,8 @@ interface InboundDraft {
   name: string;
   didKind: InboundRouteFields["didKind"];
   did: string;
-  trunkId: string;
+  /** The trunk id exactly as the API gave it; null = any trunk. */
+  trunkId: Id | null;
   sipDomain: string;
   headerName: string;
   headerRegex: string;
@@ -810,8 +885,7 @@ function inboundDraft(r: InboundRoute | null): InboundDraft {
     name: r?.name ?? "",
     didKind: r?.didKind ?? "exact",
     did: r?.did ?? "",
-    trunkId:
-      r?.trunkId === null || r?.trunkId === undefined ? "" : String(r.trunkId),
+    trunkId: r?.trunkId ?? null,
     sipDomain: r?.sipDomain ?? "",
     headerName: r?.headerName ?? "",
     headerRegex: r?.headerRegex ?? "",
@@ -823,13 +897,12 @@ function inboundDraft(r: InboundRoute | null): InboundDraft {
   };
 }
 
-function inboundBody(d: InboundDraft, trunks: Trunk[]): InboundRouteFields {
-  const trunk = trunks.find((t) => String(t.id) === d.trunkId);
+function inboundBody(d: InboundDraft): InboundRouteFields {
   return {
     name: d.name.trim(),
     didKind: d.didKind,
     did: d.didKind === "any" ? "" : d.did,
-    trunkId: d.trunkId === "" ? null : (trunk?.id ?? d.trunkId),
+    trunkId: d.trunkId,
     sipDomain: d.sipDomain,
     headerName: d.headerName,
     headerRegex: d.headerRegex,
@@ -878,7 +951,8 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   sip_uri: "SIP URI",
 };
 
-function InboundPanel({ trunks }: { trunks: Trunk[] }) {
+function InboundPanel({ trunks: options }: { trunks: TrunkOptions }) {
+  const trunks = options.items;
   const list = useOrderedList("inbound", listInboundRoutes);
   const [editing, setEditing] = useState<Editing<InboundRoute>>(null);
   const trunkName = (tid: Id | null) =>
@@ -893,7 +967,7 @@ function InboundPanel({ trunks }: { trunks: Trunk[] }) {
         <InboundForm
           key={editing.kind === "edit" ? String(editing.route.id) : "new"}
           route={editing.kind === "edit" ? editing.route : null}
-          trunks={trunks}
+          trunks={options}
           onCancel={() => setEditing(null)}
           onSaved={(r) => {
             list.upsert(r);
@@ -984,7 +1058,7 @@ function InboundForm({
   onSaved,
 }: {
   route: InboundRoute | null;
-  trunks: Trunk[];
+  trunks: TrunkOptions;
   onCancel: () => void;
   onSaved: (r: InboundRoute) => void;
 }) {
@@ -1001,7 +1075,7 @@ function InboundForm({
     if (v.clientErrors(validateInbound(d))) return;
     setBusy(true);
     try {
-      const body = inboundBody(d, trunks);
+      const body = inboundBody(d);
       onSaved(
         route
           ? await updateInboundRoute(route.id, body)
@@ -1066,15 +1140,28 @@ function InboundForm({
           {(p) => (
             <select
               {...p}
-              value={d.trunkId}
-              onChange={(e) => set("trunkId", e.target.value)}
+              value={d.trunkId === null ? "" : String(d.trunkId)}
+              disabled={!trunks.ready}
+              onChange={(e) => {
+                const v = e.target.value;
+                const t = trunks.items.find((x) => String(x.id) === v);
+                set("trunkId", v === "" ? null : (t?.id ?? d.trunkId));
+              }}
             >
               <option value="">Any trunk</option>
-              {trunks.map((t) => (
+              {trunks.items.map((t) => (
                 <option key={String(t.id)} value={String(t.id)}>
                   {t.name}
                 </option>
               ))}
+              {d.trunkId !== null &&
+                !trunks.items.some(
+                  (t) => String(t.id) === String(d.trunkId),
+                ) && (
+                  <option value={String(d.trunkId)}>
+                    Trunk #{String(d.trunkId)}
+                  </option>
+                )}
             </select>
           )}
         </Field>
@@ -1181,8 +1268,14 @@ function InboundForm({
         onChange={(s) => set("schedule", s)}
       />
       <FormError message={v.formError} unmatched={v.unmatched} />
+      <TrunksPending ready={trunks.ready} />
       <div className="actions start">
-        <button type="submit" className="primary" disabled={busy}>
+        <button
+          type="submit"
+          className="primary"
+          disabled={busy || !trunks.ready}
+          aria-describedby={trunks.ready ? undefined : TRUNKS_PENDING_ID}
+        >
           {route ? "Save route" : "Create route"}
         </button>
         <button type="button" disabled={busy} onClick={onCancel}>
