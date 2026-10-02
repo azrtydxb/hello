@@ -147,26 +147,10 @@ func (s *server) usability(ctx context.Context, snap store.RoutingSnapshot) (rou
 		case !live:
 			return true, ""
 		}
-		st := status[id]
-		if st.Registration != nil && st.Registration.State == "misconfigured" {
-			return false, "misconfigured"
-		}
-		if t.Mode == "registration" && st.Registration != nil && st.Registration.State == "failed" {
-			return false, "unhealthy"
-		}
-		if len(st.Destinations) > 0 {
-			up := false
-			for _, h := range st.Destinations {
-				up = up || h.Up
-			}
-			if !up {
-				return false, "unhealthy"
-			}
-		}
-		if !emergency && t.MaxCalls > 0 && st.ActiveCalls >= t.MaxCalls {
-			return false, "full"
-		}
-		return true, ""
+		// The same rule hello-sip applies on the call path, so a tested
+		// route and a real call agree. Only "full" can differ: hello-sip
+		// decides it at attempt time with a cluster-wide slot.
+		return status[id].Usability(t, emergency)
 	}, note
 }
 

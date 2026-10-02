@@ -544,7 +544,7 @@ func testRoutingTest(t *testing.T, addr string, fake bool) {
 		"numberTransform": map[string]any{"strip": 1, "prefix": "+971"},
 	})
 	// Trunk a's only destination is down.
-	if err := live.PutDestinationHealth(ctx, int64(a), livestate.DestinationHealth{Destination: "10.0.0.5:5060", Up: false, CheckedAt: time.Now()}, time.Minute); err != nil {
+	if err := live.PutDestinationHealth(ctx, int64(a), livestate.DestinationHealth{Destination: livestate.DestinationKey(routing.Destination{Host: "10.0.0.5"}), Up: false, CheckedAt: time.Now()}, time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	dbsize := func() int64 {

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/azrtydxb/hello/test/sipua"
 )
 
 // Lab-level trunk and routing tests (spec .procoder/specs/trunks-routing.md)
@@ -381,10 +383,17 @@ func TestInboundRouting(t *testing.T) {
 	register(t, p)
 	did := "+9714555" + randDigits(4)
 	lc.inbound(did, backup, d.Extension, nil)
-	// A closed schedule must not match: this DID's only route is closed.
+	// A closed schedule must not match: this DID's only route is open on
+	// every day except today (UTC), all day.
 	closedDID := "+9714556" + randDigits(4)
+	var otherDays []int
+	for d := range 7 {
+		if time.Weekday(d) != time.Now().UTC().Weekday() {
+			otherDays = append(otherDays, d)
+		}
+	}
 	lc.inbound(closedDID, backup, d.Extension, map[string]any{"schedule": map[string]any{
-		"timeZone": "UTC", "windows": []map[string]any{{"days": []int{}, "start": "00:00", "end": "00:01"}},
+		"timeZone": "UTC", "windows": []map[string]any{{"days": otherDays, "start": "00:00", "end": "23:59"}},
 	}})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -403,15 +412,22 @@ func TestInboundRouting(t *testing.T) {
 		t.Fatalf("inbound call to a closed-schedule DID = %d, want 404", res.Status)
 	}
 
-	// From an address that is no trunk (a host-side phone): 403.
-	stranger := phone(t, lc.devices("desk")[0], labSIP1) // not registered
-	out, err := stranger.Dial(ctx, strings.TrimPrefix(did, "+"), sdpOffer)
+	// A carrier-style INVITE (no credentials, foreign From domain) from an
+	// address that is no trunk — a host-side UA, not the carrier: 403.
+	stranger, err := sipua.New(sipua.Options{User: "+97145558888", Domain: "carrier.example", Proxy: labSIP1, Listen: "0.0.0.0:0"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Status != 403 && out.Status != 401 {
-		t.Fatalf("INVITE from a non-trunk source = %d, want 403 (or a challenge)", out.Status)
+	t.Cleanup(stranger.Close)
+	out, err := stranger.Dial(ctx, did, sdpOffer)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if out.Status != 403 {
+		t.Fatalf("INVITE from a non-trunk source = %d, want 403", out.Status)
+	}
+	// Clear the throttle count this refusal added for the host's IP.
+	labCompose(t, "exec", "-T", "valkey", "sh", "-c", "valkey-cli --scan --pattern 'hello:authfail:*' | xargs -r valkey-cli del")
 }
 
 func TestCDRTrace(t *testing.T) {

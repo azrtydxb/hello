@@ -194,12 +194,21 @@ func register(t *testing.T, p *sipua.Phone) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	res, err := p.Register(ctx, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.StatusCode != 200 {
-		t.Fatalf("REGISTER = %d %s", res.StatusCode, res.Reason)
+	// A device created a moment ago reaches the nodes' snapshots within the
+	// spec's 2s (S-5); until then REGISTER is refused with 403.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		res, err := p.Register(ctx, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.StatusCode == 200 {
+			return
+		}
+		if res.StatusCode != 403 || time.Now().After(deadline) {
+			t.Fatalf("REGISTER = %d %s", res.StatusCode, res.Reason)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
