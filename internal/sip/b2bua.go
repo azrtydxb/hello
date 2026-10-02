@@ -31,11 +31,13 @@ type call struct {
 	inv     *sip.Request
 	dss     *sipgo.DialogServerSession
 
-	events   chan legEvent
-	canceled chan struct{}
-	cancelMu sync.Once
-	stopHB   chan struct{}
-	endOnce  sync.Once
+	events    chan legEvent
+	setupDone chan struct{} // closed when setup stops reading events
+	canceled  chan struct{}
+	maxTimer  *time.Timer // ends a connected call at MaxCallDuration
+	cancelMu  sync.Once
+	stopHB    chan struct{}
+	endOnce   sync.Once
 
 	mu          sync.Mutex
 	legs        []*leg
@@ -102,16 +104,15 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, sip.StatusLoopDetected, "Loop Detected")
 		return
 	}
-	dev, ok := s.authenticate(req, tx)
+	dev, snap, ok := s.authenticate(req, tx)
 	if !ok {
 		return
 	}
 	c := &call{
 		s: s, id: newID(), callID: req.CallID().Value(), caller: dev,
 		dialled: req.Recipient.User, start: time.Now(), inv: req,
-		canceled: make(chan struct{}), stopHB: make(chan struct{}),
+		canceled: make(chan struct{}), stopHB: make(chan struct{}), setupDone: make(chan struct{}),
 	}
-	snap := s.deps.Snapshots.Current()
 	if !snap.HasExtension(c.dialled) {
 		s.respond(tx, req, sip.StatusNotFound, "Not Found")
 		c.record(sip.StatusNotFound, cdr.SideSystem, "unknown number", ResultNotFound)
@@ -174,6 +175,7 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 // setup waits for the first fork to answer, every fork to fail, the caller
 // to cancel, or the ring timeout.
 func (c *call) setup(pending int) {
+	defer close(c.setupDone)
 	timer := time.NewTimer(c.s.cfg.RingTimeout)
 	defer timer.Stop()
 	total, busy := pending, 0
@@ -321,6 +323,15 @@ func (c *call) answer(w *leg) {
 	c.s.m.response(sip.StatusOK)
 	err := c.dss.WriteResponse(res)
 	if err == nil {
+		c.mu.Lock()
+		if !c.ended {
+			// debt: a fixed cap stands in for RFC 4028 session timers, which
+			// would clear a call within minutes of a phone vanishing without
+			// BYE. Revisit when calls must be cleared that fast, or when a
+			// 4h call is a real use case.
+			c.maxTimer = time.AfterFunc(c.s.cfg.MaxCallDuration, c.expire)
+		}
+		c.mu.Unlock()
 		return
 	}
 	c.mu.Lock()
@@ -361,6 +372,32 @@ func (c *call) hangup(side string) {
 	}()
 }
 
+// expire ends a call that reached MaxCallDuration: BYE to both legs.
+func (c *call) expire() {
+	c.mu.Lock()
+	if c.hungUp || c.ended {
+		c.mu.Unlock()
+		return
+	}
+	c.hungUp = true
+	w := c.winner
+	c.mu.Unlock()
+	c.s.log.Info("call reached the maximum duration", "correlation_id", c.id, "max", c.s.cfg.MaxCallDuration.String())
+	c.end(sip.StatusOK, cdr.SideSystem, "max duration", ResultAnswered)
+	go func() {
+		defer c.release()
+		defer contain(c.s.log, "expire")
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			defer contain(c.s.log, "expire")
+			w.bye()
+		}()
+		c.byeA()
+		<-done
+	}()
+}
+
 func (c *call) byeA() {
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
@@ -376,6 +413,9 @@ func (c *call) end(status int, side, reason, result string) {
 	c.endOnce.Do(func() {
 		c.mu.Lock()
 		c.ended = true
+		if c.maxTimer != nil {
+			c.maxTimer.Stop()
+		}
 		c.mu.Unlock()
 		close(c.stopHB)
 		if result != ResultAnswered {
@@ -476,7 +516,7 @@ func (l *leg) run() {
 	reported := false
 	report := func(ev legEvent) {
 		reported = true
-		l.c.events <- ev // buffered: one final event per leg
+		l.c.report(ev)
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -533,6 +573,15 @@ func (l *leg) drive(report func(legEvent)) {
 		code = sip.StatusRequestTimeout
 	}
 	report(legEvent{leg: l, kind: evFailed, code: code})
+}
+
+// report hands a fork's outcome to setup, or drops it when setup has
+// already returned (so the fork's goroutine never blocks on a full queue).
+func (c *call) report(ev legEvent) {
+	select {
+	case c.events <- ev:
+	case <-c.setupDone:
+	}
 }
 
 // invite builds the fork's INVITE: new Call-ID and tags, the caller's SDP
@@ -634,7 +683,7 @@ func (l *leg) bye() {
 // confirms the A dialog (and is forwarded for a late offer); an ACK for a
 // relayed re-INVITE is relayed to the other leg.
 func (s *Server) handleAck(req *sip.Request, tx sip.ServerTransaction) {
-	ref, ok := s.lookup(req.CallID().Value())
+	ref, ok := s.matchDialog(req)
 	if !ok {
 		return
 	}
@@ -698,9 +747,37 @@ func (l *leg) target() sip.Uri {
 	return *dcs.InviteRequest.Recipient.Clone()
 }
 
+// matchDialog finds the call leg an in-dialog request belongs to. The
+// Call-ID only selects a candidate; the request must carry both of that
+// dialog's tags (RFC 3261 §12.2.2) and come from the leg's peer: the
+// caller's source for the A leg, the address the winning fork's 2xx came
+// from (the phone, or the edge node it is reached through) for the B leg.
+// Losing forks never match.
+func (s *Server) matchDialog(req *sip.Request) (dialogRef, bool) {
+	ref, ok := s.lookup(req.CallID().Value())
+	if !ok {
+		return dialogRef{}, false
+	}
+	c := ref.c
+	if ref.leg == nil {
+		id, err := sip.DialogIDFromRequestUAS(req)
+		return ref, err == nil && c.dss != nil && id == c.dss.ID && req.Source() == c.inv.Source()
+	}
+	c.mu.Lock()
+	w := c.winner
+	c.mu.Unlock()
+	if ref.leg != w {
+		return dialogRef{}, false
+	}
+	res := w.session().InviteResponse // stable once the fork has won
+	want, err1 := sip.DialogIDFromResponse(res)
+	got, err2 := sip.DialogIDFromRequestUAC(req)
+	return ref, err1 == nil && err2 == nil && got == want && req.Source() == res.Source()
+}
+
 // handleBye ends a connected call from either side.
 func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
-	ref, ok := s.lookup(req.CallID().Value())
+	ref, ok := s.matchDialog(req)
 	if !ok {
 		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 		return
@@ -719,24 +796,21 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 		}
 		s.m.response(sip.StatusOK)
 		c.hangup(cdr.SideCaller)
-	case ref.leg == w:
+	default: // matchDialog only matches the caller's leg or the winner's
 		if err := w.session().ReadBye(req, tx); err != nil {
 			s.respond(tx, req, sip.StatusBadRequest, "Bad Request")
 			return
 		}
 		s.m.response(sip.StatusOK)
 		c.hangup(cdr.SideCallee)
-	default:
-		// A losing fork hanging up: its dialog is already being torn down.
-		s.respond(tx, req, sip.StatusOK, "OK")
 	}
 }
 
 // handleInDialog relays a re-INVITE or UPDATE to the other leg and its final
 // response back, bodies unchanged.
 func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
-	ref, ok := s.lookup(req.CallID().Value())
-	if !ok || !isInDialog(req) {
+	ref, ok := s.matchDialog(req)
+	if !ok {
 		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 		return
 	}

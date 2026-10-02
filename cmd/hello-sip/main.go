@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -97,10 +98,12 @@ func run(args []string) error {
 		NodeID: cfg.NodeID, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
 		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
+		MaxCallDuration: cfg.MaxCallDuration,
 	}, sip.Deps{
 		Snapshots: watcher, State: livestate.New(vk),
 		Throttle: sip.ValkeyThrottle{Client: vk, Window: cfg.AuthFailWindow},
 		CDRs:     cdrs, Metrics: sipMetrics, Log: log.With("component", "sip"),
+		Presence: sip.ValkeyPresence{Client: vk},
 	})
 	if err != nil {
 		return err
@@ -115,13 +118,33 @@ func run(args []string) error {
 	go func() { cdrs.Run(bg, 5*time.Second); close(cdrDone) }()
 	sipCtx, stopSIP := context.WithCancel(context.Background())
 	defer stopSIP()
+	// A SIP listener that dies on its own takes the node down: readiness
+	// fails at once and shutdown begins, rather than serving HTTP with no
+	// SIP behind it.
+	ctx, sipFailed := context.WithCancel(ctx)
+	defer sipFailed()
+	var sipDied atomic.Bool
 	sipDone := make(chan error, 1)
-	go func() { sipDone <- srv.Serve(sipCtx, udp) }()
+	go func() {
+		err := srv.Serve(sipCtx, udp)
+		if sipCtx.Err() == nil {
+			log.Error("SIP listener stopped", "error", err)
+			sipDied.Store(true)
+			sipFailed()
+		}
+		sipDone <- err
+	}()
 
 	log.Info("starting", "version", version.Version, "commit", version.Commit, "config", cfg)
 	opsSrv := &ops.Server{
 		Checks: map[string]ops.Check{
 			"valkey": valkeyReady,
+			"sip": func(context.Context) error {
+				if !srv.Serving() {
+					return errors.New("SIP listener not running")
+				}
+				return nil
+			},
 			"snapshot": func(context.Context) error {
 				if !watcher.Ready() {
 					return errors.New("configuration snapshot not loaded")
@@ -138,8 +161,8 @@ func run(args []string) error {
 	// traffic moves away before the listener closes.
 	err = opsSrv.Serve(ctx, ln)
 	stopSIP()
-	if serr := <-sipDone; serr != nil && err == nil {
-		err = fmt.Errorf("sip: %w", serr)
+	if serr := <-sipDone; err == nil && (serr != nil || sipDied.Load()) {
+		err = fmt.Errorf("sip: listener stopped: %w", serr)
 	}
 	stopBG()
 	<-watchDone

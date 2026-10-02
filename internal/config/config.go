@@ -61,6 +61,9 @@ type SIP struct {
 	AuthFailLimit      int
 	AuthFailWindow     time.Duration
 	StateTimeout       time.Duration
+	// MaxCallDuration ends a connected call that has run this long (both
+	// legs get BYE), so a call whose phones vanished without BYE is cleared.
+	MaxCallDuration time.Duration
 }
 
 // LogValue keeps the database password out of logs.
@@ -120,6 +123,10 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		AuthFailLimit:      r.positiveInt("HELLO_SIP_AUTH_FAIL_LIMIT", 10),
 		AuthFailWindow:     r.duration("HELLO_SIP_AUTH_FAIL_WINDOW", 5*time.Minute),
 		StateTimeout:       r.duration("HELLO_SIP_STATE_TIMEOUT", 200*time.Millisecond),
+		MaxCallDuration:    r.duration("HELLO_SIP_MAX_CALL_DURATION", 4*time.Hour),
+	}
+	if c.MaxCallDuration == 0 {
+		r.fail("HELLO_SIP_MAX_CALL_DURATION", errors.New("must be positive"))
 	}
 	c.Database = r.database(c.DatabaseURL)
 	r.hostPort("HELLO_VALKEY_ADDR", c.ValkeyAddr)

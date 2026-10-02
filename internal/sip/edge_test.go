@@ -18,12 +18,21 @@ func edgeDevices() []snapshot.Device {
 
 // twoNodes starts two SIP nodes sharing one live state, as a cluster does.
 func twoNodes(t *testing.T, opts ...pbxOpt) (nodeA, nodeB *testPBX) {
+	nodeA, nodeB, _ = twoNodesPresence(t, opts...)
+	return nodeA, nodeB
+}
+
+// twoNodesPresence also returns the presence registry both nodes use.
+func twoNodesPresence(t *testing.T, opts ...pbxOpt) (nodeA, nodeB *testPBX, pr *fakePresence) {
 	t.Helper()
-	st := newFakeState()
+	st, pr := newFakeState(), newFakePresence()
 	with := func(id string) []pbxOpt {
-		return append([]pbxOpt{func(c *Config, d *Deps) { c.NodeID, d.State = id, st }}, opts...)
+		return append([]pbxOpt{func(c *Config, d *Deps) { c.NodeID, d.State, d.Presence = id, st, pr }}, opts...)
 	}
-	return startPBX(t, edgeDevices(), with("sip-a")...), startPBX(t, edgeDevices(), with("sip-b")...)
+	nodeA, nodeB = startPBX(t, edgeDevices(), with("sip-a")...), startPBX(t, edgeDevices(), with("sip-b")...)
+	// Each node announced itself at start; wait until both see the other.
+	eventually(t, "nodes see each other", func() bool { return nodeA.srv.peers.has(nodeB.addr) && nodeB.srv.peers.has(nodeA.addr) })
+	return nodeA, nodeB, pr
 }
 
 func onlyBinding(t *testing.T, pbx *testPBX, user string) livestate.Binding {
@@ -175,11 +184,11 @@ func TestEdgeForgedToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := newPhone(t, nodeA, "x", "x")
-	valid := nodeA.srv.flowToken(p.addr, "udp")
+	valid := nodeA.srv.flowToken(p.addr, "udp", time.Now().Add(time.Hour))
 	tampered := []byte(valid)
 	tampered[2] ^= 1
 	for name, tok := range map[string]string{
-		"other secret": other.flowToken(p.addr, "udp"),
+		"other secret": other.flowToken(p.addr, "udp", time.Now().Add(time.Hour)),
 		"tampered":     string(tampered),
 		"garbage":      "bm90LWEtdG9rZW4",
 	} {
@@ -212,7 +221,7 @@ func TestEdgeDeadNode(t *testing.T) {
 	ghost := livestate.Binding{
 		AOR: "sip:b1@" + testDomain, Extension: "200", Device: "b1", ContactURI: "sip:b1@10.255.255.1:5060",
 		Source: "10.255.255.1:5060", Transport: "udp", ReceivedNode: "sip-dead",
-		Path:    []string{"<sip:" + deadAddr + ";lr;hflow=" + nodeB.srv.flowToken("10.255.255.1:5060", "udp") + ">"},
+		Path:    []string{"<sip:" + deadAddr + ";lr;hflow=" + nodeB.srv.flowToken("10.255.255.1:5060", "udp", time.Now().Add(time.Hour)) + ">"},
 		Expires: time.Now().Add(time.Hour), UpdatedAt: time.Now(),
 	}
 	if err := nodeB.state.PutBinding(context.Background(), ghost); err != nil {

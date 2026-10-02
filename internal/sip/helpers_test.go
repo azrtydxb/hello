@@ -190,11 +190,48 @@ func (f *fakeCDRs) Enqueue(r cdr.Record) bool {
 	}
 }
 
-type fakeSnaps struct {
-	p atomic.Pointer[snapshot.Snapshot]
+// fakePresence is a shared node registry; extra lists addresses to treat
+// as nodes without a Server behind them.
+type fakePresence struct {
+	mu    sync.Mutex
+	nodes map[string]string
+	extra []string
 }
 
-func (f *fakeSnaps) Current() *snapshot.Snapshot { return f.p.Load() }
+func newFakePresence() *fakePresence { return &fakePresence{nodes: map[string]string{}} }
+
+func (f *fakePresence) Announce(_ context.Context, id, addr string, _ time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nodes[id] = addr
+	return nil
+}
+
+func (f *fakePresence) Nodes(context.Context) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := append([]string(nil), f.extra...)
+	for _, a := range f.nodes {
+		out = append(out, a)
+	}
+	return out, nil
+}
+
+func (f *fakePresence) add(addr string) {
+	f.mu.Lock()
+	f.extra = append(f.extra, addr)
+	f.mu.Unlock()
+}
+
+type fakeSnaps struct {
+	p     atomic.Pointer[snapshot.Snapshot]
+	reads atomic.Int64
+}
+
+func (f *fakeSnaps) Current() *snapshot.Snapshot {
+	f.reads.Add(1)
+	return f.p.Load()
+}
 
 // --- devices -----------------------------------------------------------------
 
@@ -222,6 +259,7 @@ type testPBX struct {
 	snaps    *fakeSnaps
 	reg      *prometheus.Registry
 	m        *Metrics
+	conn     net.PacketConn
 }
 
 type pbxOpt func(*Config, *Deps)
@@ -242,6 +280,7 @@ func startPBX(t *testing.T, devices []snapshot.Device, opts ...pbxOpt) *testPBX 
 		NodeID: "sip-test", Domain: testDomain, AdvertisedAddr: addr, NonceSecret: []byte(testSecret),
 		MinExpires: 60 * time.Second, MaxExpires: time.Hour, RingTimeout: 5 * time.Second,
 		AuthFailLimit: 10, StateTimeout: 200 * time.Millisecond, RecountInterval: 50 * time.Millisecond,
+		PeerRefresh: 50 * time.Millisecond,
 	}
 	deps := Deps{
 		Snapshots: snaps, State: fs, Throttle: &fakeThrottle{n: map[string]int64{}},
@@ -266,7 +305,7 @@ func startPBX(t *testing.T, devices []snapshot.Device, opts ...pbxOpt) *testPBX 
 		}
 	})
 	p := &testPBX{srv: srv, addr: addr, cfg: cfg, state: deps.State, throttle: deps.Throttle,
-		cdrs: deps.CDRs.(*fakeCDRs), snaps: snaps, reg: reg, m: deps.Metrics}
+		cdrs: deps.CDRs.(*fakeCDRs), snaps: snaps, reg: reg, m: deps.Metrics, conn: conn}
 	p.fake, _ = deps.State.(*fakeState)
 	return p
 }

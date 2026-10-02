@@ -67,7 +67,7 @@ func TestStaleNonce(t *testing.T) {
 	chal := pickChallenge(t, p.do(req), AlgMD5)
 
 	old := &Digest{Realm: testDomain, Secret: []byte(testSecret), Now: func() time.Time { return time.Now().Add(-NonceValidity - time.Minute) }}
-	chal.Nonce = old.Nonce()
+	chal.Nonce = old.Nonce("127.0.0.1")
 	authorize(t, req, chal, "alice", "pw")
 	res := p.do(req)
 	if res.StatusCode != 401 {
@@ -83,7 +83,7 @@ func TestStaleNonce(t *testing.T) {
 	}
 
 	forged := &Digest{Realm: testDomain, Secret: []byte("another-secret-another-secret-xx"), Now: old.Now}
-	chal.Nonce = forged.Nonce()
+	chal.Nonce = forged.Nonce("127.0.0.1")
 	authorize(t, req, chal, "alice", "pw")
 	res = p.do(req)
 	if res.StatusCode != 401 || pickChallenge(t, res, AlgMD5).Stale {
@@ -96,33 +96,54 @@ func TestDigestVerifyUnit(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	d := &Digest{Realm: testDomain, Secret: []byte(testSecret), Now: func() time.Time { return now }}
 	device := dev(1, "alice", "100", "pw")
-	nonce := d.Nonce()
+	const ip = "192.0.2.7"
+	nonce := d.Nonce(ip)
 	req := sip.NewRequest(sip.REGISTER, sip.Uri{Scheme: "sip", Host: testDomain})
 	for _, alg := range []string{AlgMD5, AlgSHA256} {
 		for _, tc := range []struct {
 			pass  string
 			at    time.Duration
 			nonce string
+			from  string
 			want  Verdict
 		}{
-			{"pw", 0, nonce, OK},
-			{"pw", NonceValidity - time.Second, nonce, OK},
-			{"pw", NonceValidity + time.Second, nonce, Stale},
-			{"bad", 0, nonce, Bad},
-			{"pw", 0, nonce[:len(nonce)-2] + "AA", Bad},
-			{"pw", 0, "not-base64!", Bad},
+			{"pw", 0, nonce, ip, OK},
+			{"pw", NonceValidity - time.Second, nonce, ip, OK},
+			{"pw", NonceValidity + time.Second, nonce, ip, Stale},
+			{"bad", 0, nonce, ip, Bad},
+			{"pw", 0, nonce[:len(nonce)-2] + "AA", ip, Bad},
+			{"pw", 0, "not-base64!", ip, Bad},
+			{"pw", 0, nonce, "192.0.2.8", Bad}, // nonce replayed from another IP
 		} {
 			chalNow := now
 			d.Now = func() time.Time { return chalNow.Add(tc.at) }
 			creds := credentialsFor(t, req, alg, tc.nonce, "alice", tc.pass)
-			if got := d.Verify(creds, "REGISTER", device.HA1MD5, device.HA1SHA256); got != tc.want {
-				t.Errorf("%s pass=%s at=+%s: verdict %d, want %d", alg, tc.pass, tc.at, got, tc.want)
+			if got := d.Verify(creds, "REGISTER", req.Recipient, tc.from, device.HA1MD5, device.HA1SHA256); got != tc.want {
+				t.Errorf("%s pass=%s at=+%s from=%s: verdict %d, want %d", alg, tc.pass, tc.at, tc.from, got, tc.want)
 			}
+		}
+	}
+	// The uri in the credentials must name the Request-URI; case and the
+	// default port are normalised.
+	creds := credentialsFor(t, req, AlgSHA256, nonce, "alice", "pw")
+	for ruri, want := range map[string]Verdict{
+		"sip:HELLO.test":      OK,
+		"sip:hello.test:5060": OK,
+		"sip:other.test":      Bad,
+		"sip:bob@hello.test":  Bad,
+		"sip:hello.test:5070": Bad,
+	} {
+		var u sip.Uri
+		if err := sip.ParseUri(ruri, &u); err != nil {
+			t.Fatal(err)
+		}
+		if got := d.Verify(creds, "REGISTER", u, ip, device.HA1MD5, device.HA1SHA256); got != want {
+			t.Errorf("Request-URI %s: verdict %d, want %d", ruri, got, want)
 		}
 	}
 	d.Now = func() time.Time { return now }
 	future := &Digest{Realm: testDomain, Secret: []byte(testSecret), Now: func() time.Time { return now.Add(time.Hour) }}
-	if got := d.Verify(credentialsFor(t, req, AlgMD5, future.Nonce(), "alice", "pw"), "REGISTER", device.HA1MD5, device.HA1SHA256); got != Bad {
+	if got := d.Verify(credentialsFor(t, req, AlgMD5, future.Nonce(ip), "alice", "pw"), "REGISTER", req.Recipient, ip, device.HA1MD5, device.HA1SHA256); got != Bad {
 		t.Errorf("future nonce verdict %d, want Bad", got)
 	}
 }

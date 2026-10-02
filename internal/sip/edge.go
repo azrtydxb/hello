@@ -21,18 +21,22 @@ import (
 // from the node that handled its REGISTER. The registrar stores a Path URI
 // <sip:{advertised};lr;hflow={token}> naming that node and the flow. Another
 // node forking to the binding sends the INVITE with that URI as its Route;
-// the registering node, seeing a Route with hflow, acts as an edge proxy:
-// it pops the Route and relays the request over the flow (or, for requests
-// coming from the phone, onwards along the route), record-routing itself on
-// the initial INVITE so in-dialog requests take the same path.
+// the registering node, seeing a top Route naming itself with hflow, acts as
+// an edge proxy between peer nodes and the phone: it pops the Route and
+// relays a peer's request over the flow, or a request from the phone on to
+// the next hop when that is a peer node, record-routing itself on the
+// initial INVITE so in-dialog requests take the same path. Peers are the
+// nodes announced in Valkey (see Presence); nothing else is relayed.
 
 const flowMACLen = 16
 
-// flowToken signs a flow (source address and transport) so only a node with
-// the cluster's secret can mint one; a forged token would otherwise turn a
-// node into an open relay.
-func (s *Server) flowToken(source, transport string) string {
-	payload := source + "|" + transport
+// flowToken names a flow (source address and transport) until expires. Its
+// MAC means only a node holding the cluster secret can mint one, so a
+// token cannot be forged to point a node at an arbitrary address. A token
+// alone does not authorise relaying: proxy also requires the request to
+// come from, or go to, a known peer node.
+func (s *Server) flowToken(source, transport string, expires time.Time) string {
+	payload := source + "|" + transport + "|" + strconv.FormatInt(expires.Unix(), 10)
 	raw := append([]byte(payload+"|"), s.flowMAC(payload)...)
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
@@ -44,24 +48,29 @@ func (s *Server) flowMAC(payload string) []byte {
 	return m.Sum(nil)[:flowMACLen]
 }
 
-// parseFlowToken returns the flow a token names, if its signature is valid.
+// parseFlowToken returns the flow a token names if its signature is valid
+// and it has not expired.
 func (s *Server) parseFlowToken(tok string) (source, transport string, ok bool) {
 	raw, err := base64.RawURLEncoding.DecodeString(tok)
-	if err != nil || len(raw) < flowMACLen+4 || raw[len(raw)-flowMACLen-1] != '|' {
+	if err != nil || len(raw) < flowMACLen+6 || raw[len(raw)-flowMACLen-1] != '|' {
 		return "", "", false
 	}
 	payload, mac := raw[:len(raw)-flowMACLen-1], raw[len(raw)-flowMACLen:]
 	if !hmac.Equal(mac, s.flowMAC(string(payload))) {
 		return "", "", false
 	}
-	source, transport, found := strings.Cut(string(payload), "|")
-	if !found || bytes.ContainsRune(payload, 0) {
+	parts := strings.Split(string(payload), "|")
+	if len(parts) != 3 || bytes.ContainsRune(payload, 0) {
 		return "", "", false
 	}
-	if _, _, err := net.SplitHostPort(source); err != nil {
+	exp, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || time.Now().Unix() > exp {
 		return "", "", false
 	}
-	return source, transport, true
+	if _, _, err := net.SplitHostPort(parts[0]); err != nil {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
 }
 
 // pathURI is the Path (and Record-Route) value for a flow through this node.
@@ -69,10 +78,18 @@ func (s *Server) pathURI(token string) string {
 	return "<sip:" + s.cfg.AdvertisedAddr + ";lr;hflow=" + token + ">"
 }
 
-// edgeToken returns the hflow token of req's top Route, if it has one.
-func edgeToken(req *sip.Request) (string, bool) {
+// edgeToken returns the hflow token of req's top Route when that Route
+// names this node (its advertised host:port).
+func (s *Server) edgeToken(req *sip.Request) (string, bool) {
 	r := req.Route()
 	if r == nil {
+		return "", false
+	}
+	port := r.Address.Port
+	if port == 0 {
+		port = sip.DefaultPort("udp")
+	}
+	if !strings.EqualFold(r.Address.Host, s.advHost) || port != s.advPort {
 		return "", false
 	}
 	return r.Address.UriParams.Get("hflow")
@@ -87,27 +104,26 @@ func hostPort(u sip.Uri) string {
 	return net.JoinHostPort(u.Host, strconv.Itoa(port))
 }
 
-// proxy relays a request whose top Route carries a flow token.
-func (s *Server) proxy(req *sip.Request, tx sip.ServerTransaction, token string) {
-	flow, _, ok := s.parseFlowToken(token)
-	if !ok {
-		s.log.Warn("edge: invalid flow token", "method", req.Method.String(), "source", req.Source())
+// proxy relays a request whose top Route is this node with a flow token.
+// It reports false when the request is not to be relayed and should be
+// handled by this node instead: one from the phone's flow whose next hop is
+// not a cluster node (the node must not relay a phone's requests to the
+// outside). A token that is invalid or expired, or a request towards the
+// phone from anything but a peer node, gets 403.
+func (s *Server) proxy(req *sip.Request, tx sip.ServerTransaction, token string) bool {
+	forbid := func(why string) bool {
+		s.log.Warn("edge: refused", "reason", why, "method", req.Method.String(), "source", req.Source())
 		if !req.IsAck() {
 			s.respond(tx, req, sip.StatusForbidden, "Forbidden")
 		}
-		return
+		return true
+	}
+	flow, _, ok := s.parseFlowToken(token)
+	if !ok {
+		return forbid("invalid or expired flow token")
 	}
 	out := req.Clone()
 	out.RemoveHeader("Route") // the top one: ours
-	if mf := out.MaxForwards(); mf != nil {
-		if mf.Val() <= 1 {
-			if !req.IsAck() {
-				s.respond(tx, req, sip.StatusTooManyHops, "Too Many Hops")
-			}
-			return
-		}
-		mf.Dec()
-	}
 	fromFlow := req.Source() == flow
 	dest := flow
 	if fromFlow {
@@ -117,9 +133,26 @@ func (s *Server) proxy(req *sip.Request, tx sip.ServerTransaction, token string)
 		} else {
 			dest = hostPort(out.Recipient)
 		}
+		if !s.peers.has(dest) {
+			return false
+		}
+	} else if !s.peers.has(req.Source()) {
+		return forbid("request towards a phone from a non-peer")
+	}
+	if mf := out.MaxForwards(); mf != nil {
+		if mf.Val() <= 1 {
+			if !req.IsAck() {
+				s.respond(tx, req, sip.StatusTooManyHops, "Too Many Hops")
+			}
+			return true
+		}
+		mf.Dec()
 	}
 	if req.IsInvite() && !isInDialog(req) {
-		out.PrependHeader(sip.NewHeader("Record-Route", s.pathURI(token)))
+		// The dialog may outlive the registration: give the route set's
+		// token the longest a call can last.
+		rr := s.flowToken(flow, "udp", time.Now().Add(s.cfg.MaxCallDuration+10*time.Minute))
+		out.PrependHeader(sip.NewHeader("Record-Route", s.pathURI(rr)))
 	}
 	out.SetDestination(dest)
 	s.laddr.Copy(&out.Laddr)
@@ -129,9 +162,10 @@ func (s *Server) proxy(req *sip.Request, tx sip.ServerTransaction, token string)
 		if err := s.client.WriteRequest(out, sipgo.ClientRequestAddVia); err != nil {
 			s.log.Debug("edge: ACK forward failed", "error", err)
 		}
-		return
+		return true
 	}
 	s.proxyStateful(req, tx, out)
+	return true
 }
 
 // proxyStateful forwards out on a client transaction and relays its

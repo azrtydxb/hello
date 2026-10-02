@@ -208,3 +208,34 @@ func count(c prometheus.Counter) float64 {
 	}
 	return m.GetCounter().GetValue()
 }
+
+// TestWatcherBackoffResets fails if the reconnect delay keeps doubling
+// across outages separated by healthy sessions: after five outages a
+// never-reset backoff (0.3s, 0.6s, ... 4.8s) would exceed 2s.
+func TestWatcherBackoffResets(t *testing.T) {
+	cfg := scratch(t)
+	ctx := context.Background()
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	w := &Watcher{Config: cfg, Domain: domain, InitialBackoff: 300 * time.Millisecond}
+	wctx, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { w.Run(wctx); close(done) }()
+	defer func() { stop(); <-done }()
+	waitFor(t, 5*time.Second, "first load", w.Ready)
+	for i := range 5 {
+		if _, err := conn.Exec(ctx, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"); err != nil {
+			t.Fatal(err)
+		}
+		rev := w.Current().Revision
+		start := time.Now()
+		change(t, conn, "UPDATE schema_info SET created_at = created_at")
+		waitFor(t, 10*time.Second, "reload after outage", func() bool { return w.Current().Revision > rev })
+		if d := time.Since(start); d > 2*time.Second {
+			t.Fatalf("outage %d: reconnect took %s; backoff did not reset", i+1, d)
+		}
+	}
+}

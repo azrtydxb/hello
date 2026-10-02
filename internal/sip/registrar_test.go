@@ -263,3 +263,30 @@ func TestRemovedDeviceRejectedAndUnbound(t *testing.T) {
 		t.Fatalf("removed device REGISTER = %d, want 403", res.StatusCode)
 	}
 }
+
+// TestValkeyThrottleAlwaysExpires fails if a failure counter can be left
+// without a TTL (a key with none gets one on the next failure) or if a
+// failure extends the window.
+func TestValkeyThrottleAlwaysExpires(t *testing.T) {
+	_, th, c := valkeyState(t)
+	ctx := context.Background()
+	key := "hello:authfail:192.0.2.1"
+	if err := c.Do(ctx, c.B().Set().Key(key).Value("3").Build()).Error(); err != nil {
+		t.Fatal(err)
+	}
+	if err := th.RecordFailure(ctx, "192.0.2.1"); err != nil {
+		t.Fatal(err)
+	}
+	n, _ := th.Failures(ctx, "192.0.2.1")
+	ttl, _ := c.Do(ctx, c.B().Ttl().Key(key).Build()).AsInt64()
+	if n != 4 || ttl <= 0 || ttl > 60 {
+		t.Fatalf("after failure: count %d ttl %d; want 4 within the 1m window", n, ttl)
+	}
+	if err := c.Do(ctx, c.B().Expire().Key(key).Seconds(5).Build()).Error(); err != nil {
+		t.Fatal(err)
+	}
+	_ = th.RecordFailure(ctx, "192.0.2.1")
+	if ttl, _ := c.Do(ctx, c.B().Ttl().Key(key).Build()).AsInt64(); ttl > 5 {
+		t.Fatalf("a failure extended the window to %ds", ttl)
+	}
+}

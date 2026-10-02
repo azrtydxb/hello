@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // env layers m over a complete valid environment for both services, so a
@@ -101,5 +102,22 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if c.HTTPAddr != ":8081" || c.ShutdownTimeout.Seconds() != 30 {
 		t.Fatalf("unexpected defaults: %+v", c)
+	}
+}
+
+// TestLoadMaxCallDuration fails if HELLO_SIP_MAX_CALL_DURATION does not
+// default to 4h, parse, or reject zero and junk.
+func TestLoadMaxCallDuration(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil || c.MaxCallDuration != 4*time.Hour {
+		t.Fatalf("default = %v, %v; want 4h", c.MaxCallDuration, err)
+	}
+	if c, err := LoadSIP(env(map[string]string{"HELLO_SIP_MAX_CALL_DURATION": "90m"})); err != nil || c.MaxCallDuration != 90*time.Minute {
+		t.Fatalf("90m = %v, %v", c.MaxCallDuration, err)
+	}
+	for _, bad := range []string{"0s", "-1h", "forever"} {
+		if _, err := LoadSIP(env(map[string]string{"HELLO_SIP_MAX_CALL_DURATION": bad})); err == nil || !strings.Contains(err.Error(), "HELLO_SIP_MAX_CALL_DURATION") {
+			t.Fatalf("%q accepted: %v", bad, err)
+		}
 	}
 }

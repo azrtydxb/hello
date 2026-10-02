@@ -22,7 +22,7 @@ type contactReq struct {
 // handleRegister authenticates the device, applies its contacts to the AOR
 // and answers with every current binding (RFC 3261 §10.3).
 func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
-	dev, ok := s.authenticate(req, tx)
+	dev, _, ok := s.authenticate(req, tx)
 	if !ok {
 		return
 	}
@@ -51,6 +51,13 @@ func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
 		}
 		s.triggerRecount()
 		s.respond(tx, req, sip.StatusOK, "OK")
+		return
+	}
+	if over, err := s.tooManyContacts(aor, contacts); err != nil {
+		s.stateDown(tx, req, "bindings", err)
+		return
+	} else if over {
+		s.respond(tx, req, sip.StatusForbidden, "Too Many Contacts")
 		return
 	}
 	if err := s.applyContacts(req, dev, aor, contacts); err != nil {
@@ -127,6 +134,33 @@ func (s *Server) parseContacts(req *sip.Request) (contacts []contactReq, wildcar
 	return contacts, wildcard, 0, ""
 }
 
+// maxContacts caps the bindings of one AOR, so one device cannot fan a
+// call out to an unbounded number of forks.
+const maxContacts = 10
+
+// tooManyContacts reports whether applying contacts would leave aor with
+// more than maxContacts bindings.
+func (s *Server) tooManyContacts(aor string, contacts []contactReq) (bool, error) {
+	ctx, cancel := s.stateCtx()
+	existing, err := s.deps.State.Bindings(ctx, aor)
+	cancel()
+	if err != nil {
+		return false, err
+	}
+	set := make(map[string]bool, len(existing)+len(contacts))
+	for _, b := range existing {
+		set[b.ContactURI] = true
+	}
+	for _, c := range contacts {
+		if c.expires == 0 {
+			delete(set, c.uri)
+		} else {
+			set[c.uri] = true
+		}
+	}
+	return len(set) > maxContacts, nil
+}
+
 // applyContacts stores or removes each contact's binding.
 func (s *Server) applyContacts(req *sip.Request, dev snapshot.Device, aor string, contacts []contactReq) error {
 	now := time.Now()
@@ -134,18 +168,17 @@ func (s *Server) applyContacts(req *sip.Request, dev snapshot.Device, aor string
 	if h := req.GetHeader("User-Agent"); h != nil {
 		userAgent = h.Value()
 	}
-	// Our own Path first: another node reaches this phone through us, over
-	// the flow it registered on (RFC 3327, RFC 5626 flow token).
-	path := []string{s.pathURI(s.flowToken(req.Source(), "udp"))}
-	for _, h := range req.GetHeaders("Path") {
-		path = append(path, h.Value())
-	}
+	// Path is ours alone: another node reaches this phone through us, over
+	// the flow it registered on (RFC 3327, RFC 5626 flow token). A Path the
+	// client sent is dropped; phones register directly, and honouring one
+	// would let a client choose where other nodes send its calls.
 	for _, c := range contacts {
 		ctx, cancel := s.stateCtx()
 		var err error
 		if c.expires == 0 {
 			err = s.deps.State.DeleteBinding(ctx, aor, c.uri)
 		} else {
+			exp := now.Add(time.Duration(c.expires) * time.Second)
 			err = s.deps.State.PutBinding(ctx, livestate.Binding{
 				AOR:          aor,
 				Extension:    dev.Extension,
@@ -154,9 +187,9 @@ func (s *Server) applyContacts(req *sip.Request, dev snapshot.Device, aor string
 				Source:       req.Source(), // the packet's source: received/rport
 				Transport:    "udp",
 				UserAgent:    userAgent,
-				Path:         path,
+				Path:         []string{s.pathURI(s.flowToken(req.Source(), "udp", exp))},
 				ReceivedNode: s.cfg.NodeID,
-				Expires:      now.Add(time.Duration(c.expires) * time.Second),
+				Expires:      exp,
 				UpdatedAt:    now,
 			})
 		}
