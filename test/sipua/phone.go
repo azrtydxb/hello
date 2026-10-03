@@ -45,7 +45,7 @@ type Phone struct {
 	mu       sync.Mutex
 	srvDlg   map[string]*sipgo.DialogServerSession // by Call-ID
 	cliDlg   map[string]*sipgo.DialogClientSession // by Call-ID
-	cancel   context.CancelFunc
+	conn     net.PacketConn
 	incoming chan *Incoming
 }
 
@@ -56,30 +56,17 @@ func init() {
 	}
 }
 
-// New starts a phone listening on opts.Listen. A free port picked for
-// "host:0" can be taken by another process before the listener binds it, so
-// a listener that fails to start is retried on a fresh port.
+// New starts a phone listening on opts.Listen. The socket is bound here
+// and handed to sipgo, so the port named in Contact is the port served.
 func New(opts Options) (*Phone, error) {
-	var err error
-	for range 3 {
-		var p *Phone
-		if p, err = newPhone(opts); err == nil || !errors.Is(err, errListen) {
-			return p, err
-		}
-	}
-	return nil, err
-}
-
-var errListen = errors.New("sipua: listener did not start")
-
-func newPhone(opts Options) (*Phone, error) {
 	if opts.Listen == "" {
 		opts.Listen = "127.0.0.1:0"
 	}
-	addr, err := freeUDP(opts.Listen)
+	conn, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", opts.Listen)
 	if err != nil {
 		return nil, err
 	}
+	addr := conn.LocalAddr().String()
 	host, portStr, _ := net.SplitHostPort(addr)
 	port, _ := strconv.Atoi(portStr)
 	listenAddr := addr
@@ -91,6 +78,7 @@ func newPhone(opts Options) (*Phone, error) {
 
 	ua, err := sipgo.NewUA(sipgo.WithUserAgent("hello-sipua/" + opts.User))
 	if err != nil {
+		_ = conn.Close()
 		return nil, err
 	}
 	// Send from the listening socket, as a real phone does, with rport so a
@@ -99,11 +87,13 @@ func newPhone(opts Options) (*Phone, error) {
 		sipgo.WithClientConnectionAddr(listenAddr), sipgo.WithClientNAT())
 	if err != nil {
 		_ = ua.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 	server, err := sipgo.NewServer(ua)
 	if err != nil {
 		_ = ua.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 	p := &Phone{
@@ -119,23 +109,21 @@ func newPhone(opts Options) (*Phone, error) {
 	p.cliDlg = map[string]*sipgo.DialogClientSession{}
 	p.routes()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	p.cancel = cancel
-	ready := make(chan struct{})
-	served := make(chan error, 1)
-	go func() {
-		// sipgo defines its listen-ready key as a string; the key is theirs.
-		readyCtx := context.WithValue(ctx, sipgo.ListenReadyCtxKey, sipgo.ListenReadyCtxValue(ready)) //nolint:staticcheck // SA1029: sipgo's own key type
-		served <- server.ListenAndServe(readyCtx, "udp", addr)
-	}()
-	select {
-	case <-ready:
-	case err := <-served:
-		p.Close()
-		return nil, fmt.Errorf("%w on %s: %w", errListen, addr, err)
-	case <-time.After(5 * time.Second):
-		p.Close()
-		return nil, fmt.Errorf("%w on %s", errListen, addr)
+	p.conn = conn
+	go func() { _ = server.ServeUDP(conn) }()
+	// ServeUDP registers the socket with the transport layer from its own
+	// goroutine; the client sends from that socket, so wait until it is
+	// there before the first request.
+	tl := ua.TransportLayer()
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		if c, _ := tl.GetConnection("udp", listenAddr); c != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			p.Close()
+			return nil, fmt.Errorf("sipua: listener on %s did not start", listenAddr)
+		}
+		time.Sleep(time.Millisecond)
 	}
 	return p, nil
 }
@@ -365,25 +353,14 @@ func ended(d *sipgo.Dialog) <-chan struct{} {
 
 // Close stops the phone.
 func (p *Phone) Close() {
-	p.cancel()
 	_ = p.server.Close()
 	_ = p.client.Close()
 	_ = p.ua.Close()
+	_ = p.conn.Close()
 }
 
 func tagParams() sip.HeaderParams {
 	p := sip.NewParams()
 	p.Add("tag", sip.GenerateTagN(16))
 	return p
-}
-
-// freeUDP resolves a port-0 address to a concrete free port, so the Contact
-// header can name the port before the listener starts.
-func freeUDP(addr string) (string, error) {
-	c, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", addr)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = c.Close() }()
-	return c.LocalAddr().String(), nil
 }
