@@ -66,7 +66,7 @@ Losing any single hello-sip node, the Valkey primary, PostgreSQL or the control 
      - Other initial requests use round robin over active nodes.
      - A failed relay (timeout or 503) is retried once on the next active node (`ds_next_dst`).
 8. **Lab topology:**
-   - **Valkey:** `valkey-1` (primary at start), `valkey-2` (replica) and `sentinel-1..3`, master set `hello`, `down-after-milliseconds 3000`, `failover-timeout 10000`. Every Hello service uses `HELLO_VALKEY_SENTINELS`.
+   - **Valkey:** `valkey-1` (primary at start), `valkey-2` (replica) and `sentinel-1..3`, master set `hello`, `down-after-milliseconds 5000`, `failover-timeout 10000`. Every Hello service uses `HELLO_VALKEY_SENTINELS`.
    - **Kamailio:** service `kamailio`, host UDP 5080 to 5060, Hello-facing `10.89.53.10:5070`.
    - **Direct ports:** the hello-sip host ports 5060 and 5062 stay for direct-mode tests.
    - **Trusted proxy:** `HELLO_SIP_TRUSTED_PROXIES` is set to Kamailio's address, via a fixed IP on the compose network.
