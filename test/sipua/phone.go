@@ -56,8 +56,23 @@ func init() {
 	}
 }
 
-// New starts a phone listening on opts.Listen.
+// New starts a phone listening on opts.Listen. A free port picked for
+// "host:0" can be taken by another process before the listener binds it, so
+// a listener that fails to start is retried on a fresh port.
 func New(opts Options) (*Phone, error) {
+	var err error
+	for range 3 {
+		var p *Phone
+		if p, err = newPhone(opts); err == nil || !errors.Is(err, errListen) {
+			return p, err
+		}
+	}
+	return nil, err
+}
+
+var errListen = errors.New("sipua: listener did not start")
+
+func newPhone(opts Options) (*Phone, error) {
 	if opts.Listen == "" {
 		opts.Listen = "127.0.0.1:0"
 	}
@@ -107,16 +122,20 @@ func New(opts Options) (*Phone, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 	ready := make(chan struct{})
+	served := make(chan error, 1)
 	go func() {
 		// sipgo defines its listen-ready key as a string; the key is theirs.
 		readyCtx := context.WithValue(ctx, sipgo.ListenReadyCtxKey, sipgo.ListenReadyCtxValue(ready)) //nolint:staticcheck // SA1029: sipgo's own key type
-		_ = server.ListenAndServe(readyCtx, "udp", addr)
+		served <- server.ListenAndServe(readyCtx, "udp", addr)
 	}()
 	select {
 	case <-ready:
-	case <-time.After(2 * time.Second):
+	case err := <-served:
 		p.Close()
-		return nil, fmt.Errorf("sipua: listener on %s did not start", addr)
+		return nil, fmt.Errorf("%w on %s: %w", errListen, addr, err)
+	case <-time.After(5 * time.Second):
+		p.Close()
+		return nil, fmt.Errorf("%w on %s", errListen, addr)
 	}
 	return p, nil
 }

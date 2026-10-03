@@ -297,6 +297,8 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { restore(t, lc, node) })
+	// Runs first (LIFO): a node the test left draining comes back READY.
+	t.Cleanup(func() { _ = lc.do("DELETE", "/api/v1/cluster/nodes/"+node+"/drain", nil, nil, 204) })
 	lc.must("POST", "/api/v1/cluster/nodes/"+node+"/drain?force=true", nil, nil, 204)
 	lc.waitState(node, "DRAINING", 10*time.Second)
 
