@@ -75,24 +75,30 @@ func (s *Server) state() (cluster.State, string) {
 	return s.deps.Lifecycle.State()
 }
 
-// refuseIfDraining answers 503 with Retry-After: 5 to a new initial INVITE
-// or REGISTER while the node drains, so the phone or the balancer moves it
-// to another node (plan contract 6). In-dialog requests, CANCEL and ACK
-// never come here.
-func (s *Server) refuseIfDraining(req *sip.Request, tx sip.ServerTransaction) bool {
-	if st, _ := s.state(); st != cluster.Draining {
+// refuseIfNotReady answers 503 with Retry-After: 5 to a new initial INVITE
+// or REGISTER unless the node is READY (JOINING, UNHEALTHY and DRAINING
+// nodes take no new work), so the phone or the balancer moves it to another
+// node (plan contract 6). In-dialog requests, CANCEL and ACK never come
+// here.
+func (s *Server) refuseIfNotReady(req *sip.Request, tx sip.ServerTransaction) bool {
+	if st, _ := s.state(); st == cluster.Ready {
 		return false
 	}
 	s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable", sip.NewHeader("Retry-After", "5"))
 	return true
 }
 
-// isSelfProbe reports whether an OPTIONS targets this node (Request-URI
-// host:port is the advertised address, no To tag): the balancer's health
-// probe (plan contract 5).
+// isSelfProbe reports whether an out-of-dialog OPTIONS (no To tag) is the
+// balancer's health probe (plan contract 5): its Request-URI names this
+// node's advertised host:port, or has no user part and is not the SIP
+// domain (Kamailio probes sip:hello-sip-N:5060, whatever the advertised
+// address is). A phone's keepalive to the domain is not a probe.
 func (s *Server) isSelfProbe(req *sip.Request) bool {
 	if _, ok := req.To().Params.Get("tag"); ok {
 		return false
+	}
+	if req.Recipient.User == "" && !strings.EqualFold(req.Recipient.Host, s.cfg.Domain) {
+		return true
 	}
 	port := req.Recipient.Port
 	if port == 0 {

@@ -15,7 +15,6 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -115,6 +114,9 @@ type Server struct {
 	trunks  *trunkManager
 	// registrations is the last count of bindings this node registered.
 	registrations atomic.Int64
+	// answerHook, when set (tests only), runs as a call's winning fork is
+	// connected, before the call is marked connected.
+	answerHook atomic.Pointer[func()]
 }
 
 // dialogRef is one leg of a call, found by its Call-ID.
@@ -356,10 +358,12 @@ func (s *Server) aor(username string) string { return "sip:" + username + "@" + 
 func (s *Server) handleOptions(req *sip.Request, tx sip.ServerTransaction) {
 	if s.isSelfProbe(req) {
 		// The balancer's probe: only a READY node is in rotation.
-		if st, reason := s.state(); st != cluster.Ready {
+		// The Warning names the state only: the reason holds check errors
+		// (internal addresses) that anyone sending OPTIONS would read.
+		if st, _ := s.state(); st != cluster.Ready {
 			res := sip.NewResponseFromRequest(req, sip.StatusServiceUnavailable, "Service Unavailable", nil)
 			res.AppendHeader(sip.NewHeader("Retry-After", "5"))
-			res.AppendHeader(sip.NewHeader("Warning", `399 hello "`+string(st)+`: `+strings.ReplaceAll(reason, `"`, "'")+`"`))
+			res.AppendHeader(sip.NewHeader("Warning", `399 hello "`+string(st)+`"`))
 			s.send(tx, res)
 			return
 		}
