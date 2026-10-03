@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/jackc/pgx/v5"
@@ -161,9 +162,17 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.SecretKey = r.secretKey()
 	c.TrustedProxies = r.prefixes("HELLO_SIP_TRUSTED_PROXIES")
 	c.DrainTimeout = r.duration("HELLO_DRAIN_TIMEOUT", 2*time.Hour)
+	if c.DrainTimeout == 0 {
+		r.fail("HELLO_DRAIN_TIMEOUT", errors.New("must be positive"))
+	}
 	c.MemberHeartbeat = r.duration("HELLO_MEMBER_HEARTBEAT", 5*time.Second)
-	if c.MemberHeartbeat == 0 {
+	switch {
+	case c.MemberHeartbeat == 0:
 		r.fail("HELLO_MEMBER_HEARTBEAT", errors.New("must be positive"))
+	case c.MemberHeartbeat > cluster.TTL/3:
+		// Three heartbeats must fit in the record TTL, or a live node's
+		// record expires between heartbeats and it flaps OFFLINE.
+		r.fail("HELLO_MEMBER_HEARTBEAT", fmt.Errorf("must not exceed %s (a third of the membership TTL)", cluster.TTL/3))
 	}
 	if c.NonceSecret != "" && len(c.NonceSecret) < 32 {
 		r.fail("HELLO_SIP_NONCE_SECRET", errors.New("must be at least 32 bytes"))
@@ -260,6 +269,10 @@ func (r *reader) valkey() (addr string, sentinels []string, master string) {
 	if s := r.getenv("HELLO_VALKEY_SENTINELS"); s != "" {
 		for _, a := range strings.Split(s, ",") {
 			a = strings.TrimSpace(a)
+			if a == "" {
+				r.fail("HELLO_VALKEY_SENTINELS", errors.New("empty entry"))
+				continue
+			}
 			r.hostPort("HELLO_VALKEY_SENTINELS", a)
 			sentinels = append(sentinels, a)
 		}
@@ -291,6 +304,11 @@ func (r *reader) prefixes(key string) []netip.Prefix {
 		p, err := netip.ParsePrefix(strings.TrimSpace(s))
 		if err != nil {
 			r.fail(key, fmt.Errorf("%q is not a CIDR", strings.TrimSpace(s)))
+			continue
+		}
+		if p.Bits() == 0 {
+			// A /0 trusts every source: anyone could forge X-Hello-Client.
+			r.fail(key, fmt.Errorf("%q trusts every address; list the balancers", p))
 			continue
 		}
 		out = append(out, p.Masked())

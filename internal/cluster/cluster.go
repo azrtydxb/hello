@@ -93,10 +93,11 @@ func (s *Store) Publish(ctx context.Context, m Member) error {
 	return nil
 }
 
-// Leave removes a node's live record at clean shutdown; its tombstone stays
-// so it is listed OFFLINE.
+// Leave removes a node's live record and any drain request for it at clean
+// shutdown, so a restart reusing the ID is not drained again; its tombstone
+// stays so it is listed OFFLINE.
 func (s *Store) Leave(ctx context.Context, id string) error {
-	return s.c.Do(ctx, s.c.B().Del().Key(memberKey(id)).Build()).Error()
+	return s.c.Do(ctx, s.c.B().Del().Key(memberKey(id), drainKey(id)).Build()).Error()
 }
 
 // Members lists every live member plus tombstoned ones as OFFLINE, sorted
@@ -169,11 +170,19 @@ func (s *Store) scanRecords(ctx context.Context, match string, keep func(string)
 		}
 		cursor = e.Cursor
 	}
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	vals, err := s.c.Do(ctx, s.c.B().Mget().Key(keys...).Build()).ToArray()
+	if err != nil {
+		return nil, fmt.Errorf("cluster: mget: %w", err)
+	}
 	out := make([]Member, 0, len(keys))
-	for _, k := range keys {
-		v, err := s.c.Do(ctx, s.c.B().Get().Key(k).Build()).ToString()
+	for i, val := range vals {
+		k := keys[i]
+		v, err := val.ToString()
 		if valkey.IsValkeyNil(err) {
-			continue // expired between SCAN and GET
+			continue // expired between SCAN and MGET
 		}
 		if err != nil {
 			return nil, fmt.Errorf("cluster: get %s: %w", k, err)

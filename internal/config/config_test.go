@@ -186,3 +186,41 @@ func TestLoadTrustedProxies(t *testing.T) {
 		t.Fatalf("defaults = %s %s", c.DrainTimeout, c.MemberHeartbeat)
 	}
 }
+
+// TestLoadHAValues fails if a zero, negative or malformed drain timeout or
+// member heartbeat is accepted, if a heartbeat longer than a third of the
+// membership TTL is accepted, if an empty Sentinel entry (a trailing comma)
+// is accepted, or if a /0 trusted proxy is accepted.
+func TestLoadHAValues(t *testing.T) {
+	for _, tc := range []struct{ key, val string }{
+		{"HELLO_DRAIN_TIMEOUT", "0"},
+		{"HELLO_DRAIN_TIMEOUT", "0s"},
+		{"HELLO_DRAIN_TIMEOUT", "-1m"},
+		{"HELLO_DRAIN_TIMEOUT", "soon"},
+		{"HELLO_MEMBER_HEARTBEAT", "0"},
+		{"HELLO_MEMBER_HEARTBEAT", "-5s"},
+		{"HELLO_MEMBER_HEARTBEAT", "often"},
+		{"HELLO_MEMBER_HEARTBEAT", "5001ms"},
+		{"HELLO_MEMBER_HEARTBEAT", "10s"},
+		{"HELLO_SIP_TRUSTED_PROXIES", "0.0.0.0/0"},
+		{"HELLO_SIP_TRUSTED_PROXIES", "10.0.0.0/8,::/0"},
+		{"HELLO_SIP_TRUSTED_PROXIES", "10.0.0.0/8,"},
+	} {
+		if _, err := LoadSIP(env(map[string]string{tc.key: tc.val})); err == nil || !strings.Contains(err.Error(), tc.key) {
+			t.Errorf("%s=%q: want error naming it, got %v", tc.key, tc.val, err)
+		}
+	}
+	for _, v := range []string{"s1:26379,", ",s1:26379", "s1:26379,,s2:26379", " , "} {
+		e := env(map[string]string{"HELLO_VALKEY_ADDR": "", "HELLO_VALKEY_SENTINELS": v, "HELLO_VALKEY_MASTER": "hello"})
+		if _, err := LoadSIP(e); err == nil || !strings.Contains(err.Error(), "HELLO_VALKEY_SENTINELS") {
+			t.Errorf("sip sentinels %q: want error, got %v", v, err)
+		}
+		if _, err := LoadControl(e); err == nil || !strings.Contains(err.Error(), "HELLO_VALKEY_SENTINELS") {
+			t.Errorf("control sentinels %q: want error, got %v", v, err)
+		}
+	}
+	c, err := LoadSIP(env(map[string]string{"HELLO_MEMBER_HEARTBEAT": "5s", "HELLO_DRAIN_TIMEOUT": "1s"}))
+	if err != nil || c.MemberHeartbeat != 5*time.Second || c.DrainTimeout != time.Second {
+		t.Fatalf("boundary values = %s %s, %v", c.MemberHeartbeat, c.DrainTimeout, err)
+	}
+}

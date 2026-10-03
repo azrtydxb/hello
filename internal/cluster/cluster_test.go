@@ -78,3 +78,26 @@ func TestDrainRequests(t *testing.T) {
 		t.Fatal("cancelled drain still requested")
 	}
 }
+
+// TestLeaveWithdrawsDrain fails if a drain request outlives the node's
+// clean exit: a restart reusing the ID would drain and exit again.
+func TestLeaveWithdrawsDrain(t *testing.T) {
+	s, _ := store(t)
+	ctx := context.Background()
+	if err := s.Publish(ctx, Member{ID: "n1", Kind: KindSIP, State: Draining}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RequestDrain(ctx, "n1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Leave(ctx, "n1"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.DrainRequested(ctx, "n1"); ok || err != nil {
+		t.Fatalf("drain requested after leaving = %v, %v", ok, err)
+	}
+	ms, err := s.Members(ctx)
+	if err != nil || len(ms) != 1 || ms[0].State != Offline {
+		t.Fatalf("after leaving = %+v, %v; want n1 OFFLINE", ms, err)
+	}
+}

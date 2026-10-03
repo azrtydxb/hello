@@ -159,7 +159,9 @@ func TestStateMachine(t *testing.T) {
 	// A drain request after shutdown began cannot be cancelled.
 	pub.setDrain(true)
 	m.Heartbeat(ctx)
-	m.Exiting()
+	m.mu.Lock()
+	m.exiting = true // shutdown begun (AwaitDrain sets it)
+	m.mu.Unlock()
 	pub.setDrain(false)
 	m.Heartbeat(ctx)
 	want(t, m, cluster.Draining, "drain requested")
@@ -434,5 +436,109 @@ func TestAwaitDrainCancelled(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("a later drain did not exit")
+	}
+}
+
+// TestAwaitDrainWithdrawsRequestAfterSIGTERM fails if a node drained by an
+// operator's request and then SIGTERM exits without withdrawing the
+// request: restarted with the same ID, it would drain and exit in a loop.
+func TestAwaitDrainWithdrawsRequestAfterSIGTERM(t *testing.T) {
+	pub := &fakePub{}
+	m := runMachine(t, Options{Checks: map[string]Check{}, Publisher: pub})
+	d := &fakeDrainer{}
+	d.calls.Store(1)
+	res := awaitAsync(m, d, time.Hour)
+	pub.setDrain(true)
+	waitState(t, m, cluster.Draining)
+	m.Drain("SIGTERM")
+	d.calls.Store(0)
+	select {
+	case ok := <-res:
+		if !ok {
+			t.Fatal("AwaitDrain = false")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not exit at 0 calls")
+	}
+	pub.mu.Lock()
+	defer pub.mu.Unlock()
+	if pub.withdrawn != 1 || pub.drain {
+		t.Fatalf("withdrawn %d, drain still requested %v", pub.withdrawn, pub.drain)
+	}
+}
+
+// TestAwaitDrainCancelAfterHangup fails if a drain request cancelled while
+// the calls ended at the drain timeout are going returns the node to READY
+// instead of letting it exit.
+func TestAwaitDrainCancelAfterHangup(t *testing.T) {
+	pub := &fakePub{}
+	m := runMachine(t, Options{Checks: map[string]Check{}, Publisher: pub})
+	d := &fakeDrainer{}
+	d.calls.Store(1)
+	d.onHangup = func() {
+		pub.setDrain(false) // cancelled during the grace period
+		go func() { time.Sleep(150 * time.Millisecond); d.calls.Store(0) }()
+	}
+	res := awaitAsync(m, d, 100*time.Millisecond)
+	pub.setDrain(true)
+	select {
+	case ok := <-res:
+		if !ok {
+			t.Fatal("AwaitDrain = false")
+		}
+	case <-time.After(2 * time.Second):
+		s, _ := m.State()
+		t.Fatalf("did not exit after its calls were ended (state %s)", s)
+	}
+	want(t, m, cluster.Draining, "drain requested")
+}
+
+// TestEffectsInStateOrder fails if a state change's effects (OnChange,
+// metrics, publish) can apply after those of a later change: with Run's
+// evaluation to READY still in OnChange, a concurrent Drain must not
+// deliver ->DRAINING first, or hello-sip would end up undrained.
+func TestEffectsInStateOrder(t *testing.T) {
+	gate := make(chan struct{})
+	entered := make(chan struct{})
+	var mu sync.Mutex
+	var seen []cluster.State
+	m := New(Options{Checks: map[string]Check{}, Publisher: &fakePub{}, OnChange: func(_, to cluster.State, _ string) {
+		if to == cluster.Ready {
+			close(entered)
+			<-gate
+		}
+		mu.Lock()
+		seen = append(seen, to)
+		mu.Unlock()
+	}})
+	ctx := context.Background()
+	beat := make(chan struct{})
+	go func() { m.Heartbeat(ctx); close(beat) }()
+	<-entered
+	drained := make(chan struct{})
+	go func() { m.Drain("SIGTERM"); close(drained) }()
+	select {
+	case <-drained: // unserialised: the drain's effects already applied
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(gate)
+	<-beat
+	<-drained
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 || seen[len(seen)-1] != cluster.Draining {
+		t.Fatalf("OnChange saw %v, want [READY DRAINING]", seen)
+	}
+	want(t, m, cluster.Draining, "SIGTERM")
+}
+
+func waitState(t *testing.T, m *Machine, s cluster.State) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for st, _ := m.State(); st != s; st, _ = m.State() {
+		if time.Now().After(deadline) {
+			t.Fatalf("not %s within 2s (is %s)", s, st)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
