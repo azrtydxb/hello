@@ -194,7 +194,19 @@ func TestLabSmoke(t *testing.T) {
 		}
 	}
 	TestCallAcrossNodes(t)
+	labSmokeKamailio(t)
 	labSmokeTrunk(t)
+}
+
+// labSmokeKamailio registers two phones through Kamailio (host UDP 5080) and
+// completes a call between them (spec S-12).
+func labSmokeKamailio(t *testing.T) {
+	lc := newLabClient(t)
+	caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
+	a, b := kamPhone(t, caller), kamPhone(t, callee)
+	if err := callOK(t, a, b, callee.Extension); err != nil {
+		t.Fatalf("call through Kamailio: %v", err)
+	}
 }
 
 // labSmokeTrunk places one outbound and one inbound call through

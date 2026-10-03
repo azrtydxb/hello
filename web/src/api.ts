@@ -663,6 +663,69 @@ export const reorderRoutes = (direction: RouteDirection, ids: Id[]) =>
 export const testRoute = (input: RouteTestRequest) =>
   request<RouteTestResult>("POST", "/api/v1/routing/test", { body: input });
 
+// --- cluster -------------------------------------------------------------------
+
+/** A node's lifecycle state (cluster.State). */
+export type MemberState =
+  "JOINING" | "READY" | "DRAINING" | "UNHEALTHY" | "OFFLINE";
+
+/** One node of the cluster (cluster.Member). */
+export interface ClusterMember {
+  id: string;
+  kind: "sip" | "control" | string;
+  state: MemberState | string;
+  /** Why the node is not READY. */
+  reason?: string;
+  sipAddr?: string;
+  httpAddr?: string;
+  transports?: string[];
+  activeCalls: number;
+  registrations: number;
+  version: string;
+  configRevision: number;
+  /**
+   * Revisions this node's configuration is behind the current one; absent
+   * while the current revision cannot be read (PostgreSQL down).
+   */
+  revisionLag?: number;
+  startedAt: string;
+  heartbeat: string;
+}
+
+/** GET /api/v1/cluster */
+export interface ClusterStatus {
+  members: ClusterMember[];
+  postgres: { up: boolean; error?: string };
+  valkey: {
+    up: boolean;
+    mode: "single" | "sentinel" | string;
+    primary?: string;
+    error?: string;
+  };
+  /** The current configuration revision; null while PostgreSQL is down. */
+  configRevision: number | null;
+}
+
+export const getCluster = (signal?: AbortSignal) =>
+  request<ClusterStatus>("GET", "/api/v1/cluster", { signal });
+
+/**
+ * POST /api/v1/cluster/nodes/{id}/drain. Without `force`, the server answers
+ * 409 when the drain would leave no READY SIP node.
+ */
+export const drainNode = (nodeId: string, force = false) =>
+  request<void>(
+    "POST",
+    `/api/v1/cluster/nodes/${encodeURIComponent(nodeId)}/drain${force ? "?force=true" : ""}`,
+  );
+
+/** DELETE /api/v1/cluster/nodes/{id}/drain: return a node to service. */
+export const undrainNode = (nodeId: string) =>
+  request<void>(
+    "DELETE",
+    `/api/v1/cluster/nodes/${encodeURIComponent(nodeId)}/drain`,
+  );
+
 /** A human-readable message for any thrown value. */
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

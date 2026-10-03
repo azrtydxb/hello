@@ -1,6 +1,6 @@
 # Phase 3 — HA
 
-Status: open
+Status: done 2026-10-03
 Created: 2026-10-02
 
 ## Goal

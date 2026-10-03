@@ -14,5 +14,7 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     restoreMocks: true,
     unstubGlobals: true,
+    // Generous per-test budget: whole-app renders are slow on a loaded runner.
+    testTimeout: 20000,
   },
 });

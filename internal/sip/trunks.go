@@ -37,8 +37,13 @@ type TrunkState interface {
 type trunkManager struct {
 	s *Server
 
-	mu   sync.Mutex
-	held map[int64]*heldTrunk
+	mu       sync.Mutex
+	held     map[int64]*heldTrunk
+	draining bool
+	// releasing are the trunks whose holder stopAll is stopping, until
+	// their lease is released; stopping tracks those goroutines.
+	releasing map[int64]bool
+	stopping  sync.WaitGroup
 
 	status atomic.Pointer[map[int64]cachedStatus]
 	// series are the metric label values this node has set, so those of
@@ -62,7 +67,7 @@ type heldTrunk struct {
 }
 
 func newTrunkManager(s *Server) *trunkManager {
-	return &trunkManager{s: s, held: map[int64]*heldTrunk{}, series: map[string]map[string]bool{}}
+	return &trunkManager{s: s, held: map[int64]*heldTrunk{}, releasing: map[int64]bool{}, series: map[string]map[string]bool{}}
 }
 
 func (m *trunkManager) state() TrunkState { return m.s.deps.Trunks }
@@ -98,6 +103,7 @@ func (m *trunkManager) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			m.stopAll()
+			m.stopping.Wait()
 			return
 		case <-lease.C:
 			m.leases(ctx)
@@ -113,13 +119,33 @@ func (m *trunkManager) routing() *snapshot.RoutingState {
 	return snap.Routing()
 }
 
+// setDraining stops (on) or resumes (off) this node's trunk work: while
+// draining it holds no trunk lease, so another node registers and checks
+// the trunks at once (plan contract 6).
+func (m *trunkManager) setDraining(on bool) {
+	m.mu.Lock()
+	was := m.draining
+	m.draining = on
+	m.mu.Unlock()
+	if on && !was {
+		m.s.log.Info("draining: releasing trunk leases")
+		m.stopAll()
+	}
+}
+
+func (m *trunkManager) isDraining() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.draining
+}
+
 // leases takes or renews the lease of every enabled trunk and starts or
 // stops this node's holder for it. Another node's unexpired lease is never
 // taken; when Valkey cannot be reached a running holder keeps going (its
 // registration stays valid until it expires).
 func (m *trunkManager) leases(ctx context.Context) {
 	rs := m.routing()
-	if rs == nil {
+	if rs == nil || m.isDraining() {
 		return
 	}
 	ttl := 3 * m.s.cfg.TrunkLeaseRefresh
@@ -129,6 +155,9 @@ func (m *trunkManager) leases(ctx context.Context) {
 			continue
 		}
 		want[t.ID] = true
+		if m.isReleasing(t.ID) {
+			continue // a drain's release is in flight: it would drop a renewed lease
+		}
 		lctx, cancel := m.s.stateCtx()
 		ok, err := m.state().AcquireLease(lctx, livestate.TrunkLeaseKey(t.ID), m.s.cfg.NodeID, ttl)
 		cancel()
@@ -165,6 +194,14 @@ func (m *trunkManager) start(ctx context.Context, t routing.Trunk, bad string) {
 	hctx, cancel := context.WithCancel(ctx)
 	h := &heldTrunk{trunk: t, bad: bad, cancel: cancel, done: make(chan struct{})}
 	m.mu.Lock()
+	if m.draining { // a drain began after this lease was taken: give it back
+		m.mu.Unlock()
+		cancel()
+		rctx, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = m.state().ReleaseLease(rctx, livestate.TrunkLeaseKey(t.ID), m.s.cfg.NodeID)
+		rcancel()
+		return
+	}
 	m.held[t.ID] = h
 	m.mu.Unlock()
 	m.s.log.Info("trunk lease held: registering and checking health", "trunk", t.Name)
@@ -196,16 +233,39 @@ func (m *trunkManager) stop(id int64, release bool) {
 	}
 }
 
+// stopAll cancels every holder at once and, in the background and in
+// parallel, waits for each to stop (unregistering, bounded by its 5s
+// timeout) and releases its lease; m.stopping tracks them. It does not
+// block: on a drain it runs inside the lifecycle's OnChange, which must
+// not delay publishing DRAINING by one unregister per unreachable carrier.
 func (m *trunkManager) stopAll() {
 	m.mu.Lock()
-	ids := make([]int64, 0, len(m.held))
-	for id := range m.held {
-		ids = append(ids, id)
+	held := m.held
+	m.held = map[int64]*heldTrunk{}
+	for id := range held {
+		m.releasing[id] = true
 	}
 	m.mu.Unlock()
-	for _, id := range ids {
-		m.stop(id, true)
+	for id, h := range held {
+		h.cancel()
+		m.stopping.Go(func() {
+			<-h.done
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			if err := m.state().ReleaseLease(ctx, livestate.TrunkLeaseKey(id), m.s.cfg.NodeID); err != nil {
+				m.s.log.Warn("trunk lease release failed", "trunk_id", id, "error", err)
+			}
+			cancel()
+			m.mu.Lock()
+			delete(m.releasing, id)
+			m.mu.Unlock()
+		})
 	}
+}
+
+func (m *trunkManager) isReleasing(id int64) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.releasing[id]
 }
 
 // hold is the lease holder's work for one trunk: OPTIONS to every

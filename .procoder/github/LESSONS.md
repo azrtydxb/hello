@@ -111,3 +111,45 @@ git config commit.template .procoder/github/COMMIT_TEMPLATE.md
 - Class: mechanical
 - Missed by: test
 - Adaptation: REVIEW.md: proxies re-resolve upstream names (resolver + variable); the lab smoke test runs against a kept, recreated lab.
+
+## 2026-10-03 Phase 3 review — a drain request survived SIGTERM, so a restarted node drained and exited in a loop
+
+- Class: judgment
+- Missed by: test
+- Adaptation: REVIEW.md: an operator request persisted in shared state is withdrawn on every exit path, tested with SIGTERM after a request.
+
+## 2026-10-03 Phase 3 review — lifecycle state effects could apply out of order, leaving a draining node accepting work
+
+- Class: judgment
+- Missed by: rubric
+- Adaptation: REVIEW.md: a state machine's effects (callbacks, metrics, publishing) are serialised with its transitions.
+
+## 2026-10-03 Phase 3 review — two quick drains both passed the last-READY guard because published state lagged
+
+- Class: judgment
+- Missed by: test
+- Adaptation: REVIEW.md: guards over eventually-consistent state count in-flight intent (pending requests), and the check-and-write is atomic; tested with concurrent callers.
+
+## 2026-10-03 Phase 3 review — a call answering during the drain-timeout hangup escaped it and was dropped without a CDR
+
+- Class: judgment
+- Missed by: test
+- Adaptation: REVIEW.md: a forced hangup races call setup; the answer path re-checks the abort flag under the same lock, with an injected-delay test.
+
+## 2026-10-03 Phase 3 review — Kamailio resolved node names via Docker DNS, so a restart with one node down failed to load its list
+
+- Class: mechanical
+- Missed by: test
+- Adaptation: REVIEW.md: dependencies of the edge are addressed by fixed IPs (or verified resolvable) and the failure mode is exercised with one member absent.
+
+## 2026-10-03 Phase 3 review — failure tests started recovery windows late and accepted late successes, unproving the guarantees
+
+- Class: judgment
+- Missed by: test
+- Adaptation: REVIEW.md: timing bounds are absolute deadlines from the event; a success after the deadline fails the test.
+
+## 2026-10-03 Phase 3 review — the 15s inactivity bound was measured from the API call, not from when the node started failing
+
+- Class: judgment
+- Missed by: rubric
+- Adaptation: REVIEW.md: a bound's start is the onset named in the spec, not an earlier convenience point.

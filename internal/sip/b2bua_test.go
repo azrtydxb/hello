@@ -470,3 +470,45 @@ func waitRing(t *testing.T, p *phone) {
 		}
 	}
 }
+
+// TestDrainAbortOwnsSetup fails if a drain that aborts a call still being
+// set up can lose the setup's end to a fork failing at the same moment.
+// abort takes the setup's ownership under the lock that guards setupClosed,
+// so a fork failure arriving in that window must not win closeSetup and
+// record a normal callee result instead: the caller gets 503, the ringing
+// callee a CANCEL, and the CDR keeps the abort's side system and reason.
+func TestDrainAbortOwnsSetup(t *testing.T) {
+	pbx := startPBX(t, ringAllDevices())
+	a := newPhone(t, pbx, "a1", "pa")
+	b1 := newPhone(t, pbx, "b1", "pb1")
+	a.register(t)
+	b1.register(t)
+	b1.setCallee(ringForever())
+
+	// Injected inside abort, after it has taken the setup's ownership but
+	// before it signals the setup goroutine: the injected fork failure is
+	// ready on the events queue at the same moment as the abort signal, so
+	// the setup goroutine's select races between them every round. With
+	// the ownership, either loser branch ends the call as the abort's.
+	inject := func(cc *call) {
+		select {
+		case cc.events <- legEvent{kind: evFailed, code: sip.StatusServiceUnavailable}:
+		default:
+		}
+	}
+	pbx.srv.abortHook.Store(&inject)
+
+	for range 60 {
+		res := dial(t.Context(), a, "200")
+		waitRing(t, a)
+		pbx.srv.HangupAll("drain timeout")
+		if rr := waitCall(t, res); responseCode(rr.err) != 503 {
+			t.Fatalf("caller got %v, want 503", rr.err)
+		}
+		waitReq(t, b1.cancels, "CANCEL to the ringing callee")
+		if cd := pbx.nextCDR(t); cd.TerminationSide != "system" || cd.FailureReason != "drain timeout" {
+			t.Fatalf("CDR = %+v", cd)
+		}
+	}
+	eventually(t, "no calls left", func() bool { return pbx.srv.ActiveCalls() == 0 })
+}

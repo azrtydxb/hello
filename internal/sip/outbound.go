@@ -55,6 +55,7 @@ const (
 	attemptFailed                   // a final non-2xx response
 	attemptTimeout                  // nothing beyond 100 Trying within TrunkAttemptTimeout
 	attemptCancelled                // the caller cancelled
+	attemptAborted                  // the node ended the call (drain timeout)
 )
 
 // setupOutbound tries the decision's candidates in order (S-8): for each
@@ -102,6 +103,11 @@ func (c *call) setupOutbound(dec routing.Decision) {
 				c.addTrace(fmt.Sprintf("%s -> 200 OK", t.Name))
 				s.m.TrunkCalls.WithLabelValues(t.Name, TrunkAnswered).Inc()
 				c.answer(l)
+				return
+			case attemptAborted:
+				s.m.TrunkCalls.WithLabelValues(t.Name, TrunkCancelled).Inc()
+				c.cancelForks(nil)
+				c.abortCaller()
 				return
 			case attemptCancelled:
 				c.addTrace(fmt.Sprintf("%s (%s) -> cancelled by the caller; no further trunks tried", t.Name, addr))
@@ -221,6 +227,12 @@ func (c *call) awaitAttempt(l *leg) (attemptOutcome, int, string) {
 			}
 			l.cancel()
 			return attemptCancelled, 0, ""
+		case <-c.aborted:
+			if !c.closeSetup() {
+				continue // the leg already won: the connected call is ended instead
+			}
+			l.cancel()
+			return attemptAborted, 0, ""
 		case <-silent:
 			if c.abandon(l) {
 				return attemptTimeout, 0, ""

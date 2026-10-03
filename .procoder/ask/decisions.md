@@ -90,3 +90,46 @@
 
 - Push phase-2-trunks-routing and open a PR to main
 - Hold for your review first
+
+## Merge PR #3
+
+- Squash-merge now and start the Phase 3 (HA) spec
+- Hold for your own review
+
+## Phase 3 how phones reach a surviving node
+
+- UDP load balancer in front of the SIP nodes (lab: nginx stream with health checks), single SIP address for phones
+- DNS SRV with both nodes (lab: CoreDNS); relies on phone SRV support
+- Both: load balancer by default, SRV documented as the alternative
+
+## Phase 3 Valkey high availability
+
+- Valkey Sentinel (primary, replica, three sentinels) in the lab, with automated failover tests
+- Single Valkey; test outage behaviour only, defer Valkey HA to Phase 6 guidance
+
+## Phase 3 PostgreSQL failover
+
+- Test PostgreSQL outage and restart (SIP keeps running from its snapshot); real PG HA left to Phase 6 deployment guidance
+- Primary/replica with promotion in the lab now
+
+## Phase 3 production SIP load balancer
+
+- Kamailio dispatcher as the SIP-aware balancer, shipped and configured in deploy/
+- A Hello-built Go balancer (hello-lb) shipped as a production component
+- Envoy UDP proxy (L4) with active health checks
+
+## Phase 3 delivery
+
+- Push phase-3-ha and open a PR to main
+- Hold for your review first
+
+## Merge PR #4
+
+- Squash-merge after CI/Copilot are clean and findings fixed, then start Phase 4 (PBX features)
+- Hold for your own review
+
+## Valkey failover test in CI
+
+- Pay for a larger runner (ubuntu-4-cores) for the images job; keep the full failover test gating CI
+- Keep the free 2-core runner; the failover test runs pre-merge locally and in CI only as a non-gating scheduled job
+- Keep the free runner; the failover test keeps trying to pass in CI with further environment tuning

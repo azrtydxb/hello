@@ -36,12 +36,25 @@ docker compose -f deploy/docker-compose/compose.yaml up -d --build --wait
 curl localhost:8080/api/v1/version
 ```
 
-| Service                  | Host port                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------ |
-| UI (proxies `/api`)      | <http://localhost:8080>                                                                    |
-| hello-control-1          | <http://localhost:8081> (`/api/v1/version`, `/api/v1/openapi.json`, `/readyz`, `/metrics`) |
-| hello-sip-1, hello-sip-2 | <http://localhost:8082>, <http://localhost:8083> (`/readyz`, `/metrics`)                   |
-| hello-sip-1, hello-sip-2 | SIP/UDP `5060`, `5062`                                                                     |
+| Service                                     | Host port                                                                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| UI (proxies `/api`)                         | <http://localhost:8080>                                                                    |
+| hello-control-1                             | <http://localhost:8081> (`/api/v1/version`, `/api/v1/openapi.json`, `/readyz`, `/metrics`) |
+| kamailio                                    | SIP/UDP `5080`: the phone entry point                                                      |
+| hello-sip-1, hello-sip-2                    | <http://localhost:8082>, <http://localhost:8083> (`/readyz`, `/metrics`)                   |
+| hello-sip-1, hello-sip-2                    | SIP/UDP `5060`, `5062` (direct, bypassing Kamailio; for tests)                             |
+| carrier-primary, carrier-backup             | `8091`, `8092` (simulated carriers)                                                        |
+| hello-control-2, postgres, Valkey, Sentinel | none                                                                                       |
+
+The lab runs on two networks:
+
+| Network | Members                                                                                                                                                                                    |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `edge`  | `10.89.53.0/24`: kamailio (`10.89.53.10`, also its Hello-facing address), hello-sip-1 (`.11`), hello-sip-2 (`.12`), hello-control, the UI, the carriers. Every host port is published here |
+| `state` | PostgreSQL; Valkey (`valkey-1` primary at start, `valkey-2` replica); `sentinel-1`..`sentinel-3` (master set `hello`); and the Hello services that use them                                |
+
+Kamailio's metrics are on port 9090 inside `edge` only. See [docs/ha.md](docs/ha.md)
+for the HA topology and operations.
 
 Sign in as `admin` with the lab-only password `hello-lab-admin`.
 
@@ -72,27 +85,32 @@ HELLO_DOCKER=1 go test -timeout 20m ./test/integration/   # images, and SIP flow
 Both services read `HELLO_*` environment variables and exit at startup,
 naming the key, if one is missing or malformed.
 
-| Variable                                          | Service | Default                                                                                 |
-| ------------------------------------------------- | ------- | --------------------------------------------------------------------------------------- |
-| `HELLO_NODE_ID`                                   | both    | required                                                                                |
-| `HELLO_HTTP_ADDR`                                 | both    | `:8081` control, `:8082` sip                                                            |
-| `HELLO_LOG_LEVEL`                                 | both    | `info`                                                                                  |
-| `HELLO_SHUTDOWN_TIMEOUT`                          | both    | `30s`                                                                                   |
-| `HELLO_DRAIN_DELAY`                               | both    | `5s`: how long `/readyz` fails before the listener closes                               |
-| `HELLO_DATABASE_URL`                              | both    | required; hello-sip reads devices and writes call records                               |
-| `HELLO_VALKEY_ADDR`                               | both    | required; registrations, active calls, trunk state; needs Valkey 9+ (hash field expiry) |
-| `HELLO_SIP_DOMAIN`                                | both    | required; digest realm and AOR host, identical everywhere                               |
-| `HELLO_SECRET_KEY`                                | both    | required: 32 bytes, base64; encrypts trunk passwords; identical on every node           |
-| `HELLO_BOOTSTRAP_ADMIN_PASSWORD`                  | control | unset; creates user `admin` when no user exists                                         |
-| `HELLO_SESSION_TTL`                               | control | `12h`                                                                                   |
-| `HELLO_SIP_BIND_ADDR`                             | sip     | `0.0.0.0:5060`                                                                          |
-| `HELLO_SIP_ADVERTISED_ADDR`                       | sip     | the bind address, which must then be a specific IP                                      |
-| `HELLO_SIP_NONCE_SECRET`                          | sip     | required, at least 32 bytes, identical on every SIP node                                |
-| `HELLO_SIP_REGISTER_MIN_EXPIRES` / `_MAX_EXPIRES` | sip     | `60s` / `1h`                                                                            |
-| `HELLO_SIP_RING_TIMEOUT`                          | sip     | `30s`                                                                                   |
-| `HELLO_SIP_MAX_CALL_DURATION`                     | sip     | `4h`; a call with no BYE (phone gone) is cleared after this                             |
-| `HELLO_SIP_AUTH_FAIL_LIMIT` / `_WINDOW`           | sip     | `10` failures per `5m` per source IP                                                    |
-| `HELLO_SIP_STATE_TIMEOUT`                         | sip     | `200ms`; Valkey calls while handling SIP                                                |
+| Variable                                          | Service | Default                                                                                                                       |
+| ------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `HELLO_NODE_ID`                                   | both    | required                                                                                                                      |
+| `HELLO_HTTP_ADDR`                                 | both    | `:8081` control, `:8082` sip                                                                                                  |
+| `HELLO_LOG_LEVEL`                                 | both    | `info`                                                                                                                        |
+| `HELLO_SHUTDOWN_TIMEOUT`                          | both    | `30s`                                                                                                                         |
+| `HELLO_DRAIN_DELAY`                               | both    | `5s`: how long `/readyz` fails before the listener closes                                                                     |
+| `HELLO_DATABASE_URL`                              | both    | required; hello-sip reads devices and writes call records                                                                     |
+| `HELLO_VALKEY_ADDR`                               | both    | required unless Sentinel is set; single Valkey: registrations, active calls, trunk state; needs Valkey 9+ (hash field expiry) |
+| `HELLO_VALKEY_SENTINELS`                          | both    | unset; comma-separated Sentinel `host:port` list, instead of `HELLO_VALKEY_ADDR`                                              |
+| `HELLO_VALKEY_MASTER`                             | both    | unset; Sentinel master set name, required with `HELLO_VALKEY_SENTINELS`                                                       |
+| `HELLO_SIP_DOMAIN`                                | both    | required; digest realm and AOR host, identical everywhere                                                                     |
+| `HELLO_SECRET_KEY`                                | both    | required: 32 bytes, base64; encrypts trunk passwords; identical on every node                                                 |
+| `HELLO_BOOTSTRAP_ADMIN_PASSWORD`                  | control | unset; creates user `admin` when no user exists                                                                               |
+| `HELLO_SESSION_TTL`                               | control | `12h`                                                                                                                         |
+| `HELLO_SIP_BIND_ADDR`                             | sip     | `0.0.0.0:5060`                                                                                                                |
+| `HELLO_SIP_ADVERTISED_ADDR`                       | sip     | the bind address, which must then be a specific IP                                                                            |
+| `HELLO_SIP_NONCE_SECRET`                          | sip     | required, at least 32 bytes, identical on every SIP node                                                                      |
+| `HELLO_SIP_REGISTER_MIN_EXPIRES` / `_MAX_EXPIRES` | sip     | `60s` / `1h`                                                                                                                  |
+| `HELLO_SIP_RING_TIMEOUT`                          | sip     | `30s`                                                                                                                         |
+| `HELLO_SIP_MAX_CALL_DURATION`                     | sip     | `4h`; a call with no BYE (phone gone) is cleared after this                                                                   |
+| `HELLO_SIP_AUTH_FAIL_LIMIT` / `_WINDOW`           | sip     | `10` failures per `5m` per source IP                                                                                          |
+| `HELLO_SIP_STATE_TIMEOUT`                         | sip     | `200ms`; Valkey calls while handling SIP                                                                                      |
+| `HELLO_SIP_TRUSTED_PROXIES`                       | sip     | unset (trust none); CIDRs of the SIP balancers (Kamailio) whose `Path` and client address are believed                        |
+| `HELLO_DRAIN_TIMEOUT`                             | sip     | `2h`; a draining node hangs up remaining calls after this                                                                     |
+| `HELLO_MEMBER_HEARTBEAT`                          | sip     | `5s`; how often the node refreshes its cluster membership in Valkey                                                           |
 
 The UI container proxies `/api` to `HELLO_CONTROL_UPSTREAM` and re-resolves it through `HELLO_DNS_RESOLVER` (default `127.0.0.11`, Docker's DNS; use your cluster DNS elsewhere).
 

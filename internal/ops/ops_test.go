@@ -194,3 +194,28 @@ func TestGracefulShutdown(t *testing.T) {
 		t.Fatal("Serve did not return within the timeout")
 	}
 }
+
+type fakeLifecycle struct {
+	ready         bool
+	state, reason string
+}
+
+func (f *fakeLifecycle) Readiness() (bool, string, string) { return f.ready, f.state, f.reason }
+
+// TestReadinessLifecycle fails if, with a lifecycle hook, /readyz is 200
+// outside READY, ignores the hook in favour of Checks, or does not name the
+// state and reason.
+func TestReadinessLifecycle(t *testing.T) {
+	lc := &fakeLifecycle{state: "DRAINING", reason: "drain requested"}
+	s := newServer(map[string]Check{"never": func(context.Context) error { return errors.New("unused") }})
+	s.Lifecycle = lc
+	h := s.Handler()
+	code, body := get(t, h, "/readyz")
+	if code != http.StatusServiceUnavailable || !strings.Contains(body, `"state":"DRAINING"`) || !strings.Contains(body, "drain requested") {
+		t.Fatalf("readyz while draining = %d %s", code, body)
+	}
+	lc.ready, lc.state, lc.reason = true, "READY", ""
+	if code, body := get(t, h, "/readyz"); code != http.StatusOK || !strings.Contains(body, `"state":"READY"`) {
+		t.Fatalf("readyz when READY = %d %s; the hook decides, not Checks", code, body)
+	}
+}
