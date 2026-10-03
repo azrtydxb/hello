@@ -478,21 +478,53 @@ func TestValkeyFailover(t *testing.T) {
 	// claiming MASTER and race the Sentinels.
 	labCompose(t, "stop", before)
 	stopped := time.Now()
-	var after string
-	// Promotion itself has no spec bound (docs/ha.md bounds readiness at 15 s
-	// from promotion, checked below), and a Sentinel aborts a promotion that
-	// does not finish within its 10 s failover-timeout, then waits before it
-	// retries; a busy runner can push the whole promotion well past 20 s.
-	// Each attempt logs the full failover picture (sentinelDiagnose), so a
-	// failure shows the timeline instead of only the last answer.
-	eventually(t, 60*time.Second, "sentinels promote the replica", func() error {
-		after = valkeyPrimary(t)
-		if after == before || after == "" {
-			sentinelDiagnose(t, stopped)
-			return fmt.Errorf("primary still %q", after)
+	// sentinelMasterAddr asks one Sentinel for the current primary and
+	// returns its raw answer as "host port": with announce-hostnames the
+	// host is a compose service name, without it a container IP.
+	sentinelMasterAddr := func(sentinel string) string {
+		out, err := compose("exec", "-T", sentinel, "valkey-cli", "-p", "26379", "--raw",
+			"SENTINEL", "get-master-addr-by-name", "hello").CombinedOutput()
+		if err != nil {
+			return ""
 		}
-		return nil
-	})
+		f := strings.Fields(string(out))
+		if len(f) < 2 {
+			return ""
+		}
+		return f[0] + ":" + f[1]
+	}
+	beforeAddr := sentinelMasterAddr("sentinel-1")
+	if beforeAddr == "" {
+		beforeAddr = before + ":6379"
+	}
+	// The wait loop is deliberately lean: ONE exec per 2 s round. The ~5
+	// execs a round the old loop spent on quorum votes and diagnostics
+	// starved a 2-vCPU runner's Sentinel event loops into tilt, suspending
+	// the very sdown checks the wait was polling for. Promotion itself has
+	// no spec bound (docs/ha.md bounds readiness at 15 s from promotion,
+	// checked below), and a Sentinel aborts a promotion that outlasts its
+	// 10 s failover-timeout and waits before it retries, so the window is
+	// wide and the load small. The 2-of-3 quorum enters only as a
+	// confirmation: once sentinel-1's answer changes, sentinel-2 must agree
+	// before the wait ends. On timeout the full picture is dumped once.
+	var after string
+	for until := stopped.Add(180 * time.Second); after == "" && time.Now().Before(until); {
+		addr := sentinelMasterAddr("sentinel-1")
+		if addr == "" || addr == beforeAddr {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		if confirm := sentinelMasterAddr("sentinel-2"); confirm != addr {
+			t.Logf("sentinel-1 says %s, sentinel-2 still says %q; waiting", addr, confirm)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		after = valkeyService(t, addr)
+	}
+	if after == "" {
+		sentinelDiagnose(t, stopped)
+		t.Fatal("sentinels promoted no new primary within 180s of stopping " + before)
+	}
 	promoted := time.Now()
 	// Each node answers /readyz 200 within 15s of the promotion.
 	for _, url := range []string{"http://localhost:8082/readyz", "http://localhost:8083/readyz"} {
@@ -752,6 +784,33 @@ func valkeyPrimary(t *testing.T) string {
 	return solo
 }
 
+// valkeyService maps a Sentinel answer "host port" to the compose service
+// name of the Valkey server it names: with announce-hostnames the host is
+// already the service name; otherwise it is a container IP, resolved once
+// against the two Valkey containers.
+func valkeyService(t *testing.T, addr string) string {
+	t.Helper()
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("sentinel answer %q: %v", addr, err)
+	}
+	if host == "valkey-1" || host == "valkey-2" {
+		return host
+	}
+	for _, svc := range []string{"valkey-1", "valkey-2"} {
+		ips, err := exec.Command("docker", "inspect", "--format",
+			"{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", container(t, svc)).Output()
+		if err != nil {
+			t.Fatalf("address of %s: %v", svc, err)
+		}
+		if slices.Contains(strings.Fields(string(ips)), host) {
+			return svc
+		}
+	}
+	t.Fatalf("sentinel answer host %q is neither a service name nor a Valkey container address", host)
+	return ""
+}
+
 // sentinelMeshLog logs, before the primary is stopped, each Sentinel's myid
 // and its peer table (SENTINEL sentinels hello): the mesh state from birth.
 // A mesh that never formed shows every peer sdown with a shared or missing
@@ -787,16 +846,15 @@ func sentinelMeshLog(t *testing.T) {
 	}
 }
 
-// sentinelDiagnose logs, during a promotion wait, everything needed to read
-// a failover timeline afterwards: each Sentinel's raw answer, valkey-2's
-// role, the containers' states and the Sentinels' state-machine events since
-// the primary was stopped. It is called once per failed promotion attempt,
-// so the test log doubles as the evidence when promotion does not happen.
-//
-// It runs at most once per 5 s: each round is six docker compose
-// invocations, and on a 2-vCPU runner that churn is itself load — the 2026
-// CI failures showed every Sentinel in tilt for the whole promotion window
-// while the wait loop diagnosed every 250 ms.
+// sentinelDiagnose logs everything needed to read a failover timeline
+// afterwards: each Sentinel's raw answer, valkey-2's role, the containers'
+// states and the Sentinels' state-machine events since the primary was
+// stopped. The promotion wait calls it exactly once, on timeout, so the test
+// log doubles as the evidence when promotion does not happen — and so its
+// seven docker invocations never add load inside the wait loop: on a
+// 2-vCPU runner that churn is itself load, and the 2026 CI failures showed
+// every Sentinel in tilt for the whole promotion window while the wait loop
+// diagnosed every 250 ms.
 var lastSentinelDiagnose time.Time
 
 func sentinelDiagnose(t *testing.T, since time.Time) {
@@ -805,7 +863,6 @@ func sentinelDiagnose(t *testing.T, since time.Time) {
 		return
 	}
 	lastSentinelDiagnose = time.Now()
-	t.Helper()
 	for _, s := range []string{"sentinel-1", "sentinel-2", "sentinel-3"} {
 		out, err := compose("exec", "-T", s, "valkey-cli", "-p", "26379", "--raw", "SENTINEL", "get-master-addr-by-name", "hello").CombinedOutput()
 		if err != nil {
