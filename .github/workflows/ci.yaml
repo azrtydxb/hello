@@ -14,7 +14,9 @@ concurrency:
 
 jobs:
   go:
-    runs-on: arc-azrtydxb # kw Arc runner (DinD); free GitHub runners are too small for the lab
+    runs-on: [self-hosted, linux, x64] # the kw Arc runner (DinD); free GitHub runners are too small for the lab
+    # The runner image has no Go toolchain; run in a container instead.
+    container: golang:1.27
     timeout-minutes: 15
     services:
       postgres:
@@ -36,9 +38,6 @@ jobs:
       HELLO_TEST_VALKEY_ADDR: localhost:6379
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
       - run: go build ./...
       - run: go vet ./...
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -47,21 +46,15 @@ jobs:
       - run: go test -race ./...
 
   web:
-    runs-on: arc-azrtydxb # kw Arc runner (DinD); free GitHub runners are too small for the lab
+    runs-on: [self-hosted, linux, x64] # the kw Arc runner (DinD); free GitHub runners are too small for the lab
+    container: node:26-bookworm # the runner image has no Node toolchain
     timeout-minutes: 10
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          package_json_file: web/package.json
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 26
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+      - run: npm install -g pnpm@10 # node:26 has no corepack
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
@@ -69,14 +62,19 @@ jobs:
       - run: pnpm build
 
   images:
-    runs-on: arc-azrtydxb # kw Arc runner (DinD); free GitHub runners are too small for the lab
+    runs-on: [self-hosted, linux, x64] # the kw Arc runner (DinD); free GitHub runners are too small for the lab
     timeout-minutes: 30
     needs: [go]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
+      # The runner has the docker CLI but not the compose plugin; the lab
+      # tests need `docker compose`.
+      - name: Install the compose plugin
+        run: |
+          mkdir -p ~/.docker/cli-plugins
+          curl -fsSL https://github.com/docker/compose/releases/download/v2.40.2/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose
+          chmod +x ~/.docker/cli-plugins/docker-compose
+          docker compose version
       - name: Non-root images and SIP flows against the two-node lab
         env:
           HELLO_DOCKER: "1"
