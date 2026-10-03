@@ -48,9 +48,10 @@ leaves the live view within 30 seconds.
 
 - **Kamailio** gives phones one SIP address. It sends each phone's REGISTERs
   to one READY node (hashing the user), spreads calls over READY nodes, and
-  probes every node with OPTIONS every 5 seconds. A node that answers anything
+  probes every node with OPTIONS every 4 seconds. A node that answers anything
   but 200 (draining, unhealthy, still joining) or nothing at all leaves
-  rotation within 15 seconds. Kamailio adds itself to each registration's
+  rotation within 15 seconds (three failed probes: 3 × 4 s plus a 1.5 s reply
+  timeout). Kamailio adds itself to each registration's
   `Path`, so every Hello node reaches every phone through Kamailio, whichever
   node took the registration.
 - **SIP nodes** are interchangeable. Registrations, active calls, trunk state
@@ -128,22 +129,51 @@ carry no calls.
 
 ## Production guidance
 
-- **Kamailio:** run at least two. Either share a virtual IP with keepalived
-  (VRRP), so phones keep one address and NAT flows survive a takeover, or
-  publish both through DNS SRV for phones that support it. Kamailio is
-  stateless apart from its dispatcher view, so either instance serves any
-  phone.
-- **Valkey:** one primary, at least one replica, and three Sentinels on
-  separate hosts (an odd number, so a majority survives one host). Hello uses
+- **Kamailio:** run at least two, with identical configuration; they are
+  stateless apart from their dispatcher view, so either serves any phone.
+  - Prefer a virtual IP shared with keepalived (VRRP) and set
+    `KAMAILIO_PUBLIC_HOST` to the VIP. Phones keep one address, and
+    established dialogs survive a VIP move because `Record-Route` names the
+    VIP, not the instance.
+  - DNS SRV also works for phones that support it, but when one Kamailio dies
+    its phones are unreachable until their next REGISTER, and its dialogs lose
+    in-dialog signalling (re-INVITE, BYE).
+  - Keep phone registration intervals short (300–600 s) so phones recover
+    quickly from any edge failure.
+  - Set `KAMAILIO_PIKE_DENSITY` (requests per source IP per 2 s, default 200)
+    to cover your biggest NAT: the site with the most phones behind one public
+    IP.
+  - Keep `KAMAILIO_INVITE_TIMEOUT` (ms) above `HELLO_SIP_RING_TIMEOUT`, so
+    Hello ends unanswered calls and Kamailio answers 408 only when a node dies
+    mid-ring.
+  - Monitor `/metrics` on port 9090 (internal): `kamailio_dispatcher_set_active`
+    (READY nodes in rotation), `kamailio_dispatcher_destination_active` (per
+    node, 1 or 0), `kamailio_dispatcher_transitions_total` (per node and
+    up/down), `kamailio_pike_blocked_total` (requests refused by flood
+    protection).
+  - See the dispatcher view with
+    `docker compose -p <project> -f deploy/docker-compose/compose.yaml exec kamailio kamcmd dispatcher.list`.
+    Flags: `AP` active, `TP` trying, `IP` inactive.
+- **Trusted proxies:** set `HELLO_SIP_TRUSTED_PROXIES` to the Hello-facing
+  address of every Kamailio, and nothing else. Hello trusts the client address
+  and `Path` that Kamailio sends, and ignores them from anywhere else; a
+  Kamailio missing from the list breaks registration through it.
+- **Valkey:** one primary and at least one replica. Hello uses
   `HELLO_VALKEY_SENTINELS` and `HELLO_VALKEY_MASTER`. Hello needs Valkey 9 or
   later.
+  - Run an odd number of Sentinels, at least three, with quorum 2, on separate
+    hosts or zones, so a majority survives one failure.
+  - Set `down-after-milliseconds` to about 5000. The lab uses 3000, and
+    promotion completes in about 5 seconds.
+  - Enable `resolve-hostnames` and `announce-hostnames` when addresses change
+    (containers, Kubernetes), and name Valkey and Sentinel by hostname.
+  - A restarted old primary rejoins as a replica.
+  - Replication is asynchronous: a failover can lose the last writes before it
+    (a registration or call state written just before the primary died).
 - **PostgreSQL:** Hello tolerates PostgreSQL outages for telephony; for
   management availability run PostgreSQL with automatic failover (an operator
   such as CloudNativePG, or Patroni). Phase 6 covers this in the Kubernetes
   guidance.
-- **Trusted proxies:** set `HELLO_SIP_TRUSTED_PROXIES` to the Kamailio
-  addresses only. Hello trusts the client address and `Path` that Kamailio
-  sends, and ignores them from anywhere else.
 
 ## Kamailio loss
 
