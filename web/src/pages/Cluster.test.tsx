@@ -81,7 +81,14 @@ describe("Cluster", () => {
       within(row)
         .getAllByRole("cell")
         .map((c) => c.textContent);
-    expect(cells(one).slice(0, 8)).toEqual([
+    // The heartbeat cell is time-relative ("N s ago"): on a loaded runner the
+    // recompute at render time can read one second higher than the mock.
+    const heartbeatSeconds = (row: HTMLElement): number => {
+      const text = cells(row)[7] ?? "";
+      expect(text).toMatch(/^\d+ s ago$/);
+      return Number.parseInt(text, 10);
+    };
+    expect(cells(one).slice(0, 7)).toEqual([
       "SIP",
       "Ready",
       "10.0.0.11:5060 (udp)",
@@ -89,9 +96,9 @@ describe("Cluster", () => {
       "241",
       "0.3.0",
       "current (rev 1284)",
-      "3 s ago",
     ]);
-    expect(cells(rowOf("hello-sip-2")).slice(0, 8)).toEqual([
+    expect(heartbeatSeconds(one)).toBeGreaterThanOrEqual(3);
+    expect(cells(rowOf("hello-sip-2")).slice(0, 7)).toEqual([
       "SIP",
       "Draining — drain requested",
       "10.0.0.12:5060 (udp)",
@@ -99,8 +106,8 @@ describe("Cluster", () => {
       "96",
       "0.2.9",
       "3 behind (rev 1281)",
-      "7 s ago",
     ]);
+    expect(heartbeatSeconds(rowOf("hello-sip-2"))).toBeGreaterThanOrEqual(7);
     expect(within(rowOf("hello-control-1")).getByText("Control")).toBeVisible();
     for (const h of [
       "State",
@@ -245,10 +252,15 @@ describe("Cluster", () => {
     const posts = () =>
       calls.filter((c) => c.method === "POST").map((c) => c.url);
     expect(posts()).toEqual(["/api/v1/cluster/nodes/hello-sip-1/drain"]);
-    // The safe choice has focus.
-    expect(
-      within(warn).getByRole("button", { name: "Keep hello-sip-1 in service" }),
-    ).toHaveFocus();
+    // The safe choice has focus. Focus is applied in an effect, which on a
+    // loaded runner can land after findByRole already returned the group.
+    await waitFor(() =>
+      expect(
+        within(warn).getByRole("button", {
+          name: "Keep hello-sip-1 in service",
+        }),
+      ).toHaveFocus(),
+    );
 
     fireEvent.click(within(warn).getByRole("button", { name: "Drain anyway" }));
     expect(await screen.findByText("hello-sip-1 is draining.")).toBeVisible();
@@ -275,9 +287,11 @@ describe("Cluster", () => {
         name: "Keep hello-sip-1 in service",
       }),
     );
-    expect(
-      screen.getByRole("button", { name: "Drain hello-sip-1" }),
-    ).toHaveFocus();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Drain hello-sip-1" }),
+      ).toHaveFocus(),
+    );
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
     expect(calls.some((c) => c.url.includes("force=true"))).toBe(false);
   });

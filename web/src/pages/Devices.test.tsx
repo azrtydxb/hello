@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { json, ME, mockApi, noContent, renderApp } from "../test/api";
 
@@ -58,9 +58,13 @@ describe("Devices", () => {
       FIRST_SECRET,
     );
     expect(dialog).toHaveTextContent(/you will not see this again/i);
-    expect(
-      within(dialog).getByRole("button", { name: "Copy secret" }),
-    ).toHaveFocus();
+    // Focus moves into the dialog in an effect, which on a loaded runner can
+    // land after findByRole has already returned the dialog.
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "Copy secret" }),
+      ).toHaveFocus(),
+    );
     expect(calls).toContainEqual({
       method: "POST",
       url: "/api/v1/devices",

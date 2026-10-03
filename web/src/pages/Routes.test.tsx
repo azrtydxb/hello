@@ -190,9 +190,14 @@ describe("Routes", () => {
     });
     renderApp("/routes");
 
+    // The trunk picker and the submit button are gated on the trunk list: on
+    // a loaded runner the form is ready first, and interacting with the
+    // disabled controls (or setting an option that does not exist yet) is
+    // silently dropped. Wait for the trunks to be offered.
     fireEvent.click(
       await screen.findByRole("button", { name: "New outbound route" }),
     );
+    await screen.findByRole("option", { name: "carrier-primary" });
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "UAE Mobile" },
     });
@@ -270,9 +275,12 @@ describe("Routes", () => {
     });
     renderApp("/routes");
 
+    // As above: open the form, then wait for the trunk list to land before
+    // touching the gated picker and submit button.
     fireEvent.click(
       await screen.findByRole("button", { name: "New outbound route" }),
     );
+    await screen.findByRole("option", { name: "carrier-primary" });
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "UAE Mobile" },
     });
@@ -364,9 +372,14 @@ describe("Routes", () => {
     });
     renderApp("/routes?tab=inbound");
 
+    // The From-trunk select and the submit button are gated on the trunk
+    // list; on a loaded runner the form can be ready first, and interacting
+    // with the disabled controls is silently dropped. Open the form, then
+    // wait for the trunks.
     fireEvent.click(
       await screen.findByRole("button", { name: "New inbound route" }),
     );
+    await screen.findByRole("option", { name: "carrier-backup" });
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Office hours" },
     });
@@ -392,7 +405,11 @@ describe("Routes", () => {
 
     expect(
       // The runner is slow; the default 5s wait flaked in CI.
-      await screen.findByRole("row", { name: /Office hours/ }, { timeout: 15000 }),
+      await screen.findByRole(
+        "row",
+        { name: /Office hours/ },
+        { timeout: 15000 },
+      ),
     ).toBeVisible();
     expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
       name: "Office hours",
