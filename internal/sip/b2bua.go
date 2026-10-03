@@ -40,10 +40,14 @@ type call struct {
 	setupDone chan struct{} // closed when setup stops reading events
 	canceled  chan struct{}
 	// aborted is closed when the node ends a call still being set up
-	// (drain timeout); the setup goroutine answers the caller.
+	// (drain timeout); the setup goroutine answers the caller. Taking its
+	// ownership also closes setup under c.mu, so a fork failure, the ring
+	// timer or fork exhaustion cannot win closeSetup afterwards and record
+	// a normal callee or timeout result instead of the abort's.
 	aborted     chan struct{}
 	abortOnce   sync.Once
 	abortReason string
+	abortOwned  bool        // guarded by mu: the abort owns the setup's end
 	maxTimer    *time.Timer // ends a connected call at MaxCallDuration
 	cancelMu    sync.Once
 	stopHB      chan struct{}
@@ -384,6 +388,9 @@ func (c *call) setup(pending int) {
 					c.end(code, cdr.SideCallee, reason, result)
 					return
 				}
+				if pending == 0 && c.setupAbort() {
+					return
+				}
 			}
 		case <-c.canceled:
 			if c.closeSetup() {
@@ -392,18 +399,23 @@ func (c *call) setup(pending int) {
 				c.end(sip.StatusRequestTerminated, cdr.SideCaller, "cancelled by caller", ResultCancelled)
 				return
 			}
-			// A fork already won; answer() sees the cancellation.
-		case <-c.aborted:
-			if c.closeSetup() {
-				c.cancelForks(nil)
-				c.abortCaller()
+			if c.setupAbort() {
 				return
 			}
+			// A fork already won; answer() sees the cancellation.
+		case <-c.aborted:
+			if c.setupAbort() {
+				return
+			}
+			// A fork already won; answer() sees the abort.
 		case <-timer.C:
 			if c.closeSetup() {
 				c.cancelForks(nil)
 				c.respondA(sip.StatusRequestTimeout, "Request Timeout")
 				c.end(sip.StatusRequestTimeout, cdr.SideSystem, "ring timeout", ResultNoAnswer)
+				return
+			}
+			if c.setupAbort() {
 				return
 			}
 		}
@@ -632,13 +644,42 @@ func closed(ch chan struct{}) bool {
 }
 
 // abort asks the setup goroutine to end a call that is not connected yet.
+// Under the same lock that guards setupClosed it takes the setup's
+// ownership, so a fork failure, the ring timer or fork exhaustion cannot
+// win closeSetup afterwards and record a normal callee or timeout CDR:
+// the drain's system side and reason survive.
 func (c *call) abort(reason string) {
 	c.abortOnce.Do(func() {
 		c.mu.Lock()
 		c.abortReason = reason
+		if !c.setupClosed && c.winner == nil {
+			c.setupClosed = true
+			c.abortOwned = true
+		}
 		c.mu.Unlock()
+		// Run after the ownership is taken, before the signal: this is
+		// exactly the window the ownership closes (tests only).
+		if h := c.s.abortHook.Load(); h != nil {
+			(*h)(c)
+		}
 		close(c.aborted)
 	})
+}
+
+// setupAbort ends setup on behalf of an abort that owns it (drain timeout):
+// it reports whether the abort owned the setup's end, and answers the
+// caller 503 when it did. Losing closeSetup to that ownership is how the
+// setup goroutine observes the abort.
+func (c *call) setupAbort() bool {
+	c.mu.Lock()
+	owned := c.abortOwned
+	c.mu.Unlock()
+	if !owned {
+		return false
+	}
+	c.cancelForks(nil)
+	c.abortCaller()
+	return true
 }
 
 // abortCaller answers the caller 503 and ends an aborted call; setup has

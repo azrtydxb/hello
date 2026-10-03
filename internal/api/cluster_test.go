@@ -522,3 +522,96 @@ func series(v *prometheus.GaugeVec) int {
 	close(ch)
 	return len(ch)
 }
+
+// slowConfigStore is a Store whose ConfigRevision blocks past its context's
+// deadline, as a stalled PostgreSQL would.
+type slowConfigStore struct{ tokenStore }
+
+func (slowConfigStore) ConfigRevision(ctx context.Context) (int64, error) {
+	<-ctx.Done()
+	return 0, context.DeadlineExceeded
+}
+
+func (slowConfigStore) Audit(context.Context, string, string, string, string) error {
+	return errors.New("dial tcp 10.0.0.9:5432: connection refused")
+}
+
+// TestClusterOverviewConcurrentReads fails if a slow configuration-revision
+// read (a PostgreSQL-only outage) starves the Valkey health check and the
+// membership read: they run concurrently, each with its own bounded
+// context, so the endpoint must still report members and Valkey health.
+func TestClusterOverviewConcurrentReads(t *testing.T) {
+	fc := &fakeCluster{drains: map[string]bool{}}
+	fc.setMembers(
+		cluster.Member{ID: "hello-sip-1", Kind: cluster.KindSIP, State: cluster.Ready, ConfigRevision: 4},
+		cluster.Member{ID: "hello-sip-2", Kind: cluster.KindSIP, State: cluster.Ready, ConfigRevision: 4},
+	)
+	h := Handler(Config{Store: slowConfigStore{}, Cluster: fc, Valkey: upValkey{}})
+	req := httptest.NewRequest("GET", "/api/v1/cluster", nil)
+	req.Header.Set("Authorization", "Bearer anything")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var v clusterView
+	if err := json.Unmarshal(rec.Body.Bytes(), &v); err != nil || rec.Code != 200 {
+		t.Fatalf("cluster = %d %s", rec.Code, rec.Body)
+	}
+	if v.Postgres.Up {
+		t.Fatal("a timed-out revision read must be reported as PostgreSQL down")
+	}
+	if len(v.Members) != 2 || v.Valkey.Primary != "10.0.0.21:6379" || !v.Valkey.Up {
+		t.Fatalf("a slow revision starved the other reads: %s", rec.Body)
+	}
+	if v.ConfigRevision != nil {
+		t.Fatal("a blocked revision read produced a revision")
+	}
+}
+
+// TestClusterPollerConcurrentReads fails if a blocked configuration-revision
+// read starves the membership read in the background poller: the gauges
+// must still refresh (with the lags kept, not reset to a false zero).
+func TestClusterPollerConcurrentReads(t *testing.T) {
+	fc := &fakeCluster{drains: map[string]bool{}}
+	fc.setMembers(
+		cluster.Member{ID: "hello-sip-1", Kind: cluster.KindSIP, State: cluster.Ready, ConfigRevision: 5},
+		cluster.Member{ID: "hello-sip-2", Kind: cluster.KindSIP, State: cluster.Ready, ConfigRevision: 5},
+	)
+	var lag float64 = 2
+	m := NewClusterMetrics(prometheus.NewRegistry())
+	m.RevisionLag.WithLabelValues("hello-sip-1").Set(lag)
+	p := &ClusterPoller{
+		Every: time.Hour,
+		Members: func(context.Context) ([]cluster.Member, error) {
+			return fc.Members(context.Background())
+		},
+		Revision: func(ctx context.Context) (int64, error) {
+			<-ctx.Done() // blocks past the deadline, as a stalled PostgreSQL
+			return 0, context.DeadlineExceeded
+		},
+		Metrics: m,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); p.Poll(ctx) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("poll did not return after the revision read hit its deadline")
+	}
+	gauge := func(v *prometheus.GaugeVec, labels ...string) float64 {
+		var out dto.Metric
+		if err := v.WithLabelValues(labels...).Write(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out.GetGauge().GetValue()
+	}
+	if gauge(m.Members, "sip", "READY") != 2 {
+		t.Fatal("a slow revision starved the membership gauges")
+	}
+	if gauge(m.RevisionLag, "hello-sip-1") != lag {
+		t.Fatal("the blocked revision read reset the lag to a false zero")
+	}
+	if p.LastRevision() != 0 {
+		t.Fatal("the blocked revision read cached a revision")
+	}
+}

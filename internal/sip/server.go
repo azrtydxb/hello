@@ -117,6 +117,11 @@ type Server struct {
 	// answerHook, when set (tests only), runs as a call's winning fork is
 	// connected, before the call is marked connected.
 	answerHook atomic.Pointer[func()]
+	// abortHook, when set (tests only), runs inside abort after it has
+	// taken the setup's ownership but before it signals the setup
+	// goroutine, so a test can inject the fork failure that races the
+	// abort.
+	abortHook atomic.Pointer[func(*call)]
 }
 
 // dialogRef is one leg of a call, found by its Call-ID.

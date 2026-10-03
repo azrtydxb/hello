@@ -99,14 +99,29 @@ type ClusterPoller struct {
 // LastRevision is the revision read by the last successful poll.
 func (p *ClusterPoller) LastRevision() int64 { return p.revision.Load() }
 
-// Poll runs one poll.
+// Poll runs one poll. The two reads run concurrently, so a slow
+// configuration-revision read (PostgreSQL) cannot starve the membership
+// read and freeze the member gauges.
 func (p *ClusterPoller) Poll(ctx context.Context) {
-	var rev *int64
-	if r, err := p.Revision(ctx); err == nil {
+	var (
+		wg   sync.WaitGroup
+		rev  *int64
+		ms   []cluster.Member
+		merr error
+	)
+	wg.Go(func() {
+		r, err := p.Revision(ctx)
+		if err != nil {
+			return // rev stays nil: the lag gauges keep their last values
+		}
 		p.revision.Store(r)
 		rev = &r
-	}
-	if ms, err := p.Members(ctx); err == nil && p.Metrics != nil {
+	})
+	wg.Go(func() {
+		ms, merr = p.Members(ctx)
+	})
+	wg.Wait()
+	if merr == nil && p.Metrics != nil {
 		p.Metrics.update(ms, rev)
 	}
 }

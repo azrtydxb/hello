@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/netip"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -356,12 +357,21 @@ func (r *reader) positiveInt(key string, def int) int {
 	return n
 }
 
+// nodeIDRe is the shape of a HELLO_NODE_ID: the same shape the cluster API
+// accepts in /api/v1/cluster/nodes/{id} paths. A node whose ID does not fit
+// could publish membership and become READY while every drain/undrain URL
+// for it was rejected, so it is refused at startup instead.
+var nodeIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
 func (r *reader) common(defaultHTTP string) Common {
 	c := Common{
 		NodeID:          r.required("HELLO_NODE_ID"),
 		HTTPAddr:        r.optional("HELLO_HTTP_ADDR", defaultHTTP),
 		ShutdownTimeout: r.duration("HELLO_SHUTDOWN_TIMEOUT", 30*time.Second),
 		DrainDelay:      r.duration("HELLO_DRAIN_DELAY", 5*time.Second),
+	}
+	if !nodeIDRe.MatchString(c.NodeID) {
+		r.fail("HELLO_NODE_ID", errors.New(`must be 1-64 characters of letters, digits, dots, underscores or dashes`))
 	}
 	if err := c.LogLevel.UnmarshalText([]byte(r.optional("HELLO_LOG_LEVEL", "info"))); err != nil {
 		r.fail("HELLO_LOG_LEVEL", err)

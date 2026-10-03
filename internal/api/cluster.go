@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"sync"
 
 	"github.com/azrtydxb/hello/internal/cluster"
 )
@@ -68,22 +69,46 @@ func (s *server) revision(ctx context.Context) (*int64, postgresHealth) {
 }
 
 // clusterOverview is GET /api/v1/cluster. It answers 200 even with a
-// dependency down, because reporting that is its job: members are empty
-// while Valkey is unreachable, and revision and lags are absent while
-// PostgreSQL is.
+// dependency down, because reporting that is the endpoint's job: members
+// are empty while Valkey is unreachable, and revision and lags are absent
+// while PostgreSQL is. The reads run concurrently, each under its own
+// bounded context, so a slow one cannot starve the rest: a PostgreSQL-only
+// outage must not make the endpoint report Valkey down and empty members.
 func (s *server) clusterOverview(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), liveTimeout)
-	defer cancel()
-	rev, pg := s.revision(ctx)
-	vh := ValkeyHealth{Mode: "single", Error: "not configured"}
-	if s.Valkey != nil {
-		vh = s.Valkey.ValkeyHealth(ctx)
+	var (
+		wg     sync.WaitGroup
+		rev    *int64
+		pg     postgresHealth
+		vh     = ValkeyHealth{Mode: "single", Error: "not configured"}
+		ms     []cluster.Member
+		memErr error
+	)
+	if s.Valkey != nil || s.Cluster != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), liveTimeout)
+		defer cancel()
+		// Each read bounds itself, so one dependency's slowness cannot
+		// spend the whole budget before the others start.
+		read := func(f func(context.Context)) {
+			cctx, cancel := context.WithTimeout(ctx, liveTimeout)
+			wg.Go(func() {
+				defer cancel()
+				f(cctx)
+			})
+		}
+		read(func(cctx context.Context) { rev, pg = s.revision(cctx) })
+		if s.Valkey != nil {
+			read(func(cctx context.Context) { vh = s.Valkey.ValkeyHealth(cctx) })
+		}
+		if s.Cluster != nil {
+			read(func(cctx context.Context) { ms, memErr = s.Cluster.Members(cctx) })
+		}
 	}
-	var ms []cluster.Member
-	if s.Cluster != nil && vh.Up {
-		var err error
-		if ms, err = s.Cluster.Members(ctx); err != nil {
-			s.Log.Warn("cluster view: members unavailable", "error", err)
+	wg.Wait()
+	if memErr != nil {
+		s.Log.Warn("cluster view: members unavailable", "error", memErr)
+		// A members failure on a Valkey that is up is reported as Valkey's
+		// loss; the health check's own error stands otherwise.
+		if vh.Up {
 			vh.Up, vh.Error = false, "members unavailable"
 		}
 	}

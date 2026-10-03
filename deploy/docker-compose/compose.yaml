@@ -228,9 +228,11 @@ services:
       KAMAILIO_INVITE_TIMEOUT: "25000"
     volumes:
       - ../kamailio:/etc/kamailio:ro
+    # started, not healthy: the edge must come up while a SIP node is down
+    # and probe it inactive (dispatcher), not wait for it.
     depends_on:
-      hello-sip-1: { condition: service_healthy }
-      hello-sip-2: { condition: service_healthy }
+      hello-sip-1: { condition: service_started }
+      hello-sip-2: { condition: service_started }
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://10.89.53.10:9090/healthz"]
       interval: 5s

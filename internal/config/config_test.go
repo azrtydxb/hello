@@ -52,6 +52,32 @@ func TestLoadBadDuration(t *testing.T) {
 	}
 }
 
+// TestNodeIDShape fails if a HELLO_NODE_ID outside the shape the cluster
+// API accepts in /api/v1/cluster/nodes/{id} (1-64 characters of letters,
+// digits, dots, underscores, dashes) is accepted: such a node could publish
+// membership and become READY while every drain/undrain URL for it was
+// rejected. Both services must refuse it.
+func TestNodeIDShape(t *testing.T) {
+	good := []string{"n1", "hello-sip-1", "a", strings.Repeat("x", 64), "A.b_c-d"}
+	for _, id := range good {
+		if _, err := LoadControl(env(map[string]string{"HELLO_NODE_ID": id})); err != nil {
+			t.Fatalf("control rejected node id %q: %v", id, err)
+		}
+		if _, err := LoadSIP(env(map[string]string{"HELLO_NODE_ID": id})); err != nil {
+			t.Fatalf("sip rejected node id %q: %v", id, err)
+		}
+	}
+	bad := []string{"", "bad id", "bad/id", "bad+id", "x y", strings.Repeat("x", 65), "nö", "🎉"}
+	for _, id := range bad {
+		if _, err := LoadControl(env(map[string]string{"HELLO_NODE_ID": id})); err == nil || !strings.Contains(err.Error(), "HELLO_NODE_ID") {
+			t.Fatalf("control accepted node id %q: %v", id, err)
+		}
+		if _, err := LoadSIP(env(map[string]string{"HELLO_NODE_ID": id})); err == nil || !strings.Contains(err.Error(), "HELLO_NODE_ID") {
+			t.Fatalf("sip accepted node id %q: %v", id, err)
+		}
+	}
+}
+
 func TestLoadUnspecifiedAdvertise(t *testing.T) {
 	base := map[string]string{"HELLO_SIP_ADVERTISED_ADDR": ""}
 	for _, bind := range []string{"", "0.0.0.0:5060", "[::]:5060", ":5060"} {
