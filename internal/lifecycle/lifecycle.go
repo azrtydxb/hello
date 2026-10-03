@@ -33,6 +33,7 @@ type Publisher interface {
 	Publish(ctx context.Context, m cluster.Member) error
 	Leave(ctx context.Context, id string) error
 	DrainRequested(ctx context.Context, id string) (bool, error)
+	CancelDrain(ctx context.Context, id string) error
 }
 
 // Load is the node's current load, for its membership record.
@@ -101,6 +102,10 @@ var states = []cluster.State{cluster.Joining, cluster.Ready, cluster.Unhealthy, 
 type Machine struct {
 	o Options
 
+	// evalMu serialises evaluations, effects included (log, metrics,
+	// OnChange, publish), so they apply in the order the states were set.
+	evalMu sync.Mutex
+
 	mu        sync.Mutex
 	state     cluster.State
 	reason    string
@@ -109,11 +114,7 @@ type Machine struct {
 	reqDrain  bool   // an operator's drain request in Valkey
 	exiting   bool   // shutdown begun: a drain can no longer be cancelled
 	primary   string
-	// lastFailing is the last check result ("" when all passed); checked
-	// is false until the checks first ran.
-	lastFailing string
-	checked     bool
-	changes     chan struct{}
+	changes   chan struct{}
 }
 
 // New returns a Machine in JOINING.
@@ -160,15 +161,7 @@ func (m *Machine) Drain(reason string) {
 	m.mu.Lock()
 	m.sigDrain = reason
 	m.mu.Unlock()
-	m.evaluate(context.Background(), false)
-}
-
-// Exiting records that shutdown has begun: from now on a cancelled drain
-// request does not bring the node back.
-func (m *Machine) Exiting() {
-	m.mu.Lock()
-	m.exiting = true
-	m.mu.Unlock()
+	m.evaluate(context.Background())
 }
 
 // Changed is signalled (coalesced) after each state change.
@@ -189,7 +182,7 @@ func (m *Machine) Run(ctx context.Context) {
 			m.leave()
 			return
 		case <-checks.C:
-			m.evaluate(ctx, true)
+			m.evaluate(ctx)
 		case <-beat.C:
 			m.Heartbeat(ctx)
 		}
@@ -201,7 +194,9 @@ func (m *Machine) Run(ctx context.Context) {
 func (m *Machine) Heartbeat(ctx context.Context) {
 	m.pollDrain(ctx)
 	m.countFailover()
-	if !m.evaluate(ctx, true) {
+	m.evalMu.Lock()
+	defer m.evalMu.Unlock()
+	if !m.evaluateLocked(ctx) {
 		m.publish(ctx) // a change already published
 	}
 }
@@ -242,21 +237,18 @@ func (m *Machine) countFailover() {
 	}
 }
 
-// evaluate derives the state from the drain signals and the checks;
-// runChecks false reuses the last check result (when only a drain signal
-// changed). It reports whether the state changed (and was published).
-func (m *Machine) evaluate(ctx context.Context, runChecks bool) bool {
-	if runChecks {
-		f := m.firstFailing(ctx)
-		m.mu.Lock()
-		m.lastFailing, m.checked = f, true
-		m.mu.Unlock()
-	}
+// evaluate derives the state from the drain signals and the checks. It
+// reports whether the state changed (and was published).
+func (m *Machine) evaluate(ctx context.Context) bool {
+	m.evalMu.Lock()
+	defer m.evalMu.Unlock()
+	return m.evaluateLocked(ctx)
+}
+
+// evaluateLocked is evaluate with evalMu held.
+func (m *Machine) evaluateLocked(ctx context.Context) bool {
+	failing := m.firstFailing(ctx)
 	m.mu.Lock()
-	failing := m.lastFailing
-	if !m.checked {
-		failing = "starting"
-	}
 	var next cluster.State
 	var reason string
 	switch {
@@ -386,7 +378,7 @@ const DrainTimeoutReason = "drain timeout"
 // (HangupAll with DrainTimeoutReason) and given up to graceWait to go. A
 // drain cancelled meanwhile returns to waiting for the next one. Before
 // returning true the machine is marked exiting, and a drain request that
-// caused it is withdrawn so the restarted node is not drained again.
+// stands is withdrawn so the restarted node is not drained again.
 func (m *Machine) AwaitDrain(ctx context.Context, d Drainer, timeout time.Duration) bool {
 	poll := m.o.CheckEvery
 	for {
@@ -412,7 +404,9 @@ func (m *Machine) AwaitDrain(ctx context.Context, d Drainer, timeout time.Durati
 			continue
 		}
 		m.exiting = true
-		requested := m.sigDrain == "" && m.reqDrain
+		// Withdraw an operator's request even when SIGTERM came too, or the
+		// restarted node (same ID) would drain and exit again.
+		requested := m.reqDrain
 		m.mu.Unlock()
 		if requested {
 			m.withdrawDrain()
@@ -435,6 +429,15 @@ func (m *Machine) waitCalls(ctx context.Context, d Drainer, timeout, poll time.D
 		case <-ctx.Done():
 			return false
 		case <-deadline.C:
+			// Exiting before the calls are ended: a drain cancelled from
+			// here on must not return to READY a node whose calls are gone.
+			m.mu.Lock()
+			if m.state != cluster.Draining {
+				m.mu.Unlock()
+				return false
+			}
+			m.exiting = true
+			m.mu.Unlock()
 			m.o.Log.Warn("drain timeout: ending the remaining calls", "active_calls", d.ActiveCalls())
 			d.HangupAll(DrainTimeoutReason)
 			grace := time.Now().Add(graceWait)
@@ -456,15 +459,12 @@ func (m *Machine) waitCalls(ctx context.Context, d Drainer, timeout, poll time.D
 }
 
 func (m *Machine) withdrawDrain() {
-	w, ok := m.o.Publisher.(interface {
-		CancelDrain(ctx context.Context, id string) error
-	})
-	if !ok {
+	if m.o.Publisher == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), m.o.CheckTimeout)
 	defer cancel()
-	if err := w.CancelDrain(ctx, m.o.Member.ID); err != nil {
+	if err := m.o.Publisher.CancelDrain(ctx, m.o.Member.ID); err != nil {
 		m.o.Log.Warn("could not withdraw the drain request", "error", err)
 	}
 }
