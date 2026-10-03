@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-03 08:28 UTC. procoder reads this
+Written 2026-10-03 08:31 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -247,6 +247,16 @@ Question: Phase 3 PostgreSQL failover
 - Primary/replica with promotion in the lab now
 
 Answer: Test PostgreSQL outage and restart (SIP keeps running from its snapshot); real PG HA left to Phase 6 deployment guidance
+
+## [decision] decisions.md
+
+Key: dbf604d8bdf1
+Question: Merge PR #4
+
+- Squash-merge after CI/Copilot are clean and findings fixed, then start Phase 4 (PBX features)
+- Hold for your own review
+
+Answer: Squash-merge after CI/Copilot are clean and findings fixed, then start Phase 4 (pre-authorized; no further merge question)
 
 ## [decision] decisions.md
 
