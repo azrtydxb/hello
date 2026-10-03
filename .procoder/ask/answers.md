@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-02 21:48 UTC. procoder reads this
+Written 2026-10-03 08:28 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -227,6 +227,16 @@ Question: Phase 3 how phones reach a surviving node
 - Both: load balancer by default, SRV documented as the alternative
 
 Answer: UDP load balancer in front of the SIP nodes (lab: nginx stream with health checks), single SIP address for phones
+
+## [decision] decisions.md
+
+Key: cbac333e0ce9
+Question: Phase 3 delivery
+
+- Push phase-3-ha and open a PR to main
+- Hold for your review first
+
+Answer: Push phase-3-ha and open a PR to main
 
 ## [decision] decisions.md
 
