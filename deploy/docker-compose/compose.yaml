@@ -81,16 +81,20 @@ x-sentinel: &sentinel
   depends_on:
     valkey-1: { condition: service_healthy }
     valkey-2: { condition: service_healthy }
-  # Sentinel rewrites its config (current primary, known peers), so the
-  # template is copied once into the container's writable /data and the
-  # copy survives restarts; each sentinel announces its service name.
+  # Sentinel rewrites its config (current primary, known peers, generated
+  # myid), so the template is copied once into the container's writable /data
+  # and the copy survives restarts. The template cannot know the service
+  # name, so this entrypoint appends the per-container identity: peers must
+  # ping this Sentinel by its resolvable service name and port, whatever
+  # address Docker gave the container this boot.
   entrypoint:
     - sh
     - -c
     - >-
       test -f /data/sentinel.conf || {
       cp /etc/valkey/sentinel.conf /data/sentinel.conf &&
-      echo "sentinel announce-ip $$SENTINEL_NAME" >> /data/sentinel.conf; } &&
+      echo "sentinel announce-ip $$SENTINEL_NAME" >> /data/sentinel.conf &&
+      echo "sentinel announce-port 26379" >> /data/sentinel.conf; } &&
       exec valkey-sentinel /data/sentinel.conf
   volumes:
     - ../valkey/sentinel.conf:/etc/valkey/sentinel.conf:ro

@@ -470,6 +470,7 @@ func TestValkeyFailover(t *testing.T) {
 	if before == "" {
 		t.Fatal("no Valkey primary known to the Sentinels before the failover")
 	}
+	sentinelMeshLog(t)
 	t.Cleanup(func() { labCompose(t, "up", "-d", "--wait", before) })
 	// stop, not kill: a stopped primary stays down whatever restart policy the
 	// lab ever gains. The old primary must stay down through the promotion: it
@@ -751,12 +752,59 @@ func valkeyPrimary(t *testing.T) string {
 	return solo
 }
 
+// sentinelMeshLog logs, before the primary is stopped, each Sentinel's myid
+// and its peer table (SENTINEL sentinels hello): the mesh state from birth.
+// A mesh that never formed shows every peer sdown with a shared or missing
+// myid; a formed mesh shows two peers per Sentinel, distinct runids, no
+// sdown, and fresh last-ok-ping-reply values — the reference picture to
+// compare the post-mortem against. The raw reply is a flat 28 fields per
+// peer: name, ip, port, runid, flags, link state, ping ages, hello age and
+// the leader vote, names and values alternating. An unexpected field count
+// is logged verbatim instead of misaligned.
+func sentinelMeshLog(t *testing.T) {
+	t.Helper()
+	for _, s := range []string{"sentinel-1", "sentinel-2", "sentinel-3"} {
+		id, err := compose("exec", "-T", s, "valkey-cli", "-p", "26379", "--raw", "SENTINEL", "myid").CombinedOutput()
+		if err != nil {
+			t.Logf("%s: myid errored: %v\n%s", s, err, id)
+			continue
+		}
+		t.Logf("%s: myid %s", s, strings.TrimSpace(string(id)))
+		out, err := compose("exec", "-T", s, "valkey-cli", "-p", "26379", "--raw", "SENTINEL", "sentinels", "hello").CombinedOutput()
+		if err != nil {
+			t.Logf("%s: sentinels hello errored: %v\n%s", s, err, out)
+			continue
+		}
+		fields := strings.Fields(string(out))
+		if n := len(fields); n == 0 || n%28 != 0 {
+			t.Logf("%s: sentinels hello (%d fields): %q", s, n, strings.Join(fields, " "))
+			continue
+		}
+		for i := 0; i < len(fields); i += 28 {
+			t.Logf("%s: peer %s %s:%s runid=%s flags=[%s] last-ok-ping-reply=%sms last-hello-message=%sms",
+				s, fields[i+1], fields[i+3], fields[i+5], fields[i+7], fields[i+9], fields[i+17], fields[i+23])
+		}
+	}
+}
+
 // sentinelDiagnose logs, during a promotion wait, everything needed to read
 // a failover timeline afterwards: each Sentinel's raw answer, valkey-2's
 // role, the containers' states and the Sentinels' state-machine events since
 // the primary was stopped. It is called once per failed promotion attempt,
 // so the test log doubles as the evidence when promotion does not happen.
+//
+// It runs at most once per 5 s: each round is six docker compose
+// invocations, and on a 2-vCPU runner that churn is itself load — the 2026
+// CI failures showed every Sentinel in tilt for the whole promotion window
+// while the wait loop diagnosed every 250 ms.
+var lastSentinelDiagnose time.Time
+
 func sentinelDiagnose(t *testing.T, since time.Time) {
+	t.Helper()
+	if time.Since(lastSentinelDiagnose) < 5*time.Second {
+		return
+	}
+	lastSentinelDiagnose = time.Now()
 	t.Helper()
 	for _, s := range []string{"sentinel-1", "sentinel-2", "sentinel-3"} {
 		out, err := compose("exec", "-T", s, "valkey-cli", "-p", "26379", "--raw", "SENTINEL", "get-master-addr-by-name", "hello").CombinedOutput()
