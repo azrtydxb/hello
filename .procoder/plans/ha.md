@@ -60,7 +60,7 @@ Losing any single hello-sip node, the Valkey primary, PostgreSQL or the control 
    - **Trust:** Hello believes `X-Hello-Client` and stores client `Path` only when the datagram's source IP is in `TrustedProxies`. It uses `X-Hello-Client` as the source for the failed-auth throttle, trunk source validation and binding `Source`. Otherwise it ignores both headers and drops a client Path (the Phase 1 behaviour).
    - **Calls to a phone with a trusted Path:** go through the Path (Route header), in place of Hello's flow-token edge.
    - **Dispatcher:**
-     - Set 1 holds every hello-sip node (`sip:hello-sip-N:5060`).
+     - Set 1 holds every hello-sip node (`sip:10.89.53.11:5060` and `sip:10.89.53.12:5060`, fixed IPs: Kamailio resolves names only via Docker DNS, and an unresolvable entry is fatal at startup).
      - OPTIONS probes every 4s (inactive within 3 × 4s + 1.5s timeout = 13.5s), with `ds_ping_reply_codes` treating only 200 as active and 3 failures marking a node inactive.
      - REGISTER is hashed on the From user, so an AOR sticks to one node while it is active.
      - Other initial requests use round robin over active nodes.
