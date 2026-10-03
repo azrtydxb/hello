@@ -175,7 +175,7 @@ The `docs/ha.md` table is normative. Its key rows:
   - Phones whose bindings were stored through it stay reachable: the Path points through Kamailio, and their bindings live in Valkey.
   - Its calls lose signalling (Level 4 is out of scope) and disappear from the live view within their 30s TTL.
 - **Valkey primary dies:**
-  - Sentinel promotes the replica (in the lab, under 10s with `down-after-milliseconds` 3000), and Hello reconnects.
+  - Sentinel promotes the replica (in the lab, about 10s with `down-after-milliseconds` 5000: 5s to detect the outage plus about 5s of promotion), and Hello reconnects.
   - Until then, state operations get 503 and nodes go UNHEALTHY.
   - Within 15s of promotion, nodes are READY again.
 - **PostgreSQL down:**

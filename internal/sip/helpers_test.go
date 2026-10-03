@@ -439,7 +439,8 @@ type phone struct {
 	mu     sync.Mutex
 	callee calleeFn
 	// reinviteHold, when set, delays the 200 to re-INVITE/UPDATE until
-	// closed; reinviteAnswered is when the last such 200 was sent.
+	// closed; reinviteAnswered is stamped just before that 200 goes out, so
+	// a BYE arriving at any phone is never before it.
 	reinviteHold     chan struct{}
 	reinviteAnswered time.Time
 	byeAt            time.Time
@@ -570,15 +571,19 @@ func (p *phone) onReinvite(req *sip.Request, tx sip.ServerTransaction) {
 	if hold != nil {
 		<-hold // the test decides when the 200 goes out
 	}
+	// Stamp before the 200 goes out: a BYE can only arrive after this
+	// instant, so a test that has seen the BYE has also seen this stamp.
+	// Stamping after tx.Respond raced the reader: a starved answerer could
+	// be descheduled between the send and the stamp, past the reader.
+	p.mu.Lock()
+	p.reinviteAnswered = time.Now()
+	p.mu.Unlock()
 	res := sip.NewResponseFromRequest(req, 200, "OK", req.Body())
 	if ct := req.ContentType(); ct != nil {
 		res.AppendHeader(sip.HeaderClone(ct))
 	}
 	res.AppendHeader(sip.HeaderClone(&p.contact))
 	_ = tx.Respond(res)
-	p.mu.Lock()
-	p.reinviteAnswered = time.Now()
-	p.mu.Unlock()
 }
 
 func (p *phone) onAck(req *sip.Request, tx sip.ServerTransaction) {

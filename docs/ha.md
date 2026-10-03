@@ -164,7 +164,7 @@ carry no calls.
   later.
   - Run an odd number of Sentinels, at least three, with quorum 2, on separate
     hosts or zones, so a majority survives one failure.
-  - Set `down-after-milliseconds` to about 5000. The lab uses 3000, and
+  - Set `down-after-milliseconds` to about 5000. The lab uses 5000, and
     promotion completes in about 5 seconds.
   - Enable `resolve-hostnames` and `announce-hostnames` when addresses change
     (containers, Kubernetes), and name Valkey and Sentinel by hostname.
