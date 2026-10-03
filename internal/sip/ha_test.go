@@ -3,6 +3,7 @@ package sip
 import (
 	"context"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -109,11 +110,8 @@ func TestDrainReleasesTrunkLeases(t *testing.T) {
 	if shared.holder(1) != "sip-a" {
 		t.Fatal("lease moved without a drain")
 	}
-	nodeA.srv.Drain()
-	if shared.holder(1) != "" && shared.holder(1) != "sip-b" {
-		t.Fatalf("lease still held by %s after the drain returned", shared.holder(1))
-	}
 	start := time.Now()
+	nodeA.srv.Drain()
 	eventually(t, "node B takes over", func() bool { return shared.holder(1) == "sip-b" })
 	if d := time.Since(start); d > 2*time.Second {
 		t.Fatalf("takeover took %s: the lease was not released, it expired", d)
@@ -192,6 +190,13 @@ func TestOptionsSelfProbe(t *testing.T) {
 		}
 		if tc.code == 503 && (res.GetHeader("Retry-After") == nil || res.GetHeader("Retry-After").Value() != "5") {
 			t.Fatalf("probe in %s: no Retry-After: 5", tc.state)
+		}
+		// Kamailio probes sip:hello-sip-N:5060 whatever the advertised
+		// address is: no user part, another host.
+		kam := sip.NewRequest(sip.OPTIONS, sip.Uri{Scheme: "sip", Host: "hello-sip-1", Port: 5060})
+		kam.SetDestination(pbx.addr)
+		if res := p.do(kam); res.StatusCode != tc.code {
+			t.Fatalf("Kamailio-style probe in %s = %d, want %d", tc.state, res.StatusCode, tc.code)
 		}
 		lc.set(cluster.Draining, "reason")
 		if res := p.do(options(p)); res.StatusCode != 200 {
@@ -391,5 +396,117 @@ func TestDrainTimeoutWaitsForReInvite(t *testing.T) {
 				t.Fatalf("CDR = %+v", cd)
 			}
 		})
+	}
+}
+
+// TestNotReadyRefusesNewWork fails if a JOINING or UNHEALTHY node accepts
+// a new INVITE or REGISTER instead of answering 503 Retry-After: 5, or if a
+// READY node refuses them.
+func TestNotReadyRefusesNewWork(t *testing.T) {
+	lc := &fakeLifecycle{state: cluster.Ready}
+	pbx := startPBX(t, ringAllDevices(), withLifecycle(lc))
+	a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
+	a.register(t)
+	b.register(t)
+	for _, st := range []cluster.State{cluster.Joining, cluster.Unhealthy} {
+		lc.set(st, "valkey: unreachable")
+		for what, req := range map[string]*sip.Request{"INVITE": a.inviteReq("200"), "REGISTER": a.registerReq(300)} {
+			res := a.do(req)
+			if res.StatusCode != 503 || res.GetHeader("Retry-After") == nil || res.GetHeader("Retry-After").Value() != "5" {
+				t.Fatalf("%s in %s = %d %v, want 503 Retry-After: 5", what, st, res.StatusCode, res.GetHeader("Retry-After"))
+			}
+		}
+	}
+	lc.set(cluster.Ready, "")
+	if res := a.do(a.registerReq(300)); res.StatusCode == 503 {
+		t.Fatal("REGISTER refused while READY")
+	}
+}
+
+// TestSelfProbeHidesReason fails if the self-probe's 503 carries the
+// state's reason (check errors with internal addresses) instead of only
+// the state.
+func TestSelfProbeHidesReason(t *testing.T) {
+	lc := &fakeLifecycle{state: cluster.Unhealthy, reason: "valkey: dial tcp 10.9.8.7:6379: connection refused"}
+	pbx := startPBX(t, nil, withLifecycle(lc))
+	p := newPhone(t, pbx, "x", "x")
+	req := sip.NewRequest(sip.OPTIONS, sip.Uri{Scheme: "sip", Host: "hello-sip-1", Port: 5060})
+	req.SetDestination(pbx.addr)
+	res := p.do(req)
+	if res.StatusCode != 503 {
+		t.Fatalf("probe = %d, want 503", res.StatusCode)
+	}
+	w := res.GetHeader("Warning")
+	if w == nil || w.Value() != `399 hello "UNHEALTHY"` {
+		t.Fatalf("Warning = %v, want the state only", w)
+	}
+	if strings.Contains(res.String(), "10.9.8.7") {
+		t.Fatal("probe response leaks the check error")
+	}
+}
+
+// TestDrainTimeoutDuringAnswer fails if a call whose fork has won but
+// which is not yet marked connected when the drain timeout hangs up
+// survives it: it must end (caller 503, callee BYE) with a CDR, side
+// system, reason "drain timeout", and leave no call counted.
+func TestDrainTimeoutDuringAnswer(t *testing.T) {
+	pbx := startPBX(t, ringAllDevices())
+	a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
+	a.register(t)
+	b.register(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	hook := func() {
+		close(entered)
+		<-release
+	}
+	pbx.srv.answerHook.Store(&hook)
+	res := dial(t.Context(), a, "200")
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("call never answered")
+	}
+	pbx.srv.HangupAll("drain timeout")
+	close(release)
+	if rr := waitCall(t, res); responseCode(rr.err) != 503 {
+		t.Fatalf("caller got %v, want 503", rr.err)
+	}
+	waitReq(t, b.byes, "BYE to the callee")
+	if cd := pbx.nextCDR(t); cd.TerminationSide != "system" || cd.FailureReason != "drain timeout" {
+		t.Fatalf("CDR = %+v", cd)
+	}
+	eventually(t, "no calls left", func() bool { return pbx.srv.ActiveCalls() == 0 })
+}
+
+// TestDrainDoesNotWaitForUnregister fails if Drain blocks on the trunk
+// holders' unregisters (it runs in the lifecycle's OnChange, before
+// DRAINING is published), or if they run one after another: with three
+// carriers that never answer the unregister, every lease must be released
+// within one unregister timeout (5s), not three.
+func TestDrainDoesNotWaitForUnregister(t *testing.T) {
+	shared := newFakeTrunkState()
+	var trunks []routing.Trunk
+	var carriers []*carrier
+	for i := range 3 {
+		cr := newCarrier(t, "acct", "pw")
+		cr.silentUnreg.Store(true)
+		carriers = append(carriers, cr)
+		trunks = append(trunks, cr.trunk(int64(i+1), "carrier-"+strconv.Itoa(i), "registration"))
+	}
+	r := &fakeRouter{trunks: trunks}
+	node := startPBX(t, nil, trunkCfg(shared), withRouter(r, nil), func(c *Config, _ *Deps) { c.NodeID = "sip-a" })
+	for i, cr := range carriers {
+		eventually(t, "trunk registered", func() bool { return shared.holder(int64(i+1)) == "sip-a" && len(cr.registrations()) > 0 })
+	}
+	start := time.Now()
+	node.srv.Drain()
+	if d := time.Since(start); d > 500*time.Millisecond {
+		t.Fatalf("Drain blocked %s on the unregisters", d)
+	}
+	eventually(t, "every lease released", func() bool {
+		return shared.holder(1) == "" && shared.holder(2) == "" && shared.holder(3) == ""
+	})
+	if d := time.Since(start); d > 7*time.Second {
+		t.Fatalf("leases released after %s: the unregisters ran serially", d)
 	}
 }

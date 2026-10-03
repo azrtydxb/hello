@@ -22,7 +22,7 @@ type contactReq struct {
 // handleRegister authenticates the device, applies its contacts to the AOR
 // and answers with every current binding (RFC 3261 §10.3).
 func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
-	if s.refuseIfDraining(req, tx) {
+	if s.refuseIfNotReady(req, tx) {
 		return
 	}
 	dev, _, ok := s.authenticate(req, tx)

@@ -61,13 +61,12 @@ type call struct {
 	connected   bool
 	ended       bool
 	hungUp      bool
-	// inDialog counts re-INVITE/UPDATE relays in progress; inDialogIdle
-	// is closed when it drops to 0 for a waiter.
-	inDialog     int
-	inDialogIdle chan struct{}
-	lateAck      bool // the winner's ACK waits for the caller's (late offer)
-	ringTime     time.Time
-	answerTime   time.Time
+	// inDialog counts re-INVITE/UPDATE relays in progress. Add happens
+	// under mu while the call is not being ended, so never after Wait.
+	inDialog   sync.WaitGroup
+	lateAck    bool // the winner's ACK waits for the caller's (late offer)
+	ringTime   time.Time
+	answerTime time.Time
 	// Routing detail for the CDR; trace is the decision's trace extended
 	// with this node's attempts.
 	direction string
@@ -141,7 +140,7 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		s.handleInDialog(req, tx)
 		return
 	}
-	if s.refuseIfDraining(req, tx) {
+	if s.refuseIfNotReady(req, tx) {
 		return
 	}
 	if _, ok := s.lookup(req.CallID().Value()); ok {
@@ -507,13 +506,26 @@ func (c *call) answer(w *leg) {
 		c.lateAck = true // the caller's ACK will carry the answer
 		c.mu.Unlock()
 	}
+	if h := c.s.answerHook.Load(); h != nil {
+		(*h)()
+	}
+	// An abort (drain timeout) that came after the fork won is honoured
+	// here: terminate read connected before it was set, so nothing else
+	// would end this call. Checked under mu with connected, so terminate
+	// either sees the call connected or this sees the abort.
 	c.mu.Lock()
 	cancelled := c.isCancelled
-	c.connected = !cancelled
+	aborted := closed(c.aborted)
+	c.connected = !cancelled && !aborted
 	c.mu.Unlock()
 	if cancelled {
 		w.bye()
 		c.end(sip.StatusRequestTerminated, cdr.SideCaller, "cancelled by caller", ResultCancelled)
+		return
+	}
+	if aborted {
+		w.bye()
+		c.abortCaller()
 		return
 	}
 	c.addTrace("Call established")
@@ -589,39 +601,33 @@ func (c *call) beginInDialog() bool {
 	if c.hungUp || c.ended {
 		return false
 	}
-	c.inDialog++
+	c.inDialog.Add(1)
 	return true
 }
 
-func (c *call) endInDialog() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.inDialog--
-	if c.inDialog == 0 && c.inDialogIdle != nil {
-		close(c.inDialogIdle)
-		c.inDialogIdle = nil
-	}
-}
+func (c *call) endInDialog() { c.inDialog.Done() }
 
 // waitInDialog waits, at most max, until no in-dialog transaction is being
 // relayed.
 func (c *call) waitInDialog(max time.Duration) {
-	c.mu.Lock()
-	if c.inDialog == 0 {
-		c.mu.Unlock()
-		return
-	}
-	if c.inDialogIdle == nil {
-		c.inDialogIdle = make(chan struct{})
-	}
-	idle := c.inDialogIdle
-	c.mu.Unlock()
+	idle := make(chan struct{})
+	go func() { c.inDialog.Wait(); close(idle) }()
 	t := time.NewTimer(max)
 	defer t.Stop()
 	select {
 	case <-idle:
 	case <-t.C:
 		c.s.log.Warn("ending a call with an in-dialog transaction still open", "correlation_id", c.id)
+	}
+}
+
+// closed reports whether ch is closed.
+func closed(ch chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
 	}
 }
 
