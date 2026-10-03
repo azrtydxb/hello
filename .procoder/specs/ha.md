@@ -62,13 +62,15 @@ Spec §17 makes HA Levels 1–3 mandatory for the first production-ready release
 - [S-5] **Cluster view.**
   - `GET /api/v1/cluster` returns the members, PostgreSQL and Valkey health (including Sentinel's current primary), the configuration revision, and each node's revision lag.
   - The UI Cluster page lays this out per §21, with drain and undrain actions.
-- [S-6] **Kamailio SIP balancer.** `deploy/kamailio/` ships a Kamailio 6.0 configuration and compose service. Kamailio:
-  - Load-balances phones across READY hello-sip nodes with `dispatcher`, probing each node with OPTIONS every 5s; a node answering 503 (draining) or nothing is out of rotation within 15s.
+- [S-6] **Kamailio SIP balancer.** `deploy/kamailio/` ships a Kamailio 6.0 configuration and compose service, on the pinned image `ghcr.io/kamailio/kamailio:6.0.8-bookworm` (amd64 only, emulated on Apple silicon). Kamailio:
+  - Load-balances phones across READY hello-sip nodes with `dispatcher`, probing each node with OPTIONS every 4s; a node answering 503 (draining) or nothing is out of rotation within 15s (3 failed probes × 4s + the 1.5s probe timeout).
   - Keeps REGISTER of the same AOR on the same node while it is healthy (hashing the From user).
   - Inserts `Path` (RFC 3327) on REGISTER, using `nathelper` for NAT keep-alive and received-address handling, so any Hello node reaches any phone through Kamailio.
+  - Listens on two sockets: phones on 5060 (host 5080, advertised as `KAMAILIO_PUBLIC_HOST`:`KAMAILIO_PUBLIC_PORT`, default `127.0.0.1:5080`) and Hello on `10.89.53.10:5070`. `Path` and `Record-Route` name the side each party can reach, so a dialog carries two Record-Routes.
   - Record-routes initial INVITEs, so in-dialog requests from either side cross it.
+  - Adds `;alias` to the Contact of dialog-forming requests and replies from phones (`set_contact_alias`), so in-dialog requests from Hello reach the phone's NAT binding.
   - Rate-limits REGISTER and INVITE per source IP (`pike`).
-  - Is stateless apart from its dispatcher view.
+  - Is stateless apart from its dispatcher view and a memory-only `usrloc` keep-alive list, which exists solely for `nathelper` pings to phones.
 - [S-7] **Hello behind a trusted edge.**
   - **Config:** `HELLO_SIP_TRUSTED_PROXIES` (CIDRs) lists the balancers. Only requests from them may carry a `Path` header, which the registrar then stores, and only they are trusted for source-IP and `received` information, through a `Via` they added.
   - **Throttling:** failed-auth throttling and trunk source validation use the original client address that Kamailio forwards (`X-Hello-Client`, set by Kamailio and stripped from untrusted sources). Without it, every phone would share Kamailio's IP.
@@ -136,7 +138,7 @@ Spec §17 makes HA Levels 1–3 mandatory for the first production-ready release
   - `GET /api/v1/cluster/nodes`
   - `POST /api/v1/cluster/nodes/{id}/drain`
   - `DELETE /api/v1/cluster/nodes/{id}/drain`
-- **SIP:** Kamailio on UDP 5080 (host) and 5060 (inside the network). The headers between Kamailio and Hello are `Path`, `Record-Route` and `X-Hello-Client`.
+- **SIP:** Kamailio on UDP 5080 (host) and 5060 (inside the network) for phones, and on `10.89.53.10:5070` for Hello. The headers between Kamailio and Hello are `Path`, `Record-Route` and `X-Hello-Client`.
 - **UI:** a Cluster page at `/cluster` with drain actions.
 - **Files:** `deploy/kamailio/kamailio.cfg` (with its dispatcher list or database), `docs/ha.md`, `test/integration/failure_test.go`.
 

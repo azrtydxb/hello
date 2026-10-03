@@ -51,19 +51,23 @@ Losing any single hello-sip node, the Valkey primary, PostgreSQL or the control 
    - It publishes `Draining` membership with the live call count.
 7. **Kamailio ↔ Hello** (every request Kamailio forwards to a Hello node):
    - **`X-Hello-Client: <ip>:<port>`:** the client's real source after Kamailio's NAT fix-up. Kamailio removes any `X-Hello-Client` arriving from outside.
-   - **REGISTER:** gets `Path: <sip:<kamailio-addr>;lr;received=...>` (path module, `add_path_received()`), so calls to the phone reach its NAT flow through Kamailio.
-   - **Initial INVITE from a phone:** Kamailio record-routes itself.
+   - **Sockets:** phones on 5060 (host 5080, advertised as `KAMAILIO_PUBLIC_HOST`:`KAMAILIO_PUBLIC_PORT`, default `127.0.0.1:5080`), Hello on `10.89.53.10:5070`. `Path` and `Record-Route` name the side each party can reach, so a dialog carries two Record-Routes.
+   - **REGISTER:** gets `Path: <sip:10.89.53.10:5070;lr;received=...>` (path module, `add_path_received()`), so calls to the phone reach its NAT flow through Kamailio.
+   - **Initial INVITE from a phone:** Kamailio record-routes itself (twice, one per socket).
+   - **Contacts from phones:** dialog-forming requests and replies get `;alias` (`set_contact_alias`); Kamailio resolves it on requests from Hello (`handle_ruri_alias`).
+   - **Keep-alive:** a memory-only `usrloc` list, fed from REGISTER replies, exists solely for `nathelper` OPTIONS pings to phones.
+   - **Image:** pinned `ghcr.io/kamailio/kamailio:6.0.8-bookworm` (amd64, emulated on Apple silicon).
    - **Trust:** Hello believes `X-Hello-Client` and stores client `Path` only when the datagram's source IP is in `TrustedProxies`. It uses `X-Hello-Client` as the source for the failed-auth throttle, trunk source validation and binding `Source`. Otherwise it ignores both headers and drops a client Path (the Phase 1 behaviour).
    - **Calls to a phone with a trusted Path:** go through the Path (Route header), in place of Hello's flow-token edge.
    - **Dispatcher:**
      - Set 1 holds every hello-sip node (`sip:hello-sip-N:5060`).
-     - OPTIONS probes every 5s, with `ds_ping_reply_codes` treating only 200 as active and 3 failures marking a node inactive.
+     - OPTIONS probes every 4s (inactive within 3 × 4s + 1.5s timeout = 13.5s), with `ds_ping_reply_codes` treating only 200 as active and 3 failures marking a node inactive.
      - REGISTER is hashed on the From user, so an AOR sticks to one node while it is active.
      - Other initial requests use round robin over active nodes.
      - A failed relay (timeout or 503) is retried once on the next active node (`ds_next_dst`).
 8. **Lab topology:**
    - **Valkey:** `valkey-1` (primary at start), `valkey-2` (replica) and `sentinel-1..3`, master set `hello`, `down-after-milliseconds 3000`, `failover-timeout 10000`. Every Hello service uses `HELLO_VALKEY_SENTINELS`.
-   - **Kamailio:** service `kamailio`, host UDP 5080 to 5060.
+   - **Kamailio:** service `kamailio`, host UDP 5080 to 5060, Hello-facing `10.89.53.10:5070`.
    - **Direct ports:** the hello-sip host ports 5060 and 5062 stay for direct-mode tests.
    - **Trusted proxy:** `HELLO_SIP_TRUSTED_PROXIES` is set to Kamailio's address, via a fixed IP on the compose network.
 
