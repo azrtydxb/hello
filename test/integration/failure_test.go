@@ -376,9 +376,12 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 	t.Cleanup(func() { restore(t, lc, node) })
 	// Runs first (LIFO): a node the test left draining comes back READY.
 	t.Cleanup(func() { undrain(lc, node) })
-	drained := time.Now()
 	lc.must("POST", "/api/v1/cluster/nodes/"+node+"/drain?force=true", nil, nil, 204)
 	lc.waitState(node, "DRAINING", 10*time.Second)
+	// The spec's 15s starts when the node starts failing (503 or gone),
+	// i.e. at DRAINING, not at the API call: the node then spends a few
+	// seconds finishing its drain before it exits.
+	drained := time.Now()
 
 	// New work goes elsewhere: Kamailio marks the node inactive...
 	dispatcherInactiveBy(t, node, drained.Add(15*time.Second))
@@ -427,11 +430,12 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 	}
 	lc.waitState(node, "READY", 30*time.Second)
 	// Steer the next call onto that node: draining the other node first.
-	otherDrained := time.Now()
 	lc.must("POST", "/api/v1/cluster/nodes/"+other+"/drain?force=true", nil, nil, 204)
 	// Cleanups run LIFO: cancel the drain first, then bring the node back.
 	t.Cleanup(func() { restore(t, lc, other) }) // with no calls it drained and exited
 	t.Cleanup(func() { undrain(lc, other) })
+	lc.waitState(other, "DRAINING", 10*time.Second)
+	otherDrained := time.Now() // failing starts at DRAINING, as above
 	dispatcherInactiveBy(t, other, otherDrained.Add(15*time.Second))
 	c2, e2 := lc.devices("desk")[0], lc.devices("desk")[0]
 	a2, b2 := kamPhone(t, c2), kamPhone(t, e2)
