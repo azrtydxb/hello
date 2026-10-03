@@ -103,8 +103,12 @@ func restore(t *testing.T, lc *labClient, node string) {
 }
 
 // undrain cancels a drain, ignoring a node that is not draining.
+// undrain cancels a drain request; 409 is fine, because a node with no
+// calls drains and exits at once, withdrawing its own request.
 func undrain(lc *labClient, node string) {
-	_ = lc.do("DELETE", "/api/v1/cluster/nodes/"+node+"/drain", nil, nil, 204)
+	if err := lc.do("DELETE", "/api/v1/cluster/nodes/"+node+"/drain", nil, nil, 204); err != nil {
+		_ = lc.do("DELETE", "/api/v1/cluster/nodes/"+node+"/drain", nil, nil, 409)
+	}
 }
 
 // callOK places a call from a to b (both through Kamailio) and hangs up.
@@ -431,7 +435,7 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 	dispatcherInactiveBy(t, other, otherDrained.Add(15*time.Second))
 	c2, e2 := lc.devices("desk")[0], lc.devices("desk")[0]
 	a2, b2 := kamPhone(t, c2), kamPhone(t, e2)
-	lc.must("DELETE", "/api/v1/cluster/nodes/"+other+"/drain", nil, nil, 204)
+	undrain(lc, other) // 409 is fine: it may already have exited call-free
 	got2 := answerNext(ctx, b2)
 	out2, err := a2.Dial(ctx, e2.Extension, sdpOffer)
 	if err != nil || out2.Status != 200 {
