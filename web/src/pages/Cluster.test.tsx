@@ -16,6 +16,7 @@ function member(id: string, over: Record<string, unknown> = {}) {
     registrations: 241,
     version: "0.3.0",
     configRevision: 1284,
+    revisionLag: 0,
     startedAt: ago(3600),
     heartbeat: ago(3),
     ...over,
@@ -61,6 +62,7 @@ describe("Cluster", () => {
             registrations: 96,
             version: "0.2.9",
             configRevision: 1281,
+            revisionLag: 3,
             heartbeat: ago(7),
           }),
           member("hello-control-1", {
@@ -123,6 +125,39 @@ describe("Cluster", () => {
     );
   });
 
+  it("shows unknown lag and revision while PostgreSQL is down, and the Valkey error", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cluster": () =>
+        json({
+          members: [member("hello-sip-1", { revisionLag: undefined })],
+          postgres: { up: false, error: "unavailable" },
+          valkey: {
+            up: false,
+            mode: "sentinel",
+            error: "members unavailable",
+          },
+          configRevision: null,
+        }),
+    });
+    renderApp("/cluster");
+
+    const one = await screen.findByRole("row", { name: /hello-sip-1/ });
+    expect(within(one).getAllByRole("cell")[6]).toHaveTextContent(
+      "— (rev 1284)",
+    );
+    expect(screen.getByText("Configuration revision:")).toHaveTextContent(
+      "Configuration revision: —",
+    );
+    const deps = screen.getByRole("table", { name: "Dependencies" });
+    expect(
+      within(deps).getByRole("row", { name: /PostgreSQL/ }),
+    ).toHaveTextContent("PostgreSQLDownunavailable");
+    expect(within(deps).getByRole("row", { name: /Valkey/ })).toHaveTextContent(
+      "ValkeyDownSentinel — members unavailable",
+    );
+  });
+
   it("refreshes every 5 seconds", async () => {
     const calls = mockApi({
       ...ME,
@@ -173,9 +208,13 @@ describe("Cluster", () => {
     expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual([
       "/api/v1/cluster/nodes/hello-sip-1/drain",
     ]);
-    // The page re-reads the cluster right away.
-    await waitFor(() =>
-      expect(within(rowOf("hello-sip-1")).getByText("Draining")).toBeVisible(),
+    // The page re-reads the cluster right away, well before the next poll.
+    await waitFor(
+      () =>
+        expect(
+          within(rowOf("hello-sip-1")).getByText("Draining"),
+        ).toBeVisible(),
+      { timeout: 2000 },
     );
   });
 

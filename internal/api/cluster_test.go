@@ -161,7 +161,8 @@ func TestClusterAPI(t *testing.T) {
 
 	before := len(e.audits())
 	c.must(http.StatusNotFound, "POST", "/api/v1/cluster/nodes/nope/drain", nil)
-	c.must(http.StatusNotFound, "DELETE", "/api/v1/cluster/nodes/nope/drain", nil)
+	c.must(http.StatusConflict, "DELETE", "/api/v1/cluster/nodes/nope/drain", nil)     // no request to withdraw
+	c.must(http.StatusNotFound, "DELETE", "/api/v1/cluster/nodes/bad%20id/drain", nil) // not a node ID
 	c.must(http.StatusNotFound, "POST", "/api/v1/cluster/nodes/bad%20id/drain", nil)
 	c.must(http.StatusConflict, "POST", "/api/v1/cluster/nodes/hello-sip-3/drain", nil)
 	c.must(http.StatusBadRequest, "POST", "/api/v1/cluster/nodes/hello-sip-1/drain?force=yes", nil)
@@ -183,6 +184,141 @@ func TestClusterAPI(t *testing.T) {
 	dc.must(http.StatusServiceUnavailable, "GET", "/api/v1/cluster/nodes", nil)
 	dc.must(http.StatusServiceUnavailable, "POST", "/api/v1/cluster/nodes/hello-sip-1/drain", nil)
 	dc.must(http.StatusServiceUnavailable, "GET", "/api/v1/registrations", nil)
+}
+
+// drainEnv is a cluster API over Valkey DB 8 with two READY SIP nodes.
+func drainEnv(t *testing.T) (*env, *client, *cluster.Store, valkey.Client) {
+	t.Helper()
+	addr := os.Getenv("HELLO_TEST_VALKEY_ADDR")
+	if addr == "" {
+		t.Skip("HELLO_TEST_VALKEY_ADDR not set")
+	}
+	vc, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(vc.Close)
+	ctx := context.Background()
+	if err := vc.Do(ctx, vc.B().Flushdb().Build()).Error(); err != nil {
+		t.Fatal(err)
+	}
+	lazy := NewLazyValkey(false)
+	lazy.Set(vc)
+	e := newEnvConfig(t, Config{Live: noLive{}, Cluster: lazy, Valkey: lazy}, nil)
+	members := cluster.New(vc)
+	now := time.Now().UTC()
+	for _, id := range []string{"hello-sip-1", "hello-sip-2"} {
+		if err := members.Publish(ctx, cluster.Member{ID: id, Kind: cluster.KindSIP, State: cluster.Ready, StartedAt: now, Heartbeat: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return e, e.login(), members, vc
+}
+
+// TestDrainGuardRequests fails if a SIP node with a pending drain request
+// (still published READY: it acts at its next heartbeat) counts as READY,
+// letting a second unforced drain empty the SIP tier, or if two concurrent
+// unforced drains both pass the guard.
+func TestDrainGuardRequests(t *testing.T) {
+	e, c, members, _ := drainEnv(t)
+	ctx := context.Background()
+	c.must(http.StatusNoContent, "POST", "/api/v1/cluster/nodes/hello-sip-1/drain", nil)
+	r := c.must(http.StatusConflict, "POST", "/api/v1/cluster/nodes/hello-sip-2/drain", nil)
+	if !strings.Contains(string(r.body), "would leave no READY SIP node") {
+		t.Fatalf("second drain: %s", r.body)
+	}
+	if ok, _ := members.DrainRequested(ctx, "hello-sip-2"); ok || len(e.audits()) != 1 {
+		t.Fatalf("refused drain written %v or audited %v", ok, e.audits())
+	}
+
+	for round := range 10 {
+		for _, id := range []string{"hello-sip-1", "hello-sip-2"} {
+			if err := members.CancelDrain(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		codes := make(chan int, 2)
+		var wg sync.WaitGroup
+		for _, id := range []string{"hello-sip-1", "hello-sip-2"} {
+			wg.Go(func() { codes <- c.do("POST", "/api/v1/cluster/nodes/"+id+"/drain", nil).code })
+		}
+		wg.Wait()
+		close(codes)
+		got := map[int]int{}
+		for code := range codes {
+			got[code]++
+		}
+		if got[http.StatusNoContent] != 1 || got[http.StatusConflict] != 1 {
+			t.Fatalf("round %d: concurrent drains answered %v, want one 204 and one 409", round, got)
+		}
+	}
+}
+
+// TestUndrainByID fails if a drain request for a node whose record and
+// tombstone have expired cannot be withdrawn, or if undraining a node with
+// no request (draining from SIGTERM) answers 204 and audits an undrain.
+func TestUndrainByID(t *testing.T) {
+	e, c, members, vc := drainEnv(t)
+	ctx := context.Background()
+	c.must(http.StatusNoContent, "POST", "/api/v1/cluster/nodes/hello-sip-1/drain", nil)
+	// SIGKILLed while draining; its tombstone has expired since.
+	for _, k := range []string{"hello:member:hello-sip-1", "hello:member:tomb:hello-sip-1"} {
+		if err := vc.Do(ctx, vc.B().Del().Key(k).Build()).Error(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.must(http.StatusNoContent, "DELETE", "/api/v1/cluster/nodes/hello-sip-1/drain", nil)
+	if ok, _ := members.DrainRequested(ctx, "hello-sip-1"); ok {
+		t.Fatal("drain request of an expired node stayed")
+	}
+	// hello-sip-2 drains from SIGTERM: DRAINING with no request.
+	now := time.Now().UTC()
+	if err := members.Publish(ctx, cluster.Member{ID: "hello-sip-2", Kind: cluster.KindSIP, State: cluster.Draining, StartedAt: now, Heartbeat: now}); err != nil {
+		t.Fatal(err)
+	}
+	r := c.must(http.StatusConflict, "DELETE", "/api/v1/cluster/nodes/hello-sip-2/drain", nil)
+	if !strings.Contains(string(r.body), "not drained by request") {
+		t.Fatalf("undrain without request: %s", r.body)
+	}
+	alice := "user:" + testUser
+	want := []auditRow{{alice, "drain", "node", "hello-sip-1"}, {alice, "undrain", "node", "hello-sip-1"}}
+	if fmt.Sprint(e.audits()) != fmt.Sprint(want) {
+		t.Fatalf("audit = %v, want %v", e.audits(), want)
+	}
+}
+
+// TestDrainLock fails if the drain lock can be taken twice, is not
+// released by unlock, or a waiter does not give up when its context ends.
+func TestDrainLock(t *testing.T) {
+	addr := os.Getenv("HELLO_TEST_VALKEY_ADDR")
+	if addr == "" {
+		t.Skip("HELLO_TEST_VALKEY_ADDR not set")
+	}
+	vc, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(vc.Close)
+	lazy := NewLazyValkey(false)
+	lazy.Set(vc)
+	unlock, err := lazy.LockDrains(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	short, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if _, err := lazy.LockDrains(short); err == nil {
+		t.Fatal("drain lock taken twice")
+	}
+	unlock()
+	unlock2, err := lazy.LockDrains(context.Background())
+	if err != nil {
+		t.Fatalf("lock not released: %v", err)
+	}
+	unlock2()
+	if _, err := NewLazyValkey(false).LockDrains(context.Background()); err == nil {
+		t.Fatal("unconnected lock succeeded")
+	}
 }
 
 // fakeCluster is an in-memory ClusterStore and MemberStore.
@@ -213,6 +349,14 @@ func (f *fakeCluster) CancelDrain(_ context.Context, id string) error {
 	delete(f.drains, id)
 	return nil
 }
+
+func (f *fakeCluster) DrainRequested(_ context.Context, id string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.drains[id], nil
+}
+
+func (f *fakeCluster) LockDrains(context.Context) (func(), error) { return func() {}, nil }
 
 func (f *fakeCluster) Publish(_ context.Context, m cluster.Member) error {
 	f.mu.Lock()

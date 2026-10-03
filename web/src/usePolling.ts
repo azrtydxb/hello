@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { errorMessage } from "./api";
 
 /** What a polled page shows: first load, last result, or an error (with the last data). */
@@ -7,16 +7,22 @@ export type PollState<T> =
   | { status: "error"; message: string; data?: T }
   | { status: "ready"; data: T; updatedAt: Date };
 
+/** A poll state plus `reload`, which loads again at once (e.g. after a change). */
+export type Polled<T> = PollState<T> & { reload: () => void };
+
 /**
  * Calls `load` now and then every `intervalMs` after each call settles, so
  * slow responses never overlap. Stops (and aborts) on unmount. `load` must be
- * stable (module-level or memoised).
+ * stable (module-level or memoised). `reload()` aborts any call in flight and
+ * loads again immediately, keeping the data shown meanwhile.
  */
 export function usePolling<T>(
   load: (signal: AbortSignal) => Promise<T>,
   intervalMs: number,
-): PollState<T> {
+): Polled<T> {
   const [state, setState] = useState<PollState<T>>({ status: "loading" });
+  const [generation, setGeneration] = useState(0);
+  const reload = useCallback(() => setGeneration((g) => g + 1), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -45,9 +51,9 @@ export function usePolling<T>(
       controller.abort();
       clearTimeout(timer);
     };
-  }, [load, intervalMs]);
+  }, [load, intervalMs, generation]);
 
-  return state;
+  return { ...state, reload };
 }
 
 /** Refresh interval of the live pages (Registrations, Active Calls). */
