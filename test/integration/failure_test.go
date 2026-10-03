@@ -336,6 +336,8 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 	// Steer the next call onto that node: draining the other node first.
 	other := otherNode(node)
 	lc.must("POST", "/api/v1/cluster/nodes/"+other+"/drain?force=true", nil, nil, 204)
+	// Cleanups run LIFO: cancel the drain first, then bring the node back.
+	t.Cleanup(func() { restore(t, lc, other) }) // with no calls it drained and exited
 	t.Cleanup(func() { _ = lc.do("DELETE", "/api/v1/cluster/nodes/"+other+"/drain", nil, nil, 204) })
 	time.Sleep(15 * time.Second)
 	c2, e2 := lc.devices("desk")[0], lc.devices("desk")[0]
