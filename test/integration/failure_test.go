@@ -470,7 +470,11 @@ func TestValkeyFailover(t *testing.T) {
 	t.Cleanup(func() { labCompose(t, "up", "-d", "--wait", before) })
 	labCompose(t, "kill", before)
 	var after string
-	eventually(t, 20*time.Second, "sentinels promote the replica", func() error {
+	// Promotion itself has no spec bound (docs/ha.md bounds readiness at 15 s
+	// from promotion, checked below), and a Sentinel aborts a promotion that
+	// does not finish within its 10 s failover-timeout, then waits before it
+	// retries; a busy runner can push the whole promotion well past 20 s.
+	eventually(t, 60*time.Second, "sentinels promote the replica", func() error {
 		after = valkeyPrimary(t)
 		if after == before || after == "" {
 			return fmt.Errorf("primary still %q", after)
@@ -683,9 +687,11 @@ func readyz(t *testing.T, url string) int {
 	return resp.StatusCode
 }
 
-// valkeyPrimary asks a Sentinel which service is the primary. Sentinels
+// valkeyPrimary asks the Sentinels which service is the primary. Sentinels
 // run with announce-hostnames and the servers announce their service names,
-// so the reply is a name; the next Sentinel is asked only on an error.
+// so the reply is a name. One Sentinel's stale or unmatchable answer is not
+// proof: every Sentinel is asked before "" is returned, so a single exec or
+// unmarshal hiccup cannot look like "no promotion".
 func valkeyPrimary(t *testing.T) string {
 	t.Helper()
 	for _, s := range []string{"sentinel-1", "sentinel-2", "sentinel-3"} {
@@ -696,14 +702,13 @@ func valkeyPrimary(t *testing.T) string {
 		var addr []string
 		if err := json.Unmarshal(out, &addr); err != nil || len(addr) == 0 {
 			t.Logf("%s: get-master-addr-by-name = %q", s, out)
-			return ""
+			continue
 		}
 		for _, svc := range []string{"valkey-1", "valkey-2"} {
 			if addr[0] == svc {
 				return svc
 			}
 		}
-		return ""
 	}
 	return ""
 }
