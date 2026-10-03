@@ -468,7 +468,11 @@ func TestValkeyFailover(t *testing.T) {
 	rec := newRecovery(t, lc)
 	before := valkeyPrimary(t)
 	t.Cleanup(func() { labCompose(t, "up", "-d", "--wait", before) })
-	labCompose(t, "kill", before)
+	// stop, not kill: a stopped primary stays down whatever restart policy the
+	// lab ever gains. The old primary must stay down through the promotion: it
+	// has no replicaof on disk, so if it came back early it would boot
+	// claiming MASTER and race the Sentinels.
+	labCompose(t, "stop", before)
 	var after string
 	// Promotion itself has no spec bound (docs/ha.md bounds readiness at 15 s
 	// from promotion, checked below), and a Sentinel aborts a promotion that
@@ -503,6 +507,17 @@ func TestValkeyFailover(t *testing.T) {
 			}
 		}
 	}
+	// The restarted old primary rejoins as a replica (docs/ha.md failure
+	// table): bring it back and check the Sentinels do not hand the primary
+	// role back to it. It has no replicaof on disk, so it boots claiming
+	// MASTER; the Sentinels must convert it before it can do damage.
+	labCompose(t, "up", "-d", "--wait", before)
+	eventually(t, 60*time.Second, "the returned old primary stays a replica", func() error {
+		if p := valkeyPrimary(t); p != after {
+			return fmt.Errorf("primary %q, want %s", p, after)
+		}
+		return nil
+	})
 }
 
 func TestPostgresOutage(t *testing.T) {
@@ -687,13 +702,18 @@ func readyz(t *testing.T, url string) int {
 	return resp.StatusCode
 }
 
-// valkeyPrimary asks the Sentinels which service is the primary. Sentinels
-// run with announce-hostnames and the servers announce their service names,
-// so the reply is a name. One Sentinel's stale or unmatchable answer is not
-// proof: every Sentinel is asked before "" is returned, so a single exec or
-// unmarshal hiccup cannot look like "no promotion".
+// valkeyPrimary asks the Sentinels which service is the primary and returns
+// the answer a quorum of two agrees on; a lone answer counts only when the
+// other Sentinels could not be asked. Sentinels run with announce-hostnames
+// and the servers announce their service names, so replies are names. A
+// Sentinel that did not lead a promotion learns of the switch by polling the
+// new primary's INFO, so under load a laggard can keep answering with the
+// old primary for a long time — and the laggard is always queried first, so
+// taking the first answer reads a finished promotion as "no promotion".
 func valkeyPrimary(t *testing.T) string {
 	t.Helper()
+	votes := map[string]int{}
+	solo := ""
 	for _, s := range []string{"sentinel-1", "sentinel-2", "sentinel-3"} {
 		out, err := compose("exec", "-T", s, "valkey-cli", "-p", "26379", "--json", "SENTINEL", "get-master-addr-by-name", "hello").Output()
 		if err != nil {
@@ -706,11 +726,22 @@ func valkeyPrimary(t *testing.T) string {
 		}
 		for _, svc := range []string{"valkey-1", "valkey-2"} {
 			if addr[0] == svc {
-				return svc
+				votes[svc]++
+				if solo == "" {
+					solo = svc
+				}
 			}
 		}
 	}
-	return ""
+	if len(votes) > 1 {
+		t.Logf("sentinels disagree on the primary: %v", votes)
+	}
+	for _, svc := range []string{"valkey-1", "valkey-2"} {
+		if votes[svc] >= 2 {
+			return svc
+		}
+	}
+	return solo
 }
 
 // Kamailio's address on the network it shares with the SIP nodes: the Path
