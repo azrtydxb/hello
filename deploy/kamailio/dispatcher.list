@@ -1,10 +1,14 @@
 # Kamailio dispatcher destinations (plan contract 7): set 1 is every
-# hello-sip node, by compose service name. Format:
+# hello-sip node, by its fixed IP on the edge network. Format:
 #   setid destination flags priority attributes
 # Flags 0: start active; probing (ds_probing_mode 1) then keeps each
-# destination's state from its OPTIONS answers. The names resolve through
-# the kamailio service's extra_hosts (fixed IPs on the edge network), so a
-# stopped node never disappears from the list. Phase 6 replaces this file
-# with a dynamic source.
-1 sip:hello-sip-1:5060 0 0 duid=hello-sip-1
-1 sip:hello-sip-2:5060 0 0 duid=hello-sip-2
+# destination's state from its OPTIONS answers. Addresses, not names:
+# Kamailio resolves names through Docker's DNS only (it ignores
+# extra_hosts), a stopped container has no DNS record, and with
+# ds_load_mode 1 an unresolvable entry is fatal at startup, so a restart
+# while one node is down would take the whole edge down. An IP always
+# loads; a stopped node is simply probed inactive until it answers again.
+# The duid is the compose service name. Phase 6 replaces this file with a
+# dynamic source.
+1 sip:10.89.53.11:5060 0 0 duid=hello-sip-1
+1 sip:10.89.53.12:5060 0 0 duid=hello-sip-2
