@@ -117,3 +117,8 @@
 - Kamailio dispatcher as the SIP-aware balancer, shipped and configured in deploy/
 - A Hello-built Go balancer (hello-lb) shipped as a production component
 - Envoy UDP proxy (L4) with active health checks
+
+## Phase 3 delivery
+
+- Push phase-3-ha and open a PR to main
+- Hold for your review first
