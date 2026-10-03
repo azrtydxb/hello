@@ -16,11 +16,12 @@ cd "$(dirname "$0")/../.."
 project=${HELLO_LAB_PROJECT:-hello}
 dc() { docker compose -p "$project" -f deploy/docker-compose/compose.yaml "$@"; }
 
-# dispatcher prints "uri=flags" for each destination (AP active, IP
-# inactive, TP trying; P is probing).
+# dispatcher prints "node=flags" for each destination, the node being its
+# duid (the compose service name; the URI is the node's IP). Flags: AP
+# active, IP inactive, TP trying; P is probing.
 dispatcher() {
 	dc exec -T kamailio kamcmd dispatcher.list |
-		awk '/URI:/ {u = $2} /FLAGS:/ {printf "%s=%s ", u, $2} END {print ""}'
+		awk '/FLAGS:/ {f = $2} /DUID:/ {printf "%s=%s ", $2, f} END {print ""}'
 }
 
 primary() {
@@ -41,7 +42,7 @@ sip)
 	t0=$(date +%s)
 	dc stop -t 0 "$node" >/dev/null 2>&1
 	echo "+0s stopped $node"
-	until dispatcher | grep -q "sip:$node:5060=I"; do
+	until dispatcher | grep -q "$node=I"; do
 		[ "$(since "$t0")" -gt 60 ] && {
 			echo "FAIL: $node still active after 60s"
 			exit 1
@@ -53,7 +54,7 @@ sip)
 	echo "+$(since "$t0")s REGISTER and calls through Kamailio OK with $node down"
 	t1=$(date +%s)
 	dc start "$node" >/dev/null 2>&1
-	until dispatcher | grep -q "sip:$node:5060=A"; do
+	until dispatcher | grep -q "$node=A"; do
 		[ "$(since "$t1")" -gt 90 ] && {
 			echo "FAIL: $node not active 90s after start"
 			exit 1

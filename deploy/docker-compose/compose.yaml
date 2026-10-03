@@ -207,6 +207,12 @@ services:
   # KAMAILIO_PUBLIC_HOST:PORT), UDP 5070 towards the hello-sip nodes, TCP
   # 9090 for /metrics (internal). Dispatcher state:
   #   docker compose exec kamailio kamcmd dispatcher.list
+  # The dispatcher list holds the nodes' fixed edge IPs (10.89.53.11/.12),
+  # not their names: see deploy/kamailio/dispatcher.list.
+  # The image's entrypoint ignores extra arguments, so a config check needs
+  # its own entrypoint:
+  #   docker run --rm --entrypoint kamailio -v "$PWD/deploy/kamailio:/etc/kamailio:ro" \
+  #     ghcr.io/kamailio/kamailio:6.0.8-bookworm -c -f /etc/kamailio/kamailio.cfg
   kamailio:
     image: ghcr.io/kamailio/kamailio:6.0.8-bookworm
     platform: linux/amd64
@@ -222,11 +228,6 @@ services:
       KAMAILIO_INVITE_TIMEOUT: "25000"
     volumes:
       - ../kamailio:/etc/kamailio:ro
-    # The dispatcher list names the nodes; fixed addresses keep a stopped
-    # node resolvable, so it stays in the list (inactive) and comes back.
-    extra_hosts:
-      - hello-sip-1:10.89.53.11
-      - hello-sip-2:10.89.53.12
     depends_on:
       hello-sip-1: { condition: service_healthy }
       hello-sip-2: { condition: service_healthy }
