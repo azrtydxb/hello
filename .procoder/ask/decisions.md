@@ -127,3 +127,9 @@
 
 - Squash-merge after CI/Copilot are clean and findings fixed, then start Phase 4 (PBX features)
 - Hold for your own review
+
+## Valkey failover test in CI
+
+- Pay for a larger runner (ubuntu-4-cores) for the images job; keep the full failover test gating CI
+- Keep the free 2-core runner; the failover test runs pre-merge locally and in CI only as a non-gating scheduled job
+- Keep the free runner; the failover test keeps trying to pass in CI with further environment tuning
