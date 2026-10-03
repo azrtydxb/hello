@@ -217,6 +217,9 @@ services:
       # another machine need this host's LAN IP here.
       KAMAILIO_PUBLIC_HOST: ${HELLO_KAMAILIO_PUBLIC_HOST:-127.0.0.1}
       KAMAILIO_PUBLIC_PORT: ${HELLO_KAMAILIO_PUBLIC_PORT:-5080}
+      # Above the SIP nodes' HELLO_SIP_RING_TIMEOUT (10s here): a caller
+      # whose node dies mid-ring gets 408 after this many ms.
+      KAMAILIO_INVITE_TIMEOUT: "25000"
     volumes:
       - ../kamailio:/etc/kamailio:ro
     # The dispatcher list names the nodes; fixed addresses keep a stopped
