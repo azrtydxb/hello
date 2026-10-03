@@ -122,3 +122,8 @@
 
 - Push phase-3-ha and open a PR to main
 - Hold for your review first
+
+## Merge PR #4
+
+- Squash-merge after CI/Copilot are clean and findings fixed, then start Phase 4 (PBX features)
+- Hold for your own review
