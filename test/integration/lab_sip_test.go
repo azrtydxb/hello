@@ -411,10 +411,8 @@ func TestSnapshotSurvivesDatabaseLoss(t *testing.T) {
 func TestAuthFailThrottle(t *testing.T) {
 	lc := newLabClient(t)
 	d := lc.devices("desk")[0]
-	t.Cleanup(func() {
-		labCompose(t, "exec", "-T", "valkey", "sh", "-c", "valkey-cli --scan --pattern 'hello:authfail:*' | xargs -r valkey-cli del")
-	})
-	labCompose(t, "exec", "-T", "valkey", "sh", "-c", "valkey-cli --scan --pattern 'hello:authfail:*' | xargs -r valkey-cli del")
+	t.Cleanup(func() { clearThrottle(t) })
+	clearThrottle(t) // on the current Valkey primary (Sentinel)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	nodes := []*sipua.Phone{phone(t, d, labSIP1), phone(t, d, labSIP2)}
