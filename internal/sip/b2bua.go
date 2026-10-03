@@ -61,9 +61,13 @@ type call struct {
 	connected   bool
 	ended       bool
 	hungUp      bool
-	lateAck     bool // the winner's ACK waits for the caller's (late offer)
-	ringTime    time.Time
-	answerTime  time.Time
+	// inDialog counts re-INVITE/UPDATE relays in progress; inDialogIdle
+	// is closed when it drops to 0 for a waiter.
+	inDialog     int
+	inDialogIdle chan struct{}
+	lateAck      bool // the winner's ACK waits for the caller's (late offer)
+	ringTime     time.Time
+	answerTime   time.Time
 	// Routing detail for the CDR; trace is the decision's trace extended
 	// with this node's attempts.
 	direction string
@@ -573,6 +577,54 @@ func (c *call) hangup(side string) {
 	}()
 }
 
+// inDialogWait bounds how long ending a call waits for an in-dialog
+// transaction being relayed (Timer B/F, 64*T1).
+const inDialogWait = 32 * time.Second
+
+// beginInDialog counts an in-dialog transaction (re-INVITE, UPDATE) being
+// relayed; false means the call is being ended and takes no new ones.
+func (c *call) beginInDialog() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.hungUp || c.ended {
+		return false
+	}
+	c.inDialog++
+	return true
+}
+
+func (c *call) endInDialog() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.inDialog--
+	if c.inDialog == 0 && c.inDialogIdle != nil {
+		close(c.inDialogIdle)
+		c.inDialogIdle = nil
+	}
+}
+
+// waitInDialog waits, at most max, until no in-dialog transaction is being
+// relayed.
+func (c *call) waitInDialog(max time.Duration) {
+	c.mu.Lock()
+	if c.inDialog == 0 {
+		c.mu.Unlock()
+		return
+	}
+	if c.inDialogIdle == nil {
+		c.inDialogIdle = make(chan struct{})
+	}
+	idle := c.inDialogIdle
+	c.mu.Unlock()
+	t := time.NewTimer(max)
+	defer t.Stop()
+	select {
+	case <-idle:
+	case <-t.C:
+		c.s.log.Warn("ending a call with an in-dialog transaction still open", "correlation_id", c.id)
+	}
+}
+
 // abort asks the setup goroutine to end a call that is not connected yet.
 func (c *call) abort(reason string) {
 	c.abortOnce.Do(func() {
@@ -615,6 +667,10 @@ func (c *call) endBoth(reason string) {
 	go func() {
 		defer c.release()
 		defer contain(c.s.log, "end both legs")
+		// A re-INVITE or UPDATE being relayed finishes first: the BYE
+		// follows its transaction's end, bounded by the transaction
+		// timeout (spec edge case "drain timeout during a re-INVITE").
+		c.waitInDialog(inDialogWait)
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -1117,6 +1173,12 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 		return
 	}
+	if !c.beginInDialog() {
+		// The call is being ended (BYE on its way): no new transactions.
+		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
+		return
+	}
+	defer c.endInDialog()
 	var (
 		out *sip.Request
 		do  func(context.Context, *sip.Request) (*sip.Response, error)

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -64,7 +62,7 @@ func TestClusterAPI(t *testing.T) {
 	if addr == "" {
 		t.Skip("HELLO_TEST_VALKEY_ADDR not set")
 	}
-	vc, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 6})
+	vc, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 8}) // DBs per package: livestate 0, api 3/4/8, cluster 5, lifecycle 6, sip 7
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,10 +315,8 @@ func TestClusterMetrics(t *testing.T) {
 	rev, revErr := int64(7), error(nil)
 	reg := prometheus.NewRegistry()
 	m := NewClusterMetrics(reg)
-	p := &Publisher{
-		ID: "hello-control-1", Heartbeat: 5 * time.Millisecond, Store: fc, Metrics: m,
-		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Required: map[string]func(context.Context) error{"postgres": func(context.Context) error { return nil }},
+	p := &ClusterPoller{
+		Every: 5 * time.Millisecond, Members: fc.Members, Metrics: m,
 		Revision: func(context.Context) (int64, error) { mu.Lock(); defer mu.Unlock(); return rev, revErr },
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -353,8 +349,8 @@ func TestClusterMetrics(t *testing.T) {
 	if n := series(m.RevisionLag); n != 3 {
 		t.Fatalf("%d lag series, want 3 (no lag for the OFFLINE node)", n)
 	}
-	if gauge(m.NodeState, "READY") != 1 || gauge(m.NodeState, "JOINING") != 0 {
-		t.Fatal("hello_node_state is not one-hot READY")
+	if p.LastRevision() != 7 {
+		t.Fatalf("cached revision %d, want 7", p.LastRevision())
 	}
 
 	// PostgreSQL down: lags keep their last values.
@@ -373,71 +369,6 @@ func TestClusterMetrics(t *testing.T) {
 	eventually("lag refresh", func() bool {
 		return gauge(m.RevisionLag, "hello-sip-1") == 3 && series(m.RevisionLag) == 1
 	})
-}
-
-// TestPublisherLifecycle fails if hello-control is not published JOINING
-// until PostgreSQL first answers, then READY, then UNHEALTHY (not JOINING)
-// while it fails, then DRAINING at shutdown with Leave afterwards; or if a
-// check's error text reaches the published reason.
-func TestPublisherLifecycle(t *testing.T) {
-	fc := &fakeCluster{drains: map[string]bool{}}
-	var mu sync.Mutex
-	pgErr := errors.New("dial tcp 10.0.0.9:5432: refused")
-	p := &Publisher{
-		ID: "hello-control-1", HTTPAddr: ":8081", Version: "v3", Heartbeat: 5 * time.Millisecond, Store: fc,
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Required: map[string]func(context.Context) error{"postgres": func(context.Context) error {
-			mu.Lock()
-			defer mu.Unlock()
-			return pgErr
-		}},
-		Revision: func(context.Context) (int64, error) { return 3, nil },
-	}
-	setPG := func(err error) { mu.Lock(); pgErr = err; mu.Unlock() }
-	states := func() []string {
-		fc.mu.Lock()
-		defer fc.mu.Unlock()
-		var out []string
-		for _, m := range fc.published {
-			s := string(m.State) + "(" + m.Reason + ")"
-			if len(out) == 0 || out[len(out)-1] != s {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	wait := func(n int) {
-		t.Helper()
-		deadline := time.Now().Add(2 * time.Second)
-		for len(states()) < n {
-			if time.Now().After(deadline) {
-				t.Fatalf("states = %v, want %d transitions", states(), n)
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { defer close(done); p.Run(ctx) }()
-	wait(1)
-	setPG(nil)
-	wait(2)
-	setPG(errors.New("dial tcp 10.0.0.9:5432: refused"))
-	wait(3)
-	cancel()
-	<-done
-	p.Leave(context.Background())
-	want := "[JOINING(waiting for postgres) READY() UNHEALTHY(postgres unavailable) DRAINING(shutting down)]"
-	if got := fmt.Sprint(states()); got != want {
-		t.Fatalf("states = %s, want %s", got, want)
-	}
-	fc.mu.Lock()
-	defer fc.mu.Unlock()
-	last := fc.published[len(fc.published)-1]
-	if last.Kind != cluster.KindControl || last.ConfigRevision != 3 || last.HTTPAddr != ":8081" || last.Version != "v3" ||
-		last.Heartbeat.IsZero() || fmt.Sprint(fc.left) != "[hello-control-1]" {
-		t.Fatalf("last record %+v, left %v", last, fc.left)
-	}
 }
 
 // series counts the label sets a vector currently exports.
