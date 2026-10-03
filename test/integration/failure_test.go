@@ -467,20 +467,27 @@ func TestValkeyFailover(t *testing.T) {
 	lc := newLabClient(t)
 	rec := newRecovery(t, lc)
 	before := valkeyPrimary(t)
+	if before == "" {
+		t.Fatal("no Valkey primary known to the Sentinels before the failover")
+	}
 	t.Cleanup(func() { labCompose(t, "up", "-d", "--wait", before) })
 	// stop, not kill: a stopped primary stays down whatever restart policy the
 	// lab ever gains. The old primary must stay down through the promotion: it
 	// has no replicaof on disk, so if it came back early it would boot
 	// claiming MASTER and race the Sentinels.
 	labCompose(t, "stop", before)
+	stopped := time.Now()
 	var after string
 	// Promotion itself has no spec bound (docs/ha.md bounds readiness at 15 s
 	// from promotion, checked below), and a Sentinel aborts a promotion that
 	// does not finish within its 10 s failover-timeout, then waits before it
 	// retries; a busy runner can push the whole promotion well past 20 s.
+	// Each attempt logs the full failover picture (sentinelDiagnose), so a
+	// failure shows the timeline instead of only the last answer.
 	eventually(t, 60*time.Second, "sentinels promote the replica", func() error {
 		after = valkeyPrimary(t)
 		if after == before || after == "" {
+			sentinelDiagnose(t, stopped)
 			return fmt.Errorf("primary still %q", after)
 		}
 		return nil
@@ -742,6 +749,69 @@ func valkeyPrimary(t *testing.T) string {
 		}
 	}
 	return solo
+}
+
+// sentinelDiagnose logs, during a promotion wait, everything needed to read
+// a failover timeline afterwards: each Sentinel's raw answer, valkey-2's
+// role, the containers' states and the Sentinels' state-machine events since
+// the primary was stopped. It is called once per failed promotion attempt,
+// so the test log doubles as the evidence when promotion does not happen.
+func sentinelDiagnose(t *testing.T, since time.Time) {
+	t.Helper()
+	for _, s := range []string{"sentinel-1", "sentinel-2", "sentinel-3"} {
+		out, err := compose("exec", "-T", s, "valkey-cli", "-p", "26379", "--raw", "SENTINEL", "get-master-addr-by-name", "hello").CombinedOutput()
+		if err != nil {
+			t.Logf("%s: get-master-addr-by-name errored: %v\n%s", s, err, out)
+			continue
+		}
+		t.Logf("%s: get-master-addr-by-name hello = %q", s, strings.Join(strings.Fields(string(out)), " "))
+		// ckquorum says directly whether this Sentinel can reach the
+		// odown quorum and names the usable Sentinels it gossips with;
+		// it is the first thing to read when promotion never starts.
+		ck, err := compose("exec", "-T", s, "valkey-cli", "-p", "26379", "--raw", "SENTINEL", "ckquorum", "hello").CombinedOutput()
+		if err != nil {
+			t.Logf("%s: ckquorum errored: %v\n%s", s, err, ck)
+			continue
+		}
+		t.Logf("%s: ckquorum hello = %s", s, strings.Join(strings.Fields(string(ck)), " "))
+	}
+	role, err := compose("exec", "-T", "valkey-2", "valkey-cli", "--raw", "ROLE").CombinedOutput()
+	if err != nil {
+		t.Logf("valkey-2 ROLE errored: %v\n%s", err, role)
+	} else {
+		t.Logf("valkey-2 ROLE = %s", strings.Fields(string(role))[0])
+	}
+	ps, err := compose("ps", "--format", "{{.Service}} state={{.State}} health={{.Health}}", "valkey-1", "valkey-2").CombinedOutput()
+	if err != nil {
+		t.Logf("compose ps valkey: %v\n%s", err, ps)
+	} else {
+		t.Logf("valkey containers: %s", strings.Join(strings.Fields(string(ps)), " | "))
+	}
+	events, err := compose("logs", "--since", since.Format(time.RFC3339), "sentinel-1", "sentinel-2", "sentinel-3").CombinedOutput()
+	if err != nil {
+		t.Logf("sentinel logs: %v\n%s", err, events)
+		return
+	}
+	var kept []string
+	for _, line := range strings.Split(string(events), "\n") {
+		for _, ev := range []string{"sdown", "odown", "switch-master", "vote-for-leader", "elected", "failover", "promoted", "reconf", "Selected", "tilt", "master_host"} {
+			if strings.Contains(line, ev) {
+				kept = append(kept, line)
+				break
+			}
+		}
+	}
+	if len(kept) == 0 {
+		t.Logf("no sentinel state-machine events since %s", since.Format(time.RFC3339))
+		return
+	}
+	// The log prefixes name the container; trim them to keep each line short.
+	for i, line := range kept {
+		if _, rest, ok := strings.Cut(line, "| "); ok {
+			kept[i] = rest
+		}
+	}
+	t.Logf("sentinel events since %s:\n\t%s", since.Format(time.RFC3339), strings.Join(kept, "\n\t"))
 }
 
 // Kamailio's address on the network it shares with the SIP nodes: the Path

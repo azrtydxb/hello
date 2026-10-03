@@ -95,11 +95,17 @@ x-sentinel: &sentinel
   volumes:
     - ../valkey/sentinel.conf:/etc/valkey/sentinel.conf:ro
   healthcheck:
+    # ckquorum, not get-master: get-master answers from the config alone, so
+    # it is healthy even when the Sentinel never connected to the primary or
+    # learned no peers — exactly the silent state where a later primary loss
+    # brings no sdown, no quorum and no promotion. ckquorum answers "OK n
+    # usable Sentinels" only once this one monitors "hello" and gossips with
+    # enough peers to reach the odown quorum and authorize a failover (the
+    # 30x2s retries give a slow runner's Sentinel mesh time to form before
+    # the lab is declared up; valkey-cli exits 0 for error replies, so the
+    # grep, not the exit code, decides).
     test:
-      [
-        "CMD-SHELL",
-        "valkey-cli -p 26379 sentinel get-master-addr-by-name hello | grep -q .",
-      ]
+      ["CMD-SHELL", "valkey-cli -p 26379 sentinel ckquorum hello | grep -q ^OK"]
     interval: 2s
     retries: 30
   networks: [state]
