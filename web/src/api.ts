@@ -683,6 +683,11 @@ export interface ClusterMember {
   registrations: number;
   version: string;
   configRevision: number;
+  /**
+   * Revisions this node's configuration is behind the current one; absent
+   * while the current revision cannot be read (PostgreSQL down).
+   */
+  revisionLag?: number;
   startedAt: string;
   heartbeat: string;
 }
@@ -695,8 +700,10 @@ export interface ClusterStatus {
     up: boolean;
     mode: "single" | "sentinel" | string;
     primary?: string;
+    error?: string;
   };
-  configRevision: number;
+  /** The current configuration revision; null while PostgreSQL is down. */
+  configRevision: number | null;
 }
 
 export const getCluster = (signal?: AbortSignal) =>

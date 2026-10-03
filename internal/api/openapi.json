@@ -1547,7 +1547,7 @@
             "description": "Drain even if no READY SIP node would remain"
           }
         ],
-        "description": "Writes a drain request the node acts on within 5s, and audits it (actor and node; action drain, or drain-force when forced). 409 when draining would leave no READY SIP node (repeat with ?force=true), or when the node is OFFLINE.",
+        "description": "Writes a drain request the node acts on within 5s, and audits it (actor and node; action drain, or drain-force when forced). 409 when draining would leave no READY SIP node, counting nodes with a pending drain request as not READY (repeat with ?force=true), or when the node is OFFLINE.",
         "responses": {
           "204": {
             "description": "Drain requested"
@@ -1588,13 +1588,16 @@
             "description": "The node's HELLO_NODE_ID"
           }
         ],
-        "description": "Withdraws the drain request and audits it (action undrain). A node that has started exiting still exits.",
+        "description": "Withdraws the drain request and audits it (action undrain). The node is not looked up, so a request for a node whose record has expired can still be withdrawn. 409 when no drain request exists (e.g. a node draining from SIGTERM). A node that has started exiting still exits.",
         "responses": {
           "204": {
             "description": "Drain cancelled"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"

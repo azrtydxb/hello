@@ -9,12 +9,18 @@ import (
 	"github.com/azrtydxb/hello/internal/cluster"
 )
 
-// ClusterStore is node membership and drain requests; *cluster.Store and
-// *LazyValkey implement it.
+// ClusterStore is node membership and drain requests; *LazyValkey
+// implements it.
 type ClusterStore interface {
 	Members(ctx context.Context) ([]cluster.Member, error)
 	RequestDrain(ctx context.Context, id string) error
 	CancelDrain(ctx context.Context, id string) error
+	DrainRequested(ctx context.Context, id string) (bool, error)
+	// LockDrains takes the cluster-wide drain lock, waiting for it until ctx
+	// ends; unlock releases it. Drain requests check-and-set under it, so
+	// two concurrent requests (on any hello-control node) cannot both pass
+	// the last-READY-SIP-node guard.
+	LockDrains(ctx context.Context) (unlock func(), err error)
 }
 
 // ValkeyStatus reports Valkey health for the cluster view.
@@ -134,17 +140,26 @@ func (s *server) drainTarget(w http.ResponseWriter, r *http.Request, ctx context
 
 // leavesNoReadySIP reports whether draining target would leave no READY
 // SIP node: Kamailio would then have no destination and every new call
-// would get 503.
-func leavesNoReadySIP(target cluster.Member, ms []cluster.Member) bool {
+// would get 503. A node with a drain request is not counted as READY even
+// while its published state still says so: it acts on the request only at
+// its next heartbeat.
+func (s *server) leavesNoReadySIP(ctx context.Context, target cluster.Member, ms []cluster.Member) (bool, error) {
 	if target.Kind != cluster.KindSIP {
-		return false
+		return false, nil
 	}
 	for _, m := range ms {
-		if m.Kind == cluster.KindSIP && m.State == cluster.Ready && m.ID != target.ID {
-			return false
+		if m.Kind != cluster.KindSIP || m.State != cluster.Ready || m.ID == target.ID {
+			continue
+		}
+		drained, err := s.Cluster.DrainRequested(ctx, m.ID)
+		if err != nil {
+			return false, err
+		}
+		if !drained {
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 // requestDrain is POST /api/v1/cluster/nodes/{id}/drain[?force=true].
@@ -160,6 +175,22 @@ func (s *server) requestDrain(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), liveTimeout)
 	defer cancel()
+	if !nodeIDRe.MatchString(r.PathValue("id")) {
+		writeError(w, http.StatusNotFound, "not_found", "node: not found")
+		return
+	}
+	if s.Cluster == nil {
+		s.liveDown(w, "request drain", errors.New("no membership store configured"))
+		return
+	}
+	// Check and write under the drain lock, so a concurrent request cannot
+	// pass the guard against the same membership.
+	unlock, err := s.Cluster.LockDrains(ctx)
+	if err != nil {
+		s.liveDown(w, "drain lock", err)
+		return
+	}
+	defer unlock()
 	target, ms, ok := s.drainTarget(w, r, ctx)
 	if !ok {
 		return
@@ -169,7 +200,12 @@ func (s *server) requestDrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := "drain"
-	if leavesNoReadySIP(target, ms) {
+	last, err := s.leavesNoReadySIP(ctx, target, ms)
+	if err != nil {
+		s.liveDown(w, "drain requests", err)
+		return
+	}
+	if last {
 		if !force {
 			writeError(w, http.StatusConflict, "conflict", "draining "+target.ID+
 				" would leave no READY SIP node, so new calls would fail; repeat with ?force=true to drain anyway")
@@ -194,26 +230,43 @@ func (s *server) requestDrain(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// cancelDrain is DELETE /api/v1/cluster/nodes/{id}/drain.
+// cancelDrain is DELETE /api/v1/cluster/nodes/{id}/drain. It does not
+// look the node up: a request for a node whose record and tombstone have
+// expired (killed while draining) must still be removable. 409 when there
+// is no request to withdraw, e.g. a node draining from SIGTERM.
 func (s *server) cancelDrain(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), liveTimeout)
 	defer cancel()
-	target, _, ok := s.drainTarget(w, r, ctx)
-	if !ok {
+	id := r.PathValue("id")
+	if !nodeIDRe.MatchString(id) {
+		writeError(w, http.StatusNotFound, "not_found", "node: not found")
 		return
 	}
-	if err := s.Cluster.CancelDrain(ctx, target.ID); err != nil {
+	if s.Cluster == nil {
+		s.liveDown(w, "cancel drain", errors.New("no membership store configured"))
+		return
+	}
+	requested, err := s.Cluster.DrainRequested(ctx, id)
+	if err != nil {
+		s.liveDown(w, "cancel drain", err)
+		return
+	}
+	if !requested {
+		writeError(w, http.StatusConflict, "conflict", "node "+id+" is not drained by request; nothing to cancel")
+		return
+	}
+	if err := s.Cluster.CancelDrain(ctx, id); err != nil {
 		s.liveDown(w, "cancel drain", err)
 		return
 	}
 	// As with drain: an unaudited cancel is undone.
-	if err := s.Store.Audit(r.Context(), actor(r).String(), "undrain", "node", target.ID); err != nil {
-		if rerr := s.Cluster.RequestDrain(context.WithoutCancel(r.Context()), target.ID); rerr != nil {
-			s.Log.Error("undrain: audit failed and the drain could not be restored", "node", target.ID, "error", rerr)
+	if err := s.Store.Audit(r.Context(), actor(r).String(), "undrain", "node", id); err != nil {
+		if rerr := s.Cluster.RequestDrain(context.WithoutCancel(r.Context()), id); rerr != nil {
+			s.Log.Error("undrain: audit failed and the drain could not be restored", "node", id, "error", rerr)
 		}
 		s.internal(w, "undrain: audit", err)
 		return
 	}
-	s.Log.Info("drain cancelled", "node", target.ID, "actor", actor(r).String())
+	s.Log.Info("drain cancelled", "node", id, "actor", actor(r).String())
 	w.WriteHeader(http.StatusNoContent)
 }

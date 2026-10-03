@@ -2,8 +2,12 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/livestate"
@@ -195,4 +199,48 @@ func (l *LazyValkey) Primary() string {
 		return ""
 	}
 	return primary(c.c.Mode(), c.c.Nodes())
+}
+
+// drainLockKey is the cluster-wide drain lock; drainLockTTL bounds how long
+// a crashed holder blocks other drains, and outlasts any request holding it
+// (liveTimeout).
+const (
+	drainLockKey = "hello:lock:drain"
+	drainLockTTL = 5 * time.Second
+)
+
+// unlockScript deletes the lock only if this holder still owns it.
+var unlockScript = valkey.NewLuaScript(`if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) end return 0`)
+
+// LockDrains implements ClusterStore: SET NX with a random token, retried
+// until ctx ends.
+func (l *LazyValkey) LockDrains(ctx context.Context) (func(), error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return nil, err
+	}
+	token := hex.EncodeToString(b[:])
+	for {
+		err := c.c.Do(ctx, c.c.B().Set().Key(drainLockKey).Value(token).Nx().Px(drainLockTTL).Build()).Error()
+		if err == nil {
+			break
+		}
+		if !valkey.IsValkeyNil(err) { // nil reply: held by someone else
+			return nil, fmt.Errorf("drain lock: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("drain lock: %w", ctx.Err())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	return func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), liveTimeout)
+		defer cancel()
+		_ = unlockScript.Exec(ctx, c.c, []string{drainLockKey}, []string{token}).Error()
+	}, nil
 }

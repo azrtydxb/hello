@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ApiError,
   drainNode,
@@ -24,13 +24,10 @@ const KIND_LABEL: Record<string, string> = {
   control: "Control",
 };
 
-/** How far a node's configuration lags the current revision. */
-export function revisionLag(current: number, member: ClusterMember): number {
-  return Math.max(0, current - member.configRevision);
-}
-
-function lagText(lag: number): string {
-  if (lag === 0) return "current";
+/** The server's revision lag; "—" when unknown (PostgreSQL down). */
+function lagText(lag: number | undefined): string {
+  if (lag === undefined) return "—";
+  if (lag <= 0) return "current";
   return `${lag} behind`;
 }
 
@@ -50,17 +47,8 @@ const canDrain = (m: ClusterMember) =>
 
 /** Cluster: nodes, their state and load, dependencies, and drain controls. */
 export function Cluster() {
-  // Changing the loader restarts polling at once (after a drain or undrain).
-  const [nonce, setNonce] = useState(0);
-  const load = useCallback(
-    (signal: AbortSignal) => {
-      void nonce;
-      return getCluster(signal);
-    },
-    [nonce],
-  );
-  const state = usePolling(load, LIVE_REFRESH_MS);
-  const refresh = useCallback(() => setNonce((n) => n + 1), []);
+  const state = usePolling(getCluster, LIVE_REFRESH_MS);
+  const { reload } = state;
   const [notice, setNotice] = useState<string | null>(null);
 
   const data: ClusterStatus | undefined =
@@ -136,7 +124,7 @@ export function Cluster() {
                       <td>{m.registrations}</td>
                       <td>{m.version}</td>
                       <td>
-                        {lagText(revisionLag(data.configRevision, m))}{" "}
+                        {lagText(m.revisionLag)}{" "}
                         <span className="muted">(rev {m.configRevision})</span>
                       </td>
                       <td>{heartbeatAge(m.heartbeat, now)}</td>
@@ -145,7 +133,7 @@ export function Cluster() {
                           member={m}
                           onDone={(message) => {
                             setNotice(message);
-                            refresh();
+                            reload();
                           }}
                         />
                       </td>
@@ -185,13 +173,15 @@ export function Cluster() {
                       , primary <code>{data.valkey.primary}</code>
                     </>
                   )}
+                  {data.valkey.error && <> — {data.valkey.error}</>}
                 </td>
               </tr>
             </tbody>
           </table>
 
           <p>
-            Configuration revision: <strong>{data.configRevision}</strong>
+            Configuration revision:{" "}
+            <strong>{data.configRevision ?? "—"}</strong>
           </p>
         </>
       )}
