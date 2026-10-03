@@ -1,6 +1,6 @@
 # `TestClusterAPI` in `internal/api` passes. It fails if `/api/v1/cluster` omits a member, state, load, version, revision lag, or dependency health, if a drain request is not audited, or if draining the last READY node is not warned.
 
-Status: open
+Status: done 2026-10-03
 Created: 2026-10-02
 Epic: ha
 Sprint: -
@@ -14,9 +14,10 @@ Phase 3 deliverable; see .procoder/specs/ha.md.
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
      true — the closer will ask for the evidence. -->
 
-- [ ] `TestClusterAPI` in `internal/api` passes. It fails if `/api/v1/cluster` omits a member, state, load, version, revision lag, or dependency health, if a drain request is not audited, or if draining the last READY node is not warned.
+- [x] `TestClusterAPI` in `internal/api` passes. It fails if `/api/v1/cluster` omits a member, state, load, version, revision lag, or dependency health, if a drain request is not audited, or if draining the last READY node is not warned.
 
 ## Evidence
 
-<!-- Filled at close time: the commands run and what their output proved,
-     one line per criterion. Empty evidence keeps the story open. -->
+Fingerprint: sha256:2fffa1560764ff2098c9b6c857e3ec7756494745257a7a4f42a7288b364063cf
+Produced: 51 bytes, exit 0
+Command: env HELLO_TEST_DATABASE_URL=$HELLO_TEST_DATABASE_URL HELLO_TEST_VALKEY_ADDR=$HELLO_TEST_VALKEY_ADDR go test -race -count=1 -run ^(TestClusterAPI|TestClusterMetrics|TestControlNodeLifecycle)$ ./internal/api/

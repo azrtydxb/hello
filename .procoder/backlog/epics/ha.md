@@ -1,9 +1,9 @@
 # ha
 
-Status: open
+Status: done 2026-10-03
 Created: 2026-10-02
 Milestone: phase-3-ha
-Spec: ha @ 6a06f3b67839
+Spec: ha @ 0c9f678da97e
 
 ## Description
 

@@ -86,65 +86,65 @@ Interfaces: contracts 1–3.
 Files: `internal/sip/`, `internal/snapshot/` (if needed), `internal/livestate/` (only if needed), `cmd/hello-sip/main.go`, a new `internal/lifecycle/` (state machine shared with hello-control; Task 3 reuses it after merge).
 Interfaces: contracts 1–7. Produces membership, the OPTIONS behaviour, draining and trusted-proxy handling.
 
-- [ ] Build `internal/lifecycle`: a state machine fed by readiness checks, the drain signal and shutdown. It publishes `cluster.Member` on each heartbeat and state change, drives `/readyz` and `hello_node_state`, and logs transitions. Test it with a fake clock and fake checks.
-- [ ] Wire it into hello-sip with `vkconn.New`, the membership publisher, a drain watcher (`DrainRequested` every 5s) and SIGTERM handling.
-- [ ] Draining per contract 6, with tests: a new INVITE or REGISTER gets 503 with Retry-After while in-dialog requests work; leases are released; the node exits when calls hit 0; the timeout sends BYE.
-- [ ] OPTIONS per contract 5, with a test.
-- [ ] Trusted proxies per contract 7: Path storage, `X-Hello-Client` as the source for throttle, binding and trunk source validation, and calls through a stored Path. Tests: a trusted source is honoured; an untrusted one has its headers ignored and Path dropped; failed auth keys on the client IP.
-- [ ] Metrics: `hello_node_state`, `hello_drain_active_calls`, `hello_valkey_failovers_total` (count reconnects that follow a primary change, which valkey-go exposes through `Mode` or `Nodes()`; if no event is exposed, compare the primary address on each heartbeat).
-- [ ] Run the gate and the Phase 1 and 2 lab suite.
+- [x] Build `internal/lifecycle`: a state machine fed by readiness checks, the drain signal and shutdown. It publishes `cluster.Member` on each heartbeat and state change, drives `/readyz` and `hello_node_state`, and logs transitions. Test it with a fake clock and fake checks.
+- [x] Wire it into hello-sip with `vkconn.New`, the membership publisher, a drain watcher (`DrainRequested` every 5s) and SIGTERM handling.
+- [x] Draining per contract 6, with tests: a new INVITE or REGISTER gets 503 with Retry-After while in-dialog requests work; leases are released; the node exits when calls hit 0; the timeout sends BYE.
+- [x] OPTIONS per contract 5, with a test.
+- [x] Trusted proxies per contract 7: Path storage, `X-Hello-Client` as the source for throttle, binding and trunk source validation, and calls through a stored Path. Tests: a trusted source is honoured; an untrusted one has its headers ignored and Path dropped; failed auth keys on the client IP.
+- [x] Metrics: `hello_node_state`, `hello_drain_active_calls`, `hello_valkey_failovers_total` (count reconnects that follow a primary change, which valkey-go exposes through `Mode` or `Nodes()`; if no event is exposed, compare the primary address on each heartbeat).
+- [x] Run the gate and the Phase 1 and 2 lab suite.
 
 ## Task 3: Control plane and cluster API (branch phase-3-control)
 
 Files: `internal/api/` (cluster routes, OpenAPI), `internal/store/` (only if an audit helper needs it), `cmd/hello-control/main.go`.
 Interfaces: consumes `cluster.Store` and contracts 1–4. Produces `GET /api/v1/cluster`, `GET /api/v1/cluster/nodes`, and `POST` and `DELETE /api/v1/cluster/nodes/{id}/drain`.
 
-- [ ] hello-control publishes its own membership (kind control) on a heartbeat through `vkconn`, and leaves cleanly on shutdown. Use a minimal publisher now; once Task 2 merges, switch to `internal/lifecycle`.
-- [ ] `GET /api/v1/cluster` returns:
+- [x] hello-control publishes its own membership (kind control) on a heartbeat through `vkconn`, and leaves cleanly on shutdown. Use a minimal publisher now; once Task 2 merges, switch to `internal/lifecycle`.
+- [x] `GET /api/v1/cluster` returns:
   - members, from `cluster.Store.Members`
   - PostgreSQL health
   - Valkey health and mode, plus the Sentinel primary when in Sentinel mode
   - the current configuration revision, and each member's lag
-- [ ] Drain and undrain: audited (actor, node), a 404 for unknown nodes, and a 409 warning when draining would leave no READY SIP node, unless `?force=true` is passed.
-- [ ] Add OpenAPI entries; `TestVersionAndOpenAPI` must still route every documented operation. Write `TestClusterAPI`.
-- [ ] Run the gate.
+- [x] Drain and undrain: audited (actor, node), a 404 for unknown nodes, and a 409 warning when draining would leave no READY SIP node, unless `?force=true` is passed.
+- [x] Add OpenAPI entries; `TestVersionAndOpenAPI` must still route every documented operation. Write `TestClusterAPI`.
+- [x] Run the gate.
 
 ## Task 4: UI Cluster page (branch phase-3-ui)
 
 Files: `web/src/` (api, `pages/Cluster.tsx`, tests).
 Interfaces: the JSON from Task 3. Field names: `members[]` uses `cluster.Member` JSON; `postgres: {up, error?}`; `valkey: {up, mode, primary?}`; `configRevision`.
 
-- [ ] Build the Cluster page per spec §21: a node table (ID, kind, state with reason, SIP address, calls, registrations, version, revision lag, heartbeat age), the dependency rows, and the configuration revision. Refresh every 5s. Drain and undrain actions use an in-page confirmation, with a stronger confirmation when the server warns that draining would leave no READY node.
-- [ ] Write `Cluster.test.tsx` per the spec criterion, mutation-checked.
-- [ ] Run `pnpm typecheck`, `lint`, `test` and `build`.
+- [x] Build the Cluster page per spec §21: a node table (ID, kind, state with reason, SIP address, calls, registrations, version, revision lag, heartbeat age), the dependency rows, and the configuration revision. Refresh every 5s. Drain and undrain actions use an in-page confirmation, with a stronger confirmation when the server warns that draining would leave no READY node.
+- [x] Write `Cluster.test.tsx` per the spec criterion, mutation-checked.
+- [x] Run `pnpm typecheck`, `lint`, `test` and `build`.
 
 ## Task 5: Kamailio and Sentinel lab (branch phase-3-infra)
 
 Files: `deploy/kamailio/` (`kamailio.cfg`, `dispatcher.list`), `deploy/valkey/` (sentinel config), `deploy/docker-compose/compose.yaml` (Kamailio, Valkey primary and replica, three sentinels, fixed IPs, env), `Dockerfile` (only if a Kamailio wrapper image is needed).
 Interfaces: contracts 7 and 8.
 
-- [ ] Write the Kamailio config: dispatcher (contract 7), nathelper keep-alive OPTIONS to phones, path with `add_path_received`, Record-Route, removal of external `X-Hello-Client` and insertion of the trusted one, pike rate limiting, `xhttp_prom` metrics on an internal HTTP port, and logging without credentials.
-- [ ] Set up Valkey primary, replica and three sentinels. Switch every Hello service to Sentinel env.
-- [ ] Verify by hand and with a small script under `deploy/`:
+- [x] Write the Kamailio config: dispatcher (contract 7), nathelper keep-alive OPTIONS to phones, path with `add_path_received`, Record-Route, removal of external `X-Hello-Client` and insertion of the trusted one, pike rate limiting, `xhttp_prom` metrics on an internal HTTP port, and logging without credentials.
+- [x] Set up Valkey primary, replica and three sentinels. Switch every Hello service to Sentinel env.
+- [x] Verify by hand and with a small script under `deploy/`:
   - Phones (`test/sipua`) on host 5080 register and call through Kamailio.
   - Killing `valkey-1` promotes `valkey-2` and Hello recovers.
   - A hello-sip answering 503 to OPTIONS leaves the dispatcher set within 15s.
 
   Report the evidence.
 
-- [ ] Phase 1 and 2 lab tests must still pass. They use direct ports, plus `HELLO_VALKEY_SENTINELS` wherever a test talked to Valkey (`valkey-cli` calls go to the current primary through Sentinel).
+- [x] Phase 1 and 2 lab tests must still pass. They use direct ports, plus `HELLO_VALKEY_SENTINELS` wherever a test talked to Valkey (`valkey-cli` calls go to the current primary through Sentinel).
 
 ## Task 6: Failure suite and docs (lead, branch phase-3-ha)
 
 Files: `test/integration/failure_test.go` (harness and tests), `docs/ha.md`, `README.md`, `test/integration/` (smoke through Kamailio).
 Interfaces: consumes everything above.
 
-- [ ] Merge the sip, control, ui and infra branches, and run the gate.
-- [ ] Write the `test/integration/failure_test.go` harness:
+- [x] Merge the sip, control, ui and infra branches, and run the gate.
+- [x] Write the `test/integration/failure_test.go` harness:
   - phones through Kamailio (host 5080)
   - helpers for killing and restarting containers, disconnecting from and reconnecting to a network, and stopping and starting PostgreSQL
   - a wait-until-READY helper using `/api/v1/cluster`
-- [ ] Write the tests from spec S-10: `TestDrainKeepsCallsAndExits`, `TestKamailioBalancesAndPaths`, `TestKillSIPNodeDuring{Register,Ringing,Call}`, `TestValkeyFailover`, `TestPostgresOutage`, `TestControlPlaneRestart`, `TestPartitionFromValkey` and `TestRollingUpgrade`.
-- [ ] Write `docs/ha.md`: the architecture, the S-9 dependency-failure table (normative, one row per case), drain and rolling-upgrade procedures, the manual Kamailio-loss procedure, and production guidance (two or more Kamailio behind a VIP or SRV, Sentinel sizing, PostgreSQL HA for Phase 6).
-- [ ] Extend `TestLabSmoke` to register and call through Kamailio, and update the README (topology, ports, env).
-- [ ] Run `HELLO_DOCKER=1 go test -timeout 40m ./test/integration/ ./test/integration/failure_test.go` (pass), then the full gate.
+- [x] Write the tests from spec S-10: `TestDrainKeepsCallsAndExits`, `TestKamailioBalancesAndPaths`, `TestKillSIPNodeDuring{Register,Ringing,Call}`, `TestValkeyFailover`, `TestPostgresOutage`, `TestControlPlaneRestart`, `TestPartitionFromValkey` and `TestRollingUpgrade`.
+- [x] Write `docs/ha.md`: the architecture, the S-9 dependency-failure table (normative, one row per case), drain and rolling-upgrade procedures, the manual Kamailio-loss procedure, and production guidance (two or more Kamailio behind a VIP or SRV, Sentinel sizing, PostgreSQL HA for Phase 6).
+- [x] Extend `TestLabSmoke` to register and call through Kamailio, and update the README (topology, ports, env).
+- [x] Run `HELLO_DOCKER=1 go test -timeout 40m ./test/integration/ ./test/integration/failure_test.go` (pass), then the full gate.
