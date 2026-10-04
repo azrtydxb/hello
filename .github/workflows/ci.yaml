@@ -18,26 +18,22 @@ jobs:
     # The runner image has no Go toolchain; run in a container instead.
     container: golang:1.27
     timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_PASSWORD: ci
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 2s --health-retries 30
-      valkey:
-        image: valkey/valkey:9-alpine
-        ports: ["6379:6379"]
-        options: >-
-          --health-cmd "valkey-cli ping"
-          --health-interval 2s --health-retries 30
     env:
       HELLO_TEST_DATABASE_URL: postgres://postgres:ci@localhost:5432/postgres?sslmode=disable
       HELLO_TEST_VALKEY_ADDR: localhost:6379
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # ARC runners have no service containers: start the test dependencies
+      # as plain containers on the runner's own Docker (DinD).
+      - name: Start PostgreSQL and Valkey
+        run: |
+          set -euo pipefail
+          docker run -d --name ci-pg -e POSTGRES_PASSWORD=ci -p 5432:5432 postgres:18-alpine
+          docker run -d --name ci-vk -p 6379:6379 valkey/valkey:9-alpine
+          for _ in $(seq 1 60); do docker exec ci-pg pg_isready -U postgres >/dev/null 2>&1 && break; sleep 1; done
+          docker exec ci-pg pg_isready -U postgres
+          for _ in $(seq 1 60); do docker exec ci-vk valkey-cli ping 2>/dev/null | grep -q PONG && break; sleep 1; done
+          docker exec ci-vk valkey-cli ping
       # In container mode the workspace is mounted from the runner user's
       # home; Go's VCS stamping refuses a directory owned by another uid.
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -47,6 +43,10 @@ jobs:
         with:
           version: v2.13.2
       - run: go test -race ./...
+
+      - name: Remove the test dependencies
+        if: always()
+        run: docker rm -f ci-pg ci-vk
 
   web:
     runs-on: [self-hosted, linux, x64] # kw Arc runner (labeled self-hosted/linux/x64); free GitHub runners are too small for the lab
