@@ -1806,6 +1806,157 @@
         "description": "Removes the row and the audio object in the hello-voicemail bucket."
       }
     },
+    "/api/v1/recordings": {
+      "get": {
+        "operationId": "listRecordings",
+        "summary": "List call recordings",
+        "tags": ["media"],
+        "parameters": [
+          {
+            "name": "extension",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Keep only recordings of calls this extension was on (joined through the CDRs)."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "format": "int64", "minimum": 1 },
+            "description": "Page cursor: recordings with a lower id."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recordings, newest first, with the cursor for the next page",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RecordingPage" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        }
+      }
+    },
+    "/api/v1/recordings/{id}": {
+      "delete": {
+        "operationId": "deleteRecording",
+        "summary": "Delete a recording",
+        "tags": ["media"],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "204": { "description": "Deleted" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        },
+        "description": "Removes the row and the audio object in the hello-recordings bucket."
+      }
+    },
+    "/api/v1/recordings/{id}/audio": {
+      "get": {
+        "operationId": "getRecordingAudio",
+        "summary": "Play a recording",
+        "tags": ["media"],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "302": { "description": "Redirect to a presigned object-store URL, valid 15 minutes" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        },
+        "description": "302 to a presigned GET URL (15 minutes) for the recording audio; the client follows it. The recording must exist before anything is presigned: a missing recording is 404."
+      }
+    },
+    "/api/v1/announcements": {
+      "get": {
+        "operationId": "listAnnouncements",
+        "summary": "List announcements",
+        "tags": ["media"],
+        "responses": {
+          "200": {
+            "description": "Announcements ordered by name",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AnnouncementList" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        }
+      },
+      "post": {
+        "operationId": "createAnnouncement",
+        "summary": "Upload an announcement",
+        "tags": ["media"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "file"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                    "description": "Unique name the announcement is configured by."
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "WAV bytes, at most 10 MiB; the bytes are checked, not the declared content type."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Announcement" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        },
+        "description": "Stores the WAV in the hello-announcements bucket under ann/<name>.wav."
+      }
+    },
+    "/api/v1/announcements/{id}": {
+      "delete": {
+        "operationId": "deleteAnnouncement",
+        "summary": "Delete an announcement",
+        "tags": ["media"],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "204": { "description": "Deleted" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        },
+        "description": "Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time."
+      }
+    },
     "/api/v1/ring-groups": {
       "get": {
         "operationId": "listRingGroups",
@@ -2371,7 +2522,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external"]
+            "enum": ["none", "voicemail", "external", "announcement"]
           },
           "failureTarget": {
             "type": "string"
@@ -2429,7 +2580,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external"]
+            "enum": ["none", "voicemail", "external", "announcement"]
           },
           "failureTarget": {
             "type": "string"
@@ -2504,7 +2655,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external"]
+            "enum": ["none", "voicemail", "external", "announcement"]
           },
           "failureTarget": {
             "type": "string"
@@ -2571,7 +2722,8 @@
               "dnd_off",
               "voicemail",
               "blind_transfer",
-              "attended_transfer"
+              "attended_transfer",
+              "announcement"
             ]
           },
           "argument": {
@@ -2620,7 +2772,8 @@
                     "dnd_off",
                     "voicemail",
                     "blind_transfer",
-                    "attended_transfer"
+                    "attended_transfer",
+                    "announcement"
                   ]
                 },
                 "argument": {
@@ -2820,7 +2973,8 @@
           "forwardAlways",
           "forwardBusy",
           "forwardNoAnswer",
-          "voicemailEnabled"
+          "voicemailEnabled",
+          "recordDefault"
         ],
         "properties": {
           "id": {
@@ -2871,6 +3025,10 @@
           "voicemailEnabled": {
             "type": "boolean",
             "description": "Whether the extension's voicemail takes calls."
+          },
+          "recordDefault": {
+            "type": "boolean",
+            "description": "Record this extension's calls by default; *1 toggles recording mid-call either way."
           }
         }
       },
@@ -2938,9 +3096,58 @@
           "voicemailEnabled": {
             "type": "boolean",
             "description": "Whether the extension's voicemail takes calls."
+          },
+          "recordDefault": {
+            "type": "boolean",
+            "description": "Record this extension's calls by default."
           }
         },
         "minProperties": 1
+      },
+      "Recording": {
+        "type": "object",
+        "required": ["id", "correlationId", "initiatedBy", "durationMs", "createdAt"],
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "correlationId": {
+            "type": "string",
+            "description": "The call the recording belongs to; matches the CDR's correlationId."
+          },
+          "initiatedBy": { "type": "string", "enum": ["dtmf", "default", "api"] },
+          "durationMs": { "type": "integer", "format": "int64" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "RecordingPage": {
+        "type": "object",
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Recording" }
+          },
+          "next": { "type": "string", "description": "Cursor for the next (older) page; empty at the end." }
+        }
+      },
+      "Announcement": {
+        "type": "object",
+        "required": ["id", "name", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "name": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AnnouncementList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Announcement" }
+          }
+        }
       },
       "Device": {
         "type": "object",
