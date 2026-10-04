@@ -1,9 +1,12 @@
+# The shape mirrors kuvryn-scout: test jobs run in containers on the generic
+# ARC runners, and what lands on main is built and pushed to Nexus by the
+# publish runners. Kuvryn Sync then deploys those images (deploy/kuvryn-sync/).
 name: ci
 
 on:
-  pull_request:
   push:
     branches: [main]
+  pull_request:
 
 permissions:
   contents: read
@@ -12,42 +15,37 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  REGISTRY: 192.168.10.131:5000
+
 jobs:
   go:
-    runs-on: [self-hosted, linux, x64] # kw Arc runner (labeled self-hosted/linux/x64); free GitHub runners are too small for the lab
-    # The runner image has no Go toolchain; run in a container instead.
+    runs-on: arc-azrtydxb
+    timeout-minutes: 30
     container:
-      image: golang:1.27
-      options: --volume /var/run/docker.sock:/var/run/docker.sock
-    timeout-minutes: 15
+      # The Go toolchain comes from the same base the Dockerfile builds
+      # with, so CI and the image agree on the compiler.
+      image: golang:1.27-bookworm
+    env:
+      # The database-backed tests read these; without them they skip and
+      # say so, which would make a green run meaningless.
+      HELLO_TEST_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
+      HELLO_TEST_VALKEY_ADDR: valkey:6379
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: hello
+          POSTGRES_PASSWORD: hello
+          POSTGRES_DB: hello
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-retries 10
+      valkey:
+        image: valkey/valkey:9-alpine
+        options: >-
+          --health-cmd "valkey-cli ping" --health-interval 5s --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # ARC runners have no service containers: start the test dependencies
-      # as plain containers on the runner's own Docker (DinD).
-      - name: Install the docker CLI
-        run: |
-          curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-28.5.2.tgz -o /tmp/docker.tgz
-          tar -xzf /tmp/docker.tgz -C /tmp docker/docker
-          mv /tmp/docker/docker /usr/local/bin/docker
-          docker version
-      - name: Start PostgreSQL and Valkey
-        run: |
-          set -euo pipefail
-          docker network create ci
-          docker run -d --name ci-pg --network ci -e POSTGRES_PASSWORD=ci postgres:18-alpine
-          docker run -d --name ci-vk --network ci valkey/valkey:9-alpine
-          for _ in $(seq 1 60); do docker exec ci-pg pg_isready -U postgres >/dev/null 2>&1 && break; sleep 1; done
-          docker exec ci-pg pg_isready -U postgres
-          for _ in $(seq 1 60); do docker exec ci-vk valkey-cli ping 2>/dev/null | grep -q PONG && break; sleep 1; done
-          docker exec ci-vk valkey-cli ping
-          # The job container reaches the databases over the DinD bridge.
-          PGIP=$(docker inspect -f '{{.NetworkSettings.Networks.ci.IPAddress}}' ci-pg)
-          VKIP=$(docker inspect -f '{{.NetworkSettings.Networks.ci.IPAddress}}' ci-vk)
-          echo "HELLO_TEST_DATABASE_URL=postgres://postgres:ci@$PGIP:5432/postgres?sslmode=disable" >> "$GITHUB_ENV"
-          echo "HELLO_TEST_VALKEY_ADDR=$VKIP:6379" >> "$GITHUB_ENV"
-      # In container mode the workspace is mounted from the runner user's
-      # home; Go's VCS stamping refuses a directory owned by another uid.
-      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: go build ./...
       - run: go vet ./...
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -55,41 +53,71 @@ jobs:
           version: v2.13.2
       - run: go test -race ./...
 
-      - name: Remove the test dependencies
-        if: always()
-        run: docker rm -f ci-pg ci-vk
-
   web:
-    runs-on: [self-hosted, linux, x64] # kw Arc runner (labeled self-hosted/linux/x64); free GitHub runners are too small for the lab
-    container: node:26-bookworm # the runner image has no Node toolchain
-    timeout-minutes: 10
+    runs-on: arc-azrtydxb
+    timeout-minutes: 15
+    container:
+      image: node:26-bookworm-slim
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - run: npm install -g pnpm@10 # node:26 has no corepack
+      # node:26 no longer bundles corepack, so pnpm comes from npm.
+      - run: npm install -g pnpm@10
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
 
-  images:
-    runs-on: [self-hosted, linux, x64] # kw Arc runner (labeled self-hosted/linux/x64); free GitHub runners are too small for the lab
+  publish:
+    # Only what lands on main becomes an image; a pull request is tested and
+    # nothing more.
+    if: github.event_name != 'pull_request'
+    needs: [go, web]
+    runs-on: arc-azrtydxb-publish
     timeout-minutes: 30
-    needs: [go]
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        image:
+          - {
+              name: hello-control,
+              context: .,
+              file: Dockerfile,
+              target: hello-control,
+            }
+          - { name: hello-sip, context: ., file: Dockerfile, target: hello-sip }
+          - { name: hello-ui, context: web, file: web/Dockerfile, target: "" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The runner has the docker CLI but not the compose plugin; the lab
-      # tests need `docker compose`.
-      - name: Install the compose plugin
-        run: |
-          mkdir -p ~/.docker/cli-plugins
-          curl -fsSL https://github.com/docker/compose/releases/download/v2.40.2/docker-compose-linux-x86_64 -o ~/.docker/cli-plugins/docker-compose
-          chmod +x ~/.docker/cli-plugins/docker-compose
-          docker compose version
-      - name: Non-root images and SIP flows against the two-node lab
-        env:
-          HELLO_DOCKER: "1"
-        run: go test -count=1 -timeout 25m -v ./test/integration/
+      # BuildKit runs in its own container and does not inherit the host
+      # trust store, so both Nexus ports need the exemption: :443 is the
+      # read-only group, :5000 the hosted repository that accepts the push.
+      # Base images come through the pull-through cache, not Docker Hub.
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          buildkitd-config-inline: |
+            [registry."192.168.10.131"]
+              insecure = true
+            [registry."192.168.10.131:5000"]
+              insecure = true
+            [registry."docker.io"]
+              mirrors = ["192.168.10.131"]
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.NEXUS_USER }}
+          password: ${{ secrets.NEXUS_PASSWORD }}
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
+          target: ${{ matrix.image.target }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/azrtydxb/${{ matrix.image.name }}:sha-${{ github.sha }}
+            ${{ env.REGISTRY }}/azrtydxb/${{ matrix.image.name }}:main
