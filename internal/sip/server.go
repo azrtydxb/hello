@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cluster"
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
@@ -65,6 +66,9 @@ type Config struct {
 	TrunkOptionsTimeout time.Duration
 	// TrunkReRegisterMin floors the re-REGISTER interval (30s).
 	TrunkReRegisterMin time.Duration
+	// PresenceTTL is how long a device's published state lives in Valkey
+	// without a refresh (2m; refreshed on REGISTER and every state change).
+	PresenceTTL time.Duration
 	// TrustedProxies are the edge proxies (Kamailio) whose X-Hello-Client
 	// and Path headers are believed (plan contract 7).
 	TrustedProxies []netip.Prefix
@@ -86,6 +90,16 @@ type Deps struct {
 	Trunks TrunkState
 	// Lifecycle is the node's state machine; nil means always READY.
 	Lifecycle Lifecycle
+	// Voicemails is the voicemail store (PostgreSQL via hello-sip's
+	// long-lived pool); nil disables voicemail. Its methods run only in the
+	// voicemail media goroutine, never on the SIP transaction path.
+	Voicemails VoicemailStore
+	// Objects is the voicemail audio store (MinIO); nil disables voicemail.
+	Objects ObjectStore
+	// Settings applies feature-code mutations (DND, forwarding) by queueing
+	// them to PostgreSQL and bumping the configuration revision; nil makes
+	// the mutating feature codes answer 503.
+	Settings SettingsSink
 }
 
 // Server is one SIP node.
@@ -118,10 +132,57 @@ type Server struct {
 	// connected, before the call is marked connected.
 	answerHook atomic.Pointer[func()]
 	// abortHook, when set (tests only), runs inside abort after it has
-	// taken the setup's ownership but before it signals the setup
-	// goroutine, so a test can inject the fork failure that races the
-	// abort.
+	// taken the setup's ownership before it signals the setup goroutine, so
+	// a test can inject the fork failure that races the abort.
 	abortHook atomic.Pointer[func(*call)]
+
+	// Presence (S-10) and feature-code (S-11) state. subs holds the live
+	// dialog subscriptions by Call-ID, byExt the per-extension index used
+	// for NOTIFY fan-out; rrPos is the round-robin rotation per group; lastEnd
+	// tracks the last call end per extension for longest-idle; digits holds
+	// an in-dialog DTMF collection per call. anchor binds voicemail media
+	// (nil unless SetMediaAnchor ran); vmBytes is this node's running total
+	// of stored voicemail audio.
+	subs     map[string]*subscription
+	byExt    map[string]map[string]bool
+	subsMu   sync.Mutex
+	rrPos    map[int64]*atomic.Uint64
+	rrMu     sync.Mutex
+	lastEnd  map[string]time.Time
+	lastMu   sync.Mutex
+	digits   map[*call]*digitBuffer
+	digitsMu sync.Mutex
+	anchor   *media.Anchor
+	vmBytes  atomic.Int64
+}
+
+// SetMediaAnchor wires the voicemail media anchor; without it voicemail
+// calls answer without recording (and store nothing). Call it before Serve.
+func (s *Server) SetMediaAnchor(a *media.Anchor) { s.anchor = a }
+
+// digitBuffer collects in-dialog DTMF digits for one call's feature-code
+// dispatch (S-11). '#' hands the collected digits on; a fresh code restarts
+// the buffer, so a mistyped code never dispatches late.
+type digitBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+}
+
+// push appends digits and reports the whole buffer.
+func (d *digitBuffer) push(digits []byte) []byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.buf = append(d.buf, digits...)
+	return d.buf
+}
+
+// take empties the buffer and returns what it held.
+func (d *digitBuffer) take() []byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := d.buf
+	d.buf = nil
+	return out
 }
 
 // dialogRef is one leg of a call, found by its Call-ID.
@@ -163,6 +224,7 @@ func New(cfg Config, deps Deps) (*Server, error) {
 	setDefault(&cfg.TrunkRetryMax, 10*time.Minute)
 	setDefault(&cfg.TrunkOptionsTimeout, 5*time.Second)
 	setDefault(&cfg.TrunkReRegisterMin, 30*time.Second)
+	setDefault(&cfg.PresenceTTL, 2*time.Minute)
 	if cfg.AuthFailLimit <= 0 {
 		cfg.AuthFailLimit = 10
 	}
@@ -175,6 +237,11 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		dialogs: map[string]dialogRef{},
 		calls:   map[*call]struct{}{},
 		done:    make(chan struct{}),
+		subs:    map[string]*subscription{},
+		byExt:   map[string]map[string]bool{},
+		rrPos:   map[int64]*atomic.Uint64{},
+		lastEnd: map[string]time.Time{},
+		digits:  map[*call]*digitBuffer{},
 	}
 	s.trunks = newTrunkManager(s)
 	s.contact = sip.ContactHeader{Address: sip.Uri{Scheme: "sip", Host: host, Port: port, UriParams: sip.HeaderParams{{K: "transport", V: "udp"}}}}
@@ -236,12 +303,17 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.handle(srv, sip.BYE, s.handleBye)
 	s.handle(srv, sip.CANCEL, s.handleStrayCancel)
 	s.handle(srv, sip.UPDATE, s.handleInDialog)
+	s.handle(srv, sip.REFER, s.handleRefer)
+	s.handle(srv, sip.SUBSCRIBE, s.handleSubscribe)
+	s.handle(srv, sip.INFO, s.handleInfo)
+	s.handle(srv, sip.MESSAGE, s.handleMessage)
 	srv.OnNoRoute(s.wrap(s.handleNotAllowed))
 
 	rctx, stop := context.WithCancel(ctx)
 	defer stop()
 	s.bg.Go(func() { s.recountLoop(rctx) })
 	s.bg.Go(func() { s.peerLoop(rctx) })
+	s.bg.Go(func() { s.subExpireLoop(rctx) })
 
 	// Trunk holders stop before the socket closes, so they can unregister
 	// and release their leases for another node.
@@ -294,7 +366,7 @@ func waitListening(ctx context.Context, ua *sipgo.UserAgent, addr string) bool {
 	}
 }
 
-const allow = "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, UPDATE"
+const allow = "INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER, UPDATE, REFER, SUBSCRIBE, INFO, MESSAGE"
 
 func (s *Server) handle(srv *sipgo.Server, m sip.RequestMethod, h sipgo.RequestHandler) {
 	srv.OnRequest(m, s.wrap(h))

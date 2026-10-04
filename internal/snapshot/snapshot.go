@@ -40,6 +40,48 @@ func (d Device) LogValue() slog.Value {
 	return slog.GroupValue(slog.Int64("id", d.ID), slog.String("username", d.Username), slog.String("extension", d.Extension))
 }
 
+// Extension is the PBX feature state (Phase 4) of one extension number.
+// VoicemailBoxID is 0 when the extension has no voicemail box.
+type Extension struct {
+	Number, Name string
+	DND          bool
+	// ForwardAlways, ForwardBusy and ForwardNoAnswer are the forwarding
+	// targets: empty means off; a number that is an extension or an
+	// external number.
+	ForwardAlways, ForwardBusy, ForwardNoAnswer string
+	VoicemailEnabled                            bool
+	VoicemailBoxID                              int64
+}
+
+// RingGroup is a ring or hunt group (contract 2). Strategy is one of
+// ring-all, sequential, round-robin, longest-idle, weighted.
+type RingGroup struct {
+	ID          int64
+	Name        string // dialled as a number: digits, dots, dashes
+	Strategy    string
+	Hunt        bool
+	RingTimeout int // seconds the whole group rings
+	MemberDelay int // seconds each sequential member rings before the next
+	IgnoreDND   bool
+	// FailureKind is none, voicemail (FailureTarget names an extension
+	// whose box takes the call) or external (FailureTarget is a number).
+	FailureKind, FailureTarget string
+}
+
+// RingGroupMember is one member of a group, ordered by Position.
+type RingGroupMember struct {
+	ExtensionID int64
+	Extension   string // the extension number to ring
+	Position    int
+	Weight      int
+	Delay       int // this member's extra delay in seconds
+}
+
+// FeatureCode is one DTMF feature code and the action it performs.
+type FeatureCode struct {
+	Code, Action, Argument string
+}
+
 // Snapshot is an immutable view of the configuration at one revision.
 type Snapshot struct {
 	Revision int64
@@ -51,14 +93,26 @@ type Snapshot struct {
 	// known holds extension numbers that exist but have no enabled device,
 	// so a call to them is 480 rather than 404.
 	known map[string]bool
+	// exts is the per-extension feature state; groups maps a dialled group
+	// name to its members; codes maps a dialled feature code.
+	exts   map[string]Extension
+	groups map[string]groupEntry
+	codes  map[string]FeatureCode
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
+}
+
+// groupEntry is one group with its members in position order.
+type groupEntry struct {
+	g       RingGroup
+	members []RingGroupMember
 }
 
 // New builds a snapshot from devices; devices whose realm differs from
 // domain are skipped and listed in Skipped.
 func New(revision int64, domain string, devices []Device) *Snapshot {
-	s := &Snapshot{Revision: revision, byUser: map[string]Device{}, byExt: map[string][]Device{}}
+	s := &Snapshot{Revision: revision, byUser: map[string]Device{}, byExt: map[string][]Device{},
+		exts: map[string]Extension{}, groups: map[string]groupEntry{}, codes: map[string]FeatureCode{}}
 	for _, d := range devices {
 		if d.Realm != domain {
 			s.Skipped = append(s.Skipped, d.Username)
@@ -68,6 +122,54 @@ func New(revision int64, domain string, devices []Device) *Snapshot {
 		s.byExt[d.Extension] = append(s.byExt[d.Extension], d)
 	}
 	return s
+}
+
+// WithExtensionData installs per-extension feature state (tests and Load);
+// it returns s for chaining. An entry also marks the number as known, so an
+// extension without enabled devices stays 480 rather than 404.
+func (s *Snapshot) WithExtensionData(exts []Extension) *Snapshot {
+	for _, e := range exts {
+		s.exts[e.Number] = e
+		s.known[e.Number] = true
+	}
+	return s
+}
+
+// WithRingGroups installs groups; each member list must belong to the
+// preceding group and arrives in position order (tests and Load).
+func (s *Snapshot) WithRingGroups(groups []RingGroup, members [][]RingGroupMember) *Snapshot {
+	for i, g := range groups {
+		s.groups[g.Name] = groupEntry{g: g, members: members[i]}
+	}
+	return s
+}
+
+// WithFeatureCodes installs the DTMF feature codes (tests and Load).
+func (s *Snapshot) WithFeatureCodes(codes []FeatureCode) *Snapshot {
+	for _, c := range codes {
+		s.codes[c.Code] = c
+	}
+	return s
+}
+
+// Extension returns the feature state of an extension number; ok is false
+// for a number that is not an extension at all.
+func (s *Snapshot) Extension(number string) (Extension, bool) {
+	e, ok := s.exts[number]
+	return e, ok
+}
+
+// RingGroup returns the group dialled as number (its name) with its members
+// ordered by position (contract 2).
+func (s *Snapshot) RingGroup(number string) (RingGroup, []RingGroupMember, bool) {
+	e, ok := s.groups[number]
+	return e.g, e.members, ok
+}
+
+// FeatureCode returns the feature code dialled as code.
+func (s *Snapshot) FeatureCode(code string) (FeatureCode, bool) {
+	c, ok := s.codes[code]
+	return c, ok
 }
 
 // DeviceByUsername returns the enabled device with that SIP username.
@@ -116,13 +218,21 @@ type Querier interface {
 
 // The snapshot query from the shared contracts, starting from extensions so
 // that an extension without enabled devices is still known (its device
-// columns are NULL).
+// columns are NULL). The Phase 4 feature columns and the extension's
+// voicemail box (LEFT JOIN: box-less extensions stay voicemail-disabled)
+// ride along in the same row, so one query keeps devices and features on one
+// revision.
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
-       d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name
-FROM extensions e LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled`
+       d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name,
+       e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id
+FROM extensions e
+LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
+LEFT JOIN voicemail_boxes v ON v.extension_id = e.id
+ORDER BY d.id`
 
-// Load reads the snapshot for domain in one round trip (plus one when no
-// extension exists, to learn the revision).
+// Load reads the snapshot for domain in one round trip per table (plus one
+// when no extension exists, to learn the revision): devices with their
+// extension features, then ring groups, then feature codes.
 func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	rows, err := db.Query(ctx, snapshotQuery)
 	if err != nil {
@@ -131,6 +241,8 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	var (
 		rev     int64
 		devices []Device
+		exts    []Extension
+		seen    = map[string]bool{}
 		bare    []string
 		anyRow  bool
 	)
@@ -140,17 +252,32 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 			d                              Device
 			id                             *int64
 			user, realm, ha1MD5, ha1SHA256 *string
+			e                              Extension
+			boxID                          *int64
 		)
-		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName); err != nil {
+		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName,
+			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}
+		e.Number, e.Name = d.Extension, d.ExtensionName
+		if boxID != nil {
+			e.VoicemailBoxID = *boxID
+		} else {
+			// Box-less: no anchor is ever set up for this extension, whatever
+			// the voicemail_enabled column says (the LEFT JOIN left it NULL).
+			e.VoicemailEnabled = false
+		}
 		if id == nil { // extension with no enabled device
 			bare = append(bare, d.Extension)
-			continue
+		} else {
+			d.ID, d.Username, d.Realm, d.HA1MD5, d.HA1SHA256 = *id, *user, *realm, *ha1MD5, *ha1SHA256
+			devices = append(devices, d)
 		}
-		d.ID, d.Username, d.Realm, d.HA1MD5, d.HA1SHA256 = *id, *user, *realm, *ha1MD5, *ha1SHA256
-		devices = append(devices, d)
+		if !seen[e.Number] {
+			seen[e.Number] = true
+			exts = append(exts, e)
+		}
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
@@ -161,7 +288,97 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 			return nil, fmt.Errorf("snapshot: revision: %w", err)
 		}
 	}
-	return New(rev, domain, devices).WithExtensions(bare...), nil
+	groups, members, err := loadRingGroups(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	codes, err := loadFeatureCodes(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	return New(rev, domain, devices).WithExtensions(bare...).
+		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes), nil
+}
+
+// loadRingGroups reads the groups and their members (in position order) as
+// parallel slices for WithRingGroups.
+func loadRingGroups(ctx context.Context, db Querier) ([]RingGroup, [][]RingGroupMember, error) {
+	rows, err := db.Query(ctx, `SELECT id, name, strategy, hunt, ring_timeout, member_delay, ignore_dnd, failure_kind, failure_target
+FROM ring_groups ORDER BY id`)
+	if err != nil {
+		return nil, nil, fmt.Errorf("snapshot: ring groups: %w", err)
+	}
+	var (
+		groups  []RingGroup
+		members [][]RingGroupMember
+	)
+	for rows.Next() {
+		var (
+			g              RingGroup
+			timeout, delay int32
+			ext            *string
+		)
+		if err := rows.Scan(&g.ID, &g.Name, &g.Strategy, &g.Hunt, &timeout, &delay, &g.IgnoreDND, &g.FailureKind, &ext); err != nil {
+			rows.Close()
+			return nil, nil, fmt.Errorf("snapshot: scan ring group: %w", err)
+		}
+		g.RingTimeout, g.MemberDelay = int(timeout), int(delay)
+		if ext != nil {
+			g.FailureTarget = *ext
+		}
+		groups = append(groups, g)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("snapshot: ring groups: %w", err)
+	}
+	for _, g := range groups {
+		memberRows, err := db.Query(ctx, `SELECT m.extension_id, e.number, m.position, m.weight, m.delay
+FROM ring_group_members m JOIN extensions e ON e.id = m.extension_id
+WHERE m.group_id = $1 ORDER BY m.position`, g.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("snapshot: ring group members: %w", err)
+		}
+		var ms []RingGroupMember
+		for memberRows.Next() {
+			var (
+				m                   RingGroupMember
+				pos, w8, memberBusy int32
+			)
+			if err := memberRows.Scan(&m.ExtensionID, &m.Extension, &pos, &w8, &memberBusy); err != nil {
+				memberRows.Close()
+				return nil, nil, fmt.Errorf("snapshot: scan ring group member: %w", err)
+			}
+			m.Position, m.Weight, m.Delay = int(pos), int(w8), int(memberBusy)
+			ms = append(ms, m)
+		}
+		if err := memberRows.Err(); err != nil {
+			memberRows.Close()
+			return nil, nil, fmt.Errorf("snapshot: ring group members: %w, at group %d", err, g.ID)
+		}
+		memberRows.Close()
+		members = append(members, ms)
+	}
+	return groups, members, nil
+}
+
+// loadFeatureCodes reads the DTMF feature codes, so dialling one stays off
+// the database path.
+func loadFeatureCodes(ctx context.Context, db Querier) ([]FeatureCode, error) {
+	rows, err := db.Query(ctx, `SELECT code, action, argument FROM feature_codes ORDER BY code`)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot: feature codes: %w", err)
+	}
+	defer rows.Close()
+	var codes []FeatureCode
+	for rows.Next() {
+		var c FeatureCode
+		if err := rows.Scan(&c.Code, &c.Action, &c.Argument); err != nil {
+			return nil, fmt.Errorf("snapshot: scan feature code: %w", err)
+		}
+		codes = append(codes, c)
+	}
+	return codes, rows.Err()
 }
 
 // Channel is the NOTIFY channel hello-control signals revisions on.
@@ -475,4 +692,24 @@ func (w *Watcher) revision() int64 {
 		return s.Revision
 	}
 	return -1
+}
+
+// Codes returns the feature codes, longest first, so a code that is
+// another's prefix matches deterministically.
+func (s *Snapshot) Codes() []FeatureCode {
+	out := make([]FeatureCode, 0, len(s.codes))
+	for _, c := range s.codes {
+		out = append(out, c)
+	}
+	sortCodes(out)
+	return out
+}
+
+// sortCodes orders longest code first.
+func sortCodes(codes []FeatureCode) {
+	for i := 1; i < len(codes); i++ {
+		for j := i; j > 0 && len(codes[j].Code) > len(codes[j-1].Code); j-- {
+			codes[j], codes[j-1] = codes[j-1], codes[j]
+		}
+	}
 }
