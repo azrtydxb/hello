@@ -49,10 +49,12 @@ jobs:
         options: >-
           --health-cmd "valkey-cli ping" --health-interval 5s --health-retries 10
       minio:
-        # The upstream image's default command only prints its help, and a
-        # service container cannot pass `server /data` arguments; this
-        # Dockerfile adds exactly that (see .github/services/).
-        image: .github/services/minio.Dockerfile
+        # The upstream image's default command only prints its help and a
+        # service container cannot pass `server /data` arguments; bitnami's
+        # starts its server from the root-user environment. The free
+        # bitnami images were frozen into bitnamilegacy, which is fine for
+        # a test-only object store.
+        image: bitnamilegacy/minio:latest
         env:
           MINIO_ROOT_USER: hello
           MINIO_ROOT_PASSWORD: hello-voicemail-secret
