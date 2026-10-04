@@ -15,7 +15,7 @@ import (
 // trunkSource is source validation (S-6): the trunk whose source CIDRs or
 // resolved destination addresses contain the request's source IP.
 func (s *Server) trunkSource(req *sip.Request, snap *snapshot.Snapshot) (*routing.Trunk, bool) {
-	ip, err := netip.ParseAddr(sourceIP(req))
+	ip, err := netip.ParseAddr(s.clientIP(req))
 	if err != nil {
 		return nil, false
 	}
@@ -43,7 +43,7 @@ func (s *Server) inboundCall(req *sip.Request, tx sip.ServerTransaction, snap *s
 	from := req.From()
 	c.direction, c.trunkName = cdr.DirectionInbound, t.Name
 	c.callerNum, c.callerName = from.Address.User, from.DisplayName
-	c.trace.Add(fmt.Sprintf("Source %s identifies trunk %s", sourceIP(req), t.Name))
+	c.trace.Add(fmt.Sprintf("Source %s identifies trunk %s", s.clientIP(req), t.Name))
 	// An inbound call counts against its source trunk's max_calls too.
 	if ok, why := c.acquireSlot(t, false, c.id+":in"); !ok {
 		if why == "full" {

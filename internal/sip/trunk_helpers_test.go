@@ -393,6 +393,7 @@ type carrier struct {
 	inviteCode  atomic.Int64 // 200 answer, 0 ring forever, -1 stay silent, else that code
 	challenge   atomic.Bool  // answer INVITE with 407 first
 	optionsDown atomic.Bool  // do not answer OPTIONS
+	silentUnreg atomic.Bool  // do not answer an unregister (Expires: 0)
 
 	mu       sync.Mutex
 	regs     []*sip.Request // authorized REGISTERs
@@ -480,6 +481,9 @@ func (cr *carrier) challengeHeader() string {
 }
 
 func (cr *carrier) onRegister(req *sip.Request, tx sip.ServerTransaction) {
+	if h := req.GetHeader("Expires"); h != nil && h.Value() == "0" && cr.silentUnreg.Load() {
+		return
+	}
 	if req.GetHeader("Authorization") == nil {
 		res := sip.NewResponseFromRequest(req, 401, "Unauthorized", nil)
 		res.AppendHeader(sip.NewHeader("WWW-Authenticate", cr.challengeHeader()))

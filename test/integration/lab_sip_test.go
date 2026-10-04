@@ -92,16 +92,30 @@ func bindingsFor(bs []livestate.Binding, device string) []livestate.Binding {
 // eventually polls f until it returns nil or d elapses.
 func eventually(t *testing.T, d time.Duration, what string, f func() error) {
 	t.Helper()
-	deadline := time.Now().Add(d)
+	eventuallyBy(t, time.Now().Add(d), what, func(context.Context) error { return f() })
+}
+
+// eventuallyBy polls f until it returns nil, failing the test unless that
+// happens by deadline: each attempt's context ends at the deadline, and a
+// success that only arrives after it is a failure too.
+func eventuallyBy(t *testing.T, deadline time.Time, what string, f func(ctx context.Context) error) {
+	t.Helper()
+	var last error
 	for {
-		err := f()
+		if time.Until(deadline) <= 0 {
+			t.Fatalf("%s: not by the deadline: %v", what, last)
+		}
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		err := f(ctx)
+		cancel()
 		if err == nil {
+			if late := time.Since(deadline); late > 0 {
+				t.Fatalf("%s: succeeded %s after the deadline", what, late)
+			}
 			return
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%s: %v", what, err)
-		}
-		time.Sleep(250 * time.Millisecond)
+		last = err
+		time.Sleep(min(250*time.Millisecond, max(time.Until(deadline), 0)))
 	}
 }
 
@@ -411,10 +425,8 @@ func TestSnapshotSurvivesDatabaseLoss(t *testing.T) {
 func TestAuthFailThrottle(t *testing.T) {
 	lc := newLabClient(t)
 	d := lc.devices("desk")[0]
-	t.Cleanup(func() {
-		labCompose(t, "exec", "-T", "valkey", "sh", "-c", "valkey-cli --scan --pattern 'hello:authfail:*' | xargs -r valkey-cli del")
-	})
-	labCompose(t, "exec", "-T", "valkey", "sh", "-c", "valkey-cli --scan --pattern 'hello:authfail:*' | xargs -r valkey-cli del")
+	t.Cleanup(func() { clearThrottle(t) })
+	clearThrottle(t) // on the current Valkey primary (Sentinel)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	nodes := []*sipua.Phone{phone(t, d, labSIP1), phone(t, d, labSIP2)}

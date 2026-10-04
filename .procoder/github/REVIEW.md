@@ -57,5 +57,19 @@ Added 2026-10-03 (Phase 2 escapes):
   recovery reload lands.
 - Proxies re-resolve upstream names.
 
+Added 2026-10-03 (Phase 3 escapes):
+
+- Operator requests persisted in shared state are withdrawn on every exit
+  path; tested with a later exit after the request.
+- A state machine's effects are serialised with its transitions.
+- Guards over eventually-consistent state count in-flight intent, and
+  check-and-write is atomic under concurrency, tested with parallel callers.
+- A forced hangup races call setup: the answer path re-checks the abort flag
+  under the same lock, tested with an injected delay.
+- Edge dependencies are addressed by fixed IPs (or proven resolvable), and
+  the missing-member case is exercised.
+- Timing bounds in tests are absolute deadlines from the onset the spec
+  names; a late success fails.
+
 End with a verdict line: findings counted by severity, or exactly
 "Nothing found — open the PR."

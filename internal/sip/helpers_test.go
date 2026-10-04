@@ -436,10 +436,16 @@ type phone struct {
 	dua     *sipgo.DialogUA
 	contact sip.ContactHeader
 
-	mu      sync.Mutex
-	callee  calleeFn
-	servers map[string]*sipgo.DialogServerSession
-	clients map[string]*sipgo.DialogClientSession
+	mu     sync.Mutex
+	callee calleeFn
+	// reinviteHold, when set, delays the 200 to re-INVITE/UPDATE until
+	// closed; reinviteAnswered is stamped just before that 200 goes out, so
+	// a BYE arriving at any phone is never before it.
+	reinviteHold     chan struct{}
+	reinviteAnswered time.Time
+	byeAt            time.Time
+	servers          map[string]*sipgo.DialogServerSession
+	clients          map[string]*sipgo.DialogClientSession
 
 	invites   chan *sip.Request
 	reinvites chan *sip.Request
@@ -559,6 +565,19 @@ func (p *phone) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 
 func (p *phone) onReinvite(req *sip.Request, tx sip.ServerTransaction) {
 	push(p.reinvites, req)
+	p.mu.Lock()
+	hold := p.reinviteHold
+	p.mu.Unlock()
+	if hold != nil {
+		<-hold // the test decides when the 200 goes out
+	}
+	// Stamp before the 200 goes out: a BYE can only arrive after this
+	// instant, so a test that has seen the BYE has also seen this stamp.
+	// Stamping after tx.Respond raced the reader: a starved answerer could
+	// be descheduled between the send and the stamp, past the reader.
+	p.mu.Lock()
+	p.reinviteAnswered = time.Now()
+	p.mu.Unlock()
 	res := sip.NewResponseFromRequest(req, 200, "OK", req.Body())
 	if ct := req.ContentType(); ct != nil {
 		res.AppendHeader(sip.HeaderClone(ct))
@@ -578,6 +597,9 @@ func (p *phone) onAck(req *sip.Request, tx sip.ServerTransaction) {
 }
 
 func (p *phone) onBye(req *sip.Request, tx sip.ServerTransaction) {
+	p.mu.Lock()
+	p.byeAt = time.Now()
+	p.mu.Unlock()
 	push(p.byes, req)
 	p.mu.Lock()
 	dss := p.servers[req.CallID().Value()]

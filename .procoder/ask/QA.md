@@ -1,6 +1,6 @@
 # Questions procoder cannot answer for you
 
-Written 2026-10-02 20:37 UTC.
+Written 2026-10-03 08:31 UTC.
 
 Answer each one by writing a line beginning `Answer: ` under it, then
 hand the file back with `procoder ask --file .procoder/ask/QA.md`.
@@ -8,10 +8,10 @@ Leave the `Key:` lines alone — they are what ties an answer to its question.
 
 ## Q1: [decision] decisions.md
 
-Key: bc412d83b326
-Question: Phase 2 delivery
+Key: dbf604d8bdf1
+Question: Merge PR #4
 
-- Push phase-2-trunks-routing and open a PR to main
-- Hold for your review first
+- Squash-merge after CI/Copilot are clean and findings fixed, then start Phase 4 (PBX features)
+- Hold for your own review
 
-Answer: Push phase-2-trunks-routing and open a PR to main
+Answer: Squash-merge after CI/Copilot are clean and findings fixed, then start Phase 4 (pre-authorized; no further merge question)

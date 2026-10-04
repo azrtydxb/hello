@@ -13,11 +13,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
@@ -63,6 +65,9 @@ type Config struct {
 	TrunkOptionsTimeout time.Duration
 	// TrunkReRegisterMin floors the re-REGISTER interval (30s).
 	TrunkReRegisterMin time.Duration
+	// TrustedProxies are the edge proxies (Kamailio) whose X-Hello-Client
+	// and Path headers are believed (plan contract 7).
+	TrustedProxies []netip.Prefix
 }
 
 // Deps are the Server's collaborators.
@@ -79,6 +84,8 @@ type Deps struct {
 	// Trunks is the shared trunk state; nil disables trunk calls,
 	// registration and health checks.
 	Trunks TrunkState
+	// Lifecycle is the node's state machine; nil means always READY.
+	Lifecycle Lifecycle
 }
 
 // Server is one SIP node.
@@ -105,6 +112,16 @@ type Server struct {
 	peers   peers         // the cluster's SIP nodes, for the edge proxy
 	serving atomic.Bool   // the listener is up
 	trunks  *trunkManager
+	// registrations is the last count of bindings this node registered.
+	registrations atomic.Int64
+	// answerHook, when set (tests only), runs as a call's winning fork is
+	// connected, before the call is marked connected.
+	answerHook atomic.Pointer[func()]
+	// abortHook, when set (tests only), runs inside abort after it has
+	// taken the setup's ownership but before it signals the setup
+	// goroutine, so a test can inject the fork failure that races the
+	// abort.
+	abortHook atomic.Pointer[func(*call)]
 }
 
 // dialogRef is one leg of a call, found by its Call-ID.
@@ -344,6 +361,18 @@ func (s *Server) stateCtx() (context.Context, context.CancelFunc) {
 func (s *Server) aor(username string) string { return "sip:" + username + "@" + s.cfg.Domain }
 
 func (s *Server) handleOptions(req *sip.Request, tx sip.ServerTransaction) {
+	if s.isSelfProbe(req) {
+		// The balancer's probe: only a READY node is in rotation.
+		// The Warning names the state only: the reason holds check errors
+		// (internal addresses) that anyone sending OPTIONS would read.
+		if st, _ := s.state(); st != cluster.Ready {
+			res := sip.NewResponseFromRequest(req, sip.StatusServiceUnavailable, "Service Unavailable", nil)
+			res.AppendHeader(sip.NewHeader("Retry-After", "5"))
+			res.AppendHeader(sip.NewHeader("Warning", `399 hello "`+string(st)+`"`))
+			s.send(tx, res)
+			return
+		}
+	}
 	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil)
 	res.AppendHeader(sip.HeaderClone(&s.contact))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
@@ -364,14 +393,6 @@ func (s *Server) handleStrayCancel(req *sip.Request, tx sip.ServerTransaction) {
 	s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 }
 
-func sourceIP(req *sip.Request) string {
-	host, _, err := net.SplitHostPort(req.Source())
-	if err != nil {
-		return req.Source()
-	}
-	return host
-}
-
 // authenticate runs the digest exchange for req. On success it returns the
 // device and the snapshot it was found in, which the caller keeps using so
 // one request sees one configuration; otherwise it has already answered
@@ -387,7 +408,7 @@ func (s *Server) authenticate(req *sip.Request, tx sip.ServerTransaction) (snaps
 }
 
 func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot) (snapshot.Device, bool) {
-	ip := sourceIP(req)
+	ip := s.clientIP(req)
 	ctx, cancel := s.stateCtx()
 	n, err := s.deps.Throttle.Failures(ctx, ip)
 	cancel()
@@ -463,7 +484,7 @@ func (s *Server) checkReplay(req *sip.Request, tx sip.ServerTransaction, user, n
 
 func (s *Server) challenge(tx sip.ServerTransaction, req *sip.Request, stale bool) {
 	res := sip.NewResponseFromRequest(req, sip.StatusUnauthorized, "Unauthorized", nil)
-	for _, c := range s.digest.Challenges(stale, sourceIP(req)) {
+	for _, c := range s.digest.Challenges(stale, s.clientIP(req)) {
 		res.AppendHeader(sip.NewHeader("WWW-Authenticate", c))
 	}
 	s.send(tx, res)
@@ -484,7 +505,7 @@ func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why 
 		s.unavailable(tx, req)
 		return
 	}
-	s.log.Info("SIP authentication failed", "method", req.Method.String(), "source", req.Source(), "reason", why)
+	s.log.Info("SIP authentication failed", "method", req.Method.String(), "source", s.clientSource(req), "reason", why)
 	if rechallenge && n <= int64(s.cfg.AuthFailLimit) {
 		s.challenge(tx, req, false)
 		return
@@ -557,11 +578,20 @@ func (s *Server) recountRegistrations(ctx context.Context) {
 		}
 	}
 	s.m.Registrations.Set(float64(n))
+	s.registrations.Store(int64(n))
 }
 
 // Serving reports whether the SIP listener is running; it turns false when
 // Serve returns, including when the socket fails.
 func (s *Server) Serving() bool { return s.serving.Load() }
+
+// SetLifecycle wires the node's state machine (created after the Server,
+// since its checks use the Server); call it before Serve.
+func (s *Server) SetLifecycle(l Lifecycle) { s.deps.Lifecycle = l }
+
+// Registrations is the number of unexpired bindings whose last REGISTER
+// this node handled (as of the last recount).
+func (s *Server) Registrations() int { return int(s.registrations.Load()) }
 
 // ActiveCalls is the number of calls this node owns.
 func (s *Server) ActiveCalls() int {

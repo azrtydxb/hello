@@ -39,9 +39,18 @@ type call struct {
 	events    chan legEvent
 	setupDone chan struct{} // closed when setup stops reading events
 	canceled  chan struct{}
-	maxTimer  *time.Timer // ends a connected call at MaxCallDuration
-	cancelMu  sync.Once
-	stopHB    chan struct{}
+	// aborted is closed when the node ends a call still being set up
+	// (drain timeout); the setup goroutine answers the caller. Taking its
+	// ownership also closes setup under c.mu, so a fork failure, the ring
+	// timer or fork exhaustion cannot win closeSetup afterwards and record
+	// a normal callee or timeout result instead of the abort's.
+	aborted     chan struct{}
+	abortOnce   sync.Once
+	abortReason string
+	abortOwned  bool        // guarded by mu: the abort owns the setup's end
+	maxTimer    *time.Timer // ends a connected call at MaxCallDuration
+	cancelMu    sync.Once
+	stopHB      chan struct{}
 	// pubMu orders live-call writes: publish and the final delete never
 	// overlap, and nothing is published once the call has ended, so an
 	// in-flight heartbeat cannot resurrect an ended call.
@@ -56,9 +65,12 @@ type call struct {
 	connected   bool
 	ended       bool
 	hungUp      bool
-	lateAck     bool // the winner's ACK waits for the caller's (late offer)
-	ringTime    time.Time
-	answerTime  time.Time
+	// inDialog counts re-INVITE/UPDATE relays in progress. Add happens
+	// under mu while the call is not being ended, so never after Wait.
+	inDialog   sync.WaitGroup
+	lateAck    bool // the winner's ACK waits for the caller's (late offer)
+	ringTime   time.Time
+	answerTime time.Time
 	// Routing detail for the CDR; trace is the decision's trace extended
 	// with this node's attempts.
 	direction string
@@ -132,6 +144,9 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		s.handleInDialog(req, tx)
 		return
 	}
+	if s.refuseIfNotReady(req, tx) {
+		return
+	}
 	if _, ok := s.lookup(req.CallID().Value()); ok {
 		// Same Call-ID as a call in progress but a new transaction: a
 		// merged or looped request (RFC 3261 §8.2.2.2).
@@ -149,7 +164,7 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 			return
 		}
 		if !s.looksLikePhone(req, snap) {
-			s.authFailed(tx, req, sourceIP(req), "INVITE from a source that is neither a trunk nor a phone", false)
+			s.authFailed(tx, req, s.clientIP(req), "INVITE from a source that is neither a trunk nor a phone", false)
 			return
 		}
 	}
@@ -181,6 +196,7 @@ func (s *Server) newCall(req *sip.Request) *call {
 		s: s, id: newID(), callID: req.CallID().Value(),
 		dialled: req.Recipient.User, start: time.Now(), inv: req, direction: cdr.DirectionInternal,
 		canceled: make(chan struct{}), stopHB: make(chan struct{}), setupDone: make(chan struct{}),
+		aborted: make(chan struct{}),
 	}
 }
 
@@ -372,6 +388,9 @@ func (c *call) setup(pending int) {
 					c.end(code, cdr.SideCallee, reason, result)
 					return
 				}
+				if pending == 0 && c.setupAbort() {
+					return
+				}
 			}
 		case <-c.canceled:
 			if c.closeSetup() {
@@ -380,12 +399,23 @@ func (c *call) setup(pending int) {
 				c.end(sip.StatusRequestTerminated, cdr.SideCaller, "cancelled by caller", ResultCancelled)
 				return
 			}
+			if c.setupAbort() {
+				return
+			}
 			// A fork already won; answer() sees the cancellation.
+		case <-c.aborted:
+			if c.setupAbort() {
+				return
+			}
+			// A fork already won; answer() sees the abort.
 		case <-timer.C:
 			if c.closeSetup() {
 				c.cancelForks(nil)
 				c.respondA(sip.StatusRequestTimeout, "Request Timeout")
 				c.end(sip.StatusRequestTimeout, cdr.SideSystem, "ring timeout", ResultNoAnswer)
+				return
+			}
+			if c.setupAbort() {
 				return
 			}
 		}
@@ -488,13 +518,26 @@ func (c *call) answer(w *leg) {
 		c.lateAck = true // the caller's ACK will carry the answer
 		c.mu.Unlock()
 	}
+	if h := c.s.answerHook.Load(); h != nil {
+		(*h)()
+	}
+	// An abort (drain timeout) that came after the fork won is honoured
+	// here: terminate read connected before it was set, so nothing else
+	// would end this call. Checked under mu with connected, so terminate
+	// either sees the call connected or this sees the abort.
 	c.mu.Lock()
 	cancelled := c.isCancelled
-	c.connected = !cancelled
+	aborted := closed(c.aborted)
+	c.connected = !cancelled && !aborted
 	c.mu.Unlock()
 	if cancelled {
 		w.bye()
 		c.end(sip.StatusRequestTerminated, cdr.SideCaller, "cancelled by caller", ResultCancelled)
+		return
+	}
+	if aborted {
+		w.bye()
+		c.abortCaller()
 		return
 	}
 	c.addTrace("Call established")
@@ -558,8 +601,107 @@ func (c *call) hangup(side string) {
 	}()
 }
 
+// inDialogWait bounds how long ending a call waits for an in-dialog
+// transaction being relayed (Timer B/F, 64*T1).
+const inDialogWait = 32 * time.Second
+
+// beginInDialog counts an in-dialog transaction (re-INVITE, UPDATE) being
+// relayed; false means the call is being ended and takes no new ones.
+func (c *call) beginInDialog() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.hungUp || c.ended {
+		return false
+	}
+	c.inDialog.Add(1)
+	return true
+}
+
+func (c *call) endInDialog() { c.inDialog.Done() }
+
+// waitInDialog waits, at most max, until no in-dialog transaction is being
+// relayed.
+func (c *call) waitInDialog(max time.Duration) {
+	idle := make(chan struct{})
+	go func() { c.inDialog.Wait(); close(idle) }()
+	t := time.NewTimer(max)
+	defer t.Stop()
+	select {
+	case <-idle:
+	case <-t.C:
+		c.s.log.Warn("ending a call with an in-dialog transaction still open", "correlation_id", c.id)
+	}
+}
+
+// closed reports whether ch is closed.
+func closed(ch chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
+// abort asks the setup goroutine to end a call that is not connected yet.
+// Under the same lock that guards setupClosed it takes the setup's
+// ownership, so a fork failure, the ring timer or fork exhaustion cannot
+// win closeSetup afterwards and record a normal callee or timeout CDR:
+// the drain's system side and reason survive.
+func (c *call) abort(reason string) {
+	c.abortOnce.Do(func() {
+		c.mu.Lock()
+		c.abortReason = reason
+		if !c.setupClosed && c.winner == nil {
+			c.setupClosed = true
+			c.abortOwned = true
+		}
+		c.mu.Unlock()
+		// Run after the ownership is taken, before the signal: this is
+		// exactly the window the ownership closes (tests only).
+		if h := c.s.abortHook.Load(); h != nil {
+			(*h)(c)
+		}
+		close(c.aborted)
+	})
+}
+
+// setupAbort ends setup on behalf of an abort that owns it (drain timeout):
+// it reports whether the abort owned the setup's end, and answers the
+// caller 503 when it did. Losing closeSetup to that ownership is how the
+// setup goroutine observes the abort.
+func (c *call) setupAbort() bool {
+	c.mu.Lock()
+	owned := c.abortOwned
+	c.mu.Unlock()
+	if !owned {
+		return false
+	}
+	c.cancelForks(nil)
+	c.abortCaller()
+	return true
+}
+
+// abortCaller answers the caller 503 and ends an aborted call; setup has
+// closed and the forks are cancelled.
+func (c *call) abortCaller() {
+	c.mu.Lock()
+	reason := c.abortReason
+	c.mu.Unlock()
+	c.addTrace("Call ended by the node: " + reason)
+	c.respondA(sip.StatusServiceUnavailable, "Service Unavailable")
+	c.end(sip.StatusServiceUnavailable, cdr.SideSystem, reason, ResultFailed)
+}
+
 // expire ends a call that reached MaxCallDuration: BYE to both legs.
 func (c *call) expire() {
+	c.s.log.Info("call reached the maximum duration", "correlation_id", c.id, "max", c.s.cfg.MaxCallDuration.String())
+	c.endBoth("max duration")
+}
+
+// endBoth ends a connected call for a system reason (max duration, drain
+// timeout): BYE to both legs, CDR side system.
+func (c *call) endBoth(reason string) {
 	c.mu.Lock()
 	if c.hungUp || c.ended {
 		c.mu.Unlock()
@@ -568,15 +710,18 @@ func (c *call) expire() {
 	c.hungUp = true
 	w := c.winner
 	c.mu.Unlock()
-	c.s.log.Info("call reached the maximum duration", "correlation_id", c.id, "max", c.s.cfg.MaxCallDuration.String())
-	c.end(sip.StatusOK, cdr.SideSystem, "max duration", ResultAnswered)
+	c.end(sip.StatusOK, cdr.SideSystem, reason, ResultAnswered)
 	go func() {
 		defer c.release()
-		defer contain(c.s.log, "expire")
+		defer contain(c.s.log, "end both legs")
+		// A re-INVITE or UPDATE being relayed finishes first: the BYE
+		// follows its transaction's end, bounded by the transaction
+		// timeout (spec edge case "drain timeout during a re-INVITE").
+		c.waitInDialog(inDialogWait)
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			defer contain(c.s.log, "expire")
+			defer contain(c.s.log, "end both legs")
 			w.bye()
 		}()
 		c.byeA()
@@ -861,6 +1006,17 @@ func (l *leg) invite() (*sip.Request, error) {
 		req.SetDestination(l.addr)
 	case l.uri != nil:
 		// sipgo resolves the URI's host.
+	case len(l.binding.Path) > 0 && !strings.Contains(l.binding.Path[0], "hflow="):
+		// Registered through a trusted edge proxy (Kamailio): its Path
+		// reaches the phone's NAT flow from any node (plan contract 7).
+		var first sip.Uri
+		if err := sip.ParseUri(strings.Trim(l.binding.Path[0], "<> "), &first); err != nil {
+			return nil, err
+		}
+		for _, p := range l.binding.Path {
+			req.AppendHeader(sip.NewHeader("Route", p))
+		}
+		req.SetDestination(hostPort(first))
 	case l.binding.ReceivedNode != s.cfg.NodeID && len(l.binding.Path) > 0:
 		// Registered through another node: only that node's flow reaches
 		// the phone, so route via its Path (it edge-proxies the INVITE).
@@ -1064,6 +1220,12 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 		return
 	}
+	if !c.beginInDialog() {
+		// The call is being ended (BYE on its way): no new transactions.
+		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
+		return
+	}
+	defer c.endInDialog()
 	var (
 		out *sip.Request
 		do  func(context.Context, *sip.Request) (*sip.Response, error)

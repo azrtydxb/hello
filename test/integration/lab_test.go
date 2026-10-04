@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -80,6 +81,37 @@ func labUp(t *testing.T) {
 	}
 }
 
+// waitLabServing waits until the lab takes registrations again: both SIP
+// nodes answer readyz 200, Kamailio dispatches to both, and a Valkey
+// primary is known. A sibling test's failure or its cleanup can leave the
+// lab briefly unable to serve — e.g. Kamailio marks both nodes inactive
+// while a Valkey primary is down, and re-probes them active only after it
+// is back. The next test must wait that out instead of failing its first
+// REGISTER with 503 No Hello Node Available.
+func waitLabServing(t *testing.T) {
+	t.Helper()
+	eventually(t, 60*time.Second, "the lab serving registrations", func() error {
+		for _, port := range []string{"8082", "8083"} {
+			if code := readyz(t, "http://localhost:"+port+"/readyz"); code != 200 {
+				return fmt.Errorf("node readyz = %d", code)
+			}
+		}
+		for _, n := range []string{"hello-sip-1", "hello-sip-2"} {
+			flags, err := dispatcherFlags(n)
+			if err != nil {
+				return err
+			}
+			if !strings.HasPrefix(flags, "A") {
+				return fmt.Errorf("%s dispatcher flags %s", n, flags)
+			}
+		}
+		if valkeyPrimary(t) == "" {
+			return errors.New("no Valkey primary")
+		}
+		return nil
+	})
+}
+
 // labClient is an authenticated management API client.
 type labClient struct {
 	t *testing.T
@@ -94,6 +126,7 @@ func newLabClient(t *testing.T) *labClient {
 	var err error
 	for range 30 { // bootstrap admin is created asynchronously at startup
 		if err = lc.do("POST", "/api/v1/auth/login", map[string]string{"username": labAdmin, "password": labPassword}, nil, 204); err == nil {
+			waitLabServing(t)
 			return lc
 		}
 		time.Sleep(time.Second)

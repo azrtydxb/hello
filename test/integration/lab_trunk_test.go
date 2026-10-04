@@ -432,7 +432,7 @@ func TestInboundRouting(t *testing.T) {
 		t.Fatalf("INVITE from a non-trunk source = %d, want 403", out.Status)
 	}
 	// Clear the throttle count this refusal added for the host's IP.
-	labCompose(t, "exec", "-T", "valkey", "sh", "-c", "valkey-cli --scan --pattern 'hello:authfail:*' | xargs -r valkey-cli del")
+	clearThrottle(t) // on the current Valkey primary (Sentinel)
 }
 
 func TestCDRTrace(t *testing.T) {

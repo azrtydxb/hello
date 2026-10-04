@@ -29,7 +29,14 @@ type Server struct {
 	Checks map[string]Check
 	// Optional dependencies degrade a feature but not the node: a failure
 	// is reported in the /readyz body and metrics, and /readyz stays 200.
-	Optional        map[string]Check
+	Optional map[string]Check
+	// Lifecycle, when set, decides readiness instead of Checks: /readyz is
+	// 200 only while it reports ready, and the body names the state and
+	// its reason. (internal/lifecycle's Machine implements it; Optional
+	// checks are still reported.)
+	Lifecycle interface {
+		Readiness() (ready bool, state, reason string)
+	}
 	App             http.Handler
 	Metrics         *telemetry.Metrics
 	Log             *slog.Logger
@@ -72,6 +79,25 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 			s.Metrics.DependencyUp.WithLabelValues(name).Set(up)
 		}
 		return failed
+	}
+	if s.Lifecycle != nil {
+		ready, state, reason := s.Lifecycle.Readiness()
+		degraded := run(s.Optional)
+		body := map[string]any{"status": state, "state": state}
+		if reason != "" {
+			body["reason"] = reason
+		}
+		if len(degraded) > 0 {
+			body["degraded"] = degraded
+		}
+		if !ready {
+			s.Metrics.NodeReady.Set(0)
+			writeJSON(w, http.StatusServiceUnavailable, body)
+			return
+		}
+		s.Metrics.NodeReady.Set(1)
+		writeJSON(w, http.StatusOK, body)
+		return
 	}
 	failed, degraded := run(s.Checks), run(s.Optional)
 	if len(failed) > 0 {
