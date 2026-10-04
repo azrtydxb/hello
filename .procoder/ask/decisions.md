@@ -133,3 +133,8 @@
 - Pay for a larger runner (ubuntu-4-cores) for the images job; keep the full failover test gating CI
 - Keep the free 2-core runner; the failover test runs pre-merge locally and in CI only as a non-gating scheduled job
 - Keep the free runner; the failover test keeps trying to pass in CI with further environment tuning
+
+## Deployment target and order
+
+- Pull Phase 6 (Helm/Kubernetes on kw) forward, right after the Phase 3 merge; features (Phases 4-5) come after
+- Keep roadmap order: Phases 4-5 features next; kw deployment stays Phase 6
