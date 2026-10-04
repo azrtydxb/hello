@@ -104,6 +104,17 @@ type SIP struct {
 	// MaxCallDuration ends a connected call that has run this long (both
 	// legs get BYE), so a call whose phones vanished without BYE is cleared.
 	MaxCallDuration time.Duration
+	// RTPPortMin and RTPPortMax (HELLO_RTP_PORT_MIN/MAX, default
+	// 20000-21000) are the UDP port range anchored media sessions draw
+	// their relay sockets from.
+	RTPPortMin int
+	RTPPortMax int
+	// MediaForceAnchor (HELLO_MEDIA_FORCE_ANCHOR, default false) anchors
+	// every call's media regardless of the per-call triggers (spec S-1d).
+	MediaForceAnchor bool
+	// MediaRecordingNotice (HELLO_MEDIA_RECORDING_NOTICE, default true)
+	// plays the recording-notice announcement before a recording starts.
+	MediaRecordingNotice bool
 }
 
 // LogValue keeps the database password out of logs.
@@ -177,6 +188,10 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		StateTimeout:       r.duration("HELLO_SIP_STATE_TIMEOUT", 200*time.Millisecond),
 		MaxCallDuration:    r.duration("HELLO_SIP_MAX_CALL_DURATION", 4*time.Hour),
 	}
+	c.RTPPortMin = r.port("HELLO_RTP_PORT_MIN", 20000)
+	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
+	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"
+	c.MediaRecordingNotice = r.getenv("HELLO_MEDIA_RECORDING_NOTICE") != "false"
 	if c.MaxCallDuration == 0 {
 		r.fail("HELLO_SIP_MAX_CALL_DURATION", errors.New("must be positive"))
 	}
@@ -203,6 +218,14 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	}
 	if c.RegisterMinExpires > c.RegisterMaxExpires {
 		r.fail("HELLO_SIP_REGISTER_MIN_EXPIRES", errors.New("must not exceed HELLO_SIP_REGISTER_MAX_EXPIRES"))
+	}
+	if c.RTPPortMin > c.RTPPortMax {
+		r.fail("HELLO_RTP_PORT_MIN", errors.New("must not exceed HELLO_RTP_PORT_MAX"))
+	}
+	// A range too small for even one relay (a relay needs two sockets) is
+	// refused at startup; anchored calls would fall back to direct forever.
+	if c.RTPPortMax-c.RTPPortMin+1 < 2 {
+		r.fail("HELLO_RTP_PORT_MIN", errors.New("the range must hold at least two ports"))
 	}
 	bindHost, err := splitHost(c.SIPBindAddr)
 	if err != nil {
@@ -388,6 +411,20 @@ func (r *reader) hostPort(key, v string) {
 	if _, err := splitHost(v); err != nil {
 		r.fail(key, err)
 	}
+}
+
+// port reads a UDP port number setting (1-65535).
+func (r *reader) port(key string, def int) int {
+	v := r.getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > 65535 {
+		r.fail(key, errors.New("must be a port number"))
+		return def
+	}
+	return n
 }
 
 func (r *reader) positiveInt(key string, def int) int {
