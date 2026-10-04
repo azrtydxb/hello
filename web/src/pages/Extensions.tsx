@@ -363,6 +363,9 @@ function EditRow({
   const [voicemailEnabled, setVoicemailEnabled] = useState(
     ext.voicemailEnabled !== false,
   );
+  const [recordDefault, setRecordDefault] = useState(
+    ext.recordDefault ?? false,
+  );
   const [always, setAlways] = useState(ext.forwardAlways ?? "");
   const [busy, setBusyField] = useState(ext.forwardBusy ?? "");
   const [noAnswer, setNoAnswer] = useState(ext.forwardNoAnswer ?? "");
@@ -389,6 +392,9 @@ function EditRow({
     if (dnd !== (ext.dnd ?? false)) patch.dnd = dnd;
     if (voicemailEnabled !== (ext.voicemailEnabled !== false)) {
       patch.voicemailEnabled = voicemailEnabled;
+    }
+    if (recordDefault !== (ext.recordDefault ?? false)) {
+      patch.recordDefault = recordDefault;
     }
     if (always.trim() !== (ext.forwardAlways ?? "")) {
       patch.forwardAlways = always.trim();
@@ -511,6 +517,17 @@ function EditRow({
                 />
                 <label htmlFor={`${base}-vm`}>
                   Voicemail for extension {ext.number}
+                </label>
+              </div>
+              <div className="field checkbox">
+                <input
+                  id={`${base}-record`}
+                  type="checkbox"
+                  checked={recordDefault}
+                  onChange={(e) => setRecordDefault(e.target.checked)}
+                />
+                <label htmlFor={`${base}-record`}>
+                  Record calls by default for extension {ext.number}
                 </label>
               </div>
             </div>

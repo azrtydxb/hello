@@ -68,6 +68,43 @@ func (m *memObjects) Remove(_ context.Context, object string) error {
 
 func (m *memObjects) EnsureBucket(context.Context) error { return nil }
 
+func (m *memObjects) PresignRecording(_ context.Context, object string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.objs["rec:"+object]; !ok {
+		return "", fmt.Errorf("memObjects: %s: not found", object)
+	}
+	m.presigns++
+	return "http://objects.test/rec/" + object + "?sig=1", nil
+}
+
+func (m *memObjects) RemoveRecording(_ context.Context, object string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.objs, "rec:"+object)
+	return nil
+}
+
+func (m *memObjects) PutAnnouncement(_ context.Context, object string, r io.Reader, _ int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	m.objs["ann:"+object] = b
+	return nil
+}
+
+func (m *memObjects) RemoveAnnouncement(_ context.Context, object string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.objs, "ann:"+object)
+	return nil
+}
+
+func (m *memObjects) EnsureMediaBuckets(context.Context) error { return nil }
+
 func (m *memObjects) has(object string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()

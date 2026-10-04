@@ -25,7 +25,7 @@ import {
   mapFieldErrors,
   type ErrorMap,
 } from "../forms";
-import { EXTENSION_NUMBER_PATTERN } from "../api";
+import { EXTENSION_NUMBER_PATTERN, SIP_USERNAME_PATTERN } from "../api";
 
 type ListState<T> =
   | { status: "loading" }
@@ -332,6 +332,14 @@ function validateGroup(d: GroupDraft): Record<string, string> {
   }
   if (d.failureKind === "voicemail" && d.failureTarget.trim() === "") {
     e.failureTarget = "Enter the extension whose box takes the call.";
+  }
+  if (d.failureKind === "announcement") {
+    if (d.failureTarget.trim() === "") {
+      e.failureTarget = "Enter the announcement's name.";
+    } else if (!SIP_USERNAME_PATTERN.test(d.failureTarget.trim())) {
+      e.failureTarget =
+        "Use the announcement's name (1-64 of A-Z a-z 0-9 . _ -).";
+    }
   }
   if (
     d.failureKind === "voicemail" &&
@@ -671,6 +679,7 @@ function RingGroupForm({
                 <option value="none">Hang up</option>
                 <option value="voicemail">Voicemail</option>
                 <option value="external">External number</option>
+                <option value="announcement">Announcement</option>
               </select>
             )}
           </Field>
@@ -680,13 +689,17 @@ function RingGroupForm({
               label={
                 d.failureKind === "voicemail"
                   ? "Box extension"
-                  : "External number"
+                  : d.failureKind === "announcement"
+                    ? "Announcement name"
+                    : "External number"
               }
               error={errors.failureTarget}
               hint={
                 d.failureKind === "voicemail"
                   ? "The extension whose box takes the call."
-                  : "2 to 20 digits, optionally starting with +."
+                  : d.failureKind === "announcement"
+                    ? "The uploaded announcement's name."
+                    : "2 to 20 digits, optionally starting with +."
               }
             >
               {(p) => (

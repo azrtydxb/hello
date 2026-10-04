@@ -113,7 +113,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		_ = ln.Close()
 		return fmt.Errorf("MINIO_ENDPOINT: %w", err)
 	}
-	go ensureVoicemailBucket(ctx, objs, log)
+	go ensureBuckets(ctx, objs, log)
 	go runMailer(ctx, cfg, st, objs, log)
 
 	// The node lifecycle: JOINING until PostgreSQL first answers, READY,
@@ -160,13 +160,17 @@ func seedFeatureCodes(ctx context.Context, st *store.Store, log *slog.Logger) {
 	}
 }
 
-// ensureVoicemailBucket creates hello-voicemail when it is missing (deploy
-// usually does; compose dev may not).
-func ensureVoicemailBucket(ctx context.Context, objs *api.MinioObjects, log *slog.Logger) {
+// ensureBuckets creates the audio buckets when they are missing (deploy
+// usually does; compose dev may not): hello-voicemail since Phase 4, plus
+// hello-recordings and hello-announcements since Phase 5.
+func ensureBuckets(ctx context.Context, objs *api.MinioObjects, log *slog.Logger) {
 	bctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := objs.EnsureBucket(bctx); err != nil {
 		log.Warn("voicemail bucket not verified", "bucket", api.VoicemailBucket, "error", err)
+	}
+	if err := objs.EnsureMediaBuckets(bctx); err != nil {
+		log.Warn("media buckets not verified", "error", err)
 	}
 }
 

@@ -274,6 +274,39 @@ describe("Extensions", () => {
     });
   });
 
+  it("saves the record-default control", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/extensions": () =>
+        json({
+          items: [
+            {
+              ...EXT,
+              dnd: false,
+              voicemailEnabled: true,
+              recordDefault: false,
+            },
+          ],
+        }),
+      "PATCH /api/v1/extensions/1": () => json({ ...EXT, recordDefault: true }),
+    });
+    renderApp("/extensions");
+    await screen.findByRole("row", { name: /Reception/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit extension 100" }));
+    fireEvent.click(
+      screen.getByLabelText("Record calls by default for extension 100"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByRole("button", { name: "Edit extension 100" });
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/1",
+      body: { recordDefault: true },
+    });
+  });
+
   it("validates forwarding targets before sending", async () => {
     const calls = mockApi({
       ...ME,
