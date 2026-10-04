@@ -126,6 +126,14 @@ jobs:
       - name: Lab and failure-injection tests
         env:
           HELLO_DOCKER: "1"
+          # The phones run on the runner and reach the nodes through the
+          # published ports, so the containers see the edge network's
+          # gateway (pinned in compose) as the packet source, not
+          # 127.0.0.1. Advertising that gateway as the Contact host keeps
+          # the lab phones off the Phase 5 NAT anchor: they present
+          # honest, matched addressing, and the direct-media pass-through
+          # assertions stay about SIP signalling, not about Docker NAT.
+          HELLO_LAB_CONTACT_HOST: 10.89.53.1
         run: go test -count=1 -timeout 50m -v ./test/integration/
 
   publish:
