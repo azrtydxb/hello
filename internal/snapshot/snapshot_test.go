@@ -252,8 +252,8 @@ func TestExtensionAndGroupLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close(ctx) }()
-	if _, err := conn.Exec(ctx, `INSERT INTO extensions (number, name, dnd, forward_always, voicemail_enabled) VALUES
-		('100', 'A', true, '200', true), ('200', 'B', false, '', true)`); err != nil {
+	if _, err := conn.Exec(ctx, `INSERT INTO extensions (number, name, dnd, forward_always, voicemail_enabled, record_default) VALUES
+		('100', 'A', true, '200', true, true), ('200', 'B', false, '', true, false)`); err != nil {
 		t.Fatal(err)
 	}
 	var a, b int64
@@ -276,6 +276,9 @@ func TestExtensionAndGroupLoad(t *testing.T) {
 	if _, err := conn.Exec(ctx, "INSERT INTO feature_codes (code, action) VALUES ('*78', 'dnd_on')"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := conn.Exec(ctx, "INSERT INTO announcements (name, minio_object) VALUES ('welcome', 'ann/welcome.wav')"); err != nil {
+		t.Fatal(err)
+	}
 
 	w := &Watcher{Domain: domain}
 	s, err := w.loadAll(ctx, conn)
@@ -285,6 +288,9 @@ func TestExtensionAndGroupLoad(t *testing.T) {
 	ea, ok := s.Extension("100")
 	if !ok || !ea.DND || ea.ForwardAlways != "200" || ea.VoicemailEnabled || ea.VoicemailBoxID != 0 {
 		t.Fatalf("extension 100 = %+v ok=%v (box-less must be voicemail-disabled)", ea, ok)
+	}
+	if !ea.RecordDefault {
+		t.Fatalf("extension 100 record_default = false, want true")
 	}
 	var boxB int64
 	if err := conn.QueryRow(ctx, "SELECT id FROM voicemail_boxes WHERE extension_id = $1", b).Scan(&boxB); err != nil {
@@ -303,5 +309,11 @@ func TestExtensionAndGroupLoad(t *testing.T) {
 	}
 	if c, ok := s.FeatureCode("*78"); !ok || c.Action != "dnd_on" || c.Argument != "" {
 		t.Fatalf("feature code = %+v ok=%v", c, ok)
+	}
+	if obj, ok := s.Announcement("welcome"); !ok || obj != "ann/welcome.wav" {
+		t.Fatalf("announcement = %q ok=%v", obj, ok)
+	}
+	if _, ok := s.Announcement("missing"); ok {
+		t.Fatal("unknown announcement reported present")
 	}
 }
