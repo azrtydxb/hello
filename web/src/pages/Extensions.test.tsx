@@ -214,4 +214,100 @@ describe("Extensions", () => {
     await waitFor(() => expect(number).toHaveAttribute("aria-invalid", "true"));
     expect(number).toHaveAccessibleDescription("number 101 is already taken");
   });
+
+  it("toggles DND and voicemail and saves forwarding targets", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/extensions": () =>
+        json({
+          items: [
+            {
+              ...EXT,
+              dnd: false,
+              voicemailEnabled: true,
+              forwardAlways: "",
+              forwardBusy: "",
+              forwardNoAnswer: "",
+            },
+          ],
+        }),
+      "PATCH /api/v1/extensions/1": () =>
+        json({
+          ...EXT,
+          dnd: true,
+          voicemailEnabled: false,
+          forwardAlways: "201",
+          forwardBusy: "+97142000100",
+        }),
+    });
+    renderApp("/extensions");
+    const row = await screen.findByRole("row", { name: /Reception/ });
+    expect(row).toHaveTextContent("No");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit extension 100" }));
+    fireEvent.click(screen.getByLabelText("DND for extension 100"));
+    fireEvent.click(screen.getByLabelText("Voicemail for extension 100"));
+    fireEvent.change(
+      screen.getByLabelText("Forward always for extension 100"),
+      {
+        target: { value: "201" },
+      },
+    );
+    fireEvent.change(screen.getByLabelText("Forward busy for extension 100"), {
+      target: { value: "+97142000100" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await screen.findByRole("button", { name: "Edit extension 100" });
+    expect(screen.getByRole("row", { name: /Reception/ })).toHaveTextContent(
+      "Yes",
+    );
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/1",
+      body: {
+        dnd: true,
+        voicemailEnabled: false,
+        forwardAlways: "201",
+        forwardBusy: "+97142000100",
+      },
+    });
+  });
+
+  it("validates forwarding targets before sending", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/extensions": () =>
+        json({
+          items: [
+            {
+              ...EXT,
+              dnd: false,
+              voicemailEnabled: true,
+              forwardAlways: "",
+              forwardBusy: "",
+              forwardNoAnswer: "",
+            },
+          ],
+        }),
+    });
+    renderApp("/extensions");
+    await screen.findByRole("row", { name: /Reception/ });
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit extension 100" }));
+    fireEvent.change(
+      screen.getByLabelText("Forward always for extension 100"),
+      {
+        target: { value: "desk" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    const always = screen.getByLabelText("Forward always for extension 100");
+    expect(always).toHaveAttribute("aria-invalid", "true");
+    expect(always).toHaveAccessibleDescription(
+      "Empty = off; or 2 to 20 digits, optionally starting with +.",
+    );
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
 });

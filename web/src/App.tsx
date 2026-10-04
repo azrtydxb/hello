@@ -22,7 +22,10 @@ import { Placeholder } from "./pages/Placeholder";
 import { Registrations } from "./pages/Registrations";
 import { RouteTest } from "./pages/RouteTest";
 import { RoutesPage } from "./pages/Routes";
+import { RingGroups } from "./pages/RingGroups";
+import { System } from "./pages/System";
 import { Trunks } from "./pages/Trunks";
+import { Voicemail } from "./pages/Voicemail";
 
 /** Pages that have content; any other nav item renders a placeholder. */
 const PAGES: Readonly<Record<string, ComponentType>> = {
@@ -34,6 +37,9 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/trunks": Trunks,
   "/routes": RoutesPage,
   "/cluster": Cluster,
+  "/voicemail": Voicemail,
+  "/ring-groups": RingGroups,
+  "/system": System,
 };
 
 function Shell() {

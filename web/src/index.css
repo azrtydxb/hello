@@ -635,3 +635,15 @@ section > .error[role="note"] {
     justify-content: flex-start;
   }
 }
+
+.playbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0;
+}
+
+.playbar p {
+  margin: 0;
+}
