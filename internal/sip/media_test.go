@@ -438,12 +438,13 @@ func TestAnnouncements(t *testing.T) {
 	}
 
 	// Missing WAV: *89 with the set emptied skips the step with a trace,
-	// the call still answers and ends.
-	feats2 := func(s *snapshot.Snapshot) {
-		s.WithFeatureCodes([]snapshot.FeatureCode{{Code: "*89", Action: ActionAnnouncement, Argument: "ghost"}})
-	}
-	withFeatures(feats2)(nil, &Deps{Snapshots: pbx.snaps})
-	pbx.snaps.p.Load().WithFeatureCodes([]snapshot.FeatureCode{{Code: "*89", Action: ActionAnnouncement, Argument: "ghost"}})
+	// the call still answers and ends. The state swap is a fresh snapshot
+	// stored atomically: mutating the live one in place races the in-flight
+	// transactions of the transfer call above (the snapshot is read
+	// lock-free).
+	pbx.snaps.p.Store(snapshot.New(pbx.snaps.p.Load().Revision, testDomain, threeDevices()).
+		WithExtensions(bareExtension).
+		WithFeatureCodes([]snapshot.FeatureCode{{Code: "*89", Action: ActionAnnouncement, Argument: "ghost"}}))
 	r = waitCall(t, dial(t.Context(), a, "*89"))
 	if r.err != nil {
 		t.Fatalf("missing-WAV call: %v", r.err)
