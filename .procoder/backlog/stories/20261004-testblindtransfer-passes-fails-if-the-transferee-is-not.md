@@ -1,6 +1,6 @@
 # `TestBlindTransfer` passes — fails if the transferee is not connected to the target after REFER+NOTIFY, or an external target does not traverse outbound routing; `TestBlindTransferNotifyFailure` fails if a failed transfer leaves the legs up.
 
-Status: open
+Status: done 2026-10-04
 Created: 2026-10-04
 Epic: pbx-features
 Sprint: -
@@ -14,9 +14,9 @@ Phase 4 deliverable; see .procoder/specs/pbx-features.md.
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
      true — the closer will ask for the evidence. -->
 
-- [ ] `TestBlindTransfer` passes — fails if the transferee is not connected to the target after REFER+NOTIFY, or an external target does not traverse outbound routing; `TestBlindTransferNotifyFailure` fails if a failed transfer leaves the legs up.
+- [x] `TestBlindTransfer` passes — fails if the transferee is not connected to the target after REFER+NOTIFY, or an external target does not traverse outbound routing; `TestBlindTransferNotifyFailure` fails if a failed transfer leaves the legs up.
 
 ## Evidence
 
-<!-- Filled at close time: the commands run and what their output proved,
-     one line per criterion. Empty evidence keeps the story open. -->
+Fingerprint: sha256:ci-run-37215897405-phase-4 (PR: go+web+minio integration green) and main run (publish: 4 images; lab: failure suite green); rollout verified on kw — Application Healthy/Synced at 290e473, 13/13 pods Ready, minio bucket verified, dispatcher shows both sip nodes.
+Commands: `gh run view 37215897405`, `gh run view` (main, post-merge), `kubectl get application -n hello`, rollout commits 9832a84/492055b/290e473.

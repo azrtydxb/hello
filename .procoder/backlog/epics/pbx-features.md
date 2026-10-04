@@ -1,6 +1,6 @@
 # pbx-features
 
-Status: open
+Status: done 2026-10-04
 Created: 2026-10-04
 Milestone: phase-4-pbx-features
 Spec: pbx-features @ 59ab3b28f478
