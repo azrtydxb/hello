@@ -21,7 +21,9 @@ func EncodeWAV(pcm []byte, sampleRate int) []byte {
 	out := make([]byte, wavHeaderLen+len(pcm))
 	le := binary.LittleEndian
 	copy(out, "RIFF")
-	// RIFF size: everything after the first 8 bytes.
+	// RIFF size: everything after the first 8 bytes. The field is uint32 by
+	// definition; a recording would have to outgrow 4 GiB to wrap it.
+	//nolint:gosec // G115: RIFF length fields are uint32 by format definition.
 	le.PutUint32(out[4:], uint32(wavHeaderLen-8+len(pcm)))
 	copy(out[8:], "WAVE")
 	copy(out[12:], "fmt ")
@@ -34,6 +36,7 @@ func EncodeWAV(pcm []byte, sampleRate int) []byte {
 	le.PutUint16(out[32:], 2)  // block align: one 16-bit sample
 	le.PutUint16(out[34:], 16) // bits per sample
 	copy(out[36:], "data")
+	//nolint:gosec // G115: RIFF length fields are uint32 by format definition.
 	le.PutUint32(out[40:], uint32(len(pcm)))
 	copy(out[wavHeaderLen:], pcm)
 	return out
