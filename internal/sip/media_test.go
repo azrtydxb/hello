@@ -26,11 +26,6 @@ func withMedia(force bool) pbxOpt {
 	}
 }
 
-// noMedia turns the media metrics off for a test that counts nothing.
-func noMedia() pbxOpt {
-	return func(_ *Config, d *Deps) { d.Media = nil }
-}
-
 // fakeRecordings is the recordings metadata store.
 type fakeRecordings struct {
 	mu   sync.Mutex
@@ -53,13 +48,6 @@ func (f *fakeRecordings) snapshot() []recording0 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]recording0(nil), f.rows...)
-}
-
-// announceInSnapshot installs an announcement set with one entry.
-func announceInSnapshot() func(s *snapshot.Snapshot) {
-	return func(s *snapshot.Snapshot) {
-		s.WithAnnouncements(map[string]string{"welcome": "ann/welcome.wav", "recording-notice": "ann/recording-notice.wav"})
-	}
 }
 
 // inviteTo builds a minimal INVITE for the anchoring decision table.
@@ -120,20 +108,11 @@ func TestConditionalAnchor(t *testing.T) {
 	}
 }
 
-// announceTo installs the announcement set on the test PBX's snapshot.
-func announceTo() func(s *snapshot.Snapshot) {
-	return func(s *snapshot.Snapshot) {
-		s.WithAnnouncements(map[string]string{
-			"welcome": "ann/welcome.wav", "recording-notice": "ann/recording-notice.wav",
-		})
-	}
-}
-
 // putAnnouncements stores both announcements' WAVs in the fake object
 // store.
 func putAnnouncements(objs *fakeObjects) {
-	objs.Put(context.Background(), "ann/welcome.wav", media.EncodeWAV(make([]byte, 3200), 8000))
-	objs.Put(context.Background(), "ann/recording-notice.wav", media.EncodeWAV(make([]byte, 1600), 8000))
+	_ = objs.Put(context.Background(), "ann/welcome.wav", media.EncodeWAV(make([]byte, 3200), 8000))
+	_ = objs.Put(context.Background(), "ann/recording-notice.wav", media.EncodeWAV(make([]byte, 1600), 8000))
 }
 
 // TestRecording fails if *1 or record_default does not produce a MinIO WAV
@@ -168,7 +147,7 @@ func TestRecording(t *testing.T) {
 		t.Fatalf("call: %v", r.err)
 	}
 	waitReq(t, c.invites, "INVITE to c")
-	var seq uint32 = r.dcs.InviteRequest.CSeq().SeqNo + 10
+	var seq = r.dcs.InviteRequest.CSeq().SeqNo + 10
 	sendDigits(t, a, r.dcs, "*1", &seq)
 	reqA := waitReq(t, a.reinvites, "re-INVITE to a with the anchor's offer")
 	reqC := waitReq(t, c.reinvites, "re-INVITE to c with the anchor's offer")
@@ -274,7 +253,7 @@ func TestReAnchorMidCall(t *testing.T) {
 		t.Fatalf("call: %v", r.err)
 	}
 	waitReq(t, c.invites, "INVITE to c")
-	var seq uint32 = r.dcs.InviteRequest.CSeq().SeqNo + 10
+	var seq = r.dcs.InviteRequest.CSeq().SeqNo + 10
 	sendDigits(t, a, r.dcs, "*1", &seq)
 	reqA := waitReq(t, a.reinvites, "re-INVITE to a")
 	reqC := waitReq(t, c.reinvites, "re-INVITE to c")
@@ -430,7 +409,7 @@ func TestAnnouncements(t *testing.T) {
 		t.Fatalf("transfer call: %v", r.err)
 	}
 	waitReq(t, c.invites, "INVITE to c")
-	var seq uint32 = r.dcs.InviteRequest.CSeq().SeqNo + 10
+	var seq = r.dcs.InviteRequest.CSeq().SeqNo + 10
 	sendDigits(t, a, r.dcs, "*2", &seq)
 	sendDigits(t, a, r.dcs, "300#", &seq)
 	// The transfer target answers; the caller is re-INVITEd to it, and the
@@ -485,5 +464,179 @@ func TestAnnouncements(t *testing.T) {
 	}
 	if !strings.Contains(traceText(cd.Trace), "missing") {
 		t.Fatalf("CDR trace lacks the missing-WAV step: %s", traceText(cd.Trace))
+	}
+}
+
+// TestNATAnchorCarrier fails if a NAT-simulated callee (Contact names one
+// port, packets come from another) does not anchor the call, or if the
+// anchored path does not deliver audio to the address the packets actually
+// come from — the one-way-audio carrier case (spec S-6). Mutation: dropping
+// the NAT trigger from the decision keeps the call direct and fails the
+// anchored-answer and CDR assertions; latching to the SDP address instead
+// of the packet source fails the feed assertions.
+func TestNATAnchorCarrier(t *testing.T) {
+	pbx := startPBX(t, callerDevices(), shortRing(2*time.Second), withMedia(false),
+		withVoicemail(newVMStore(), &fakeObjects{}))
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	// b registers once, with a Contact port far from its real source:
+	// exactly what a phone behind a symmetric NAT looks like.
+	b := newPhone(t, pbx, "b1", "pb1")
+	res := b.authDo(b.registerReq(300, "<sip:b1@"+testDomain+":51999;transport=udp>"), AlgSHA256, "pb1")
+	if res.StatusCode != 200 {
+		t.Fatalf("NAT register = %d", res.StatusCode)
+	}
+	b.setCallee(answerAfter(nil))
+	r := waitCall(t, dial(t.Context(), a, "200"))
+	if r.err != nil {
+		t.Fatalf("call: %v", r.err)
+	}
+	// The fork's INVITE carried the anchor's offer: b's answer echoes the
+	// anchor host, not a's address.
+	invB := waitReq(t, b.invites, "INVITE to b")
+	if sdp, err := media.ParseAudioSDP(invB.Body()); err != nil || sdp.Address != "127.0.0.1" {
+		t.Fatalf("fork offer is not the anchor's: %q (%v)", invB.Body(), err)
+	}
+	ans := r.dcs.InviteResponse.Body()
+	sdpA, err := media.ParseAudioSDP(ans)
+	if err != nil || sdpA.Address != "127.0.0.1" {
+		t.Fatalf("caller answer is not the anchor's: %q (%v)", ans, err)
+	}
+	// RTP: both feeds send from their own sockets; the relay must latch
+	// them and deliver each side's audio to the other.
+	feedA := startRTPFeed(t, ans)
+	feedB := startRTPFeed(t, invB.Body())
+	// b's first packet latches leg b onto feedB's socket (its real source,
+	// not the SDP port); a's audio then flows there.
+	feedB.packet(0, make([]byte, 160), false)
+	time.Sleep(200 * time.Millisecond) // the latch lands before a's audio
+	feedA.packet(0, make([]byte, 160), false)
+	pkt := <-func() chan *media.RTPPacket {
+		ch := make(chan *media.RTPPacket, 1)
+		go func() {
+			buf := make([]byte, 2048)
+			_ = feedB.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+			n, _, err := feedB.conn.ReadFrom(buf)
+			if err == nil {
+				if p, ok := media.ParseRTP(buf[:n]); ok {
+					ch <- p
+				}
+			}
+			close(ch)
+		}()
+		return ch
+	}()
+	if pkt == nil {
+		t.Fatal("the callee feed received nothing: one-way audio")
+	}
+	hangup(t, r.dcs)
+	cd := pbx.nextCDR(t)
+	if cd.MediaMode != "anchored" {
+		t.Fatalf("CDR media = %q, want anchored", cd.MediaMode)
+	}
+	if !strings.Contains(traceText(cd.Trace), "Media anchored (nat)") {
+		t.Fatalf("CDR trace lacks the NAT anchor step: %s", traceText(cd.Trace))
+	}
+}
+
+// TestRTPMetrics fails if the packets, octets, sessions or anchored-call
+// gauges do not move for an anchored call, or if a failed anchor (port
+// range exhausted) does not count and leave the call direct (spec S-3).
+// Mutation: dropping the Observe wiring from startAnchor freezes the
+// packet counters; dropping the AnchorFailures increment hides the
+// exhaustion.
+func TestRTPMetrics(t *testing.T) {
+	objs := &fakeObjects{}
+	pbx := startPBX(t, callerDevices(), shortRing(2*time.Second), withMedia(false),
+		withVoicemail(newVMStore(), objs))
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	// NAT on the callee side anchors the call: one registration whose
+	// Contact names a port its packets never come from.
+	b := newPhone(t, pbx, "b1", "pb1")
+	if res := b.authDo(b.registerReq(300, "<sip:b1@"+testDomain+":51997;transport=udp>"), AlgSHA256, "pb1"); res.StatusCode != 200 {
+		t.Fatalf("NAT register = %d", res.StatusCode)
+	}
+	b.setCallee(answerAfter(nil))
+	r := waitCall(t, dial(t.Context(), a, "200"))
+	if r.err != nil {
+		t.Fatalf("call: %v", r.err)
+	}
+	waitReq(t, b.invites, "INVITE to b")
+	feedA := startRTPFeed(t, r.dcs.InviteResponse.Body())
+	feedA.silence(0.5)
+	if v := pbx.metric(t, "hello_media_anchored_calls", nil); v != 1 {
+		t.Fatalf("anchored calls = %v, want 1", v)
+	}
+	if v := pbx.metric(t, "hello_rtp_sessions", nil); v != 1 {
+		t.Fatalf("rtp sessions = %v, want 1", v)
+	}
+	// The stats tick is one second: give it a moment, then expect both
+	// directions' counters.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if pbx.metric(t, "hello_rtp_packets_total", map[string]string{"direction": "a>b"}) > 0 &&
+			pbx.metric(t, "hello_rtp_octets_total", map[string]string{"direction": "a>b"}) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if v := pbx.metric(t, "hello_rtp_packets_total", map[string]string{"direction": "a>b"}); v == 0 {
+		t.Fatal("hello_rtp_packets_total{a>b} never moved")
+	}
+	if v := pbx.metric(t, "hello_rtp_octets_total", map[string]string{"direction": "a>b"}); v == 0 {
+		t.Fatal("hello_rtp_octets_total{a>b} never moved")
+	}
+	hangup(t, r.dcs)
+	pbx.nextCDR(t)
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if pbx.metric(t, "hello_media_anchored_calls", nil) == 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if v := pbx.metric(t, "hello_media_anchored_calls", nil); v != 0 {
+		t.Fatalf("anchored calls = %v after hangup, want 0", v)
+	}
+	// Anchor failure: exhaust the configured range, the call falls back to
+	// direct, is counted, and still completes.
+	pbx2 := startPBX(t, callerDevices(), shortRing(2*time.Second),
+		func(c *Config, d *Deps) {
+			c.RTPPortMin, c.RTPPortMax = 32000, 32001
+			c.MediaForceAnchor = true
+		},
+		withVoicemail(newVMStore(), objs))
+	hoard, err := media.NewRelay(32000, 32001)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hoard.AddLeg("a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hoard.AddLeg("b"); err != nil {
+		t.Fatal(err)
+	}
+	defer hoard.Close()
+	a2 := newPhone(t, pbx2, "a1", "pa")
+	a2.register(t)
+	b2 := newPhone(t, pbx2, "b1", "pb1")
+	b2.register(t)
+	b2.setCallee(answerAfter(nil))
+	r2 := waitCall(t, dial(t.Context(), a2, "200"))
+	if r2.err != nil {
+		t.Fatalf("exhausted-range call: %v", r2.err)
+	}
+	waitReq(t, b2.invites, "INVITE to b")
+	hangup(t, r2.dcs)
+	cd2 := pbx2.nextCDR(t)
+	if cd2.MediaMode == "anchored" {
+		t.Fatal("the exhausted-range call anchored anyway")
+	}
+	if !strings.Contains(traceText(cd2.Trace), "Media anchor failed") {
+		t.Fatalf("CDR trace lacks the anchor failure: %s", traceText(cd2.Trace))
+	}
+	if v := pbx2.metric(t, "hello_media_anchor_failures_total", nil); v != 1 {
+		t.Fatalf("anchor failures = %v, want 1", v)
 	}
 }
