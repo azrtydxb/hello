@@ -1556,9 +1556,11 @@ spec:
         hello.dev/part: minio
     spec:
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        runAsGroup: 1000
+        # As in the lab's compose file the container runs as the image
+        # default (root): an explicit uid 1000 hit "file access denied" on
+        # its emptyDir /data in kw. Caps are still dropped and privilege
+        # escalation disabled.
+        runAsUser: 0
         fsGroup: 1000
       containers:
         - name: minio
