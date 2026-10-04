@@ -279,6 +279,14 @@ func TestCallAcrossNodes(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	// What the nodes actually observe for these phones decides direct vs
+	// anchored media (contract 2); log it so failures explain themselves.
+	var regs []map[string]any
+	if err := lc.do("GET", "/api/v1/registrations", nil, &regs, 200); err != nil {
+		t.Logf("registrations unavailable: %v", err)
+	} else {
+		t.Logf("registrations: %v", regs)
+	}
 	answered := make(chan error, 1)
 	go func() {
 		in, err := b.Next(ctx)
