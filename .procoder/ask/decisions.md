@@ -143,3 +143,19 @@
 
 - Yes — draft the Phase 4 spec (transfers, forwarding, DND, ring/hunt groups, voicemail, presence)
 - No — I want something else first
+
+## Phase 4 voicemail audio storage
+
+- S3-compatible object storage (MinIO) in the hello namespace
+- PostgreSQL bytea/large objects
+- Persistent-volume filesystem
+
+## Phase 4 voicemail delivery
+
+- Web + phone (MWI) only; email notification later
+- Include SMTP email notification with audio attachment now
+
+## Phase 4 ring/hunt group strategies
+
+- All five now (ring-all, sequential, round-robin, longest-idle, weighted)
+- Ring-all + sequential first, the rest later
