@@ -989,6 +989,7 @@ export const FEATURE_CODE_ACTIONS = [
   "attended_transfer",
 ] as const;
 
+/** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
 export type FeatureCodeAction = (typeof FEATURE_CODE_ACTIONS)[number];
 
 /** GET /api/v1/feature-codes. */
