@@ -693,3 +693,23 @@ func (w *Watcher) revision() int64 {
 	}
 	return -1
 }
+
+// Codes returns the feature codes, longest first, so a code that is
+// another's prefix matches deterministically.
+func (s *Snapshot) Codes() []FeatureCode {
+	out := make([]FeatureCode, 0, len(s.codes))
+	for _, c := range s.codes {
+		out = append(out, c)
+	}
+	sortCodes(out)
+	return out
+}
+
+// sortCodes orders longest code first.
+func sortCodes(codes []FeatureCode) {
+	for i := 1; i < len(codes); i++ {
+		for j := i; j > 0 && len(codes[j].Code) > len(codes[j-1].Code); j-- {
+			codes[j], codes[j-1] = codes[j-1], codes[j]
+		}
+	}
+}
