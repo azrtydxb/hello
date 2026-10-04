@@ -268,7 +268,7 @@ func (r *Relay) Start() {
 		return
 	}
 	r.started = true
-	r.wg.Add(2 * len(r.legs))
+	r.wg.Add(len(r.legs))
 	for _, l := range r.legs {
 		go r.runLeg(l)
 	}
@@ -324,7 +324,7 @@ func (r *Relay) recv(l *relayLeg) {
 		if !ok {
 			continue // a malformed datagram is a dropped packet, never fatal
 		}
-		if l.audioPT != 0 && pkt.PayloadType == l.audioPT {
+		if (l.audioPT == 0 || pkt.PayloadType == l.audioPT) && pkt.PayloadType != l.dtmfPT {
 			r.noteAudio(l, pkt)
 		}
 		if l.dtmfPT != 0 && pkt.PayloadType == l.dtmfPT {
@@ -563,7 +563,9 @@ func (r *Relay) Metrics() RelayStats {
 			Dropped:  l.dropped.Load(),
 		}
 		l.stats.mu.Unlock()
-		out.Directions[peer.name+">"+l.name] = st
+		// Audio arriving into leg l is l's party speaking: the direction
+		// runs from l's side to the peer's side.
+		out.Directions[l.name+">"+peer.name] = st
 	}
 	return out
 }
