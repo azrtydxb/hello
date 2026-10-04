@@ -60,11 +60,11 @@ Interfaces: contracts 2–6; produces MWI MESSAGEs, presence publishes, the anch
 Files: `internal/store/` (new tables; voicemail queries; group queries; feature-code queries), `internal/api/` (contract 7 routes, presigned URLs, multipart greeting upload), `internal/mailer/` (SMTP queue worker: pick up `email_status='pending'` rows, send with WAV attachment, retry 3× backoff, record `sent`/`failed`), `cmd/hello-control/main.go` (MinIO client + mailer wiring).
 Interfaces: produces contract 7; consumes contracts 1, 3, 6.
 
-- [ ] Store: box settings, message list/mark/delete (delete removes the MinIO object too — via callback to avoid a store→MinIO dependency), group CRUD with member positions, feature-code upsert; audit + revision bump + NOTIFY on every mutation.
-- [ ] Handlers per contract 7 + presigned GETs; OpenAPI for all; `TestVersionAndOpenAPI` stays green.
-- [ ] Mailer with fake-SMTP tests (`TestMailerRetries`, `TestMailerDisabled`).
-- [ ] API tests: `TestVoicemailBoxSettings`, `TestVoicemailMessagesFlow` (with MinIO container), `TestRingGroupCRUDValidation`, `TestFeatureCodeRoutes`, `TestPresenceAPI`.
-- [ ] Gate + report.
+- [x] Store: box settings, message list/mark/delete (delete removes the MinIO object too — via callback to avoid a store→MinIO dependency), group CRUD with member positions, feature-code upsert; audit + revision bump + NOTIFY on every mutation.
+- [x] Handlers per contract 7 + presigned GETs; OpenAPI for all; `TestVersionAndOpenAPI` stays green.
+- [x] Mailer with fake-SMTP tests (`TestMailerRetries`, `TestMailerDisabled`).
+- [x] API tests: `TestVoicemailBoxSettings`, `TestVoicemailMessagesFlow` (with MinIO container), `TestRingGroupCRUDValidation`, `TestFeatureCodeRoutes`, `TestPresenceAPI`.
+- [x] Gate + report.
 
 ## Task 4: UI (branch phase-4-ui)
 
