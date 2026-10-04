@@ -675,7 +675,7 @@ spec:
           # The official ghcr image is amd64-only and the kw nodes are
           # arm64; this is the Debian-trixie build from ci.yaml (docker/
           # kamailio/Dockerfile), pinned to the tag it published.
-          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-0bb80e69a17a1670107306a29058f3c70658b0a1
+          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-7be25b6f16b63c27cc42b58cb31f714007e12871
           imagePullPolicy: IfNotPresent
           securityContext:
             # uid/gid of the image's kamailio user (read from the image).
