@@ -6,7 +6,7 @@ export interface NavItem {
 }
 
 /** The phase whose pages are built; later pages render a placeholder. */
-export const CURRENT_PHASE = 3;
+export const CURRENT_PHASE = 4;
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { label: "Dashboard", path: "/", phase: 0 },

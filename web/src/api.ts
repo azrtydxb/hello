@@ -32,13 +32,23 @@ export interface CreatedApiToken extends ApiToken {
   token: string;
 }
 
-/** An extension: a dialable number. */
+/** An extension: a dialable number, with its Phase 4 call features. */
 export interface Extension {
   id: Id;
   number: string;
   name: string;
   /** E.164-ish number presented to carriers; "" when none. */
   externalNumber: string;
+  /** Do-not-disturb; false when the server omits it. */
+  dnd?: boolean;
+  /** Forward target; "" = off. */
+  forwardAlways?: string;
+  forwardBusy?: string;
+  forwardNoAnswer?: string;
+  /** Unanswered/busy calls go to this extension's voicemail; true by default. */
+  voicemailEnabled?: boolean;
+  /** The extension's voicemail box, when it has one. */
+  voicemailBoxId?: Id | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -362,6 +372,11 @@ export function setUnauthorizedHandler(handler: () => void): () => void {
 
 interface RequestOptions {
   body?: unknown;
+  /**
+   * Sent as the request body untouched (e.g. a multipart FormData with file
+   * parts); overrides `body`, and the browser picks the Content-Type.
+   */
+  rawBody?: BodyInit;
   signal?: AbortSignal;
   /** When false, a 401 is returned to the caller instead of redirecting. */
   redirectOn401?: boolean;
@@ -412,14 +427,19 @@ async function errorFrom(
 async function request<T>(
   method: string,
   path: string,
-  { body, signal, redirectOn401 = true }: RequestOptions = {},
+  { body, rawBody, signal, redirectOn401 = true }: RequestOptions = {},
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const res = await fetch(path, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body:
+      rawBody !== undefined
+        ? rawBody
+        : body === undefined
+          ? undefined
+          : JSON.stringify(body),
     credentials: "same-origin",
     signal,
   });
@@ -522,7 +542,16 @@ export const createExtension = (input: {
 
 export const updateExtension = (
   extensionId: Id,
-  patch: { number?: string; name?: string; externalNumber?: string },
+  patch: {
+    number?: string;
+    name?: string;
+    externalNumber?: string;
+    dnd?: boolean;
+    forwardAlways?: string;
+    forwardBusy?: string;
+    forwardNoAnswer?: string;
+    voicemailEnabled?: boolean;
+  },
 ) =>
   request<Extension>("PATCH", `/api/v1/extensions/${id(extensionId)}`, {
     body: patch,
@@ -725,6 +754,263 @@ export const undrainNode = (nodeId: string) =>
     "DELETE",
     `/api/v1/cluster/nodes/${encodeURIComponent(nodeId)}/drain`,
   );
+
+// --- voicemail ----------------------------------------------------------------
+
+/** GET/PUT /api/v1/extensions/{id}/voicemail: a box's settings. */
+export interface VoicemailBox {
+  id: Id;
+  extensionId: Id;
+  /** Where messages are emailed; "" when none is set. */
+  email: string;
+  /** True when a password is set; the password itself is never returned. */
+  hasPassword: boolean;
+  /** True when a played-first greeting has been uploaded. */
+  hasGreeting: boolean;
+  /** True when an unreachable greeting has been uploaded. */
+  hasUnreachableGreeting: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** PUT /api/v1/extensions/{id}/voicemail: what can change on a box. */
+export interface VoicemailBoxInput {
+  /** Sent only when changing it; never echoed back. */
+  password?: string;
+  email?: string;
+  /** Uploaded as multipart `greeting` / `unreachable` file parts. */
+  greeting?: File;
+  unreachable?: File;
+}
+
+/** One stored voicemail message (GET /api/v1/voicemail/messages). */
+export interface VoicemailMessage {
+  id: Id;
+  boxId: Id;
+  /** Who left it: a number, or a SIP identity. */
+  caller: string;
+  durationMs: number;
+  heard: boolean;
+  /** pending | sent | failed, when the server reports it. */
+  emailStatus?: string;
+  createdAt: string;
+}
+
+/**
+ * GET /api/v1/voicemail/messages?box=&unheard=. `box` is the box id (the
+ * extension's `voicemailBoxId`), not the extension id.
+ */
+export const listVoicemailMessages = (
+  boxId: Id,
+  opts: { unheard?: boolean } = {},
+  signal?: AbortSignal,
+) => {
+  const q = new URLSearchParams({ box: String(boxId) });
+  if (opts.unheard) q.set("unheard", "true");
+  return list<VoicemailMessage>(`/api/v1/voicemail/messages?${q}`, signal);
+};
+
+/** POST /api/v1/voicemail/messages/{id}/heard. */
+export const markMessageHeard = (messageId: Id, heard = true) =>
+  request<void>("POST", `/api/v1/voicemail/messages/${id(messageId)}/heard`, {
+    body: { heard },
+  });
+
+/** DELETE /api/v1/voicemail/messages/{id}. */
+export const deleteVoicemailMessage = (messageId: Id) =>
+  request<void>("DELETE", `/api/v1/voicemail/messages/${id(messageId)}`);
+
+/**
+ * GET /api/v1/voicemail/messages/{id}/audio: answers 302 with a presigned
+ * MinIO URL. Played by pointing an <audio> element at this path, so the
+ * browser follows the redirect itself; `isPlayableAudio` gates it.
+ */
+export const voicemailAudioPath = (messageId: Id) =>
+  `/api/v1/voicemail/messages/${id(messageId)}/audio`;
+
+/**
+ * Whether GET audio answered with something an <audio> element can play: the
+ * 302 to the presigned URL (seen as an opaque redirect through fetch), a
+ * 3xx redirect status, or the audio streamed directly.
+ */
+export function isPlayableAudio(res: Response): boolean {
+  return (
+    res.type === "opaqueredirect" ||
+    res.ok ||
+    res.status === 302 ||
+    res.status === 303 ||
+    res.status === 307 ||
+    res.status === 308
+  );
+}
+
+/** GET /api/v1/extensions/{id}/voicemail. */
+export const getVoicemailBox = (extensionId: Id, signal?: AbortSignal) =>
+  request<VoicemailBox>(
+    "GET",
+    `/api/v1/extensions/${id(extensionId)}/voicemail`,
+    { signal },
+  );
+
+/**
+ * PUT /api/v1/extensions/{id}/voicemail: JSON for password/email, multipart
+ * form data when a greeting file is uploaded.
+ */
+export function updateVoicemailBox(
+  extensionId: Id,
+  input: VoicemailBoxInput,
+): Promise<VoicemailBox> {
+  const path = `/api/v1/extensions/${id(extensionId)}/voicemail`;
+  if (!input.greeting && !input.unreachable) {
+    return request<VoicemailBox>("PUT", path, {
+      body: {
+        ...(input.password !== undefined ? { password: input.password } : {}),
+        ...(input.email !== undefined ? { email: input.email } : {}),
+      },
+    });
+  }
+  const form = new FormData();
+  if (input.password !== undefined) form.set("password", input.password);
+  if (input.email !== undefined) form.set("email", input.email);
+  if (input.greeting) form.set("greeting", input.greeting, input.greeting.name);
+  if (input.unreachable) {
+    form.set("unreachable", input.unreachable, input.unreachable.name);
+  }
+  return request<VoicemailBox>("PUT", path, { rawBody: form });
+}
+
+// --- ring groups ----------------------------------------------------------------
+
+/** How a group's members are rung. */
+export type RingStrategy =
+  "ring-all" | "sequential" | "round-robin" | "longest-idle" | "weighted";
+
+/** All five strategies, in picker order. */
+export const RING_STRATEGIES = [
+  "ring-all",
+  "sequential",
+  "round-robin",
+  "longest-idle",
+  "weighted",
+] as const;
+
+/** Human names for the strategies. */
+export const RING_STRATEGY_LABEL: Record<RingStrategy, string> = {
+  "ring-all": "Ring all",
+  sequential: "Sequential",
+  "round-robin": "Round robin",
+  "longest-idle": "Longest idle",
+  weighted: "Weighted",
+};
+
+/** Where a call goes when every member missed it. */
+export type FailureKind = "none" | "voicemail" | "external";
+
+export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
+  none: "Hang up",
+  voicemail: "A member's voicemail box",
+  external: "An external number",
+};
+
+/** One member of a ring group; `position` is 1-based ring order. */
+export interface RingGroupMember {
+  extensionId: Id;
+  position: number;
+  /** For the weighted strategy; 0 never rings first. */
+  weight: number;
+  /** Seconds this member rings before the next (hunt/sequential). */
+  delay: number;
+}
+
+/** The writable fields of a ring group. */
+export interface RingGroupFields {
+  name: string;
+  strategy: RingStrategy;
+  /** True = hunt: one member at a time, advancing on no-answer/busy. */
+  hunt: boolean;
+  /** Seconds the whole group rings. */
+  ringTimeout: number;
+  /** Seconds added before the next member starts. */
+  memberDelay: number;
+  /** True = ring members even when they are on DND. */
+  ignoreDnd: boolean;
+  failureKind: FailureKind;
+  /** Voicemail box (extension number) or external number; "" for none. */
+  failureTarget: string;
+  members: RingGroupMember[];
+}
+
+/** A ring group as returned. */
+export interface RingGroup extends RingGroupFields {
+  id: Id;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listRingGroups = (signal?: AbortSignal) =>
+  list<RingGroup>("/api/v1/ring-groups", signal);
+
+export const createRingGroup = (input: RingGroupFields) =>
+  request<RingGroup>("POST", "/api/v1/ring-groups", { body: input });
+
+export const getRingGroup = (groupId: Id, signal?: AbortSignal) =>
+  request<RingGroup>("GET", `/api/v1/ring-groups/${id(groupId)}`, { signal });
+
+export const updateRingGroup = (groupId: Id, patch: RingGroupFields) =>
+  request<RingGroup>("PATCH", `/api/v1/ring-groups/${id(groupId)}`, {
+    body: patch,
+  });
+
+export const deleteRingGroup = (groupId: Id) =>
+  request<void>("DELETE", `/api/v1/ring-groups/${id(groupId)}`);
+
+// --- feature codes and presence -------------------------------------------------
+
+/** A DTMF feature code (GET/PUT /api/v1/feature-codes). */
+export interface FeatureCode {
+  /** e.g. "*72" or "##". */
+  code: string;
+  action: FeatureCodeAction;
+  /** What the code carries, e.g. the target number; "" when none. */
+  argument: string;
+}
+
+export const FEATURE_CODE_PATTERN = /^(\*[0-9#]{2,4}|##)$/;
+
+/** The actions a feature code can perform (migration 00004's action column). */
+export const FEATURE_CODE_ACTIONS = [
+  "forward_always",
+  "forward_busy",
+  "forward_no_answer",
+  "dnd_on",
+  "dnd_off",
+  "voicemail",
+  "blind_transfer",
+  "attended_transfer",
+] as const;
+
+export type FeatureCodeAction = (typeof FEATURE_CODE_ACTIONS)[number];
+
+/** GET /api/v1/feature-codes. */
+export const listFeatureCodes = (signal?: AbortSignal) =>
+  list<FeatureCode>("/api/v1/feature-codes", signal);
+
+/** PUT /api/v1/feature-codes: the full list, replacing what is stored. */
+export const updateFeatureCodes = (codes: readonly FeatureCode[]) =>
+  request<void>("PUT", "/api/v1/feature-codes", { body: { items: codes } });
+
+/** livestate DeviceState (GET /api/v1/presence). */
+export interface DeviceState {
+  device: string;
+  extension: string;
+  /** idle | ringing | on-call | dnd. */
+  state: string;
+  updatedAt: string;
+}
+
+/** GET /api/v1/presence. */
+export const listPresence = (signal?: AbortSignal) =>
+  list<DeviceState>("/api/v1/presence", signal);
 
 /** A human-readable message for any thrown value. */
 export function errorMessage(err: unknown): string {

@@ -6,7 +6,7 @@ import { json, ME, mockApi, renderApp } from "./test/api";
 describe("App navigation", () => {
   it("renders every primary nav item and marks the active one", async () => {
     mockApi(ME);
-    renderApp("/ring-groups");
+    renderApp("/diagnostics");
 
     const nav = await screen.findByRole("navigation", { name: "Primary" });
     const links = within(nav).getAllByRole("link");
@@ -14,15 +14,15 @@ describe("App navigation", () => {
       NAV_ITEMS.map((i) => i.label),
     );
     expect(
-      within(nav).getByRole("link", { name: "Ring Groups" }),
+      within(nav).getByRole("link", { name: "Diagnostics" }),
     ).toHaveAttribute("aria-current", "page");
     expect(
-      within(nav).getByRole("link", { name: "Dashboard" }),
+      within(nav).getByRole("link", { name: "Ring Groups" }),
     ).not.toHaveAttribute("aria-current");
     expect(
-      screen.getByRole("heading", { level: 1, name: "Ring Groups" }),
+      screen.getByRole("heading", { level: 1, name: "Diagnostics" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Arrives in Phase 4.")).toBeInTheDocument();
+    expect(screen.getByText("Arrives in Phase 3.")).toBeInTheDocument();
   });
 
   it("lists Registrations and gives every Phase 1 page real content", async () => {
