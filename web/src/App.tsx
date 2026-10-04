@@ -19,6 +19,8 @@ import { History } from "./pages/History";
 import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
 import { Placeholder } from "./pages/Placeholder";
+import { Recordings } from "./pages/Recordings";
+import { Announcements } from "./pages/Announcements";
 import { Registrations } from "./pages/Registrations";
 import { RouteTest } from "./pages/RouteTest";
 import { RoutesPage } from "./pages/Routes";
@@ -39,6 +41,8 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/cluster": Cluster,
   "/voicemail": Voicemail,
   "/ring-groups": RingGroups,
+  "/recordings": Recordings,
+  "/announcements": Announcements,
   "/system": System,
 };
 

@@ -6,7 +6,7 @@ export interface NavItem {
 }
 
 /** The phase whose pages are built; later pages render a placeholder. */
-export const CURRENT_PHASE = 4;
+export const CURRENT_PHASE = 5;
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { label: "Dashboard", path: "/", phase: 0 },
@@ -17,6 +17,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { label: "Routes", path: "/routes", phase: 2 },
   { label: "Ring Groups", path: "/ring-groups", phase: 4 },
   { label: "Voicemail", path: "/voicemail", phase: 4 },
+  { label: "Recordings", path: "/recordings", phase: 5 },
+  { label: "Announcements", path: "/announcements", phase: 5 },
   { label: "Active Calls", path: "/calls", phase: 1 },
   { label: "Call History", path: "/history", phase: 1 },
   { label: "Cluster", path: "/cluster", phase: 3 },
