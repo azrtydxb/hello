@@ -274,16 +274,21 @@ func TestCallFailureCodes(t *testing.T) {
 	// A fresh extension has a voicemail box (Phase 4), so the failure
 	// scenarios would be answered by the voicemail application. First prove
 	// the hand-off: an unreachable extension with voicemail answers 200.
-	out, err := a.Dial(ctx, bareNumber, sdpOffer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Status != 200 {
-		t.Fatalf("dial %s with voicemail = %d, want 200 (voicemail answers)", bareNumber, out.Status)
-	}
-	if err := out.Hangup(ctx); err != nil {
-		t.Fatal(err)
-	}
+	// The dial reads the snapshot, which lags the extension's creation, so
+	// the 200 may need a retry to become visible at all.
+	eventually(t, 10*time.Second, "voicemail answers an unreachable extension", func() error {
+		out, err := a.Dial(ctx, bareNumber, sdpOffer)
+		if err != nil {
+			return err
+		}
+		if err := out.Hangup(ctx); err != nil {
+			return err
+		}
+		if out.Status != 200 {
+			return fmt.Errorf("dial %s with voicemail = %d, want 200 (voicemail answers)", bareNumber, out.Status)
+		}
+		return nil
+	})
 	// Then silence voicemail on every involved extension, so the test can
 	// assert the raw failure codes the features pass through.
 	for _, number := range []string{unregistered.Extension, busyExt.Extension, slowExt.Extension, bareNumber} {
