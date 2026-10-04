@@ -281,11 +281,13 @@ func TestCallAcrossNodes(t *testing.T) {
 	defer cancel()
 	// What the nodes actually observe for these phones decides direct vs
 	// anchored media (contract 2); log it so failures explain themselves.
-	var regs []map[string]any
+	var regs struct {
+		Items []map[string]any `json:"items"`
+	}
 	if err := lc.do("GET", "/api/v1/registrations", nil, &regs, 200); err != nil {
 		t.Logf("registrations unavailable: %v", err)
 	} else {
-		t.Logf("registrations: %v", regs)
+		t.Logf("registrations: %v", regs.Items)
 	}
 	answered := make(chan error, 1)
 	go func() {
