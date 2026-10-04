@@ -14,19 +14,32 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// voicemailBucket is contract 6's fixed bucket for voicemail audio.
-const voicemailBucket = "hello-voicemail"
+// The buckets, one per media kind (Phase 5 contract 4): voicemail audio,
+// call recordings and announcements.
+const (
+	voicemailBucket     = "hello-voicemail"
+	recordingsBucket    = "hello-recordings"
+	announcementsBucket = "hello-announcements"
+)
 
-// Objects is the voicemail audio store (contract 6: bucket hello-voicemail,
-// key box/<box-id>/<unix>-<callid>.wav). The client is built once at
-// startup and shared; Put and Get are safe for concurrent use.
+// Objects is the call-plane audio store: voicemail audio (contract 6,
+// bucket hello-voicemail, key box/<box-id>/<unix>-<callid>.wav), call
+// recordings (bucket hello-recordings, key rec/<unix>-<callid>.wav) and
+// announcement audio (bucket hello-announcements, key ann/<name>.wav). The
+// client is built once and shared; all methods are safe for concurrent use.
 type Objects interface {
-	// Put stores data under key, replacing any earlier object with the
-	// same key.
+	// Put stores voicemail audio under key, replacing any earlier object
+	// with the same key.
 	Put(ctx context.Context, key string, data []byte) error
-	// Get returns the bytes stored under key. A missing object is an
-	// error, not an empty slice with a nil error.
+	// Get returns the voicemail bytes stored under key. A missing object
+	// is an error, not an empty slice with a nil error.
 	Get(ctx context.Context, key string) ([]byte, error)
+	// PutRecording stores recording audio under key (bucket
+	// hello-recordings).
+	PutRecording(ctx context.Context, key string, data []byte) error
+	// GetAnnouncement returns announcement audio under key (bucket
+	// hello-announcements). A missing object is an error.
+	GetAnnouncement(ctx context.Context, key string) ([]byte, error)
 }
 
 // ObjectKey builds the canonical storage key for one voicemail message:
@@ -124,6 +137,36 @@ func (o *minioObjects) Get(ctx context.Context, key string) ([]byte, error) {
 	data, err := io.ReadAll(obj)
 	if err != nil {
 		return nil, fmt.Errorf("media: read voicemail object %s: %w", key, err)
+	}
+	return data, nil
+}
+
+// PutRecording stores the audio of one call recording under key in bucket
+// hello-recordings. The recording flow retries around this (three attempts
+// in the SIP stream's storeRecording); Objects itself stays a single honest
+// attempt so a failure is visible to whoever can act on it.
+func (o *minioObjects) PutRecording(ctx context.Context, key string, data []byte) error {
+	_, err := o.client.PutObject(ctx, recordingsBucket, key,
+		bytes.NewReader(data), int64(len(data)),
+		minio.PutObjectOptions{ContentType: "audio/wav"})
+	if err != nil {
+		return fmt.Errorf("media: put recording %s: %w", key, err)
+	}
+	return nil
+}
+
+// GetAnnouncement returns announcement audio under key from bucket
+// hello-announcements. A missing object surfaces as the MinIO error, not as
+// empty bytes and success.
+func (o *minioObjects) GetAnnouncement(ctx context.Context, key string) ([]byte, error) {
+	obj, err := o.client.GetObject(ctx, announcementsBucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("media: open announcement %s: %w", key, err)
+	}
+	defer func() { _ = obj.Close() }()
+	data, err := io.ReadAll(obj)
+	if err != nil {
+		return nil, fmt.Errorf("media: read announcement %s: %w", key, err)
 	}
 	return data, nil
 }

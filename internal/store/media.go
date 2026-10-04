@@ -71,6 +71,20 @@ func (s *Store) ListRecordings(ctx context.Context, extension string, before int
 	return out, next, nil
 }
 
+// InsertRecording stores one recording row after the SIP node put the audio
+// in the object store. It is call-plane (no audit, no revision), runs off
+// the SIP transaction path, and returns the row's id. A correlation id that
+// already has a recording fails the unique constraint: one recording per
+// call (spec S-4).
+func (s *Store) InsertRecording(ctx context.Context, correlationID, object, initiatedBy string, durationMs int64) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO recordings (correlation_id, minio_object, initiated_by, duration_ms)
+		VALUES ($1, $2, $3, $4) RETURNING id`,
+		correlationID, object, initiatedBy, durationMs).Scan(&id)
+	return id, mapErr(err)
+}
+
 // GetRecording returns one recording.
 func (s *Store) GetRecording(ctx context.Context, id int64) (Recording, error) {
 	rec, err := scanRecording(s.db.QueryRowContext(ctx,

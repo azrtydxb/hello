@@ -56,12 +56,14 @@ type VoicemailMessage struct {
 	CreatedAt   time.Time
 }
 
-// ObjectStore is the voicemail audio store (MinIO, bucket hello-voicemail,
-// contract 6; implemented by internal/media). Called from the media
-// goroutine only.
+// ObjectStore is the call-plane audio store (MinIO, buckets hello-voicemail,
+// hello-recordings and hello-announcements, contracts 4 and 6; implemented
+// by internal/media). Called from the media goroutine only.
 type ObjectStore interface {
 	Put(ctx context.Context, key string, data []byte) error
 	Get(ctx context.Context, key string) ([]byte, error)
+	PutRecording(ctx context.Context, key string, data []byte) error
+	GetAnnouncement(ctx context.Context, key string) ([]byte, error)
 }
 
 // Voicemail application modes.

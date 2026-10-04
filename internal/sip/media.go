@@ -515,7 +515,7 @@ func (c *call) playAnnouncementObject(obj string) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), c.s.cfg.StateTimeout)
-	raw, err := objs.Get(ctx, obj)
+	raw, err := objs.GetAnnouncement(ctx, obj)
 	cancel()
 	if err != nil {
 		c.addTrace(fmt.Sprintf("Announcement %q unavailable: skipped", obj))
@@ -562,7 +562,7 @@ func (c *call) storeRecording(rec *media.Recorder, by string) {
 	stored := false
 	for i := 0; i < 3; i++ {
 		pctx, pcancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
-		err := s.deps.Objects.Put(pctx, obj, audio)
+		err := s.deps.Objects.PutRecording(pctx, obj, audio)
 		pcancel()
 		if err == nil {
 			stored = true

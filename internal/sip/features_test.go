@@ -175,6 +175,14 @@ func (f *fakeObjects) Get(_ context.Context, key string) ([]byte, error) {
 	return d, nil
 }
 
+func (f *fakeObjects) PutRecording(ctx context.Context, key string, data []byte) error {
+	return f.Put(ctx, key, data)
+}
+
+func (f *fakeObjects) GetAnnouncement(ctx context.Context, key string) ([]byte, error) {
+	return f.Get(ctx, key)
+}
+
 // snapshotGets copies the fetched keys (tests).
 func (f *fakeObjects) snapshotGets() []string {
 	f.mu.Lock()
