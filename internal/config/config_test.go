@@ -16,6 +16,9 @@ func env(m map[string]string) func(string) string {
 		"HELLO_SIP_DOMAIN": "hello.test", "HELLO_SIP_NONCE_SECRET": strings.Repeat("k", 32),
 		"HELLO_SIP_ADVERTISED_ADDR": "10.0.0.5:5060",
 		"HELLO_SECRET_KEY":          base64.StdEncoding.EncodeToString([]byte(strings.Repeat("s", 32))),
+		"MINIO_ENDPOINT":            "minio:9000",
+		"MINIO_ACCESS_KEY":          "hello-minio",
+		"MINIO_SECRET_KEY":          "hello-minio-" + "secret",
 	}
 	return func(k string) string {
 		if v, ok := m[k]; ok {
@@ -248,5 +251,43 @@ func TestLoadHAValues(t *testing.T) {
 	c, err := LoadSIP(env(map[string]string{"HELLO_MEMBER_HEARTBEAT": "5s", "HELLO_DRAIN_TIMEOUT": "1s"}))
 	if err != nil || c.MemberHeartbeat != 5*time.Second || c.DrainTimeout != time.Second {
 		t.Fatalf("boundary values = %s %s, %v", c.MemberHeartbeat, c.DrainTimeout, err)
+	}
+}
+
+// TestLoadMinioSmtp fails if the MinIO settings are not required together,
+// if SMTP_PORT is not a port, or if SMTP_FROM is required with SMTP_HOST.
+func TestLoadMinioSmtp(t *testing.T) {
+	sip, err := LoadSIP(env(nil))
+	if err != nil || sip.MinioEndpoint == "" || sip.MinioAccessKey == "" || sip.MinioSecretKey == "" {
+		t.Fatalf("sip minio defaults missing: %+v %v", sip, err)
+	}
+	if _, err := LoadSIP(env(map[string]string{"MINIO_ENDPOINT": "", "MINIO_ACCESS_KEY": ""})); err == nil || !strings.Contains(err.Error(), "MINIO_ENDPOINT") {
+		t.Fatalf("empty MINIO_ENDPOINT accepted: %v", err)
+	}
+	if _, err := LoadSIP(env(map[string]string{"MINIO_ENDPOINT": "minio:9000", "MINIO_ACCESS_KEY": "", "MINIO_SECRET_KEY": ""})); err == nil || !strings.Contains(err.Error(), "MINIO_ACCESS_KEY") {
+		t.Fatalf("keys required with endpoint: %v", err)
+	}
+	if !sip.MinioSecure {
+		t.Fatal("MINIO_SECURE should default to true (TLS); the lab sets it false explicitly")
+	}
+	if sip2, err := LoadSIP(env(map[string]string{"MINIO_SECURE": "false"})); err != nil || sip2.MinioSecure {
+		t.Fatalf("MINIO_SECURE=false not honored: %+v %v", sip2, err)
+	}
+	ctl, err := LoadControl(env(nil))
+	if err != nil || ctl.MinioEndpoint == "" {
+		t.Fatalf("control minio: %+v %v", ctl, err)
+	}
+	if ctl.SmtpHost != "" {
+		t.Fatalf("SMTP should default off, got %q", ctl.SmtpHost)
+	}
+	if _, err := LoadControl(env(map[string]string{"SMTP_HOST": "smtp", "SMTP_PORT": "notaport"})); err == nil || !strings.Contains(err.Error(), "SMTP_PORT") {
+		t.Fatalf("bad SMTP_PORT accepted: %v", err)
+	}
+	if _, err := LoadControl(env(map[string]string{"SMTP_HOST": "smtp", "SMTP_PORT": "587"})); err == nil || !strings.Contains(err.Error(), "SMTP_FROM") {
+		t.Fatalf("SMTP_FROM required with host: %v", err)
+	}
+	c, err := LoadControl(env(map[string]string{"SMTP_HOST": "smtp", "SMTP_PORT": "587", "SMTP_FROM": "hello@kw.watteel.lab"}))
+	if err != nil || c.SmtpPort != 587 || c.SmtpFrom == "" {
+		t.Fatalf("smtp config = %+v %v", c, err)
 	}
 }
