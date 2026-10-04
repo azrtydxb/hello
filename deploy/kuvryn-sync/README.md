@@ -20,17 +20,20 @@ that apply here too.
 
 1. Merge to `main`. `.github/workflows/deploy.yml` builds and pushes
    `192.168.10.131:5000/azrtydxb/hello-control`, `hello-sip` and `hello-ui`
-   with the immutable tag `sha-<short sha>` (plus `main`). The job proves the
-   `:443` pull name resolves before it succeeds.
+   with the immutable tag `sha-<full sha>` (plus `main`; the registry keeps
+   no short tags). The job proves the `:443` pull name resolves before it
+   succeeds.
 2. Update the intended container references in `kw/resources.yaml` to that
    `sha-` tag (later: an immutable `repository@sha256:...` digest). Merging
    application code alone does not promote an image.
 3. Edit configuration in `kw/`. For credentials, the `secret-*.sops.yaml`
-   skeletons become real Secrets like this (never commit a decrypted file):
+   files encrypt to the hello namespace age recipient via the repo-root
+   `.sops.yaml` creation rule; edit them like this (never commit a decrypted
+   file):
 
    ```sh
    export SOPS_AGE_KEY_FILE="$HOME/.config/kuvryn-sync/age/kw-hello.agekey"
-   sops edit --age <hello-namespace-age-recipient> deploy/kuvryn-sync/kw/secret-hello-store.sops.yaml
+   sops deploy/kuvryn-sync/kw/secret-hello-store.sops.yaml
    ```
 
    Each skeleton documents its keys and how to generate the values.
@@ -56,20 +59,18 @@ alongside Sync. Revert the deployment commit to roll back. A field conflict
 requires resolving the competing writer; do not enable blanket force
 adoption.
 
-## Before the first sync
+## One-time kw facts (confirmed 2026-10-04)
 
-One-time facts in `kw/resources.yaml` that must be confirmed against kw
-(first sync fails closed or phones fail until they are right):
+Confirmed against the cluster during the first-sync bootstrap:
 
-- `HELLO_SIP_TRUSTED_PROXIES` (hello-sip-1/2): the cluster pod CIDR; the
-  default `10.42.0.0/16` is a guess. Hello ignores `Path` and
-  `X-Hello-Client` from anything outside it, so a wrong value fails closed.
-- `HELLO_DNS_RESOLVER` (hello-ui): the kube-dns ClusterIP; the default
-  `10.96.0.10` is a guess.
-- `KAMAILIO_PUBLIC_HOST` (kamailio): a node address phones can reach; the
-  phones socket advertises it on NodePort `30508/udp`. `CHANGE-ME` until set.
-- Image tags: `sha-0000000` until the first `sha-` tag from deploy.yml is
-  pinned in.
+- `HELLO_SIP_TRUSTED_PROXIES` (hello-sip-1/2): kw's pod CIDR is
+  `10.42.0.0/16` (the nodes' `spec.podCIDR` values).
+- `HELLO_DNS_RESOLVER` (hello-ui): kube-dns is `10.43.0.10`.
+- `KAMAILIO_PUBLIC_HOST` (kamailio): `192.168.10.101` (node master-11;
+  NodePort 30508/udp is reachable on every node address).
+- Images pull from `192.168.10.131:5000/...` with no imagePullSecret: the
+  nodes trust Nexus directly (containerd `certs.d`), verified with a
+  disposable pod in this namespace before the first sync.
 
 ## Secrets
 

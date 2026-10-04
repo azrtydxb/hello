@@ -8,11 +8,10 @@
 # commit you intend to run and let Sync converge; immutable sha256 digest
 # pins come later.
 #
-# Values that need one-time confirmation against kw before the first sync
-# (see deploy/kuvryn-sync/README.md, "Before the first sync"):
-#   - HELLO_SIP_TRUSTED_PROXIES: kw's pod CIDR.
-#   - HELLO_DNS_RESOLVER: the kube-dns ClusterIP.
-#   - KAMAILIO_PUBLIC_HOST: a node address phones can reach (NodePort 30508/udp).
+# One-time kw facts below are confirmed against the cluster (first sync of
+# 2026-10-04): HELLO_SIP_TRUSTED_PROXIES is kw's pod CIDR 10.42.0.0/16 (node
+# podCIDRs), HELLO_DNS_RESOLVER is kube-dns 10.43.0.10, KAMAILIO_PUBLIC_HOST
+# is node master-11 192.168.10.101 (NodePort 30508/udp).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -690,9 +689,9 @@ spec:
                   fieldPath: status.podIP
             - name: KAMAILIO_PUBLIC_HOST
               # Where phones reach this Kamailio: a kw node address at the
-              # NodePort below. One-time kw fact; README "Before the first
-              # sync".
-              value: CHANGE-ME-before-first-sync
+              # NodePort below (master-11; k3s NodePorts are reachable on
+              # every node's address).
+              value: 192.168.10.101
             - name: KAMAILIO_PUBLIC_PORT
               value: "30508"
             - name: KAMAILIO_INVITE_TIMEOUT
@@ -803,9 +802,10 @@ spec:
       terminationGracePeriodSeconds: 120 # a drain must finish (lab: 2h, capped here)
       containers:
         - name: hello-sip
-          image: 192.168.10.131/azrtydxb/hello-sip:sha-0000000
-          # Pin: replace with the tag printed by .github/workflows/deploy.yml
-          # (and later a sha256 digest) for the commit you intend to run.
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
+          # Pinned to the tag deploy.yml published for commit c0130ed (the
+          # full sha tag; the registry keeps no short tags). Later: an
+          # immutable repository@sha256:... digest.
           imagePullPolicy: Always
           env:
             - name: HELLO_NODE_ID
@@ -836,9 +836,9 @@ spec:
             - name: HELLO_SIP_RING_TIMEOUT
               value: 10s
             - name: HELLO_SIP_TRUSTED_PROXIES
-              # The kamailio pod IPs. Default k3s pod CIDR; confirm kw's
-              # before the first sync (README "Before the first sync"):
-              # hello ignores Path/X-Hello-Client from anything else.
+              # The kamailio pod IPs. kw's pod CIDR, confirmed from the node
+              # podCIDRs (10.42.0.0/16): hello ignores Path/X-Hello-Client
+              # from anything else.
               value: 10.42.0.0/16
             - name: HELLO_SIP_ADVERTISED_ADDR
               # What hello tells Kamailio/phones this node is: its Service
@@ -938,9 +938,10 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
         - name: hello-sip
-          image: 192.168.10.131/azrtydxb/hello-sip:sha-0000000
-          # Pin: replace with the tag printed by .github/workflows/deploy.yml
-          # (and later a sha256 digest) for the commit you intend to run.
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
+          # Pinned to the tag deploy.yml published for commit c0130ed (the
+          # full sha tag; the registry keeps no short tags). Later: an
+          # immutable repository@sha256:... digest.
           imagePullPolicy: Always
           env:
             - name: HELLO_NODE_ID
@@ -971,9 +972,9 @@ spec:
             - name: HELLO_SIP_RING_TIMEOUT
               value: 10s
             - name: HELLO_SIP_TRUSTED_PROXIES
-              # The kamailio pod IPs. Default k3s pod CIDR; confirm kw's
-              # before the first sync (README "Before the first sync"):
-              # hello ignores Path/X-Hello-Client from anything else.
+              # The kamailio pod IPs. kw's pod CIDR, confirmed from the node
+              # podCIDRs (10.42.0.0/16): hello ignores Path/X-Hello-Client
+              # from anything else.
               value: 10.42.0.0/16
             - name: HELLO_SIP_ADVERTISED_ADDR
               # What hello tells Kamailio/phones this node is: its Service
@@ -1006,11 +1007,6 @@ spec:
               memory: 64Mi
             limits:
               memory: 256Mi
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -1079,7 +1075,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: 192.168.10.131/azrtydxb/hello-control:sha-0000000
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
           command:
             - sh
             - -c
@@ -1100,9 +1096,10 @@ spec:
               value: hello-migrate
       containers:
         - name: hello-control
-          image: 192.168.10.131/azrtydxb/hello-control:sha-0000000
-          # Pin: replace with the tag printed by .github/workflows/deploy.yml
-          # (and later a sha256 digest) for the commit you intend to run.
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
+          # Pinned to the tag deploy.yml published for commit c0130ed (the
+          # full sha tag; the registry keeps no short tags). Later: an
+          # immutable repository@sha256:... digest.
           imagePullPolicy: Always
           env:
             - name: HELLO_NODE_ID
@@ -1210,18 +1207,19 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: 192.168.10.131/azrtydxb/hello-ui:sha-0000000
-          # Pin: replace with the tag printed by .github/workflows/deploy.yml
-          # (and later a sha256 digest) for the commit you intend to run.
+          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
+          # Pinned to the tag deploy.yml published for commit c0130ed (the
+          # full sha tag; the registry keeps no short tags). Later: an
+          # immutable repository@sha256:... digest.
           imagePullPolicy: Always
           env:
             - name: HELLO_CONTROL_UPSTREAM
               value: http://hello-control:8081
             - name: HELLO_DNS_RESOLVER
-              # nginx re-resolves hello-control at request time; this must be
-              # the kube-dns ClusterIP. kubeadm default; confirm kw's before
-              # the first sync (README "Before the first sync").
-              value: 10.96.0.10
+              # nginx re-resolves hello-control at request time; this is the
+              # kube-dns ClusterIP (confirmed from kw's kube-dns Service:
+              # 10.43.0.10).
+              value: 10.43.0.10
           ports:
             - name: http
               containerPort: 8080
@@ -1852,6 +1850,7 @@ spec:
         - name: data
           emptyDir: {}
 ---
+apiVersion: v1
 kind: Service
 metadata:
   name: sentinel-2
@@ -1876,6 +1875,7 @@ spec:
       protocol: TCP
       targetPort: sentinel
 ---
+apiVersion: v1
 kind: Service
 metadata:
   name: sentinel-3
@@ -1899,4 +1899,3 @@ spec:
       port: 26379
       protocol: TCP
       targetPort: sentinel
----

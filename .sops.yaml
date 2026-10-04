@@ -1,0 +1,8 @@
+# SOPS creation rules for hello's kw deployment credentials (dhole pattern).
+# Encryption targets the hello namespace age identity; its private key lives
+# in the kuvryn-sync-sops Secret in namespace hello and at
+# ~/.config/kuvryn-sync/age/kw-hello.agekey on the operator machine.
+creation_rules:
+  - path_regex: deploy/kuvryn-sync/kw/secret-.*\.sops\.yaml$
+    encrypted_regex: ^(data|stringData|env)$
+    age: age16r4tvtjglvsutkce9w2el3sfvu8jms0vxt8deke3vzxvecuxndks4e32wp
