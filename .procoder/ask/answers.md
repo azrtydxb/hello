@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-04 10:30 UTC. procoder reads this
+Written 2026-10-04 18:00 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -43,6 +43,16 @@ Question: Phase 3 Valkey high availability
 - Single Valkey; test outage behaviour only, defer Valkey HA to Phase 6 guidance
 
 Answer: Valkey Sentinel (primary, replica, three sentinels) in the lab, with automated failover tests
+
+## [decision] decisions.md
+
+Key: 10ecd9488531
+Question: Phase 5 announcements
+
+- In scope: named announcement sets played on demand (failure destinations, before transfer)
+- Out of scope for Phase 5
+
+Answer: In scope: named announcement sets played on demand (failure destinations, before transfer)
 
 ## [decision] decisions.md
 
@@ -159,12 +169,32 @@ Question: OPEN: Scope of the first build — Phase 0 only, or Phase 0 plus Phase
 
 Answer: all — build the full roadmap (Phases 0-7) in phase order; Phase 0 first, one spec + milestone per phase.
 
+## [decision] decisions.md
+
+Key: 5a10fd5e72c9
+Question: Merge Phase 4 (PR #5) and roll out to kw
+
+- Mark PR #5 ready, squash-merge, push images via publish, pin digests, add MinIO+SMTP+feature env to deploy/kuvryn-sync/kw, let Sync roll it out
+- Hold PR #5 for review; kw stays on Phase 3 until reviewed
+
+Answer: Merge + roll out to kw (done 2026-10-04: PR #5 squash-merged, images published, rollout commits 9832a84/492055b/290e473)
+
 ## (no longer asked)
 
 Key: 61fa8fc32239
 Question: OPEN: Migration library — goose, or golang-migrate?
 
 Answer: goose
+
+## [decision] decisions.md
+
+Key: 6844d41d1251
+Question: Phase 5 media anchoring policy
+
+- Conditional: anchor only when a feature needs it (NAT-detected, recording, announcements); direct RTP otherwise (spec §4/§16)
+- Always anchor: all calls traverse the media anchor
+
+Answer: Conditional: anchor only when a feature needs it (NAT-detected, recording, announcements); direct RTP otherwise
 
 ## [decision] decisions.md
 
@@ -226,6 +256,16 @@ Question: Phase 0 delivery
 - Hold — leave uncommitted for review
 
 Answer: Commit on branch phase-0-foundation and open a PR to main
+
+## [decision] decisions.md
+
+Key: 9f3be89ce05e
+Question: Phase 5 recording
+
+- On-demand: DTMF (*1) and per-extension API toggle; recordings to MinIO
+- Auto-record all calls (compliance style), stored to MinIO
+
+Answer: On-demand: DTMF (*1) and per-extension API toggle; recordings to MinIO
 
 ## [decision] decisions.md
 

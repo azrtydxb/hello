@@ -164,3 +164,18 @@
 
 - Mark PR #5 ready, squash-merge, push images via publish, pin digests, add MinIO+SMTP+feature env to deploy/kuvryn-sync/kw, let Sync roll it out
 - Hold PR #5 for review; kw stays on Phase 3 until reviewed
+
+## Phase 5 media anchoring policy
+
+- Conditional: anchor only when a feature needs it (NAT-detected, recording, announcements); direct RTP otherwise (spec §4/§16)
+- Always anchor: all calls traverse the media anchor
+
+## Phase 5 recording
+
+- On-demand: DTMF (*1) and per-extension API toggle; recordings to MinIO
+- Auto-record all calls (compliance style), stored to MinIO
+
+## Phase 5 announcements
+
+- In scope: named announcement sets played on demand (failure destinations, before transfer)
+- Out of scope for Phase 5
