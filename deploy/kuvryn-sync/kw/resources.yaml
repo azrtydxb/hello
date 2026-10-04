@@ -674,8 +674,10 @@ spec:
         - name: kamailio
           # The official ghcr image is amd64-only and the kw nodes are
           # arm64; this is the Debian-trixie build from ci.yaml (docker/
-          # kamailio/Dockerfile), pinned to the tag it published.
-          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-7be25b6f16b63c27cc42b58cb31f714007e12871
+          # kamailio/Dockerfile), pinned to the tag it published for
+          # commit 7a43e0f (the full sha tag; the registry keeps no short
+          # tags). Later: an immutable repository@sha256:... digest.
+          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
           imagePullPolicy: IfNotPresent
           securityContext:
             # uid/gid of the image's kamailio user (read from the image).
@@ -809,8 +811,8 @@ spec:
       terminationGracePeriodSeconds: 120 # a drain must finish (lab: 2h, capped here)
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
-          # Pinned to the tag ci.yaml published for commit c0130ed (the
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
+          # Pinned to the tag ci.yaml published for commit 7a43e0f (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -854,6 +856,23 @@ spec:
             - name: HELLO_DRAIN_TIMEOUT
               # Under the pod's 120s termination grace, so a drain finishes.
               value: 90s
+            - name: MINIO_ENDPOINT
+              # The voicemail object store (contract 6): the in-namespace
+              # MinIO Deployment/Service, as in the lab's compose file.
+              value: minio:9000
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: minioRootUser
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: minioRootPassword
+            - name: MINIO_SECURE
+              # In-cluster traffic to the Service, no TLS.
+              value: "false"
           ports:
             - name: http
               containerPort: 8082
@@ -945,8 +964,8 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
-          # Pinned to the tag ci.yaml published for commit c0130ed (the
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
+          # Pinned to the tag ci.yaml published for commit 7a43e0f (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -990,6 +1009,23 @@ spec:
             - name: HELLO_DRAIN_TIMEOUT
               # Under the pod's 120s termination grace, so a drain finishes.
               value: 90s
+            - name: MINIO_ENDPOINT
+              # The voicemail object store (contract 6): the in-namespace
+              # MinIO Deployment/Service, as in the lab's compose file.
+              value: minio:9000
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: minioRootUser
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: minioRootPassword
+            - name: MINIO_SECURE
+              # In-cluster traffic to the Service, no TLS.
+              value: "false"
           ports:
             - name: http
               containerPort: 8082
@@ -1082,7 +1118,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
           command:
             - sh
             - -c
@@ -1110,10 +1146,52 @@ spec:
                   key: secretKey
             - name: HELLO_NODE_ID
               value: hello-migrate
+            - name: MINIO_ENDPOINT
+              # The voicemail object store (contract 6): the in-namespace
+              # MinIO Deployment/Service, as in the lab's compose file.
+              value: minio:9000
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: minioRootUser
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: minioRootPassword
+            - name: MINIO_SECURE
+              # In-cluster traffic to the Service, no TLS.
+              value: "false"
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: hello-smtp
+                  key: smtpHost
+            - name: SMTP_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: hello-smtp
+                  key: smtpPort
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: hello-smtp
+                  key: smtpUser
+            - name: SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: hello-smtp
+                  key: smtpPass
+            - name: SMTP_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: hello-smtp
+                  key: smtpFrom
       containers:
         - name: hello-control
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
-          # Pinned to the tag ci.yaml published for commit c0130ed (the
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
+          # Pinned to the tag ci.yaml published for commit 7a43e0f (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -1143,6 +1221,48 @@ spec:
                 secretKeyRef:
                   name: hello-bootstrap
                   key: password
+            - name: MINIO_ENDPOINT
+              # The voicemail object store (contract 6): the in-namespace
+              # MinIO Deployment/Service, as in the lab's compose file.
+              value: minio:9000
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: minioRootUser
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: minioRootPassword
+            - name: MINIO_SECURE
+              # In-cluster traffic to the Service, no TLS.
+              value: "false"
+            - name: SMTP_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: hello-smtp
+                  key: smtpHost
+            - name: SMTP_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: hello-smtp
+                  key: smtpPort
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: hello-smtp
+                  key: smtpUser
+            - name: SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: hello-smtp
+                  key: smtpPass
+            - name: SMTP_FROM
+              valueFrom:
+                secretKeyRef:
+                  name: hello-smtp
+                  key: smtpFrom
           ports:
             - name: http
               containerPort: 8081
@@ -1223,8 +1343,8 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
-          # Pinned to the tag ci.yaml published for commit c0130ed (the
+          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
+          # Pinned to the tag ci.yaml published for commit 7a43e0f (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -1404,6 +1524,102 @@ spec:
       port: 5432
       protocol: TCP
       targetPort: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: state
+      hello.dev/part: minio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: state
+        hello.dev/part: minio
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          imagePullPolicy: IfNotPresent
+          args: ["server", "/data"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: minioRootUser
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: minioRootPassword
+          ports:
+            - name: api
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    hello.dev/part: minio
+  ports:
+    - name: api
+      port: 9000
+      protocol: TCP
+      targetPort: api
 ---
 apiVersion: apps/v1
 kind: Deployment
