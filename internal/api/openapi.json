@@ -1610,6 +1610,460 @@
           }
         }
       }
+    },
+    "/api/v1/extensions/{id}/voicemail": {
+      "get": {
+        "operationId": "getExtensionVoicemail",
+        "summary": "One extension's voicemail box",
+        "tags": ["voicemail"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Voicemail box",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailBox"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "description": "The box is created with the extension; a missing box (an extension that predates it) is 404."
+      },
+      "put": {
+        "operationId": "updateExtensionVoicemail",
+        "summary": "Change a voicemail box",
+        "tags": ["voicemail"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailBox"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "description": "JSON with password and/or email, or multipart/form-data with the same fields plus optional `greeting` and `unreachable` WAV files (PCM, 5 MiB max); greetings land in the hello-voicemail bucket and the previous object is removed. At least one field is required. The password is stored as a hash and never returned."
+      }
+    },
+    "/api/v1/voicemail/messages": {
+      "get": {
+        "operationId": "listVoicemailMessages",
+        "summary": "List a box's voicemail messages",
+        "tags": ["voicemail"],
+        "responses": {
+          "200": {
+            "description": "Messages, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailMessageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "description": "`box` is a voicemail box id (required); `unheard=true` keeps the messages not played yet."
+      }
+    },
+    "/api/v1/voicemail/messages/{id}/heard": {
+      "post": {
+        "operationId": "markVoicemailMessageHeard",
+        "summary": "Mark a voicemail message heard",
+        "tags": ["voicemail"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The message's new heard flag",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailMessageHeard"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "description": "An empty body marks heard; a body of `{\"heard\": false}` marks it unheard again."
+      }
+    },
+    "/api/v1/voicemail/messages/{id}/audio": {
+      "get": {
+        "operationId": "getVoicemailMessageAudio",
+        "summary": "Play a voicemail message",
+        "tags": ["voicemail"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to a presigned object-store URL, valid 15 minutes"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "description": "302 to a presigned GET URL (15 minutes) for the message audio; the client follows it. The message must exist before anything is presigned: a missing message is 404."
+      }
+    },
+    "/api/v1/voicemail/messages/{id}": {
+      "delete": {
+        "operationId": "deleteVoicemailMessage",
+        "summary": "Delete a voicemail message",
+        "tags": ["voicemail"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "description": "Removes the row and the audio object in the hello-voicemail bucket."
+      }
+    },
+    "/api/v1/ring-groups": {
+      "get": {
+        "operationId": "listRingGroups",
+        "summary": "List ring/hunt groups",
+        "tags": ["ring-groups"],
+        "responses": {
+          "200": {
+            "description": "Groups with their members in position order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingGroupList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createRingGroup",
+        "summary": "Create a ring/hunt group",
+        "tags": ["ring-groups"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RingGroupCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "description": "Validation failures list each failing field (strategy, failureKind, members' positions, weights) in error.fields."
+      }
+    },
+    "/api/v1/ring-groups/{id}": {
+      "get": {
+        "operationId": "getRingGroup",
+        "summary": "One ring/hunt group",
+        "tags": ["ring-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingGroup"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateRingGroup",
+        "summary": "Change a ring/hunt group",
+        "tags": ["ring-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RingGroupUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "description": "Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored."
+      },
+      "delete": {
+        "operationId": "deleteRingGroup",
+        "summary": "Delete a ring/hunt group",
+        "tags": ["ring-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "description": "The members go with it."
+      }
+    },
+    "/api/v1/feature-codes": {
+      "get": {
+        "operationId": "listFeatureCodes",
+        "summary": "List DTMF feature codes",
+        "tags": ["feature-codes"],
+        "responses": {
+          "200": {
+            "description": "Codes ordered by code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureCodeList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "put": {
+        "operationId": "putFeatureCodes",
+        "summary": "Replace the DTMF feature codes",
+        "tags": ["feature-codes"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureCodesPut"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureCodeList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "description": "The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer."
+      }
+    },
+    "/api/v1/presence": {
+      "get": {
+        "operationId": "listPresence",
+        "summary": "Device presence (BLF states)",
+        "tags": ["presence"],
+        "responses": {
+          "200": {
+            "description": "Every live device state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceStateList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "description": "The dialog state hello-sip publishes per device: idle, ringing, on-call or dnd."
+      }
     }
   },
   "components": {
@@ -1699,6 +2153,519 @@
       }
     },
     "schemas": {
+      "VoicemailBox": {
+        "type": "object",
+        "required": [
+          "id",
+          "extensionId",
+          "hasPassword",
+          "email",
+          "greetingObject",
+          "unreachableObject",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "hasPassword": {
+            "type": "boolean",
+            "description": "Whether a retrieval password is set; the password itself is never returned."
+          },
+          "email": {
+            "type": "string",
+            "description": "Address voicemail notifications are sent to; empty for none."
+          },
+          "greetingObject": {
+            "type": "string",
+            "description": "Object key of the greeting in hello-voicemail; empty for none."
+          },
+          "unreachableObject": {
+            "type": "string",
+            "description": "Object key of the unreachable greeting; empty for none."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "VoicemailBoxUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "JSON body of PUT /api/v1/extensions/{id}/voicemail; multipart/form-data carries the same fields plus greeting and unreachable files.",
+        "properties": {
+          "password": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 72
+          },
+          "email": {
+            "type": "string",
+            "description": "Empty disables voicemail email."
+          }
+        }
+      },
+      "VoicemailMessage": {
+        "type": "object",
+        "required": [
+          "id",
+          "boxId",
+          "caller",
+          "durationMs",
+          "heard",
+          "emailStatus",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "boxId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "caller": {
+            "type": "string",
+            "description": "The caller's number."
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "heard": {
+            "type": "boolean"
+          },
+          "emailStatus": {
+            "type": "string",
+            "description": "pending, sent or failed."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "VoicemailMessageList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoicemailMessage"
+            }
+          }
+        }
+      },
+      "VoicemailMessageHeard": {
+        "type": "object",
+        "required": ["id", "heard"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "heard": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RingGroupMember": {
+        "type": "object",
+        "required": ["extensionId", "position", "weight", "delay"],
+        "properties": {
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string",
+            "description": "The member extension's number (read-only)."
+          },
+          "name": {
+            "type": "string",
+            "description": "The member extension's name (read-only)."
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Order within the group; distinct."
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "Only the weighted strategy distributes by it."
+          },
+          "delay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 300,
+            "description": "Seconds to wait before this member rings."
+          }
+        }
+      },
+      "RingGroup": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "strategy",
+          "hunt",
+          "ringTimeout",
+          "memberDelay",
+          "ignoreDnd",
+          "failureKind",
+          "failureTarget",
+          "members",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "ring-all",
+              "sequential",
+              "round-robin",
+              "longest-idle",
+              "weighted"
+            ]
+          },
+          "hunt": {
+            "type": "boolean",
+            "description": "true: members ring one at a time and the call moves on on no-answer/busy."
+          },
+          "ringTimeout": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 300
+          },
+          "memberDelay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60
+          },
+          "ignoreDnd": {
+            "type": "boolean"
+          },
+          "failureKind": {
+            "type": "string",
+            "enum": ["none", "voicemail", "external"]
+          },
+          "failureTarget": {
+            "type": "string"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingGroupMember"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RingGroupCreate": {
+        "type": "object",
+        "required": ["name", "members"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "ring-all",
+              "sequential",
+              "round-robin",
+              "longest-idle",
+              "weighted"
+            ]
+          },
+          "hunt": {
+            "type": "boolean"
+          },
+          "ringTimeout": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 300
+          },
+          "memberDelay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60
+          },
+          "ignoreDnd": {
+            "type": "boolean"
+          },
+          "failureKind": {
+            "type": "string",
+            "enum": ["none", "voicemail", "external"]
+          },
+          "failureTarget": {
+            "type": "string"
+          },
+          "members": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "required": ["extensionId", "position"],
+              "additionalProperties": false,
+              "properties": {
+                "extensionId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "weight": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 1
+                },
+                "delay": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "RingGroupUpdate": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": false,
+        "description": "Absent fields keep their value; a members list replaces the whole member list.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "ring-all",
+              "sequential",
+              "round-robin",
+              "longest-idle",
+              "weighted"
+            ]
+          },
+          "hunt": {
+            "type": "boolean"
+          },
+          "ringTimeout": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 300
+          },
+          "memberDelay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 60
+          },
+          "ignoreDnd": {
+            "type": "boolean"
+          },
+          "failureKind": {
+            "type": "string",
+            "enum": ["none", "voicemail", "external"]
+          },
+          "failureTarget": {
+            "type": "string"
+          },
+          "members": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "required": ["extensionId", "position"],
+              "additionalProperties": false,
+              "properties": {
+                "extensionId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "weight": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 1
+                },
+                "delay": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                }
+              }
+            }
+          }
+        }
+      },
+      "RingGroupList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingGroup"
+            }
+          }
+        }
+      },
+      "FeatureCode": {
+        "type": "object",
+        "required": ["code", "action", "argument"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^(\\*[0-9]{2,4}|##)$"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "forward_always",
+              "forward_busy",
+              "forward_no_answer",
+              "dnd_on",
+              "dnd_off",
+              "voicemail",
+              "blind_transfer",
+              "attended_transfer"
+            ]
+          },
+          "argument": {
+            "type": "string",
+            "description": "What the action needs (for example set or clear for a forwarding action)."
+          }
+        }
+      },
+      "FeatureCodeList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FeatureCode"
+            }
+          }
+        }
+      },
+      "FeatureCodesPut": {
+        "type": "object",
+        "required": ["items"],
+        "additionalProperties": false,
+        "description": "The complete feature-code configuration; codes absent from the list are removed.",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 64,
+            "items": {
+              "type": "object",
+              "required": ["code", "action"],
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "pattern": "^(\\*[0-9]{2,4}|##)$"
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "forward_always",
+                    "forward_busy",
+                    "forward_no_answer",
+                    "dnd_on",
+                    "dnd_off",
+                    "voicemail",
+                    "blind_transfer",
+                    "attended_transfer"
+                  ]
+                },
+                "argument": {
+                  "type": "string",
+                  "maxLength": 64,
+                  "default": ""
+                }
+              }
+            }
+          }
+        }
+      },
+      "DeviceState": {
+        "type": "object",
+        "required": ["device", "extension", "state", "updatedAt"],
+        "properties": {
+          "device": {
+            "type": "string",
+            "description": "The device's SIP username."
+          },
+          "extension": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["idle", "ringing", "on-call", "dnd"]
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DeviceStateList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceState"
+            }
+          }
+        }
+      },
       "Version": {
         "type": "object",
         "required": ["version", "commit", "configRevision"],
@@ -1848,7 +2815,12 @@
           "name",
           "createdAt",
           "updatedAt",
-          "externalNumber"
+          "externalNumber",
+          "dnd",
+          "forwardAlways",
+          "forwardBusy",
+          "forwardNoAnswer",
+          "voicemailEnabled"
         ],
         "properties": {
           "id": {
@@ -1879,6 +2851,26 @@
             "pattern": "^(\\+?[0-9]{2,20})?$",
             "example": "+97142000000",
             "description": "Caller ID presented on outbound trunk calls; empty for none."
+          },
+          "dnd": {
+            "type": "boolean",
+            "description": "Do not disturb: incoming calls reject with 603 or go to voicemail."
+          },
+          "forwardAlways": {
+            "type": "string",
+            "description": "Forwarding target, empty = off."
+          },
+          "forwardBusy": {
+            "type": "string",
+            "description": "Forwarding target on 486/600, empty = off."
+          },
+          "forwardNoAnswer": {
+            "type": "string",
+            "description": "Forwarding target after the ring timeout, empty = off."
+          },
+          "voicemailEnabled": {
+            "type": "boolean",
+            "description": "Whether the extension's voicemail takes calls."
           }
         }
       },
@@ -1926,6 +2918,26 @@
             "pattern": "^(\\+?[0-9]{2,20})?$",
             "example": "+97142000000",
             "description": "Caller ID presented on outbound trunk calls; empty for none."
+          },
+          "dnd": {
+            "type": "boolean",
+            "description": "Do not disturb: incoming calls reject with 603 or go to voicemail."
+          },
+          "forwardAlways": {
+            "type": "string",
+            "description": "Forwarding target, empty = off."
+          },
+          "forwardBusy": {
+            "type": "string",
+            "description": "Forwarding target on 486/600, empty = off."
+          },
+          "forwardNoAnswer": {
+            "type": "string",
+            "description": "Forwarding target after the ring timeout, empty = off."
+          },
+          "voicemailEnabled": {
+            "type": "boolean",
+            "description": "Whether the extension's voicemail takes calls."
           }
         },
         "minProperties": 1

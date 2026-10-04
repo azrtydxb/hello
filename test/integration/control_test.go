@@ -26,6 +26,9 @@ type noLive struct{}
 
 func (noLive) AllBindings(context.Context) ([]livestate.Binding, error) { return nil, nil }
 func (noLive) Calls(context.Context) ([]livestate.Call, error)          { return nil, nil }
+func (noLive) DeviceStates(context.Context) ([]livestate.DeviceState, error) {
+	return nil, nil
+}
 
 type auditRow struct{ actor, action, resource, resourceID string }
 

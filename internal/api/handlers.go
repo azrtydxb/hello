@@ -242,23 +242,44 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Number         *string `json:"number"`
-		Name           *string `json:"name"`
-		ExternalNumber *string `json:"externalNumber"`
+		Number           *string `json:"number"`
+		Name             *string `json:"name"`
+		ExternalNumber   *string `json:"externalNumber"`
+		DND              *bool   `json:"dnd"`
+		ForwardAlways    *string `json:"forwardAlways"`
+		ForwardBusy      *string `json:"forwardBusy"`
+		ForwardNoAnswer  *string `json:"forwardNoAnswer"`
+		VoicemailEnabled *bool   `json:"voicemailEnabled"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.Number == nil && in.Name == nil && in.ExternalNumber == nil {
-		badRequest(w, "number, name or externalNumber is required")
+	if in.Number == nil && in.Name == nil && in.ExternalNumber == nil && in.DND == nil &&
+		in.ForwardAlways == nil && in.ForwardBusy == nil && in.ForwardNoAnswer == nil && in.VoicemailEnabled == nil {
+		badRequest(w, "a field to change is required")
 		return
 	}
 	if f := validateExtension(in.Number, in.Name, in.ExternalNumber); len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
-	e, err := s.Store.UpdateExtension(r.Context(), actor(r).String(), id,
-		store.ExtensionChange{Number: in.Number, Name: in.Name, ExternalNumber: in.ExternalNumber}, s.check())
+	var f fieldErrs
+	for path, v := range map[string]*string{
+		"forwardAlways": in.ForwardAlways, "forwardBusy": in.ForwardBusy, "forwardNoAnswer": in.ForwardNoAnswer,
+	} {
+		if v != nil {
+			validateForwardTarget(&f, path, *v)
+		}
+	}
+	if len(f) > 0 {
+		writeFields(w, f)
+		return
+	}
+	e, err := s.Store.UpdateExtension(r.Context(), actor(r).String(), id, store.ExtensionChange{
+		Number: in.Number, Name: in.Name, ExternalNumber: in.ExternalNumber,
+		DND: in.DND, ForwardAlways: in.ForwardAlways, ForwardBusy: in.ForwardBusy,
+		ForwardNoAnswer: in.ForwardNoAnswer, VoicemailEnabled: in.VoicemailEnabled,
+	}, s.check())
 	if err != nil {
 		s.configError(w, "extension", err)
 		return
