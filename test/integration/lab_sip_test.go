@@ -270,6 +270,44 @@ func TestCallFailureCodes(t *testing.T) {
 	}()
 	bareNumber := "7" + randDigits(7) // an extension with no device at all
 	lc.must("POST", "/api/v1/extensions", map[string]string{"number": bareNumber, "name": "bare"}, nil, 201)
+
+	// A fresh extension has a voicemail box (Phase 4), so the failure
+	// scenarios would be answered by the voicemail application. First prove
+	// the hand-off: an unreachable extension with voicemail answers 200.
+	// The dial reads the snapshot, which lags the extension's creation, so
+	// the 200 may need a retry to become visible at all.
+	eventually(t, 10*time.Second, "voicemail answers an unreachable extension", func() error {
+		out, err := a.Dial(ctx, bareNumber, sdpOffer)
+		if err != nil {
+			return err
+		}
+		if err := out.Hangup(ctx); err != nil {
+			return err
+		}
+		if out.Status != 200 {
+			return fmt.Errorf("dial %s with voicemail = %d, want 200 (voicemail answers)", bareNumber, out.Status)
+		}
+		return nil
+	})
+	// Then silence voicemail on every involved extension, so the test can
+	// assert the raw failure codes the features pass through.
+	for _, number := range []string{unregistered.Extension, busyExt.Extension, slowExt.Extension, bareNumber} {
+		lc.must("PATCH", "/api/v1/extensions/"+lc.extensionID(number),
+			map[string]any{"voicemailEnabled": false}, nil, 200)
+	}
+	// The dials below read the snapshot, which lags the PATCH by the reload:
+	// the fast bare dial is true again only once it landed.
+	eventually(t, 10*time.Second, "voicemail disabled in the snapshot", func() error {
+		out, err := a.Dial(ctx, bareNumber, sdpOffer)
+		if err != nil {
+			return err
+		}
+		if out.Status != 480 {
+			_ = out.Hangup(ctx)
+			return fmt.Errorf("dial %s = %d, want 480", bareNumber, out.Status)
+		}
+		return nil
+	})
 	for _, tc := range []struct {
 		name, number string
 		want         int

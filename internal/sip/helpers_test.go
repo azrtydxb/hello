@@ -42,10 +42,11 @@ func TestMain(m *testing.M) {
 var errDown = errors.New("valkey down")
 
 type fakeState struct {
-	mu    sync.Mutex
-	regs  map[string]map[string]livestate.Binding
-	calls map[string]livestate.Call
-	down  atomic.Bool
+	mu       sync.Mutex
+	regs     map[string]map[string]livestate.Binding
+	calls    map[string]livestate.Call
+	devState map[string]livestate.DeviceState
+	down     atomic.Bool
 	// putGate, when set, holds PutCall until the channel is closed;
 	// putBlocked is signalled when one is held.
 	putGate    atomic.Pointer[chan struct{}]
@@ -151,6 +152,27 @@ func (f *fakeState) DeleteCall(_ context.Context, id string) error {
 	defer f.mu.Unlock()
 	delete(f.calls, id)
 	return nil
+}
+
+func (f *fakeState) SetDeviceState(_ context.Context, sds livestate.DeviceState, _ time.Duration) error {
+	if f.down.Load() {
+		return errDown
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.devState == nil {
+		f.devState = map[string]livestate.DeviceState{}
+	}
+	f.devState[sds.Device] = sds
+	return nil
+}
+
+// DeviceState reads what was published for a device (tests).
+func (f *fakeState) DeviceState(device string) (livestate.DeviceState, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	s, ok := f.devState[device]
+	return s, ok
 }
 
 func (f *fakeState) Calls(context.Context) ([]livestate.Call, error) {
@@ -345,7 +367,11 @@ func startPBX(t *testing.T, devices []snapshot.Device, opts ...pbxOpt) *testPBX 
 	}
 	deps := Deps{
 		Snapshots: snaps, State: fs, Throttle: &fakeThrottle{n: map[string]int64{}},
-		CDRs: &fakeCDRs{ch: make(chan cdr.Record, 64)}, Metrics: NewMetrics(reg), Log: discard,
+		CDRs: &fakeCDRs{ch: make(chan cdr.Record, 64)}, Metrics: NewMetrics(reg),
+		Log: discard,
+	}
+	if os.Getenv("HELLO_TEST_SIPLOG") != "" {
+		deps.Log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
 	for _, o := range opts {
 		o(&cfg, &deps)
@@ -365,6 +391,7 @@ func startPBX(t *testing.T, devices []snapshot.Device, opts ...pbxOpt) *testPBX 
 			t.Error("Serve did not return")
 		}
 	})
+	eventually(t, "pbx listener", srv.Serving) // all Serve startup writes done
 	p := &testPBX{srv: srv, addr: addr, cfg: cfg, state: deps.State, throttle: deps.Throttle,
 		cdrs: deps.CDRs.(*fakeCDRs), snaps: snaps, reg: reg, m: deps.Metrics, conn: conn}
 	p.fake, _ = deps.State.(*fakeState)
@@ -447,12 +474,16 @@ type phone struct {
 	servers          map[string]*sipgo.DialogServerSession
 	clients          map[string]*sipgo.DialogClientSession
 
-	invites   chan *sip.Request
-	reinvites chan *sip.Request
-	cancels   chan *sip.Request
-	acks      chan *sip.Request
-	byes      chan *sip.Request
-	rings     chan int // provisional codes the phone heard as caller
+	invites    chan *sip.Request
+	reinvites  chan *sip.Request
+	cancels    chan *sip.Request
+	acks       chan *sip.Request
+	byes       chan *sip.Request
+	rings      chan int // provisional codes the phone heard as caller
+	infos      chan *sip.Request
+	messages   chan *sip.Request
+	subscribes chan *sip.Request
+	notifies   chan *sip.Request
 }
 
 func newPhone(t *testing.T, pbx *testPBX, user, pass string) *phone {
@@ -507,11 +538,14 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 	cli, _ := sipgo.NewClient(ua, sipgo.WithClientAddr(addr), sipgo.WithClientConnectionAddr(addr), sipgo.WithClientLogger(discard))
 	p := &phone{
 		t: t, user: user, pass: pass, addr: addr, pbx: pbx.addr, ua: ua, srv: srv, cli: cli,
-		sdp:     "v=0\r\no=" + user + " 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio " + strconv.Itoa(port+1000) + " RTP/AVP 0\r\n",
+		sdp: "v=0\r\no=" + user + " 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n" +
+			"m=audio " + strconv.Itoa(port+1000) + " RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\n",
 		contact: sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: user, Host: host, Port: port}},
 		servers: map[string]*sipgo.DialogServerSession{}, clients: map[string]*sipgo.DialogClientSession{},
 		invites: make(chan *sip.Request, 16), reinvites: make(chan *sip.Request, 16), cancels: make(chan *sip.Request, 16),
 		acks: make(chan *sip.Request, 16), byes: make(chan *sip.Request, 16), rings: make(chan int, 16),
+		infos: make(chan *sip.Request, 16), messages: make(chan *sip.Request, 16),
+		subscribes: make(chan *sip.Request, 16), notifies: make(chan *sip.Request, 16),
 		callee: answerAfter(nil),
 	}
 	p.dua = &sipgo.DialogUA{Client: cli, ContactHDR: p.contact, RewriteContact: true}
@@ -519,6 +553,22 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 	srv.OnAck(p.onAck)
 	srv.OnBye(p.onBye)
 	srv.OnUpdate(p.onReinvite)
+	srv.OnInfo(func(req *sip.Request, tx sip.ServerTransaction) {
+		push(p.infos, req)
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+	})
+	srv.OnMessage(func(req *sip.Request, tx sip.ServerTransaction) {
+		push(p.messages, req)
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+	})
+	srv.OnSubscribe(func(req *sip.Request, tx sip.ServerTransaction) {
+		push(p.subscribes, req)
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+	})
+	srv.OnNotify(func(req *sip.Request, tx sip.ServerTransaction) {
+		push(p.notifies, req)
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+	})
 	go func() { _ = srv.ServeUDP(conn) }()
 	t.Cleanup(func() {
 		_ = conn.Close()
@@ -804,4 +854,120 @@ func eventually(t *testing.T, what string, f func() bool) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// reinviteAsCaller sends a re-INVITE with body on an established caller
+// dialog (hold and resume tests).
+func (p *phone) reinviteAsCaller(t *testing.T, dcs *sipgo.DialogClientSession, body string) *sip.Response {
+	t.Helper()
+	inv := dcs.InviteRequest
+	target := *dcs.InviteRequest.Recipient.Clone()
+	if ct := dcs.InviteResponse.Contact(); ct != nil {
+		target = *ct.Address.Clone()
+	}
+	req := sip.NewRequest(sip.INVITE, target)
+	req.AppendHeader(&sip.FromHeader{Address: *inv.From().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: tagOfTest(inv.From())}}})
+	req.AppendHeader(&sip.ToHeader{Address: *inv.To().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: toTagOf(dcs)}}})
+	callID := sip.CallIDHeader(inv.CallID().Value())
+	req.AppendHeader(&callID)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: inv.CSeq().SeqNo + 1, MethodName: sip.INVITE})
+	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
+	req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+	req.SetBody([]byte(body))
+	req.SetTransport("UDP")
+	res := p.do(req)
+	if res.IsSuccess() {
+		ack := sip.NewRequest(sip.ACK, *dcs.InviteRequest.Recipient.Clone())
+		ack.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+		ack.SetBody([]byte(res.Body()))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = dcs.WriteAck(ctx, ack)
+	}
+	return res
+}
+
+// toTagOf is the remote (To) tag of a caller dialog: the tag the PBX put in
+// its 200.
+func toTagOf(dcs *sipgo.DialogClientSession) string {
+	if res := dcs.InviteResponse; res != nil {
+		return tagOfTest(res.To())
+	}
+	return tagOfTest(dcs.InviteRequest.To())
+}
+
+func tagOfTest(h sip.Header) string {
+	switch v := h.(type) {
+	case *sip.FromHeader:
+		if tag, ok := v.Params.Get("tag"); ok {
+			return tag
+		}
+	case *sip.ToHeader:
+		if tag, ok := v.Params.Get("tag"); ok {
+			return tag
+		}
+	}
+	return ""
+}
+
+// sendDTMF sends one digit as an in-dialog INFO (application/dtmf-relay).
+func (p *phone) sendDTMF(t *testing.T, dcs *sipgo.DialogClientSession, digit string) {
+	t.Helper()
+	inv := dcs.InviteRequest
+	target := *dcs.InviteRequest.Recipient.Clone()
+	if ct := dcs.InviteResponse.Contact(); ct != nil {
+		target = *ct.Address.Clone()
+	}
+	req := sip.NewRequest(sip.INFO, target)
+	req.AppendHeader(&sip.FromHeader{Address: *inv.From().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: tagOfTest(inv.From())}}})
+	req.AppendHeader(&sip.ToHeader{Address: *inv.To().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: toTagOf(dcs)}}})
+	callID := sip.CallIDHeader(inv.CallID().Value())
+	req.AppendHeader(&callID)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: inv.CSeq().SeqNo + 2, MethodName: sip.INFO})
+	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
+	req.AppendHeader(sip.NewHeader("Content-Type", "application/dtmf-relay"))
+	req.SetBody([]byte("Signal=" + digit + "\r\nDuration=100\r\n"))
+	req.SetTransport("UDP")
+	p.do(req)
+}
+
+// send REFER with a Refer-To header on an established dialog.
+func (p *phone) sendRefer(t *testing.T, dcs *sipgo.DialogClientSession, referTo string) *sip.Response {
+	t.Helper()
+	inv := dcs.InviteRequest
+	target := *dcs.InviteRequest.Recipient.Clone()
+	if ct := dcs.InviteResponse.Contact(); ct != nil {
+		target = *ct.Address.Clone()
+	}
+	req := sip.NewRequest(sip.REFER, target)
+	req.AppendHeader(&sip.FromHeader{Address: *inv.From().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: tagOfTest(inv.From())}}})
+	req.AppendHeader(&sip.ToHeader{Address: *inv.To().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: toTagOf(dcs)}}})
+	callID := sip.CallIDHeader(inv.CallID().Value())
+	req.AppendHeader(&callID)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: inv.CSeq().SeqNo + 3, MethodName: sip.REFER})
+	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
+	req.AppendHeader(sip.NewHeader("Refer-To", referTo))
+	req.SetTransport("UDP")
+	return p.do(req)
+}
+
+// subscribe sends a dialog SUBSCRIBE for ext, answering the digest
+// challenge; expires<0 omits the header.
+func (p *phone) subscribe(t *testing.T, ext string, expires int) *sip.Response {
+	t.Helper()
+	req := sip.NewRequest(sip.SUBSCRIBE, sip.Uri{Scheme: "sip", User: ext, Host: testDomain})
+	req.AppendHeader(&sip.FromHeader{Address: p.aorURI(), Params: sip.HeaderParams{{K: "tag", V: sip.GenerateTagN(8)}}})
+	req.AppendHeader(&sip.ToHeader{Address: sip.Uri{Scheme: "sip", User: ext, Host: testDomain}})
+	callID := sip.CallIDHeader(newID())
+	req.AppendHeader(&callID)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: 1, MethodName: sip.SUBSCRIBE})
+	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
+	req.AppendHeader(sip.NewHeader("Event", "dialog"))
+	req.AppendHeader(sip.HeaderClone(&p.contact))
+	if expires >= 0 {
+		req.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(expires)))
+	}
+	req.SetDestination(p.pbx)
+	res := p.authDo(req, AlgSHA256, p.pass)
+	return res
 }

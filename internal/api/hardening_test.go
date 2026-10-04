@@ -25,12 +25,19 @@ func (oneBinding) AllBindings(context.Context) ([]livestate.Binding, error) {
 	return []livestate.Binding{{AOR: "sip:a@hello.test", Path: []string{"<sip:10.0.0.1:5060;lr;hflow=c2VjcmV0LXRva2Vu>"}}}, nil
 }
 func (oneBinding) Calls(context.Context) ([]livestate.Call, error) { return nil, nil }
+func (oneBinding) DeviceStates(context.Context) ([]livestate.DeviceState, error) {
+	return nil, nil
+}
 
 type liveDown struct{}
 
 func (liveDown) AllBindings(context.Context) ([]livestate.Binding, error) {
 	return nil, errors.New("valkey: connection refused")
 }
+func (liveDown) DeviceStates(context.Context) ([]livestate.DeviceState, error) {
+	return nil, context.DeadlineExceeded
+}
+
 func (liveDown) Calls(context.Context) ([]livestate.Call, error) {
 	return nil, errors.New("valkey: connection refused")
 }

@@ -45,10 +45,12 @@ export function mockApi(routes: Routes): Call[] {
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = (init?.method ?? "GET").toUpperCase();
+      // A JSON body is parsed; anything else (e.g. multipart FormData) is
+      // recorded as-is so tests can inspect its parts.
       const body =
         typeof init?.body === "string"
           ? (JSON.parse(init.body) as unknown)
-          : undefined;
+          : init?.body;
       calls.push({ method, url, body });
       const key = `${method} ${url}`;
       const route = routes[key];

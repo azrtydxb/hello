@@ -1,8 +1,18 @@
 # What a human decided
 
-Written 2026-10-03 08:31 UTC. procoder reads this
+Written 2026-10-04 10:30 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
+
+## [decision] decisions.md
+
+Key: 0562d75801e2
+Question: Start Phase 4 (PBX features) next
+
+- Yes — draft the Phase 4 spec (transfers, forwarding, DND, ring/hunt groups, voicemail, presence)
+- No — I want something else first
+
+Answer: Yes — draft the Phase 4 spec
 
 ## [decision] decisions.md
 
@@ -70,6 +80,17 @@ Key: 2a0645102517
 Question: OPEN: UI package manager — npm or pnpm?
 
 Answer: pnpm
+
+## [decision] decisions.md
+
+Key: 2ad55e86b114
+Question: Phase 4 voicemail audio storage
+
+- S3-compatible object storage (MinIO) in the hello namespace
+- PostgreSQL bytea/large objects
+- Persistent-volume filesystem
+
+Answer: S3-compatible object storage (MinIO) in the hello namespace
 
 ## [decision] decisions.md
 
@@ -144,6 +165,16 @@ Key: 61fa8fc32239
 Question: OPEN: Migration library — goose, or golang-migrate?
 
 Answer: goose
+
+## [decision] decisions.md
+
+Key: 6fee12142fca
+Question: Phase 4 voicemail delivery
+
+- Web + phone (MWI) only; email notification later
+- Include SMTP email notification with audio attachment now
+
+Answer: Include SMTP email notification with audio attachment now
 
 ## [decision] decisions.md
 
@@ -250,6 +281,16 @@ Answer: Test PostgreSQL outage and restart (SIP keeps running from its snapshot)
 
 ## [decision] decisions.md
 
+Key: d8bbc86e5884
+Question: Phase 4 ring/hunt group strategies
+
+- All five now (ring-all, sequential, round-robin, longest-idle, weighted)
+- Ring-all + sequential first, the rest later
+
+Answer: All five now (ring-all, sequential, round-robin, longest-idle, weighted)
+
+## [decision] decisions.md
+
 Key: dbf604d8bdf1
 Question: Merge PR #4
 
@@ -267,6 +308,27 @@ Question: Phase 1 registration store
 - In-memory per node until Phase 3
 
 Answer: Valkey from Phase 1 (cluster-wide, HA-ready)
+
+## [decision] decisions.md
+
+Key: e8298c768bbb
+Question: Deployment target and order
+
+- Pull Phase 6 (Helm/Kubernetes on kw) forward, right after the Phase 3 merge; features (Phases 4-5) come after
+- Keep roadmap order: Phases 4-5 features next; kw deployment stays Phase 6
+
+Answer: Pull Phase 6 (Helm/Kubernetes on kw) forward, right after the Phase 3 merge; features (Phases 4-5) come after
+
+## [decision] decisions.md
+
+Key: e8a416e0a619
+Question: Valkey failover test in CI
+
+- Pay for a larger runner (ubuntu-4-cores) for the images job; keep the full failover test gating CI
+- Keep the free 2-core runner; the failover test runs pre-merge locally and in CI only as a non-gating scheduled job
+- Keep the free runner; the failover test keeps trying to pass in CI with further environment tuning
+
+Answer: Use the kw Arc runners (the user directs CI there; labels self-hosted/linux/x64 via scaleSetLabels)
 
 ## [decision] decisions.md
 

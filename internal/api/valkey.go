@@ -128,6 +128,15 @@ func (l *LazyValkey) Calls(ctx context.Context) ([]livestate.Call, error) {
 	return c.live.Calls(ctx)
 }
 
+// DeviceStates implements Live.
+func (l *LazyValkey) DeviceStates(ctx context.Context) ([]livestate.DeviceState, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.DeviceStates(ctx)
+}
+
 // TrunkStatus implements TrunkLive.
 func (l *LazyValkey) TrunkStatus(ctx context.Context, id int64) (livestate.TrunkStatus, error) {
 	c, err := l.get()

@@ -25,6 +25,12 @@ x-db-env: &db-env
   HELLO_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
   HELLO_SIP_DOMAIN: hello.lab
   HELLO_SECRET_KEY: bGFiLW9ubHktc2VjcmV0LWtleS0wMTIzNDU2Nzg5YWI= # lab-only placeholder, confirmed 2026-10-02 gitleaks:allow
+  # The voicemail object store (contract 6): required by both services'
+  # configuration, so the lab runs its own MinIO on the state network.
+  MINIO_ENDPOINT: minio:9000
+  MINIO_ACCESS_KEY: hello-minio
+  MINIO_SECRET_KEY: lab-only-minio-secret # gitleaks:allow
+  MINIO_SECURE: "false"
 
 x-sip-env: &sip-env
   <<: *db-env
@@ -128,6 +134,21 @@ services:
     volumes: [pgdata:/var/lib/postgresql]
     networks: [state]
 
+  # The voicemail audio store (contract 6). Health is the S3 liveness
+  # endpoint: MinIO answers 200 only once it serves requests.
+  minio:
+    image: minio/minio:latest
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: hello-minio
+      MINIO_ROOT_PASSWORD: lab-only-minio-secret
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks: [state]
+
   # Valkey: valkey-1 is the primary at start, valkey-2 its replica; Sentinel
   # moves the primary role on failure. Each announces its service name, so
   # Sentinel and Hello reach it by name whatever IP it gets.
@@ -210,10 +231,11 @@ services:
       state: {}
       edge: { ipv4_address: 10.89.53.12, gw_priority: 1 }
 
-  # The SIP edge (deploy/kamailio, plan contract 7). The official image is
-  # published for amd64 only; Docker Desktop on Apple silicon emulates it.
-  # It runs as the image's unprivileged kamailio user (its ports need no
-  # root). Sockets: UDP 5060 for phones (host UDP 5080, advertised as
+  # The SIP edge (deploy/kamailio, plan contract 7), built from
+  # docker/kamailio (Debian trixie; the official image is amd64-only and
+  # ghcr.io is not reachable from every network this lab runs on). It runs
+  # as the image's unprivileged kamailio user (its ports need no root).
+  # Sockets: UDP 5060 for phones (host UDP 5080, advertised as
   # KAMAILIO_PUBLIC_HOST:PORT), UDP 5070 towards the hello-sip nodes, TCP
   # 9090 for /metrics (internal). Dispatcher state:
   #   docker compose exec kamailio kamcmd dispatcher.list
@@ -222,10 +244,10 @@ services:
   # The image's entrypoint ignores extra arguments, so a config check needs
   # its own entrypoint:
   #   docker run --rm --entrypoint kamailio -v "$PWD/deploy/kamailio:/etc/kamailio:ro" \
-  #     ghcr.io/kamailio/kamailio:6.0.8-bookworm -c -f /etc/kamailio/kamailio.cfg
+  #     hello-kamailio:dev -c -f /etc/kamailio/kamailio.cfg
   kamailio:
-    image: ghcr.io/kamailio/kamailio:6.0.8-bookworm
-    platform: linux/amd64
+    build: { context: ../.., dockerfile: docker/kamailio/Dockerfile }
+    image: hello-kamailio:dev
     user: kamailio
     environment:
       KAMAILIO_LISTEN_IP: 10.89.53.10

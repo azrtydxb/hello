@@ -88,6 +88,15 @@ func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
 	if len(contacts) > 0 {
 		s.triggerRecount()
 	}
+	// A registration refreshes the device's presence: idle, or dnd while the
+	// extension's DND is on (contract 3, "DND from the registrar state").
+	if snap2 := s.deps.Snapshots.Current(); snap2 != nil {
+		state := StateIdle
+		if e, ok := snap2.Extension(dev.Extension); ok && e.DND {
+			state = StateDND
+		}
+		s.publishDeviceState([]string{dev.Username}, dev.Extension, state)
+	}
 }
 
 // parseContacts reads the Contact headers and their expiry, clamped to the

@@ -31,6 +31,10 @@ jobs:
       # say so, which would make a green run meaningless.
       HELLO_TEST_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
       HELLO_TEST_VALKEY_ADDR: valkey:6379
+      # The voicemail MinIO tests reuse this endpoint instead of starting
+      # their own container; the user is the tests' fixed "hello".
+      HELLO_TEST_MINIO_ENDPOINT: minio:9000
+      HELLO_TEST_MINIO_PASS: hello-voicemail-secret
     services:
       postgres:
         image: postgres:18-alpine
@@ -44,6 +48,19 @@ jobs:
         image: valkey/valkey:9-alpine
         options: >-
           --health-cmd "valkey-cli ping" --health-interval 5s --health-retries 10
+      minio:
+        # The upstream image's default command only prints its help and a
+        # service container cannot pass `server /data` arguments; bitnami's
+        # starts its server from the root-user environment. The free
+        # bitnami images were frozen into bitnamilegacy, which is fine for
+        # a test-only object store.
+        image: bitnamilegacy/minio:latest
+        env:
+          MINIO_ROOT_USER: hello
+          MINIO_ROOT_PASSWORD: hello-voicemail-secret
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Go refuses to stamp VCS info for a workspace owned by another uid.
@@ -73,6 +90,43 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
+
+  lab:
+    # The Phase 3 failure-injection and lab flow tests drive the real compose
+    # lab (deploy/docker-compose), so they need the runner's Docker daemon,
+    # the compose plugin and a Go toolchain on the runner itself — not a job
+    # container. The go job must be green first: the lab builds the same
+    # images from the same source.
+    needs: [go]
+    runs-on: arc-azrtydxb
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Evidence first: what the runner actually has decides whether this
+      # job can work here at all.
+      - name: Docker and compose on the runner
+        run: |
+          docker version
+          docker compose version || {
+            echo "compose plugin missing; installing"
+            arch=$(uname -m); case $arch in
+              x86_64) carch=x86_64 ;;
+              aarch64|arm64) carch=aarch64 ;;
+              *) echo "unsupported arch $arch"; exit 1 ;;
+            esac
+            mkdir -p "$HOME/.docker/cli-plugins"
+            curl -fsSL "https://github.com/docker/compose/releases/download/v2.40.2/docker-compose-linux-$carch" \
+              -o "$HOME/.docker/cli-plugins/docker-compose"
+            chmod +x "$HOME/.docker/cli-plugins/docker-compose"
+            docker compose version
+          }
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Lab and failure-injection tests
+        env:
+          HELLO_DOCKER: "1"
+        run: go test -count=1 -timeout 50m -v ./test/integration/
 
   publish:
     # Only what lands on main becomes an image; a pull request is tested and

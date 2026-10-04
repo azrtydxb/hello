@@ -15,6 +15,7 @@ import (
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
+	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
@@ -102,6 +103,18 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	st := store.New(db).WithSecretBox(box)
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
+	go seedFeatureCodes(ctx, st, log)
+
+	// The voicemail object store and the email worker are the Phase 4
+	// control-plane services (spec contract 6, S-8). minio.New does not
+	// dial, so an unreachable MinIO surfaces on first use.
+	objs, err := api.NewMinioObjects(cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioSecure)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("MINIO_ENDPOINT: %w", err)
+	}
+	go ensureVoicemailBucket(ctx, objs, log)
+	go runMailer(ctx, cfg, st, objs, log)
 
 	// The node lifecycle: JOINING until PostgreSQL first answers, READY,
 	// UNHEALTHY while it fails, DRAINING on SIGTERM or a drain request
@@ -115,6 +128,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			Trunks:     vk,
 			Cluster:    vk,
 			Valkey:     vk,
+			Objects:    objs,
 			SIPDomain:  cfg.SIPDomain,
 			SessionTTL: cfg.SessionTTL,
 			Log:        log,
@@ -127,6 +141,71 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	err = node.Run(ctx.Done(), ln)
 	log.Info("stopped", "error", err)
 	return err
+}
+
+// seedFeatureCodes inserts the default DTMF codes missing from the table,
+// retrying until PostgreSQL answers, without overwriting edited codes.
+func seedFeatureCodes(ctx context.Context, st *store.Store, log *slog.Logger) {
+	for {
+		err := st.EnsureFeatureCodes(ctx, store.DefaultFeatureCodes())
+		if err == nil {
+			return
+		}
+		log.Warn("seed feature codes: retrying", "error", err, "retry_in", bootstrapRetry.String())
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(bootstrapRetry):
+		}
+	}
+}
+
+// ensureVoicemailBucket creates hello-voicemail when it is missing (deploy
+// usually does; compose dev may not).
+func ensureVoicemailBucket(ctx context.Context, objs *api.MinioObjects, log *slog.Logger) {
+	bctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := objs.EnsureBucket(bctx); err != nil {
+		log.Warn("voicemail bucket not verified", "bucket", api.VoicemailBucket, "error", err)
+	}
+}
+
+// runMailer starts the voicemail email queue worker. Without SMTP_HOST the
+// worker is disabled: it logs and returns (spec S-8).
+func runMailer(ctx context.Context, cfg config.Control, st *store.Store, objs *api.MinioObjects, log *slog.Logger) {
+	if cfg.SmtpHost == "" {
+		log.Info("voicemail email delivery disabled (SMTP not configured)")
+		return
+	}
+	mailer.New(mailer.Config{
+		From:    cfg.SmtpFrom,
+		Queue:   queue{st},
+		Objects: objs,
+		Sender:  mailer.NewSMTPSender(cfg.SmtpHost, cfg.SmtpPort, cfg.SmtpUser, cfg.SmtpPass),
+		Log:     log,
+	}).Run(ctx)
+}
+
+// queue adapts the store's email jobs to the mailer's queue.
+type queue struct{ st *store.Store }
+
+func (q queue) PendingEmails(ctx context.Context, limit int) ([]mailer.Job, error) {
+	js, err := q.st.PendingEmails(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]mailer.Job, len(js))
+	for i, j := range js {
+		out[i] = mailer.Job{
+			MessageID: j.MessageID, To: j.To, Caller: j.Caller,
+			DurationMs: j.DurationMs, CreatedAt: j.CreatedAt, Object: j.Object,
+		}
+	}
+	return out, nil
+}
+
+func (q queue) MarkEmail(ctx context.Context, id int64, status string) error {
+	return q.st.MarkEmail(ctx, id, status)
 }
 
 // bootstrap creates the first admin, retrying until the database is

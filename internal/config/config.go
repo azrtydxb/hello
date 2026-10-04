@@ -50,6 +50,16 @@ type Control struct {
 	// BootstrapAdminPassword creates the first admin user when none exist.
 	BootstrapAdminPassword string
 	SessionTTL             time.Duration
+	// MinIO (voicemail audio) and SMTP (voicemail email). SMTP is optional:
+	// an empty SmtpHost disables the mailer.
+	MinioEndpoint      string
+	MinioAccessKey     string
+	MinioSecretKey     string
+	MinioSecure        bool
+	SmtpHost           string
+	SmtpPort           int
+	SmtpUser, SmtpPass string
+	SmtpFrom           string
 	// SecretKey (HELLO_SECRET_KEY) seals trunk passwords; identical on every
 	// hello-control and hello-sip.
 	SecretKey string
@@ -79,7 +89,11 @@ type SIP struct {
 	StateTimeout       time.Duration
 	// SecretKey (HELLO_SECRET_KEY) opens trunk passwords sealed by
 	// hello-control.
-	SecretKey string
+	SecretKey      string
+	MinioEndpoint  string
+	MinioAccessKey string
+	MinioSecretKey string
+	MinioSecure    bool
 	// TrustedProxies (HELLO_SIP_TRUSTED_PROXIES) are the SIP balancers whose
 	// Path headers are stored and whose X-Hello-Client is believed.
 	TrustedProxies []netip.Prefix
@@ -130,6 +144,14 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.Database = r.database(c.DatabaseURL)
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
+	r.minio(&c.MinioEndpoint, &c.MinioAccessKey, &c.MinioSecretKey, &c.MinioSecure)
+	c.SmtpHost = r.getenv("SMTP_HOST")
+	if c.SmtpHost != "" {
+		c.SmtpPort = r.smtpPort()
+		c.SmtpUser = r.getenv("SMTP_USER")
+		c.SmtpPass = r.getenv("SMTP_PASS")
+		c.SmtpFrom = r.required("SMTP_FROM")
+	}
 	if c.SessionTTL == 0 {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
@@ -161,6 +183,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.Database = r.database(c.DatabaseURL)
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
+	r.minio(&c.MinioEndpoint, &c.MinioAccessKey, &c.MinioSecretKey, &c.MinioSecure)
 	c.TrustedProxies = r.prefixes("HELLO_SIP_TRUSTED_PROXIES")
 	c.DrainTimeout = r.duration("HELLO_DRAIN_TIMEOUT", 2*time.Hour)
 	if c.DrainTimeout == 0 {
@@ -315,6 +338,28 @@ func (r *reader) prefixes(key string) []netip.Prefix {
 		out = append(out, p.Masked())
 	}
 	return out
+}
+
+// minio reads the voicemail object-store settings; the endpoint is
+// required for both services, and the keys with it.
+func (r *reader) minio(endpoint, access, secret *string, secure *bool) {
+	*endpoint = r.required("MINIO_ENDPOINT")
+	if *endpoint != "" {
+		*access = r.required("MINIO_ACCESS_KEY")
+		*secret = r.required("MINIO_SECRET_KEY")
+		*secure = r.getenv("MINIO_SECURE") != "false"
+	}
+}
+
+// smtpPort reads SMTP_PORT.
+func (r *reader) smtpPort() int {
+	v := r.getenv("SMTP_PORT")
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > 65535 {
+		r.fail("SMTP_PORT", errors.New("must be a port number"))
+		return 0
+	}
+	return n
 }
 
 // secretKey reads HELLO_SECRET_KEY and checks it is 32 bytes of base64
