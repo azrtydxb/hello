@@ -1,0 +1,1902 @@
+# Hello on kw: the desired state kuvryn-sync converges. Mirrors the
+# docker-compose lab (deploy/docker-compose/compose.yaml) and follows the
+# dhole deployment pattern (azrtydxb/dhole deploy/kuvryn-sync/kw).
+#
+# Images are pinned by sha- tag; every merge to main publishes
+# 192.168.10.131:5000/azrtydxb/hello-<part>:sha-<short sha> (workflow:
+# .github/workflows/deploy.yml). Replace the tags below with the tag of the
+# commit you intend to run and let Sync converge; immutable sha256 digest
+# pins come later.
+#
+# Values that need one-time confirmation against kw before the first sync
+# (see deploy/kuvryn-sync/README.md, "Before the first sync"):
+#   - HELLO_SIP_TRUSTED_PROXIES: kw's pod CIDR.
+#   - HELLO_DNS_RESOLVER: the kube-dns ClusterIP.
+#   - KAMAILIO_PUBLIC_HOST: a node address phones can reach (NodePort 30508/udp).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-kamailio
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+data:
+  # Verbatim copy of deploy/kamailio/kamailio.cfg. The pod's env sets
+  # KAMAILIO_LISTEN_IP from status.podIP, so the "hello" socket's Path and
+  # Record-Route name the kamailio pod itself — reachable in-cluster with no
+  # advertise override — and the phones socket advertises
+  # KAMAILIO_PUBLIC_HOST:30508.
+  kamailio.cfg: |
+    #!KAMAILIO
+    #
+    # Hello SIP edge: Kamailio in front of the hello-sip nodes.
+    #
+    # Spec .procoder/specs/ha.md S-6/S-7, plan .procoder/plans/ha.md contract 7.
+    # Phones send everything to this one address; Kamailio
+    #   - load-balances initial requests over the READY hello-sip nodes
+    #     (dispatcher set 1, OPTIONS-probed every 4s);
+    #   - keeps an AOR's REGISTERs on one node (hash of the From user);
+    #   - adds Path (with the phone's received address) to REGISTER, so any
+    #     Hello node reaches any phone through Kamailio;
+    #   - record-routes initial INVITEs in both directions;
+    #   - tells Hello the phone's real source in X-Hello-Client;
+    #   - rate-limits REGISTER and INVITE per source IP (pike).
+    #
+    # It holds no Hello secrets and keeps no call or registration state of its
+    # own: the only state is the dispatcher view and an in-memory keep-alive
+    # list of NATed phones (rebuilt from the next REGISTER after a restart; it is
+    # never used for routing).
+    #
+    # Two kinds of peers, told apart by source address:
+    #   - Hello nodes: the source IP is in dispatcher set 1. Their requests go to
+    #     phones (Route = the Path or Record-Route Kamailio put there).
+    #   - Phones: everything else. Their requests only ever go to Hello nodes.
+    #
+    # Never log message bodies or Authorization/Proxy-Authorization headers:
+    # the lab's TestNoSecretsInLogs fails on 'Authorization: Digest' or
+    # 'response="' in any service log.
+
+    ####### Environment (set by compose) #######
+
+    # The address phones use to reach this Kamailio (VIP, DNS name or, in the
+    # lab, the host's published port): the advertised address of the "phones"
+    # socket, so it is what phones see in Via, Record-Route and keep-alives.
+    #!trydefenv PUBLIC_HOST=KAMAILIO_PUBLIC_HOST
+    #!trydefenv PUBLIC_PORT=KAMAILIO_PUBLIC_PORT
+    #!ifndef PUBLIC_HOST
+    #!define PUBLIC_HOST 127.0.0.1
+    #!endif
+    #!ifndef PUBLIC_PORT
+    #!define PUBLIC_PORT 5080
+    #!endif
+
+    # Kamailio's own address on the edge network (its fixed IP; hello-sip's
+    # HELLO_SIP_TRUSTED_PROXIES names it). It must be a real address: the
+    # "hello" socket's Path and Record-Route carry it.
+    #!trydefenv LISTEN_IP=KAMAILIO_LISTEN_IP
+    #!ifndef LISTEN_IP
+    #!define LISTEN_IP 10.89.53.10
+    #!endif
+
+    # How long (ms) an INVITE towards Hello may stay unanswered after its first
+    # provisional reply. Hello ends ringing itself (HELLO_SIP_RING_TIMEOUT,
+    # default 30s), so this only matters when the node dies mid-ring: the
+    # caller then gets 408 instead of hanging. Keep it above Hello's ring
+    # timeout.
+    #!trydefenv INVITE_TIMEOUT=KAMAILIO_INVITE_TIMEOUT
+    #!ifndef INVITE_TIMEOUT
+    #!define INVITE_TIMEOUT 45000
+    #!endif
+
+    # pike: requests allowed per source IP per 2s sampling unit before the IP is
+    # blocked (blocking starts between 1x and 3x this for IPv4). Every phone in
+    # the lab runs on the Docker host and so shares one source IP; the default
+    # leaves room for the test suites. Size it per site in production.
+    #!trydefenv PIKE_DENSITY=KAMAILIO_PIKE_DENSITY
+    #!ifndef PIKE_DENSITY
+    #!define PIKE_DENSITY 200
+    #!endif
+
+    ####### Flags #######
+
+    # FLT_FROM_HELLO: the request came from a hello-sip node.
+    # FLT_RETRIED: already failed over once (ds_next_dst).
+    # FLB_NATB (branch): the phone is behind NAT (usrloc nat_bflag).
+    # FLB_NATSIPPING (branch): send it SIP OPTIONS keep-alives.
+    #!define FLT_FROM_HELLO 1
+    #!define FLT_RETRIED 2
+    #!define FLB_NATB 6
+    #!define FLB_NATSIPPING 7
+
+    # Dispatcher: set "1" is the hello-sip nodes; algorithm "7" hashes over
+    # hash_pvar ($fU, the From user), "4" is round robin. Match mode "3" in
+    # ds_is_from_list ignores port and protocol.
+
+    ####### Global parameters #######
+
+    debug=2                 # info; never 3+ in production (it prints messages)
+    log_stderror=yes        # the container logs to stdout/stderr
+    memdbg=5
+    memlog=5
+    log_facility=LOG_LOCAL0
+    log_prefix="{$mt $hdr(CSeq) $ci} "
+
+    children=4
+    auto_aliases=no
+    server_header="Server: Hello edge"
+    user_agent_header="User-Agent: Hello edge"
+    sip_warning=0
+
+    # Two SIP sockets, so each side sees an address it can reach:
+    #   phones - UDP 5060, published to the host as UDP 5080 and advertised as
+    #            PUBLIC_HOST:PUBLIC_PORT. Phones send here.
+    #   hello  - UDP 5070, internal to the edge network. Kamailio talks to the
+    #            hello-sip nodes from here: dispatcher probes, Path, the
+    #            Hello-facing Record-Route. Hello nodes send here.
+    # A request crossing from one socket to the other gets two Record-Route
+    # headers (rr enable_double_rr), each naming the socket its side uses.
+    listen=udp:LISTEN_IP:5060 advertise PUBLIC_HOST:PUBLIC_PORT name "phones"
+    listen=udp:LISTEN_IP:5070 name "hello"
+    # Prometheus metrics (xhttp_prom), internal only: not published to the host.
+    # The only TCP socket, so every HTTP request arrives here; SIP sent to it
+    # is dropped in request_route.
+    listen=tcp:LISTEN_IP:9090 name "metrics"
+    tcp_accept_no_cl=yes
+
+    # Answer quickly when a Hello node is gone: DNS failover and SRV are not
+    # used (the dispatcher list holds the nodes' addresses), and the DNS blocklist would
+    # hide a restarted node.
+    dns_try_ipv6=no
+    use_dns_failover=no
+    use_dns_cache=on
+    dst_blocklist_init=off
+
+    ####### Modules #######
+
+    loadmodule "jsonrpcs.so"
+    loadmodule "kex.so"
+    loadmodule "corex.so"
+    loadmodule "tm.so"
+    loadmodule "tmx.so"
+    loadmodule "sl.so"
+    loadmodule "rr.so"
+    loadmodule "pv.so"
+    loadmodule "maxfwd.so"
+    loadmodule "textops.so"
+    loadmodule "siputils.so"
+    loadmodule "xlog.so"
+    loadmodule "sanity.so"
+    loadmodule "ctl.so"
+    loadmodule "cfg_rpc.so"
+    loadmodule "dispatcher.so"
+    loadmodule "path.so"
+    loadmodule "usrloc.so"      # before nathelper, which pings its contacts
+    loadmodule "registrar.so"
+    loadmodule "nathelper.so"
+    loadmodule "pike.so"
+    loadmodule "xhttp.so"
+    loadmodule "xhttp_prom.so"
+    loadmodule "rtimer.so"
+
+    # ctl: kamcmd's default socket (/run/kamailio/kamailio_ctl), so
+    # `docker compose exec kamailio kamcmd dispatcher.list` works as the
+    # kamailio user the container runs as.
+
+    # jsonrpcs: RPC over the FIFO only (no HTTP transport here).
+    modparam("jsonrpcs", "transport", 1)
+    modparam("jsonrpcs", "fifo_name", "/run/kamailio/kamailio_rpc.fifo")
+
+    # tm: 1.5s for a non-INVITE (and an INVITE's first reply) towards Hello and
+    # for the dispatcher's OPTIONS probes, so a dead node is noticed quickly;
+    # INVITEs towards Hello get INVITE_TIMEOUT and requests towards phones
+    # longer timers (routes TO_HELLO, TO_PHONE).
+    modparam("tm", "fr_timer", 1500)
+    modparam("tm", "fr_inv_timer", 120000)
+    modparam("tm", "reparse_invite", 1)
+
+    # rr: double Record-Route (phone-facing public address, Hello-facing edge
+    # address), and Route processing for both at once (r2=on).
+    modparam("rr", "enable_full_lr", 0)
+    modparam("rr", "append_fromtag", 0)
+
+    # dispatcher (contract 7): set 1 = every hello-sip node.
+    modparam("dispatcher", "list_file", "/etc/kamailio/dispatcher.list")
+    modparam("dispatcher", "ds_ping_method", "OPTIONS")
+    modparam("dispatcher", "ds_ping_from", "sip:kamailio@hello.edge")
+    # Probe every 4s: a dead or draining node is marked inactive within 15s at
+    # worst (3 failed probes x 4s + the 1.5s fr_timer of the last probe = 13.5s,
+    # below the 15s the HA spec allows before new work avoids it).
+    modparam("dispatcher", "ds_ping_interval", 4)       # probe every 4s
+    modparam("dispatcher", "ds_probing_mode", 1)        # probe every destination
+    modparam("dispatcher", "ds_probing_threshold", 3)   # 3 failures: inactive
+    modparam("dispatcher", "ds_inactive_threshold", 1)  # one 200: active again
+    modparam("dispatcher", "ds_ping_reply_codes", "")   # only 200 is a success
+    modparam("dispatcher", "hash_pvar", "$fU")          # REGISTER: From user
+    modparam("dispatcher", "flags", 2)                  # keep failover list
+    modparam("dispatcher", "xavp_dst", "_dsdst_")
+    modparam("dispatcher", "xavp_ctx", "_dsctx_")
+    modparam("dispatcher", "ds_load_mode", 1)           # a bad entry is fatal
+    modparam("dispatcher", "ds_default_sockname", "hello") # probes from 5070
+    # A Hello OPTIONS answer of 503 (draining, unhealthy) or none counts as a
+    # failure; nothing else is accepted.
+
+    # path: Path: <sip:LISTEN_IP:5070;lr;received=sip:phone-ip:port>; a request
+    # routed by that Path (Route) goes to the received address.
+    modparam("path", "use_received", 1)
+
+    # nathelper: keep-alive OPTIONS to NATed phones. The keep-alive list is an
+    # in-memory usrloc fed from 200 OK replies to REGISTER (route
+    # REGISTER_REPLY); Kamailio never routes from it.
+    modparam("nathelper", "natping_interval", 20)
+    modparam("nathelper", "ping_nated_only", 1)
+    modparam("nathelper", "sipping_bflag", FLB_NATSIPPING)
+    modparam("nathelper", "sipping_from", "sip:keepalive@hello.edge")
+    modparam("nathelper", "received_avp", "$avp(RECEIVED)")
+    modparam("usrloc", "db_mode", 0)
+    modparam("usrloc", "nat_bflag", FLB_NATB)
+    modparam("registrar", "received_avp", "$avp(RECEIVED)")
+    modparam("registrar", "max_contacts", 10)
+
+    # pike: per source IP.
+    modparam("pike", "sampling_time_unit", 2)
+    modparam("pike", "reqs_density_per_unit", PIKE_DENSITY)
+    modparam("pike", "remove_latency", 4)
+
+    # xhttp_prom: GET http://<kamailio>:9090/metrics inside the network.
+    modparam("xhttp", "url_skip", "^/(RPC|rpc)")
+    modparam("xhttp_prom", "xhttp_prom_stats", "all")
+    modparam("xhttp_prom", "prom_gauge", "name=dispatcher_set_destinations; label=setid")
+    modparam("xhttp_prom", "prom_gauge", "name=dispatcher_set_active; label=setid")
+    modparam("xhttp_prom", "prom_gauge", "name=dispatcher_destination_active; label=uri")
+    modparam("xhttp_prom", "prom_counter", "name=dispatcher_transitions_total; label=uri:state")
+    modparam("xhttp_prom", "prom_counter", "name=pike_blocked_total")
+
+    # rtimer: refresh the dispatcher set gauges every 5s.
+    modparam("rtimer", "timer", "name=dsmetrics;interval=5;mode=1;")
+    modparam("rtimer", "exec", "timer=dsmetrics;route=DS_METRICS")
+
+    ####### Routing #######
+
+    request_route {
+    	# The metrics socket is HTTP only: no SIP over it.
+    	if ($Rp == 9090) {
+    		drop;
+    	}
+
+    	route(REQINIT);
+
+    	if (ds_is_from_list("1", "3")) {
+    		# Source IP (any port, any protocol) is a hello-sip node.
+    		setflag(FLT_FROM_HELLO);
+    	}
+
+    	if (is_method("CANCEL")) {
+    		if (t_check_trans()) {
+    			route(RELAY);
+    		}
+    		exit;
+    	}
+
+    	if (is_method("ACK")) {
+    		# An ACK for a negative reply belongs to its INVITE transaction: tm
+    		# absorbs it here (the script ends). An ACK for a 2xx goes on.
+    		t_check_trans();
+    	} else {
+    		# Absorb retransmissions of requests being processed.
+    		if (t_precheck_trans()) {
+    			t_check_trans();
+    			exit;
+    		}
+    		t_check_trans();
+    	}
+
+    	if (isflagset(FLT_FROM_HELLO)) {
+    		route(FROM_HELLO);
+    	}
+    	route(FROM_PHONE);
+    }
+
+    # Basic sanity, loop protection.
+    route[REQINIT] {
+    	if (!mf_process_maxfwd_header("10")) {
+    		sl_send_reply("483", "Too Many Hops");
+    		exit;
+    	}
+    	if (!sanity_check("17895", "7")) {
+    		xlog("L_WARN", "malformed request from $si:$sp\n");
+    		exit;
+    	}
+    }
+
+    ####### Requests from phones (towards Hello) #######
+
+    route[FROM_PHONE] {
+    	# Only Kamailio says where a request came from.
+    	remove_hf("X-Hello-Client");
+    	force_rport();
+
+    	if (is_method("REGISTER|INVITE") && !has_totag()) {
+    		if (!pike_check_req()) {
+    			if ($rc == -2) {
+    				prom_counter_inc("pike_blocked_total", "1");
+    				xlog("L_WARN", "pike: blocking $si (flooding $rm)\n");
+    			}
+    			exit; # dropped silently
+    		}
+    	}
+
+    	# Keep-alive OPTIONS addressed to Kamailio itself.
+    	if (is_method("OPTIONS") && uri == myself && $rU == $null) {
+    		sl_send_reply("200", "OK");
+    		exit;
+    	}
+
+    	if (has_totag()) {
+    		route(PHONE_IN_DIALOG);
+    		exit;
+    	}
+
+    	# Initial request: Kamailio alone picks the Hello node, so any route a
+    	# phone preloaded (an outbound proxy entry naming us) is dropped.
+    	remove_hf("Route");
+
+    	if (is_method("ACK")) {
+    		# An ACK for a non-2xx reply is absorbed by tm (t_check_trans above);
+    		# any other ACK without a To tag is stray.
+    		exit;
+    	}
+
+    	if (is_method("REGISTER")) {
+    		route(REGISTER);
+    		exit;
+    	}
+
+    	if (is_method("INVITE|SUBSCRIBE|REFER")) {
+    		# Dialog-forming: in-dialog requests from both sides cross Kamailio
+    		# (two Record-Route headers: the hello socket, then the advertised
+    		# phones socket).
+    		$fsn = "hello";
+    		record_route();
+    		# Hello reaches the phone's NAT binding through ;alias=ip~port~udp on
+    		# its Contact (handle_ruri_alias in route[FROM_HELLO]).
+    		set_contact_alias();
+    	}
+
+    	if (!ds_select_dst("1", "4")) {
+    		route(NO_NODE);
+    	}
+    	route(TO_HELLO);
+    }
+
+    # REGISTER: hash of the From user, so an AOR stays on one node while that
+    # node is active, plus Path with the phone's received address.
+    route[REGISTER] {
+    	# Only our own Path reaches Hello: a phone could otherwise steer Hello's
+    	# requests for its binding through a host of its choosing.
+    	remove_hf("Path");
+    	if (!add_path_received()) {
+    		sl_send_reply("503", "Internal Path Error");
+    		exit;
+    	}
+    	# Keep-alive list (route REGISTER_REPLY): record where the phone is.
+    	if (nat_uac_test("19")) {
+    		fix_nated_register();
+    		setbflag(FLB_NATB);
+    		setbflag(FLB_NATSIPPING);
+    	}
+    	t_on_reply("REGISTER_REPLY");
+    	if (!ds_select_dst("1", "7")) {
+    		route(NO_NODE);
+    	}
+    	route(TO_HELLO);
+    }
+
+    # In-dialog request from a phone: follow our Record-Route to the Hello node
+    # that owns the dialog. Nothing else: a phone cannot use Kamailio to reach
+    # any other host.
+    route[PHONE_IN_DIALOG] {
+    	if (!loose_route()) {
+    		if (!is_method("ACK")) {
+    			sl_send_reply("404", "Not Here");
+    		}
+    		exit;
+    	}
+    	# loose_route leaves the next hop in $du (another Route) or the R-URI
+    	# (Hello's Contact, e.g. sip:hello-sip-1:5060).
+    	if ($du != $null && $du != "") {
+    		$var(next) = $du;
+    	} else {
+    		$var(next) = $ru;
+    	}
+    	if (!ds_is_from_list("1", "3", "$var(next)")) {
+    		xlog("L_WARN", "refused in-dialog $rm from $si:$sp to a non-Hello target\n");
+    		sl_send_reply("403", "Forbidden");
+    		exit;
+    	}
+    	if (is_method("INVITE|UPDATE")) {
+    		set_contact_alias(); # a re-INVITE may move the phone
+    	}
+    	route(TO_HELLO);
+    }
+
+    # Forward to the Hello node in $du with the client's address.
+    route[TO_HELLO] {
+    	$fsn = "hello";
+    	if (is_method("INVITE")) {
+    		t_set_fr(INVITE_TIMEOUT, 1500);
+    	}
+    	# The phone's source after NAT fix-up (force_rport): the address Hello's
+    	# failed-auth throttle, trunk source check and binding Source use.
+    	if (af == INET6) {
+    		append_hf("X-Hello-Client: [$si]:$sp\r\n");
+    	} else {
+    		append_hf("X-Hello-Client: $si:$sp\r\n");
+    	}
+    	if (!has_totag()) {
+    		t_on_failure("HELLO_FAILOVER"); # initial requests only
+    	}
+    	route(RELAY);
+    	exit;
+    }
+
+    route[NO_NODE] {
+    	xlog("L_WARN", "no active hello-sip node for $rm\n");
+    	append_to_reply("Retry-After: 5\r\n");
+    	sl_send_reply("503", "No Hello Node Available");
+    	exit;
+    }
+
+    ####### Requests from Hello (towards phones) #######
+
+    route[FROM_HELLO] {
+    	remove_hf("X-Hello-Client");
+
+    	# Hello's own OPTIONS to Kamailio, if any.
+    	if (is_method("OPTIONS") && uri == myself && $rU == $null && !is_present_hf("Route")) {
+    		sl_send_reply("200", "OK");
+    		exit;
+    	}
+
+    	# A Route naming us: the Path from REGISTER (path module sets $du from
+    	# its received parameter) or our Record-Route in a dialog.
+    	loose_route();
+
+    	# A Contact with ;alias=ip~port~udp (set_contact_alias above): send to
+    	# that address and strip the parameter.
+    	if ($du == $null || $du == "") {
+    		handle_ruri_alias();
+    	}
+
+    	if (is_method("INVITE|SUBSCRIBE|REFER") && !has_totag()) {
+    		# In-dialog requests from both sides cross Kamailio: the phone's
+    		# later requests (BYE, re-INVITE) come to the phones socket, Hello's
+    		# to the hello socket.
+    		$fsn = "phones";
+    		record_route();
+    	}
+    	route(TO_PHONE);
+    }
+
+    route[TO_PHONE] {
+    	# Phones may be slow, far away and lossy: longer timers than towards
+    	# Hello. A phone answers our Via's rport, i.e. the source port it saw.
+    	t_set_fr(120000, 8000);
+    	$fsn = "phones";
+    	add_local_rport();
+    	if (is_method("INVITE|SUBSCRIBE|REFER|UPDATE")) {
+    		t_on_reply("PHONE_REPLY");
+    	}
+    	route(RELAY);
+    	exit;
+    }
+
+    route[RELAY] {
+    	if (!t_relay()) {
+    		sl_reply_error();
+    	}
+    	exit;
+    }
+
+    ####### Replies and failures #######
+
+    # A phone's reply to a dialog-forming request from Hello: alias its Contact
+    # so in-dialog requests from Hello find the phone's NAT binding.
+    onreply_route[PHONE_REPLY] {
+    	if (status =~ "^(1[0-9][1-9]|2[0-9][0-9])$" && is_present_hf("Contact")) {
+    		set_contact_alias();
+    	}
+    }
+
+    # A 200 OK to a NATed phone's REGISTER: keep that phone in the keep-alive
+    # list for as long as the binding Hello granted.
+    onreply_route[REGISTER_REPLY] {
+    	if (t_check_status("200") && isbflagset(FLB_NATSIPPING)) {
+    		save("location", "0x01");
+    	}
+    }
+
+    # Contract 7: a relay that times out or gets 503 is retried once on the next
+    # active node; the phone gets the last answer otherwise.
+    failure_route[HELLO_FAILOVER] {
+    	if (t_is_canceled()) {
+    		exit;
+    	}
+    	if (isflagset(FLT_RETRIED)) {
+    		exit;
+    	}
+    	if (t_check_status("503") || (t_branch_timeout() && !t_branch_replied())) {
+    		if (ds_next_dst()) {
+    			setflag(FLT_RETRIED);
+    			xlog("L_INFO", "failover of $rm to $du\n");
+    			t_on_failure("HELLO_FAILOVER");
+    			t_relay();
+    			exit;
+    		}
+    	}
+    }
+
+    ####### Dispatcher events and metrics #######
+
+    event_route[dispatcher:dst-down] {
+    	xlog("L_WARN", "hello-sip destination down: $ru\n");
+    	prom_gauge_set("dispatcher_destination_active", "0", "$ru");
+    	prom_counter_inc("dispatcher_transitions_total", "1", "$ru", "down");
+    }
+
+    event_route[dispatcher:dst-up] {
+    	xlog("L_WARN", "hello-sip destination up: $ru\n");
+    	prom_gauge_set("dispatcher_destination_active", "1", "$ru");
+    	prom_counter_inc("dispatcher_transitions_total", "1", "$ru", "up");
+    }
+
+    route[DS_METRICS] {
+    	ds_dsg_fetch("1");
+    	prom_gauge_set("dispatcher_set_destinations", "$dsg(count)", "1");
+    	prom_gauge_set("dispatcher_set_active", "$dsg(active)", "1");
+    }
+
+    # HTTP only arrives on the metrics socket (the only TCP listener).
+    event_route[xhttp:request] {
+    	if (prom_check_uri()) {
+    		prom_dispatch();
+    		exit;
+    	}
+    	if ($hu == "/healthz") {
+    		xhttp_reply("200", "OK", "text/plain", "ok\n");
+    		exit;
+    	}
+    	xhttp_reply("404", "Not Found", "text/plain", "not found\n");
+    }
+  # On kw the hello-sip nodes sit behind Services, not fixed edge IPs
+  # (10.89.53.11/.12 in the lab's dispatcher.list): a ClusterIP name resolves
+  # even with no ready endpoints, so a restarted node's entry always loads and
+  # is merely probed inactive until it answers — the property the lab's
+  # fixed-IP entries existed to preserve. duid matches HELLO_NODE_ID.
+  dispatcher.list: |
+    # Hello SIP edge dispatcher destinations (lab twin:
+    # deploy/kamailio/dispatcher.list). Format:
+    #   setid destination flags priority attributes
+    # Flags 0: start active; probing (ds_probing_mode 1) then keeps each
+    # destination's state from its OPTIONS answers.
+    1 sip:hello-sip-1.hello.svc.cluster.local:5060 0 0 duid=hello-sip-1
+    1 sip:hello-sip-2.hello.svc.cluster.local:5060 0 0 duid=hello-sip-2
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hello-sentinel
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+data:
+  # Verbatim copy of deploy/valkey/sentinel.conf. Each sentinel-N pod copies
+  # it to its writable /data on first start and appends
+  # `sentinel announce-ip <its Service name>`, exactly as the compose
+  # entrypoint does.
+  sentinel.conf: |
+    # Valkey Sentinel for the Hello lab (spec .procoder/specs/ha.md S-8, plan
+    # contract 8). Each sentinel-N copies this template to /data/sentinel.conf on
+    # first start only: Sentinel rewrites its config file with the current
+    # primary and the peers it has learned, and a restart must keep that.
+    port 26379
+    dir /data
+
+    # Identity: the template deliberately carries no `sentinel myid` line. Valkey
+    # generates a distinct myid per container on first start and rewrites it into
+    # /data/sentinel.conf, so the restart keeps it (verified: three containers,
+    # three distinct myids). A myid shared by all three would make every Sentinel
+    # read its peers' hello messages as its own and the mesh would never form.
+    #
+    # Docker gives containers new IPs when they are recreated, so every address
+    # Sentinel stores, returns to clients (Hello) and announces to its peers is a
+    # compose service name, resolvable on the "state" network. The per-container
+    # `sentinel announce-ip <service name>` is appended to the copy by the
+    # compose entrypoint, which is the only place that knows the name.
+    sentinel resolve-hostnames yes
+    sentinel announce-hostnames yes
+
+    # Master set "hello": valkey-1 is the primary at start; 2 of the 3 sentinels
+    # must agree it is down before a failover. The down-after also ages peer
+    # Sentinels and the replica into sdown, and a busy 2-vCPU runner can freeze a
+    # Sentinel's event loop for seconds at a time (every freeze over ~2 s sends
+    # it into a 30 s tilt that suspends the sdown checks entirely), so the
+    # window must stay wider than a freeze: 3000 ms aged healthy peers into
+    # sdown during CI freezes and left NOQUORUM, 5000 ms is the value
+    # docs/ha.md recommends.
+    sentinel monitor hello valkey-1 6379 2
+    sentinel down-after-milliseconds hello 5000
+    sentinel failover-timeout hello 10000
+    sentinel parallel-syncs hello 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kamailio
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: edge
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: edge
+    spec:
+      containers:
+        - name: kamailio
+          image: ghcr.io/kamailio/kamailio:6.0.8-bookworm
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            # uid/gid of the image's kamailio user (read from the image).
+            runAsUser: 102
+            runAsGroup: 102
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: KAMAILIO_LISTEN_IP
+              # Bind the pod IP: the "hello" socket (5070) must carry an
+              # address hello nodes can route to, and the phones socket
+              # advertises KAMAILIO_PUBLIC_HOST:30508.
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: KAMAILIO_PUBLIC_HOST
+              # Where phones reach this Kamailio: a kw node address at the
+              # NodePort below. One-time kw fact; README "Before the first
+              # sync".
+              value: CHANGE-ME-before-first-sync
+            - name: KAMAILIO_PUBLIC_PORT
+              value: "30508"
+            - name: KAMAILIO_INVITE_TIMEOUT
+              # Above HELLO_SIP_RING_TIMEOUT (10s), as in the lab.
+              value: "25000"
+          ports:
+            - name: phones
+              containerPort: 5060
+              protocol: UDP
+            - name: hello
+              containerPort: 5070
+              protocol: UDP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            - name: config
+              mountPath: /etc/kamailio
+              readOnly: true
+            - name: run
+              # The ctl socket and RPC FIFO (/run/kamailio) must be writable
+              # by the kamailio user.
+              mountPath: /run/kamailio
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: hello-kamailio
+            defaultMode: 420
+        - name: run
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kamailio
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+  ports:
+    - name: phones
+      port: 5060
+      protocol: UDP
+      targetPort: phones
+      nodePort: 30508
+    - name: metrics
+      port: 9090
+      protocol: TCP
+      targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-sip-1
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: sip
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: sip
+      hello.dev/node: hello-sip-1
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: sip
+        hello.dev/node: hello-sip-1
+    spec:
+      terminationGracePeriodSeconds: 120 # a drain must finish (lab: 2h, capped here)
+      containers:
+        - name: hello-sip
+          image: 192.168.10.131/azrtydxb/hello-sip:sha-0000000
+          # Pin: replace with the tag printed by .github/workflows/deploy.yml
+          # (and later a sha256 digest) for the commit you intend to run.
+          imagePullPolicy: Always
+          env:
+            - name: HELLO_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HELLO_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: dsn
+            - name: HELLO_VALKEY_SENTINELS
+              value: sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+            - name: HELLO_VALKEY_MASTER
+              value: hello
+            - name: HELLO_SIP_DOMAIN
+              value: hello.kw.watteel.lab
+            - name: HELLO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-app
+                  key: secretKey
+            - name: HELLO_SIP_NONCE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hello-nonce
+                  key: nonceSecret
+            - name: HELLO_SIP_RING_TIMEOUT
+              value: 10s
+            - name: HELLO_SIP_TRUSTED_PROXIES
+              # The kamailio pod IPs. Default k3s pod CIDR; confirm kw's
+              # before the first sync (README "Before the first sync"):
+              # hello ignores Path/X-Hello-Client from anything else.
+              value: 10.42.0.0/16
+            - name: HELLO_SIP_ADVERTISED_ADDR
+              # What hello tells Kamailio/phones this node is: its Service
+              # name, resolvable in-cluster (dispatcher + dialog routes).
+              value: hello-sip-1:5060
+            - name: HELLO_DRAIN_TIMEOUT
+              # Under the pod's 120s termination grace, so a drain finishes.
+              value: 90s
+          ports:
+            - name: http
+              containerPort: 8082
+            - name: sip
+              containerPort: 5060
+              protocol: UDP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-sip-1
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: sip
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: sip
+    hello.dev/node: hello-sip-1
+  ports:
+    - name: sip
+      port: 5060
+      protocol: UDP
+      targetPort: sip
+    - name: http
+      port: 8082
+      protocol: TCP
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-sip-2
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: sip
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: sip
+      hello.dev/node: hello-sip-2
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: sip
+        hello.dev/node: hello-sip-2
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: hello-sip
+          image: 192.168.10.131/azrtydxb/hello-sip:sha-0000000
+          # Pin: replace with the tag printed by .github/workflows/deploy.yml
+          # (and later a sha256 digest) for the commit you intend to run.
+          imagePullPolicy: Always
+          env:
+            - name: HELLO_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HELLO_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: dsn
+            - name: HELLO_VALKEY_SENTINELS
+              value: sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+            - name: HELLO_VALKEY_MASTER
+              value: hello
+            - name: HELLO_SIP_DOMAIN
+              value: hello.kw.watteel.lab
+            - name: HELLO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-app
+                  key: secretKey
+            - name: HELLO_SIP_NONCE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hello-nonce
+                  key: nonceSecret
+            - name: HELLO_SIP_RING_TIMEOUT
+              value: 10s
+            - name: HELLO_SIP_TRUSTED_PROXIES
+              # The kamailio pod IPs. Default k3s pod CIDR; confirm kw's
+              # before the first sync (README "Before the first sync"):
+              # hello ignores Path/X-Hello-Client from anything else.
+              value: 10.42.0.0/16
+            - name: HELLO_SIP_ADVERTISED_ADDR
+              # What hello tells Kamailio/phones this node is: its Service
+              # name, resolvable in-cluster (dispatcher + dialog routes).
+              value: hello-sip-2:5060
+            - name: HELLO_DRAIN_TIMEOUT
+              # Under the pod's 120s termination grace, so a drain finishes.
+              value: 90s
+          ports:
+            - name: http
+              containerPort: 8082
+            - name: sip
+              containerPort: 5060
+              protocol: UDP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-sip-2
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: sip
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: sip
+    hello.dev/node: hello-sip-2
+  ports:
+    - name: sip
+      port: 5060
+      protocol: UDP
+      targetPort: sip
+    - name: http
+      port: 8082
+      protocol: TCP
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-control
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: control
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: control
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: control
+    spec:
+      initContainers:
+        - name: migrate
+          # The lab runs `hello-control migrate up` as a one-shot (compose
+          # hello-migrate); a Sync-managed Job would need RBAC the deployer
+          # does not have, so it runs as an init container instead. The retry
+          # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
+          image: 192.168.10.131/azrtydxb/hello-control:sha-0000000
+          command:
+            - sh
+            - -c
+            - >-
+              until hello-control migrate up; do
+              echo 'waiting for postgres/valkey'; sleep 3; done
+          env:
+            - name: HELLO_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: dsn
+            - name: HELLO_VALKEY_SENTINELS
+              value: sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+            - name: HELLO_VALKEY_MASTER
+              value: hello
+            - name: HELLO_NODE_ID
+              value: hello-migrate
+      containers:
+        - name: hello-control
+          image: 192.168.10.131/azrtydxb/hello-control:sha-0000000
+          # Pin: replace with the tag printed by .github/workflows/deploy.yml
+          # (and later a sha256 digest) for the commit you intend to run.
+          imagePullPolicy: Always
+          env:
+            - name: HELLO_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HELLO_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: dsn
+            - name: HELLO_VALKEY_SENTINELS
+              value: sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+            - name: HELLO_VALKEY_MASTER
+              value: hello
+            - name: HELLO_SIP_DOMAIN
+              value: hello.kw.watteel.lab
+            - name: HELLO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-app
+                  key: secretKey
+            - name: HELLO_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hello-bootstrap
+                  key: password
+          ports:
+            - name: http
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-control
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: control
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: control
+  ports:
+    - name: http
+      port: 8081
+      protocol: TCP
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-ui
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: ui
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: ui
+    spec:
+      containers:
+        - name: hello-ui
+          image: 192.168.10.131/azrtydxb/hello-ui:sha-0000000
+          # Pin: replace with the tag printed by .github/workflows/deploy.yml
+          # (and later a sha256 digest) for the commit you intend to run.
+          imagePullPolicy: Always
+          env:
+            - name: HELLO_CONTROL_UPSTREAM
+              value: http://hello-control:8081
+            - name: HELLO_DNS_RESOLVER
+              # nginx re-resolves hello-control at request time; this must be
+              # the kube-dns ClusterIP. kubeadm default; confirm kw's before
+              # the first sync (README "Before the first sync").
+              value: 10.96.0.10
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-ui
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: ui
+  ports:
+    - name: http
+      port: 8080
+      protocol: TCP
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: ui
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: hello.kw.watteel.lab
+      http:
+        paths:
+          - backend:
+              service:
+                name: hello-ui
+                port:
+                  number: 8080
+            path: /
+            pathType: Prefix
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-postgres
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: state
+      hello.dev/part: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: state
+        hello.dev/part: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              value: hello
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hello-store
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U hello -d hello
+            periodSeconds: 5
+            failureThreshold: 12
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        # Lab parity (dhole's kw desired state also runs emptyDir): Sync does
+        # not make this storage persistent; replacing the pod loses data.
+        # Persistent storage is a separate, deliberate migration.
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    hello.dev/part: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      protocol: TCP
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey-1
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: state
+      hello.dev/part: valkey-1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: state
+        hello.dev/part: valkey-1
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey:9-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - valkey-server
+            - --replica-announce-ip
+            - valkey-1
+          ports:
+            - name: valkey
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command:
+                - valkey-cli
+                - ping
+            periodSeconds: 2
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey-1
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    hello.dev/part: valkey-1
+  ports:
+    - name: valkey
+      port: 6379
+      protocol: TCP
+      targetPort: valkey
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey-2
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: state
+      hello.dev/part: valkey-2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: state
+        hello.dev/part: valkey-2
+    spec:
+      containers:
+        - name: valkey
+          image: valkey/valkey:9-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - valkey-server
+            - --replicaof
+            - valkey-1
+            - "6379"
+            - --replica-announce-ip
+            - valkey-2
+          ports:
+            - name: valkey
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command:
+                - valkey-cli
+                - ping
+            periodSeconds: 2
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey-2
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    hello.dev/part: valkey-2
+  ports:
+    - name: valkey
+      port: 6379
+      protocol: TCP
+      targetPort: valkey
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-1
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: state
+      hello.dev/part: sentinel-1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: state
+        hello.dev/part: sentinel-1
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: sentinel
+          image: valkey/valkey:9-alpine
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            # The valkey image's valkey user, as in the lab's compose file.
+            runAsUser: 999
+            runAsGroup: 999
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+          env:
+            - name: SENTINEL_NAME
+              value: sentinel-1
+          command:
+            - sh
+            - -c
+            - >-
+              test -f /data/sentinel.conf || {
+              cp /etc/valkey/sentinel.conf /data/sentinel.conf &&
+              echo "sentinel announce-ip $SENTINEL_NAME" >> /data/sentinel.conf &&
+              echo "sentinel announce-port 26379" >> /data/sentinel.conf; } &&
+              exec valkey-sentinel /data/sentinel.conf
+          ports:
+            - name: sentinel
+              containerPort: 26379
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                # ckquorum, not get-master: get-master answers from the
+                # config alone and would be healthy even when this Sentinel
+                # never joined the mesh (see deploy/valkey/sentinel.conf and
+                # the lab's compose healthchecks).
+                - valkey-cli -p 26379 sentinel ckquorum hello | grep -q ^OK
+            periodSeconds: 2
+            failureThreshold: 30
+          volumeMounts:
+            - name: config
+              mountPath: /etc/valkey
+              readOnly: true
+            - name: data
+              # Sentinel rewrites its config (primary, peers, myid); the
+              # template is copied here on first start only, so a restart
+              # keeps the learned state — same as the lab's compose volume.
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 25m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+      volumes:
+        - name: config
+          configMap:
+            name: hello-sentinel
+            defaultMode: 420
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sentinel-1
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    hello.dev/part: sentinel-1
+  ports:
+    - name: sentinel
+      port: 26379
+      protocol: TCP
+      targetPort: sentinel
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-2
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: state
+      hello.dev/part: sentinel-2
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: state
+        hello.dev/part: sentinel-2
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: sentinel
+          image: valkey/valkey:9-alpine
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            # The valkey image's valkey user, as in the lab's compose file.
+            runAsUser: 999
+            runAsGroup: 999
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+          env:
+            - name: SENTINEL_NAME
+              value: sentinel-2
+          command:
+            - sh
+            - -c
+            - >-
+              test -f /data/sentinel.conf || {
+              cp /etc/valkey/sentinel.conf /data/sentinel.conf &&
+              echo "sentinel announce-ip $SENTINEL_NAME" >> /data/sentinel.conf &&
+              echo "sentinel announce-port 26379" >> /data/sentinel.conf; } &&
+              exec valkey-sentinel /data/sentinel.conf
+          ports:
+            - name: sentinel
+              containerPort: 26379
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                # ckquorum, not get-master: get-master answers from the
+                # config alone and would be healthy even when this Sentinel
+                # never joined the mesh (see deploy/valkey/sentinel.conf and
+                # the lab's compose healthchecks).
+                - valkey-cli -p 26379 sentinel ckquorum hello | grep -q ^OK
+            periodSeconds: 2
+            failureThreshold: 30
+          volumeMounts:
+            - name: config
+              mountPath: /etc/valkey
+              readOnly: true
+            - name: data
+              # Sentinel rewrites its config (primary, peers, myid); the
+              # template is copied here on first start only, so a restart
+              # keeps the learned state — same as the lab's compose volume.
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 25m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+      volumes:
+        - name: config
+          configMap:
+            name: hello-sentinel
+            defaultMode: 420
+        - name: data
+          emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-3
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: state
+      hello.dev/part: sentinel-3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/component: state
+        hello.dev/part: sentinel-3
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: sentinel
+          image: valkey/valkey:9-alpine
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            # The valkey image's valkey user, as in the lab's compose file.
+            runAsUser: 999
+            runAsGroup: 999
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+          env:
+            - name: SENTINEL_NAME
+              value: sentinel-3
+          command:
+            - sh
+            - -c
+            - >-
+              test -f /data/sentinel.conf || {
+              cp /etc/valkey/sentinel.conf /data/sentinel.conf &&
+              echo "sentinel announce-ip $SENTINEL_NAME" >> /data/sentinel.conf &&
+              echo "sentinel announce-port 26379" >> /data/sentinel.conf; } &&
+              exec valkey-sentinel /data/sentinel.conf
+          ports:
+            - name: sentinel
+              containerPort: 26379
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                # ckquorum, not get-master: get-master answers from the
+                # config alone and would be healthy even when this Sentinel
+                # never joined the mesh (see deploy/valkey/sentinel.conf and
+                # the lab's compose healthchecks).
+                - valkey-cli -p 26379 sentinel ckquorum hello | grep -q ^OK
+            periodSeconds: 2
+            failureThreshold: 30
+          volumeMounts:
+            - name: config
+              mountPath: /etc/valkey
+              readOnly: true
+            - name: data
+              # Sentinel rewrites its config (primary, peers, myid); the
+              # template is copied here on first start only, so a restart
+              # keeps the learned state — same as the lab's compose volume.
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 25m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+      volumes:
+        - name: config
+          configMap:
+            name: hello-sentinel
+            defaultMode: 420
+        - name: data
+          emptyDir: {}
+---
+kind: Service
+metadata:
+  name: sentinel-2
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    hello.dev/part: sentinel-2
+  ports:
+    - name: sentinel
+      port: 26379
+      protocol: TCP
+      targetPort: sentinel
+---
+kind: Service
+metadata:
+  name: sentinel-3
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    sync.kuvryn.io/prune: disabled
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: state
+    hello.dev/part: sentinel-3
+  ports:
+    - name: sentinel
+      port: 26379
+      protocol: TCP
+      targetPort: sentinel
+---
