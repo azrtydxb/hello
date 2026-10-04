@@ -44,16 +44,16 @@ Files: `migrations/00004_pbx_features.sql` (contract 1 DDL), livestate presence 
 Files: `internal/sip/` (hold, transfers, forwarding/DND/group/voicemail call flow, feature codes, SUBSCRIBE/NOTIFY, MWI), `internal/media/`, `internal/livestate/` presence publish hooks, `internal/snapshot/` per contract 2.
 Interfaces: contracts 2–6; produces MWI MESSAGEs, presence publishes, the anchored-media Session.
 
-- [ ] Snapshot additions per contract 2 (+ tests: DND/forwarding/group/box fields load; LEFT JOIN leaves box-less extensions voicemail-disabled).
-- [ ] Hold (S-1): sendonly/sendrecv relay per direction; tests incl. mutation check.
-- [ ] Blind transfer (S-2): REFER → NOTIFY (100/200/failure), new originations; tests for extension/external/failed targets.
-- [ ] Attended transfer (S-3): bridging with CDR linkage; tests.
-- [ ] Forwarding + DND (S-4, S-5): evaluation order (always → DND/voicemail → busy → no-answer), loop detection (408), tests per kind + interplay with voicemail.
-- [ ] Groups (S-6/S-7): strategy resolution as pure unit-tested functions (per-strategy tables), then fork integration; failure destinations.
-- [ ] Voicemail flow (S-8): anchor Session, greeting → beep → record (DTMF `#` end, `*` retry), MinIO put with retry, MWI MESSAGE (counts from the store), busy/DND immediate routing.
-- [ ] Presence (S-10): publish on B2BUA state changes; SUBSCRIBE/NOTIFY dialog package with digest auth and expiry.
-- [ ] Feature codes (S-11): in-dialog DTMF dispatch per contract 1 actions; tests per action.
-- [ ] Metrics per spec S-13. Gate + report per house rules (mutation checks on hold, transfer, forwarding loop, group strategies, voicemail store).
+- [x] Snapshot additions per contract 2 (+ tests: DND/forwarding/group/box fields load; LEFT JOIN leaves box-less extensions voicemail-disabled).
+- [x] Hold (S-1): sendonly/sendrecv relay per direction; tests incl. mutation check.
+- [x] Blind transfer (S-2): REFER → NOTIFY (100/200/failure), new originations; tests for extension/external/failed targets.
+- [x] Attended transfer (S-3): bridging with CDR linkage; tests.
+- [x] Forwarding + DND (S-4, S-5): evaluation order (always → DND/voicemail → busy → no-answer), loop detection (408), tests per kind + interplay with voicemail.
+- [x] Groups (S-6/S-7): strategy resolution as pure unit-tested functions (per-strategy tables), then fork integration; failure destinations.
+- [x] Voicemail flow (S-8): anchor Session, greeting → beep → record (DTMF `#` end, `*` retry), MinIO put with retry, MWI MESSAGE (counts from the store), busy/DND immediate routing.
+- [x] Presence (S-10): publish on B2BUA state changes; SUBSCRIBE/NOTIFY dialog package with digest auth and expiry.
+- [x] Feature codes (S-11): in-dialog DTMF dispatch per contract 1 actions; tests per action.
+- [x] Metrics per spec S-13. Gate + report per house rules (mutation checks on hold, transfer, forwarding loop, group strategies, voicemail store).
 
 ## Task 3: Control plane (branch phase-4-control)
 
