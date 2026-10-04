@@ -245,8 +245,8 @@ func (c *call) anchorFailed(what string, err error) {
 // anchorHostOr is the node's advertised anchor host, or the offer's own
 // address when the node has none (tests bind the anchor host explicitly).
 func (s *Server) anchorHostOr(fallback string) string {
-	if s.anchor != nil {
-		return s.anchor.AdvertisedHost()
+	if a := s.anchor.Load(); a != nil {
+		return a.AdvertisedHost()
 	}
 	return fallback
 }

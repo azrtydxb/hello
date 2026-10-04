@@ -106,10 +106,11 @@ func (c *call) startVoicemail(mode int, reason string) {
 // answerAnchored binds the media anchor for this call and builds the answer
 // SDP from the caller's offer.
 func (s *Server) answerAnchored(offer []byte) ([]byte, media.Session, error) {
-	if s.deps.Objects == nil || s.anchor == nil {
+	anchor := s.anchor.Load()
+	if s.deps.Objects == nil || anchor == nil {
 		return nil, nil, errors.New("voicemail media disabled")
 	}
-	return s.anchor.Answer(offer)
+	return anchor.Answer(offer)
 }
 
 // answerSelf connects a call with no B leg (voicemail, feature codes):

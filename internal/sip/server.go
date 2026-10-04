@@ -170,13 +170,14 @@ type Server struct {
 	lastMu   sync.Mutex
 	digits   map[*call]*digitBuffer
 	digitsMu sync.Mutex
-	anchor   *media.Anchor
+	anchor   atomic.Pointer[media.Anchor]
 	vmBytes  atomic.Int64
 }
 
 // SetMediaAnchor wires the voicemail media anchor; without it voicemail
-// calls answer without recording (and store nothing). Call it before Serve.
-func (s *Server) SetMediaAnchor(a *media.Anchor) { s.anchor = a }
+// calls answer without recording (and store nothing). Call it before Serve;
+// the atomic keeps the write ordered against every later reader either way.
+func (s *Server) SetMediaAnchor(a *media.Anchor) { s.anchor.Store(a) }
 
 // digitBuffer collects in-dialog DTMF digits for one call's feature-code
 // dispatch (S-11). '#' hands the collected digits on; a fresh code restarts
