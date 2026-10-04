@@ -159,3 +159,8 @@
 
 - All five now (ring-all, sequential, round-robin, longest-idle, weighted)
 - Ring-all + sequential first, the rest later
+
+## Merge Phase 4 (PR #5) and roll out to kw
+
+- Mark PR #5 ready, squash-merge, push images via publish, pin digests, add MinIO+SMTP+feature env to deploy/kuvryn-sync/kw, let Sync roll it out
+- Hold PR #5 for review; kw stays on Phase 3 until reviewed
