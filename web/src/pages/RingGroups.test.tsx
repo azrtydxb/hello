@@ -86,7 +86,9 @@ describe("RingGroups", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
     fireEvent.click(screen.getByRole("button", { name: "Create group" }));
 
-    await screen.findByRole("row", { name: /Support/ });
+    // CI's runners are slow enough that the refresh after the create can
+    // outlast the default one-second wait.
+    await screen.findByRole("row", { name: /Support/ }, { timeout: 10000 });
     expect(calls).toContainEqual({
       method: "POST",
       url: "/api/v1/ring-groups",
