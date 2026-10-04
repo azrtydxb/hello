@@ -239,3 +239,69 @@ func TestWatcherBackoffResets(t *testing.T) {
 		}
 	}
 }
+
+// TestExtensionAndGroupLoad fails if the Phase 4 extension features (DND,
+// forwarding targets, voicemail enablement and the box the LEFT JOIN finds)
+// are not loaded, if a box-less extension is not left voicemail-disabled, or
+// if ring groups and feature codes are missing from the snapshot.
+func TestExtensionAndGroupLoad(t *testing.T) {
+	cfg := scratch(t)
+	ctx := context.Background()
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	if _, err := conn.Exec(ctx, `INSERT INTO extensions (number, name, dnd, forward_always, voicemail_enabled) VALUES
+		('100', 'A', true, '200', true), ('200', 'B', false, '', true)`); err != nil {
+		t.Fatal(err)
+	}
+	var a, b int64
+	if err := conn.QueryRow(ctx, "SELECT id FROM extensions WHERE number = '100'").Scan(&a); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(ctx, "SELECT id FROM extensions WHERE number = '200'").Scan(&b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, "INSERT INTO voicemail_boxes (extension_id, password_hash, email) VALUES ($1, 'h', 'b@x.test')", b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO ring_groups (name, strategy, hunt, failure_kind, failure_target) VALUES ('700', 'ring-all', false, 'voicemail', '100')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO ring_group_members (group_id, extension_id, position, weight, delay) VALUES
+		(1, $1, 2, 1, 0), (1, $2, 1, 1, 3)`, a, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, "INSERT INTO feature_codes (code, action) VALUES ('*78', 'dnd_on')"); err != nil {
+		t.Fatal(err)
+	}
+
+	w := &Watcher{Domain: domain}
+	s, err := w.loadAll(ctx, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ea, ok := s.Extension("100")
+	if !ok || !ea.DND || ea.ForwardAlways != "200" || ea.VoicemailEnabled || ea.VoicemailBoxID != 0 {
+		t.Fatalf("extension 100 = %+v ok=%v (box-less must be voicemail-disabled)", ea, ok)
+	}
+	var boxB int64
+	if err := conn.QueryRow(ctx, "SELECT id FROM voicemail_boxes WHERE extension_id = $1", b).Scan(&boxB); err != nil {
+		t.Fatal(err)
+	}
+	eb, ok := s.Extension("200")
+	if !ok || eb.DND || eb.ForwardAlways != "" || !eb.VoicemailEnabled || eb.VoicemailBoxID != boxB {
+		t.Fatalf("extension 200 = %+v", eb)
+	}
+	g, ms, ok := s.RingGroup("700")
+	if !ok || g.Name != "700" || g.Strategy != "ring-all" || g.FailureKind != "voicemail" || g.FailureTarget != "100" {
+		t.Fatalf("ring group = %+v ok=%v", g, ok)
+	}
+	if len(ms) != 2 || ms[0].Extension != "200" || ms[0].Delay != 3 || ms[1].Extension != "100" || ms[1].Position != 2 {
+		t.Fatalf("members = %+v (must arrive in position order)", ms)
+	}
+	if c, ok := s.FeatureCode("*78"); !ok || c.Action != "dnd_on" || c.Argument != "" {
+		t.Fatalf("feature code = %+v ok=%v", c, ok)
+	}
+}
