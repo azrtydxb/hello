@@ -186,15 +186,18 @@ func startMinio(t *testing.T) *MinioObjects {
 	return o
 }
 
-// waitBucket blocks until EnsureBucket succeeds, so a just-started server
-// (the throwaway container, the CI service) is up and holds the bucket
-// before the test's first upload.
+// waitBucket blocks until every audio bucket is ensured, so a just-started
+// server (the throwaway container, the CI service) is up and holds the
+// buckets before the test's first upload.
 func waitBucket(t *testing.T, o *MinioObjects) {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err := o.EnsureBucket(ctx)
+		if err == nil {
+			err = o.EnsureMediaBuckets(ctx)
+		}
 		cancel()
 		if err == nil {
 			return

@@ -141,6 +141,9 @@ func (s *server) createAnnouncement(w http.ResponseWriter, r *http.Request) {
 	if len(data) == 0 {
 		f.add("file", "a WAV file is required")
 	}
+	if len(data) != 0 && !isWAV(data) {
+		f.add("file", "the audio must be a RIFF/WAVE file")
+	}
 	if len(f) > 0 {
 		writeFields(w, f)
 		return
