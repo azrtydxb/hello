@@ -86,6 +86,10 @@ func startMinio(t *testing.T) *MinioObjects {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// A reused server starts with an empty data directory (the CI
+		// service container): wait for it and create the bucket, exactly as
+		// the throwaway-container path below does.
+		waitBucket(t, o)
 		return o
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -130,14 +134,22 @@ func startMinio(t *testing.T) *MinioObjects {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Wait until the server answers, then make sure the bucket exists.
+	waitBucket(t, o)
+	return o
+}
+
+// waitBucket blocks until EnsureBucket succeeds, so a just-started server
+// (the throwaway container, the CI service) is up and holds the bucket
+// before the test's first upload.
+func waitBucket(t *testing.T, o *MinioObjects) {
+	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err := o.EnsureBucket(ctx)
 		cancel()
 		if err == nil {
-			return o
+			return
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("minio not ready: %v", err)
