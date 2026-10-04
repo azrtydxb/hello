@@ -1099,6 +1099,15 @@ spec:
               value: sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
             - name: HELLO_VALKEY_MASTER
               value: hello
+            - name: HELLO_SIP_DOMAIN
+              # The migrate init container runs the same hello-control
+              # configuration validation as the server containers.
+              value: hello.kw.watteel.lab
+            - name: HELLO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-app
+                  key: secretKey
             - name: HELLO_NODE_ID
               value: hello-migrate
       containers:
