@@ -138,3 +138,8 @@
 
 - Pull Phase 6 (Helm/Kubernetes on kw) forward, right after the Phase 3 merge; features (Phases 4-5) come after
 - Keep roadmap order: Phases 4-5 features next; kw deployment stays Phase 6
+
+## Start Phase 4 (PBX features) next
+
+- Yes — draft the Phase 4 spec (transfers, forwarding, DND, ring/hunt groups, voicemail, presence)
+- No — I want something else first
