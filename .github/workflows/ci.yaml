@@ -16,24 +16,35 @@ jobs:
   go:
     runs-on: [self-hosted, linux, x64] # kw Arc runner (labeled self-hosted/linux/x64); free GitHub runners are too small for the lab
     # The runner image has no Go toolchain; run in a container instead.
-    container: golang:1.27
+    container:
+      image: golang:1.27
+      options: --volume /var/run/docker.sock:/var/run/docker.sock
     timeout-minutes: 15
-    env:
-      HELLO_TEST_DATABASE_URL: postgres://postgres:ci@localhost:5432/postgres?sslmode=disable
-      HELLO_TEST_VALKEY_ADDR: localhost:6379
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # ARC runners have no service containers: start the test dependencies
       # as plain containers on the runner's own Docker (DinD).
+      - name: Install the docker CLI
+        run: |
+          curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-28.5.2.tgz -o /tmp/docker.tgz
+          tar -xzf /tmp/docker.tgz -C /tmp docker/docker
+          mv /tmp/docker/docker /usr/local/bin/docker
+          docker version
       - name: Start PostgreSQL and Valkey
         run: |
           set -euo pipefail
-          docker run -d --name ci-pg -e POSTGRES_PASSWORD=ci -p 5432:5432 postgres:18-alpine
-          docker run -d --name ci-vk -p 6379:6379 valkey/valkey:9-alpine
+          docker network create ci
+          docker run -d --name ci-pg --network ci -e POSTGRES_PASSWORD=ci postgres:18-alpine
+          docker run -d --name ci-vk --network ci valkey/valkey:9-alpine
           for _ in $(seq 1 60); do docker exec ci-pg pg_isready -U postgres >/dev/null 2>&1 && break; sleep 1; done
           docker exec ci-pg pg_isready -U postgres
           for _ in $(seq 1 60); do docker exec ci-vk valkey-cli ping 2>/dev/null | grep -q PONG && break; sleep 1; done
           docker exec ci-vk valkey-cli ping
+          # The job container reaches the databases over the DinD bridge.
+          PGIP=$(docker inspect -f '{{.NetworkSettings.Networks.ci.IPAddress}}' ci-pg)
+          VKIP=$(docker inspect -f '{{.NetworkSettings.Networks.ci.IPAddress}}' ci-vk)
+          echo "HELLO_TEST_DATABASE_URL=postgres://postgres:ci@$PGIP:5432/postgres?sslmode=disable" >> "$GITHUB_ENV"
+          echo "HELLO_TEST_VALKEY_ADDR=$VKIP:6379" >> "$GITHUB_ENV"
       # In container mode the workspace is mounted from the runner user's
       # home; Go's VCS stamping refuses a directory owned by another uid.
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
