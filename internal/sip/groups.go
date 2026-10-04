@@ -169,6 +169,8 @@ func (c *call) ringGroup(req *sip.Request, tx sip.ServerTransaction, snap *snaps
 		c.groupFail(snap, g)
 		return
 	}
+	// The anchoring decision (contract 2) from the first member binding.
+	c.considerAnchor(snap, bindingEndpoint(bindings[0], ordered[0].ext))
 	if !c.begin(req, tx) {
 		return
 	}
@@ -282,6 +284,13 @@ func (c *call) groupFail(snap *snapshot.Snapshot, g snapshot.RingGroup) {
 			return
 		}
 		c.hangupGroup(sip.StatusTemporarilyUnavailable, "failure destination unavailable")
+	case "announcement":
+		// The announcement destination answers, plays, then hangs the
+		// caller up after the prompt (spec S-5). A missing or broken WAV
+		// still answers and ends the call; the step is traced either way
+		// (spec failure mode).
+		c.addTrace(fmt.Sprintf("Group %s: announcement %q", g.Name, g.FailureTarget))
+		c.announcementDestination(g.FailureTarget)
 	case "external":
 		if req := c.inv; req != nil {
 			c.forward(req, nil, snap, g.FailureTarget, nil)

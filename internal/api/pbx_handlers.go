@@ -34,11 +34,12 @@ var (
 	emailRe   = regexp.MustCompile(`^[^@\s]{1,64}@[^@\s]{1,255}\.[A-Za-z]{2,}$`)
 )
 
-// Group strategies and feature-code actions (migration 00004's CHECKs).
+// Group strategies and feature-code actions (migration 00004's CHECKs,
+// widened by 00005 to accept the announcement destination and action).
 var (
 	strategies = []string{"ring-all", "sequential", "round-robin", "longest-idle", "weighted"}
 	fcActions  = []string{"forward_always", "forward_busy", "forward_no_answer", "dnd_on", "dnd_off",
-		"voicemail", "blind_transfer", "attended_transfer"}
+		"voicemail", "blind_transfer", "attended_transfer", "announcement"}
 )
 
 // voicemailLimits bound greeting uploads.
@@ -449,8 +450,12 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		if !externalNumRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be 2-32 of 0-9 * # with an optional leading +")
 		}
+	case "announcement":
+		if !usernameRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be an announcement name (1-64 of A-Z a-z 0-9 . _ -)")
+		}
 	default:
-		f.add("failureKind", `must be "none", "voicemail" or "external"`)
+		f.add("failureKind", `must be "none", "voicemail", "external" or "announcement"`)
 	}
 	if len(in.Members) == 0 || len(in.Members) > 50 {
 		f.add("members", "must have 1-50 members")

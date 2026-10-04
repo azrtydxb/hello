@@ -34,6 +34,15 @@ func (c *call) setHeld(held bool) {
 	}
 	c.held = held
 	c.mu.Unlock()
+	// A recording pauses while the call is held and resumes after (spec
+	// edge case "Re-INVITE hold during recording": hold silence is not
+	// captured).
+	c.mu.Lock()
+	rec := c.rec
+	c.mu.Unlock()
+	if rec != nil {
+		rec.setPaused(held)
+	}
 	if held {
 		c.s.m.HoldActive.Inc()
 		c.addTrace("Call held")

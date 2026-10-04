@@ -51,6 +51,9 @@ type Extension struct {
 	ForwardAlways, ForwardBusy, ForwardNoAnswer string
 	VoicemailEnabled                            bool
 	VoicemailBoxID                              int64
+	// RecordDefault records this extension's calls unless the caller
+	// already records them (migration 00005; spec S-4).
+	RecordDefault bool
 }
 
 // RingGroup is a ring or hunt group (contract 2). Strategy is one of
@@ -64,7 +67,9 @@ type RingGroup struct {
 	MemberDelay int // seconds each sequential member rings before the next
 	IgnoreDND   bool
 	// FailureKind is none, voicemail (FailureTarget names an extension
-	// whose box takes the call) or external (FailureTarget is a number).
+	// whose box takes the call), external (FailureTarget is a number) or
+	// announcement (FailureTarget names an announcement, migration 00005;
+	// spec S-5).
 	FailureKind, FailureTarget string
 }
 
@@ -77,7 +82,10 @@ type RingGroupMember struct {
 	Delay       int // this member's extra delay in seconds
 }
 
-// FeatureCode is one DTMF feature code and the action it performs.
+// FeatureCode is one DTMF feature code and the action it performs. Action
+// is one of forward_always, forward_busy, forward_no_answer, dnd_on,
+// dnd_off, voicemail, blind_transfer, attended_transfer and, since
+// migration 00005, announcement (Argument names the announcement).
 type FeatureCode struct {
 	Code, Action, Argument string
 }
@@ -94,10 +102,12 @@ type Snapshot struct {
 	// so a call to them is 480 rather than 404.
 	known map[string]bool
 	// exts is the per-extension feature state; groups maps a dialled group
-	// name to its members; codes maps a dialled feature code.
+	// name to its members; codes maps a dialled feature code; anns maps an
+	// announcement name to its MinIO object.
 	exts   map[string]Extension
 	groups map[string]groupEntry
 	codes  map[string]FeatureCode
+	anns   map[string]string
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
 }
@@ -112,7 +122,8 @@ type groupEntry struct {
 // domain are skipped and listed in Skipped.
 func New(revision int64, domain string, devices []Device) *Snapshot {
 	s := &Snapshot{Revision: revision, byUser: map[string]Device{}, byExt: map[string][]Device{},
-		exts: map[string]Extension{}, groups: map[string]groupEntry{}, codes: map[string]FeatureCode{}}
+		exts: map[string]Extension{}, groups: map[string]groupEntry{}, codes: map[string]FeatureCode{},
+		anns: map[string]string{}, known: map[string]bool{}}
 	for _, d := range devices {
 		if d.Realm != domain {
 			s.Skipped = append(s.Skipped, d.Username)
@@ -150,6 +161,22 @@ func (s *Snapshot) WithFeatureCodes(codes []FeatureCode) *Snapshot {
 		s.codes[c.Code] = c
 	}
 	return s
+}
+
+// WithAnnouncements installs the announcement set: name -> MinIO object
+// (tests and Load). It returns s for chaining.
+func (s *Snapshot) WithAnnouncements(anns map[string]string) *Snapshot {
+	for n, o := range anns {
+		s.anns[n] = o
+	}
+	return s
+}
+
+// Announcement returns the MinIO object of a named announcement; ok is
+// false without one (spec failure mode: the missing-WAV step is skipped).
+func (s *Snapshot) Announcement(name string) (string, bool) {
+	o, ok := s.anns[name]
+	return o, ok
 }
 
 // Extension returns the feature state of an extension number; ok is false
@@ -224,7 +251,8 @@ type Querier interface {
 // revision.
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
        d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name,
-       e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id
+       e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
+       e.record_default
 FROM extensions e
 LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
 LEFT JOIN voicemail_boxes v ON v.extension_id = e.id
@@ -256,7 +284,8 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 			boxID                          *int64
 		)
 		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName,
-			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID); err != nil {
+			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
+			&e.RecordDefault); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}
@@ -296,8 +325,32 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	anns, err := loadAnnouncements(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	return New(rev, domain, devices).WithExtensions(bare...).
-		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes), nil
+		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
+		WithAnnouncements(anns), nil
+}
+
+// loadAnnouncements reads the announcement set (name -> MinIO object), so
+// playing one stays off the database path.
+func loadAnnouncements(ctx context.Context, db Querier) (map[string]string, error) {
+	rows, err := db.Query(ctx, `SELECT name, minio_object FROM announcements ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot: announcements: %w", err)
+	}
+	defer rows.Close()
+	anns := map[string]string{}
+	for rows.Next() {
+		var name, obj string
+		if err := rows.Scan(&name, &obj); err != nil {
+			return nil, fmt.Errorf("snapshot: scan announcement: %w", err)
+		}
+		anns[name] = obj
+	}
+	return anns, rows.Err()
 }
 
 // loadRingGroups reads the groups and their members (in position order) as

@@ -47,6 +47,8 @@ export interface Extension {
   forwardNoAnswer?: string;
   /** Unanswered/busy calls go to this extension's voicemail; true by default. */
   voicemailEnabled?: boolean;
+  /** Calls are recorded by default; `*1` toggles recording mid-call either way. */
+  recordDefault?: boolean;
   /** The extension's voicemail box, when it has one. */
   voicemailBoxId?: Id | null;
   createdAt: string;
@@ -551,6 +553,7 @@ export const updateExtension = (
     forwardBusy?: string;
     forwardNoAnswer?: string;
     voicemailEnabled?: boolean;
+    recordDefault?: boolean;
   },
 ) =>
   request<Extension>("PATCH", `/api/v1/extensions/${id(extensionId)}`, {
@@ -904,12 +907,13 @@ export const RING_STRATEGY_LABEL: Record<RingStrategy, string> = {
 };
 
 /** Where a call goes when every member missed it. */
-export type FailureKind = "none" | "voicemail" | "external";
+export type FailureKind = "none" | "voicemail" | "external" | "announcement";
 
 export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   none: "Hang up",
   voicemail: "A member's voicemail box",
   external: "An external number",
+  announcement: "A named announcement",
 };
 
 /** One member of a ring group; `position` is 1-based ring order. */
@@ -1012,6 +1016,97 @@ export interface DeviceState {
 /** GET /api/v1/presence. */
 export const listPresence = (signal?: AbortSignal) =>
   list<DeviceState>("/api/v1/presence", signal);
+
+// --- media: recordings and announcements ---------------------------------------
+
+/** How a recording came to be (migration 00005's initiated_by column). */
+export type RecordingOrigin = "dtmf" | "default" | "api";
+
+/** One stored call recording (GET /api/v1/recordings). */
+export interface Recording {
+  id: Id;
+  /** Matches the CDR's correlationId. */
+  correlationId: string;
+  initiatedBy: RecordingOrigin;
+  durationMs: number;
+  createdAt: string;
+}
+
+/** One page of GET /api/v1/recordings. */
+export interface RecordingPage {
+  items: Recording[];
+  /** Cursor for the next (older) page; empty when there is none. */
+  next: string;
+}
+
+/**
+ * GET /api/v1/recordings?extension=&before=&limit=, newest first; pass the
+ * previous page's `next` as `before`, and an extension number to keep only
+ * that extension's calls.
+ */
+export async function listRecordings(
+  opts: { extension?: string; before?: string; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<RecordingPage> {
+  const q = new URLSearchParams();
+  if (opts.extension) q.set("extension", opts.extension);
+  if (opts.before) q.set("before", opts.before);
+  if (opts.limit !== undefined) q.set("limit", String(opts.limit));
+  const qs = q.toString();
+  const path = `/api/v1/recordings${qs ? `?${qs}` : ""}`;
+  const body = await request<unknown>("GET", path, { signal });
+  const page = items<Recording>(body, path);
+  const next = (body as Record<string, unknown>).next;
+  return { items: page, next: typeof next === "string" ? next : "" };
+}
+
+/**
+ * GET /api/v1/recordings/{id}/audio: answers 302 with a presigned MinIO URL.
+ * Played by pointing an <audio> element at this path, so the browser follows
+ * the redirect itself; `isPlayableAudio` gates it, like voicemail.
+ */
+export const recordingAudioPath = (recordingId: Id) =>
+  `/api/v1/recordings/${id(recordingId)}/audio`;
+
+/** DELETE /api/v1/recordings/{id}. */
+export const deleteRecording = (recordingId: Id) =>
+  request<void>("DELETE", `/api/v1/recordings/${id(recordingId)}`);
+
+/** One named announcement (GET /api/v1/announcements). */
+export interface Announcement {
+  id: Id;
+  /** 1-64 of A-Z a-z 0-9 . _ -; unique; what destinations name. */
+  name: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/** GET /api/v1/announcements. */
+export const listAnnouncements = (signal?: AbortSignal) =>
+  list<Announcement>("/api/v1/announcements", signal);
+
+/** The largest announcement WAV the server accepts (spec S-5). */
+export const MAX_ANNOUNCEMENT_BYTES = 10 * 1024 * 1024;
+
+/**
+ * POST /api/v1/announcements: multipart with `name` and `file` (WAV) parts.
+ * Returns the created announcement (201).
+ */
+export function uploadAnnouncement(
+  name: string,
+  file: File,
+): Promise<Announcement> {
+  const form = new FormData();
+  form.set("name", name);
+  form.set("file", file, file.name);
+  return request<Announcement>("POST", "/api/v1/announcements", {
+    rawBody: form,
+  });
+}
+
+/** DELETE /api/v1/announcements/{id}. */
+export const deleteAnnouncement = (announcementId: Id) =>
+  request<void>("DELETE", `/api/v1/announcements/${id(announcementId)}`);
 
 /** A human-readable message for any thrown value. */
 export function errorMessage(err: unknown): string {

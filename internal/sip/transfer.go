@@ -534,15 +534,8 @@ func (c *call) bridge(other *call) bool {
 	// its own, so one failing leg never leaves the other dialog up.
 	go func() {
 		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					println("TEARDOWN PANIC leg:", fmt.Sprint(r))
-				}
-			}()
 			defer contain(s.log, "attended transfer teardown (leg)")
-			println("DBG wA.bye start")
 			wA.bye()
-			println("DBG wA.bye done")
 		}()
 		func() {
 			defer contain(s.log, "attended transfer teardown (caller)")
