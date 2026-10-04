@@ -250,12 +250,14 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		ForwardBusy      *string `json:"forwardBusy"`
 		ForwardNoAnswer  *string `json:"forwardNoAnswer"`
 		VoicemailEnabled *bool   `json:"voicemailEnabled"`
+		RecordDefault    *bool   `json:"recordDefault"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	if in.Number == nil && in.Name == nil && in.ExternalNumber == nil && in.DND == nil &&
-		in.ForwardAlways == nil && in.ForwardBusy == nil && in.ForwardNoAnswer == nil && in.VoicemailEnabled == nil {
+		in.ForwardAlways == nil && in.ForwardBusy == nil && in.ForwardNoAnswer == nil &&
+		in.VoicemailEnabled == nil && in.RecordDefault == nil {
 		badRequest(w, "a field to change is required")
 		return
 	}
@@ -279,6 +281,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		Number: in.Number, Name: in.Name, ExternalNumber: in.ExternalNumber,
 		DND: in.DND, ForwardAlways: in.ForwardAlways, ForwardBusy: in.ForwardBusy,
 		ForwardNoAnswer: in.ForwardNoAnswer, VoicemailEnabled: in.VoicemailEnabled,
+		RecordDefault: in.RecordDefault,
 	}, s.check())
 	if err != nil {
 		s.configError(w, "extension", err)

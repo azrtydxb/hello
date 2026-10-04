@@ -1,7 +1,9 @@
 package api
 
-// The MinIO object store behind voicemail audio (spec contract 6): bucket
-// hello-voicemail, presigned GET URLs for playback and uploads for greetings.
+// The MinIO object store behind audio (spec contracts 4 and 6): bucket
+// hello-voicemail for voicemail audio, hello-recordings and
+// hello-announcements for the Phase 5 media, presigned GET URLs for playback
+// and uploads from hello-control.
 
 import (
 	"context"
@@ -13,26 +15,42 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// VoicemailBucket is the one bucket voicemail audio lives in.
-const VoicemailBucket = "hello-voicemail"
+// The buckets, one per media kind (spec contract 4).
+const (
+	VoicemailBucket     = "hello-voicemail"
+	RecordingsBucket    = "hello-recordings"
+	AnnouncementsBucket = "hello-announcements"
+)
 
 // presignTTL is how long a playback URL stays valid (spec contract 6).
 const presignTTL = 15 * time.Minute
 
-// Objects is the voicemail audio store the API and mailer need. It is the
-// seam that keeps MinIO out of internal/store and the mailer: a fake in
-// tests, MinIO in main.
+// Objects is the audio store the API and mailer need. It is the seam that
+// keeps MinIO out of internal/store and the mailer: a fake in tests, MinIO in
+// main.
 type Objects interface {
-	// Presign returns a GET URL for object, valid 15 minutes.
+	// Presign returns a GET URL for a voicemail object, valid 15 minutes.
 	Presign(ctx context.Context, object string) (string, error)
-	// Put uploads r (size known) as object.
+	// Put uploads r (size known) as a voicemail object.
 	Put(ctx context.Context, object string, r io.Reader, size int64) error
-	// Get returns the object's bytes (mailer attachments).
+	// Get returns a voicemail object's bytes (mailer attachments).
 	Get(ctx context.Context, object string) ([]byte, error)
-	// Remove deletes the object; an absent object is not an error.
+	// Remove deletes a voicemail object; an absent object is not an error.
 	Remove(ctx context.Context, object string) error
-	// EnsureBucket creates the bucket when it is missing.
+	// EnsureBucket creates hello-voicemail when it is missing.
 	EnsureBucket(ctx context.Context) error
+
+	// PresignRecording returns a GET URL for a recording, valid 15 minutes.
+	PresignRecording(ctx context.Context, object string) (string, error)
+	// RemoveRecording deletes a recording object.
+	RemoveRecording(ctx context.Context, object string) error
+	// PutAnnouncement uploads r (size known) as announcement audio.
+	PutAnnouncement(ctx context.Context, object string, r io.Reader, size int64) error
+	// RemoveAnnouncement deletes announcement audio.
+	RemoveAnnouncement(ctx context.Context, object string) error
+	// EnsureMediaBuckets creates hello-recordings and hello-announcements when
+	// they are missing.
+	EnsureMediaBuckets(ctx context.Context) error
 }
 
 // MinioObjects is the MinIO-backed Objects.
@@ -89,12 +107,56 @@ func (m *MinioObjects) Remove(ctx context.Context, object string) error {
 }
 
 func (m *MinioObjects) EnsureBucket(ctx context.Context) error {
-	exists, err := m.cli.BucketExists(ctx, VoicemailBucket)
+	return m.ensure(ctx, VoicemailBucket)
+}
+
+func (m *MinioObjects) PresignRecording(ctx context.Context, object string) (string, error) {
+	u, err := m.cli.PresignedGetObject(ctx, RecordingsBucket, object, presignTTL, nil)
 	if err != nil {
-		return fmt.Errorf("api: bucket check %s: %w", VoicemailBucket, err)
+		return "", fmt.Errorf("api: presign recording %s: %w", object, err)
+	}
+	return u.String(), nil
+}
+
+func (m *MinioObjects) RemoveRecording(ctx context.Context, object string) error {
+	if err := m.cli.RemoveObject(ctx, RecordingsBucket, object, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("api: remove recording %s: %w", object, err)
+	}
+	return nil
+}
+
+func (m *MinioObjects) PutAnnouncement(ctx context.Context, object string, r io.Reader, size int64) error {
+	_, err := m.cli.PutObject(ctx, AnnouncementsBucket, object, r, size, minio.PutObjectOptions{ContentType: "audio/wav"})
+	if err != nil {
+		return fmt.Errorf("api: put announcement %s: %w", object, err)
+	}
+	return nil
+}
+
+func (m *MinioObjects) RemoveAnnouncement(ctx context.Context, object string) error {
+	if err := m.cli.RemoveObject(ctx, AnnouncementsBucket, object, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("api: remove announcement %s: %w", object, err)
+	}
+	return nil
+}
+
+func (m *MinioObjects) EnsureMediaBuckets(ctx context.Context) error {
+	for _, bucket := range []string{RecordingsBucket, AnnouncementsBucket} {
+		if err := m.ensure(ctx, bucket); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ensure creates bucket when it is missing.
+func (m *MinioObjects) ensure(ctx context.Context, bucket string) error {
+	exists, err := m.cli.BucketExists(ctx, bucket)
+	if err != nil {
+		return fmt.Errorf("api: bucket check %s: %w", bucket, err)
 	}
 	if exists {
 		return nil
 	}
-	return m.cli.MakeBucket(ctx, VoicemailBucket, minio.MakeBucketOptions{})
+	return m.cli.MakeBucket(ctx, bucket, minio.MakeBucketOptions{})
 }
