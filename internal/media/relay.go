@@ -537,10 +537,11 @@ func (r *Relay) Close() {
 	}
 	r.wg.Wait()
 	r.mu.Lock()
-	if r.observe != nil {
-		r.observe(r.Metrics())
-	}
+	fn := r.observe
 	r.mu.Unlock()
+	if fn != nil {
+		fn(r.Metrics())
+	}
 }
 
 // Metrics snapshots the per-direction counters (contract 3).

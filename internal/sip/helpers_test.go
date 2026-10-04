@@ -18,6 +18,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
@@ -370,6 +371,7 @@ func startPBX(t *testing.T, devices []snapshot.Device, opts ...pbxOpt) *testPBX 
 		CDRs: &fakeCDRs{ch: make(chan cdr.Record, 64)}, Metrics: NewMetrics(reg),
 		Log: discard,
 	}
+	deps.Media = media.NewMetrics(reg)
 	if os.Getenv("HELLO_TEST_SIPLOG") != "" {
 		deps.Log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}

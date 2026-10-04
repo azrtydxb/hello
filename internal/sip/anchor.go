@@ -58,7 +58,7 @@ func (e EndpointInfo) nat() bool {
 // decideAnchor reports why a call anchors, or AnchorNone for direct media
 // (contract 2). snap may be nil. Exported for tests.
 func decideAnchor(req *sip.Request, snap *snapshot.Snapshot, from, to EndpointInfo, force bool) AnchorReason {
-	if from.nat() || to.nat() {
+	if from.nat() || to.nat() || from.NATKnown || to.NATKnown {
 		return AnchorNAT
 	}
 	if req != nil && snap != nil {

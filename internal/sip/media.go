@@ -373,6 +373,8 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 	c.anchorHost = host
 	c.anchorReason = reason
 	c.mediaMode = "anchored"
+	c.relay = relay
+	c.anchored = true
 	c.mu.Unlock()
 	relay.SetPayloadTypes(legCaller, off.PayloadType, off.DTMFPayloadType)
 	relay.SetPayloadTypes(legCallee, off.PayloadType, off.DTMFPayloadType)
@@ -415,8 +417,6 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 	}
 	c.mu.Lock()
 	c.rec = &recording{}
-	c.anchored = true
-	c.relay = relay
 	c.mu.Unlock()
 	c.addTrace(fmt.Sprintf("Media anchored mid-call (%s)", reason))
 	relay.Start()
@@ -476,6 +476,9 @@ func (c *call) toggleRecording() {
 	rec := c.rec
 	c.mu.Unlock()
 	if rec == nil {
+		// A direct call never anchored: *1 is the mid-call need that
+		// re-anchors (spec S-1, S-4).
+		c.startRecordingFlow("dtmf")
 		return
 	}
 	if r, by := rec.stop(); r != nil {

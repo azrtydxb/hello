@@ -123,7 +123,7 @@ type groupEntry struct {
 func New(revision int64, domain string, devices []Device) *Snapshot {
 	s := &Snapshot{Revision: revision, byUser: map[string]Device{}, byExt: map[string][]Device{},
 		exts: map[string]Extension{}, groups: map[string]groupEntry{}, codes: map[string]FeatureCode{},
-		anns: map[string]string{}}
+		anns: map[string]string{}, known: map[string]bool{}}
 	for _, d := range devices {
 		if d.Realm != domain {
 			s.Skipped = append(s.Skipped, d.Username)
