@@ -94,6 +94,15 @@ jobs:
             }
           - { name: hello-sip, context: ., file: Dockerfile, target: hello-sip }
           - { name: hello-ui, context: web, file: web/Dockerfile, target: "" }
+          # The official kamailio image is amd64-only; the kw nodes are
+          # arm64, so the edge image builds from Debian trixie here (see
+          # docker/kamailio/Dockerfile).
+          - {
+              name: kamailio,
+              context: docker/kamailio,
+              file: docker/kamailio/Dockerfile,
+              target: "",
+            }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # BuildKit runs in its own container and does not inherit the host

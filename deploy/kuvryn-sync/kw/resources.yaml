@@ -4,7 +4,7 @@
 #
 # Images are pinned by sha- tag; every merge to main publishes
 # 192.168.10.131:5000/azrtydxb/hello-<part>:sha-<short sha> (workflow:
-# .github/workflows/deploy.yml). Replace the tags below with the tag of the
+# .github/workflows/ci.yaml). Replace the tags below with the tag of the
 # commit you intend to run and let Sync converge; immutable sha256 digest
 # pins come later.
 #
@@ -803,7 +803,7 @@ spec:
       containers:
         - name: hello-sip
           image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
-          # Pinned to the tag deploy.yml published for commit c0130ed (the
+          # Pinned to the tag ci.yaml published for commit c0130ed (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -939,7 +939,7 @@ spec:
       containers:
         - name: hello-sip
           image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
-          # Pinned to the tag deploy.yml published for commit c0130ed (the
+          # Pinned to the tag ci.yaml published for commit c0130ed (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -1097,7 +1097,7 @@ spec:
       containers:
         - name: hello-control
           image: 192.168.10.131:5000/azrtydxb/hello-control:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
-          # Pinned to the tag deploy.yml published for commit c0130ed (the
+          # Pinned to the tag ci.yaml published for commit c0130ed (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -1208,7 +1208,7 @@ spec:
       containers:
         - name: hello-ui
           image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-c0130ed357a573b8589695e52cd10c4b7a6de269
-          # Pinned to the tag deploy.yml published for commit c0130ed (the
+          # Pinned to the tag ci.yaml published for commit c0130ed (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always

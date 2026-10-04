@@ -18,7 +18,7 @@ that apply here too.
 
 ## Release a change
 
-1. Merge to `main`. `.github/workflows/deploy.yml` builds and pushes
+1. Merge to `main`. `.github/workflows/ci.yaml` builds and pushes
    `192.168.10.131:5000/azrtydxb/hello-control`, `hello-sip` and `hello-ui`
    with the immutable tag `sha-<full sha>` (plus `main`; the registry keeps
    no short tags). The job proves the `:443` pull name resolves before it
