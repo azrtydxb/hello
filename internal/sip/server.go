@@ -72,6 +72,18 @@ type Config struct {
 	// TrustedProxies are the edge proxies (Kamailio) whose X-Hello-Client
 	// and Path headers are believed (plan contract 7).
 	TrustedProxies []netip.Prefix
+
+	// RTPPortMin and RTPPortMax bound the UDP port range anchored media
+	// sessions draw their relay sockets from (20000-21000 default,
+	// config.SIP).
+	RTPPortMin int
+	RTPPortMax int
+	// MediaForceAnchor anchors every call's media regardless of the
+	// per-call triggers (HELLO_MEDIA_FORCE_ANCHOR, spec S-1d).
+	MediaForceAnchor bool
+	// MediaRecordingNotice plays the recording-notice announcement before
+	// a recording starts (default true).
+	MediaRecordingNotice bool
 }
 
 // Deps are the Server's collaborators.
@@ -100,6 +112,12 @@ type Deps struct {
 	// them to PostgreSQL and bumping the configuration revision; nil makes
 	// the mutating feature codes answer 503.
 	Settings SettingsSink
+	// Media holds the anchored-media metrics; nil disables them (tests).
+	Media *media.Metrics
+	// Recordings is the recordings metadata store (PostgreSQL); nil
+	// disables recording. Its methods run only in a media goroutine, never
+	// on the SIP transaction path.
+	Recordings RecordingStore
 }
 
 // Server is one SIP node.
@@ -227,6 +245,9 @@ func New(cfg Config, deps Deps) (*Server, error) {
 	setDefault(&cfg.PresenceTTL, 2*time.Minute)
 	if cfg.AuthFailLimit <= 0 {
 		cfg.AuthFailLimit = 10
+	}
+	if cfg.RTPPortMin <= 0 || cfg.RTPPortMax <= cfg.RTPPortMin {
+		cfg.RTPPortMin, cfg.RTPPortMax = 20000, 21000
 	}
 	s := &Server{
 		cfg: cfg, deps: deps, m: deps.Metrics,

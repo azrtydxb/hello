@@ -98,6 +98,15 @@ type call struct {
 	vmSession media.Session
 	held      bool
 
+	// Phase 5 anchoring state: the reason the media anchors ("" direct),
+	// the session's relay, and the recording state. Guarded by mu.
+	anchored     bool
+	anchorReason AnchorReason
+	relay        *media.Relay
+	rec          *recording
+	// anchorHost is the advertised IPv4 for relay SDP answers.
+	anchorHost string
+
 	groupName     string
 	groupStrategy string
 	groupFn       func()
@@ -274,12 +283,14 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 		if c.direction == cdr.DirectionInternal {
 			c.direction = cdr.DirectionOutbound
 		}
+		c.considerAnchor(snap, EndpointInfo{}) // external: caller-side triggers only
 		if c.begin(req, tx) {
 			c.setupOutbound(dec)
 		}
 	case (dec.Kind == routing.KindInternal || dec.Kind == routing.KindInbound) && dec.Extension != "":
 		c.ringTarget(req, tx, snap, dec.Extension)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
+		c.considerAnchor(snap, EndpointInfo{}) // external URI: caller-side triggers only
 		c.ringURI(req, tx, dec.SIPURI)
 	default:
 		code, reason := dec.RejectCode, dec.Reason
@@ -582,13 +593,31 @@ func (c *call) answer(w *leg) {
 	}
 	c.addTrace("Call established")
 	c.publish()
+	// record_default recordings start when the call is answered (spec
+	// S-4); the flow re-anchors when needed, but an anchored-for-recording
+	// call is already set up.
+	if c.anchorReasonIs(AnchorRecording) {
+		go c.startRecordingFlow("default")
+	}
 	if snap := c.s.deps.Snapshots.Current(); snap != nil {
 		c.s.publishDeviceState(c.s.devicesOf(snap, c.dialled), c.dialled, StateOnCall)
 		if c.callerDevice != "" {
 			c.s.publishDeviceState([]string{c.callerDevice}, c.callerNum, StateOnCall)
 		}
 	}
-	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", bres.Body())
+	body := bres.Body()
+	if c.isAnchored() {
+		// The caller's answer is the anchor's leg-a SDP, never the
+		// callee's body (spec S-2); the callee's answer aims leg b.
+		if len(bres.Body()) > 0 {
+			if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
+				c.relay.SetTarget(legCallee, udpAddr(ans.Address, ans.Port))
+			}
+		}
+		off, _ := media.ParseAudioSDP(c.inv.Body())
+		body = c.anchoredAnswerA(off)
+	}
+	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
 	if ct := bres.ContentType(); ct != nil {
 		res.AppendHeader(sip.HeaderClone(ct))
 	}
@@ -795,6 +824,7 @@ func (c *call) end(status int, side, reason, result string) {
 			c.maxTimer.Stop()
 		}
 		c.mu.Unlock()
+		c.closeMedia()
 		if held {
 			c.s.m.HoldActive.Dec()
 		}
@@ -1065,6 +1095,17 @@ func (l *leg) invite() (*sip.Request, error) {
 		}
 		req.SetBody(body)
 	}
+	// An anchored call terminates media: the fork's offer is the anchor's
+	// leg-b port, not the caller's SDP (spec S-2).
+	if l.c.isAnchored() {
+		if off, err := media.ParseAudioSDP(c.inv.Body()); err == nil {
+			if body := l.c.anchoredOfferB(off); len(body) > 0 {
+				req.SetBody(body)
+				req.RemoveHeader("Content-Type")
+				req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+			}
+		}
+	}
 	req.SetTransport("UDP")
 	switch {
 	case l.trunk != nil:
@@ -1307,6 +1348,13 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	defer c.endInDialog()
+	// An anchored call terminates media in dialog too: a re-INVITE offer
+	// is answered with the anchor's SDP and mirrored to the peer (hold
+	// included), so both dialogs keep pointing at the relay (spec S-2).
+	if c.isAnchored() {
+		c.handleAnchoredInDialog(req, tx, ref.leg == nil)
+		return
+	}
 	// Hold (S-1) is signalled by the phone's re-INVITE SDP direction: a
 	// sendonly (or inactive, or zero-connection) offer holds the call from
 	// whichever side sends it; a sendrecv re-INVITE resumes it. The body is

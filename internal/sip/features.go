@@ -12,7 +12,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 )
 
-// Feature-code actions (contract 4).
+// Feature-code actions (contract 4, widened by migration 00005).
 const (
 	ActionForwardAlways    = "forward_always"
 	ActionForwardBusy      = "forward_busy"
@@ -22,6 +22,7 @@ const (
 	ActionVoicemail        = "voicemail"
 	ActionBlindTransfer    = "blind_transfer"
 	ActionAttendedTransfer = "attended_transfer"
+	ActionAnnouncement     = "announcement"
 )
 
 // ExtUpdate is one queued extension-feature change from a feature code.
@@ -75,6 +76,14 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 			return true
 		}
 		c.voicemailOwnBox(fc.Argument)
+		return true
+	case ActionAnnouncement:
+		// The announcement feature code answers, plays its argument's
+		// announcement, then hangs up (spec S-5).
+		if !c.begin(c.inv, tx) {
+			return true
+		}
+		c.announcementDestination(arg)
 		return true
 	}
 	upd, ok := featureUpdate(fc, arg, c.callerNum)
@@ -213,6 +222,12 @@ func (s *Server) dispatchDigit(c *call, fromCaller bool, d byte) {
 	}
 	fc, arg, ok := matchFeatureCode(snap, string(all))
 	if !ok {
+		// *1 is not a feature code row: it toggles this call's recording
+		// (spec S-4), with a mid-call re-anchor when the call was direct.
+		if string(all) == recordToggle {
+			buf.take()
+			c.toggleRecording()
+		}
 		return
 	}
 	// A code whose action carries no argument fires immediately; otherwise
@@ -268,6 +283,11 @@ func (s *Server) applyInDialogCode(c *call, fromCaller bool, fc snapshot.Feature
 	switch fc.Action {
 	case ActionBlindTransfer:
 		if arg != "" {
+			// A transfer feature code with an announcement argument plays
+			// the prompt before the transfer executes (contract 7).
+			if fc.Argument != "" {
+				c.playAnnouncementToCall(fc.Argument)
+			}
 			// The phone that dialled the code is the transferee: its side
 			// gets the NOTIFYs (the caller's dialog when it dialled).
 			if fromCaller {
@@ -282,6 +302,9 @@ func (s *Server) applyInDialogCode(c *call, fromCaller bool, fc snapshot.Feature
 			// DTMF attended transfer without a second call: the transferee
 			// legs drop and the two parties bridge, the same as a REFER
 			// attended transfer whose second call was never answered.
+			if fc.Argument != "" {
+				c.playAnnouncementToCall(fc.Argument)
+			}
 			if fromCaller {
 				c.transferBlindVia(ext, arg, TransferAttended, nil)
 			} else {

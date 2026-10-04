@@ -191,3 +191,35 @@ func codecName(pt uint8) string {
 	}
 	return "PCMU"
 }
+
+// BuildAudioSDPDir is BuildAudioSDP with an explicit media direction
+// ("sendrecv", "sendonly", "recvonly", "inactive"); anything else is
+// sendrecv.
+func BuildAudioSDPDir(ip string, port int, pt uint8, dtmfPT uint8, dtmfRate int, dir string) []byte {
+	switch dir {
+	case "sendonly", "recvonly", "inactive":
+	default:
+		dir = "sendrecv"
+	}
+	body := BuildAudioSDP(ip, port, pt, dtmfPT, dtmfRate)
+	return []byte(strings.ReplaceAll(string(body), "a=sendrecv", "a="+dir))
+}
+
+// SDPDirection reports an SDP body's media direction: the first direction
+// attribute in the body, "sendrecv" when none.
+func SDPDirection(body []byte) string {
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		switch {
+		case strings.HasPrefix(line, "a=sendonly"):
+			return "sendonly"
+		case strings.HasPrefix(line, "a=recvonly"):
+			return "recvonly"
+		case strings.HasPrefix(line, "a=inactive"):
+			return "inactive"
+		case strings.HasPrefix(line, "a=sendrecv"):
+			return "sendrecv"
+		}
+	}
+	return "sendrecv"
+}

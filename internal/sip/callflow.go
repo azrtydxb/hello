@@ -97,6 +97,12 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 		return
 	}
 	targets := c.bindingsForDevices(tx, req, snap, ext)
+	if len(targets) > 0 {
+		// The anchoring decision (contract 2): NAT on either side
+		// (contact-vs-source of the binding), record_default, a pending
+		// announcement or voicemail hand-off, or the force switch.
+		c.considerAnchor(snap, bindingEndpoint(targets[0], ext))
+	}
 	if len(targets) == 0 {
 		// Nothing registered: the no-answer target applies at once, else
 		// voicemail with the unreachable greeting, else 480.

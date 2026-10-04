@@ -606,3 +606,61 @@ func (r *Relay) observeLoop() {
 		}
 	}
 }
+
+// LegPort returns the local port of a named leg, 0 without one (the sip
+// package reads it for the SDP answers).
+func (r *Relay) LegPort(name string) int {
+	if l := r.findLeg(name); l != nil {
+		return l.port
+	}
+	return 0
+}
+
+// PlayTo plays PCM (16-bit mono, 8 kHz) into one leg in real time, as its
+// own announcement stream: a fresh SSRC with its own sequence and
+// timestamp space, so the bridged stream's rewrite state is untouched.
+// It returns ctx.Err() when ctx is cancelled mid-way.
+func (r *Relay) PlayTo(ctx context.Context, legName string, pcm []byte) error {
+	l := r.findLeg(legName)
+	if l == nil {
+		return errors.New("media: unknown relay leg " + legName)
+	}
+	if len(pcm)%2 != 0 {
+		pcm = pcm[:len(pcm)-1]
+	}
+	var b [10]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Errorf("media: announcement stream: %w", err)
+	}
+	encode := EncodePCMU
+	pt := uint8(0)
+	if l.audioPT == 8 {
+		encode, pt = EncodePCMA, 8
+	}
+	seq := binary.BigEndian.Uint16(b[0:2])
+	ts := binary.BigEndian.Uint32(b[2:6])
+	ssrc := binary.BigEndian.Uint32(b[6:10])
+	ticker := time.NewTicker(frameDur)
+	defer ticker.Stop()
+	for off := 0; off < len(pcm); off += frameBytes {
+		end := min(off+frameBytes, len(pcm))
+		payload := encode(pcm[off:end])
+		pkt := BuildRTP(pt, seq, ts, ssrc, false, payload)
+		seq++
+		ts += frameSamples
+		l.remoteMu.Lock()
+		dst := l.remote
+		l.remoteMu.Unlock()
+		if dst != nil {
+			_, _ = l.conn.WriteToUDP(pkt, dst)
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-r.ctx.Done():
+			return errors.New("media: relay closed")
+		}
+	}
+	return nil
+}
