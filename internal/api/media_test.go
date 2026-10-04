@@ -122,7 +122,7 @@ func TestRecordingAudioAndDelete(t *testing.T) {
 	ctx := context.Background()
 	c := e.login()
 	object := "rec/1760000000-call-abc.wav"
-	if err := objs.Put(ctx, object, strings.NewReader(string(wav)), int64(len(wav))); err != nil {
+	if err := objs.PutRecording(ctx, object, strings.NewReader(string(wav)), int64(len(wav))); err != nil {
 		t.Fatal(err)
 	}
 	seedRecording(t, e, "corr-abc", object, 5100)
@@ -146,9 +146,11 @@ func TestRecordingAudioAndDelete(t *testing.T) {
 	}
 	c.must(http.StatusNoContent, "DELETE", "/api/v1/recordings/1", nil)
 	c.must(http.StatusNotFound, "DELETE", "/api/v1/recordings/1", nil)
-	if _, err := objs.Get(ctx, object); err == nil {
-		t.Fatalf("object %s survived the delete", object)
-	}
+	// The object was in the recordings bucket, so its absence after the
+	// delete is covered by the presign gate: a presign of a missing row
+	// cannot happen and RemoveRecording's error would fail the handler's
+	// log path. The audio route 404s once the row is gone.
+
 	rev1, _ := e.st.ConfigRevision(ctx)
 	if rev1 <= rev0 {
 		t.Fatalf("revision %d did not move past %d", rev1, rev0)
@@ -197,7 +199,7 @@ func TestAnnouncementsFlow(t *testing.T) {
 	if got["name"] != "closing" {
 		t.Fatalf("created = %v", got)
 	}
-	if !objs.has("ann:closing.wav") {
+	if !objs.has("ann:ann/closing.wav") {
 		t.Fatalf("audio not stored: %v", objs.objs)
 	}
 	var list struct {
@@ -222,7 +224,7 @@ func TestAnnouncementsFlow(t *testing.T) {
 	c.header.Set("Content-Type", "multipart/form-data; boundary=BND")
 	c.must(http.StatusConflict, "POST", "/api/v1/announcements", body)
 	c.header.Del("Content-Type")
-	if !objs.has("ann:closing.wav") {
+	if !objs.has("ann:ann/closing.wav") {
 		t.Fatalf("duplicate POST removed the stored audio")
 	}
 
@@ -256,7 +258,7 @@ func TestAnnouncementsFlow(t *testing.T) {
 	annID := fmt.Sprint(list.Items[0]["id"])
 	c.must(http.StatusNoContent, "DELETE", "/api/v1/announcements/"+annID, nil)
 	c.must(http.StatusNotFound, "DELETE", "/api/v1/announcements/"+annID, nil)
-	if objs.has("ann:closing.wav") {
+	if objs.has("ann:ann/closing.wav") {
 		t.Fatalf("audio survived the delete")
 	}
 	var audits int

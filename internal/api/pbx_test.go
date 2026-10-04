@@ -78,6 +78,17 @@ func (m *memObjects) PresignRecording(_ context.Context, object string) (string,
 	return "http://objects.test/rec/" + object + "?sig=1", nil
 }
 
+func (m *memObjects) PutRecording(_ context.Context, object string, r io.Reader, _ int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	m.objs["rec:"+object] = b
+	return nil
+}
+
 func (m *memObjects) RemoveRecording(_ context.Context, object string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

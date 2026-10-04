@@ -42,6 +42,8 @@ type Objects interface {
 
 	// PresignRecording returns a GET URL for a recording, valid 15 minutes.
 	PresignRecording(ctx context.Context, object string) (string, error)
+	// PutRecording uploads r (size known) as recording audio.
+	PutRecording(ctx context.Context, object string, r io.Reader, size int64) error
 	// RemoveRecording deletes a recording object.
 	RemoveRecording(ctx context.Context, object string) error
 	// PutAnnouncement uploads r (size known) as announcement audio.
@@ -116,6 +118,14 @@ func (m *MinioObjects) PresignRecording(ctx context.Context, object string) (str
 		return "", fmt.Errorf("api: presign recording %s: %w", object, err)
 	}
 	return u.String(), nil
+}
+
+func (m *MinioObjects) PutRecording(ctx context.Context, object string, r io.Reader, size int64) error {
+	_, err := m.cli.PutObject(ctx, RecordingsBucket, object, r, size, minio.PutObjectOptions{ContentType: "audio/wav"})
+	if err != nil {
+		return fmt.Errorf("api: put recording %s: %w", object, err)
+	}
+	return nil
 }
 
 func (m *MinioObjects) RemoveRecording(ctx context.Context, object string) error {

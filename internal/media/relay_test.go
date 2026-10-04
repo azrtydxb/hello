@@ -128,10 +128,18 @@ func TestRelayBidirectional(t *testing.T) {
 		t.Error("leg a received the callee's SSRC: no rewrite happened")
 	}
 	// The two directions must not share one outbound stream: the SSRC the
-	// relay chose toward a differs from the one toward b.
+	// relay chose toward a differs from the one toward b. Each rewrite
+	// state has its own lock (the pump goroutine writes it), so the read
+	// takes that lock, not the relay's.
 	r.mu.Lock()
-	ssrcA, ssrcB := r.legs[0].out.ssrc, r.legs[1].out.ssrc
+	outA, outB := &r.legs[0].out, &r.legs[1].out
 	r.mu.Unlock()
+	outA.mu.Lock()
+	ssrcA := outA.ssrc
+	outA.mu.Unlock()
+	outB.mu.Lock()
+	ssrcB := outB.ssrc
+	outB.mu.Unlock()
 	if ssrcA == ssrcB {
 		t.Error("both legs share one outbound SSRC")
 	}
