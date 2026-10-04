@@ -54,6 +54,8 @@ RUN printf '%s\n' \
 USER 102:102
 EXPOSE 5060/udp 5070/udp 9090
 ENTRYPOINT ["kamailio"]
-# Stay in the foreground (-D) and log to stderr (-E); the config sets
+# -DD: stay in the foreground without forking into daemon mode, but still
+# fork the UDP/TCP listener children (plain -D would run no-fork and bind
+# only the first listen address); -E logs to stderr. The config sets
 # log_stderror=yes as well.
-CMD ["-D", "-E"]
+CMD ["-DD", "-E"]
