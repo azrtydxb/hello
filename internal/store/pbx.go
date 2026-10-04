@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strconv"
 	"time"
 
@@ -227,6 +228,114 @@ func (s *Store) MarkEmail(ctx context.Context, id int64, status string) error {
 		return err
 	}
 	return requireRow(res)
+}
+
+// The voicemail paths hello-sip uses (the *97 application, MWI). These are
+// call-plane bookkeeping, not configuration: like MarkEmail they are not
+// audited and do not bump the revision hello-sip reloads on — the snapshot
+// carries no message rows, so a bump would only churn every node.
+
+// VoicemailBoxByNumber returns the box of the extension with number
+// (ok=false when the extension has no box or does not exist). This is the
+// box lookup the *97 application and MWI make by dialled number.
+func (s *Store) VoicemailBoxByNumber(ctx context.Context, number string) (VoicemailBox, bool, error) {
+	var b VoicemailBox
+	err := s.db.QueryRowContext(ctx, `
+		SELECT b.id, b.email, b.greeting_object, b.unreachable_object
+		FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
+		WHERE e.number = $1`, number).
+		Scan(&b.ID, &b.Email, &b.GreetingObject, &b.UnreachableObject)
+	if errors.Is(err, sql.ErrNoRows) {
+		return VoicemailBox{}, false, nil
+	}
+	if err != nil {
+		return VoicemailBox{}, false, err
+	}
+	return b, true, nil
+}
+
+// VerifyVoicemailPassword reports whether password opens boxID's retrieval
+// prompt. A box without a password accepts none. The comparison is bcrypt's,
+// which is constant-time in the password.
+func (s *Store) VerifyVoicemailPassword(ctx context.Context, boxID int64, password string) (bool, error) {
+	var hash string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT password_hash FROM voicemail_boxes WHERE id = $1`, boxID).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if hash == "" {
+		return false, nil
+	}
+	return auth.CheckPassword(hash, password), nil
+}
+
+// InsertVoicemailMessage stores one recorded message and returns its id.
+func (s *Store) InsertVoicemailMessage(ctx context.Context, boxID int64, object, caller string, durationMs int64) (int64, error) {
+	var id int64
+	err := s.db.QueryRowContext(ctx, `
+		INSERT INTO voicemail_messages (box_id, minio_object, caller, duration_ms)
+		VALUES ($1, $2, $3, $4) RETURNING id`,
+		boxID, object, caller, durationMs).Scan(&id)
+	return id, err
+}
+
+// SetVoicemailMessageHeard sets a message's heard flag after the phone
+// played it (*97). The UI path is UpdateVoicemailMessageHeard, which audits.
+func (s *Store) SetVoicemailMessageHeard(ctx context.Context, id int64, heard bool) error {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE voicemail_messages SET heard = $2 WHERE id = $1`, id, heard)
+	if err != nil {
+		return err
+	}
+	return requireRow(res)
+}
+
+// Feature groups.
+
+// FeatureUpdate is one hello-sip feature-code change to an extension: DND
+// and the forwarding targets. Pointer fields are optional; nil leaves the
+// column alone, and the empty string clears a forward.
+type FeatureUpdate struct {
+	Number          string
+	DND             *bool
+	ForwardAlways   *string
+	ForwardBusy     *string
+	ForwardNoAnswer *string
+}
+
+// ApplyFeatureUpdate applies one feature-code change the same way every
+// configuration change is applied: the extension row, the audit event, the
+// revision bump and the NOTIFY, in one transaction, so hello-sip reloads its
+// snapshot. Unlike the API paths it runs no routing check: a feature code
+// touches only the extension's own feature columns.
+func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureUpdate) error {
+	return s.configChangeID(ctx, actor, "update", "extension", nil, func(tx *sql.Tx) (string, error) {
+		res, err := tx.ExecContext(ctx, `
+			UPDATE extensions SET
+				dnd = COALESCE($2, dnd),
+				forward_always = COALESCE($3, forward_always),
+				forward_busy = COALESCE($4, forward_busy),
+				forward_no_answer = COALESCE($5, forward_no_answer),
+				updated_at = now()
+			WHERE number = $1`,
+			u.Number, u.DND, u.ForwardAlways, u.ForwardBusy, u.ForwardNoAnswer)
+		if err != nil {
+			return "", err
+		}
+		if err := requireRow(res); err != nil {
+			return "", err
+		}
+		var id int64
+		if err := tx.QueryRowContext(ctx,
+			`SELECT id FROM extensions WHERE number = $1`, u.Number).Scan(&id); err != nil {
+			return "", err
+		}
+		return strconv.FormatInt(id, 10), nil
+	})
 }
 
 // Ring groups.

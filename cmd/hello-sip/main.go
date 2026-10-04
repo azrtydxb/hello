@@ -29,7 +29,10 @@ import (
 	"github.com/azrtydxb/hello/internal/vkconn"
 	sipgosip "github.com/emiago/sipgo/sip"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/azrtydxb/hello/internal/store"
 	"github.com/valkey-io/valkey-go"
 )
 
@@ -114,6 +117,21 @@ func run(args []string) error {
 	defer pool.Close()
 	cdrs := cdr.NewWriter(pool, cdr.NewDroppedCounter(metrics.Registry), log.With("component", "cdr"))
 
+	// The voicemail store, the feature-code settings sink and the voicemail
+	// audio store (Phase 4, S-8 and S-11). The writer pool is small: the SIP
+	// path never waits on it, so a few connections cover voicemail writes,
+	// MWI counts and feature-code changes.
+	sipDB := stdlib.OpenDB(*poolCfg.ConnConfig)
+	sipDB.SetMaxOpenConns(2)
+	sipDB.SetMaxIdleConns(2)
+	defer func() { _ = sipDB.Close() }()
+	controlStore := store.New(sipDB)
+	settings := newSettings(controlStore, log.With("component", "settings"))
+	voicemailObjects := &lazyObjects{
+		endpoint: cfg.MinioEndpoint, access: cfg.MinioAccessKey, secret: cfg.MinioSecretKey,
+		secure: cfg.MinioSecure, log: log.With("component", "media"),
+	}
+
 	box, err := secret.New(cfg.SecretKey)
 	if err != nil {
 		return fmt.Errorf("HELLO_SECRET_KEY: %w", err)
@@ -131,7 +149,8 @@ func run(args []string) error {
 		Snapshots: watcher, State: live, Trunks: live,
 		Throttle: sip.ValkeyThrottle{Client: vk, Window: cfg.AuthFailWindow},
 		CDRs:     cdrs, Metrics: sipMetrics, Log: log.With("component", "sip"),
-		Presence: sip.ValkeyPresence{Client: vk},
+		Presence:   sip.ValkeyPresence{Client: vk},
+		Voicemails: voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings,
 	})
 	if err != nil {
 		return err
@@ -196,6 +215,8 @@ func run(args []string) error {
 
 	bg, stopBG := context.WithCancel(context.Background())
 	defer stopBG()
+	settingsDone := make(chan struct{})
+	go func() { defer close(settingsDone); settings.Run(bg) }()
 	watchDone := make(chan struct{})
 	go func() { watcher.Run(bg); close(watchDone) }()
 	resolveDone := make(chan struct{})
