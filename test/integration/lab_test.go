@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -206,6 +207,25 @@ func (lc *labClient) extension(devices ...string) []labDevice {
 		out = append(out, labDevice{ID: dev.ID, Extension: number, User: user, Secret: dev.Secret})
 	}
 	return out
+}
+
+// extensionID looks up an extension's id by number, for the PATCH paths
+// that address extensions by id.
+func (lc *labClient) extensionID(number string) string {
+	var list struct {
+		Items []struct {
+			ID     int64  `json:"id"`
+			Number string `json:"number"`
+		} `json:"items"`
+	}
+	lc.must("GET", "/api/v1/extensions", nil, &list, 200)
+	for _, e := range list.Items {
+		if e.Number == number {
+			return strconv.FormatInt(e.ID, 10)
+		}
+	}
+	lc.t.Fatalf("extension %s not found", number)
+	return ""
 }
 
 // phone starts a test phone for d that sends to the given SIP node.

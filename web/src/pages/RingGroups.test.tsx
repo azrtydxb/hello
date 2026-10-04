@@ -80,9 +80,11 @@ describe("RingGroups", () => {
     fireEvent.change(screen.getByLabelText("External number"), {
       target: { value: "+97142000100" },
     });
-    fireEvent.change(screen.getByLabelText("Add member"), {
-      target: { value: "1" },
-    });
+    // The member select stays disabled until the extensions request lands,
+    // which can lose the race against the form on a loaded CI runner.
+    const pick = await screen.findByLabelText("Add member");
+    await waitFor(() => expect(pick).toBeEnabled());
+    fireEvent.change(pick, { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
     fireEvent.click(screen.getByRole("button", { name: "Create group" }));
 
