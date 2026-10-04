@@ -48,6 +48,22 @@ type Store interface {
 	UpdateExtension(ctx context.Context, actor string, id int64, c store.ExtensionChange, check store.Check) (store.Extension, error)
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
 
+	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
+	UpdateVoicemailBox(ctx context.Context, actor string, extensionID int64, c store.VoicemailBoxChange, check store.Check) (store.VoicemailBox, error)
+	ListVoicemailMessages(ctx context.Context, boxID int64, unheardOnly bool) ([]store.VoicemailMessage, error)
+	GetVoicemailMessage(ctx context.Context, id int64) (store.VoicemailMessage, error)
+	UpdateVoicemailMessageHeard(ctx context.Context, actor string, id int64, heard bool) error
+	DeleteVoicemailMessage(ctx context.Context, actor string, id int64) (string, error)
+
+	ListRingGroups(ctx context.Context) ([]store.RingGroup, error)
+	GetRingGroup(ctx context.Context, id int64) (store.RingGroup, error)
+	CreateRingGroup(ctx context.Context, actor string, in store.RingGroupInput, check store.Check) (store.RingGroup, error)
+	UpdateRingGroup(ctx context.Context, actor string, id int64, in store.RingGroupInput, check store.Check) (store.RingGroup, error)
+	DeleteRingGroup(ctx context.Context, actor string, id int64, check store.Check) error
+
+	ListFeatureCodes(ctx context.Context) ([]store.FeatureCode, error)
+	PutFeatureCodes(ctx context.Context, actor string, codes []store.FeatureCode, check store.Check) error
+
 	ListDevices(ctx context.Context) ([]store.Device, error)
 	GetDevice(ctx context.Context, id int64) (store.Device, error)
 	CreateDevice(ctx context.Context, actor string, in store.NewDevice) (store.Device, error)
@@ -87,6 +103,7 @@ type Store interface {
 type Live interface {
 	AllBindings(ctx context.Context) ([]livestate.Binding, error)
 	Calls(ctx context.Context) ([]livestate.Call, error)
+	DeviceStates(ctx context.Context) ([]livestate.DeviceState, error)
 }
 
 // Config wires the API to its dependencies.
@@ -106,6 +123,9 @@ type Config struct {
 	// health. nil behaves as Valkey unreachable.
 	Cluster ClusterStore
 	Valkey  ValkeyStatus
+	// Objects is the voicemail audio store; nil makes the audio routes and
+	// greeting uploads answer 503 instead of touching MinIO.
+	Objects Objects
 }
 
 type server struct{ Config }
@@ -150,6 +170,25 @@ func Handler(c Config) http.Handler {
 	private("PATCH /api/v1/devices/{id}", s.updateDevice)
 	private("DELETE /api/v1/devices/{id}", s.deleteDevice)
 	private("POST /api/v1/devices/{id}/rotate-secret", s.rotateSecret)
+
+	private("GET /api/v1/extensions/{id}/voicemail", s.getVoicemailBox)
+	private("PUT /api/v1/extensions/{id}/voicemail", s.putVoicemailBox)
+
+	private("GET /api/v1/voicemail/messages", s.listVoicemailMessages)
+	private("POST /api/v1/voicemail/messages/{id}/heard", s.markMessageHeard)
+	private("DELETE /api/v1/voicemail/messages/{id}", s.deleteMessage)
+	private("GET /api/v1/voicemail/messages/{id}/audio", s.messageAudio)
+
+	private("GET /api/v1/ring-groups", s.listRingGroups)
+	private("POST /api/v1/ring-groups", s.createRingGroup)
+	private("GET /api/v1/ring-groups/{id}", s.getRingGroup)
+	private("PATCH /api/v1/ring-groups/{id}", s.updateRingGroup)
+	private("DELETE /api/v1/ring-groups/{id}", s.deleteRingGroup)
+
+	private("GET /api/v1/feature-codes", s.listFeatureCodes)
+	private("PUT /api/v1/feature-codes", s.putFeatureCodes)
+
+	private("GET /api/v1/presence", s.presence)
 
 	private("GET /api/v1/registrations", s.registrations)
 	private("GET /api/v1/calls", s.calls)

@@ -43,6 +43,9 @@ type env struct {
 	srv *httptest.Server
 	db  *sql.DB
 	st  *store.Store
+	// ext101 and ext102 hold the extensions newPBXEnv created, by number.
+	ext101 map[string]any
+	ext102 map[string]any
 }
 
 // newEnv migrates a scratch database, creates user alice and serves the API.
@@ -197,6 +200,9 @@ type noLive struct{}
 
 func (noLive) AllBindings(context.Context) ([]livestate.Binding, error) { return nil, nil }
 func (noLive) Calls(context.Context) ([]livestate.Call, error)          { return nil, nil }
+func (noLive) DeviceStates(context.Context) ([]livestate.DeviceState, error) {
+	return nil, nil
+}
 
 func TestAuthRequired(t *testing.T) {
 	e := newEnv(t, noLive{})
