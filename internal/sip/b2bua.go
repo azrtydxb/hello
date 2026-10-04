@@ -10,6 +10,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo"
@@ -65,6 +66,12 @@ type call struct {
 	connected   bool
 	ended       bool
 	hungUp      bool
+	stageSeq    int // the current forwarding stage; legs carry the stage they belong to
+	// invTx is the caller INVITE's server transaction, kept so a
+	// callee-less answer (voicemail) can respond without sipgo's dialog
+	// ACK-wait; vmTag is the To tag that answer carries.
+	invTx sip.ServerTransaction
+	vmTag string
 	// inDialog counts re-INVITE/UPDATE relays in progress. Add happens
 	// under mu while the call is not being ended, so never after Wait.
 	inDialog   sync.WaitGroup
@@ -79,6 +86,35 @@ type call struct {
 	trunkName string
 	trace     routing.Trace
 	slots     []heldSlot // trunk call slots held, released when the attempt ends
+
+	// Phase 4 call-flow state. stages carries the forwarding/DND context of
+	// the extension being rung (nil for a plain call); mediaMode is the CDR's
+	// media column ("direct", or "anchored" for voicemail); vmSession is the
+	// voicemail anchor; held is the hold state behind hello_hold_active.
+	// groupName/Strategy/Fn carry the group a call dialled and the failure
+	// destination that applies when the group gives up.
+	stages    *callStages
+	mediaMode string
+	vmSession media.Session
+	held      bool
+
+	groupName     string
+	groupStrategy string
+	groupFn       func()
+	transferKind  string // blind or attended, for hello_transfers_total
+	// transferNotify reports a transfer's outcome to the transferee's
+	// dialog (set by transferBlindVia for the rethreaded call).
+	transferNotify func(fragment string, final bool)
+}
+
+// callStages is the forwarding/DND context of the extension a call is
+// currently ringing, carried across the exhaustion hand-offs (forward on
+// busy or no answer, voicemail). The setup goroutine owns it.
+type callStages struct {
+	visited []string           // extensions already rung; a revisit is a loop
+	ext     string             // the extension this stage rings
+	feats   snapshot.Extension // its features
+	source  string             // the forwarding kind that led here, "" at first
 }
 
 type legEventKind int
@@ -118,6 +154,7 @@ type leg struct {
 	callerID  string
 	uri       *sip.Uri
 	abandoned bool // guarded by c.mu: failed over, may no longer win
+	stage     int  // the forwarding stage this fork belongs to; setup ignores older stages' events
 }
 
 func (l *leg) session() *sipgo.DialogClientSession {
@@ -174,6 +211,17 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	c := s.newCall(req)
 	c.callerNum, c.callerName, c.callerDevice = dev.Extension, dev.ExtensionName, dev.Username
+	// A feature code dialled as a call (*78, *72599, *97) is dispatched here
+	// and never reaches routing.
+	if fc, arg, ok := matchFeatureCode(snap, c.dialled); ok {
+		c.handleFeatureInvite(tx, fc, arg)
+		return
+	}
+	// A ring group number resolves as a group instead of through routing.
+	if _, _, ok := snap.RingGroup(c.dialled); ok {
+		c.ringTarget(req, tx, snap, c.dialled)
+		return
+	}
 	rs := snap.Routing()
 	var dec routing.Decision
 	if len(rs.Errors) > 0 && snap.HasExtension(c.dialled) {
@@ -230,7 +278,7 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 			c.setupOutbound(dec)
 		}
 	case (dec.Kind == routing.KindInternal || dec.Kind == routing.KindInbound) && dec.Extension != "":
-		c.ringExtension(req, tx, snap, dec.Extension)
+		c.ringTarget(req, tx, snap, dec.Extension)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
 		c.ringURI(req, tx, dec.SIPURI)
 	default:
@@ -251,45 +299,6 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 		s.respond(tx, req, code, statusText(code))
 		c.record(code, cdr.SideSystem, reason, result)
 	}
-}
-
-// ringExtension forks to every binding of the extension's enabled devices
-// except the caller's own (Phase 1 ring-all).
-func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot, ext string) {
-	s := c.s
-	var targets []livestate.Binding
-	for _, d := range snap.DevicesForExtension(ext) {
-		if d.Username == c.callerDevice {
-			continue // never ring the calling device
-		}
-		ctx, cancel := s.stateCtx()
-		bs, err := s.deps.State.Bindings(ctx, s.aor(d.Username))
-		cancel()
-		if err != nil {
-			s.stateDown(tx, req, "bindings", err)
-			c.record(sip.StatusServiceUnavailable, cdr.SideSystem, "live state unavailable", ResultFailed)
-			return
-		}
-		targets = append(targets, bs...)
-	}
-	if len(targets) == 0 {
-		s.respond(tx, req, sip.StatusTemporarilyUnavailable, "Temporarily Unavailable")
-		c.record(sip.StatusTemporarilyUnavailable, cdr.SideSystem, "no registered device", ResultUnavailable)
-		return
-	}
-	if !c.begin(req, tx) {
-		return
-	}
-	c.mu.Lock()
-	for _, b := range targets {
-		c.addLeg(&leg{binding: b})
-	}
-	legs := c.legs
-	c.mu.Unlock()
-	for _, l := range legs {
-		go l.run()
-	}
-	c.setup(len(legs))
 }
 
 // ringURI sends the call to a SIP URI (an inbound route's destination, such
@@ -337,6 +346,9 @@ func (c *call) begin(req *sip.Request, tx sip.ServerTransaction) bool {
 		return false
 	}
 	c.dss = dss
+	c.mu.Lock()
+	c.invTx = tx
+	c.mu.Unlock()
 	if !tx.OnCancel(func(*sip.Request) {
 		s.m.request(sip.CANCEL.String())
 		c.cancelled()
@@ -368,6 +380,9 @@ func (c *call) setup(pending int) {
 	for {
 		select {
 		case ev := <-c.events:
+			if ev.leg != nil && ev.leg.stage != c.curStage() {
+				continue // a leg the forwarding stage abandoned
+			}
 			switch ev.kind {
 			case evRinging:
 				c.ringing()
@@ -375,21 +390,34 @@ func (c *call) setup(pending int) {
 				c.answer(ev.leg)
 				return
 			case evFailed:
+				if ev.leg != nil && ev.leg.stage != c.curStage() {
+					continue // a leg the forwarding stage abandoned
+				}
 				pending--
 				if isBusy(ev.code) {
 					busy++
 				}
-				if pending == 0 && c.closeSetup() {
-					code, reason, result := sip.StatusTemporarilyUnavailable, "Temporarily Unavailable", ResultUnavailable
-					if busy == total {
-						code, reason, result = sip.StatusBusyHere, "Busy Here", ResultBusy
+				if pending == 0 {
+					switch c.exhausted(busy == total) {
+					case exhRetry: // forwarding opened a new stage
+						pending, total, busy = c.pendingLegs(), c.pendingLegs(), 0
+						timer.Reset(c.s.cfg.RingTimeout)
+						continue
+					case exhDone:
+						return
 					}
-					c.respondA(code, reason)
-					c.end(code, cdr.SideCallee, reason, result)
-					return
-				}
-				if pending == 0 && c.setupAbort() {
-					return
+					if c.closeSetup() {
+						code, reason, result := sip.StatusTemporarilyUnavailable, "Temporarily Unavailable", ResultUnavailable
+						if busy == total {
+							code, reason, result = sip.StatusBusyHere, "Busy Here", ResultBusy
+						}
+						c.respondA(code, reason)
+						c.end(code, cdr.SideCallee, reason, result)
+						return
+					}
+					if c.setupAbort() {
+						return
+					}
 				}
 			}
 		case <-c.canceled:
@@ -409,6 +437,14 @@ func (c *call) setup(pending int) {
 			}
 			// A fork already won; answer() sees the abort.
 		case <-timer.C:
+			switch c.exhausted(false) {
+			case exhRetry:
+				pending, total, busy = c.pendingLegs(), c.pendingLegs(), 0
+				timer.Reset(c.s.cfg.RingTimeout)
+				continue
+			case exhDone:
+				return
+			}
 			if c.closeSetup() {
 				c.cancelForks(nil)
 				c.respondA(sip.StatusRequestTimeout, "Request Timeout")
@@ -491,9 +527,13 @@ func (c *call) ringing() {
 	if first {
 		c.ringTime = time.Now()
 	}
+	ext := c.dialled
 	c.mu.Unlock()
 	if first {
 		c.respondA(sip.StatusRinging, "Ringing")
+		if snap := c.s.deps.Snapshots.Current(); snap != nil {
+			c.s.publishDeviceState(c.s.devicesOf(snap, ext), ext, StateRinging)
+		}
 	}
 }
 
@@ -542,6 +582,12 @@ func (c *call) answer(w *leg) {
 	}
 	c.addTrace("Call established")
 	c.publish()
+	if snap := c.s.deps.Snapshots.Current(); snap != nil {
+		c.s.publishDeviceState(c.s.devicesOf(snap, c.dialled), c.dialled, StateOnCall)
+		if c.callerDevice != "" {
+			c.s.publishDeviceState([]string{c.callerDevice}, c.callerNum, StateOnCall)
+		}
+	}
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", bres.Body())
 	if ct := bres.ContentType(); ct != nil {
 		res.AppendHeader(sip.HeaderClone(ct))
@@ -744,10 +790,19 @@ func (c *call) end(status int, side, reason, result string) {
 	c.endOnce.Do(func() {
 		c.mu.Lock()
 		c.ended = true
+		held := c.held
 		if c.maxTimer != nil {
 			c.maxTimer.Stop()
 		}
 		c.mu.Unlock()
+		if held {
+			c.s.m.HoldActive.Dec()
+		}
+		c.s.dropBuffer(c)
+		c.mu.Lock()
+		cn, cd, de := c.callerNum, c.callerDevice, c.dialled
+		c.mu.Unlock()
+		c.s.restorePresenceOf(cn, cd, de)
 		close(c.stopHB)
 		if result != ResultAnswered {
 			c.release()
@@ -808,6 +863,16 @@ func (c *call) record(status int, side, reason, result string) {
 		r.BillableMs = end.Sub(answer).Milliseconds()
 	}
 	c.s.m.Calls.WithLabelValues(result).Inc()
+	if c.groupName != "" {
+		c.s.m.GroupCalls.WithLabelValues(c.groupName, c.groupStrategy, result).Inc()
+	}
+	c.s.noteCallEnd(c.callerNum, c.dialled)
+	c.mu.Lock()
+	media := c.mediaMode
+	c.mu.Unlock()
+	if media != "" {
+		r.MediaMode = media
+	}
 	c.s.deps.CDRs.Enqueue(r)
 }
 
@@ -1101,9 +1166,11 @@ func (s *Server) handleAck(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	switch {
 	case ref.leg == nil && req.CSeq().SeqNo == c.inv.CSeq().SeqNo:
-		if err := c.dss.ReadAck(req, tx); err != nil {
-			s.log.Debug("caller ACK rejected", "error", err)
-			return
+		if c.dss != nil {
+			if err := c.dss.ReadAck(req, tx); err != nil {
+				s.log.Debug("caller ACK rejected", "error", err)
+				return
+			}
 		}
 		if lateAck {
 			w.ack(req.Body(), ct)
@@ -1159,7 +1226,18 @@ func (s *Server) matchDialog(req *sip.Request) (dialogRef, bool) {
 	c := ref.c
 	if ref.leg == nil {
 		id, err := sip.DialogIDFromRequestUAS(req)
-		return ref, err == nil && c.dss != nil && id == c.dss.ID && req.Source() == c.inv.Source()
+		if err == nil && c.dss != nil && id == c.dss.ID && req.Source() == c.inv.Source() {
+			return ref, true
+		}
+		// A callee-less answer (voicemail) carries its own To tag instead
+		// of a sipgo dialog.
+		c.mu.Lock()
+		tag := c.vmTag
+		c.mu.Unlock()
+		if v, has := req.To().Params.Get("tag"); tag != "" {
+			return ref, has && v == tag && req.Source() == c.inv.Source()
+		}
+		return ref, false
 	}
 	c.mu.Lock()
 	w := c.winner
@@ -1185,12 +1263,15 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 	w, connected := c.winner, c.connected
 	c.mu.Unlock()
 	switch {
-	case !connected || w == nil:
+	case !connected || (w == nil && ref.leg != nil):
 		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 	case ref.leg == nil:
-		if err := c.dss.ReadBye(req, tx); err != nil {
-			s.respond(tx, req, sip.StatusBadRequest, "Bad Request")
-			return
+		// The caller's BYE (including on a callee-less voicemail call).
+		if c.dss != nil {
+			if err := c.dss.ReadBye(req, tx); err != nil {
+				s.respond(tx, req, sip.StatusBadRequest, "Bad Request")
+				return
+			}
 		}
 		s.m.response(sip.StatusOK)
 		c.hangup(cdr.SideCaller)
@@ -1226,6 +1307,11 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	defer c.endInDialog()
+	// Hold (S-1) is signalled by the phone's re-INVITE SDP direction: a
+	// sendonly (or inactive, or zero-connection) offer holds the call from
+	// whichever side sends it; a sendrecv re-INVITE resumes it. The body is
+	// relayed unchanged, so both phones agree on the direction.
+	c.setHeld(sdpHeld(req.Body()))
 	var (
 		out *sip.Request
 		do  func(context.Context, *sip.Request) (*sip.Response, error)

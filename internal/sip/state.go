@@ -21,6 +21,8 @@ type State interface {
 	AllBindings(ctx context.Context) ([]livestate.Binding, error)
 	PutCall(ctx context.Context, c livestate.Call, ttl time.Duration) error
 	DeleteCall(ctx context.Context, id string) error
+	// SetDeviceState publishes a device's presence (contract 3).
+	SetDeviceState(ctx context.Context, sds livestate.DeviceState, ttl time.Duration) error
 }
 
 // Snapshots yields the current configuration snapshot (nil before the first

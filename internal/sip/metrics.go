@@ -41,7 +41,50 @@ type Metrics struct {
 	TrunkActiveCalls    *prometheus.GaugeVec   // trunk: cluster-wide
 	TrunkSlotOvercommit *prometheus.CounterVec // trunk: lost slots re-added over max_calls
 	RouteDecision       prometheus.Histogram
+
+	// Phase 4 (spec S-13). VoicemailStorage is what this node stored
+	// (cluster-wide totals come from MinIO via hello-control); VoicemailEmail
+	// is incremented by the SMTP worker in hello-control through this shared
+	// registry. PresenceSubscriptions counts this node's live dialog
+	// subscriptions; HoldActive the calls currently held on this node.
+	VoicemailMessages     *prometheus.CounterVec // result
+	VoicemailStorage      prometheus.Gauge
+	VoicemailEmail        *prometheus.CounterVec // result
+	Transfers             *prometheus.CounterVec // kind, result
+	Forwarded             *prometheus.CounterVec // kind
+	GroupCalls            *prometheus.CounterVec // group, strategy, result
+	PresenceSubscriptions prometheus.Gauge
+	HoldActive            prometheus.Gauge
 }
+
+// Transfer kinds for hello_transfers_total.
+const (
+	TransferBlind    = "blind"
+	TransferAttended = "attended"
+)
+
+// Transfer results.
+const (
+	TransferAnswered = "answered"
+	TransferFailed   = "failed"
+)
+
+// Voicemail message results for hello_voicemail_messages_total.
+const (
+	VMStored  = "stored"
+	VMFailed  = "failed"
+	VMDiscord = "discarded" // caller hung up, or under one second
+)
+
+// Forwarding kinds for hello_forwarded_calls_total.
+const (
+	ForwardAlways   = "always"
+	ForwardBusy     = "busy"
+	ForwardNoAnswer = "no_answer"
+	ForwardUnreach  = "unreachable"
+	ForwardDND      = "dnd"
+	ForwardLoop     = "loop"
+)
 
 // Trunk attempt results for hello_trunk_calls_total.
 const (
@@ -99,8 +142,34 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Name: "hello_route_decision_seconds", Help: "Time to take a routing decision.",
 		Buckets: []float64{.00001, .00005, .0001, .00025, .0005, .001, .0025, .005, .01},
 	})
+	m.VoicemailMessages = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_voicemail_messages_total", Help: "Voicemail messages by result (stored, failed, discarded).",
+	}, []string{"result"})
+	m.VoicemailStorage = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hello_voicemail_storage_bytes", Help: "Voicemail audio bytes this node stored (cluster total lives in MinIO).",
+	})
+	m.VoicemailEmail = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_voicemail_email_total", Help: "Voicemail email deliveries by result (sent, failed); incremented by hello-control's worker.",
+	}, []string{"result"})
+	m.Transfers = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_transfers_total", Help: "Blind and attended transfers by kind and result.",
+	}, []string{"kind", "result"})
+	m.Forwarded = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_forwarded_calls_total", Help: "Forwarded call attempts by forwarding kind.",
+	}, []string{"kind"})
+	m.GroupCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_group_calls_total", Help: "Group call attempts by group, strategy and result.",
+	}, []string{"group", "strategy", "result"})
+	m.PresenceSubscriptions = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hello_presence_subscriptions", Help: "Live dialog (BLF) subscriptions served by this node.",
+	})
+	m.HoldActive = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hello_hold_active", Help: "Calls currently held on this node (either leg sendonly).",
+	})
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
-		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision)
+		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
+		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Forwarded, m.GroupCalls,
+		m.PresenceSubscriptions, m.HoldActive)
 	return m
 }
 
