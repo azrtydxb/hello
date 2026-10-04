@@ -666,9 +666,16 @@ spec:
         app.kubernetes.io/instance: hello
         app.kubernetes.io/component: edge
     spec:
+      securityContext:
+        # /run/kamailio is an emptyDir the kamailio user (102) must write its
+        # ctl socket and RPC FIFO into; group ownership via fsGroup.
+        fsGroup: 102
       containers:
         - name: kamailio
-          image: ghcr.io/kamailio/kamailio:6.0.8-bookworm
+          # The official ghcr image is amd64-only and the kw nodes are
+          # arm64; this is the Debian-trixie build from ci.yaml (docker/
+          # kamailio/Dockerfile), pinned to the tag it published.
+          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-0bb80e69a17a1670107306a29058f3c70658b0a1
           imagePullPolicy: IfNotPresent
           securityContext:
             # uid/gid of the image's kamailio user (read from the image).
