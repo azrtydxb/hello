@@ -738,7 +738,10 @@ func (c *call) announcementDestination(name string) {
 		obj, ok = snap.Announcement(name)
 	}
 	if !c.isAnchored() {
-		if !c.reanchorLive(AnchorAnnouncement) {
+		// Pre-answer (a group failure destination): anchor at setup like
+		// voicemail does, so the answer SDP is the anchor's.
+		c.startAnchor(snap, AnchorAnnouncement)
+		if !c.isAnchored() {
 			c.addTrace("Announcement destination skipped: the call could not be anchored")
 			c.hangupGroup(sip.StatusRequestTimeout, "group timeout")
 			return
@@ -756,7 +759,7 @@ func (c *call) announcementDestination(name string) {
 		}
 		// The announcement ends the call here: a group's failure
 		// destination has no next step (spec S-5 "hangup or next step").
-		c.hangup(cdr.SideCallee)
+		c.announcementEnd()
 	}()
 }
 
@@ -791,4 +794,57 @@ func (c *call) anchorReasonIs(r AnchorReason) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.anchored && c.anchorReason == r
+}
+
+// announcementEnd ends an answered callee-less call (announcement
+// destination or feature code): the CDR, then a raw BYE on the caller's
+// dialog, whose sipgo session Bye refuses (its 200 was written through the
+// transaction, so InviteResponse was never set).
+func (c *call) announcementEnd() {
+	c.mu.Lock()
+	if c.hungUp {
+		c.mu.Unlock()
+		return
+	}
+	c.hungUp = true
+	c.mu.Unlock()
+	c.end(sip.StatusOK, cdr.SideCallee, "", ResultAnswered)
+	go func() {
+		defer contain(c.s.log, "announcement bye")
+		c.byeCallerRaw()
+	}()
+}
+
+// byeCallerRaw sends the BYE on the caller dialog we answered through the
+// transaction (vmTag identifies it).
+func (c *call) byeCallerRaw() {
+	c.mu.Lock()
+	inv, tag := c.inv, c.vmTag
+	c.mu.Unlock()
+	if inv == nil {
+		return
+	}
+	target := inv.Recipient
+	if ct := inv.Contact(); ct != nil {
+		target = ct.Address
+	}
+	req := sip.NewRequest(sip.BYE, *target.Clone())
+	req.AppendHeader(&sip.FromHeader{Address: *inv.To().Address.Clone(),
+		Params: sip.HeaderParams{{K: "tag", V: tag}}})
+	req.AppendHeader(&sip.ToHeader{Address: *inv.From().Address.Clone(),
+		Params: sip.HeaderParams{{K: "tag", V: tagParam(inv.From())}}})
+	callID := sip.CallIDHeader(inv.CallID().Value())
+	req.AppendHeader(&callID)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: inv.CSeq().SeqNo + 1, MethodName: sip.BYE})
+	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
+	req.AppendHeader(sip.HeaderClone(&c.s.contact))
+	req.SetTransport("UDP")
+	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
+	defer cancel()
+	res, err := c.s.client.Do(ctx, req)
+	if err != nil {
+		c.s.log.Debug("announcement BYE failed", "error", err)
+		return
+	}
+	c.s.m.response(res.StatusCode)
 }

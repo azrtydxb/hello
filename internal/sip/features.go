@@ -79,9 +79,13 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		return true
 	case ActionAnnouncement:
 		// The announcement feature code answers, plays its argument's
-		// announcement, then hangs up (spec S-5).
+		// announcement, then hangs up (spec S-5). The name is the code
+		// row's argument column; a name dialled after the code wins.
 		if !c.begin(c.inv, tx) {
 			return true
+		}
+		if arg == "" {
+			arg = fc.Argument
 		}
 		c.announcementDestination(arg)
 		return true

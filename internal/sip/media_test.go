@@ -2,6 +2,7 @@ package sip
 
 import (
 	"context"
+	"github.com/azrtydxb/hello/internal/cdr"
 	"slices"
 	"strings"
 	"sync"
@@ -252,5 +253,237 @@ func sendDigits(t *testing.T, p *phone, dcs *sipgo.DialogClientSession, digits s
 		req.SetBody([]byte("Signal=" + string(d) + "\r\nDuration=100\r\n"))
 		req.SetTransport("UDP")
 		p.do(req)
+	}
+}
+
+// TestReAnchorMidCall fails if a mid-call anchor need (here *1 on a direct
+// call) does not re-anchor live: both dialogs must be re-INVITEd to the
+// anchor, the CDR must say anchored, and the anchor must not churn back to
+// direct (spec S-1, TestReAnchorMidCall). Mutation: making reanchorLive a
+// no-op fails the re-INVITE waits and the CDR media column.
+func TestReAnchorMidCall(t *testing.T) {
+	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), withMedia(false),
+		withVoicemail(newVMStore(), &fakeObjects{}))
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	c := newPhone(t, pbx, "c1", "pc")
+	c.register(t)
+	c.setCallee(answerAfter(nil))
+	r := waitCall(t, dial(t.Context(), a, "300"))
+	if r.err != nil {
+		t.Fatalf("call: %v", r.err)
+	}
+	waitReq(t, c.invites, "INVITE to c")
+	var seq uint32 = r.dcs.InviteRequest.CSeq().SeqNo + 10
+	sendDigits(t, a, r.dcs, "*1", &seq)
+	reqA := waitReq(t, a.reinvites, "re-INVITE to a")
+	reqC := waitReq(t, c.reinvites, "re-INVITE to c")
+	for _, body := range [][]byte{reqA.Body(), reqC.Body()} {
+		sdp, err := media.ParseAudioSDP(body)
+		if err != nil || !strings.Contains(string(body), "m=audio") {
+			t.Fatalf("re-INVITE body is not the anchor's SDP: %q (%v)", body, err)
+		}
+		if sdp.Address != "127.0.0.1" {
+			t.Fatalf("re-INVITE names %s, want the anchor host", sdp.Address)
+		}
+	}
+	if v := pbx.metric(t, "hello_media_anchored_calls", nil); v != 1 {
+		t.Fatalf("anchored calls = %v, want 1", v)
+	}
+	// A second re-INVITE from a (a hold toggle) must not churn the anchor
+	// away: the anchored path answers with the anchor's SDP.
+	res := a.reinviteAsCaller(t, r.dcs, "v=0\r\no=a 2 2 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 4970 RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\na=sendonly\r\n")
+	if res.StatusCode != 200 {
+		t.Fatalf("hold re-INVITE = %d", res.StatusCode)
+	}
+	reqA2 := waitReq(t, c.reinvites, "hold mirrored to c")
+	if !strings.Contains(string(reqA2.Body()), "sendonly") {
+		t.Fatalf("hold not mirrored: %q", reqA2.Body())
+	}
+	hangup(t, r.dcs)
+	cd := pbx.nextCDR(t)
+	if cd.MediaMode != "anchored" {
+		t.Fatalf("CDR media = %q, want anchored", cd.MediaMode)
+	}
+	if !strings.Contains(traceText(cd.Trace), "Media anchored mid-call (recording)") {
+		t.Fatalf("CDR trace lacks the anchor step: %s", traceText(cd.Trace))
+	}
+}
+
+// TestRecordingPauseOnHold fails if recording captures hold silence: a
+// held call's incoming audio must not reach the recorder, and the stored
+// duration must not count the held seconds (spec edge case).
+// Mutation: dropping the isPaused check in recTap makes the duration cover
+// the held phase too and fails the bound.
+func TestRecordingPauseOnHold(t *testing.T) {
+	objs := &fakeObjects{}
+	recs := &fakeRecordings{}
+	feats := func(s *snapshot.Snapshot) {
+		s.WithExtensionData([]snapshot.Extension{{Number: "200", RecordDefault: true}})
+	}
+	pbx := startPBX(t, callerDevices(), shortRing(2*time.Second), withMedia(false),
+		withFeatures(feats), withVoicemail(newVMStore(), objs))
+	pbx.srv.deps.Recordings = recs
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	b := newPhone(t, pbx, "b1", "pb1")
+	b.register(t)
+	b.setCallee(answerAfter(nil))
+	r := waitCall(t, dial(t.Context(), a, "200"))
+	if r.err != nil {
+		t.Fatalf("call: %v", r.err)
+	}
+	waitReq(t, b.invites, "INVITE to b")
+	feedA := startRTPFeed(t, r.dcs.InviteResponse.Body())
+	feedA.silence(1)
+	// Hold: a sendonly re-INVITE pauses the recording.
+	res := a.reinviteAsCaller(t, r.dcs, "v=0\r\no=a 2 2 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 4970 RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\na=sendonly\r\n")
+	if res.StatusCode != 200 {
+		t.Fatalf("hold re-INVITE = %d", res.StatusCode)
+	}
+	feedA.silence(1.5) // held: must not be captured
+	res = a.reinviteAsCaller(t, r.dcs, "v=0\r\no=a 3 3 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 4970 RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\na=sendrecv\r\n")
+	if res.StatusCode != 200 {
+		t.Fatalf("resume re-INVITE = %d", res.StatusCode)
+	}
+	feedA.silence(1)
+	hangup(t, r.dcs)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if rows := recs.snapshot(); len(rows) == 1 {
+			// About two seconds captured; the 1.5 held seconds must be
+			// missing. The frame clock tolerates one tick either way.
+			if rows[0].durationMs > 2400 {
+				t.Fatalf("recording is %d ms: hold silence was captured", rows[0].durationMs)
+			}
+			if rows[0].durationMs < 1500 {
+				t.Fatalf("recording is only %d ms", rows[0].durationMs)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("recording not stored")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestAnnouncements fails if an announcement destination does not answer,
+// play and continue, if the before-transfer announcement does not play, or
+// if a missing WAV does not skip the step (spec S-5).
+func TestAnnouncements(t *testing.T) {
+	objs := &fakeObjects{}
+	putAnnouncements(objs)
+	group := []snapshot.RingGroup{{
+		ID: 1, Name: "700", Strategy: "ring-all", RingTimeout: 1, MemberDelay: 1,
+		FailureKind: "announcement", FailureTarget: "welcome",
+	}}
+	feats := func(s *snapshot.Snapshot) {
+		s.WithRingGroups(group, [][]snapshot.RingGroupMember{{{ExtensionID: 9, Extension: "200", Position: 1}}})
+		s.WithFeatureCodes([]snapshot.FeatureCode{
+			{Code: "*89", Action: ActionAnnouncement, Argument: "welcome"},
+			{Code: "*2", Action: ActionBlindTransfer, Argument: "welcome"},
+		})
+		s.WithAnnouncements(map[string]string{"welcome": "ann/welcome.wav"})
+	}
+	pbx := startPBX(t, threeDevices(), shortRing(300*time.Millisecond), withMedia(false),
+		withFeatures(feats), withVoicemail(newVMStore(), objs))
+	pbx.srv.deps.Recordings = &fakeRecordings{}
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	b := newPhone(t, pbx, "b1", "pb1")
+	b.register(t)
+	c := newPhone(t, pbx, "c1", "pc")
+	c.register(t)
+	c.setCallee(answerAfter(nil))
+
+	// Destination kind: the group's member never answers, so the failure
+	// destination answers, plays, hangs up. The caller sees a 200 then a
+	// BYE, and the WAV was fetched.
+	b.setCallee(ringForever())
+	r := waitCall(t, dial(t.Context(), a, "700"))
+	if r.err != nil {
+		t.Fatalf("announcement call: %v", r.err)
+	}
+	waitReq(t, a.byes, "BYE ends the announcement")
+	deadline := time.Now().Add(3 * time.Second)
+	for !slices.Contains(objs.snapshotGets(), "ann/welcome.wav") {
+		if time.Now().After(deadline) {
+			t.Fatal("the announcement WAV was never fetched")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	pbx.nextCDR(t)
+
+	// Feature code: *89 answers, plays, and the PBX hangs up first.
+	r = waitCall(t, dial(t.Context(), a, "*89"))
+	if r.err != nil {
+		t.Fatalf("feature code call: %v", r.err)
+	}
+	waitReq(t, a.byes, "BYE ends the announcement feature code")
+	pbx.nextCDR(t)
+
+	// Pre-transfer: *2 with the announcement argument plays before the
+	// blind transfer to 300 executes.
+	r = waitCall(t, dial(t.Context(), a, "300"))
+	if r.err != nil {
+		t.Fatalf("transfer call: %v", r.err)
+	}
+	waitReq(t, c.invites, "INVITE to c")
+	var seq uint32 = r.dcs.InviteRequest.CSeq().SeqNo + 10
+	sendDigits(t, a, r.dcs, "*2", &seq)
+	sendDigits(t, a, r.dcs, "300#", &seq)
+	// The transfer target answers; the caller is re-INVITEd to it, and the
+	// announcement ran (fetched) before the transfer.
+	waitReq(t, c.reinvites, "caller re-INVITEd to the transfer target")
+	waitReq(t, a.reinvites, "the transferee leg's answer reaches the caller")
+	deadline = time.Now().Add(3 * time.Second)
+	for !slices.Contains(objs.snapshotGets(), "ann/welcome.wav") {
+		if time.Now().After(deadline) {
+			t.Fatal("the pre-transfer announcement never played")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		if v := pbx.metric(t, "hello_transfers_total", map[string]string{"kind": "blind", "result": "answered"}); v == 1 {
+			break
+		}
+		if v := pbx.metric(t, "hello_transfers_total", map[string]string{"kind": "blind", "result": "failed"}); v == 1 {
+			t.Fatal("the transfer failed")
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the transfer never completed")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Missing WAV: *89 with the set emptied skips the step with a trace,
+	// the call still answers and ends.
+	feats2 := func(s *snapshot.Snapshot) {
+		s.WithFeatureCodes([]snapshot.FeatureCode{{Code: "*89", Action: ActionAnnouncement, Argument: "ghost"}})
+	}
+	withFeatures(feats2)(nil, &Deps{Snapshots: pbx.snaps})
+	pbx.snaps.p.Load().WithFeatureCodes([]snapshot.FeatureCode{{Code: "*89", Action: ActionAnnouncement, Argument: "ghost"}})
+	r = waitCall(t, dial(t.Context(), a, "*89"))
+	if r.err != nil {
+		t.Fatalf("missing-WAV call: %v", r.err)
+	}
+	waitReq(t, a.byes, "BYE ends the skipped announcement")
+	// Drain the CDRs still in flight from the transfer part until this
+	// call's CDR shows up.
+	var cd cdr.Record
+	deadline = time.Now().Add(5 * time.Second)
+	for {
+		cd = pbx.nextCDR(t)
+		if cd.Destination == "*89" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the missing-WAV CDR never arrived")
+		}
+	}
+	if !strings.Contains(traceText(cd.Trace), "missing") {
+		t.Fatalf("CDR trace lacks the missing-WAV step: %s", traceText(cd.Trace))
 	}
 }
