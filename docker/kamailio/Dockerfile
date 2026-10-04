@@ -5,7 +5,9 @@
 # same 6.0 line; the config (deploy/kamailio/kamailio.cfg) is unchanged.
 FROM debian:trixie-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends kamailio \
+# wget is not in the slim base, but the lab's healthchecks (compose.yaml)
+# and an operator's readyz probe both use it the way the Hello images do.
+RUN apt-get update && apt-get install -y --no-install-recommends kamailio wget \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # The kw manifest pins runAsUser/runAsGroup 102 (the official image's
