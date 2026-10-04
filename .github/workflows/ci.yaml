@@ -48,11 +48,11 @@ jobs:
         image: valkey/valkey:9-alpine
         options: >-
           --health-cmd "valkey-cli ping" --health-interval 5s --health-retries 10
-      # bitnami/minio starts its server from the environment; the upstream
-      # image's entrypoint wants `server /data` arguments, which a GitHub
-      # service container cannot pass.
       minio:
-        image: bitnami/minio:latest
+        # The upstream image's default command only prints its help, and a
+        # service container cannot pass `server /data` arguments; this
+        # Dockerfile adds exactly that (see .github/services/).
+        image: .github/services/minio.Dockerfile
         env:
           MINIO_ROOT_USER: hello
           MINIO_ROOT_PASSWORD: hello-voicemail-secret
