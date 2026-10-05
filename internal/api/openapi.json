@@ -2215,6 +2215,115 @@
         },
         "description": "The dialog state hello-sip publishes per device: idle, ringing, on-call or dnd."
       }
+    },
+    "/api/v1/diagnostics/devices/{id}": {
+      "get": {
+        "operationId": "getDeviceDiagnostics",
+        "summary": "Why a device is or is not registered",
+        "tags": ["diagnostics"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Device id"
+          }
+        ],
+        "description": "The device's current bindings, its recent REGISTER attempts (newest first; hello-sip keeps the last 20 per enabled device for 1 h after the latest) and the failed-auth counter of the last attempt's source IP. verdict explains a missing registration from those facts only, and is null while the device is registered. 503 while live state (Valkey) is unavailable.",
+        "responses": {
+          "200": {
+            "description": "Diagnostics for the device",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceDiagnostics"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/diagnostics/auth-failures": {
+      "get": {
+        "operationId": "listAuthFailures",
+        "summary": "Source IPs with failed authentications",
+        "tags": ["diagnostics"],
+        "description": "Every source IP with a failed-auth counter in its current window (HELLO_SIP_AUTH_FAIL_WINDOW). blocked is true at or above limit (HELLO_SIP_AUTH_FAIL_LIMIT as hello-control reads it): hello-sip then answers that IP 403 until the window ends.",
+        "responses": {
+          "200": {
+            "description": "The counters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthFailureList"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/diagnostics/auth-failures/{ip}": {
+      "delete": {
+        "operationId": "clearAuthFailures",
+        "summary": "Unblock a source IP",
+        "tags": ["diagnostics"],
+        "parameters": [
+          {
+            "name": "ip",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "IPv4 or IPv6 address"
+          }
+        ],
+        "description": "Deletes the source's failed-auth counter, so it is no longer throttled. 404 when ip is not an IP address.",
+        "responses": {
+          "204": {
+            "description": "Counter cleared"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4697,6 +4806,164 @@
               }
             ],
             "description": "null while PostgreSQL is unavailable"
+          }
+        }
+      },
+      "RegisterAttempt": {
+        "type": "object",
+        "required": ["at", "device", "source", "ip", "node", "credentials", "code", "reason"],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "device": {
+            "type": "string",
+            "description": "SIP username of the AOR"
+          },
+          "source": {
+            "type": "string",
+            "description": "ip:port the REGISTER came from"
+          },
+          "ip": {
+            "type": "string",
+            "description": "Client IP the failed-auth throttle counts"
+          },
+          "node": {
+            "type": "string",
+            "description": "SIP node that answered"
+          },
+          "userAgent": {
+            "type": "string",
+            "description": "The request's User-Agent; absent when it had none"
+          },
+          "credentials": {
+            "type": "boolean",
+            "description": "The request carried an Authorization header"
+          },
+          "code": {
+            "type": "integer",
+            "description": "Final response status"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "A 401 whose challenge carried stale=true"
+          }
+        }
+      },
+      "AuthFailure": {
+        "type": "object",
+        "required": ["ip", "failures", "windowEndsAt", "blocked"],
+        "properties": {
+          "ip": {
+            "type": "string"
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "windowEndsAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the counter expires"
+          },
+          "blocked": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AuthFailureList": {
+        "type": "object",
+        "required": ["items", "limit"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuthFailure"
+            }
+          },
+          "limit": {
+            "type": "integer"
+          }
+        }
+      },
+      "DeviceDiagnostics": {
+        "type": "object",
+        "required": ["deviceId", "device", "extensionId", "enabled", "aor", "registered", "bindings", "attempts", "attemptsRetentionSeconds", "source", "authFailLimit", "verdict"],
+        "properties": {
+          "deviceId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "device": {
+            "type": "string"
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "aor": {
+            "type": "string",
+            "example": "sip:101-desk@hello.test"
+          },
+          "registered": {
+            "type": "boolean"
+          },
+          "bindings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binding"
+            }
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegisterAttempt"
+            }
+          },
+          "attemptsRetentionSeconds": {
+            "type": "integer"
+          },
+          "source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AuthFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Failed-auth counter of the last attempt's IP"
+          },
+          "authFailLimit": {
+            "type": "integer"
+          },
+          "verdict": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["code", "message"],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": ["disabled", "throttled", "no_register", "expired", "stale_nonce", "auth_failed", "challenge_unanswered", "forbidden", "interval_too_brief", "unavailable", "rejected"]
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it is not registered; null while registered"
           }
         }
       }

@@ -1,6 +1,7 @@
 package sip
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,11 @@ type contactReq struct {
 // handleRegister authenticates the device, applies its contacts to the AOR
 // and answers with every current binding (RFC 3261 §10.3).
 func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
+	if rec, ok := s.deps.State.(registerAttemptRecorder); ok {
+		rtx := &recordingTx{ServerTransaction: tx}
+		defer s.recordRegisterAttempt(rec, req, rtx)
+		tx = rtx
+	}
 	if s.refuseIfNotReady(req, tx) {
 		return
 	}
@@ -233,4 +239,56 @@ func (s *Server) bindingPath(req *sip.Request, exp time.Time) []string {
 		}
 	}
 	return []string{s.pathURI(s.flowToken(req.Source(), "udp", exp))}
+}
+
+// registerAttemptRecorder keeps each enabled device's recent REGISTER
+// outcomes for the Diagnostics view; *livestate.Store implements it. A
+// State without it records nothing.
+type registerAttemptRecorder interface {
+	RecordRegisterAttempt(ctx context.Context, a livestate.RegisterAttempt) error
+}
+
+// recordingTx notes the final response sent through it.
+type recordingTx struct {
+	sip.ServerTransaction
+	res *sip.Response
+}
+
+func (t *recordingTx) Respond(res *sip.Response) error {
+	if res.StatusCode >= 200 {
+		t.res = res
+	}
+	return t.ServerTransaction.Respond(res)
+}
+
+// recordRegisterAttempt stores the REGISTER's final response, after it was
+// sent, for the AOR's device. Only enabled devices of the snapshot are
+// recorded, so the keyspace is bounded by configuration, not by what
+// clients send; a failed write is logged and never affects the response.
+func (s *Server) recordRegisterAttempt(rec registerAttemptRecorder, req *sip.Request, tx *recordingTx) {
+	snap := s.deps.Snapshots.Current()
+	if tx.res == nil || snap == nil || req.To() == nil {
+		return
+	}
+	user := req.To().Address.User
+	if _, ok := snap.DeviceByUsername(user); !ok {
+		return
+	}
+	stale := false
+	for _, h := range tx.res.GetHeaders("WWW-Authenticate") {
+		stale = stale || strings.Contains(strings.ToLower(h.Value()), "stale=true")
+	}
+	ua := ""
+	if h := req.GetHeader("User-Agent"); h != nil {
+		ua = h.Value()
+	}
+	ctx, cancel := s.stateCtx()
+	defer cancel()
+	err := rec.RecordRegisterAttempt(ctx, livestate.RegisterAttempt{
+		At: time.Now().UTC(), Device: user, Source: s.clientSource(req), IP: s.clientIP(req), Node: s.cfg.NodeID, UserAgent: ua,
+		Credentials: req.GetHeader("Authorization") != nil, Code: tx.res.StatusCode, Reason: tx.res.Reason, Stale: stale,
+	})
+	if err != nil {
+		s.log.Debug("register attempt not recorded", "error", err)
+	}
 }
