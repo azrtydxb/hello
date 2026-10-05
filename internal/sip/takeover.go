@@ -9,6 +9,7 @@ import (
 	"context"
 	crand "crypto/rand"
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -121,41 +122,55 @@ func (l *haLeg) request(s *Server, method sip.RequestMethod, body []byte, conten
 	}
 	req.SetTransport("UDP")
 	// Transport destination: the route hop on Hello's side of the dialog.
-	// The dialog's route set crosses the edge proxy's two interfaces: on
-	// the caller's leg (Hello is the UAS) it runs phone-edge-first, so
-	// Hello's hop is the last; on Hello's own forks it is the first.
-	if hop, ok := l.helloHop(); ok {
+	// The route set crosses the edge proxy's two interfaces (the
+	// phone-facing one is advertised and unreachable from the Hello
+	// network); the hop naming a trusted proxy is the edge's Hello-facing
+	// address.
+	if hop := l.helloHop(s); hop != "" {
 		req.SetDestination(hop)
 	}
 	return req, nil
 }
 
-// helloHop is the address of the route hop adjacent to Hello, for the
-// transport destination of the leg's requests.
-func (l *haLeg) helloHop() (string, bool) {
+// helloHop is the address of the route hop adjacent to Hello: the route
+// whose host is one of the node's trusted proxies (the edge's Hello-facing
+// address), or "" when no route names one.
+func (l *haLeg) helloHop(s *Server) string {
 	l.mu.Lock()
-	routes, uas := l.routes, l.uas
+	routes := l.routes
 	l.mu.Unlock()
-	var raw string
-	switch {
-	case len(routes) == 0:
-		return "", false
-	case uas:
-		raw = routes[len(routes)-1]
-	default:
-		raw = routes[0]
+	for _, raw := range routes {
+		var hop sip.Uri
+		if err := sip.ParseUri(strings.Trim(raw, "<> "), &hop); err != nil {
+			continue
+		}
+		if addrIsTrusted(s, hop.Host) {
+			return hostPort(hop)
+		}
 	}
-	var hop sip.Uri
-	if err := sip.ParseUri(strings.Trim(raw, "<> "), &hop); err != nil {
-		return "", false
+	return ""
+}
+
+// addrIsTrusted reports whether host falls in one of the node's trusted
+// proxy ranges (netip parse failures are simply not trusted).
+func addrIsTrusted(s *Server, host string) bool {
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
 	}
-	return hostPort(hop), true
+	ip = ip.Unmap()
+	for _, p := range s.cfg.TrustedProxies {
+		if p.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // destination is where the leg's requests go: the route hop on Hello's
-// side, or the remote target when the dialog has no route set.
-func (l *haLeg) destination() string {
-	if hop, ok := l.helloHop(); ok {
+// side, or the remote target when no route names it.
+func (l *haLeg) destination(s *Server) string {
+	if hop := l.helloHop(s); hop != "" {
 		return hop
 	}
 	l.mu.Lock()
@@ -192,7 +207,7 @@ func (s *Server) haAck(l *haLeg, inv *sip.Request, res *sip.Response) {
 	ack.AppendHeader(&cseq)
 	ack.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
 	ack.SetTransport("UDP")
-	if hop, ok := l.helloHop(); ok {
+	if hop := l.helloHop(s); hop != "" {
 		ack.SetDestination(hop)
 	}
 	if err := s.client.WriteRequest(ack, sipgo.ClientRequestAddVia); err != nil {
@@ -501,7 +516,7 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	// this node's relay port for that leg, in the dialog's replicated
 	// direction (a held call stays held); the answer re-aims it.
 	bodyA := []byte(relaySDPDir(host, relay, legCaller, off, media.SDPDirection([]byte(a.sdp))))
-	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCaller, "to", a.destination())
+	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCaller, "to", a.destination(s))
 	res, okA := s.haReinvite(a, bodyA)
 	if okA {
 		haAim(relay, legCaller, res.Body())
@@ -510,7 +525,7 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 		s.log.Warn("takeover leg failed", "call_id", st.CallID, "leg", legCaller, "res", resStatus(res))
 	}
 	bodyB := []byte(relaySDPDir(host, relay, legCallee, off, media.SDPDirection([]byte(b.sdp))))
-	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCallee, "to", b.destination())
+	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCallee, "to", b.destination(s))
 	res, okB := s.haReinvite(b, bodyB)
 	if okB {
 		haAim(relay, legCallee, res.Body())
