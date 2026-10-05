@@ -28,8 +28,8 @@ type fakeHA struct {
 	// staleReleases counts claims released while the record still named
 	// another node than the claimant: a survivor could take that call again.
 	staleReleases int
-	saves    map[string]int // replication writes per Call-ID
-	ttls     map[string]time.Duration
+	saves         map[string]int // replication writes per Call-ID
+	ttls          map[string]time.Duration
 }
 
 func newFakeHA() *fakeHA {
