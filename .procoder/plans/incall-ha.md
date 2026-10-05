@@ -38,7 +38,7 @@ Files: `internal/sip/` (replication hooks in the call lifecycle, takeover poller
 
 - [x] Replication: write-on-change + heartbeat; tests (TestDialogStateLifecycle against real Valkey, TestTakeoverReINVITEs asserts the replicated fields; replication failure non-fatal + counted by hello_dialog_replicated_total{result}).
 - [x] Orphan detection + claim + takeover re-INVITEs; tests with in-process phones (TestTakeoverReINVITEs: taker re-INVITEs both, hangup works, trace carries `ha: taken over from …`; TestTakeoverClaim on claim atomicity; TestTakeoverLoopOnValkey runs the loop against real Valkey + membership in CI). The lab's TestKillSIPNodeDuringCall asserts the full takeover end to end.
-- [x] Scenario coverage (partial, see report): hold and recording in TestTakeoverScenarioMatrix (in-process); connected/ringing in the lab; blind/attended transfer, announcement and voicemail takeovers are NOT implemented (voicemail is one-legged by design; transfer/announcement state replicates but has no dedicated kill-test).
+- [x] Scenario coverage: hold and recording in TestTakeoverScenarioMatrix (in-process); connected/ringing in the lab. Gaps closed on phase-7-gaps: every S-5 row runs in TestTakeoverScenarioMatrix (connected, ringing, hold, recording, blind transfer ringing/answered, attended consultation/bridged, announcement, announcement destination, voicemail); one-legged calls (voicemail, announcement destination) are taken over and their application restarts; transferred and bridged calls keep the anchor and replicate; the lab adds TestKillSIPNodeDuringVoicemail; the live view carries `ha`; TestDialogReplication, TestTakeoverMediaGap, TestHonestyFlags, TestDoubleFailure and TestHAMetrics exist under the spec's names.
 - [x] Zombie counting + honesty flags (S-6); always-anchor policy flip (S-7); metrics (S-13 list).
 - [x] Gate + report per house rules.
 
@@ -48,6 +48,16 @@ Files: `deploy/kamailio/kamailio.cfg` (+ tests where the shape allows).
 
 - [x] In-dialog failure route: dead downstream → retry other hello node (contract 3). Verified by the lab's TestKamailioInDialogReroute (a callee BYE that reaches the dead node is answered 200 by the taker).
 - [x] Gate + report.
+
+## Task 5: Handoff on drain and the kw findings (addition, 2026-10-05)
+
+The live proof on kw failed; these close what it found. Files: `internal/sip` (handoff, route set, symmetric responses), `internal/livestate` (`Handoff`, `DialogOwner`), `deploy/kamailio/kamailio.cfg` + the kw ConfigMap copy, `deploy/kuvryn-sync/kw/resources.yaml`, `docs/ha.md`, the lab drain tests.
+
+- [x] Handoff on drain: a draining node marks its recoverable calls' records `handoff`; READY survivors claim such dialogs of a DRAINING node at once and take them over; the drainer yields (no BYE), answers stray in-dialog requests 503 so Kamailio retries them on a survivor, and exits once it holds no call; a cancelled drain takes back unclaimed calls. Tests: `TestHandoffOnDrain`, `TestHandoffCancelledDrain`; lab `TestDrainKeepsCallsAndExits` and `TestRollingUpgrade` now assert the handoff, and the drain-timeout path with no READY survivor.
+- [x] Route set: a UAC leg's route set is the 2xx Record-Route reversed and the taker uses its first hop (Kamailio's Hello-facing socket), never a phone-facing entry in a trusted range. Test: `TestTakeoverEdgeRouteSet`.
+- [x] Symmetric responses: Hello answers at the request's source; Kamailio adds rport to what it relays to Hello. Test: `TestSymmetricResponse`.
+- [x] kw: headless hello-sip Services, so Cilium socket-LB never translates (and on pod deletion force-terminates) Kamailio's socket.
+- [x] Zombie reaper: an OFFLINE member is listed without load; the reaper uses the node's last published call count.
 
 ## Task 4: Failure suite + rollout (lead)
 

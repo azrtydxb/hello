@@ -102,6 +102,13 @@ func (r *recording) setPaused(p bool) {
 	r.mu.Unlock()
 }
 
+// isActive reports whether the recording is running.
+func (r *recording) isActive() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.active
+}
+
 // isPaused reports the hold-pause state.
 func (r *recording) isPaused() bool {
 	r.mu.Lock()
@@ -760,8 +767,15 @@ func (c *call) announcementDestination(name string) {
 			return
 		}
 	}
-	if !c.answerSelf(c.anchoredAnswerA(parsedOffer(c))) {
+	answer := c.anchoredAnswerA(parsedOffer(c))
+	if !c.answerSelf(answer) {
 		return
+	}
+	if s.deps.HAState != nil {
+		// Replicated while the announcement plays (incall-ha S-5): a
+		// taker re-INVITEs the caller and plays it from the beginning.
+		c.haSoloRefresh(string(answer))
+		go c.haLoop()
 	}
 	go func() {
 		defer contain(s.log, "announcement destination")
@@ -826,6 +840,11 @@ func (c *call) announcementEnd() {
 	c.end(sip.StatusOK, cdr.SideCallee, "", ResultAnswered)
 	go func() {
 		defer contain(c.s.log, "announcement bye")
+		if hom := c.homed(); hom != nil {
+			defer c.release()
+			c.s.haBye(hom.leg(false)) // a taken-over call has no transaction-answered dialog
+			return
+		}
 		c.byeCallerRaw()
 	}()
 }

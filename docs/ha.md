@@ -8,21 +8,23 @@ Every row of the failure table is proven by an automated test in
 
 ## What Hello guarantees
 
-| Level | Guarantee                                                                  | Status       |
-| ----- | -------------------------------------------------------------------------- | ------------ |
-| 1     | Losing hello-control or the UI does not interrupt telephony                | Guaranteed   |
-| 2     | When a SIP node fails, phones register through another node                | Guaranteed   |
-| 3     | When a SIP node fails, new internal, inbound and outbound calls still work | Guaranteed   |
+| Level | Guarantee                                                                  | Status     |
+| ----- | -------------------------------------------------------------------------- | ---------- |
+| 1     | Losing hello-control or the UI does not interrupt telephony                | Guaranteed |
+| 2     | When a SIP node fails, phones register through another node                | Guaranteed |
+| 3     | When a SIP node fails, new internal, inbound and outbound calls still work | Guaranteed |
 | 4     | An established call survives loss of the node controlling it               | Guaranteed |
 
 Level 4 (Phase 7, in-call HA): **a live call survives the death of its SIP
 node with ≤3 s audio gap, when the cluster retains Valkey and at least one
 Kamailio.** The call is taken over by a surviving node from its replicated
 dialog state, both endpoints are re-INVITEd to the taker's media relay, and
-the call can be held, transferred, recorded and hung up as before. The CDR
-and live view mark such a call `ha: taken-over`; a call no survivor could
-save (see the two limitations below) is counted in `hello_zombie_calls_total`
-and never silently dropped.
+the call can be held, recorded and hung up as before (a transfer requested
+after the takeover is refused; see below). The CDR trace and the live view
+(`GET /api/v1/calls` field `ha`, a "Taken over" badge on the Active Calls
+page) mark such a call `taken-over`; a call no survivor could save (see the
+two limitations below) is counted in `hello_zombie_calls_total` and never
+silently dropped.
 
 ## Architecture
 
@@ -86,8 +88,8 @@ This table is normative: it is what Hello does. The Test column names the test t
 | Failure                                      | Detected by                                               | Node reports                                                                                                                                   | Still works                                                                                                                                                                                            | Recovery                                                                                                                    | Test                                                                                         |
 | -------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | **SIP node dies**                            | Kamailio OPTIONS probe (≤15 s); membership expires (15 s) | Other nodes: the dead node goes OFFLINE (`hello_node_state`)                                                                                   | New registrations and calls through the survivor. Phones registered through the dead node stay reachable: their binding is in Valkey and their Path points through Kamailio                            | Restart the node; it joins and Kamailio adds it back after a 200 probe                                                      | `TestKillSIPNodeDuringRegister`, `TestKillSIPNodeDuringRinging`, `TestKillSIPNodeDuringCall` |
-| **Call in progress on the dying node**       | Membership expires (15 s)                                 | `hello_dialog_takeovers_total` on the taker; the call re-homes with `ha: taken-over` in its CDR trace                                          | The call continues: both endpoints re-INVITEd to the taker's relay within 3 s of the claim, and hangup, hold, transfer and recording work there                                                        | Automatic; a call that cannot be saved is counted in `hello_zombie_calls_total`                                             | `TestKillSIPNodeDuringCall` (full takeover), `TestTakeoverScenarioMatrix`                    |
-| **SIP node drained (maintenance)**           | Operator action or SIGTERM                                | DRAINING (`hello_node_state`); calls left to finish (`hello_drain_active_calls`)                                                               | Its established calls and its trunk registrations, which move to another node; new INVITEs to it get 503 and Kamailio stops sending it work within 15 s                                                | The node exits after its last call or `HELLO_DRAIN_TIMEOUT`                                                                 | `TestDrainKeepsCallsAndExits`, `TestRollingUpgrade`                                          |
+| **Call in progress on the dying node**       | Membership expires (15 s)                                 | `hello_dialog_takeovers_total` on the taker; the call re-homes with `ha: taken-over` in its CDR trace                                          | The call continues: both endpoints re-INVITEd to the taker's relay within 3 s of the claim, and hangup, hold and recording work there                                                                  | Automatic; a call that cannot be saved is counted in `hello_zombie_calls_total`                                             | `TestKillSIPNodeDuringCall` (full takeover), `TestTakeoverScenarioMatrix`                    |
+| **SIP node drained (maintenance)**           | Operator action or SIGTERM                                | DRAINING (`hello_node_state`); calls left to hand off (`hello_drain_active_calls`)                                                             | Its established calls, handed to a READY node (in-call HA handoff), and its trunk registrations, which move to another node; new INVITEs to it get 503 and Kamailio stops sending it work within 15 s  | The node exits once its calls are handed off or ended, or at `HELLO_DRAIN_TIMEOUT`                                          | `TestDrainKeepsCallsAndExits`, `TestRollingUpgrade`                                          |
 | **Valkey primary dies**                      | Sentinels (5 s down-after) promote the replica            | UNHEALTHY with 503 + `Retry-After` until Hello reconnects; READY within 15 s of promotion (`hello_node_state`, `hello_valkey_failovers_total`) | Established calls; after promotion, everything                                                                                                                                                         | Automatic; the old primary rejoins as a replica when restarted                                                              | `TestValkeyFailover`                                                                         |
 | **Writes lost in a Valkey failover**         | —                                                         | —                                                                                                                                              | Replication is asynchronous, so registrations written in the last moment before the failure can be lost                                                                                                | Phones restore them on their next refresh                                                                                   | Documented, not automated                                                                    |
 | **All of Valkey unavailable**                | Every node's readiness check                              | UNHEALTHY (`hello_node_state`); new REGISTER/INVITE get 503 + `Retry-After`                                                                    | Established calls                                                                                                                                                                                      | Automatic when Valkey returns                                                                                               | `TestPartitionFromValkey` (one node), Phase 1 `TestStateUnavailable`                         |
@@ -109,12 +111,15 @@ This table is normative: it is what Hello does. The Test column names the test t
    registrations within 15 seconds, phones that try anyway are told to retry
    elsewhere (503 + `Retry-After`), and its trunk registrations move to another
    node.
-3. Its active calls continue to the end. When the last one ends, the node
-   exits. After `HELLO_DRAIN_TIMEOUT` (default 2 hours) it hangs up any calls
-   that remain and exits.
+3. Its active calls are handed to a READY SIP node (see
+   [Handoff on drain](#handoff-on-drain)): each continues there after a short
+   audio gap, and the draining node exits once it holds no call. A call no
+   node can take (no READY node, or one still ringing) continues to its end
+   on the draining node; after `HELLO_DRAIN_TIMEOUT` (default 2 hours) the
+   node hangs up any calls that remain and exits.
 4. Stopping a node with SIGTERM (`docker compose stop`, a Kubernetes pod
-   termination) drains it the same way; give it a grace period at least as long
-   as you are willing to wait for calls.
+   termination) drains it the same way; give it a grace period long enough
+   for the handoff (seconds) and for whatever calls no node can take.
 
 Cancel a drain with **Undrain** or `DELETE /api/v1/cluster/nodes/{id}/drain`
 before the node starts exiting.
@@ -127,9 +132,10 @@ Upgrade one SIP node at a time:
 2. Start the new version; wait until the Cluster page shows it READY.
 3. Repeat for the next node.
 
-Active calls finish on the node that set them up; new calls go to whichever
-nodes are READY. `TestRollingUpgrade` does exactly this with a call active
-throughout. Upgrade hello-control replicas one at a time the same way; they
+Active calls are handed to the READY node as the other drains; new calls go
+to whichever nodes are READY. `TestRollingUpgrade` does exactly this with a
+call active throughout: the call moves to the upgraded node and is never
+dropped. Upgrade hello-control replicas one at a time the same way; they
 carry no calls.
 
 ## In-call HA (Level 4)
@@ -137,11 +143,15 @@ carry no calls.
 Every call anchors through the owning node's media relay, and the node
 continuously writes each connected call's recovery state to Valkey — both
 legs' full dialog data (Call-IDs, tags, CSeq counters, route sets, contacts,
-remote targets, negotiated SDP), the relay ports, the endpoints' latched
-media addresses, the call's phase (talking, hold, transferring, recording,
-announcement) and the CDR correlation. Writes happen off the SIP transaction
-path: on every state change and on a 5 s heartbeat. A record expires 30 s
-after its last heartbeat.
+remote targets, both sides' negotiated SDP), the relay ports, the call's
+phase (talking, hold, transferring, recording, announcement, voicemail) with
+what a taker needs to resume it, the caller and destination numbers and the
+CDR correlation. The CSeq a taker continues from is past every request the
+owner sent on the dialog, including the NOTIFYs of a transfer. Writes happen
+off the SIP transaction path: on every state change and on a 5 s heartbeat.
+A record expires 30 s after its last heartbeat. Calls that come out of a
+transfer (the blind transfer's new call, the attended transfer's bridge)
+keep the original call's relay and replicate like any call.
 
 When membership marks a node OFFLINE (15 s), each surviving node scans for
 that node's unclaimed dialogs on a jittered 1–3 s poll and claims them
@@ -151,12 +161,42 @@ and tags, and the CSeq continues the old owner's counter — allocates fresh
 relay ports, and re-INVITEs both endpoints. Kamailio's failure route sends
 in-dialog requests that reach a dead node (408/503, or a 1.5 s timeout) to
 another hello-sip node, which answers from the replicated state. The claim
-is released once both legs are re-homed; the restarted owner cannot retake
+is released once both legs are re-homed and the record names the taker (so
+no survivor takes the call twice); the restarted owner cannot retake
 its old calls (its heartbeat finds the taker's record and yields). A slow
 owner that reappears mid-takeover yields the same way. Either re-INVITE
 failing (an endpoint that died too, or rejects with 488/603) closes the call
 one-sidedly — the surviving leg gets a normal BYE and CDR — and the zombie
 is counted.
+
+Calls Hello answered itself — a caller in voicemail, or an announcement
+destination — have one dialog, the caller's. The taker re-INVITEs the
+caller onto media of its own (a fresh voicemail anchor, or a relay) and
+restarts the application from its beginning: voicemail replays the greeting
+and beep and records afresh (what the caller had said on the dead node is
+lost), an announcement plays from the top and then hangs up as before.
+
+Each claim is counted against the dead node in Valkey. Past the dialog TTL,
+exactly one survivor counts the dead node's calls that nobody claimed (its
+live calls at death less the claims) in `hello_zombie_calls_total`: a call
+that was taken over is never counted, a takeover that failed is counted
+once by its taker.
+
+### Handoff on drain
+
+A draining node (an operator drain or SIGTERM) does not keep its calls to
+the end: it marks each recoverable call's record for handoff, and a READY
+survivor claims such a dialog of a DRAINING node at once — without waiting
+for the node to go OFFLINE — and takes it over exactly as after a crash
+(re-INVITEs, ≤3 s gap, CDR and live view `taken-over`). The draining node
+yields its copy as soon as the survivor holds the call: it closes its media
+and CDR without a BYE to the endpoints, and answers any in-dialog request
+that still reaches it for the call with 503, which Kamailio's in-dialog
+failure route retries on a survivor. With no READY survivor nothing is
+claimed and the drain timeout applies as before; a cancelled drain takes
+back the calls nobody claimed yet. Proven by `TestHandoffOnDrain` and
+`TestHandoffCancelledDrain` (`internal/sip`) and the lab's
+`TestDrainKeepsCallsAndExits` and `TestRollingUpgrade`.
 
 ### Scenario matrix
 
@@ -164,13 +204,37 @@ Each row is proven by a test (`TestKillSIPNodeDuringCall` in
 `test/integration/failure_test.go`, `TestTakeoverScenarioMatrix` and friends
 in `internal/sip`):
 
-| The node dies during          | What the users see                                            |
-| ----------------------------- | ------------------------------------------------------------- |
-| A connected call              | ≤3 s audio gap, call continues, hang up normally              |
-| A held call                   | The hold direction survives the takeover                      |
-| A recording call              | The recording continues on the taker (second MinIO object, same correlation) |
-| An announcement               | The announcement restarts from its beginning                  |
-| Ringing                       | Phase 3 behaviour: the caller gets a final response, nothing hangs |
+| The node dies during                   | What the users see                                                                                                                    |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| A connected call                       | ≤3 s audio gap, call continues, hang up normally                                                                                      |
+| A held call                            | The hold direction survives the takeover                                                                                              |
+| A blind transfer, target still ringing | The original call continues untransferred; the transferor gets a final NOTIFY (503); Kamailio's INVITE timer stops the target ringing |
+| A blind transfer, target answered      | The transferred call (caller and target) continues                                                                                    |
+| An attended transfer's consultation    | Both calls (the held original and the consultation) continue                                                                          |
+| An attended transfer, bridged          | The bridged call continues                                                                                                            |
+| A recording call                       | The recording continues on the taker (second MinIO object, same correlation)                                                          |
+| An announcement                        | The announcement restarts from its beginning                                                                                          |
+| An announcement destination            | The announcement restarts from its beginning, then the call ends as before                                                            |
+| A voicemail recording or prompt        | The caller stays connected; the greeting restarts and the message is recorded on the taker                                            |
+| Ringing                                | Phase 3 behaviour: the caller gets a final response, nothing hangs                                                                    |
+
+`TestTakeoverScenarioMatrix` runs every row in-process; the lab suite kills
+real nodes under a connected call (`TestKillSIPNodeDuringCall`,
+`TestTakeoverMediaGap`, `TestHonestyFlags`), a voicemail call
+(`TestKillSIPNodeDuringVoicemail`) and a ringing call. `TestDoubleFailure`
+kills a second node while a survivor is mid-takeover of a different call
+(in-process: the lab runs two SIP nodes).
+
+A taker reaches each endpoint through the dialog's route set, first hop
+first: the edge's Hello-facing socket. Kamailio double-record-routes, and
+its phone-facing entry (on kw, a NodePort address inside a trusted range)
+is never a hop Hello may use. `TestTakeoverEdgeRouteSet` keeps the two
+apart.
+
+Not recovered after a takeover: a REFER (transfer) on a taken-over call is
+answered 481, and a SIP INFO DTMF digit is not matched (in-band RFC 2833
+DTMF, including `*1` recording, works). A transfer still in progress when
+the node dies is abandoned, as in the table.
 
 ### The two named limitations
 
@@ -184,11 +248,6 @@ in `internal/sip`):
   silent. A call whose replication was failing when its node died (see
   `hello_dialog_replicated_total{result="failed"}`) is unrecoverable the
   same way.
-
-One-legged calls — an announcement destination or a voicemail greeting
-answering a caller with nobody on the second leg — have no second endpoint
-to re-INVITE and are **not** taken over; when their node dies they are
-counted as zombies.
 
 ## Production guidance
 
@@ -217,6 +276,14 @@ counted as zombies.
   - See the dispatcher view with
     `docker compose -p <project> -f deploy/docker-compose/compose.yaml exec kamailio kamcmd dispatcher.list`.
     Flags: `AP` active, `TP` trying, `IP` inactive.
+- **Kubernetes:** give each hello-sip node a headless Service
+  (`clusterIP: None`) and name those in Kamailio's dispatcher list, so the
+  names resolve straight to the pods. Behind a ClusterIP, a CNI with
+  socket-level load balancing (Cilium socket-LB) force-terminates
+  Kamailio's UDP socket when the backend pod goes, and Kamailio exits. Hello
+  answers every probe and request at the address it came from, and
+  Kamailio asks for that (rport) on what it sends Hello, so a replaced
+  Kamailio pod is probed UP without flushing conntrack.
 - **Trusted proxies:** set `HELLO_SIP_TRUSTED_PROXIES` to the Hello-facing
   address of every Kamailio, and nothing else. Hello trusts the client address
   and `Path` that Kamailio sends, and ignores them from anywhere else; a

@@ -1,112 +1,127 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router";
 import {
   createExtension,
   deleteExtension,
   errorMessage,
-  fieldErrors,
   EXTENSION_NUMBER_PATTERN,
+  fieldErrors,
+  listDevices,
   listExtensions,
   updateExtension,
+  type Device,
   type Extension,
 } from "../api";
-import { ConfirmButton } from "../components/ConfirmButton";
+import {
+  bindingsOf,
+  devicesLabel,
+  devicesOf,
+  forwardingLabel,
+  loadLiveDirectory,
+  presenceOf,
+  type LiveDirectory,
+} from "../api/directory";
+import {
+  Alert,
+  Badge,
+  Button,
+  Drawer,
+  EmptyState,
+  Input,
+  Modal,
+  Spinner,
+  Switch,
+  Table,
+  type TableColumn,
+} from "../design/azrty/components";
 import { mapFieldErrors } from "../forms";
+import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
+import { PageHeader } from "./directory/PageHeader";
+import { Toast, useToast } from "./directory/Toast";
+import "./directory/directory.css";
 
 const NUMBER_HINT = "2 to 10 digits.";
-
-const EXTERNAL_NUMBER_PATTERN = /^(\+?[0-9]{2,20})?$/;
-const EXTERNAL_HINT = "Optional; presented to carriers, e.g. +97142000101.";
-
-interface Errors {
-  number?: string;
-  name?: string;
-  externalNumber?: string;
-  dnd?: string;
-  forwardAlways?: string;
-  forwardBusy?: string;
-  forwardNoAnswer?: string;
-  voicemailEnabled?: string;
-}
-
-const hasErrors = (e: Errors) =>
-  Boolean(
-    e.number ||
-    e.name ||
-    e.externalNumber ||
-    e.dnd ||
-    e.forwardAlways ||
-    e.forwardBusy ||
-    e.forwardNoAnswer ||
-    e.voicemailEnabled,
-  );
-
+const EXTERNAL_PATTERN = /^(\+?[0-9]{2,20})?$/;
 /** A forward target: empty = off, or 2–20 digits with an optional +. */
 const FORWARD_PATTERN = /^(\+?[0-9]{2,20})?$/;
 const FORWARD_HINT =
   "Empty = off; or 2 to 20 digits, optionally starting with +.";
-const FORWARD_FIELDS = [
-  { key: "forwardAlways", label: "Forward always", source: "always" },
-  { key: "forwardBusy", label: "Forward busy", source: "busy" },
-  { key: "forwardNoAnswer", label: "Forward no-answer", source: "noAnswer" },
-] as const;
 
-function validate(
-  number: string,
-  name: string,
-  external: string,
-  forwards: { always: string; busy: string; noAnswer: string },
-): Errors {
+const FIELDS = [
+  "number",
+  "name",
+  "externalNumber",
+  "dnd",
+  "forwardAlways",
+  "forwardBusy",
+  "forwardNoAnswer",
+  "voicemailEnabled",
+  "recordDefault",
+] as const;
+type Field = (typeof FIELDS)[number];
+type Errors = Partial<Record<Field, string>>;
+
+interface Draft {
+  number: string;
+  name: string;
+  externalNumber: string;
+  forwardAlways: string;
+  forwardBusy: string;
+  forwardNoAnswer: string;
+}
+
+function validate(d: Draft): Errors {
   const errors: Errors = {};
-  if (!EXTENSION_NUMBER_PATTERN.test(number)) {
+  if (!EXTENSION_NUMBER_PATTERN.test(d.number)) {
     errors.number = "The number must be 2 to 10 digits (0–9 only).";
   }
-  if (name.trim() === "") errors.name = "Enter a name.";
-  if (!EXTERNAL_NUMBER_PATTERN.test(external.trim())) {
+  if (d.name.trim() === "") errors.name = "Enter a name.";
+  if (!EXTERNAL_PATTERN.test(d.externalNumber.trim())) {
     errors.externalNumber =
       "Use 2 to 20 digits, optionally starting with +, or leave it empty.";
   }
-  const targets = [
-    ["forwardAlways", forwards.always],
-    ["forwardBusy", forwards.busy],
-    ["forwardNoAnswer", forwards.noAnswer],
-  ] as const;
-  for (const [key, value] of targets) {
-    if (!FORWARD_PATTERN.test(value.trim())) {
-      errors[key as keyof Errors] = FORWARD_HINT;
-    }
+  for (const key of [
+    "forwardAlways",
+    "forwardBusy",
+    "forwardNoAnswer",
+  ] as const) {
+    if (!FORWARD_PATTERN.test(d[key].trim())) errors[key] = FORWARD_HINT;
   }
   return errors;
 }
 
+const hasErrors = (e: Errors) => Object.values(e).some(Boolean);
+
 /** Server field errors on the extension's editable fields. */
 function serverFieldErrors(err: unknown): Errors {
-  return mapFieldErrors(fieldErrors(err), [
-    "number",
-    "name",
-    "externalNumber",
-    "dnd",
-    "forwardAlways",
-    "forwardBusy",
-    "forwardNoAnswer",
-    "voicemailEnabled",
-  ]).byKey;
+  return mapFieldErrors(fieldErrors(err), FIELDS).byKey as Errors;
 }
 
 type ListState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; items: Extension[] };
+  | { status: "ready"; extensions: Extension[]; devices: Device[] };
 
-/** Extensions: list, create, edit and delete. */
+/** Extensions: the directory list, the extension drawer and "New extension". */
 export function Extensions() {
   const [list, setList] = useState<ListState>({ status: "loading" });
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<Extension["id"] | null>(null);
+  const [q, setQ] = useState("");
+  const [selected, setSelected] = useState<Extension["id"] | null>(null);
+  const [creating, setCreating] = useState(false);
+  const toast = useToast();
+  const liveState = usePolling(loadLiveDirectory, LIVE_REFRESH_MS);
+  const live: LiveDirectory =
+    liveState.status === "loading" ? {} : (liveState.data ?? {});
 
   useEffect(() => {
     const controller = new AbortController();
-    listExtensions(controller.signal)
-      .then((items) => setList({ status: "ready", items }))
+    Promise.all([
+      listExtensions(controller.signal),
+      listDevices(controller.signal),
+    ])
+      .then(([extensions, devices]) =>
+        setList({ status: "ready", extensions, devices }),
+      )
       .catch((err: unknown) => {
         if (!controller.signal.aborted) {
           setList({ status: "error", message: errorMessage(err) });
@@ -115,118 +130,208 @@ export function Extensions() {
     return () => controller.abort();
   }, []);
 
-  function replaceItems(fn: (items: Extension[]) => Extension[]) {
+  function setExtensions(fn: (items: Extension[]) => Extension[]) {
     setList((prev) =>
       prev.status === "ready"
-        ? { status: "ready", items: fn(prev.items) }
+        ? { ...prev, extensions: fn(prev.extensions) }
         : prev,
     );
   }
 
-  async function onDelete(ext: Extension) {
-    setActionError(null);
-    try {
-      await deleteExtension(ext.id);
-      replaceItems((items) => items.filter((i) => i.id !== ext.id));
-    } catch (err) {
-      setActionError(`Could not delete ${ext.number}: ${errorMessage(err)}`);
-    }
-  }
+  const all = list.status === "ready" ? list.extensions : [];
+  const devices = list.status === "ready" ? list.devices : [];
+  const query = q.trim().toLowerCase();
+  const shown = all.filter(
+    (e) =>
+      !query ||
+      e.number.includes(query) ||
+      e.name.toLowerCase().includes(query),
+  );
+  const current = all.find((e) => e.id === selected);
+
+  const columns: TableColumn<Extension>[] = [
+    {
+      key: "number",
+      label: "Number",
+      mono: true,
+      render: (e) => (
+        <button
+          type="button"
+          className="dir-rowlink dir-number"
+          aria-label={`Open extension ${e.number}`}
+          onClick={() => setSelected(e.id)}
+        >
+          {e.number}
+        </button>
+      ),
+    },
+    {
+      key: "name",
+      label: "Name",
+      render: (e) => <span className="az-table__primary">{e.name}</span>,
+    },
+    {
+      key: "externalNumber",
+      label: "External number",
+      mono: true,
+      render: (e) => e.externalNumber || "—",
+    },
+    {
+      key: "devices",
+      label: "Devices",
+      render: (e) => devicesLabel(devicesOf(devices, e), live.bindings),
+    },
+    {
+      key: "presence",
+      label: "Presence",
+      render: (e) => {
+        const p = presenceOf(e, devicesOf(devices, e), live);
+        return p ? (
+          <Badge tone={p.tone} dot>
+            {p.label}
+          </Badge>
+        ) : (
+          "—"
+        );
+      },
+    },
+    {
+      key: "forwarding",
+      label: "Forwarding",
+      render: (e) => <span className="dir-cell-sm">{forwardingLabel(e)}</span>,
+    },
+    {
+      key: "voicemail",
+      label: "Voicemail",
+      render: (e) => (e.voicemailEnabled === false ? "Off" : "On"),
+    },
+    {
+      key: "recording",
+      label: "Recording",
+      render: (e) => (e.recordDefault ? "Default on" : "Off"),
+    },
+  ];
 
   return (
     <section aria-labelledby="page-title">
-      <h1 id="page-title">Extensions</h1>
-      <CreateExtension
-        onCreated={(ext) => replaceItems((items) => [...items, ext])}
+      <PageHeader
+        eyebrow="Directory"
+        title="Extensions"
+        description="Dialable numbers, their devices and call features."
+        actions={
+          <Button icon="plus" onClick={() => setCreating(true)}>
+            New extension
+          </Button>
+        }
       />
 
-      <h2 id="extensions-list">All extensions</h2>
-      {actionError && (
-        <p role="alert" className="error">
-          {actionError}
-        </p>
-      )}
-      {list.status === "loading" && (
-        <p role="status" aria-live="polite">
-          Loading extensions…
-        </p>
-      )}
+      {list.status === "loading" && <Spinner label="Loading extensions…" />}
       {list.status === "error" && (
-        <div role="alert" className="error">
-          <strong>Could not load extensions.</strong>
-          <p>{list.message}</p>
-        </div>
+        <Alert tone="bad" title="Could not load extensions.">
+          {list.message}
+        </Alert>
       )}
-      {list.status === "ready" && list.items.length === 0 && (
-        <p className="muted">No extensions yet.</p>
+      {list.status === "ready" && all.length === 0 && (
+        <EmptyState
+          icon="user-round"
+          title="No extensions yet"
+          description="An extension is a dialable number. Add one, then give it devices."
+          action={
+            <Button icon="plus" onClick={() => setCreating(true)}>
+              New extension
+            </Button>
+          }
+        />
       )}
-      {list.status === "ready" && list.items.length > 0 && (
-        <table aria-labelledby="extensions-list">
-          <thead>
-            <tr>
-              <th scope="col">Number</th>
-              <th scope="col">Name</th>
-              <th scope="col">External number</th>
-              <th scope="col">DND</th>
-              <th scope="col">Voicemail</th>
-              <th scope="col">
-                <span className="visually-hidden">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.items.map((ext) =>
-              editing === ext.id ? (
-                <EditRow
-                  key={ext.id}
-                  ext={ext}
-                  onCancel={() => setEditing(null)}
-                  onSaved={(saved) => {
-                    replaceItems((items) =>
-                      items.map((i) => (i.id === saved.id ? saved : i)),
-                    );
-                    setEditing(null);
-                  }}
-                />
-              ) : (
-                <tr key={ext.id}>
-                  <th scope="row">{ext.number}</th>
-                  <td>{ext.name}</td>
-                  <td>{ext.externalNumber || "—"}</td>
-                  <td>{ext.dnd ? "Yes" : "No"}</td>
-                  <td>{ext.voicemailEnabled === false ? "No" : "Yes"}</td>
-                  <td className="row-actions">
-                    <button
-                      type="button"
-                      aria-label={`Edit extension ${ext.number}`}
-                      onClick={() => {
-                        setActionError(null);
-                        setEditing(ext.id);
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <ConfirmButton
-                      label="Delete"
-                      accessibleLabel={`Delete extension ${ext.number}`}
-                      prompt={`Delete ${ext.number} and its devices?`}
-                      confirmLabel="Delete extension"
-                      onConfirm={() => onDelete(ext)}
-                    />
-                  </td>
-                </tr>
-              ),
-            )}
-          </tbody>
-        </table>
+      {list.status === "ready" && all.length > 0 && (
+        <>
+          <div className="dir-toolbar">
+            <Input
+              id="ext-search"
+              aria-label="Search number or name"
+              icon="search"
+              size="sm"
+              type="search"
+              placeholder="Search number or name"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="dir-toolbar__search"
+            />
+            <span className="dir-count" aria-live="polite">
+              {shown.length} of {all.length}
+            </span>
+          </div>
+          {shown.length === 0 ? (
+            <EmptyState
+              icon="search"
+              title="No extensions match"
+              description={`Nothing matches “${q.trim()}”. Search by number or name.`}
+            />
+          ) : (
+            <Table
+              caption="Extensions"
+              columns={columns}
+              rows={shown}
+              rowKey={(e) => String(e.id)}
+              onRowClick={(e) => setSelected(e.id)}
+            />
+          )}
+        </>
       )}
+
+      {current && (
+        <ExtensionDrawer
+          key={String(current.id)}
+          ext={current}
+          devices={devicesOf(devices, current)}
+          live={live}
+          onClose={() => setSelected(null)}
+          onSaved={(saved) => {
+            setExtensions((items) =>
+              items.map((i) => (i.id === saved.id ? saved : i)),
+            );
+            setSelected(null);
+            toast.show(`Extension ${saved.number} saved.`);
+          }}
+          onDeleted={() => {
+            setExtensions((items) => items.filter((i) => i.id !== current.id));
+            setList((prev) =>
+              prev.status === "ready"
+                ? {
+                    ...prev,
+                    devices: prev.devices.filter(
+                      (d) => String(d.extensionId) !== String(current.id),
+                    ),
+                  }
+                : prev,
+            );
+            setSelected(null);
+            toast.show(`Extension ${current.number} and its devices deleted.`);
+          }}
+        />
+      )}
+
+      {creating && (
+        <NewExtension
+          onClose={() => setCreating(false)}
+          onCreated={(ext) => {
+            setExtensions((items) => [...items, ext]);
+            setCreating(false);
+            toast.show(`Extension ${ext.number} created.`);
+          }}
+        />
+      )}
+
+      <Toast message={toast.message} />
     </section>
   );
 }
 
-function CreateExtension({
+function NewExtension({
+  onClose,
   onCreated,
 }: {
+  onClose: () => void;
   onCreated: (ext: Extension) => void;
 }) {
   const [number, setNumber] = useState("");
@@ -239,348 +344,398 @@ function CreateExtension({
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setServerError(null);
-    const found = validate(number, name, external, {
-      always: "",
-      busy: "",
-      noAnswer: "",
+    const found = validate({
+      number,
+      name,
+      externalNumber: external,
+      forwardAlways: "",
+      forwardBusy: "",
+      forwardNoAnswer: "",
     });
     setErrors(found);
     if (hasErrors(found)) return;
     setBusy(true);
     try {
-      const ext = await createExtension({
-        number,
-        name: name.trim(),
-        // Sent only when given, so a create without one stays the Phase 1 shape.
-        ...(external.trim() ? { externalNumber: external.trim() } : {}),
-      });
-      onCreated(ext);
-      setNumber("");
-      setName("");
-      setExternal("");
+      onCreated(
+        await createExtension({
+          number,
+          name: name.trim(),
+          // Sent only when given, so a create without one stays the Phase 1 shape.
+          ...(external.trim() ? { externalNumber: external.trim() } : {}),
+        }),
+      );
     } catch (err) {
       setErrors(serverFieldErrors(err));
       setServerError(errorMessage(err));
-    } finally {
       setBusy(false);
     }
   }
 
   return (
-    <form
-      className="inline-form"
-      aria-labelledby="new-extension"
-      onSubmit={(e) => void onSubmit(e)}
-      noValidate
+    <Modal
+      title="New extension"
+      description="Add devices after the extension exists."
+      onClose={onClose}
+      actions={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="submit" form="new-extension-form" disabled={busy}>
+            Create extension
+          </Button>
+        </>
+      }
     >
-      <h2 id="new-extension">New extension</h2>
-      <div className="fields">
-        <div className="field">
-          <label htmlFor="ext-number">Number</label>
-          <input
-            id="ext-number"
+      <form
+        id="new-extension-form"
+        className="dir-stack"
+        aria-label="New extension"
+        onSubmit={(e) => void onSubmit(e)}
+        noValidate
+      >
+        {serverError && (
+          <Alert tone="bad" title="Could not create the extension.">
+            {serverError}
+          </Alert>
+        )}
+        <div className="dir-grid-2">
+          <Input
+            id="new-ext-number"
+            label="Number"
+            mono
             inputMode="numeric"
+            placeholder="1030"
+            hint={NUMBER_HINT}
+            error={errors.number}
             value={number}
+            autoFocus
             onChange={(e) => setNumber(e.target.value)}
-            aria-invalid={errors.number ? true : undefined}
-            aria-describedby={
-              errors.number ? "ext-number-error" : "ext-number-hint"
-            }
           />
-          {errors.number ? (
-            <p id="ext-number-error" className="field-error">
-              {errors.number}
-            </p>
-          ) : (
-            <p id="ext-number-hint" className="hint">
-              {NUMBER_HINT}
-            </p>
-          )}
-        </div>
-        <div className="field">
-          <label htmlFor="ext-name">Name</label>
-          <input
-            id="ext-name"
+          <Input
+            id="new-ext-name"
+            label="Name"
+            placeholder="Front desk"
+            error={errors.name}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            aria-invalid={errors.name ? true : undefined}
-            aria-describedby={errors.name ? "ext-name-error" : undefined}
           />
-          {errors.name && (
-            <p id="ext-name-error" className="field-error">
-              {errors.name}
-            </p>
-          )}
         </div>
-        <div className="field">
-          <label htmlFor="ext-external">External number</label>
-          <input
-            id="ext-external"
-            inputMode="tel"
-            value={external}
-            onChange={(e) => setExternal(e.target.value)}
-            aria-invalid={errors.externalNumber ? true : undefined}
-            aria-describedby={
-              errors.externalNumber ? "ext-external-error" : "ext-external-hint"
-            }
-          />
-          {errors.externalNumber ? (
-            <p id="ext-external-error" className="field-error">
-              {errors.externalNumber}
-            </p>
-          ) : (
-            <p id="ext-external-hint" className="hint">
-              {EXTERNAL_HINT}
-            </p>
-          )}
-        </div>
-      </div>
-      {serverError && (
-        <p role="alert" className="error">
-          Could not create the extension: {serverError}
-        </p>
-      )}
-      <button type="submit" className="primary" disabled={busy}>
-        Create extension
-      </button>
-    </form>
+        <Input
+          id="new-ext-external"
+          label="External number"
+          mono
+          inputMode="tel"
+          placeholder="+97142000130"
+          hint="Optional; presented to carriers."
+          error={errors.externalNumber}
+          value={external}
+          onChange={(e) => setExternal(e.target.value)}
+        />
+      </form>
+    </Modal>
   );
 }
 
-function EditRow({
+function ExtensionDrawer({
   ext,
-  onCancel,
+  devices,
+  live,
+  onClose,
   onSaved,
+  onDeleted,
 }: {
   ext: Extension;
-  onCancel: () => void;
+  devices: Device[];
+  live: LiveDirectory;
+  onClose: () => void;
   onSaved: (ext: Extension) => void;
+  onDeleted: () => void;
 }) {
-  const [number, setNumber] = useState(ext.number);
-  const [name, setName] = useState(ext.name);
-  const [external, setExternal] = useState(ext.externalNumber ?? "");
+  const navigate = useNavigate();
+  const [draft, setDraft] = useState<Draft>({
+    number: ext.number,
+    name: ext.name,
+    externalNumber: ext.externalNumber ?? "",
+    forwardAlways: ext.forwardAlways ?? "",
+    forwardBusy: ext.forwardBusy ?? "",
+    forwardNoAnswer: ext.forwardNoAnswer ?? "",
+  });
   const [dnd, setDnd] = useState(ext.dnd ?? false);
-  const [voicemailEnabled, setVoicemailEnabled] = useState(
-    ext.voicemailEnabled !== false,
-  );
-  const [recordDefault, setRecordDefault] = useState(
-    ext.recordDefault ?? false,
-  );
-  const [always, setAlways] = useState(ext.forwardAlways ?? "");
-  const [busy, setBusyField] = useState(ext.forwardBusy ?? "");
-  const [noAnswer, setNoAnswer] = useState(ext.forwardNoAnswer ?? "");
+  const [voicemail, setVoicemail] = useState(ext.voicemailEnabled !== false);
+  const [record, setRecord] = useState(ext.recordDefault ?? false);
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const base = `edit-${String(ext.id)}`;
+  const [busy, setBusy] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const set = (key: keyof Draft) => (e: { target: { value: string } }) =>
+    setDraft((d) => ({ ...d, [key]: e.target.value }));
 
   async function onSave() {
     setServerError(null);
-    const found = validate(number, name, external, {
-      always,
-      busy,
-      noAnswer,
-    });
+    const found = validate(draft);
     setErrors(found);
     if (hasErrors(found)) return;
     const patch: Parameters<typeof updateExtension>[1] = {};
-    if (number !== ext.number) patch.number = number;
-    if (name.trim() !== ext.name) patch.name = name.trim();
-    if (external.trim() !== (ext.externalNumber ?? "")) {
-      patch.externalNumber = external.trim();
+    if (draft.number !== ext.number) patch.number = draft.number;
+    if (draft.name.trim() !== ext.name) patch.name = draft.name.trim();
+    for (const key of [
+      "externalNumber",
+      "forwardAlways",
+      "forwardBusy",
+      "forwardNoAnswer",
+    ] as const) {
+      if (draft[key].trim() !== (ext[key] ?? ""))
+        patch[key] = draft[key].trim();
     }
     if (dnd !== (ext.dnd ?? false)) patch.dnd = dnd;
-    if (voicemailEnabled !== (ext.voicemailEnabled !== false)) {
-      patch.voicemailEnabled = voicemailEnabled;
+    if (voicemail !== (ext.voicemailEnabled !== false)) {
+      patch.voicemailEnabled = voicemail;
     }
-    if (recordDefault !== (ext.recordDefault ?? false)) {
-      patch.recordDefault = recordDefault;
-    }
-    if (always.trim() !== (ext.forwardAlways ?? "")) {
-      patch.forwardAlways = always.trim();
-    }
-    if (busy.trim() !== (ext.forwardBusy ?? "")) {
-      patch.forwardBusy = busy.trim();
-    }
-    if (noAnswer.trim() !== (ext.forwardNoAnswer ?? "")) {
-      patch.forwardNoAnswer = noAnswer.trim();
-    }
+    if (record !== (ext.recordDefault ?? false)) patch.recordDefault = record;
     if (Object.keys(patch).length === 0) {
-      onCancel();
+      onClose();
       return;
     }
-    setSaving(true);
+    setBusy(true);
     try {
       onSaved(await updateExtension(ext.id, patch));
     } catch (err) {
       setErrors(serverFieldErrors(err));
-      setServerError(errorMessage(err));
-      setSaving(false);
+      setServerError(`Could not save: ${errorMessage(err)}`);
+      setBusy(false);
     }
   }
 
+  async function onDelete() {
+    setServerError(null);
+    setBusy(true);
+    try {
+      await deleteExtension(ext.id);
+      onDeleted();
+    } catch (err) {
+      setServerError(`Could not delete ${ext.number}: ${errorMessage(err)}`);
+      setConfirmDelete(false);
+      setBusy(false);
+    }
+  }
+
+  const footer = confirmDelete ? (
+    <>
+      <span className="dir-foot-text">
+        Delete {ext.number} and its devices?
+      </span>
+      <Button
+        variant="secondary"
+        disabled={busy}
+        onClick={() => setConfirmDelete(false)}
+      >
+        Keep
+      </Button>
+      <Button
+        key="confirm-delete"
+        variant="danger"
+        disabled={busy}
+        autoFocus
+        onClick={() => void onDelete()}
+      >
+        Delete extension
+      </Button>
+    </>
+  ) : (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="dir-danger"
+        disabled={busy}
+        onClick={() => setConfirmDelete(true)}
+      >
+        Delete
+      </Button>
+      <Button variant="secondary" disabled={busy} onClick={onClose}>
+        Cancel
+      </Button>
+      <Button type="submit" form="extension-form" disabled={busy}>
+        Save
+      </Button>
+    </>
+  );
+
   return (
-    <tr>
-      <td colSpan={6}>
-        <form
-          className="inline-form"
-          aria-label={`Edit extension ${ext.number}`}
-          onSubmit={(e) => {
-            e.preventDefault();
-            void onSave();
-          }}
-          noValidate
+    <Drawer
+      title={`Extension ${ext.number}`}
+      description={ext.name}
+      onClose={onClose}
+      width={480}
+      footer={footer}
+    >
+      <form
+        id="extension-form"
+        className="dir-form"
+        aria-label={`Edit extension ${ext.number}`}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void onSave();
+        }}
+        noValidate
+      >
+        {serverError && <Alert tone="bad">{serverError}</Alert>}
+        <div className="dir-grid-2">
+          <Input
+            id="ext-number"
+            label="Number"
+            mono
+            inputMode="numeric"
+            hint={NUMBER_HINT}
+            error={errors.number}
+            value={draft.number}
+            autoFocus
+            onChange={set("number")}
+          />
+          <Input
+            id="ext-name"
+            label="Name"
+            error={errors.name}
+            value={draft.name}
+            onChange={set("name")}
+          />
+        </div>
+        <Input
+          id="ext-external"
+          label="External number"
+          mono
+          inputMode="tel"
+          hint="Optional; presented to carriers, e.g. +97142000101."
+          error={errors.externalNumber}
+          value={draft.externalNumber}
+          onChange={set("externalNumber")}
+        />
+
+        <div
+          className="dir-section"
+          role="group"
+          aria-labelledby="ext-features-label"
         >
-          <div className="fields">
-            <div className="field">
-              <label htmlFor={`${base}-number`}>
-                Number for extension {ext.number}
-              </label>
-              <input
-                id={`${base}-number`}
-                inputMode="numeric"
-                value={number}
-                autoFocus
-                onChange={(e) => setNumber(e.target.value)}
-                aria-invalid={errors.number ? true : undefined}
-                aria-describedby={
-                  errors.number ? `${base}-number-error` : undefined
-                }
-              />
-              {errors.number && (
-                <p id={`${base}-number-error`} className="field-error">
-                  {errors.number}
-                </p>
-              )}
-            </div>
-            <div className="field">
-              <label htmlFor={`${base}-name`}>
-                Name for extension {ext.number}
-              </label>
-              <input
-                id={`${base}-name`}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                aria-invalid={errors.name ? true : undefined}
-                aria-describedby={
-                  errors.name ? `${base}-name-error` : undefined
-                }
-              />
-              {errors.name && (
-                <p id={`${base}-name-error`} className="field-error">
-                  {errors.name}
-                </p>
-              )}
-            </div>
-            <div className="field">
-              <label htmlFor={`${base}-external`}>
-                External number for extension {ext.number}
-              </label>
-              <input
-                id={`${base}-external`}
-                inputMode="tel"
-                value={external}
-                onChange={(e) => setExternal(e.target.value)}
-                aria-invalid={errors.externalNumber ? true : undefined}
-                aria-describedby={
-                  errors.externalNumber ? `${base}-external-error` : undefined
-                }
-              />
-              {errors.externalNumber && (
-                <p id={`${base}-external-error`} className="field-error">
-                  {errors.externalNumber}
-                </p>
-              )}
-            </div>
-          </div>
+          <span id="ext-features-label" className="az-eyebrow">
+            Call features
+          </span>
+          <Switch
+            label="Do not disturb"
+            hint="Calls go straight to forward-busy or voicemail"
+            labelPosition="end"
+            checked={dnd}
+            onChange={(e) => setDnd(e.target.checked)}
+          />
+          <Switch
+            label="Voicemail"
+            hint="Unanswered and busy calls go to this box"
+            labelPosition="end"
+            checked={voicemail}
+            onChange={(e) => setVoicemail(e.target.checked)}
+          />
+          <Switch
+            label="Record calls by default"
+            hint="*1 toggles recording mid-call either way"
+            labelPosition="end"
+            checked={record}
+            onChange={(e) => setRecord(e.target.checked)}
+          />
+        </div>
 
-          <fieldset className="group">
-            <legend>Call features</legend>
-            <div className="fields">
-              <div className="field checkbox">
-                <input
-                  id={`${base}-dnd`}
-                  type="checkbox"
-                  checked={dnd}
-                  onChange={(e) => setDnd(e.target.checked)}
-                />
-                <label htmlFor={`${base}-dnd`}>
-                  DND for extension {ext.number}
-                </label>
-              </div>
-              <div className="field checkbox">
-                <input
-                  id={`${base}-vm`}
-                  type="checkbox"
-                  checked={voicemailEnabled}
-                  onChange={(e) => setVoicemailEnabled(e.target.checked)}
-                />
-                <label htmlFor={`${base}-vm`}>
-                  Voicemail for extension {ext.number}
-                </label>
-              </div>
-              <div className="field checkbox">
-                <input
-                  id={`${base}-record`}
-                  type="checkbox"
-                  checked={recordDefault}
-                  onChange={(e) => setRecordDefault(e.target.checked)}
-                />
-                <label htmlFor={`${base}-record`}>
-                  Record calls by default for extension {ext.number}
-                </label>
-              </div>
-            </div>
-            <div className="fields">
-              {FORWARD_FIELDS.map((f) => {
-                const key = f.key;
-                const value = { always, busy, noAnswer }[f.source];
-                const setter = {
-                  always: setAlways,
-                  busy: setBusyField,
-                  noAnswer: setNoAnswer,
-                }[f.source];
-                const id = `${base}-${key}`;
-                return (
-                  <div className="field" key={key}>
-                    <label htmlFor={id}>
-                      {f.label} for extension {ext.number}
-                    </label>
-                    <input
-                      id={id}
-                      inputMode="tel"
-                      value={value}
-                      aria-invalid={errors[key] ? true : undefined}
-                      aria-describedby={errors[key] ? `${id}-error` : undefined}
-                      onChange={(e) => setter(e.target.value)}
-                    />
-                    {errors[key] && (
-                      <p id={`${id}-error`} className="field-error">
-                        {errors[key]}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <p className="hint">Forward targets: {FORWARD_HINT}</p>
-          </fieldset>
+        <div
+          className="dir-section"
+          role="group"
+          aria-labelledby="ext-forwarding-label"
+        >
+          <span id="ext-forwarding-label" className="az-eyebrow">
+            Forwarding
+          </span>
+          <Input
+            id="ext-forward-always"
+            label="Always"
+            mono
+            size="sm"
+            inputMode="tel"
+            placeholder="Off"
+            error={errors.forwardAlways}
+            value={draft.forwardAlways}
+            onChange={set("forwardAlways")}
+          />
+          <Input
+            id="ext-forward-busy"
+            label="When busy"
+            mono
+            size="sm"
+            inputMode="tel"
+            placeholder="Off"
+            error={errors.forwardBusy}
+            value={draft.forwardBusy}
+            onChange={set("forwardBusy")}
+          />
+          <Input
+            id="ext-forward-no-answer"
+            label="No answer"
+            mono
+            size="sm"
+            inputMode="tel"
+            placeholder="Off"
+            hint={FORWARD_HINT}
+            error={errors.forwardNoAnswer}
+            value={draft.forwardNoAnswer}
+            onChange={set("forwardNoAnswer")}
+          />
+        </div>
 
-          {serverError && (
-            <p role="alert" className="error">
-              Could not save: {serverError}
-            </p>
+        <section
+          className="dir-section dir-section--tight"
+          aria-label="Devices"
+        >
+          <span className="az-eyebrow" aria-hidden="true">
+            Devices
+          </span>
+          {devices.length === 0 && (
+            <p className="dir-device dir-muted">No devices yet.</p>
           )}
-          <div className="actions start">
-            <button type="submit" className="primary" disabled={saving}>
-              Save
-            </button>
-            <button type="button" disabled={saving} onClick={onCancel}>
-              Cancel
-            </button>
-          </div>
-        </form>
-      </td>
-    </tr>
+          <ul
+            className="dir-device-list"
+            aria-label={`Devices of ${ext.number}`}
+          >
+            {devices.map((d) => {
+              const contacts = live.bindings
+                ? bindingsOf(live.bindings, d.sipUsername)
+                : undefined;
+              const registered = Boolean(contacts && contacts.length > 0);
+              return (
+                <li key={String(d.id)} className="dir-device">
+                  <span
+                    className={`az-dot ${registered ? "dir-dot--good" : "dir-dot--faint"}`}
+                    aria-hidden="true"
+                  />
+                  <span className="dir-device__name">{d.sipUsername}</span>
+                  <span className="dir-device__ua">
+                    {!contacts
+                      ? "—"
+                      : registered
+                        ? contacts[0]?.userAgent || "Registered"
+                        : "Not registered"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+          <Button
+            variant="ghost"
+            size="sm"
+            iconRight="arrow-right"
+            className="dir-manage"
+            onClick={() => navigate("/devices")}
+          >
+            Manage devices
+          </Button>
+        </section>
+      </form>
+    </Drawer>
   );
 }

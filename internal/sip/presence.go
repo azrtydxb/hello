@@ -57,7 +57,7 @@ func (s *Server) publishDeviceState(devices []string, extension, state string) {
 	if len(devices) == 0 {
 		return
 	}
-	s.bg.Go(func() {
+	s.goBG(func() {
 		defer contain(s.log, "presence publish")
 		ctx, cancel := context.WithTimeout(context.Background(), presenceFanout)
 		defer cancel()
