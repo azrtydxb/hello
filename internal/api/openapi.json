@@ -1788,6 +1788,28 @@
         "description": "JSON with password and/or email, or multipart/form-data with the same fields plus optional `greeting` and `unreachable` WAV files (PCM, 5 MiB max); greetings land in the hello-voicemail bucket and the previous object is removed. At least one field is required. The password is stored as a hash and never returned."
       }
     },
+    "/api/v1/voicemail/boxes": {
+      "get": {
+        "operationId": "listVoicemailBoxes",
+        "summary": "List voicemail boxes",
+        "tags": ["voicemail"],
+        "responses": {
+          "200": {
+            "description": "Every box with its extension and message counts, by extension number",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailBoxSummaryList"
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        },
+        "description": "One row per box: the extension's number and name and its unheard and total messages, so a box list needs one request."
+      }
+    },
     "/api/v1/voicemail/messages": {
       "get": {
         "operationId": "listVoicemailMessages",
@@ -1976,13 +1998,23 @@
     "/api/v1/recordings/{id}/audio": {
       "get": {
         "operationId": "getRecordingAudio",
-        "summary": "Play a recording",
+        "summary": "Play or download a recording",
         "tags": ["media"],
-        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "parameters": [
+          { "$ref": "#/components/parameters/id" },
+          {
+            "name": "download",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["true", "false", "1", "0"] },
+            "description": "true or 1 presigns the audio as an attachment named recording-<id>.wav, so the browser saves it instead of playing it."
+          }
+        ],
         "responses": {
           "302": {
             "description": "Redirect to a presigned object-store URL, valid 15 minutes"
           },
+          "400": { "$ref": "#/components/responses/BadRequest" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "503": { "$ref": "#/components/responses/Unavailable" },
@@ -2055,6 +2087,51 @@
       }
     },
     "/api/v1/announcements/{id}": {
+      "put": {
+        "operationId": "replaceAnnouncement",
+        "summary": "Replace an announcement's audio",
+        "tags": ["media"],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                    "description": "Optional; must equal the announcement's name, which cannot change."
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "WAV bytes, at most 10 MiB; the bytes are checked, not the declared content type."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Announcement" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        },
+        "description": "Overwrites the audio at ann/<name>.wav in the hello-announcements bucket, validated like the upload, then moves updatedAt; audited, bumps the configuration revision and notifies hello-sip."
+      },
       "delete": {
         "operationId": "deleteAnnouncement",
         "summary": "Delete an announcement",
@@ -2067,6 +2144,24 @@
           "500": { "$ref": "#/components/responses/Internal" }
         },
         "description": "Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time."
+      }
+    },
+    "/api/v1/announcements/{id}/audio": {
+      "get": {
+        "operationId": "getAnnouncementAudio",
+        "summary": "Play an announcement",
+        "tags": ["media"],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "302": {
+            "description": "Redirect to a presigned object-store URL, valid 15 minutes"
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        },
+        "description": "302 to a presigned GET URL (15 minutes) for the announcement audio; the client follows it. A missing announcement is 404."
       }
     },
     "/api/v1/ring-groups": {
@@ -2585,6 +2680,36 @@
           "email": {
             "type": "string",
             "description": "Empty disables voicemail email."
+          }
+        }
+      },
+      "VoicemailBoxSummary": {
+        "type": "object",
+        "required": ["id", "extensionId", "number", "name", "unheard", "total"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The box id (the messages list's box parameter)."
+          },
+          "extensionId": { "type": "integer", "format": "int64" },
+          "number": { "type": "string" },
+          "name": { "type": "string" },
+          "unheard": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Messages not played yet."
+          },
+          "total": { "type": "integer", "format": "int64" }
+        }
+      },
+      "VoicemailBoxSummaryList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VoicemailBoxSummary" }
           }
         }
       },
@@ -3332,7 +3457,9 @@
           "correlationId",
           "initiatedBy",
           "durationMs",
-          "createdAt"
+          "createdAt",
+          "source",
+          "destination"
         ],
         "properties": {
           "id": { "type": "integer", "format": "int64" },
@@ -3345,7 +3472,20 @@
             "enum": ["dtmf", "default", "api"]
           },
           "durationMs": { "type": "integer", "format": "int64" },
-          "createdAt": { "type": "string", "format": "date-time" }
+          "createdAt": { "type": "string", "format": "date-time" },
+          "cdrId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The call's CDR (same correlationId); absent until the CDR is written."
+          },
+          "source": {
+            "type": "string",
+            "description": "The CDR's source; empty until the CDR is written."
+          },
+          "destination": {
+            "type": "string",
+            "description": "The CDR's destination; empty until the CDR is written."
+          }
         }
       },
       "RecordingPage": {
