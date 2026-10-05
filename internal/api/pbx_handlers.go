@@ -236,6 +236,18 @@ func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, gree
 
 // Voicemail messages.
 
+// listVoicemailBoxes is GET /api/v1/voicemail/boxes: every box with its
+// extension number and name and its unheard and total message counts, so a
+// box list needs one request.
+func (s *server) listVoicemailBoxes(w http.ResponseWriter, r *http.Request) {
+	bs, err := s.Store.ListVoicemailBoxes(r.Context())
+	if err != nil {
+		s.internal(w, "list voicemail boxes", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items(bs))
+}
+
 func (s *server) listVoicemailMessages(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	box, err := strconv.ParseInt(q.Get("box"), 10, 64)

@@ -82,10 +82,20 @@ func (s *server) deleteRecording(w http.ResponseWriter, r *http.Request) {
 
 // recordingAudio is GET /api/v1/recordings/{id}/audio: a 302 to a presigned
 // GET URL (15 minutes, contract 6). The recording must exist before anything
-// is presigned.
+// is presigned. ?download=1 presigns it as an attachment
+// (recording-<id>.wav) so the browser saves it instead of playing it.
 func (s *server) recordingAudio(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
+		return
+	}
+	download := ""
+	switch r.URL.Query().Get("download") {
+	case "", "0", "false":
+	case "1", "true":
+		download = fmt.Sprintf("recording-%d.wav", id)
+	default:
+		badRequest(w, "download must be true or false")
 		return
 	}
 	rec, err := s.Store.GetRecording(r.Context(), id)
@@ -97,13 +107,15 @@ func (s *server) recordingAudio(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "object storage is unavailable; try again shortly")
 		return
 	}
-	url, err := s.Objects.PresignRecording(r.Context(), rec.Object)
+	url, err := s.Objects.PresignRecording(r.Context(), rec.Object, download)
 	if err != nil {
 		s.Log.Error("media: presign recording audio", "error", err)
 		writeError(w, http.StatusBadGateway, "upstream", "object storage is unavailable; try again shortly")
 		return
 	}
-	http.Redirect(w, r, url, http.StatusFound)
+	// The URL is the object store's presign; the query only picks a fixed
+	// attachment name built from the numeric id.
+	http.Redirect(w, r, url, http.StatusFound) //nolint:gosec // G710: presigned by the object store, not client-chosen.
 }
 
 // Announcements.
@@ -138,12 +150,7 @@ func (s *server) createAnnouncement(w http.ResponseWriter, r *http.Request) {
 	if !usernameRe.MatchString(name) {
 		f.add("name", "must be 1-64 of A-Z a-z 0-9 . _ -")
 	}
-	if len(data) == 0 {
-		f.add("file", "a WAV file is required")
-	}
-	if len(data) != 0 && !isWAV(data) {
-		f.add("file", "the audio must be a RIFF/WAVE file")
-	}
+	checkAnnouncementAudio(&f, data)
 	if len(f) > 0 {
 		writeFields(w, f)
 		return
@@ -181,6 +188,100 @@ func (s *server) createAnnouncement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, a)
+}
+
+// replaceAnnouncement is PUT /api/v1/announcements/{id}: multipart with a
+// WAV file part named "file" (validated like the upload) that overwrites the
+// announcement's audio at the same key, ann/<name>.wav. The name cannot
+// change (destinations name it, and the key follows it): an optional name
+// part must match. The row's updated_at moves, audited with a revision bump
+// and NOTIFY like every announcement change, so hello-sip reloads the audio.
+func (s *server) replaceAnnouncement(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
+		badRequest(w, "upload as multipart form data with a file part")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxAnnouncementUpload)
+	var (
+		name string
+		data []byte
+	)
+	if err := readAnnouncementUpload(r, &name, &data); err != nil {
+		badRequest(w, err.Error())
+		return
+	}
+	a, err := s.Store.GetAnnouncement(r.Context(), id)
+	if err != nil {
+		s.configError(w, "announcement", err)
+		return
+	}
+	var f fieldErrs
+	if name != "" && name != a.Name {
+		f.add("name", "cannot change; upload a new announcement under the other name")
+	}
+	checkAnnouncementAudio(&f, data)
+	if len(f) > 0 {
+		writeFields(w, f)
+		return
+	}
+	if s.Objects == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "object storage is unavailable; try again shortly")
+		return
+	}
+	object := fmt.Sprintf("ann/%s.wav", a.Name)
+	if err := s.Objects.PutAnnouncement(r.Context(), object, bytes.NewReader(data), int64(len(data))); err != nil {
+		s.Log.Error("media: replace announcement", "error", err)
+		writeError(w, http.StatusBadGateway, "upstream", "object storage upload failed; try again shortly")
+		return
+	}
+	// The audio is already replaced; a row that vanished in between (a
+	// concurrent delete) answers 404 and leaves the object for its delete to
+	// have removed or to be overwritten by a later upload of the same name.
+	updated, err := s.Store.ReplaceAnnouncement(r.Context(), actor(r).String(), id)
+	if err != nil {
+		s.configError(w, "announcement", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// announcementAudio is GET /api/v1/announcements/{id}/audio: a 302 to a
+// presigned GET URL (15 minutes), like the recording audio route.
+func (s *server) announcementAudio(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	a, err := s.Store.GetAnnouncement(r.Context(), id)
+	if err != nil {
+		s.configError(w, "announcement", err)
+		return
+	}
+	if s.Objects == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "object storage is unavailable; try again shortly")
+		return
+	}
+	url, err := s.Objects.PresignAnnouncement(r.Context(), a.Object)
+	if err != nil {
+		s.Log.Error("media: presign announcement audio", "error", err)
+		writeError(w, http.StatusBadGateway, "upstream", "object storage is unavailable; try again shortly")
+		return
+	}
+	http.Redirect(w, r, url, http.StatusFound)
+}
+
+// checkAnnouncementAudio adds the file errors of an upload: required, and
+// RIFF/WAVE by its bytes.
+func checkAnnouncementAudio(f *fieldErrs, data []byte) {
+	if len(data) == 0 {
+		f.add("file", "a WAV file is required")
+	} else if !isWAV(data) {
+		f.add("file", "the audio must be a RIFF/WAVE file")
+	}
 }
 
 // deleteAnnouncement removes the row and then the MinIO object (the row
