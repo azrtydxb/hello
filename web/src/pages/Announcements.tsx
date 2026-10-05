@@ -2,31 +2,62 @@ import { useEffect, useState, type FormEvent } from "react";
 import {
   deleteAnnouncement,
   errorMessage,
+  fieldErrors,
   listAnnouncements,
   MAX_ANNOUNCEMENT_BYTES,
   SIP_USERNAME_PATTERN,
   uploadAnnouncement,
   type Announcement,
 } from "../api";
-import { ConfirmButton } from "../components/ConfirmButton";
+import {
+  announcementAudioPath,
+  replaceAnnouncement,
+  wasReplaced,
+} from "../api/media";
+import {
+  Alert,
+  Button,
+  EmptyState,
+  IconButton,
+  Input,
+  Modal,
+  Spinner,
+  Table,
+  type TableColumn,
+} from "../design/azrty/components";
 import { formatTime } from "../format";
+import { mapFieldErrors } from "../forms";
+import {
+  checkWav,
+  ConfirmDelete,
+  MediaHeader,
+  NowPlaying,
+  usePlayback,
+  useToast,
+  WavDrop,
+} from "./media/MediaParts";
 
-const NAME_HINT = "1-64 of A-Z a-z 0-9 . _ -; used by ring groups and codes.";
+const NAME_HINT =
+  "Letters, digits, . _ - · up to 64; destinations use this name.";
 
 type ListState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; items: Announcement[] };
 
-/** Announcements: named WAVs, uploaded as multipart, played by the PBX. */
+const byName = (a: Announcement, b: Announcement) =>
+  a.name.localeCompare(b.name);
+
+/**
+ * Announcements: named WAV prompts that ring groups and routes play. Upload,
+ * play, replace the audio of one, delete.
+ */
 export function Announcements() {
   const [list, setList] = useState<ListState>({ status: "loading" });
-  const [name, setName] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [errors, setErrors] = useState<{ name?: string; file?: string }>({});
-  const [formError, setFormError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [replacing, setReplacing] = useState<Announcement | null>(null);
+  const [deleting, setDeleting] = useState<Announcement | null>(null);
+  const [toast, showToast] = useToast();
+  const playback = usePlayback((name) => `Could not play ${name}`);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -40,6 +71,181 @@ export function Announcements() {
     return () => controller.abort();
   }, []);
 
+  /** Put one announcement into the list (new, or replacing its old row). */
+  function upsert(a: Announcement) {
+    setList((prev) =>
+      prev.status === "ready"
+        ? {
+            status: "ready",
+            items: [
+              ...prev.items.filter((i) => String(i.id) !== String(a.id)),
+              a,
+            ].sort(byName),
+          }
+        : prev,
+    );
+  }
+
+  async function onDelete(a: Announcement) {
+    await deleteAnnouncement(a.id);
+    setList((prev) =>
+      prev.status === "ready"
+        ? { status: "ready", items: prev.items.filter((i) => i.id !== a.id) }
+        : prev,
+    );
+    if (String(playback.playing) === String(a.id)) playback.stop();
+    setDeleting(null);
+    showToast(`Announcement ${a.name} deleted`);
+  }
+
+  const items = list.status === "ready" ? list.items : null;
+  const playingAnn =
+    items?.find((a) => String(a.id) === String(playback.playing)) ?? null;
+
+  const columns: TableColumn<Announcement>[] = [
+    {
+      key: "play",
+      label: <span className="visually-hidden">Play</span>,
+      width: 44,
+      primary: false,
+      render: (a) => {
+        const isPlaying = String(playback.playing) === String(a.id);
+        return (
+          <IconButton
+            icon={isPlaying ? "pause" : "play"}
+            label={isPlaying ? `Stop ${a.name}` : `Play ${a.name}`}
+            disabled={playback.checking !== null}
+            onClick={() =>
+              isPlaying
+                ? playback.stop()
+                : void playback.play(a.id, announcementAudioPath(a.id), a.name)
+            }
+          />
+        );
+      },
+    },
+    {
+      key: "name",
+      label: "Name",
+      mono: true,
+      render: (a) => <span className="az-table__primary">{a.name}</span>,
+    },
+    {
+      key: "uploaded",
+      label: "Uploaded",
+      render: (a) => formatTime(a.createdAt),
+    },
+    {
+      key: "updated",
+      label: "Updated",
+      render: (a) => (wasReplaced(a) ? formatTime(a.updatedAt) : "—"),
+    },
+    {
+      key: "actions",
+      label: <span className="visually-hidden">Actions</span>,
+      align: "right",
+      render: (a) => (
+        <div className="media-actions">
+          <IconButton
+            icon="replace"
+            label={`Replace the audio of ${a.name}`}
+            onClick={() => setReplacing(a)}
+          />
+          <IconButton
+            icon="trash-2"
+            label={`Delete announcement ${a.name}`}
+            onClick={() => setDeleting(a)}
+          />
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <section aria-labelledby="page-title">
+      <MediaHeader
+        title="Announcements"
+        description="Named prompts that ring groups and routes can play. WAV, up to 10 MB."
+      />
+      <div className="ann-grid">
+        <UploadCard
+          onUploaded={(a) => {
+            upsert(a);
+            showToast(`Announcement ${a.name} uploaded`);
+          }}
+        />
+        <div className="ann-list media-stack">
+          {playback.error && <Alert tone="bad">{playback.error}</Alert>}
+          {playingAnn && (
+            <NowPlaying
+              key={String(playingAnn.id)}
+              src={announcementAudioPath(playingAnn.id)}
+              title={playingAnn.name}
+              label={`Playback of ${playingAnn.name}`}
+              onStop={playback.stop}
+            />
+          )}
+          {list.status === "loading" && (
+            <Spinner label="Loading announcements…" />
+          )}
+          {list.status === "error" && (
+            <Alert tone="bad" title="Could not load announcements">
+              {list.message}
+            </Alert>
+          )}
+          {items && items.length === 0 && (
+            <EmptyState
+              icon="megaphone"
+              title="No announcements yet"
+              description="Upload a WAV to name it in ring groups and routes."
+            />
+          )}
+          {items && items.length > 0 && (
+            <Table
+              caption="Announcements"
+              columns={columns}
+              rows={items}
+              rowKey={(a) => String(a.id)}
+            />
+          )}
+        </div>
+      </div>
+      {replacing && (
+        <ReplaceAudio
+          announcement={replacing}
+          onClose={() => setReplacing(null)}
+          onReplaced={(a) => {
+            upsert(a);
+            setReplacing(null);
+            if (String(playback.playing) === String(a.id)) playback.stop();
+            showToast(`Audio of ${a.name} replaced`);
+          }}
+        />
+      )}
+      {deleting && (
+        <ConfirmDelete
+          title="Delete announcement?"
+          description={`${deleting.name} and its audio are removed; destinations that name it skip the step at call time.`}
+          confirmLabel="Delete announcement"
+          onConfirm={() => onDelete(deleting)}
+          onClose={() => setDeleting(null)}
+        />
+      )}
+      {toast}
+    </section>
+  );
+}
+
+/** The design's upload card: name, WAV drop field, upload button. */
+function UploadCard({ onUploaded }: { onUploaded: (a: Announcement) => void }) {
+  const [name, setName] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [errors, setErrors] = useState<{ name?: string; file?: string }>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // A new key clears the file input after an upload.
+  const [dropKey, setDropKey] = useState(0);
+
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFormError(null);
@@ -48,166 +254,139 @@ export function Announcements() {
     if (!SIP_USERNAME_PATTERN.test(trimmed)) {
       found.name = "Enter a name of 1-64 of A-Z a-z 0-9 . _ -.";
     }
-    if (!file) {
-      found.file = "Choose a WAV file.";
-    } else if (file.size > MAX_ANNOUNCEMENT_BYTES) {
-      found.file = "The file is larger than 10 MiB.";
-    } else if (file.size === 0) {
-      found.file = "The file is empty.";
-    }
+    const fileError = checkWav(file, MAX_ANNOUNCEMENT_BYTES);
+    if (fileError) found.file = fileError;
     setErrors(found);
-    if (found.name || found.file) return;
+    if (found.name || found.file || !file) return;
     setBusy(true);
     try {
-      const created = await uploadAnnouncement(trimmed, file!);
-      setList((prev) =>
-        prev.status === "ready"
-          ? {
-              status: "ready",
-              items: [...prev.items, created].sort((a, b) =>
-                a.name.localeCompare(b.name),
-              ),
-            }
-          : prev,
-      );
+      const created = await uploadAnnouncement(trimmed, file);
+      onUploaded(created);
       setName("");
       setFile(null);
+      setDropKey((k) => k + 1);
       setErrors({});
     } catch (err: unknown) {
+      const mapped = mapFieldErrors(fieldErrors(err), ["name", "file"]);
+      setErrors(mapped.byKey);
       setFormError(errorMessage(err));
     } finally {
       setBusy(false);
     }
   }
 
-  async function onDelete(a: Announcement) {
-    setActionError(null);
+  return (
+    <form
+      className="az-card ann-upload"
+      aria-labelledby="ann-upload-title"
+      onSubmit={(e) => void onSubmit(e)}
+      noValidate
+    >
+      <h2 id="ann-upload-title" className="ann-upload__title">
+        Upload
+      </h2>
+      <Input
+        id="ann-name"
+        label="Name"
+        mono
+        placeholder="support-closed"
+        value={name}
+        error={errors.name}
+        hint={NAME_HINT}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <WavDrop
+        key={dropKey}
+        file={file}
+        onFile={setFile}
+        error={errors.file}
+        disabled={busy}
+      />
+      {formError && (
+        <Alert tone="bad" title="Could not upload">
+          {formError}
+        </Alert>
+      )}
+      <Button type="submit" icon="upload" block disabled={busy}>
+        Upload announcement
+      </Button>
+    </form>
+  );
+}
+
+/** Replace an announcement's audio: same name, new WAV. */
+function ReplaceAudio({
+  announcement,
+  onClose,
+  onReplaced,
+}: {
+  announcement: Announcement;
+  onClose: () => void;
+  onReplaced: (a: Announcement) => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const formId = `ann-replace-${String(announcement.id)}`;
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setFormError(null);
+    const fileError = checkWav(file, MAX_ANNOUNCEMENT_BYTES);
+    setError(fileError ?? undefined);
+    if (fileError || !file) return;
+    setBusy(true);
     try {
-      await deleteAnnouncement(a.id);
-      setList((prev) =>
-        prev.status === "ready"
-          ? { status: "ready", items: prev.items.filter((i) => i.id !== a.id) }
-          : prev,
-      );
+      onReplaced(await replaceAnnouncement(announcement.id, file));
     } catch (err: unknown) {
-      setActionError(`Could not delete ${a.name}: ${errorMessage(err)}`);
+      const mapped = mapFieldErrors(fieldErrors(err), ["file"]);
+      setError(mapped.byKey.file);
+      setFormError(errorMessage(err));
+      setBusy(false);
     }
   }
 
-  const items = list.status === "ready" ? list.items : null;
-
   return (
-    <section aria-labelledby="page-title">
-      <h1 id="page-title">Announcements</h1>
+    <Modal
+      title={`Replace ${announcement.name}`}
+      description="Destinations keep the name; calls play the new audio from the next one on."
+      onClose={busy ? undefined : onClose}
+      actions={
+        <>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            size="sm"
+            icon="replace"
+            form={formId}
+            disabled={busy}
+          >
+            Replace audio
+          </Button>
+        </>
+      }
+    >
       <form
-        className="inline-form"
-        aria-labelledby="new-announcement"
+        id={formId}
+        className="media-modal-form"
         onSubmit={(e) => void onSubmit(e)}
         noValidate
       >
-        <h2 id="new-announcement">New announcement</h2>
-        <div className="fields">
-          <div className="field">
-            <label htmlFor="ann-name">Name</label>
-            <input
-              id="ann-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              aria-invalid={errors.name ? true : undefined}
-              aria-describedby={
-                errors.name ? "ann-name-error" : "ann-name-hint"
-              }
-            />
-            {errors.name ? (
-              <p id="ann-name-error" className="field-error">
-                {errors.name}
-              </p>
-            ) : (
-              <p id="ann-name-hint" className="hint">
-                {NAME_HINT}
-              </p>
-            )}
-          </div>
-          <div className="field">
-            <label htmlFor="ann-file">Audio (WAV)</label>
-            <input
-              id="ann-file"
-              type="file"
-              accept=".wav,audio/wav,audio/x-wav"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              aria-invalid={errors.file ? true : undefined}
-              aria-describedby={errors.file ? "ann-file-error" : undefined}
-            />
-            {errors.file && (
-              <p id="ann-file-error" className="field-error">
-                {errors.file}
-              </p>
-            )}
-            <p className="hint">At most 10 MiB of WAV audio.</p>
-          </div>
-        </div>
+        <WavDrop file={file} onFile={setFile} error={error} disabled={busy} />
         {formError && (
-          <p role="alert" className="error">
-            Could not upload: {formError}
-          </p>
+          <Alert tone="bad" title="Could not replace the audio">
+            {formError}
+          </Alert>
         )}
-        <button type="submit" className="primary" disabled={busy}>
-          Upload announcement
-        </button>
       </form>
-
-      <h2 id="announcements-list">All announcements</h2>
-      {actionError && (
-        <p role="alert" className="error">
-          {actionError}
-        </p>
-      )}
-      {list.status === "loading" && (
-        <p role="status" aria-live="polite">
-          Loading announcements…
-        </p>
-      )}
-      {list.status === "error" && (
-        <div role="alert" className="error">
-          <strong>Could not load announcements.</strong>
-          <p>{list.message}</p>
-        </div>
-      )}
-      {items && items.length === 0 && (
-        <p className="muted">No announcements yet.</p>
-      )}
-      {items && items.length > 0 && (
-        <table aria-labelledby="announcements-list">
-          <thead>
-            <tr>
-              <th scope="col">Name</th>
-              <th scope="col">Created</th>
-              <th scope="col">Updated</th>
-              <th scope="col">
-                <span className="visually-hidden">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((a) => (
-              <tr key={String(a.id)}>
-                <th scope="row">{a.name}</th>
-                <td>{formatTime(a.createdAt)}</td>
-                <td>{formatTime(a.updatedAt)}</td>
-                <td className="row-actions">
-                  <ConfirmButton
-                    label="Delete"
-                    accessibleLabel={`Delete announcement ${a.name}`}
-                    prompt={`Delete the announcement ${a.name}?`}
-                    confirmLabel="Delete announcement"
-                    onConfirm={() => onDelete(a)}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </section>
+    </Modal>
   );
 }

@@ -426,7 +426,7 @@ async function errorFrom(
   );
 }
 
-async function request<T>(
+export async function request<T>(
   method: string,
   path: string,
   { body, rawBody, signal, redirectOn401 = true }: RequestOptions = {},
@@ -465,7 +465,10 @@ function items<T>(value: unknown, path: string): T[] {
   return list as T[];
 }
 
-async function list<T>(path: string, signal?: AbortSignal): Promise<T[]> {
+export async function list<T>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<T[]> {
   return items<T>(await request<unknown>("GET", path, { signal }), path);
 }
 

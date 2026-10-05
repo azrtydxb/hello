@@ -1,0 +1,277 @@
+/* Layout for the Media pages (Voicemail, Recordings, Announcements), from
+   the Kuvryn Hello console design. Tokens only: no colours of our own. */
+
+.media-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: var(--az-space-5);
+  margin-bottom: var(--az-space-6);
+  flex-wrap: wrap;
+}
+
+.media-head__eyebrow {
+  color: var(--az-accent-text);
+}
+
+.media-head__title {
+  margin: 6px 0 0;
+  font-size: var(--az-text-2xl);
+  font-weight: 600;
+  letter-spacing: var(--az-tracking-heading);
+  line-height: 1.3;
+}
+
+.media-head__desc {
+  margin: var(--az-space-1) 0 0;
+  font-size: var(--az-text-md);
+  color: var(--az-muted);
+}
+
+.media-mono {
+  font-family: var(--az-font-mono);
+}
+
+.media-muted {
+  color: var(--az-muted);
+}
+
+.media-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--az-space-4);
+  min-width: 0;
+}
+
+.media-actions {
+  display: inline-flex;
+  gap: var(--az-space-1);
+}
+
+.media-actions .az-iconbtn {
+  text-decoration: none;
+}
+
+/* Voicemail: box list on the left, the selected box on the right. */
+.vm-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: var(--az-space-4);
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .vm-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.vm-boxes {
+  padding: var(--az-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+}
+
+.vm-boxes .az-nav__item {
+  padding: 10px var(--az-space-3);
+  width: 100%;
+}
+
+.vm-boxes__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vm-boxes .az-badge {
+  margin-left: auto;
+}
+
+.vm-box {
+  padding: var(--az-space-5) 22px;
+  display: flex;
+  align-items: center;
+  gap: var(--az-space-6);
+  flex-wrap: wrap;
+}
+
+.vm-box__title {
+  font-size: var(--az-text-lg);
+  font-weight: 600;
+  margin: var(--az-space-1) 0 0;
+}
+
+.vm-box__facts {
+  display: flex;
+  gap: var(--az-space-5);
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--az-text-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vm-box__facts li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vm-box__facts .az-icon {
+  color: var(--az-muted);
+}
+
+.vm-box__settings {
+  margin-left: auto;
+}
+
+.media-unheard {
+  color: var(--az-text);
+  font-weight: 500;
+}
+
+/* The now-playing card. */
+.media-player {
+  padding: var(--az-space-4) var(--az-space-5);
+  display: flex;
+  align-items: center;
+  gap: var(--az-space-4);
+}
+
+.media-player .az-meter {
+  flex: 1;
+  min-width: 0;
+}
+
+.media-player .az-meter__head {
+  font-family: var(--az-font-mono);
+}
+
+/* Recordings. */
+.rec-filter {
+  width: 220px;
+}
+
+.rec-call {
+  font-family: var(--az-font-mono);
+  color: var(--az-text);
+}
+
+.media-pager {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--az-space-2);
+  margin-top: var(--az-space-4);
+}
+
+/* Announcements: upload card beside the list. */
+.ann-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: var(--az-space-4);
+  align-items: start;
+}
+
+.ann-list {
+  grid-column: span 2;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .ann-list {
+    grid-column: auto;
+  }
+}
+
+.ann-upload {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--az-space-4);
+}
+
+.ann-upload__title {
+  margin: 0;
+  font-size: var(--az-text-base);
+  font-weight: 600;
+}
+
+.media-drop {
+  position: relative;
+  border: 1px dashed var(--az-border-strong);
+  border-radius: var(--az-radius-lg);
+  padding: 28px var(--az-space-4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--az-space-2);
+  text-align: center;
+  color: var(--az-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.media-drop--over,
+.media-drop:focus-within {
+  border-color: var(--az-accent-text);
+}
+
+.media-drop--error {
+  border-color: var(--az-bad);
+}
+
+.media-drop__lead {
+  color: var(--az-text);
+}
+
+.media-drop__hint {
+  font-size: var(--az-text-md);
+}
+
+.media-drop__file {
+  font-family: var(--az-font-mono);
+  color: var(--az-text);
+}
+
+.media-drop input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.media-field-error {
+  font-size: var(--az-text-md);
+  color: var(--az-bad-strong);
+  margin: 0;
+}
+
+/* The design's toast: bottom right, over the page. */
+.media-toast {
+  position: fixed;
+  right: var(--az-space-6);
+  bottom: var(--az-space-6);
+  z-index: 60;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--az-raised);
+  border-color: var(--az-border-strong);
+  box-shadow: var(--az-shadow-overlay);
+  font-size: 13px;
+}
+
+.media-toast .az-icon {
+  color: var(--az-good-strong);
+}
+
+.media-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--az-space-4);
+}
