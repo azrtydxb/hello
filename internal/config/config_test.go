@@ -234,6 +234,9 @@ func TestLoadHAValues(t *testing.T) {
 		{"HELLO_SIP_TRUSTED_PROXIES", "0.0.0.0/0"},
 		{"HELLO_SIP_TRUSTED_PROXIES", "10.0.0.0/8,::/0"},
 		{"HELLO_SIP_TRUSTED_PROXIES", "10.0.0.0/8,"},
+		{"HELLO_HA_TAKEOVER_POLL", "0"},
+		{"HELLO_HA_TAKEOVER_POLL", "-1s"},
+		{"HELLO_HA_TAKEOVER_POLL", "later"},
 	} {
 		if _, err := LoadSIP(env(map[string]string{tc.key: tc.val})); err == nil || !strings.Contains(err.Error(), tc.key) {
 			t.Errorf("%s=%q: want error naming it, got %v", tc.key, tc.val, err)
@@ -251,6 +254,22 @@ func TestLoadHAValues(t *testing.T) {
 	c, err := LoadSIP(env(map[string]string{"HELLO_MEMBER_HEARTBEAT": "5s", "HELLO_DRAIN_TIMEOUT": "1s"}))
 	if err != nil || c.MemberHeartbeat != 5*time.Second || c.DrainTimeout != time.Second {
 		t.Fatalf("boundary values = %s %s, %v", c.MemberHeartbeat, c.DrainTimeout, err)
+	}
+}
+
+// TestLoadHATakeover fails if the takeover defaults are wrong, a disabled
+// switch is read as enabled, a non-positive poll is accepted, or the jitter
+// is not parsed.
+func TestLoadHATakeover(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil || !c.HATakeoverEnabled || c.HATakeoverPoll != time.Second || c.HATakeoverJitter != 2*time.Second {
+		t.Fatalf("takeover defaults = %+v, %v", c, err)
+	}
+	c, err = LoadSIP(env(map[string]string{
+		"HELLO_HA_TAKEOVER_ENABLED": "false", "HELLO_HA_TAKEOVER_POLL": "3s", "HELLO_HA_TAKEOVER_JITTER": "0",
+	}))
+	if err != nil || c.HATakeoverEnabled || c.HATakeoverPoll != 3*time.Second || c.HATakeoverJitter != 0 {
+		t.Fatalf("takeover overrides = %+v, %v", c, err)
 	}
 }
 
