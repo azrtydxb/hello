@@ -39,3 +39,28 @@ Anchor sessions draw RTP ports from `HELLO_RTP_PORT_MIN`–
 `HELLO_RTP_PORT_MAX` (default 20000–21000) on the hello-sip node that owns
 the call. When the range is exhausted, the call falls back to direct media
 with a routing-trace step and a failure metric.
+
+## Anchored media on kw (Kubernetes)
+
+The anchor binds its relay legs on the hello-sip pod: UDP
+`HELLO_RTP_PORT_MIN`–`HELLO_RTP_PORT_MAX` (20000–21000) on the pod IP, set
+on hello-sip-1/2 in `deploy/kuvryn-sync/kw/resources.yaml`. The hello-sip
+Services stay ClusterIP with no RTP ports: a Service cannot map a port
+range in one entry, a per-port NodePort list (1001 entries per Service)
+would still not carry audio, because the anchored SDP answers advertise the
+offer's own c= address when no anchor host is wired (see below) — a phone
+would send RTP to the address in the answer, never to a node.
+
+Until hello-sip advertises a reachable anchor host:port in its SDP answers
+(a code change: wire the media anchor host from the node's routable
+address), anchored media carries audio only between endpoints that can
+already reach each other and the pod IP (the compose lab's shared host).
+On kw, a LAN phone's anchored calls complete and record their signaling
+(CDR, traces, recording rows), but RTP does not flow to the anchor, so
+recordings capture silence and announcements/voicemail audio do not reach
+a LAN phone.
+
+Anchoring triggers are unchanged: NAT detection, `*1` or per-extension
+`record_default`, an announcement destination or pre-transfer prompt,
+voicemail, or `HELLO_MEDIA_FORCE_ANCHOR=true`. On kw the force switch stays
+off; see deploy/kuvryn-sync/kw/resources.yaml for the live env.

@@ -675,9 +675,9 @@ spec:
           # The official ghcr image is amd64-only and the kw nodes are
           # arm64; this is the Debian-trixie build from ci.yaml (docker/
           # kamailio/Dockerfile), pinned to the tag it published for
-          # commit 7a43e0f (the full sha tag; the registry keeps no short
+          # commit 4f860ff (the full sha tag; the registry keeps no short
           # tags). Later: an immutable repository@sha256:... digest.
-          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
+          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
           imagePullPolicy: IfNotPresent
           securityContext:
             # uid/gid of the image's kamailio user (read from the image).
@@ -811,8 +811,8 @@ spec:
       terminationGracePeriodSeconds: 120 # a drain must finish (lab: 2h, capped here)
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
-          # Pinned to the tag ci.yaml published for commit 7a43e0f (the
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
+          # Pinned to the tag ci.yaml published for commit 4f860ff (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -873,6 +873,22 @@ spec:
             - name: MINIO_SECURE
               # In-cluster traffic to the Service, no TLS.
               value: "false"
+            - name: HELLO_RTP_PORT_MIN
+              # Phase 5 anchored media (spec .procoder/specs/media-anchoring.md):
+              # relay legs bind UDP 20000-21000 on the pod IP. No Service
+              # exposes the range (see below), so off-cluster endpoints cannot
+              # reach it; keep the range off the Service until the anchor
+              # advertises a reachable host:port in its SDP.
+              value: "20000"
+            - name: HELLO_RTP_PORT_MAX
+              value: "21000"
+            - name: HELLO_MEDIA_FORCE_ANCHOR
+              # The operator override stays off: anchor only when a feature
+              # needs it (NAT detection, recording, announcement, voicemail).
+              value: "false"
+            - name: HELLO_MEDIA_RECORDING_NOTICE
+              # The spoken notice plays before a recording starts.
+              value: "true"
           ports:
             - name: http
               containerPort: 8082
@@ -903,6 +919,14 @@ spec:
               drop:
                 - ALL
 ---
+# No RTP exposure here on purpose: the anchored-media relay binds UDP
+# 20000-21000 on the pod IP, but a Service port list cannot map a range
+# (one entry per port), and the pinned build's anchored SDP answers mirror
+# the offer's own c= address (no anchor host is wired), so even a NodePort
+# range would not carry audio: the phone would still send RTP to the
+# address in the answer, not to a node. LAN phones get anchored audio only
+# once hello-sip advertises a reachable anchor host:port in SDP; until
+# then the RTP range stays pod-only (see docs/media.md).
 apiVersion: v1
 kind: Service
 metadata:
@@ -964,8 +988,8 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
-          # Pinned to the tag ci.yaml published for commit 7a43e0f (the
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
+          # Pinned to the tag ci.yaml published for commit 4f860ff (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -1026,6 +1050,22 @@ spec:
             - name: MINIO_SECURE
               # In-cluster traffic to the Service, no TLS.
               value: "false"
+            - name: HELLO_RTP_PORT_MIN
+              # Phase 5 anchored media (spec .procoder/specs/media-anchoring.md):
+              # relay legs bind UDP 20000-21000 on the pod IP. No Service
+              # exposes the range (see below), so off-cluster endpoints cannot
+              # reach it; keep the range off the Service until the anchor
+              # advertises a reachable host:port in its SDP.
+              value: "20000"
+            - name: HELLO_RTP_PORT_MAX
+              value: "21000"
+            - name: HELLO_MEDIA_FORCE_ANCHOR
+              # The operator override stays off: anchor only when a feature
+              # needs it (NAT detection, recording, announcement, voicemail).
+              value: "false"
+            - name: HELLO_MEDIA_RECORDING_NOTICE
+              # The spoken notice plays before a recording starts.
+              value: "true"
           ports:
             - name: http
               containerPort: 8082
@@ -1056,6 +1096,8 @@ spec:
               drop:
                 - ALL
 ---
+# See the hello-sip-1 Service above: no RTP exposure on purpose; the same
+# SDP limitation applies (docs/media.md).
 apiVersion: v1
 kind: Service
 metadata:
@@ -1118,7 +1160,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
           command:
             - sh
             - -c
@@ -1190,8 +1232,8 @@ spec:
                   key: smtpFrom
       containers:
         - name: hello-control
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
-          # Pinned to the tag ci.yaml published for commit 7a43e0f (the
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
+          # Pinned to the tag ci.yaml published for commit 4f860ff (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -1343,8 +1385,8 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-7a43e0ffc62ed923bc2eb2a47395071949ad438a
-          # Pinned to the tag ci.yaml published for commit 7a43e0f (the
+          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
+          # Pinned to the tag ci.yaml published for commit 4f860ff (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
