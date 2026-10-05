@@ -413,6 +413,9 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	}
 	t.Logf("takeover completed %s after the kill", rehomed.Sub(killed).Round(time.Millisecond))
 	// Both endpoints saw the takeover re-INVITE (the phone answered it).
+	if rehomed.Sub(killed) > 6*time.Second {
+		t.Logf("the re-home took %s; the endpoints' answers were the slow part", rehomed.Sub(killed))
+	}
 	for _, p := range []*sipua.Phone{a, b} {
 		select {
 		case <-p.Reinvites():

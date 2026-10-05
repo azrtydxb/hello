@@ -25,9 +25,10 @@ import (
 // (spec S-4). Exceeding it is logged; the CDR trace records the real gap.
 const haMediaGap = 3 * time.Second
 
-// haReinviteTimeout bounds one takeover re-INVITE (Timer F); a var so the
-// tests can shrink it.
-var haReinviteTimeout = byeTimeout
+// haReinviteTimeout bounds one takeover re-INVITE. The whole takeover
+// budget is 3s (spec S-4), so a leg that has not answered by then fails
+// the takeover and takes the one-sided close; a var so tests shrink it.
+var haReinviteTimeout = 3 * time.Second
 
 // haLeg is one dialog of a taken-over call, carried from the replicated
 // state. The endpoint's view of the dialog is unchanged: same Call-ID, same
@@ -433,6 +434,7 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	relay.SetPayloadTypes(legCaller, off.PayloadType, off.DTMFPayloadType)
 	relay.SetPayloadTypes(legCallee, off.PayloadType, off.DTMFPayloadType)
 	host := s.anchorHostOr(off.Address)
+	s.log.Info("takeover claimed", "call_id", st.CallID, "from", from)
 	c := &call{
 		s: s, id: st.Correlation, callID: a.callID,
 		callerNum: userOf(a.remoteID), dialled: userOf(a.localID),
