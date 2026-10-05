@@ -1,27 +1,122 @@
-/** Primary navigation, per spec §21. `phase` is when the page gets content. */
+/**
+ * Primary navigation, from the Kuvryn Hello console design (groups, labels,
+ * order and icons). `phase` is when the page gets content (spec §21).
+ */
 export interface NavItem {
   label: string;
   path: string;
   phase: number;
+  /** Lucide icon name (design/azrty icon font). */
+  icon: string;
+}
+
+/** A section of the sidebar; the first one has no heading. */
+export interface NavGroup {
+  label: string;
+  items: readonly NavItem[];
 }
 
 /** The phase whose pages are built; later pages render a placeholder. */
 export const CURRENT_PHASE = 5;
 
-export const NAV_ITEMS: readonly NavItem[] = [
-  { label: "Dashboard", path: "/", phase: 0 },
-  { label: "Extensions", path: "/extensions", phase: 1 },
-  { label: "Devices", path: "/devices", phase: 1 },
-  { label: "Registrations", path: "/registrations", phase: 1 },
-  { label: "Trunks", path: "/trunks", phase: 2 },
-  { label: "Routes", path: "/routes", phase: 2 },
-  { label: "Ring Groups", path: "/ring-groups", phase: 4 },
-  { label: "Voicemail", path: "/voicemail", phase: 4 },
-  { label: "Recordings", path: "/recordings", phase: 5 },
-  { label: "Announcements", path: "/announcements", phase: 5 },
-  { label: "Active Calls", path: "/calls", phase: 1 },
-  { label: "Call History", path: "/history", phase: 1 },
-  { label: "Cluster", path: "/cluster", phase: 3 },
-  { label: "Diagnostics", path: "/diagnostics", phase: 3 },
-  { label: "System", path: "/system", phase: 3 },
+export const NAV_GROUPS: readonly NavGroup[] = [
+  {
+    label: "",
+    items: [
+      { label: "Dashboard", path: "/", phase: 0, icon: "layout-dashboard" },
+    ],
+  },
+  {
+    label: "Directory",
+    items: [
+      {
+        label: "Extensions",
+        path: "/extensions",
+        phase: 1,
+        icon: "user-round",
+      },
+      { label: "Devices", path: "/devices", phase: 1, icon: "smartphone" },
+      {
+        label: "Registrations",
+        path: "/registrations",
+        phase: 1,
+        icon: "radio-tower",
+      },
+    ],
+  },
+  {
+    label: "Call flow",
+    items: [
+      { label: "Trunks", path: "/trunks", phase: 2, icon: "cable" },
+      { label: "Routes", path: "/routes", phase: 2, icon: "route" },
+      {
+        label: "Route tester",
+        path: "/routes/test",
+        phase: 2,
+        icon: "flask-conical",
+      },
+      {
+        label: "Ring groups",
+        path: "/ring-groups",
+        phase: 4,
+        icon: "users-round",
+      },
+    ],
+  },
+  {
+    label: "Media",
+    items: [
+      { label: "Voicemail", path: "/voicemail", phase: 4, icon: "voicemail" },
+      { label: "Recordings", path: "/recordings", phase: 5, icon: "mic" },
+      {
+        label: "Announcements",
+        path: "/announcements",
+        phase: 5,
+        icon: "megaphone",
+      },
+    ],
+  },
+  {
+    label: "Activity",
+    items: [
+      { label: "Active calls", path: "/calls", phase: 1, icon: "phone-call" },
+      { label: "Call history", path: "/history", phase: 1, icon: "history" },
+    ],
+  },
+  {
+    label: "Platform",
+    items: [
+      { label: "Cluster", path: "/cluster", phase: 3, icon: "server" },
+      {
+        label: "Diagnostics",
+        path: "/diagnostics",
+        phase: 3,
+        icon: "stethoscope",
+      },
+      { label: "System", path: "/system", phase: 3, icon: "settings" },
+    ],
+  },
 ];
+
+/** Every nav item, in sidebar order. */
+export const NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
+
+/** Nav items whose link is active only on their exact path. */
+export const EXACT_PATHS: ReadonlySet<string> = new Set(
+  NAV_ITEMS.filter((a) =>
+    NAV_ITEMS.some((b) => b !== a && b.path.startsWith(a.path + "/")),
+  )
+    .map((i) => i.path)
+    .concat("/"),
+);
+
+/** The breadcrumb title for a location (the design's page titles). */
+export function pageTitle(pathname: string): string | null {
+  const exact = NAV_ITEMS.find((i) => i.path === pathname);
+  if (exact) return exact.label;
+  if (/^\/history\/[^/]+$/.test(pathname)) return "Call detail";
+  const parent = NAV_ITEMS.filter(
+    (i) => i.path !== "/" && pathname.startsWith(i.path + "/"),
+  ).sort((a, b) => b.path.length - a.path.length)[0];
+  return parent ? parent.label : null;
+}
