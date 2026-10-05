@@ -332,3 +332,28 @@ func TestLoadMediaSettings(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadMediaAnchorHost fails if HELLO_MEDIA_ANCHOR_HOST is not picked up,
+// or accepted when it is not an IPv4 literal — the SDP answer must carry a
+// routable host, and media.NewAnchor refuses anything else at runtime.
+func TestLoadMediaAnchorHost(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MediaAnchorHost != "" {
+		t.Fatalf("default anchor host = %q, want empty", c.MediaAnchorHost)
+	}
+	c, err = LoadSIP(env(map[string]string{"HELLO_MEDIA_ANCHOR_HOST": "192.0.2.10"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.MediaAnchorHost != "192.0.2.10" {
+		t.Fatalf("anchor host = %q, want 192.0.2.10", c.MediaAnchorHost)
+	}
+	for _, bad := range []string{"anchor.example", "fd00::1", "192.0.2.10:5060"} {
+		if _, err := LoadSIP(env(map[string]string{"HELLO_MEDIA_ANCHOR_HOST": bad})); err == nil || !strings.Contains(err.Error(), "HELLO_MEDIA_ANCHOR_HOST") {
+			t.Fatalf("%q accepted: %v", bad, err)
+		}
+	}
+}

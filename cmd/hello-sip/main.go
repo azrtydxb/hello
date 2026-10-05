@@ -159,6 +159,13 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The media anchor host (HELLO_MEDIA_ANCHOR_HOST): the IPv4 stamped
+	// into anchored SDP answers, so LAN phones send RTP to a reachable
+	// node address instead of mirroring the offer's own c= line. Empty
+	// keeps the tests'/lab's offer-mirroring behaviour.
+	if cfg.MediaAnchorHost != "" {
+		srv.SetMediaAnchor(media.NewAnchor(cfg.MediaAnchorHost, log.With("component", "media")))
+	}
 	watcher.OnReload = srv.SnapshotChanged
 
 	members := cluster.New(vk)

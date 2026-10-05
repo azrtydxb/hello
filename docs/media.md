@@ -42,23 +42,26 @@ with a routing-trace step and a failure metric.
 
 ## Anchored media on kw (Kubernetes)
 
-The anchor binds its relay legs on the hello-sip pod: UDP
-`HELLO_RTP_PORT_MIN`–`HELLO_RTP_PORT_MAX` (20000–21000) on the pod IP, set
-on hello-sip-1/2 in `deploy/kuvryn-sync/kw/resources.yaml`. The hello-sip
-Services stay ClusterIP with no RTP ports: a Service cannot map a port
-range in one entry, a per-port NodePort list (1001 entries per Service)
-would still not carry audio, because the anchored SDP answers advertise the
-offer's own c= address when no anchor host is wired (see below) — a phone
-would send RTP to the address in the answer, never to a node.
+The anchor binds its relay legs on UDP `HELLO_RTP_PORT_MIN`–
+`HELLO_RTP_PORT_MAX` (20000–21000). On kw the hello-sip pods run with
+`hostNetwork: true`, so the legs bind the node IP, and
+`HELLO_MEDIA_ANCHOR_HOST` (the Downward API's `status.hostIP`) is stamped
+into every anchored SDP answer: a LAN phone sends its RTP straight to the
+node at the advertised port pair. Both deployments carry a required
+anti-affinity (one hello-sip per node: the pods bind node UDP 5060 and TCP
+8082). The hello-sip Services stay ClusterIP with no RTP ports — no
+Service can map a port range — and serve only the in-cluster paths:
+Kamailio's dispatcher set 1 and the dialog routes
+(`HELLO_SIP_ADVERTISED_ADDR` stays the Service name).
 
-Until hello-sip advertises a reachable anchor host:port in its SDP answers
-(a code change: wire the media anchor host from the node's routable
-address), anchored media carries audio only between endpoints that can
-already reach each other and the pod IP (the compose lab's shared host).
-On kw, a LAN phone's anchored calls complete and record their signaling
-(CDR, traces, recording rows), but RTP does not flow to the anchor, so
-recordings capture silence and announcements/voicemail audio do not reach
-a LAN phone.
+`HELLO_MEDIA_ANCHOR_HOST` is optional: unset, the SDP answers mirror the
+offer's own c= address, which carries audio only when the peer can reach
+the pod directly (the compose lab). Set it to the node's LAN IPv4 — on kw
+the manifest derives it per node, so it stays correct wherever the pod
+schedules. Before this wiring existed, a LAN phone's anchored calls
+completed and recorded their signaling (CDR, traces, recording rows), but
+RTP never reached the anchor, so recordings captured silence and
+announcements/voicemail audio did not reach a LAN phone.
 
 Anchoring triggers are unchanged: NAT detection, `*1` or per-extension
 `record_default`, an announcement destination or pre-transfer prompt,

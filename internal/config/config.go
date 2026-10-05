@@ -115,6 +115,12 @@ type SIP struct {
 	// MediaRecordingNotice (HELLO_MEDIA_RECORDING_NOTICE, default true)
 	// plays the recording-notice announcement before a recording starts.
 	MediaRecordingNotice bool
+	// MediaAnchorHost (HELLO_MEDIA_ANCHOR_HOST, default empty) is the
+	// IPv4 the anchored-media SDP answers advertise: the address LAN
+	// phones send their RTP to (the node IP under hostNetwork). Empty
+	// keeps the old behaviour of mirroring the offer's own c= address,
+	// which only carries audio when the peer can reach the pod directly.
+	MediaAnchorHost string
 }
 
 // LogValue keeps the database password out of logs.
@@ -192,6 +198,12 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
 	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"
 	c.MediaRecordingNotice = r.getenv("HELLO_MEDIA_RECORDING_NOTICE") != "false"
+	c.MediaAnchorHost = r.optional("HELLO_MEDIA_ANCHOR_HOST", "")
+	if c.MediaAnchorHost != "" {
+		if ip := net.ParseIP(c.MediaAnchorHost); ip == nil || ip.To4() == nil {
+			r.fail("HELLO_MEDIA_ANCHOR_HOST", fmt.Errorf("%q is not an IPv4 address", c.MediaAnchorHost))
+		}
+	}
 	if c.MaxCallDuration == 0 {
 		r.fail("HELLO_SIP_MAX_CALL_DURATION", errors.New("must be positive"))
 	}
