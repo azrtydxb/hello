@@ -754,12 +754,25 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 		}
 	}()
 	dialer := phone(t, lc.devices("desk")[0], nodeHostPort[node])
-	go func() { _, _ = dialer.Dial(ctx, ringer.Extension, sdpOffer) }()
-	eventually(t, 5*time.Second, "a call ringing on "+node, func() error {
+	// The new extensions reach the node with its next snapshot: until then
+	// the dial fails fast, and is placed again.
+	dialed := make(chan struct{})
+	close(dialed)
+	eventually(t, 20*time.Second, "a call ringing on "+node, func() error {
 		for _, c := range lc.calls() {
 			if c.To == ringer.Extension && c.Node == node {
 				return nil
 			}
+		}
+		select {
+		case <-dialed:
+			done := make(chan struct{})
+			dialed = done
+			go func() {
+				defer close(done)
+				_, _ = dialer.Dial(ctx, ringer.Extension, sdpOffer)
+			}()
+		default:
 		}
 		return errors.New("not ringing")
 	})
