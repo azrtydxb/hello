@@ -9,6 +9,7 @@ import (
 	"context"
 	crand "crypto/rand"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -149,6 +150,22 @@ func (l *haLeg) helloHop() (string, bool) {
 		return "", false
 	}
 	return hostPort(hop), true
+}
+
+// destination is where the leg's requests go: the route hop on Hello's
+// side, or the remote target when the dialog has no route set.
+func (l *haLeg) destination() string {
+	if hop, ok := l.helloHop(); ok {
+		return hop
+	}
+	l.mu.Lock()
+	target := l.remoteTarget
+	l.mu.Unlock()
+	var u sip.Uri
+	if err := sip.ParseUri(strings.TrimSuffix(strings.TrimPrefix(target, "<"), ">"), &u); err != nil {
+		return ""
+	}
+	return hostPort(u)
 }
 
 // parseOr parses a URI string, falling back to fallback.
@@ -404,6 +421,14 @@ func haAim(relay *media.Relay, leg string, body []byte) {
 	}
 }
 
+// resStatus is a response's status for a log line ("" on a transport error).
+func resStatus(res *sip.Response) string {
+	if res == nil {
+		return ""
+	}
+	return strconv.Itoa(res.StatusCode) + " " + res.Reason
+}
+
 func legName(caller bool) string {
 	if caller {
 		return legCaller
@@ -505,6 +530,7 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 // and replication heartbeats, release the claim, restart recording or the
 // announcement if the call was mid-way through one.
 func (s *Server) haHome(c *call, st livestate.DialogState, from string, gap time.Duration) {
+	s.log.Info("takeover re-homed", "call_id", st.CallID, "from", from, "gap", gap.String())
 	hom := c.homed()
 	c.addTrace(fmt.Sprintf("ha: taken over from %s in %s (media gap %s)", from,
 		gap.Round(time.Millisecond), gap.Round(time.Millisecond)))
