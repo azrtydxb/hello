@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router";
 import {
   createTrunk,
   deleteTrunk,
@@ -12,20 +13,41 @@ import {
   type TrunkInput,
   type TrunkStatus,
 } from "../api";
-import { ConfirmButton } from "../components/ConfirmButton";
-import { LiveStatus } from "../components/LiveStatus";
 import {
-  Field,
-  fieldId,
-  FormError,
-  mapFieldErrors,
-  splitList,
-  type ErrorMap,
-} from "../forms";
+  Alert,
+  Badge,
+  Button,
+  Drawer,
+  EmptyState,
+  Icon,
+  IconButton,
+  Input,
+  Meter,
+  PropertyList,
+  Select,
+  Switch,
+  type BadgeTone,
+  type Property,
+} from "../design/azrty/components";
+import { mapFieldErrors, splitList, type ErrorMap } from "../forms";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
+import {
+  formatLatency,
+  minutesUntil,
+  orUnknown,
+  UNKNOWN,
+} from "./callflow/format";
+import {
+  ConfirmDialog,
+  FormAlert,
+  Loading,
+  PageHeader,
+  useRestoreFocus,
+  useToast,
+} from "./callflow/ui";
 
 const TRUNK_NAME_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
-const FORM = "trunk";
+const FORM_ID = "trunk-form";
 
 interface DestinationDraft {
   host: string;
@@ -97,7 +119,7 @@ function toDraft(t: Trunk): TrunkDraft {
 const isInt = (v: string) => /^-?[0-9]+$/.test(v.trim());
 
 /** Client-side checks; the server validates everything again. */
-function validate(d: TrunkDraft): ErrorMap {
+function validate(d: TrunkDraft): Record<string, string> {
   const e: Record<string, string> = {};
   if (!TRUNK_NAME_PATTERN.test(d.name)) {
     e.name = "Use 1 to 64 letters, digits, dots, underscores or hyphens.";
@@ -165,11 +187,6 @@ function knownKeys(d: TrunkDraft): string[] {
   ];
 }
 
-function formatLatency(ns: number | undefined): string {
-  if (ns === undefined) return "";
-  return `${(ns / 1e6).toFixed(ns < 1e7 ? 1 : 0)} ms`;
-}
-
 type ListState =
   | { status: "loading" }
   | { status: "error"; message: string }
@@ -177,13 +194,13 @@ type ListState =
 
 type Editing = { kind: "new" } | { kind: "edit"; trunk: Trunk } | null;
 
-/** Trunks: carrier accounts and IP peers, with live status every 5s. */
+/** Trunks: carrier accounts and IP peers as cards, with live status every 5 s. */
 export function Trunks() {
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [editing, setEditing] = useState<Editing>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<Trunk | null>(null);
   const status = usePolling(listTrunkStatus, LIVE_REFRESH_MS);
+  const toast = useToast();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -197,129 +214,183 @@ export function Trunks() {
     return () => controller.abort();
   }, []);
 
-  const onSaved = useCallback((saved: Trunk, created: boolean) => {
-    setList((prev) =>
-      prev.status !== "ready"
-        ? prev
-        : {
-            status: "ready",
-            items: created
-              ? [...prev.items, saved]
-              : prev.items.map((t) => (t.id === saved.id ? saved : t)),
-          },
-    );
-    setEditing(null);
-    setNotice(`Trunk ${saved.name} saved.`);
-  }, []);
+  const { show } = toast;
+  const onSaved = useCallback(
+    (saved: Trunk, created: boolean, rotated: boolean) => {
+      setList((prev) =>
+        prev.status !== "ready"
+          ? prev
+          : {
+              status: "ready",
+              items: created
+                ? [...prev.items, saved]
+                : prev.items.map((t) => (t.id === saved.id ? saved : t)),
+            },
+      );
+      setEditing(null);
+      show(
+        rotated
+          ? `Secret rotated. ${saved.name} uses the new password from its next request.`
+          : created
+            ? `Trunk ${saved.name} created.`
+            : `Trunk ${saved.name} saved.`,
+      );
+    },
+    [show],
+  );
 
   async function onDelete(t: Trunk) {
-    setActionError(null);
-    setNotice(null);
     try {
       await deleteTrunk(t.id);
-      setList((prev) =>
-        prev.status === "ready"
-          ? { status: "ready", items: prev.items.filter((x) => x.id !== t.id) }
-          : prev,
-      );
     } catch (err) {
-      setActionError(`Could not delete ${t.name}: ${errorMessage(err)}`);
+      throw new Error(`Could not delete ${t.name}: ${errorMessage(err)}`, {
+        cause: err,
+      });
     }
+    setList((prev) =>
+      prev.status === "ready"
+        ? { status: "ready", items: prev.items.filter((x) => x.id !== t.id) }
+        : prev,
+    );
+    setDeleting(null);
+    show(`Trunk ${t.name} deleted.`);
   }
 
   const statuses = status.status === "loading" ? undefined : status.data;
   const statusOf = (t: Trunk) =>
     statuses?.find((s) => String(s.trunkId) === String(t.id));
+  const newTrunk = (
+    <Button
+      icon="plus"
+      disabled={list.status !== "ready"}
+      onClick={() => setEditing({ kind: "new" })}
+    >
+      New trunk
+    </Button>
+  );
 
   return (
     <section aria-labelledby="page-title">
-      <h1 id="page-title">Trunks</h1>
-      <p className="muted" role="status" aria-live="polite">
-        {notice}
-      </p>
-      {editing ? (
-        <TrunkForm
+      <PageHeader
+        title="Trunks"
+        description="Carrier accounts and IP peers. Destinations are health-checked with OPTIONS; status refreshes every 5 s."
+        actions={newTrunk}
+      />
+      <div className="cf-stack">
+        {status.status === "error" && (
+          <Alert tone="warn" title="Live status unavailable">
+            {status.message} Registration, health and call counts show — until
+            it returns.
+          </Alert>
+        )}
+        {list.status === "loading" && <Loading what="trunks" />}
+        {list.status === "error" && (
+          <Alert tone="bad" title="Could not load trunks.">
+            {list.message}
+          </Alert>
+        )}
+        {list.status === "ready" && list.items.length === 0 && (
+          <EmptyState
+            icon="cable"
+            title="No trunks yet."
+            description="Add a carrier account or an IP peer to call numbers outside Hello."
+            action={newTrunk}
+          />
+        )}
+        {list.status === "ready" && list.items.length > 0 && (
+          <ul className="cf-grid cf-plain" aria-label="Trunks">
+            {list.items.map((t) => (
+              <TrunkCard
+                key={String(t.id)}
+                trunk={t}
+                status={statusOf(t)}
+                onEdit={() => setEditing({ kind: "edit", trunk: t })}
+                onDelete={() => setDeleting(t)}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {editing && (
+        <TrunkDrawer
           key={editing.kind === "edit" ? String(editing.trunk.id) : "new"}
           trunk={editing.kind === "edit" ? editing.trunk : null}
-          onCancel={() => setEditing(null)}
+          onClose={() => setEditing(null)}
           onSaved={onSaved}
         />
-      ) : (
-        <p>
-          <button
-            type="button"
-            className="primary"
-            disabled={list.status !== "ready"}
-            onClick={() => {
-              setNotice(null);
-              setEditing({ kind: "new" });
-            }}
-          >
-            New trunk
-          </button>
-        </p>
       )}
-
-      <h2 id="trunks-list">All trunks</h2>
-      <LiveStatus state={status} what="trunk status" />
-      {actionError && (
-        <p role="alert" className="error">
-          {actionError}
-        </p>
+      {deleting && (
+        <ConfirmDialog
+          title={`Delete trunk ${deleting.name}?`}
+          description="Routes that use it stop trying it. Calls in progress are not cut."
+          confirmLabel="Delete trunk"
+          onConfirm={() => onDelete(deleting)}
+          onClose={() => setDeleting(null)}
+        />
       )}
-      {list.status === "loading" && (
-        <p role="status" aria-live="polite">
-          Loading trunks…
-        </p>
-      )}
-      {list.status === "error" && (
-        <div role="alert" className="error">
-          <strong>Could not load trunks.</strong>
-          <p>{list.message}</p>
-        </div>
-      )}
-      {list.status === "ready" && list.items.length === 0 && (
-        <p className="muted">No trunks yet.</p>
-      )}
-      {list.status === "ready" && list.items.length > 0 && (
-        <div className="table-wrap">
-          <table aria-labelledby="trunks-list">
-            <thead>
-              <tr>
-                <th scope="col">Name</th>
-                <th scope="col">Mode</th>
-                <th scope="col">Registration</th>
-                <th scope="col">Destinations</th>
-                <th scope="col">Calls</th>
-                <th scope="col">Password</th>
-                <th scope="col">Enabled</th>
-                <th scope="col">
-                  <span className="visually-hidden">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.items.map((t) => (
-                <TrunkRow
-                  key={t.id}
-                  trunk={t}
-                  status={statusOf(t)}
-                  onEdit={() => {
-                    setNotice(null);
-                    setEditing({ kind: "edit", trunk: t });
-                  }}
-                  onDelete={() => onDelete(t)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {toast.node}
     </section>
   );
 }
 
-function TrunkRow({
+/** The trunk's overall state badge, from its live status. */
+function trunkState(
+  t: Trunk,
+  s: TrunkStatus | undefined,
+): { tone: BadgeTone; label: string } {
+  if (!t.enabled) return { tone: "outline", label: "Disabled" };
+  if (!s) return { tone: "outline", label: "Status unknown" };
+  const down = s.destinations.filter((d) => !d.up).length;
+  const allDown = s.destinations.length > 0 && down === s.destinations.length;
+  if (t.mode === "registration") {
+    const reg = s.registration;
+    if (!reg) return { tone: "outline", label: "Not registered yet" };
+    switch (reg.state) {
+      case "registered":
+        return down > 0
+          ? { tone: "warn", label: "Degraded" }
+          : { tone: "good", label: "Registered" };
+      case "registering":
+        return { tone: "info", label: "Registering" };
+      case "failed":
+        return { tone: "bad", label: "Registration failed" };
+      case "misconfigured":
+        return { tone: "bad", label: "Misconfigured" };
+      case "disabled":
+        return { tone: "outline", label: "Disabled" };
+      default:
+        return { tone: "neutral", label: reg.state };
+    }
+  }
+  if (s.destinations.length === 0) {
+    return { tone: "outline", label: "Not checked yet" };
+  }
+  if (allDown) return { tone: "bad", label: "Down" };
+  if (down > 0) return { tone: "warn", label: "Degraded" };
+  return { tone: "good", label: "Up" };
+}
+
+/** "registered on hello-sip-1 (200) · expires in 51 min" or "accepts …". */
+function trunkLine(t: Trunk, s: TrunkStatus | undefined): string {
+  if (t.mode === "ip") {
+    const cidrs = t.sourceCidrs ?? [];
+    return cidrs.length > 0
+      ? `accepts ${cidrs.join(", ")}`
+      : "accepts no source addresses";
+  }
+  const reg = s?.registration;
+  if (!reg) return "registration state —";
+  const mins = minutesUntil(reg.expires);
+  return [
+    `${reg.state} on ${orUnknown(reg.node)}${reg.lastCode ? ` (${reg.lastCode})` : ""}`,
+    mins !== null ? `expires in ${mins} min` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function TrunkCard({
   trunk: t,
   status,
   onEdit,
@@ -328,80 +399,163 @@ function TrunkRow({
   trunk: Trunk;
   status: TrunkStatus | undefined;
   onEdit: () => void;
-  onDelete: () => Promise<void>;
+  onDelete: () => void;
 }) {
-  const reg = status?.registration;
+  const state = trunkState(t, status);
+  const titleId = `trunk-${String(t.id)}-name`;
+  const calls = status?.activeCalls;
+  const callsLabel =
+    calls === undefined
+      ? UNKNOWN
+      : t.maxCalls > 0
+        ? `${calls} of ${t.maxCalls}`
+        : `${calls} · no limit`;
+  const password = t.hasPassword ? "set (write-only)" : "not set";
+  const props: Property[] =
+    t.mode === "registration"
+      ? [
+          { label: "Username", value: orUnknown(t.username), mono: true },
+          { label: "Realm", value: orUnknown(t.realm), mono: true },
+          { label: "OPTIONS interval", value: `${t.optionsInterval} s` },
+          {
+            label: "Default caller ID",
+            value: orUnknown(t.defaultCallerId),
+            mono: true,
+          },
+          { label: "Password", value: password },
+        ]
+      : [
+          {
+            label: "Source CIDRs",
+            value: orUnknown((t.sourceCidrs ?? []).join(", ")),
+            mono: true,
+          },
+          { label: "From domain", value: orUnknown(t.fromDomain), mono: true },
+          { label: "OPTIONS interval", value: `${t.optionsInterval} s` },
+          {
+            label: "Default caller ID",
+            value: orUnknown(t.defaultCallerId),
+            mono: true,
+          },
+          { label: "Password", value: password },
+        ];
+
   return (
-    <tr>
-      <th scope="row">{t.name}</th>
-      <td>{t.mode === "ip" ? "IP peer" : "Registration"}</td>
-      <td>
-        {t.mode === "ip" ? (
-          <span className="muted">Not used</span>
-        ) : reg ? (
-          <span className={`state state-${reg.state}`}>
-            {reg.state}
-            {reg.lastCode ? ` (${reg.lastCode})` : ""}
-          </span>
-        ) : (
-          <span className="muted">Unknown</span>
-        )}
-      </td>
-      <td>
-        {status && status.destinations.length > 0 ? (
-          <ul className="plain">
-            {status.destinations.map((d) => (
-              <li key={d.destination}>
-                <code>{d.destination}</code>{" "}
-                <span className={d.up ? "state state-up" : "state state-down"}>
-                  {d.up ? "up" : "down"}
-                </span>
-                {d.up && d.latencyNs !== undefined
-                  ? `, ${formatLatency(d.latencyNs)}`
-                  : ""}
-                {!d.up && d.lastCode ? ` (${d.lastCode})` : ""}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <span className="muted">No health data</span>
-        )}
-      </td>
-      <td>
-        {status?.activeCalls ?? 0}
-        {t.maxCalls > 0 ? ` of ${t.maxCalls}` : " (no limit)"}
-      </td>
-      <td>{t.hasPassword ? "set" : "not set"}</td>
-      <td>{t.enabled ? "Yes" : "No"}</td>
-      <td className="row-actions">
-        <button
-          type="button"
+    <li className="az-card cf-card" aria-labelledby={titleId}>
+      <div className="cf-card__head">
+        <span className="cf-tile">
+          <Icon
+            name={t.mode === "registration" ? "key-round" : "network"}
+            size={18}
+          />
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <h2 className="cf-card__name" id={titleId}>
+            {t.name}
+          </h2>
+          <div className="cf-card__sub">
+            {t.mode === "registration" ? "Registration" : "IP peer"} ·{" "}
+            {trunkLine(t, status)}
+          </div>
+        </div>
+        <Badge tone={state.tone} dot>
+          {state.label}
+        </Badge>
+      </div>
+
+      <table className="cf-dests">
+        <caption className="visually-hidden">Destinations of {t.name}</caption>
+        <thead>
+          <tr className="cf-dests__row cf-dests__row--head az-eyebrow">
+            <th scope="col">Destination</th>
+            <th scope="col">Prio</th>
+            <th scope="col">Weight</th>
+            <th scope="col" className="cf-dests__right">
+              Health
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {(t.destinations ?? []).map((d) => {
+            const key = `${d.host}:${d.port}`;
+            const h = status?.destinations.find((x) => x.destination === key);
+            const latency = formatLatency(h?.latencyNs);
+            const tone = !h ? "unknown" : h.up ? "good" : "bad";
+            const text = !h
+              ? UNKNOWN
+              : h.up
+                ? (latency ?? "up")
+                : h.lastCode
+                  ? `down · ${h.lastCode}`
+                  : "down";
+            return (
+              <tr className="cf-dests__row" key={key}>
+                <td className="cf-dests__host" title={key}>
+                  {d.port === 0 ? `${d.host} (SRV)` : key}
+                </td>
+                <td className="cf-dests__num">{d.priority}</td>
+                <td className="cf-dests__num">{d.weight}</td>
+                <td className={`cf-health cf-health--${tone}`}>
+                  <span className="az-dot" aria-hidden="true" />
+                  {text}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      <Meter
+        label="Concurrent calls"
+        value={calls ?? 0}
+        max={t.maxCalls > 0 ? t.maxCalls : Math.max(calls ?? 0, 1)}
+        tone={t.maxCalls > 0 ? "auto" : "mint"}
+        valueLabel={callsLabel}
+      />
+      <PropertyList items={props} />
+
+      <div className="cf-card__foot">
+        <Button
+          variant="secondary"
+          size="sm"
+          icon="pencil"
           aria-label={`Edit trunk ${t.name}`}
           onClick={onEdit}
         >
           Edit
-        </button>
-        <ConfirmButton
-          label="Delete"
-          accessibleLabel={`Delete trunk ${t.name}`}
-          prompt={`Delete trunk ${t.name}?`}
-          confirmLabel="Delete trunk"
-          onConfirm={onDelete}
-        />
-      </td>
-    </tr>
+        </Button>
+        <Link
+          className="az-btn az-btn--ghost az-btn--sm"
+          to={`/routes/test?from=${encodeURIComponent(`trunk:${String(t.id)}`)}`}
+        >
+          <Icon name="flask-conical" size={13} />
+          Test a route
+        </Link>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="trash-2"
+          className="cf-danger"
+          aria-label={`Delete trunk ${t.name}`}
+          onClick={onDelete}
+        >
+          Delete
+        </Button>
+      </div>
+    </li>
   );
 }
 
-function TrunkForm({
+function TrunkDrawer({
   trunk,
-  onCancel,
+  onClose,
   onSaved,
 }: {
   trunk: Trunk | null;
-  onCancel: () => void;
-  onSaved: (t: Trunk, created: boolean) => void;
+  onClose: () => void;
+  onSaved: (t: Trunk, created: boolean, rotated: boolean) => void;
 }) {
+  useRestoreFocus();
   const [draft, setDraft] = useState<TrunkDraft>(() =>
     trunk ? toDraft(trunk) : NEW_TRUNK,
   );
@@ -423,7 +577,7 @@ function TrunkForm({
         j === i ? { ...x, ...patch } : x,
       ),
     }));
-  const id = (key: string) => fieldId(FORM, key);
+  const fid = (key: string) => `trunk-${key.replace(/[^A-Za-z0-9_-]+/g, "-")}`;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -439,14 +593,15 @@ function TrunkForm({
       return;
     }
     const body = toInput(draft);
-    if (changingPassword && password !== "") body.password = password;
+    const sendingPassword = changingPassword && password !== "";
+    if (sendingPassword) body.password = password;
     setBusy(true);
     try {
       const saved = trunk
         ? await updateTrunk(trunk.id, body)
         : await createTrunk(body);
       setPassword("");
-      onSaved(saved, trunk === null);
+      onSaved(saved, trunk === null, trunk !== null && sendingPassword);
     } catch (err) {
       const mapped = mapFieldErrors(fieldErrors(err), knownKeys(draft));
       setErrors(mapped.byKey);
@@ -456,289 +611,277 @@ function TrunkForm({
     }
   }
 
-  const title = trunk ? `Edit trunk ${trunk.name}` : "New trunk";
+  const registration = draft.mode === "registration";
   return (
-    <form
-      className="inline-form"
-      aria-labelledby="trunk-form-title"
-      onSubmit={(e) => void onSubmit(e)}
-      noValidate
+    <Drawer
+      title={trunk ? `Trunk ${trunk.name}` : "New trunk"}
+      description={
+        trunk
+          ? "Changes apply to new calls and the next registration."
+          : "A carrier account that registers, or an IP peer that is trusted by address."
+      }
+      onClose={busy ? undefined : onClose}
+      width={560}
+      footer={
+        <>
+          <Button variant="secondary" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form={FORM_ID} disabled={busy}>
+            {trunk ? "Save trunk" : "Create trunk"}
+          </Button>
+        </>
+      }
     >
-      <h2 id="trunk-form-title">{title}</h2>
-      <div className="fields">
-        <Field id={id("name")} label="Name" error={errors.name}>
-          {(p) => (
-            <input
-              {...p}
-              value={draft.name}
+      <form
+        id={FORM_ID}
+        className="cf-form"
+        aria-label={trunk ? `Edit trunk ${trunk.name}` : "New trunk"}
+        onSubmit={(e) => void onSubmit(e)}
+        noValidate
+      >
+        <div className="cf-two">
+          <Input
+            id={fid("name")}
+            label="Name"
+            mono
+            autoFocus
+            autoComplete="off"
+            value={draft.name}
+            error={errors.name}
+            hint="Letters, digits, dots, underscores or hyphens."
+            onChange={(e) => set("name", e.target.value)}
+          />
+          <Select
+            id={fid("mode")}
+            label="Mode"
+            value={draft.mode}
+            error={errors.mode}
+            options={[
+              { value: "registration", label: "Registration" },
+              { value: "ip", label: "IP peer" },
+            ]}
+            onChange={(e) => set("mode", e.target.value as TrunkDraft["mode"])}
+          />
+        </div>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Credentials</legend>
+          <div className="cf-two">
+            <Input
+              id={fid("username")}
+              label="Username"
+              mono
               autoComplete="off"
-              onChange={(e) => set("name", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field id={id("mode")} label="Mode" error={errors.mode}>
-          {(p) => (
-            <select
-              {...p}
-              value={draft.mode}
-              onChange={(e) =>
-                set("mode", e.target.value as TrunkDraft["mode"])
-              }
-            >
-              <option value="registration">
-                Registration (carrier account)
-              </option>
-              <option value="ip">IP peer</option>
-            </select>
-          )}
-        </Field>
-        <Field id={id("username")} label="Username" error={errors.username}>
-          {(p) => (
-            <input
-              {...p}
               value={draft.username}
-              autoComplete="off"
+              error={errors.username}
               onChange={(e) => set("username", e.target.value)}
             />
-          )}
-        </Field>
-        <PasswordField
-          id={id("password")}
-          isNew={trunk === null}
-          hasPassword={trunk?.hasPassword ?? false}
-          changing={changingPassword}
-          value={password}
-          error={errors.password}
-          onChange={setPassword}
-          onChanging={(on) => {
-            setChangingPassword(on);
-            setPassword("");
-          }}
-        />
-        <Field id={id("realm")} label="Realm" error={errors.realm}>
-          {(p) => (
-            <input
-              {...p}
+            <Input
+              id={fid("realm")}
+              label="Realm"
+              mono
               value={draft.realm}
+              error={errors.realm}
               onChange={(e) => set("realm", e.target.value)}
             />
-          )}
-        </Field>
-        <Field
-          id={id("fromDomain")}
-          label="From domain"
-          error={errors.fromDomain}
-        >
-          {(p) => (
-            <input
-              {...p}
-              value={draft.fromDomain}
-              onChange={(e) => set("fromDomain", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field
-          id={id("registerExpires")}
-          label="Register expires (s)"
-          error={errors.registerExpires}
-          hint="60 to 86400."
-        >
-          {(p) => (
-            <input
-              {...p}
+          </div>
+          <PasswordField
+            id={fid("password")}
+            isNew={trunk === null}
+            hasPassword={trunk?.hasPassword ?? false}
+            changing={changingPassword}
+            value={password}
+            error={errors.password}
+            onChange={setPassword}
+            onChanging={(on) => {
+              setChangingPassword(on);
+              setPassword("");
+            }}
+          />
+          {registration && (
+            <Input
+              id={fid("registerExpires")}
+              label="Register expires (s)"
               inputMode="numeric"
               value={draft.registerExpires}
+              error={errors.registerExpires}
+              hint="60 to 86400."
               onChange={(e) => set("registerExpires", e.target.value)}
             />
           )}
-        </Field>
-        <Field
-          id={id("optionsInterval")}
-          label="OPTIONS interval (s)"
-          error={errors.optionsInterval}
-          hint="5 to 3600."
-        >
-          {(p) => (
-            <input
-              {...p}
-              inputMode="numeric"
-              value={draft.optionsInterval}
-              onChange={(e) => set("optionsInterval", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field
-          id={id("maxCalls")}
-          label="Max calls"
-          error={errors.maxCalls}
-          hint="0 means no limit."
-        >
-          {(p) => (
-            <input
-              {...p}
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Calls</legend>
+          <div className="cf-two">
+            <Input
+              id={fid("maxCalls")}
+              label="Concurrent calls"
               inputMode="numeric"
               value={draft.maxCalls}
+              error={errors.maxCalls}
+              hint="0 means no limit."
               onChange={(e) => set("maxCalls", e.target.value)}
             />
-          )}
-        </Field>
-        <Field
-          id={id("defaultCallerId")}
-          label="Default caller ID"
-          error={errors.defaultCallerId}
-        >
-          {(p) => (
-            <input
-              {...p}
-              value={draft.defaultCallerId}
-              onChange={(e) => set("defaultCallerId", e.target.value)}
+            <Input
+              id={fid("optionsInterval")}
+              label="OPTIONS interval (s)"
+              inputMode="numeric"
+              value={draft.optionsInterval}
+              error={errors.optionsInterval}
+              hint="5 to 3600."
+              onChange={(e) => set("optionsInterval", e.target.value)}
             />
-          )}
-        </Field>
-        <Field
-          id={id("sourceCidrs")}
-          label="Source CIDRs"
-          error={errors.sourceCidrs}
-          hint="One per line, e.g. 203.0.113.0/24. Calls from these addresses are accepted as this trunk."
-        >
-          {(p) => (
+          </div>
+          <Input
+            id={fid("defaultCallerId")}
+            label="Default caller ID"
+            mono
+            value={draft.defaultCallerId}
+            error={errors.defaultCallerId}
+            hint="Presented when the calling extension has no external number."
+            onChange={(e) => set("defaultCallerId", e.target.value)}
+          />
+          <Input
+            id={fid("fromDomain")}
+            label="From domain"
+            mono
+            value={draft.fromDomain}
+            error={errors.fromDomain}
+            hint="Optional; the host of the From header sent to this trunk."
+            onChange={(e) => set("fromDomain", e.target.value)}
+          />
+          <div className="az-field">
+            <label className="az-field__label" htmlFor={fid("sourceCidrs")}>
+              Source CIDRs
+            </label>
             <textarea
-              {...p}
+              id={fid("sourceCidrs")}
+              className="az-input az-textarea az-input--mono"
               rows={3}
               value={draft.sourceCidrs}
+              aria-invalid={errors.sourceCidrs ? true : undefined}
+              aria-describedby={`${fid("sourceCidrs")}-hint`}
               onChange={(e) => set("sourceCidrs", e.target.value)}
             />
-          )}
-        </Field>
-        <div className="field checkbox">
-          <input
-            id={id("enabled")}
-            type="checkbox"
+            <span
+              className={
+                errors.sourceCidrs
+                  ? "az-field__hint cf-form__error"
+                  : "az-field__hint"
+              }
+              id={`${fid("sourceCidrs")}-hint`}
+            >
+              {errors.sourceCidrs ??
+                "One per line, e.g. 203.0.113.0/24. Calls from these addresses are accepted as this trunk."}
+            </span>
+          </div>
+          <Switch
+            label="Enabled"
+            hint="A disabled trunk is skipped by every route."
+            labelPosition="end"
             checked={draft.enabled}
             onChange={(e) => set("enabled", e.target.checked)}
           />
-          <label htmlFor={id("enabled")}>Enabled</label>
-        </div>
-      </div>
+        </fieldset>
 
-      <fieldset
-        className="group"
-        aria-describedby={
-          errors.destinations ? `${id("destinations")}-error` : undefined
-        }
-      >
-        <legend>Destinations</legend>
-        {errors.destinations && (
-          <p id={`${id("destinations")}-error`} className="field-error">
-            {errors.destinations}
-          </p>
-        )}
-        {draft.destinations.map((dst, i) => {
-          const n = i + 1;
-          const k = (f: string) => `destinations[${i}].${f}`;
-          return (
-            <div className="fields destination" key={i}>
-              <Field
-                id={id(k("host"))}
-                label={`Host ${n}`}
-                error={errors[k("host")] ?? errors[`destinations[${i}]`]}
-              >
-                {(p) => (
-                  <input
-                    {...p}
-                    value={dst.host}
-                    onChange={(e) => setDest(i, { host: e.target.value })}
-                  />
-                )}
-              </Field>
-              <Field
-                id={id(k("port"))}
-                label={`Port ${n}`}
-                error={errors[k("port")]}
-              >
-                {(p) => (
-                  <input
-                    {...p}
-                    className="narrow"
-                    inputMode="numeric"
-                    value={dst.port}
-                    onChange={(e) => setDest(i, { port: e.target.value })}
-                  />
-                )}
-              </Field>
-              <Field
-                id={id(k("priority"))}
-                label={`Priority ${n}`}
-                error={errors[k("priority")]}
-              >
-                {(p) => (
-                  <input
-                    {...p}
-                    className="narrow"
-                    inputMode="numeric"
-                    value={dst.priority}
-                    onChange={(e) => setDest(i, { priority: e.target.value })}
-                  />
-                )}
-              </Field>
-              <Field
-                id={id(k("weight"))}
-                label={`Weight ${n}`}
-                error={errors[k("weight")]}
-              >
-                {(p) => (
-                  <input
-                    {...p}
-                    className="narrow"
-                    inputMode="numeric"
-                    value={dst.weight}
-                    onChange={(e) => setDest(i, { weight: e.target.value })}
-                  />
-                )}
-              </Field>
-              <button
-                type="button"
-                className="align-end"
-                aria-label={`Remove destination ${n}`}
-                onClick={() =>
-                  setDraft((d) => ({
-                    ...d,
-                    destinations: d.destinations.filter((_, j) => j !== i),
-                  }))
-                }
-              >
-                Remove
-              </button>
-            </div>
-          );
-        })}
-        <p className="hint">
-          Lower priority is tried first; weight splits calls among equal
-          priorities. Port 0 resolves SRV.
-        </p>
-        <button
-          type="button"
-          onClick={() =>
-            setDraft((d) => ({
-              ...d,
-              destinations: [...d.destinations, NEW_DESTINATION],
-            }))
+        <fieldset
+          className="cf-form__section"
+          aria-describedby={
+            errors.destinations ? `${fid("destinations")}-error` : undefined
           }
         >
-          Add destination
-        </button>
-      </fieldset>
-
-      <FormError message={formError} unmatched={unmatched} />
-      <div className="actions start">
-        <button type="submit" className="primary" disabled={busy}>
-          {trunk ? "Save trunk" : "Create trunk"}
-        </button>
-        <button type="button" disabled={busy} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </form>
+          <legend className="az-eyebrow">Destinations</legend>
+          <p className="cf-form__note">
+            Lower priority is tried first; weight splits calls among equal
+            priorities. Port 0 resolves SRV.
+          </p>
+          {errors.destinations && (
+            <p id={`${fid("destinations")}-error`} className="cf-form__error">
+              {errors.destinations}
+            </p>
+          )}
+          <ul className="cf-rows">
+            {draft.destinations.map((dst, i) => {
+              const n = i + 1;
+              const k = (f: string) => `destinations[${i}].${f}`;
+              return (
+                <li className="cf-row" key={i}>
+                  <div className="cf-row__fields cf-row__fields--dest">
+                    <Input
+                      id={fid(k("host"))}
+                      label={`Host ${n}`}
+                      mono
+                      size="sm"
+                      value={dst.host}
+                      error={errors[k("host")] ?? errors[`destinations[${i}]`]}
+                      onChange={(e) => setDest(i, { host: e.target.value })}
+                    />
+                    <Input
+                      id={fid(k("port"))}
+                      label={`Port ${n}`}
+                      mono
+                      size="sm"
+                      inputMode="numeric"
+                      value={dst.port}
+                      error={errors[k("port")]}
+                      onChange={(e) => setDest(i, { port: e.target.value })}
+                    />
+                    <Input
+                      id={fid(k("priority"))}
+                      label={`Priority ${n}`}
+                      mono
+                      size="sm"
+                      inputMode="numeric"
+                      value={dst.priority}
+                      error={errors[k("priority")]}
+                      onChange={(e) => setDest(i, { priority: e.target.value })}
+                    />
+                    <Input
+                      id={fid(k("weight"))}
+                      label={`Weight ${n}`}
+                      mono
+                      size="sm"
+                      inputMode="numeric"
+                      value={dst.weight}
+                      error={errors[k("weight")]}
+                      onChange={(e) => setDest(i, { weight: e.target.value })}
+                    />
+                  </div>
+                  <IconButton
+                    icon="trash-2"
+                    label={`Remove destination ${n}`}
+                    onClick={() =>
+                      setDraft((d) => ({
+                        ...d,
+                        destinations: d.destinations.filter((_, j) => j !== i),
+                      }))
+                    }
+                  />
+                </li>
+              );
+            })}
+          </ul>
+          <div>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="plus"
+              onClick={() =>
+                setDraft((d) => ({
+                  ...d,
+                  destinations: [...d.destinations, NEW_DESTINATION],
+                }))
+              }
+            >
+              Add destination
+            </Button>
+          </div>
+        </fieldset>
+        <FormAlert message={formError} unmatched={unmatched} />
+      </form>
+    </Drawer>
   );
 }
 
@@ -768,45 +911,44 @@ function PasswordField({
   const statusId = `${id}-status`;
   if (!changing) {
     return (
-      <div className="field">
-        <span className="label" id={`${id}-label`}>
-          Password
-        </span>
-        <p id={statusId} className="password-state">
-          {hasPassword ? "set" : "not set"}
-        </p>
-        <button
-          type="button"
-          aria-describedby={statusId}
-          onClick={() => onChanging(true)}
-        >
-          {hasPassword ? "Change password" : "Set password"}
-        </button>
+      <div className="az-field">
+        <span className="az-field__label">Password</span>
+        <div className="cf-inline">
+          <span id={statusId}>
+            {hasPassword ? "set (write-only)" : "not set"}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="key-round"
+            aria-describedby={statusId}
+            onClick={() => onChanging(true)}
+          >
+            {hasPassword ? "Change password" : "Set password"}
+          </Button>
+        </div>
       </div>
     );
   }
   return (
-    <div className="field">
-      <Field
+    <div className="cf-field-group">
+      <Input
         id={id}
         label={isNew ? "Password (optional)" : "New password"}
+        type="password"
+        autoComplete="new-password"
+        autoFocus={!isNew}
+        value={value}
         error={error}
-        hint="Write-only: it is stored encrypted and never shown again."
-      >
-        {(p) => (
-          <input
-            {...p}
-            type="password"
-            autoComplete="new-password"
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        )}
-      </Field>
+        hint="Write-only: stored encrypted and never shown again."
+        onChange={(e) => onChange(e.target.value)}
+      />
       {!isNew && (
-        <button type="button" onClick={() => onChanging(false)}>
-          Keep current password
-        </button>
+        <div>
+          <Button variant="ghost" size="sm" onClick={() => onChanging(false)}>
+            Keep current password
+          </Button>
+        </div>
       )}
     </div>
   );

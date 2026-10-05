@@ -1,53 +1,247 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Link, useSearchParams } from "react-router";
 import {
   errorMessage,
   fieldErrors,
   listExtensions,
   listTrunks,
-  testRoute,
   type Extension,
   type FieldError,
   type RouteTestRequest,
-  type RouteTestResult,
+  type TraceStep,
   type Trunk,
 } from "../api";
-import { TraceList } from "../components/TraceList";
-import { Field, FormError, mapFieldErrors, type ErrorMap } from "../forms";
+import {
+  testCall,
+  type CallflowDecision,
+  type CallflowTestResult,
+} from "../api/callflow";
+import {
+  Alert,
+  Badge,
+  Button,
+  EmptyState,
+  Icon,
+  Input,
+  PropertyList,
+  SegmentedControl,
+  Select,
+  type BadgeTone,
+  type Property,
+} from "../design/azrty/components";
+import { mapFieldErrors, type ErrorMap } from "../forms";
+import { orUnknown, sipStatus, UNKNOWN } from "./callflow/format";
+import { FormAlert, Loading, PageHeader } from "./callflow/ui";
 
-const KIND_LABEL: Record<string, string> = {
-  internal: "Internal call",
-  outbound: "Outbound via trunks",
-  inbound: "Inbound",
-  reject: "Rejected",
-};
+type FromKind = "extension" | "trunk";
+
+type Load<T> =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; items: T[] };
+
+interface Presented {
+  tone: "good" | "bad" | "info" | "warn";
+  icon: string;
+  title: string;
+  kindLabel: string;
+  chain: { k: string; v: string }[];
+  facts: Property[];
+}
+
+/** The design's decision card, from the tester's answer. */
+function present(d: CallflowDecision, from: string): Presented {
+  const trunks = d.trunks ?? [];
+  const callerId = {
+    label: "Caller ID",
+    value: orUnknown(d.callerId),
+    mono: true,
+  };
+  switch (d.kind) {
+    case "internal":
+      return {
+        tone: "good",
+        icon: "arrow-left-right",
+        title: `Internal call to ${orUnknown(d.extension)}`,
+        kindLabel: "Internal call",
+        chain: [
+          { k: "From", v: from },
+          { k: "Extension", v: orUnknown(d.extension) },
+        ],
+        facts: [
+          { label: "Outcome", value: "Internal call" },
+          { label: "Extension", value: orUnknown(d.extension), mono: true },
+          { label: "SIP URI", value: orUnknown(d.sipUri), mono: true },
+        ],
+      };
+    case "outbound": {
+      const first = trunks[0] ?? UNKNOWN;
+      return {
+        tone: d.emergency ? "bad" : "good",
+        icon: d.emergency ? "siren" : "phone-outgoing",
+        title: d.emergency
+          ? `Emergency call via ${first}`
+          : `Outbound via ${first}`,
+        kindLabel: d.emergency ? "Emergency" : "Outbound via trunks",
+        chain: [
+          { k: "From", v: from },
+          { k: "Route", v: orUnknown(d.route) },
+          { k: "Number sent", v: orUnknown(d.number) },
+          { k: "Trunk", v: first },
+        ],
+        facts: [
+          { label: "Outcome", value: "Outbound via trunks" },
+          { label: "Route", value: orUnknown(d.route) },
+          { label: "Number sent", value: orUnknown(d.number), mono: true },
+          callerId,
+          {
+            label: "Trunks, in try order",
+            value:
+              trunks.length > 0 ? (
+                <ol
+                  className="cf-chips cf-plain"
+                  aria-label="Trunks, in try order"
+                >
+                  {trunks.map((t, i) => (
+                    <li key={t} className="cf-inline">
+                      {i > 0 && <Icon name="chevron-right" size={12} />}
+                      <span className="cf-chip">{t}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                UNKNOWN
+              ),
+          },
+        ],
+      };
+    }
+    case "inbound": {
+      const target = d.extension || d.sipUri || d.number || "";
+      return {
+        tone: "good",
+        icon: "phone-incoming",
+        title: `Inbound to ${orUnknown(target)}`,
+        kindLabel: "Inbound",
+        chain: [
+          { k: "From", v: from },
+          { k: "Route", v: orUnknown(d.route) },
+          { k: "Destination", v: orUnknown(target) },
+        ],
+        facts: [
+          { label: "Outcome", value: "Inbound" },
+          { label: "Route", value: orUnknown(d.route) },
+          d.extension
+            ? { label: "Extension", value: d.extension, mono: true }
+            : d.sipUri
+              ? { label: "SIP URI", value: d.sipUri, mono: true }
+              : {
+                  label: "Number sent",
+                  value: orUnknown(d.number),
+                  mono: true,
+                },
+          callerId,
+        ],
+      };
+    }
+    case "reject":
+      return {
+        tone: "bad",
+        icon: "ban",
+        title: d.rejectCode
+          ? `Rejected · ${sipStatus(d.rejectCode)}`
+          : "Rejected",
+        kindLabel: "Rejected",
+        chain: [],
+        facts: [
+          { label: "Outcome", value: "Rejected" },
+          {
+            label: "Rejected with",
+            value: d.rejectCode ? String(d.rejectCode) : UNKNOWN,
+            mono: true,
+          },
+          { label: "Reason", value: orUnknown(d.reason) },
+        ],
+      };
+    default:
+      return {
+        tone: "info",
+        icon: "info",
+        title: String(d.kind),
+        kindLabel: String(d.kind),
+        chain: [],
+        facts: [{ label: "Outcome", value: String(d.kind) }],
+      };
+  }
+}
+
+/** Reads ?from= (an extension number or trunk:<id>) and ?number=. */
+function initialFrom(params: URLSearchParams) {
+  const from = params.get("from") ?? "";
+  const trunk = /^trunk:(.+)$/.exec(from);
+  return {
+    kind: (trunk ? "trunk" : "extension") as FromKind,
+    extension: trunk ? "" : from,
+    trunk: trunk?.[1] ?? "",
+    number: params.get("number") ?? "",
+  };
+}
 
 /** Route tester: decide a call against the live configuration without placing it. */
 export function RouteTest() {
-  const [extensions, setExtensions] = useState<Extension[]>([]);
-  const [trunks, setTrunks] = useState<Trunk[]>([]);
-  const [fromKind, setFromKind] = useState<"extension" | "trunk">("extension");
-  const [fromExtension, setFromExtension] = useState("");
-  const [fromTrunk, setFromTrunk] = useState("");
-  const [number, setNumber] = useState("");
+  const [params] = useSearchParams();
+  const [initial] = useState(() => initialFrom(params));
+  const [extensions, setExtensions] = useState<Load<Extension>>({
+    status: "loading",
+  });
+  const [trunks, setTrunks] = useState<Load<Trunk>>({ status: "loading" });
+  const [fromKind, setFromKind] = useState<FromKind>(initial.kind);
+  const [fromExtension, setFromExtension] = useState(initial.extension);
+  const [fromTrunk, setFromTrunk] = useState(initial.trunk);
+  const [number, setNumber] = useState(initial.number);
   const [callerId, setCallerId] = useState("");
   const [at, setAt] = useState("");
   const [errors, setErrors] = useState<ErrorMap>({});
   const [unmatched, setUnmatched] = useState<FieldError[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<RouteTestResult | null>(null);
+  const [result, setResult] = useState<{
+    data: CallflowTestResult;
+    from: string;
+  } | null>(null);
+  const autorun = useRef(
+    initial.number !== "" && (initial.extension !== "" || initial.trunk !== ""),
+  );
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
+    const fail = (set: (s: Load<never>) => void) => (err: unknown) => {
+      if (!controller.signal.aborted) {
+        set({ status: "error", message: errorMessage(err) });
+      }
+    };
     listExtensions(controller.signal)
-      .then(setExtensions)
-      .catch(() => {});
+      .then((items) => setExtensions({ status: "ready", items }))
+      .catch(fail(setExtensions));
     listTrunks(controller.signal)
-      .then(setTrunks)
-      .catch(() => {});
+      .then((items) => setTrunks({ status: "ready", items }))
+      .catch(fail(setTrunks));
     return () => controller.abort();
   }, []);
+
+  // Opened with ?from=…&number=… (e.g. "Test a route" on a trunk): test at once.
+  useEffect(() => {
+    if (autorun.current) {
+      autorun.current = false;
+      formRef.current?.requestSubmit();
+    }
+  }, []);
+
+  const trunkName = (id: string) =>
+    trunks.status === "ready"
+      ? (trunks.items.find((t) => String(t.id) === id)?.name ?? `trunk ${id}`)
+      : `trunk ${id}`;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -58,9 +252,7 @@ export function RouteTest() {
         : fromTrunk && `trunk:${fromTrunk}`;
     if (!from) {
       found.from =
-        fromKind === "extension"
-          ? "Choose or enter an extension."
-          : "Choose a trunk.";
+        fromKind === "extension" ? "Choose an extension." : "Choose a trunk.";
     }
     if (number.trim() === "") found.number = "Enter the dialled number.";
     let atIso: string | undefined;
@@ -79,7 +271,14 @@ export function RouteTest() {
     if (atIso) body.at = atIso;
     setBusy(true);
     try {
-      setResult(await testRoute(body));
+      const data = await testCall(body);
+      setResult({
+        data,
+        from:
+          fromKind === "extension"
+            ? fromExtension.trim()
+            : trunkName(fromTrunk),
+      });
     } catch (err) {
       const mapped = mapFieldErrors(fieldErrors(err), [
         "from",
@@ -96,191 +295,278 @@ export function RouteTest() {
     }
   }
 
-  const decision = result?.decision;
+  const extensionOptions =
+    extensions.status === "ready"
+      ? [
+          { value: "", label: "Choose…" },
+          ...extensions.items.map((x) => ({
+            value: x.number,
+            label: x.name ? `${x.number} · ${x.name}` : x.number,
+          })),
+          // Keep a number from the link even if it is not in the list.
+          ...(fromExtension &&
+          !extensions.items.some((x) => x.number === fromExtension)
+            ? [{ value: fromExtension, label: fromExtension }]
+            : []),
+        ]
+      : [];
+  const trunkOptions = [
+    { value: "", label: "Choose…" },
+    ...(trunks.status === "ready"
+      ? trunks.items.map((t) => ({ value: String(t.id), label: t.name }))
+      : []),
+    ...(fromTrunk &&
+    !(
+      trunks.status === "ready" &&
+      trunks.items.some((t) => String(t.id) === fromTrunk)
+    )
+      ? [{ value: fromTrunk, label: `Trunk ${fromTrunk}` }]
+      : []),
+  ];
+
+  const view = result ? present(result.data.decision, result.from) : null;
+
   return (
     <section aria-labelledby="page-title">
-      <p>
-        <Link to="/routes">← Routes</Link>
-      </p>
-      <h1 id="page-title">Route tester</h1>
-      <p className="muted">
-        Shows how a call would be routed now, or at a chosen time. No call is
-        placed.
-      </p>
-      <form
-        className="inline-form"
-        aria-label="Test a call"
-        onSubmit={(e) => void onSubmit(e)}
-        noValidate
-      >
-        <div className="fields">
-          <Field id="rt-from-kind" label="From">
-            {(p) => (
-              <select
-                {...p}
-                value={fromKind}
-                onChange={(e) =>
-                  setFromKind(e.target.value as "extension" | "trunk")
-                }
-              >
-                <option value="extension">An extension</option>
-                <option value="trunk">A trunk (inbound)</option>
-              </select>
-            )}
-          </Field>
+      <PageHeader
+        title="Route tester"
+        description="Shows how a call would be routed now, or at a chosen time, against the live configuration. No call is placed."
+        back={
+          <Link
+            to="/routes"
+            className="az-btn az-btn--ghost az-btn--sm cf-back"
+          >
+            <Icon name="arrow-left" size={14} />
+            Routes
+          </Link>
+        }
+      />
+      <div className="cf-tester">
+        <form
+          ref={formRef}
+          className="az-card cf-card cf-card--form"
+          aria-labelledby="rt-call"
+          onSubmit={(e) => void onSubmit(e)}
+          noValidate
+        >
+          <h2 className="cf-card__title" id="rt-call">
+            Call
+          </h2>
+          <div className="cf-field-group">
+            <span className="az-field__label" id="rt-from-label">
+              From
+            </span>
+            <SegmentedControl<FromKind>
+              aria-label="From"
+              block
+              value={fromKind}
+              onChange={setFromKind}
+              options={[
+                { value: "extension", label: "Extension" },
+                { value: "trunk", label: "Trunk (inbound)" },
+              ]}
+            />
+          </div>
           {fromKind === "extension" ? (
-            <Field id="rt-from" label="Extension" error={errors.from}>
-              {(p) => (
-                <>
-                  <input
-                    {...p}
-                    list="rt-extensions"
-                    inputMode="numeric"
-                    value={fromExtension}
-                    onChange={(e) => setFromExtension(e.target.value)}
-                  />
-                  <datalist id="rt-extensions">
-                    {extensions.map((x) => (
-                      <option key={String(x.id)} value={x.number}>
-                        {x.name}
-                      </option>
-                    ))}
-                  </datalist>
-                </>
-              )}
-            </Field>
+            extensions.status === "ready" ? (
+              <Select
+                id="rt-from"
+                label="Extension"
+                value={fromExtension}
+                options={extensionOptions}
+                error={errors.from}
+                onChange={(e) => setFromExtension(e.target.value)}
+              />
+            ) : (
+              <Input
+                id="rt-from"
+                label="Extension"
+                mono
+                inputMode="numeric"
+                value={fromExtension}
+                error={errors.from}
+                hint={
+                  extensions.status === "error"
+                    ? `The extension list did not load (${extensions.message}); type the number.`
+                    : "Loading extensions…"
+                }
+                onChange={(e) => setFromExtension(e.target.value)}
+              />
+            )
           ) : (
-            <Field id="rt-from" label="Trunk" error={errors.from}>
-              {(p) => (
-                <select
-                  {...p}
-                  value={fromTrunk}
-                  onChange={(e) => setFromTrunk(e.target.value)}
-                >
-                  <option value="">Choose…</option>
-                  {trunks.map((t) => (
-                    <option key={String(t.id)} value={String(t.id)}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </Field>
+            <Select
+              id="rt-from"
+              label="Trunk"
+              value={fromTrunk}
+              options={trunkOptions}
+              error={
+                errors.from ??
+                (trunks.status === "error"
+                  ? `The trunk list did not load: ${trunks.message}`
+                  : undefined)
+              }
+              onChange={(e) => setFromTrunk(e.target.value)}
+            />
           )}
-          <Field
+          <Input
             id="rt-number"
             label={
               fromKind === "trunk" ? "Called number (DID)" : "Dialled number"
             }
+            mono
+            value={number}
             error={errors.number}
-          >
-            {(p) => (
-              <input
-                {...p}
-                value={number}
-                onChange={(e) => setNumber(e.target.value)}
-              />
-            )}
-          </Field>
-          <Field
-            id="rt-caller"
-            label="Caller ID"
-            error={errors.callerId}
-            hint="Optional."
-          >
-            {(p) => (
-              <input
-                {...p}
-                value={callerId}
-                onChange={(e) => setCallerId(e.target.value)}
-              />
-            )}
-          </Field>
-          <Field
-            id="rt-at"
-            label="At"
-            error={errors.at}
-            hint="Optional; your local time. Empty means now."
-          >
-            {(p) => (
-              <input
-                {...p}
-                type="datetime-local"
-                value={at}
-                onChange={(e) => setAt(e.target.value)}
-              />
-            )}
-          </Field>
-        </div>
-        <FormError message={formError} unmatched={unmatched} />
-        <button type="submit" className="primary" disabled={busy}>
-          {busy ? "Testing…" : "Test"}
-        </button>
-      </form>
+            hint={
+              fromKind === "trunk"
+                ? "The number the carrier sent."
+                : "An extension, or an external number as dialled."
+            }
+            onChange={(e) => setNumber(e.target.value)}
+          />
+          <div className="cf-two">
+            <Input
+              id="rt-caller"
+              label="Caller ID"
+              mono
+              placeholder="Optional"
+              value={callerId}
+              error={errors.callerId}
+              onChange={(e) => setCallerId(e.target.value)}
+            />
+            <Input
+              id="rt-at"
+              label="At"
+              type="datetime-local"
+              value={at}
+              error={errors.at}
+              hint="Empty means now"
+              onChange={(e) => setAt(e.target.value)}
+            />
+          </div>
+          <FormAlert message={formError} unmatched={unmatched} />
+          <Button type="submit" icon="play" block disabled={busy}>
+            {busy ? "Testing…" : "Test"}
+          </Button>
+        </form>
 
-      {result && decision && (
-        <section aria-labelledby="rt-result" className="result">
-          <h2 id="rt-result">Decision</h2>
-          <dl className="facts">
-            <dt>Outcome</dt>
-            <dd>{KIND_LABEL[decision.kind] ?? decision.kind}</dd>
-            {decision.route && (
-              <>
-                <dt>Route</dt>
-                <dd>{decision.route}</dd>
-              </>
-            )}
-            {decision.extension && (
-              <>
-                <dt>Extension</dt>
-                <dd>{decision.extension}</dd>
-              </>
-            )}
-            {decision.sipUri && (
-              <>
-                <dt>SIP URI</dt>
-                <dd>
-                  <code>{decision.sipUri}</code>
-                </dd>
-              </>
-            )}
-            {decision.number && (
-              <>
-                <dt>Number sent</dt>
-                <dd>{decision.number}</dd>
-              </>
-            )}
-            {decision.callerId && (
-              <>
-                <dt>Caller ID</dt>
-                <dd>{decision.callerId}</dd>
-              </>
-            )}
-            {decision.trunks && decision.trunks.length > 0 && (
-              <>
-                <dt>Trunks, in try order</dt>
-                <dd>
-                  <ol className="inline-list">
-                    {decision.trunks.map((t) => (
-                      <li key={t}>{t}</li>
+        <div className="cf-tester__result">
+          {!view && busy && (
+            <div className="az-card cf-card">
+              <Loading what="the decision" />
+            </div>
+          )}
+          {!view && !busy && (
+            <div className="az-card">
+              <EmptyState
+                icon="flask-conical"
+                title="No test yet"
+                description="Choose who calls and the number, then select Test. Nothing is dialled."
+              />
+            </div>
+          )}
+          {view && result && (
+            <>
+              <section
+                className="az-card cf-card cf-card--form"
+                aria-labelledby="rt-decision"
+                aria-busy={busy}
+              >
+                <div className="cf-card__head">
+                  <span className={`cf-tile cf-tile--${view.tone}`}>
+                    <Icon name={view.icon} size={18} />
+                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <span className="az-eyebrow">Decision</span>
+                    <h2 className="cf-decision__title" id="rt-decision">
+                      {view.title}
+                    </h2>
+                  </div>
+                  <Badge tone={view.tone as BadgeTone}>{view.kindLabel}</Badge>
+                </div>
+                {view.chain.length > 0 && (
+                  <p className="cf-chain">
+                    {view.chain.map((c, i) => (
+                      <ChainStep key={c.k} k={c.k} v={c.v} later={i > 0} />
                     ))}
-                  </ol>
-                </dd>
-              </>
-            )}
-            {decision.kind === "reject" && (
-              <>
-                <dt>Rejected with</dt>
-                <dd>{decision.rejectCode ?? "—"}</dd>
-                <dt>Reason</dt>
-                <dd>{decision.reason || "—"}</dd>
-              </>
-            )}
-          </dl>
-          <h2 id="rt-trace">Trace</h2>
-          <TraceList trace={result.trace} labelledBy="rt-trace" />
-        </section>
-      )}
+                  </p>
+                )}
+                <PropertyList items={view.facts} />
+              </section>
+              <section className="az-card cf-card" aria-labelledby="rt-trace">
+                <h2 className="cf-card__title" id="rt-trace">
+                  Trace
+                </h2>
+                <Trace
+                  trace={result.data.trace}
+                  tone={view.tone === "bad" ? "bad" : "good"}
+                />
+              </section>
+            </>
+          )}
+          {trunks.status === "error" && fromKind === "extension" && (
+            <Alert tone="warn" title="Trunk names unavailable">
+              {trunks.message}
+            </Alert>
+          )}
+        </div>
+      </div>
     </section>
+  );
+}
+
+function ChainStep({ k, v, later }: { k: string; v: string; later: boolean }) {
+  return (
+    <>
+      {later && <Icon name="arrow-right" size={13} />}
+      <span className="cf-chain__step">
+        <span className="cf-chain__k">{k}</span>
+        <span className="cf-chain__v">{v}</span>
+      </span>
+    </>
+  );
+}
+
+/** The routing trace, in step order; the last step carries the outcome. */
+function Trace({
+  trace,
+  tone,
+}: {
+  trace: readonly TraceStep[];
+  tone: "good" | "bad";
+}) {
+  if (trace.length === 0) {
+    return <p className="cf-form__note">No trace was recorded.</p>;
+  }
+  const steps = [...trace].sort((a, b) => a.n - b.n);
+  return (
+    <ol className="cf-trace" aria-labelledby="rt-trace">
+      {steps.map((s, i) => {
+        const last = i === steps.length - 1;
+        return (
+          <li
+            key={s.n}
+            value={s.n}
+            className={
+              last ? `cf-trace__step cf-trace__step--${tone}` : "cf-trace__step"
+            }
+          >
+            <span className="cf-trace__n" aria-hidden="true">
+              {s.n}
+            </span>
+            <Icon
+              name={
+                last
+                  ? tone === "bad"
+                    ? "circle-x"
+                    : "circle-check"
+                  : "chevron-right"
+              }
+              size={14}
+            />
+            <span className="cf-trace__text">{s.text}</span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

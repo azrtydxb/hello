@@ -239,3 +239,33 @@ func TestInboundSIPSRejected(t *testing.T) {
 	}
 	c.must(http.StatusCreated, "POST", "/api/v1/routes/inbound", map[string]any{"name": "Agent", "destinationKind": "sip_uri", "destination": "sip:agent@ai.example"})
 }
+
+// TestTesterEmergencyFlag fails if the route tester does not say whether
+// the matched outbound route is an emergency route.
+func TestTesterEmergencyFlag(t *testing.T) {
+	live := fixedLive{}
+	p := newP2Env(t, live, false)
+	c := p.login()
+	c.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]any{"number": "101", "name": "Desk"})
+	trunk := c.must(http.StatusCreated, "POST", "/api/v1/trunks", map[string]any{
+		"name": "carrier", "mode": "ip", "destinations": []map[string]any{{"host": "10.0.0.5"}},
+	}).json(t)["id"].(float64)
+	live[int64(trunk)] = livestate.TrunkStatus{TrunkID: int64(trunk)}
+	for _, r := range []map[string]any{
+		{"name": "Emergency", "matchKind": "prefix", "match": "112", "trunks": []any{trunk}, "emergency": true},
+		{"name": "Mobile", "matchKind": "prefix", "match": "05", "trunks": []any{trunk}},
+	} {
+		c.must(http.StatusCreated, "POST", "/api/v1/routes/outbound", r)
+	}
+	for number, want := range map[string]bool{"112": true, "0501234567": false} {
+		var r struct {
+			Decision map[string]any `json:"decision"`
+		}
+		if err := json.Unmarshal(c.must(http.StatusOK, "POST", "/api/v1/routing/test", map[string]any{"from": "101", "number": number}).body, &r); err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := r.Decision["emergency"].(bool); !ok || got != want || r.Decision["kind"] != "outbound" {
+			t.Errorf("%s: decision %v, want emergency %v", number, r.Decision, want)
+		}
+	}
+}

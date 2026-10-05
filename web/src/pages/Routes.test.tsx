@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { createEvent, fireEvent as fe } from "@testing-library/react";
 import { json, ME, mockApi, noContent, renderApp } from "../test/api";
 
 const TRUNKS = [
@@ -104,8 +105,8 @@ describe("Routes", () => {
     });
     renderApp("/routes");
 
-    fireEvent.click(await screen.findByRole("tab", { name: "Inbound" }));
-    expect(screen.getByRole("tab", { name: "Inbound" })).toHaveAttribute(
+    fireEvent.click(await screen.findByRole("tab", { name: /^Inbound/ }));
+    expect(screen.getByRole("tab", { name: /^Inbound/ })).toHaveAttribute(
       "aria-selected",
       "true",
     );
@@ -195,8 +196,11 @@ describe("Routes", () => {
     // disabled controls (or setting an option that does not exist yet) is
     // silently dropped. Wait for the trunks to be offered.
     fireEvent.click(
-      await screen.findByRole("button", { name: "New outbound route" }),
+      (await screen.findAllByRole("button", { name: "New route" }))[0]!,
     );
+    expect(
+      screen.getByRole("dialog", { name: "New outbound route" }),
+    ).toBeVisible();
     await screen.findByRole("option", { name: "carrier-primary" });
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "UAE Mobile" },
@@ -278,8 +282,11 @@ describe("Routes", () => {
     // As above: open the form, then wait for the trunk list to land before
     // touching the gated picker and submit button.
     fireEvent.click(
-      await screen.findByRole("button", { name: "New outbound route" }),
+      (await screen.findAllByRole("button", { name: "New route" }))[0]!,
     );
+    expect(
+      screen.getByRole("dialog", { name: "New outbound route" }),
+    ).toBeVisible();
     await screen.findByRole("option", { name: "carrier-primary" });
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "UAE Mobile" },
@@ -377,8 +384,11 @@ describe("Routes", () => {
     // with the disabled controls is silently dropped. Open the form, then
     // wait for the trunks.
     fireEvent.click(
-      await screen.findByRole("button", { name: "New inbound route" }),
+      (await screen.findAllByRole("button", { name: "New route" }))[0]!,
     );
+    expect(
+      screen.getByRole("dialog", { name: "New inbound route" }),
+    ).toBeVisible();
     await screen.findByRole("option", { name: "carrier-backup" });
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Office hours" },
@@ -423,5 +433,142 @@ describe("Routes", () => {
         windows: [{ days: [1, 2, 3, 4, 5, 6], start: "09:00", end: "18:30" }],
       },
     });
+  });
+
+  it("shows the design's columns: match, rewrite, trunk chain, schedule, emergency", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: TRUNKS }),
+      "GET /api/v1/routes/outbound": () =>
+        json({
+          items: [
+            {
+              ...outbound(1, 1, "UAE landline"),
+              matchKind: "regex",
+              match: "^0[2-9][0-9]{7}$",
+              numberTransform: { strip: 1, prefix: "+971" },
+              trunks: [5, 4],
+              schedule: {
+                timeZone: "Asia/Dubai",
+                windows: [
+                  { days: [0, 1, 2, 3, 4], start: "08:00", end: "18:00" },
+                ],
+              },
+            },
+            { ...outbound(2, 2, "Emergency"), emergency: true, match: "112" },
+          ],
+        }),
+      "GET /api/v1/extensions": () =>
+        json({ items: [{ id: 1, number: "101", name: "Reception" }] }),
+      "GET /api/v1/routes/inbound": () =>
+        json({ items: [inbound(3, 1, "Main number")] }),
+    });
+    renderApp("/routes");
+
+    const row = await screen.findByRole("row", { name: /UAE landline/ });
+    const cells = within(row).getAllByRole("cell");
+    expect(cells.map((c) => c.textContent)).toEqual([
+      "1",
+      "regex^0[2-9][0-9]{7}$",
+      "strip 1 · prefix +971",
+      "carrier-backupcarrier-primary",
+      "Sun–Thu 08:00–18:00 Asia/Dubai",
+      "",
+      "",
+    ]);
+    expect(
+      within(screen.getByRole("row", { name: /Emergency/ })).getByText(
+        "Emergency",
+        { selector: ".az-badge" },
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole("tab", { name: /^Outbound/ })).toHaveTextContent(
+      "Outbound2",
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /^Inbound/ }));
+    const main = await screen.findByRole("row", { name: /Main number/ });
+    expect(within(main).getByText("Extension · Reception")).toBeVisible();
+    expect(within(main).getByText("Always")).toBeVisible();
+  });
+
+  it("toggles Enabled in the list, and puts it back when the save fails", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: TRUNKS }),
+      "GET /api/v1/routes/outbound": () =>
+        json({ items: [outbound(10, 1, "Alpha")] }),
+      "PATCH /api/v1/routes/outbound/10": [
+        () => json({ ...outbound(10, 1, "Alpha"), enabled: false }),
+        () =>
+          json({ error: { code: "internal", message: "database down" } }, 500),
+      ],
+    });
+    renderApp("/routes");
+
+    const toggle = await screen.findByRole("switch", { name: "Alpha enabled" });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    expect(await screen.findByText("Route Alpha disabled.")).toBeVisible();
+    expect(toggle).not.toBeChecked();
+    expect(calls.filter((c) => c.method === "PATCH")[0]?.body).toEqual({
+      enabled: false,
+    });
+
+    fireEvent.click(toggle);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Could not enable Alpha: database down",
+    );
+    expect(toggle).not.toBeChecked();
+  });
+
+  it("reorders by dragging a row onto another", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: TRUNKS }),
+      "GET /api/v1/routes/outbound": () =>
+        json({
+          items: [
+            outbound(10, 1, "Alpha"),
+            outbound(20, 2, "Beta"),
+            outbound(30, 3, "Gamma"),
+          ],
+        }),
+      "PUT /api/v1/routes/outbound/order": noContent,
+    });
+    renderApp("/routes");
+
+    const gamma = await screen.findByRole("row", { name: /Gamma/ });
+    const alpha = screen.getByRole("row", { name: /Alpha/ });
+    const dataTransfer = { setData: () => {}, effectAllowed: "" };
+    fe(gamma, createEvent.dragStart(gamma, { dataTransfer }));
+    fe(alpha, createEvent.dragOver(alpha, { dataTransfer }));
+    fe(alpha, createEvent.drop(alpha, { dataTransfer }));
+
+    await waitFor(() => expect(rowNames()).toEqual(["Gamma", "Alpha", "Beta"]));
+    expect(calls.find((c) => c.method === "PUT")?.body).toEqual({
+      ids: [30, 10, 20],
+    });
+  });
+
+  it("deletes a route after the confirmation dialog", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: TRUNKS }),
+      "GET /api/v1/routes/outbound": () =>
+        json({ items: [outbound(10, 1, "Alpha")] }),
+      "DELETE /api/v1/routes/outbound/10": noContent,
+    });
+    renderApp("/routes");
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete Alpha" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Delete route Alpha?" });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Delete route" }),
+    );
+    expect(await screen.findByText("No outbound routes yet.")).toBeVisible();
+    expect(calls.some((c) => c.method === "DELETE")).toBe(true);
   });
 });

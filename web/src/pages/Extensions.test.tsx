@@ -52,9 +52,15 @@ function api(extensions: unknown[], more: Routes = {}) {
 }
 
 async function openNew() {
-  fireEvent.click(
-    (await screen.findAllByRole("button", { name: "New extension" }))[0]!,
+  const [button] = await screen.findAllByRole("button", {
+    name: "New extension",
+  });
+  // The header button shows while the list still loads; a create made then
+  // would be overwritten by the list arriving, so wait for the list first.
+  await waitFor(() =>
+    expect(screen.queryByText("Loading extensions…")).toBeNull(),
   );
+  fireEvent.click(button!);
   return screen.getByRole("dialog", { name: "New extension" });
 }
 
