@@ -829,7 +829,7 @@ spec:
       terminationGracePeriodSeconds: 120 # a drain must finish (lab: 2h, capped here)
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-60acf3a7c06abe741d452e949f20ed9a5805203c
           # Pinned to the tag ci.yaml published for commit 4f860ff (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1024,7 +1024,7 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-60acf3a7c06abe741d452e949f20ed9a5805203c
           # Pinned to the tag ci.yaml published for commit 4f860ff (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
