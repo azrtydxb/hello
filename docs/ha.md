@@ -88,8 +88,8 @@ This table is normative: it is what Hello does. The Test column names the test t
 | Failure                                      | Detected by                                               | Node reports                                                                                                                                   | Still works                                                                                                                                                                                            | Recovery                                                                                                                    | Test                                                                                         |
 | -------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | **SIP node dies**                            | Kamailio OPTIONS probe (≤15 s); membership expires (15 s) | Other nodes: the dead node goes OFFLINE (`hello_node_state`)                                                                                   | New registrations and calls through the survivor. Phones registered through the dead node stay reachable: their binding is in Valkey and their Path points through Kamailio                            | Restart the node; it joins and Kamailio adds it back after a 200 probe                                                      | `TestKillSIPNodeDuringRegister`, `TestKillSIPNodeDuringRinging`, `TestKillSIPNodeDuringCall` |
-| **Call in progress on the dying node**       | Membership expires (15 s)                                 | `hello_dialog_takeovers_total` on the taker; the call re-homes with `ha: taken-over` in its CDR trace                                          | The call continues: both endpoints re-INVITEd to the taker's relay within 3 s of the claim, and hangup, hold, transfer and recording work there                                                        | Automatic; a call that cannot be saved is counted in `hello_zombie_calls_total`                                             | `TestKillSIPNodeDuringCall` (full takeover), `TestTakeoverScenarioMatrix`                    |
-| **SIP node drained (maintenance)**           | Operator action or SIGTERM                                | DRAINING (`hello_node_state`); calls left to finish (`hello_drain_active_calls`)                                                               | Its established calls and its trunk registrations, which move to another node; new INVITEs to it get 503 and Kamailio stops sending it work within 15 s                                                | The node exits after its last call or `HELLO_DRAIN_TIMEOUT`                                                                 | `TestDrainKeepsCallsAndExits`, `TestRollingUpgrade`                                          |
+| **Call in progress on the dying node**       | Membership expires (15 s)                                 | `hello_dialog_takeovers_total` on the taker; the call re-homes with `ha: taken-over` in its CDR trace                                          | The call continues: both endpoints re-INVITEd to the taker's relay within 3 s of the claim, and hangup, hold and recording work there                                                                  | Automatic; a call that cannot be saved is counted in `hello_zombie_calls_total`                                             | `TestKillSIPNodeDuringCall` (full takeover), `TestTakeoverScenarioMatrix`                    |
+| **SIP node drained (maintenance)**           | Operator action or SIGTERM                                | DRAINING (`hello_node_state`); calls left to hand off (`hello_drain_active_calls`)                                                             | Its established calls, handed to a READY node (in-call HA handoff), and its trunk registrations, which move to another node; new INVITEs to it get 503 and Kamailio stops sending it work within 15 s  | The node exits once its calls are handed off or ended, or at `HELLO_DRAIN_TIMEOUT`                                          | `TestDrainKeepsCallsAndExits`, `TestRollingUpgrade`                                          |
 | **Valkey primary dies**                      | Sentinels (5 s down-after) promote the replica            | UNHEALTHY with 503 + `Retry-After` until Hello reconnects; READY within 15 s of promotion (`hello_node_state`, `hello_valkey_failovers_total`) | Established calls; after promotion, everything                                                                                                                                                         | Automatic; the old primary rejoins as a replica when restarted                                                              | `TestValkeyFailover`                                                                         |
 | **Writes lost in a Valkey failover**         | —                                                         | —                                                                                                                                              | Replication is asynchronous, so registrations written in the last moment before the failure can be lost                                                                                                | Phones restore them on their next refresh                                                                                   | Documented, not automated                                                                    |
 | **All of Valkey unavailable**                | Every node's readiness check                              | UNHEALTHY (`hello_node_state`); new REGISTER/INVITE get 503 + `Retry-After`                                                                    | Established calls                                                                                                                                                                                      | Automatic when Valkey returns                                                                                               | `TestPartitionFromValkey` (one node), Phase 1 `TestStateUnavailable`                         |
@@ -111,12 +111,15 @@ This table is normative: it is what Hello does. The Test column names the test t
    registrations within 15 seconds, phones that try anyway are told to retry
    elsewhere (503 + `Retry-After`), and its trunk registrations move to another
    node.
-3. Its active calls continue to the end. When the last one ends, the node
-   exits. After `HELLO_DRAIN_TIMEOUT` (default 2 hours) it hangs up any calls
-   that remain and exits.
+3. Its active calls are handed to a READY SIP node (see
+   [Handoff on drain](#handoff-on-drain)): each continues there after a short
+   audio gap, and the draining node exits once it holds no call. A call no
+   node can take (no READY node, or one still ringing) continues to its end
+   on the draining node; after `HELLO_DRAIN_TIMEOUT` (default 2 hours) the
+   node hangs up any calls that remain and exits.
 4. Stopping a node with SIGTERM (`docker compose stop`, a Kubernetes pod
-   termination) drains it the same way; give it a grace period at least as long
-   as you are willing to wait for calls.
+   termination) drains it the same way; give it a grace period long enough
+   for the handoff (seconds) and for whatever calls no node can take.
 
 Cancel a drain with **Undrain** or `DELETE /api/v1/cluster/nodes/{id}/drain`
 before the node starts exiting.
@@ -129,9 +132,10 @@ Upgrade one SIP node at a time:
 2. Start the new version; wait until the Cluster page shows it READY.
 3. Repeat for the next node.
 
-Active calls finish on the node that set them up; new calls go to whichever
-nodes are READY. `TestRollingUpgrade` does exactly this with a call active
-throughout. Upgrade hello-control replicas one at a time the same way; they
+Active calls are handed to the READY node as the other drains; new calls go
+to whichever nodes are READY. `TestRollingUpgrade` does exactly this with a
+call active throughout: the call moves to the upgraded node and is never
+dropped. Upgrade hello-control replicas one at a time the same way; they
 carry no calls.
 
 ## In-call HA (Level 4)
@@ -178,6 +182,22 @@ live calls at death less the claims) in `hello_zombie_calls_total`: a call
 that was taken over is never counted, a takeover that failed is counted
 once by its taker.
 
+### Handoff on drain
+
+A draining node (an operator drain or SIGTERM) does not keep its calls to
+the end: it marks each recoverable call's record for handoff, and a READY
+survivor claims such a dialog of a DRAINING node at once — without waiting
+for the node to go OFFLINE — and takes it over exactly as after a crash
+(re-INVITEs, ≤3 s gap, CDR and live view `taken-over`). The draining node
+yields its copy as soon as the survivor holds the call: it closes its media
+and CDR without a BYE to the endpoints, and answers any in-dialog request
+that still reaches it for the call with 503, which Kamailio's in-dialog
+failure route retries on a survivor. With no READY survivor nothing is
+claimed and the drain timeout applies as before; a cancelled drain takes
+back the calls nobody claimed yet. Proven by `TestHandoffOnDrain` and
+`TestHandoffCancelledDrain` (`internal/sip`) and the lab's
+`TestDrainKeepsCallsAndExits` and `TestRollingUpgrade`.
+
 ### Scenario matrix
 
 Each row is proven by a test (`TestKillSIPNodeDuringCall` in
@@ -204,6 +224,12 @@ real nodes under a connected call (`TestKillSIPNodeDuringCall`,
 (`TestKillSIPNodeDuringVoicemail`) and a ringing call. `TestDoubleFailure`
 kills a second node while a survivor is mid-takeover of a different call
 (in-process: the lab runs two SIP nodes).
+
+A taker reaches each endpoint through the dialog's route set, first hop
+first: the edge's Hello-facing socket. Kamailio double-record-routes, and
+its phone-facing entry (on kw, a NodePort address inside a trusted range)
+is never a hop Hello may use. `TestTakeoverEdgeRouteSet` keeps the two
+apart.
 
 Not recovered after a takeover: a REFER (transfer) on a taken-over call is
 answered 481, and a SIP INFO DTMF digit is not matched (in-band RFC 2833
@@ -250,6 +276,14 @@ the node dies is abandoned, as in the table.
   - See the dispatcher view with
     `docker compose -p <project> -f deploy/docker-compose/compose.yaml exec kamailio kamcmd dispatcher.list`.
     Flags: `AP` active, `TP` trying, `IP` inactive.
+- **Kubernetes:** give each hello-sip node a headless Service
+  (`clusterIP: None`) and name those in Kamailio's dispatcher list, so the
+  names resolve straight to the pods. Behind a ClusterIP, a CNI with
+  socket-level load balancing (Cilium socket-LB) force-terminates
+  Kamailio's UDP socket when the backend pod goes, and Kamailio exits. Hello
+  answers every probe and request at the address it came from, and
+  Kamailio asks for that (rport) on what it sends Hello, so a replaced
+  Kamailio pod is probed UP without flushing conntrack.
 - **Trusted proxies:** set `HELLO_SIP_TRUSTED_PROXIES` to the Hello-facing
   address of every Kamailio, and nothing else. Hello trusts the client address
   and `Path` that Kamailio sends, and ignores them from anywhere else; a

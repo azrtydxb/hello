@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -116,11 +117,29 @@ func (c *call) startVoicemail(mode int, reason string) {
 // answerAnchored binds the media anchor for this call and builds the answer
 // SDP from the caller's offer.
 func (s *Server) answerAnchored(offer []byte) ([]byte, media.Session, error) {
-	anchor := s.anchor.Load()
+	anchor := s.voicemailAnchor(offer)
 	if s.deps.Objects == nil || anchor == nil {
 		return nil, nil, errors.New("voicemail media disabled")
 	}
 	return anchor.Answer(offer)
+}
+
+// voicemailAnchor is the node's media anchor; without an advertised anchor
+// host (HELLO_MEDIA_ANCHOR_HOST unset, as in the lab) it advertises the
+// offer's own address, the way the relay mirrors it (anchorHostOr), so
+// voicemail still records. nil when neither gives an address.
+func (s *Server) voicemailAnchor(offer []byte) *media.Anchor {
+	if a := s.anchor.Load(); a != nil {
+		return a
+	}
+	off, err := media.ParseAudioSDP(offer)
+	if err != nil {
+		return nil
+	}
+	if ip := net.ParseIP(off.Address); ip == nil || ip.To4() == nil {
+		return nil
+	}
+	return media.NewAnchor(off.Address, s.log)
 }
 
 // answerSelf connects a call with no B leg (voicemail, feature codes):

@@ -9,7 +9,6 @@ import (
 	"context"
 	crand "crypto/rand"
 	"fmt"
-	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -138,39 +137,24 @@ func (l *haLeg) request(s *Server, method sip.RequestMethod, body []byte, conten
 	return req, nil
 }
 
-// helloHop is the address of the route hop adjacent to Hello: the route
-// whose host is one of the node's trusted proxies (the edge's Hello-facing
-// address), or "" when no route names one.
-func (l *haLeg) helloHop(s *Server) string {
+// helloHop is the address of the route hop adjacent to Hello: the first
+// entry of the dialog's route set (loose routing), "" when it has none.
+// An edge proxy that double-record-routes puts two entries there, its
+// Hello-facing socket first and its phone-facing one after; the latter's
+// advertised address is unreachable from Hello (kw: a NodePort the edge
+// answers 403 from Hello), however trusted its network may be.
+func (l *haLeg) helloHop(_ *Server) string {
 	l.mu.Lock()
 	routes := l.routes
 	l.mu.Unlock()
-	for _, raw := range routes {
-		var hop sip.Uri
-		if err := sip.ParseUri(strings.Trim(raw, "<> "), &hop); err != nil {
-			continue
-		}
-		if addrIsTrusted(s, hop.Host) {
-			return hostPort(hop)
-		}
+	if len(routes) == 0 {
+		return ""
 	}
-	return ""
-}
-
-// addrIsTrusted reports whether host falls in one of the node's trusted
-// proxy ranges (netip parse failures are simply not trusted).
-func addrIsTrusted(s *Server, host string) bool {
-	ip, err := netip.ParseAddr(host)
-	if err != nil {
-		return false
+	var hop sip.Uri
+	if err := sip.ParseUri(strings.Trim(routes[0], "<> "), &hop); err != nil {
+		return ""
 	}
-	ip = ip.Unmap()
-	for _, p := range s.cfg.TrustedProxies {
-		if p.Contains(ip) {
-			return true
-		}
-	}
-	return false
+	return hostPort(hop)
 }
 
 // destination is where the leg's requests go: the route hop on Hello's
@@ -249,9 +233,8 @@ func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
 	if n := res.CSeq(); n != nil {
 		l.localCSeq = n.SeqNo + 1
 	}
-	if rrs := headerValues(res, "Record-Route"); len(rrs) > 0 {
-		l.routes = rrs
-	}
+	// The route set is fixed when the dialog forms (RFC 3261 12.2.1.2):
+	// a re-INVITE refreshes only the remote target.
 	l.mu.Unlock()
 	return res, true
 }
@@ -321,11 +304,21 @@ func (s *Server) takeoverPass(ctx context.Context) {
 		if m.Kind != cluster.KindSIP || m.ID == self {
 			continue
 		}
-		if m.State != cluster.Offline {
+		handoffOnly := false
+		switch m.State {
+		case cluster.Offline:
+			s.haReap(members, m, self)
+		case cluster.Draining:
+			// A draining node hands its calls over while still alive:
+			// only the dialogs it marked for handoff are claimed.
 			s.haOfflineForget(m.ID)
+			s.haNoteActive(m.ID, m.ActiveCalls)
+			handoffOnly = true
+		default:
+			s.haOfflineForget(m.ID)
+			s.haNoteActive(m.ID, m.ActiveCalls)
 			continue
 		}
-		s.haReap(members, m, self)
 		cctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
 		orphans, err := s.deps.HAState.OrphanedDialogs(cctx, m.ID)
 		cancel()
@@ -334,7 +327,7 @@ func (s *Server) takeoverPass(ctx context.Context) {
 			continue
 		}
 		for _, o := range orphans {
-			if o.CallID == "" || o.OwnerNode != m.ID {
+			if o.CallID == "" || o.OwnerNode != m.ID || (handoffOnly && !o.Handoff) {
 				continue
 			}
 			cctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
@@ -373,7 +366,9 @@ func (s *Server) haReap(members []cluster.Member, m cluster.Member, self string)
 		return
 	}
 	s.haOfflineCount(m.ID)
-	lost := m.ActiveCalls - taken
+	// OFFLINE members are listed with no load: the node's live calls are
+	// the last count seen while it was still alive.
+	lost := max(m.ActiveCalls, e.active) - taken
 	if lost <= 0 {
 		return
 	}
@@ -411,6 +406,7 @@ func (s *Server) haOfflineSee(id string, active int) *haOfflineNode {
 	if e, ok := s.haOffline[id]; ok {
 		return e
 	}
+	active = max(active, s.haLastActive[id])
 	e := &haOfflineNode{active: active, deadline: time.Now().Add(haReapDelay)}
 	s.haOffline[id] = e
 	return e
@@ -422,6 +418,14 @@ func (s *Server) haOfflineCount(id string) {
 	if e, ok := s.haOffline[id]; ok {
 		e.counted = true
 	}
+}
+
+// haNoteActive remembers a live node's last published call count, which
+// the reaper needs once the node is listed OFFLINE (with no load).
+func (s *Server) haNoteActive(id string, active int) {
+	s.haOfflineMu.Lock()
+	defer s.haOfflineMu.Unlock()
+	s.haLastActive[id] = active
 }
 
 func (s *Server) haOfflineForget(id string) {
@@ -782,7 +786,7 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 	)
 	switch st.State {
 	case haPhaseVoicemail:
-		anchor := s.anchor.Load()
+		anchor := s.voicemailAnchor([]byte(a.remoteSDP))
 		if anchor == nil {
 			s.haAbandon(st, from, "no voicemail media anchor on this node")
 			return

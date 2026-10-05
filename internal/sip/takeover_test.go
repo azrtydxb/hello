@@ -50,6 +50,12 @@ func (f *fakeHA) SaveDialogState(_ context.Context, sds livestate.DialogState, t
 	return nil
 }
 
+func (f *fakeHA) DialogOwner(_ context.Context, id string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dialogs[id].OwnerNode, nil
+}
+
 func (f *fakeHA) TakenOver(_ context.Context, node string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

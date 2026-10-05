@@ -408,7 +408,15 @@ func TestHonestyFlags(t *testing.T) {
 		b.register(t)
 		connect(t, a, b, "200")
 		haReapDelay = 50 * time.Millisecond
-		killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
+		// Seen alive with its call; once OFFLINE, membership lists it with
+		// no load (as the real store does), and the reaper must still
+		// count the call it last had.
+		mem.set(
+			cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Ready, ActiveCalls: 1},
+			cluster.Member{ID: "sip-2", Kind: cluster.KindSIP, State: cluster.Ready},
+		)
+		taker.srv.takeoverPass(t.Context())
+		killNode(owner, mem, map[string]int{"sip-1": 0}, "sip-2")
 		taker.srv.takeoverPass(t.Context()) // first sight: the reaper waits
 		time.Sleep(100 * time.Millisecond)
 		for i := 0; i < 3; i++ {

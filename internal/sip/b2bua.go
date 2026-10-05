@@ -133,6 +133,10 @@ type call struct {
 	// haSolo marks a call Hello answered itself (voicemail, an
 	// announcement destination): one replicated leg, the caller's.
 	haSolo bool
+	// haHandoff marks a call this draining node is handing to a survivor:
+	// its record says so once (haHandoffWritten) and is never written
+	// again, so the taker's record is not overwritten.
+	haHandoff, haHandoffWritten bool
 	// transferNotify reports a transfer's outcome to the transferee's
 	// dialog (set by transferBlindVia for the rethreaded call).
 	transferNotify func(fragment string, final bool)

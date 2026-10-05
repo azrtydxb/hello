@@ -24,6 +24,7 @@ type HAState interface {
 	ClaimOwner(ctx context.Context, callId string) (string, error)
 	OrphanedDialogs(ctx context.Context, offlineNode string) ([]livestate.DialogState, error)
 	TakenOver(ctx context.Context, node string) (int, error)
+	DialogOwner(ctx context.Context, callId string) (string, error)
 }
 
 // Membership reports the cluster's nodes (Phase 3 membership);
@@ -146,9 +147,11 @@ func (c *call) haRefresh() {
 		{
 			callID:   w.callID,
 			localTag: tagParam(dcs.InviteRequest.From()), remoteTag: tagParam(dcs.InviteResponse.To()),
-			localCSeq:    s.nextCSeq(w.callID, dcs.InviteRequest.CSeq().SeqNo, dcs.CSEQ()),
-			remoteCSeq:   dcs.InviteRequest.CSeq().SeqNo,
-			routes:       headerValues(dcs.InviteResponse, "Record-Route"),
+			localCSeq:  s.nextCSeq(w.callID, dcs.InviteRequest.CSeq().SeqNo, dcs.CSEQ()),
+			remoteCSeq: dcs.InviteRequest.CSeq().SeqNo,
+			// A UAC's route set is the 2xx's Record-Route reversed (RFC
+			// 3261 12.1.2): the first entry is the hop next to Hello.
+			routes:       reversed(headerValues(dcs.InviteResponse, "Record-Route")),
 			localID:      uriString(*dcs.InviteRequest.From().Address.Clone()),
 			remoteID:     uriString(*dcs.InviteRequest.To().Address.Clone()),
 			remoteTarget: uriString(w.target()),
@@ -258,6 +261,9 @@ func (c *call) haState() (livestate.DialogState, bool) {
 	c.mu.Lock()
 	caller, dest := c.callerNum, c.dialled
 	c.mu.Unlock()
+	c.mu.Lock()
+	handoff := c.haHandoff
+	c.mu.Unlock()
 	st := livestate.DialogState{
 		CallID:      legs[0].callID,
 		OwnerNode:   c.s.cfg.NodeID,
@@ -267,6 +273,7 @@ func (c *call) haState() (livestate.DialogState, bool) {
 		Legs:        [2]livestate.DialogLeg{c.haSnapLeg(legs[0], contact)},
 		Caller:      caller,
 		Destination: dest,
+		Handoff:     handoff,
 	}
 	if relay != nil {
 		st.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
@@ -319,6 +326,7 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 		StateDetail: detail,
 		Caller:      caller,
 		Destination: dest,
+		Handoff:     c.handingOff(),
 	}
 	if relay != nil {
 		state.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
@@ -353,6 +361,12 @@ func (c *call) replicate() {
 	if c.s.deps.HAState == nil || !c.s.serving.Load() {
 		return // a node shutting down leaves its records to the takers
 	}
+	c.mu.Lock()
+	written := c.haHandoff && c.haHandoffWritten
+	c.mu.Unlock()
+	if written {
+		return // handed off: the record is the taker's to write
+	}
 	st, ok := c.haState()
 	if !ok {
 		return
@@ -365,6 +379,18 @@ func (c *call) replicate() {
 		return
 	}
 	c.s.m.DialogReplicated.WithLabelValues("ok").Inc()
+	if st.Handoff {
+		c.mu.Lock()
+		c.haHandoffWritten = c.haHandoff
+		c.mu.Unlock()
+	}
+}
+
+// handingOff reports whether the call is being handed to a survivor.
+func (c *call) handingOff() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.haHandoff
 }
 
 // haLoop is the replication heartbeat: its writes are the owner's
@@ -385,13 +411,32 @@ func (c *call) haLoop() {
 			if !c.s.serving.Load() {
 				return // the node is shutting down; its calls die with it
 			}
-			if taker := c.s.haClaimedBy(c.callID); taker != "" && taker != c.s.cfg.NodeID {
+			if taker := c.s.haTakenBy(c.callID); taker != "" {
 				c.haYield(taker)
 				return
 			}
 			c.replicate()
 		}
 	}
+}
+
+// haTakenBy names the other node that took the call over: the holder of
+// its claim, or, once the taker released the claim, the node its record
+// names. "" while the call is still this node's (or the store is down).
+func (s *Server) haTakenBy(callID string) string {
+	if taker := s.haClaimedBy(callID); taker != "" && taker != s.cfg.NodeID {
+		return taker
+	}
+	if s.deps.HAState == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout)
+	defer cancel()
+	owner, err := s.deps.HAState.DialogOwner(ctx, callID)
+	if err != nil || owner == s.cfg.NodeID {
+		return ""
+	}
+	return owner
 }
 
 // haClaimedBy names the node holding the dialog's takeover claim ("" when
@@ -420,10 +465,30 @@ func (c *call) haYield(taker string) {
 		return
 	}
 	c.haYielded = true
+	legs := []string{c.callID}
+	if w := c.winner; w != nil && w.callID != "" {
+		legs = append(legs, w.callID)
+	}
+	if hom := c.homedCall; hom != nil {
+		for _, l := range hom.legs {
+			if l != nil {
+				legs = append(legs, l.callID)
+			}
+		}
+	}
 	c.mu.Unlock()
+	// In-dialog requests that still reach this node for the call (the
+	// edge routes by Record-Route) are answered 503, so the edge retries
+	// them on the taker.
+	for _, id := range legs {
+		c.s.haGone.Store(id, taker)
+	}
 	c.addTrace("Call taken over by " + taker + ": this node yields")
 	c.s.log.Info("yielding a taken-over call", "correlation_id", c.id, "taker", taker)
 	c.end(sip.StatusOK, cdr.SideSystem, "taken over by "+taker, ResultAnswered)
+	// The dialogs are the taker's now: nothing here may answer for them
+	// (or BYE the endpoints when a stray request arrives).
+	c.release()
 }
 
 // haDelete removes the replicated record of an ended call, so its dialog is
@@ -449,6 +514,15 @@ func headerValues(m sip.Message, name string) []string {
 	var out []string
 	for _, h := range m.GetHeaders(name) {
 		out = append(out, h.Value())
+	}
+	return out
+}
+
+// reversed returns a reversed copy of a list.
+func reversed(in []string) []string {
+	out := make([]string, len(in))
+	for i, v := range in {
+		out[len(in)-1-i] = v
 	}
 	return out
 }
@@ -483,4 +557,114 @@ func userOf(raw string) string {
 		return ""
 	}
 	return u.User
+}
+
+// --- handoff on drain (incall-ha addition) -----------------------------------
+
+// handoffPoll is how often a draining node checks whether a survivor has
+// taken over the calls it handed off; a var so tests can shrink it.
+var handoffPoll = 100 * time.Millisecond
+
+// HandOffCalls hands every recoverable live call to a surviving node: the
+// call's record is marked for handoff (survivors claim such dialogs of a
+// DRAINING node at once), and once a survivor has re-homed a call this
+// node yields its copy without touching the endpoints. A drain then ends
+// as soon as the calls are handed over instead of at the drain timeout;
+// calls nobody takes stay here and the drain timeout still applies.
+func (s *Server) HandOffCalls() {
+	if s.deps.HAState == nil || !s.cfg.HATakeoverEnabled {
+		return
+	}
+	s.mu.Lock()
+	calls := make([]*call, 0, len(s.calls))
+	for c := range s.calls {
+		calls = append(calls, c)
+	}
+	s.mu.Unlock()
+	var handed []*call
+	for _, c := range calls {
+		if _, ok := c.haState(); !ok {
+			continue // not recoverable (ringing, unreplicated): it stays
+		}
+		c.mu.Lock()
+		c.haHandoff, c.haHandoffWritten = true, false
+		c.mu.Unlock()
+		c.addTrace("Node draining: call handed off for takeover")
+		c.replicate()
+		handed = append(handed, c)
+	}
+	if len(handed) > 0 {
+		s.goBG(func() { s.handoffLoop(handed) })
+	}
+}
+
+// handoffLoop yields each handed-off call once a survivor took it over,
+// until none is left, the node stops, or the drain is cancelled.
+func (s *Server) handoffLoop(calls []*call) {
+	t := time.NewTicker(handoffPoll)
+	defer t.Stop()
+	for len(calls) > 0 {
+		select {
+		case <-s.done:
+			return
+		case <-t.C:
+		}
+		left := calls[:0]
+		for _, c := range calls {
+			c.mu.Lock()
+			done := c.ended || c.haYielded || !c.haHandoff
+			c.mu.Unlock()
+			if done {
+				continue
+			}
+			if taker := s.haTakenBy(c.callID); taker != "" {
+				c.haYield(taker)
+				continue
+			}
+			left = append(left, c)
+		}
+		calls = left
+	}
+}
+
+// CancelHandOff takes back the calls not yet taken over when a drain is
+// cancelled: their records lose the handoff mark and replicate as before.
+func (s *Server) CancelHandOff() {
+	s.mu.Lock()
+	calls := make([]*call, 0, len(s.calls))
+	for c := range s.calls {
+		calls = append(calls, c)
+	}
+	s.mu.Unlock()
+	for _, c := range calls {
+		c.mu.Lock()
+		was := c.haHandoff && !c.haYielded
+		c.haHandoff, c.haHandoffWritten = false, false
+		c.mu.Unlock()
+		if was {
+			c.addTrace("Drain cancelled: the call stays on this node")
+			go c.replicate()
+		}
+	}
+}
+
+// handedOff answers an in-dialog request for a call this node handed to
+// another node with 503, so the edge retries it on a surviving node (its
+// in-dialog failure route); true when it answered.
+func (s *Server) handedOff(req *sip.Request, tx sip.ServerTransaction) bool {
+	if req.IsAck() || tx == nil {
+		return false
+	}
+	if _, ok := req.To().Params.Get("tag"); !ok {
+		return false
+	}
+	id := req.CallID().Value()
+	if _, gone := s.haGone.Load(id); !gone {
+		return false
+	}
+	if _, bound := s.lookup(id); bound {
+		return false
+	}
+	s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable", sip.NewHeader("Retry-After", "0"))
+	return true
 }

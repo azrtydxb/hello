@@ -59,6 +59,10 @@ type DialogState struct {
 	// is its target, not what its caller's dialog first dialled.
 	Caller      string `json:"caller,omitempty"`
 	Destination string `json:"destination,omitempty"`
+	// Handoff marks a dialog its live owner is handing over (the owner is
+	// draining): survivors claim it at once, without waiting for the owner
+	// to go OFFLINE or its heartbeat to age.
+	Handoff bool `json:"handoff,omitempty"`
 }
 
 // HA timing: the owner refreshes its records every heartbeat and they expire
@@ -115,7 +119,7 @@ func (s *Store) ClaimDialog(ctx context.Context, callId, newNode string) (bool, 
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return false, out, fmt.Errorf("livestate: dialog decode: %w", err)
 	}
-	if !out.UpdatedAt.IsZero() && time.Since(out.UpdatedAt) < 2*HAHeartbeat {
+	if !out.Handoff && !out.UpdatedAt.IsZero() && time.Since(out.UpdatedAt) < 2*HAHeartbeat {
 		return false, out, nil // the owner's heartbeat is still fresh
 	}
 	claim := claimOrphan.Exec(ctx, s.c, []string{dialogClaimKey(callId), dialogKey(callId), dialogTakenKey(out.OwnerNode)},
@@ -179,6 +183,24 @@ func (s *Store) ClaimOwner(ctx context.Context, callId string) (string, error) {
 		return "", fmt.Errorf("livestate: dialog claim get: %w", err)
 	}
 	return v, nil
+}
+
+// DialogOwner names the node a dialog's record says owns it ("" when there
+// is no record). An owner handing a call over yields once this names
+// another node.
+func (s *Store) DialogOwner(ctx context.Context, callId string) (string, error) {
+	raw, err := s.c.Do(ctx, s.c.B().Get().Key(dialogKey(callId)).Build()).ToString()
+	if valkey.IsValkeyNil(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("livestate: dialog get: %w", err)
+	}
+	var sds DialogState
+	if err := json.Unmarshal([]byte(raw), &sds); err != nil {
+		return "", fmt.Errorf("livestate: dialog decode: %w", err)
+	}
+	return sds.OwnerNode, nil
 }
 
 // OrphanedDialogs returns the replicated states of dialogs owned by

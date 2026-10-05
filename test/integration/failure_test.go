@@ -773,18 +773,39 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 		}
 		return nil
 	})
-	// The draining node keeps the call and does not exit while it lasts.
-	if !callListedOn(lc, node) || containerState(t, node) != "running" {
-		t.Fatal("draining node dropped its call or exited early")
+	// In-call HA hands the call to the READY node instead of keeping it
+	// until it ends (handoff on drain): it re-homes there, marked taken
+	// over, without being dropped, and the drained node exits.
+	eventually(t, 20*time.Second, "the call handed off to "+other, func() error {
+		for _, c := range lc.calls() {
+			if c.To == callee.Extension && c.Node == other && c.HA == livestate.HATakenOver {
+				return nil
+			}
+		}
+		return errors.New("not handed off")
+	})
+	select {
+	case <-in.Ended():
+		t.Fatal("the handoff dropped the call")
+	default:
 	}
-	if err := in.Hangup(ctx); err != nil {
-		t.Fatalf("hang up the drained node's call: %v", err)
-	}
-	eventually(t, 30*time.Second, "drained node exits after its last call", func() error {
+	eventually(t, 30*time.Second, "drained node exits once its call is handed off", func() error {
 		if s := containerState(t, node); s == "running" {
 			return errors.New("still running")
 		}
 		return nil
+	})
+	// The call still ends normally, now on the survivor.
+	if err := in.Hangup(ctx); err != nil {
+		t.Fatalf("hang up the handed-off call: %v", err)
+	}
+	eventually(t, 20*time.Second, "the caller's dialog ended", func() error {
+		select {
+		case <-out.Ended():
+			return nil
+		default:
+			return errors.New("still up")
+		}
 	})
 
 	// With a short drain timeout, a remaining call is hung up and the node
@@ -816,6 +837,10 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 	if n := callNode(t, lc, e2.Extension); n != node {
 		t.Fatalf("second call on %s, want %s", n, node)
 	}
+	// No READY node to hand the call to: the other node drains (and,
+	// call-free, exits), so the drain timeout is what ends this call.
+	lc.must("POST", "/api/v1/cluster/nodes/"+other+"/drain?force=true", nil, nil, 204)
+	lc.waitState(other, "DRAINING", 10*time.Second)
 	lc.must("POST", "/api/v1/cluster/nodes/"+node+"/drain?force=true", nil, nil, 204)
 	select {
 	case <-out2.Ended():
@@ -1074,14 +1099,28 @@ func TestRollingUpgrade(t *testing.T) {
 		t.Fatal("the long call was dropped while the other node upgraded")
 	default:
 	}
-	// Upgrade the node with the call: it waits for the call, which the
-	// users end normally. A new call during the drain goes to the
-	// upgraded node.
+	// Upgrade the node with the call: it hands the call to the upgraded
+	// node (handoff on drain) and exits; the users end the call normally
+	// afterwards. A new call during the drain goes to the upgraded node.
 	rec = newRecovery(t, lc)
 	drained = time.Now()
 	lc.must("POST", "/api/v1/cluster/nodes/"+withCall+"/drain?force=true", nil, nil, 204)
 	lc.waitState(withCall, "DRAINING", 10*time.Second)
 	rec.by(drained.Add(20 * time.Second))
+	eventually(t, 20*time.Second, "the long call handed off to "+first, func() error {
+		for _, c := range lc.calls() {
+			if c.To == callee.Extension && c.Node == first && c.HA == livestate.HATakenOver {
+				return nil
+			}
+		}
+		return errors.New("not handed off")
+	})
+	eventually(t, 30*time.Second, withCall+" exits once its call is handed off", func() error {
+		if containerState(t, withCall) == "running" {
+			return errors.New("still running")
+		}
+		return nil
+	})
 	select {
 	case <-in.Ended():
 		t.Fatal("draining dropped the long call")
@@ -1090,12 +1129,6 @@ func TestRollingUpgrade(t *testing.T) {
 	if err := out.Hangup(ctx); err != nil {
 		t.Fatalf("hang up the long call: %v", err)
 	}
-	eventually(t, 30*time.Second, withCall+" exits after the call", func() error {
-		if containerState(t, withCall) == "running" {
-			return errors.New("still running")
-		}
-		return nil
-	})
 	restore(t, lc, withCall)
 	newRecovery(t, lc).by(time.Now().Add(20 * time.Second))
 }

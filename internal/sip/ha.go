@@ -110,10 +110,19 @@ func (s *Server) isSelfProbe(req *sip.Request) bool {
 // Drain makes the node stop taking trunk work: its trunk holders stop
 // (unregistering) and release their leases at once, so another node takes
 // over registration and health checks. Undrain resumes it.
-func (s *Server) Drain() { s.trunks.setDraining(true) }
+// Its live calls are handed to surviving nodes (incall-ha: handoff on
+// drain), so the drain ends without cutting them.
+func (s *Server) Drain() {
+	s.trunks.setDraining(true)
+	s.HandOffCalls()
+}
 
-// Undrain lets the node take trunk leases again after a cancelled drain.
-func (s *Server) Undrain() { s.trunks.setDraining(false) }
+// Undrain lets the node take trunk leases again after a cancelled drain,
+// and keeps the calls no survivor has taken yet.
+func (s *Server) Undrain() {
+	s.trunks.setDraining(false)
+	s.CancelHandOff()
+}
 
 // HangupAll ends every call this node owns: connected calls get BYE on
 // both legs, calls still ringing are cancelled with 503; each CDR records
