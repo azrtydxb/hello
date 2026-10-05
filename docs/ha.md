@@ -285,7 +285,7 @@ the node dies is abandoned, as in the table.
   Kamailio asks for that (rport) on what it sends Hello, so a replaced
   Kamailio pod is probed UP without flushing conntrack. Kamailio
   re-resolves those names every 5s (`ds_dns_mode` 1|4, `ds_dns_interval`
-  5, DNS cache capped at 5s), keeping each node's probing state, so a
+  5; answers cached for the record's TTL), keeping each node's probing state, so a
   hostNetwork pod that returns on another node is accepted as an in-dialog
   target again within seconds, with no `dispatcher.reload`.
 - **Trusted proxies:** set `HELLO_SIP_TRUSTED_PROXIES` to the Hello-facing

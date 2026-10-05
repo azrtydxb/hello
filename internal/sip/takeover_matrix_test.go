@@ -466,7 +466,11 @@ func TestDoubleFailure(t *testing.T) {
 	devs := threeDevices()
 	n1 := startPBX(t, devs, withNodeID("sip-1"), withHA(ha, mem))
 	n2 := startPBX(t, devs, withNodeID("sip-2"), withHA(ha, mem))
-	n3 := startPBX(t, devs, withNodeID("sip-3"), withHA(ha, mem))
+	// sip-3 is a survivor too until it dies: its own poller must not race
+	// sip-2 for X (claiming it, then dying mid-takeover), so only sip-2
+	// polls - the scenario is sip-2 mid-takeover when sip-3 dies.
+	n3 := startPBX(t, devs, withNodeID("sip-3"), withHA(ha, mem),
+		func(c *Config, _ *Deps) { c.HATakeoverEnabled = false })
 	a, b := newPhone(t, n1, "a1", "pa"), newPhone(t, n1, "b1", "pb1")
 	c, d := newPhone(t, n3, "c1", "pc"), newPhone(t, n3, "d1", "pd")
 	for _, p := range []*phone{a, b, c, d} {
