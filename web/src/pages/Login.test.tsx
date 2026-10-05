@@ -58,7 +58,7 @@ describe("Login", () => {
     fillAndSubmit("admin", "s3cret-pass");
 
     expect(
-      await screen.findByRole("heading", { level: 1, name: "Call History" }),
+      await screen.findByRole("heading", { level: 1, name: "Call history" }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/history$/);
     expect(calls).toContainEqual({

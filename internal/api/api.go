@@ -71,7 +71,9 @@ type Store interface {
 	RotateDeviceSecret(ctx context.Context, actor string, id int64, realm, secret string) (store.Device, error)
 	DeleteDevice(ctx context.Context, actor string, id int64) error
 
-	ListCDRs(ctx context.Context, before int64, limit int) ([]store.CDR, string, error)
+	ListCDRs(ctx context.Context, f store.CDRFilter, before int64, limit int) ([]store.CDR, string, error)
+	CountCDRs(ctx context.Context) (store.CDRCounts, error)
+	CDRConcurrency(ctx context.Context, from, to time.Time, step time.Duration) ([]store.ConcurrencyPoint, error)
 	GetCDR(ctx context.Context, id int64) (store.CDR, routing.Trace, error)
 
 	ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]store.Recording, string, error)
@@ -216,6 +218,9 @@ func Handler(c Config) http.Handler {
 	private("GET /api/v1/registrations", s.registrations)
 	private("GET /api/v1/calls", s.calls)
 	private("GET /api/v1/cdrs", s.cdrs)
+	private("GET /api/v1/cdrs/counts", s.cdrCounts)
+	private("GET /api/v1/cdrs/concurrency", s.cdrConcurrency)
+	private("GET /api/v1/cdrs/export", s.cdrExport)
 	private("GET /api/v1/cdrs/{id}", s.getCDR)
 
 	private("GET /api/v1/trunks", s.listTrunks)
