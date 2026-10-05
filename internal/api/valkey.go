@@ -253,3 +253,48 @@ func (l *LazyValkey) LockDrains(ctx context.Context) (func(), error) {
 		_ = unlockScript.Exec(ctx, c.c, []string{drainLockKey}, []string{token}).Error()
 	}, nil
 }
+
+// Bindings implements DiagnosticsLive.
+func (l *LazyValkey) Bindings(ctx context.Context, aor string) ([]livestate.Binding, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.Bindings(ctx, aor)
+}
+
+// RegisterAttempts implements DiagnosticsLive.
+func (l *LazyValkey) RegisterAttempts(ctx context.Context, device string) ([]livestate.RegisterAttempt, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.RegisterAttempts(ctx, device)
+}
+
+// AuthFailures implements DiagnosticsLive.
+func (l *LazyValkey) AuthFailures(ctx context.Context, ip string) (livestate.AuthFailure, bool, error) {
+	c, err := l.get()
+	if err != nil {
+		return livestate.AuthFailure{}, false, err
+	}
+	return c.live.AuthFailures(ctx, ip)
+}
+
+// AllAuthFailures implements DiagnosticsLive.
+func (l *LazyValkey) AllAuthFailures(ctx context.Context) ([]livestate.AuthFailure, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.AllAuthFailures(ctx)
+}
+
+// ClearAuthFailures implements DiagnosticsLive.
+func (l *LazyValkey) ClearAuthFailures(ctx context.Context, ip string) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.live.ClearAuthFailures(ctx, ip)
+}
