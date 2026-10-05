@@ -507,6 +507,12 @@ func TestDoubleFailure(t *testing.T) {
 	if z := n2.metric(t, "hello_zombie_calls_total", nil); z != 0 {
 		t.Fatalf("zombies = %v, want 0", z)
 	}
+	ha.mu.Lock()
+	stale := ha.staleReleases
+	ha.mu.Unlock()
+	if stale != 0 {
+		t.Fatalf("%d claims released before the record named the taker: a survivor could take the call again", stale)
+	}
 	if ha.ownerOf(recX.CallID) != "sip-2" || ha.ownerOf(recY.CallID) != "sip-2" {
 		t.Fatalf("records owned by %q/%q, want sip-2", ha.ownerOf(recX.CallID), ha.ownerOf(recY.CallID))
 	}

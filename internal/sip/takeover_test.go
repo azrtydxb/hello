@@ -25,6 +25,9 @@ type fakeHA struct {
 	failSave bool
 	deleted  map[string]int
 	taken    map[string]int // claims per dead owner (TakenOver)
+	// staleReleases counts claims released while the record still named
+	// another node than the claimant: a survivor could take that call again.
+	staleReleases int
 	saves    map[string]int // replication writes per Call-ID
 	ttls     map[string]time.Duration
 }
@@ -79,6 +82,9 @@ func (f *fakeHA) ClaimDialog(_ context.Context, id, node string) (bool, livestat
 func (f *fakeHA) ReleaseDialogClaim(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if st, ok := f.dialogs[id]; ok && st.OwnerNode != f.claims[id] {
+		f.staleReleases++
+	}
 	delete(f.claims, id)
 	return nil
 }
