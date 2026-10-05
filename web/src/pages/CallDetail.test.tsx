@@ -58,15 +58,80 @@ describe("CallDetail", () => {
 
     const list = await screen.findByRole("list", { name: "Routing trace" });
     const items = within(list).getAllByRole("listitem");
-    expect(items.map((li) => li.textContent)).toEqual(STEPS);
-
-    expect(screen.getByRole("note")).toHaveTextContent(
-      "Why it failed: carrier-backup -> 503 Service Unavailable",
+    // Each step reads its number, then its sentence.
+    expect(items.map((li) => li.textContent)).toEqual(
+      STEPS.map((text, i) => `${i + 1}${text}`),
     );
+    // The last step of a failed call is marked as the failure; a skipped
+    // step and a failover are marked as such.
+    expect(items[5]!.querySelector(".icon-x")).not.toBeNull();
+    expect(items[0]!.querySelector(".icon-minus")).not.toBeNull();
+    expect(items[3]!.querySelector(".icon-triangle-alert")).not.toBeNull();
+    expect(items[1]!.querySelector(".icon-check")).not.toBeNull();
+
+    const why = screen.getByRole("alert");
+    expect(why).toHaveTextContent("Why it failed");
+    expect(why).toHaveTextContent("carrier-backup -> 503 Service Unavailable");
     expect(screen.getByText("0501234567 → +971501234567")).toBeVisible();
     expect(screen.getByText("UAE Mobile")).toBeVisible();
     expect(screen.getByText("carrier-backup")).toBeVisible();
-    expect(screen.getByText("Outbound")).toBeVisible();
+    expect(screen.getByText(/^Outbound ·/)).toBeVisible();
+    expect(screen.getByText("503 (failed)")).toBeVisible();
+
+    // Timeline: never rang or answered, so both are unknown.
+    const timeline = screen.getByLabelText("Timeline");
+    const values = within(timeline)
+      .getAllByRole("definition")
+      .map((d) => d.textContent);
+    expect(values[1]).toBe("—");
+    expect(values[2]).toBe("—");
+
+    // The actions open the SIP trace and the route test for this call.
+    expect(screen.getByRole("link", { name: "SIP trace" })).toHaveAttribute(
+      "href",
+      "/diagnostics?call=corr-77",
+    );
+    expect(
+      screen.getByRole("link", { name: "Re-test this number" }),
+    ).toHaveAttribute("href", "/routes/test?from=101&number=0501234567");
+  });
+
+  it("shows the failover note on an answered call", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/79": () =>
+        json({
+          ...BASE,
+          id: 79,
+          finalStatus: 200,
+          answerTime: "2026-10-01T10:00:02Z",
+          failureReason: "",
+          trace: [],
+          explanation: "",
+          note: "carrier-primary (10.0.0.5:5060) -> 503 Service Unavailable; failed over to carrier-backup.",
+        }),
+    });
+    renderApp("/history/79");
+
+    const note = (await screen.findByText("Note")).closest(".az-alert");
+    expect(note).toHaveAttribute("role", "status");
+    expect(note).toHaveTextContent("failed over to carrier-backup.");
+    expect(screen.queryByText("Why it failed")).toBeNull();
+    expect(screen.getByText("No trace was recorded.")).toBeVisible();
+    expect(screen.getByText("after 0:05")).toBeVisible();
+  });
+
+  it("explains why a call could not load", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/404": () =>
+        json({ error: { code: "not_found", message: "cdr: not found" } }, 404),
+    });
+    renderApp("/history/404");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Could not load this call");
+    expect(alert).toHaveTextContent("cdr: not found");
   });
 
   it("shows no failure explanation for an answered call", async () => {
@@ -88,8 +153,9 @@ describe("CallDetail", () => {
     renderApp("/history/78");
 
     expect(await screen.findByText("Call established")).toBeVisible();
-    expect(screen.queryByRole("note")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText(/Why it failed/)).toBeNull();
+    expect(screen.queryByText("Note")).toBeNull();
   });
 
   it("is reached from a Call History row", async () => {

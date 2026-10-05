@@ -488,7 +488,11 @@ func (s *server) cdrs(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = n
 	}
-	cs, next, err := s.Store.ListCDRs(r.Context(), before, limit)
+	f, ok := cdrFilter(w, r)
+	if !ok {
+		return
+	}
+	cs, next, err := s.Store.ListCDRs(r.Context(), f, before, limit)
 	if err != nil {
 		s.internal(w, "list cdrs", err)
 		return

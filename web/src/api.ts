@@ -426,7 +426,8 @@ async function errorFrom(
   );
 }
 
-async function request<T>(
+/** One API call: JSON in and out, the error envelope thrown as ApiError. */
+export async function request<T>(
   method: string,
   path: string,
   { body, rawBody, signal, redirectOn401 = true }: RequestOptions = {},

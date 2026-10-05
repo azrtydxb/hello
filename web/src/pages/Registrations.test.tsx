@@ -71,13 +71,13 @@ describe("live pages", () => {
     });
     const { unmount } = render(<Calls />);
     await flush();
-    expect(screen.getByText("ringing")).toBeVisible();
+    expect(screen.getByText("Ringing")).toBeVisible();
 
     await flush(5000);
-    expect(screen.getByText("No calls in progress.")).toBeVisible();
+    expect(screen.getByText("No calls in progress")).toBeVisible();
 
     unmount();
     await flush(15000);
-    expect(calls).toHaveLength(2);
+    expect(calls.filter((c) => c.url === "/api/v1/calls")).toHaveLength(2);
   });
 });

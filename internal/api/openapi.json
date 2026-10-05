@@ -728,6 +728,21 @@
               "maximum": 200,
               "default": 50
             }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "description": "Keep only calls of this direction",
+            "schema": {
+              "type": "string",
+              "enum": ["internal", "inbound", "outbound"]
+            }
+          },
+          {
+            "name": "failed",
+            "in": "query",
+            "description": "true keeps only failed calls (final status outside 2xx)",
+            "schema": { "type": "boolean", "default": false }
           }
         ],
         "responses": {
@@ -750,6 +765,96 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
+        }
+      }
+    },
+    "/api/v1/cdrs/counts": {
+      "get": {
+        "operationId": "countCDRs",
+        "summary": "How many call records exist, and how many failed",
+        "tags": ["history"],
+        "responses": {
+          "200": {
+            "description": "CDR counts",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CDRCounts" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        }
+      }
+    },
+    "/api/v1/cdrs/concurrency": {
+      "get": {
+        "operationId": "cdrConcurrency",
+        "summary": "Recorded calls in progress over a time window, by direction",
+        "description": "Samples, at every step of the window, how many CDRs were in progress (start <= t < end). Calls still in progress have no CDR yet and are not counted; GET /api/v1/calls lists those.",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "description": "Window ending at the last whole step: 1h in 5 min steps, 6h in 15 min steps, 24h in 1 h steps",
+            "schema": {
+              "type": "string",
+              "enum": ["1h", "6h", "24h"],
+              "default": "6h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Concurrency samples",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CDRConcurrency" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        }
+      }
+    },
+    "/api/v1/cdrs/export": {
+      "get": {
+        "operationId": "exportCDRs",
+        "summary": "Call detail records as CSV, newest first",
+        "description": "The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "name": "direction",
+            "in": "query",
+            "description": "Keep only calls of this direction",
+            "schema": {
+              "type": "string",
+              "enum": ["internal", "inbound", "outbound"]
+            }
+          },
+          {
+            "name": "failed",
+            "in": "query",
+            "description": "true keeps only failed calls (final status outside 2xx)",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV with a header row",
+            "content": {
+              "text/csv": {
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
         }
       }
     },
@@ -1830,7 +1935,12 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 }
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
           }
         ],
         "responses": {
@@ -1870,7 +1980,9 @@
         "tags": ["media"],
         "parameters": [{ "$ref": "#/components/parameters/id" }],
         "responses": {
-          "302": { "description": "Redirect to a presigned object-store URL, valid 15 minutes" },
+          "302": {
+            "description": "Redirect to a presigned object-store URL, valid 15 minutes"
+          },
           "404": { "$ref": "#/components/responses/NotFound" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "503": { "$ref": "#/components/responses/Unavailable" },
@@ -3106,14 +3218,23 @@
       },
       "Recording": {
         "type": "object",
-        "required": ["id", "correlationId", "initiatedBy", "durationMs", "createdAt"],
+        "required": [
+          "id",
+          "correlationId",
+          "initiatedBy",
+          "durationMs",
+          "createdAt"
+        ],
         "properties": {
           "id": { "type": "integer", "format": "int64" },
           "correlationId": {
             "type": "string",
             "description": "The call the recording belongs to; matches the CDR's correlationId."
           },
-          "initiatedBy": { "type": "string", "enum": ["dtmf", "default", "api"] },
+          "initiatedBy": {
+            "type": "string",
+            "enum": ["dtmf", "default", "api"]
+          },
           "durationMs": { "type": "integer", "format": "int64" },
           "createdAt": { "type": "string", "format": "date-time" }
         }
@@ -3126,7 +3247,10 @@
             "type": "array",
             "items": { "$ref": "#/components/schemas/Recording" }
           },
-          "next": { "type": "string", "description": "Cursor for the next (older) page; empty at the end." }
+          "next": {
+            "type": "string",
+            "description": "Cursor for the next (older) page; empty at the end."
+          }
         }
       },
       "Announcement": {
@@ -4531,6 +4655,54 @@
           }
         }
       },
+      "CDRCounts": {
+        "type": "object",
+        "required": ["all", "failed"],
+        "properties": {
+          "all": { "type": "integer", "format": "int64" },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Final status outside 2xx"
+          }
+        }
+      },
+      "ConcurrencyPoint": {
+        "type": "object",
+        "required": ["at", "inbound", "outbound", "internal"],
+        "properties": {
+          "at": { "type": "string", "format": "date-time" },
+          "inbound": { "type": "integer", "format": "int64" },
+          "outbound": { "type": "integer", "format": "int64" },
+          "internal": { "type": "integer", "format": "int64" }
+        }
+      },
+      "CDRConcurrency": {
+        "type": "object",
+        "required": ["range", "stepSeconds", "points", "peak"],
+        "properties": {
+          "range": { "type": "string", "enum": ["1h", "6h", "24h"] },
+          "stepSeconds": { "type": "integer" },
+          "points": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ConcurrencyPoint" }
+          },
+          "peak": {
+            "description": "The sample with the most calls in progress; null when no call was in progress",
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "required": ["calls", "at"],
+                "properties": {
+                  "calls": { "type": "integer", "format": "int64" },
+                  "at": { "type": "string", "format": "date-time" }
+                }
+              }
+            ]
+          }
+        }
+      },
       "CDRDetail": {
         "allOf": [
           {
@@ -4538,7 +4710,7 @@
           },
           {
             "type": "object",
-            "required": ["trace", "explanation"],
+            "required": ["trace", "explanation", "note"],
             "properties": {
               "trace": {
                 "type": "array",
@@ -4549,6 +4721,10 @@
               "explanation": {
                 "type": "string",
                 "description": "For a failed call, the reason from the last trace step; empty otherwise"
+              },
+              "note": {
+                "type": "string",
+                "description": "For an answered call that failed over, the trunk response that caused it and the trunk that answered; empty otherwise"
               }
             }
           }
