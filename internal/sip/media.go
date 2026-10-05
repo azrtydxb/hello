@@ -119,11 +119,11 @@ func (c *call) considerAnchor(snap *snapshot.Snapshot, to EndpointInfo) {
 		return
 	}
 	c.mu.Unlock()
-	reason := decideAnchor(c.inv, snap, c.callerEndpoint(snap), to, c.s.cfg.MediaForceAnchor)
-	if reason == AnchorNone {
-		return
-	}
-	c.startAnchor(snap, reason)
+	// Every call anchors since Phase 7 (spec S-7); the conditional trigger
+	// is trace information next to the policy reason.
+	trigger := anchorTrigger(c.inv, snap, c.callerEndpoint(snap), to, c.s.cfg.MediaForceAnchor)
+	c.policyTrigger = trigger
+	c.startAnchor(snap, AnchorPolicy)
 }
 
 // callerEndpoint is the caller side's EndpointInfo: Contact vs packet
@@ -219,10 +219,15 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	c.mu.Lock()
 	c.anchored = true
 	c.anchorReason = reason
+	trigger := c.policyTrigger
 	c.relay = relay
 	c.mediaMode = "anchored"
 	c.mu.Unlock()
-	c.addTrace(fmt.Sprintf("Media anchored (%s)", reason))
+	if trigger == AnchorNone {
+		c.addTrace(fmt.Sprintf("Media anchored (%s)", reason))
+	} else {
+		c.addTrace(fmt.Sprintf("Media anchored (%s; trigger: %s)", reason, trigger))
+	}
 	if m := c.s.deps.Media; m != nil {
 		m.NoteStart()
 		relay.Observe(m.ObserveStats)
@@ -462,6 +467,7 @@ func (c *call) startRecordingFlow(by string) {
 		return // already recording (spec: one recording per call)
 	}
 	c.addTrace("Recording started")
+	c.noteHAState(haPhaseRecording, "")
 	// The notice announcement plays before the capture becomes a kept
 	// recording, matching the voicemail beep discipline.
 	if c.s.cfg.MediaRecordingNotice {
@@ -483,6 +489,7 @@ func (c *call) toggleRecording() {
 	}
 	if r, by := rec.stop(); r != nil {
 		c.addTrace("Recording stopped")
+		c.noteHAState("", "")
 		go c.storeRecording(r, by)
 		return
 	}
@@ -526,6 +533,7 @@ func (c *call) playAnnouncementObject(obj string) {
 		c.addTrace(fmt.Sprintf("Announcement %q is not a WAV: skipped", obj))
 		return
 	}
+	c.noteHAState(haPhaseAnnouncement, haRecordDetailPrefix+obj) // replays from the top after a takeover
 	pctx, pcancel := context.WithTimeout(context.Background(), time.Minute)
 	defer pcancel()
 	for _, legName := range []string{legCaller, legCallee} {
@@ -533,6 +541,7 @@ func (c *call) playAnnouncementObject(obj string) {
 			c.s.log.Debug("announcement playback failed", "leg", legName, "error", err)
 		}
 	}
+	c.noteHAState("", "")
 }
 
 // storeRecording takes the recorder's audio and stores it: the WAV (or
@@ -789,11 +798,13 @@ func (c *call) playAnnouncementToCall(name string) {
 	c.playAnnouncementObject(obj)
 }
 
-// anchorReasonIs reports the call's anchoring reason (locked read).
-func (c *call) anchorReasonIs(r AnchorReason) bool {
+// anchorTriggerWas reports whether the call's policy trace carries r as the
+// conditional trigger (e.g. record_default: the recording starts with the
+// call although the reason is now policy, spec S-7).
+func (c *call) anchorTriggerWas(r AnchorReason) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.anchored && c.anchorReason == r
+	return c.anchored && c.policyTrigger == r
 }
 
 // announcementEnd ends an answered callee-less call (announcement

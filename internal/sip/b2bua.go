@@ -100,10 +100,11 @@ type call struct {
 
 	// Phase 5 anchoring state: the reason the media anchors ("" direct),
 	// the session's relay, and the recording state. Guarded by mu.
-	anchored     bool
-	anchorReason AnchorReason
-	relay        *media.Relay
-	rec          *recording
+	anchored      bool
+	anchorReason  AnchorReason
+	policyTrigger AnchorReason // what the pre-Phase-7 decision would have been
+	relay         *media.Relay
+	rec           *recording
 	// anchorHost is the advertised IPv4 for relay SDP answers.
 	anchorHost string
 
@@ -111,6 +112,17 @@ type call struct {
 	groupStrategy string
 	groupFn       func()
 	transferKind  string // blind or attended, for hello_transfers_total
+
+	// In-call HA state (Phase 7). haPhase/haDetail are the replicated call
+	// phase beyond hold; haYielded stops replication and record deletion
+	// once another node took the call; haStop closes the replication
+	// heartbeat; homedCall carries a taken-over call's rebuilt dialogs.
+	// All guarded by mu.
+	haPhase   string
+	haDetail  string
+	haYielded bool
+	haStop    chan struct{}
+	homedCall *homedCall
 	// transferNotify reports a transfer's outcome to the transferee's
 	// dialog (set by transferBlindVia for the rethreaded call).
 	transferNotify func(fragment string, final bool)
@@ -253,7 +265,7 @@ func (s *Server) newCall(req *sip.Request) *call {
 		s: s, id: newID(), callID: req.CallID().Value(),
 		dialled: req.Recipient.User, start: time.Now(), inv: req, direction: cdr.DirectionInternal,
 		canceled: make(chan struct{}), stopHB: make(chan struct{}), setupDone: make(chan struct{}),
-		aborted: make(chan struct{}),
+		aborted: make(chan struct{}), haStop: make(chan struct{}),
 	}
 }
 
@@ -593,10 +605,13 @@ func (c *call) answer(w *leg) {
 	}
 	c.addTrace("Call established")
 	c.publish()
+	if c.s.deps.HAState != nil {
+		go c.haLoop() // replication: the write cadence is the owner's liveness
+	}
 	// record_default recordings start when the call is answered (spec
 	// S-4); the flow re-anchors when needed, but an anchored-for-recording
 	// call is already set up.
-	if c.anchorReasonIs(AnchorRecording) {
+	if c.anchorTriggerWas(AnchorRecording) {
 		go c.startRecordingFlow("default")
 	}
 	if snap := c.s.deps.Snapshots.Current(); snap != nil {
@@ -663,11 +678,21 @@ func (c *call) hangup(side string) {
 	}
 	c.hungUp = true
 	w := c.winner
+	hom := c.homedCall
 	c.mu.Unlock()
 	c.end(sip.StatusOK, side, "", ResultAnswered)
 	go func() {
 		defer c.release()
 		defer contain(c.s.log, "hangup")
+		if hom != nil {
+			// A taken-over call has no sipgo sessions: raw leg BYEs.
+			if side == cdr.SideCaller {
+				c.s.haBye(hom.leg(true))
+			} else {
+				c.s.haBye(hom.leg(false))
+			}
+			return
+		}
 		if side == cdr.SideCaller {
 			w.bye()
 		} else {
@@ -784,11 +809,19 @@ func (c *call) endBoth(reason string) {
 	}
 	c.hungUp = true
 	w := c.winner
+	hom := c.homedCall
 	c.mu.Unlock()
 	c.end(sip.StatusOK, cdr.SideSystem, reason, ResultAnswered)
 	go func() {
 		defer c.release()
 		defer contain(c.s.log, "end both legs")
+		if hom != nil {
+			done := make(chan struct{})
+			go func() { defer close(done); c.s.haBye(hom.leg(true)) }()
+			c.s.haBye(hom.leg(false))
+			<-done
+			return
+		}
 		// A re-INVITE or UPDATE being relayed finishes first: the BYE
 		// follows its transaction's end, bounded by the transaction
 		// timeout (spec edge case "drain timeout during a re-INVITE").
@@ -833,7 +866,10 @@ func (c *call) end(status int, side, reason, result string) {
 		cn, cd, de := c.callerNum, c.callerDevice, c.dialled
 		c.mu.Unlock()
 		c.s.restorePresenceOf(cn, cd, de)
-		close(c.stopHB)
+		if c.haStop != nil {
+			close(c.haStop)
+		}
+		c.haDelete()
 		if result != ResultAnswered {
 			c.release()
 		}
@@ -1191,6 +1227,9 @@ func (s *Server) handleAck(req *sip.Request, tx sip.ServerTransaction) {
 	if !ok {
 		return
 	}
+	if ref.c.homed() != nil {
+		return // a taken-over call's ACKs need no relay (its 200s are terminal)
+	}
 	c := ref.c
 	c.mu.Lock()
 	w, lateAck := c.winner, c.lateAck
@@ -1265,6 +1304,16 @@ func (s *Server) matchDialog(req *sip.Request) (dialogRef, bool) {
 		return dialogRef{}, false
 	}
 	c := ref.c
+	if hom := c.homed(); hom != nil {
+		// A taken-over call matches from its replicated dialogs (the tags
+		// and the endpoint's source are the old owner's); other in-dialog
+		// methods (REFER and friends) are not recovered and answer 481.
+		switch req.Method {
+		case sip.INVITE, sip.ACK, sip.BYE, sip.UPDATE:
+			return s.matchHomed(c, hom, req, ref)
+		}
+		return dialogRef{}, false
+	}
 	if ref.leg == nil {
 		id, err := sip.DialogIDFromRequestUAS(req)
 		if err == nil && c.dss != nil && id == c.dss.ID && req.Source() == c.inv.Source() {
@@ -1292,6 +1341,48 @@ func (s *Server) matchDialog(req *sip.Request) (dialogRef, bool) {
 	return ref, err1 == nil && err2 == nil && got == want && req.Source() == res.Source()
 }
 
+// matchHomed verifies an in-dialog request against a taken-over call's
+// replicated dialogs: the Call-ID selects the leg, and the request must
+// carry exactly that dialog's tags from the endpoint's side and come from
+// the endpoint's source (the edge proxy, as for the original owner).
+func (s *Server) matchHomed(c *call, hom *homedCall, req *sip.Request, ref dialogRef) (dialogRef, bool) {
+	l := hom.leg(ref.leg != nil)
+	if l == nil {
+		return dialogRef{}, false
+	}
+	l.mu.Lock()
+	localTag, remoteTag, source := l.localTag, l.remoteTag, l.source
+	l.mu.Unlock()
+	if tagParam(req.From()) != remoteTag || tagParam(req.To()) != localTag || req.Source() != source {
+		return dialogRef{}, false
+	}
+	return ref, true
+}
+
+// haByeRequest ends a taken-over call from one of its endpoints: 200, then
+// the other leg's BYE, then the dialogs release.
+func (s *Server) haByeRequest(c *call, hom *homedCall, fromCallee bool, req *sip.Request, tx sip.ServerTransaction) {
+	c.mu.Lock()
+	if c.hungUp || c.ended {
+		c.mu.Unlock()
+		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
+		return
+	}
+	c.hungUp = true
+	c.mu.Unlock()
+	s.respond(tx, req, sip.StatusOK, "OK")
+	side := cdr.SideCallee
+	if fromCallee {
+		side = cdr.SideCaller
+	}
+	c.end(sip.StatusOK, side, "", ResultAnswered)
+	go func() {
+		defer c.release()
+		defer contain(c.s.log, "homed bye")
+		c.s.haBye(hom.leg(!fromCallee))
+	}()
+}
+
 // handleBye ends a connected call from either side.
 func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 	ref, ok := s.matchDialog(req)
@@ -1300,6 +1391,10 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	c := ref.c
+	if hom := c.homed(); hom != nil {
+		s.haByeRequest(c, hom, ref.leg != nil, req, tx)
+		return
+	}
 	c.mu.Lock()
 	w, connected := c.winner, c.connected
 	c.mu.Unlock()
@@ -1348,6 +1443,12 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	defer c.endInDialog()
+	if hom := c.homed(); hom != nil {
+		// A taken-over call terminates media in dialog from the replicated
+		// relay: hold direction mirrored, the peer re-INVITEd the same way.
+		c.haInDialog(hom, req, tx, ref.leg == nil)
+		return
+	}
 	// An anchored call terminates media in dialog too: a re-INVITE offer
 	// is answered with the anchor's SDP and mirrored to the peer (hold
 	// included), so both dialogs keep pointing at the relay (spec S-2).

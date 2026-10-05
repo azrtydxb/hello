@@ -84,6 +84,15 @@ type Config struct {
 	// MediaRecordingNotice plays the recording-notice announcement before
 	// a recording starts (default true).
 	MediaRecordingNotice bool
+
+	// In-call HA (Phase 7). HADialogHeartbeat is the replication cadence
+	// (5s; the record's TTL is 30s). HATakeoverEnabled gates the orphan
+	// poller; HATakeoverPoll is its base interval and HATakeoverJitter the
+	// random extra delay that keeps survivors out of lockstep.
+	HADialogHeartbeat time.Duration
+	HATakeoverEnabled bool
+	HATakeoverPoll    time.Duration
+	HATakeoverJitter  time.Duration
 }
 
 // Deps are the Server's collaborators.
@@ -118,6 +127,12 @@ type Deps struct {
 	// disables recording. Its methods run only in a media goroutine, never
 	// on the SIP transaction path.
 	Recordings RecordingStore
+	// HAState is the dialog-replication store (Phase 7); nil disables
+	// in-call HA (no replication, no takeover).
+	HAState HAState
+	// Membership reports the cluster's nodes (Phase 3); nil disables
+	// takeover.
+	Membership Membership
 }
 
 // Server is one SIP node.
@@ -153,6 +168,11 @@ type Server struct {
 	// taken the setup's ownership before it signals the setup goroutine, so
 	// a test can inject the fork failure that races the abort.
 	abortHook atomic.Pointer[func(*call)]
+
+	// haOffline tracks OFFLINE nodes for the zombie reaper (guarded by
+	// haOfflineMu).
+	haOfflineMu sync.Mutex
+	haOffline   map[string]*haOfflineNode
 
 	// Presence (S-10) and feature-code (S-11) state. subs holds the live
 	// dialog subscriptions by Call-ID, byExt the per-extension index used
@@ -255,16 +275,20 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		log:     slog.New(NewRedactingHandler(deps.Log.Handler())),
 		digest:  &Digest{Realm: cfg.Domain, Secret: cfg.NonceSecret},
 		advHost: host, advPort: port,
-		recount: make(chan struct{}, 1),
-		dialogs: map[string]dialogRef{},
-		calls:   map[*call]struct{}{},
-		done:    make(chan struct{}),
-		subs:    map[string]*subscription{},
-		byExt:   map[string]map[string]bool{},
-		rrPos:   map[int64]*atomic.Uint64{},
-		lastEnd: map[string]time.Time{},
-		digits:  map[*call]*digitBuffer{},
+		recount:   make(chan struct{}, 1),
+		dialogs:   map[string]dialogRef{},
+		calls:     map[*call]struct{}{},
+		done:      make(chan struct{}),
+		subs:      map[string]*subscription{},
+		byExt:     map[string]map[string]bool{},
+		rrPos:     map[int64]*atomic.Uint64{},
+		lastEnd:   map[string]time.Time{},
+		digits:    map[*call]*digitBuffer{},
+		haOffline: map[string]*haOfflineNode{},
 	}
+	setDefault(&cfg.HADialogHeartbeat, 5*time.Second)
+	setDefault(&cfg.HATakeoverPoll, time.Second)
+	setDefault(&cfg.HATakeoverJitter, 2*time.Second)
 	s.trunks = newTrunkManager(s)
 	s.contact = sip.ContactHeader{Address: sip.Uri{Scheme: "sip", Host: host, Port: port, UriParams: sip.HeaderParams{{K: "transport", V: "udp"}}}}
 	return s, nil
@@ -336,6 +360,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.recountLoop(rctx) })
 	s.bg.Go(func() { s.peerLoop(rctx) })
 	s.bg.Go(func() { s.subExpireLoop(rctx) })
+	if s.deps.HAState != nil && s.deps.Membership != nil && s.cfg.HATakeoverEnabled {
+		s.bg.Go(func() { s.takeoverLoop(rctx) })
+	}
 
 	// Trunk holders stop before the socket closes, so they can unregister
 	// and release their leases for another node.

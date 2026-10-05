@@ -24,6 +24,9 @@ const (
 	AnchorAnnouncement AnchorReason = "announcement"
 	AnchorVoicemail    AnchorReason = "voicemail"
 	AnchorForced       AnchorReason = "forced"
+	// AnchorPolicy is the Phase 7 reason: every call anchors (spec S-7).
+	// The conditional triggers above remain as trace information only.
+	AnchorPolicy AnchorReason = "policy"
 )
 
 // EndpointInfo is one side's addressing as the anchoring decision sees it.
@@ -55,9 +58,19 @@ func (e EndpointInfo) nat() bool {
 	return e.ContactPort != 0 && e.SourcePort != 0 && e.ContactPort != e.SourcePort
 }
 
-// decideAnchor reports why a call anchors, or AnchorNone for direct media
-// (contract 2). snap may be nil. Exported for tests.
+// decideAnchor reports why a call anchors. Since Phase 7 (spec S-7) every
+// call anchors by policy — the bandwidth trade-off was accepted explicitly —
+// so this is AnchorPolicy for every call; the conditional triggers live on
+// only as trace information (anchorTrigger). HELLO_MEDIA_FORCE_ANCHOR stays
+// as a no-op: its forcing is the policy now. snap may be nil. Exported for
+// tests.
 func decideAnchor(req *sip.Request, snap *snapshot.Snapshot, from, to EndpointInfo, force bool) AnchorReason {
+	return AnchorPolicy
+}
+
+// anchorTrigger is what the pre-Phase-7 anchoring decision would have been
+// (contract 2), recorded in the trace next to the policy reason.
+func anchorTrigger(req *sip.Request, snap *snapshot.Snapshot, from, to EndpointInfo, force bool) AnchorReason {
 	if from.nat() || to.nat() || from.NATKnown || to.NATKnown {
 		return AnchorNAT
 	}

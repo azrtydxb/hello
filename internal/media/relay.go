@@ -227,6 +227,24 @@ func (r *Relay) findLeg(name string) *relayLeg {
 	return nil
 }
 
+// LegTarget is the leg's current target (nil when unset): the address the
+// leg's SDP names until inbound packets latch the peer. In-call HA
+// replicates it as the leg's LatchedAddr, so a taker starts with the last
+// known media addresses before its re-INVITEs answer.
+func (r *Relay) LegTarget(name string) *net.UDPAddr {
+	l := r.findLeg(name)
+	if l == nil {
+		return nil
+	}
+	l.remoteMu.Lock()
+	defer l.remoteMu.Unlock()
+	if l.remote == nil {
+		return nil
+	}
+	out := *l.remote
+	return &out
+}
+
 // SetPayloadTypes tells the relay which payload types this leg negotiates,
 // so telephone-event packets can be deduped for DTMF hooks and the
 // recording tap can note the codec.

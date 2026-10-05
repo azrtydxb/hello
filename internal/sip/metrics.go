@@ -55,6 +55,13 @@ type Metrics struct {
 	GroupCalls            *prometheus.CounterVec // group, strategy, result
 	PresenceSubscriptions prometheus.Gauge
 	HoldActive            prometheus.Gauge
+
+	// Phase 7 (in-call HA, spec S-13). DialogReplicated counts replication
+	// writes by result; DialogTakeovers the calls this node took over;
+	// ZombieCalls the calls no survivor could save.
+	DialogReplicated *prometheus.CounterVec // result
+	DialogTakeovers  prometheus.Counter
+	ZombieCalls      prometheus.Counter
 }
 
 // Transfer kinds for hello_transfers_total.
@@ -166,10 +173,20 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.HoldActive = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_hold_active", Help: "Calls currently held on this node (either leg sendonly).",
 	})
+	m.DialogReplicated = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_dialog_replicated_total", Help: "Dialog replication writes by result (ok, failed).",
+	}, []string{"result"})
+	m.DialogTakeovers = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "hello_dialog_takeovers_total", Help: "Calls taken over from a dead node by this node.",
+	})
+	m.ZombieCalls = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "hello_zombie_calls_total", Help: "Calls lost with no recovery possible (unreplicated or failed takeover).",
+	})
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Forwarded, m.GroupCalls,
-		m.PresenceSubscriptions, m.HoldActive)
+		m.PresenceSubscriptions, m.HoldActive,
+		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	return m
 }
 

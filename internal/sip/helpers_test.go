@@ -447,6 +447,27 @@ func (p *testPBX) metric(t *testing.T, name string, labels map[string]string) fl
 	return 0
 }
 
+// anchoredSDP fails the test unless body is the anchor's SDP: the offer's
+// own address (mirrored) and a relay port from the PBX's range.
+func anchoredSDP(t *testing.T, pbx *testPBX, body []byte) media.AudioSDP {
+	t.Helper()
+	sdp, err := media.ParseAudioSDP(body)
+	if err != nil {
+		t.Fatalf("body is not audio SDP: %q (%v)", body, err)
+	}
+	if sdp.Address != "127.0.0.1" {
+		t.Fatalf("SDP names %s, want the mirrored offer address 127.0.0.1", sdp.Address)
+	}
+	min, max := pbx.cfg.RTPPortMin, pbx.cfg.RTPPortMax
+	if min <= 0 { // New's defaults, which the test cfg copy predates
+		min, max = 20000, 21000
+	}
+	if sdp.Port < min || sdp.Port > max {
+		t.Fatalf("SDP port %d outside the relay range %d-%d", sdp.Port, min, max)
+	}
+	return sdp
+}
+
 // --- test phone -------------------------------------------------------------
 
 type calleeFn func(p *phone, req *sip.Request, tx sip.ServerTransaction, dss *sipgo.DialogServerSession)

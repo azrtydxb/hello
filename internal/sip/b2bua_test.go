@@ -3,6 +3,7 @@ package sip
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,9 +111,9 @@ func testCallRingAll(t *testing.T, opt pbxOpt) {
 	var forked *sip.Request
 	for _, p := range []*phone{b1, b2x, b2y} {
 		inv := waitReq(t, p.invites, p.addr+" INVITE")
-		if string(inv.Body()) != a.sdp {
-			t.Fatalf("fork SDP changed:\n%q\nwant\n%q", inv.Body(), a.sdp)
-		}
+		// The call anchors (spec S-7): the fork's offer is the anchor's
+		// leg-b port, never the caller's body.
+		anchoredSDP(t, pbx, inv.Body())
 		// RFC 3581: the callee must answer to our source port, not the Via
 		// port, or a NAT'd phone's reply reaches another node.
 		if v := inv.Via(); v == nil || !v.Params.Has("rport") {
@@ -133,9 +134,7 @@ func testCallRingAll(t *testing.T, opt pbxOpt) {
 	if r.err != nil {
 		t.Fatalf("call: %v", r.err)
 	}
-	if got := string(r.dcs.InviteResponse.Body()); got != b2x.sdp {
-		t.Fatalf("answer SDP changed:\n%q\nwant\n%q", got, b2x.sdp)
-	}
+	anchoredSDP(t, pbx, r.dcs.InviteResponse.Body()) // the caller's answer is the anchor's leg-a SDP
 	waitReq(t, b1.cancels, "CANCEL to losing fork b1")
 	waitReq(t, b2y.cancels, "CANCEL to losing fork b2 (second contact)")
 	waitReq(t, b2x.acks, "ACK to the winner")
@@ -183,12 +182,18 @@ func TestCallSimultaneous2xx(t *testing.T) {
 	if r.err != nil {
 		t.Fatal(r.err)
 	}
-	winner, loser := b1, b2
-	if string(r.dcs.InviteResponse.Body()) == b2.sdp {
+	// Both 2xx are answered with the anchor's SDP either way (spec S-7):
+	// the loser is whichever fork the node sends the losing-leg BYE to.
+	var winner, loser *phone
+	select {
+	case <-b1.byes:
 		winner, loser = b2, b1
+	case <-b2.byes:
+		winner, loser = b1, b2
+	case <-time.After(10 * time.Second):
+		t.Fatal("no BYE to the losing fork")
 	}
-	waitReq(t, loser.acks, "ACK to the second 2xx")
-	waitReq(t, loser.byes, "BYE to the second 2xx")
+	waitReq(t, loser.acks, "ACK to the second 2xx") // its BYE is the one the select above saw
 	waitReq(t, winner.acks, "ACK to the winner")
 	noReq(t, winner.byes, 200*time.Millisecond, "BYE to the winner")
 	hangup(t, r.dcs)
@@ -355,10 +360,12 @@ func TestCallOwnExtension(t *testing.T) {
 	}
 }
 
-// TestCallReInviteAndUpdateRelay fails if an in-dialog re-INVITE or UPDATE
-// is not relayed to the other leg with its body unchanged, and its response
-// relayed back.
-func TestCallReInviteAndUpdateRelay(t *testing.T) {
+// TestCallInDialogAnchored fails if a re-INVITE or UPDATE on an anchored
+// call is not terminated: the offer must be answered with the relay's SDP
+// for that side (direction mirrored) and the peer re-INVITEd in the same
+// direction, so a hold reaches both dialogs and both keep pointing at the
+// relay (spec S-2).
+func TestCallInDialogAnchored(t *testing.T) {
 	pbx := startPBX(t, ringAllDevices())
 	a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
 	a.register(t)
@@ -377,18 +384,29 @@ func TestCallReInviteAndUpdateRelay(t *testing.T) {
 	re.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	re.SetBody([]byte(hold))
 	res, err := r.dcs.Do(ctx, re)
-	if err != nil || res.StatusCode != 200 || string(res.Body()) != hold {
+	if err != nil || res.StatusCode != 200 {
 		t.Fatalf("re-INVITE = %v, %v", res, err)
 	}
-	if got := waitReq(t, b.reinvites, "relayed re-INVITE"); string(got.Body()) != hold {
-		t.Fatalf("re-INVITE body changed: %q", got.Body())
+	ans := anchoredSDP(t, pbx, res.Body())
+	if !strings.Contains(string(res.Body()), "recvonly") {
+		t.Fatalf("hold not mirrored to the holder: %q", res.Body())
+	}
+	got := waitReq(t, b.reinvites, "hold re-INVITE to the peer")
+	offB := anchoredSDP(t, pbx, got.Body())
+	if !strings.Contains(string(got.Body()), "sendonly") {
+		t.Fatalf("hold not mirrored to the peer: %q", got.Body())
+	}
+	if offB.Port == ans.Port {
+		t.Fatalf("both sides answered relay port %d", ans.Port)
 	}
 	ack := sip.NewRequest(sip.ACK, r.dcs.InviteResponse.Contact().Address)
 	if err := r.dcs.WriteRequest(ack); err != nil {
 		t.Fatal(err)
 	}
-	waitReq(t, b.acks, "relayed re-INVITE ACK")
+	waitReq(t, b.acks, "hold re-INVITE ACK")
 
+	// An UPDATE from the callee side is terminated the same way, and the
+	// caller's dialog is re-INVITEd in the same direction.
 	b.mu.Lock()
 	dss := b.servers[inv.CallID().Value()]
 	b.mu.Unlock()
@@ -399,9 +417,14 @@ func TestCallReInviteAndUpdateRelay(t *testing.T) {
 	if err != nil || res.StatusCode != 200 {
 		t.Fatalf("UPDATE = %v, %v", res, err)
 	}
-	if got := waitReq(t, a.reinvites, "relayed UPDATE"); string(got.Body()) != b.sdp || got.Method != sip.UPDATE {
-		t.Fatalf("relayed UPDATE = %s %q", got.Method, got.Body())
+	anchoredSDP(t, pbx, res.Body())
+	// The peer mirror is a re-INVITE (the anchored path re-INVITEs, it does
+	// not relay the UPDATE method).
+	got = waitReq(t, a.reinvites, "UPDATE mirrored to the caller")
+	if got.Method != sip.INVITE || len(got.Body()) == 0 {
+		t.Fatalf("mirrored UPDATE = %s %q", got.Method, got.Body())
 	}
+	anchoredSDP(t, pbx, got.Body())
 	hangup(t, r.dcs)
 	pbx.nextCDR(t)
 }

@@ -31,6 +31,13 @@ type DialogLeg struct {
 	SDP          string   `json:"sdp"`
 	Endpoint     string   `json:"endpoint"`
 	LatchedAddr  string   `json:"latchedAddr"`
+	// Additive (Phase 7, omitempty on the wire): the endpoint request
+	// source the owner matched dialogs on, and both sides' identity URIs,
+	// which a taker needs to build in-dialog requests that keep the
+	// endpoint's view of the dialog unchanged.
+	Source         string `json:"source,omitempty"`
+	LocalIdentity  string `json:"localIdentity,omitempty"`
+	RemoteIdentity string `json:"remoteIdentity,omitempty"`
 }
 
 // DialogState is a call's full recovery state.
@@ -121,6 +128,12 @@ return 1`)
 // any claim it finds through ClaimOwner on its next heartbeat).
 func (s *Store) ReleaseDialogClaim(ctx context.Context, callId string) error {
 	return s.c.Do(ctx, s.c.B().Del().Key(dialogClaimKey(callId)).Build()).Error()
+}
+
+// DeleteDialogState removes an ended call's record, so its dialog is never
+// offered to takers.
+func (s *Store) DeleteDialogState(ctx context.Context, callId string) error {
+	return s.c.Do(ctx, s.c.B().Del().Key(dialogKey(callId)).Build()).Error()
 }
 
 // ClaimOwner names the node holding the dialog's takeover claim ("" when
