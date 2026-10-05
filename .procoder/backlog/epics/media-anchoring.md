@@ -1,6 +1,6 @@
 # media-anchoring
 
-Status: open
+Status: done 2026-10-05
 Created: 2026-10-04
 Milestone: phase-5-media
 Spec: media-anchoring @ 18145c7326f7

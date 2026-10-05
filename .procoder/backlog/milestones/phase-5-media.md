@@ -1,6 +1,6 @@
 # Phase 5 — Media
 
-Status: open
+Status: done 2026-10-05
 Created: 2026-10-02
 
 ## Goal
