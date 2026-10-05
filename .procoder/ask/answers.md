@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-04 18:00 UTC. procoder reads this
+Written 2026-10-05 04:06 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -225,6 +225,16 @@ Question: Phase 1 delivery
 - Hold for your review first
 
 Answer: Push phase-1-minimum-pbx and open a PR to main
+
+## [decision] decisions.md
+
+Key: 8a983b0caee7
+Question: Merge Phase 5 (PR #6) and roll out to kw
+
+- Merge PR #6, pin the published digests, add RTP/anchor env to deploy/kuvryn-sync/kw, let Sync roll it out
+- Hold PR #6 for review; kw stays on Phase 4 until reviewed
+
+Answer: Merge + roll out to kw
 
 ## [decision] decisions.md
 
