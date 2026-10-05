@@ -1,8 +1,20 @@
 # What a human decided
 
-Written 2026-10-05 04:06 UTC. procoder reads this
+Written 2026-10-05 06:07 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
+
+## [decision] decisions.md
+
+Key: 011dba9bcb59
+Question: Phase 7 in-call HA scope (after the anchored-vs-direct explanation)
+
+- In-call HA for anchored calls only; NAT'd direct-media calls stay best-effort
+- Always-on anchoring: every call anchored so all calls get in-call HA
+- In-call HA for anchored calls + policy change: LAN-to-LAN calls also anchor (cheap on a LAN, makes every call survivable)
+- Defer Phase 7; stop at the current scope
+
+Answer: Anchor everything + full HA (all calls anchor, LAN-to-LAN included; reverses Phase 5 conditional anchoring deliberately)
 
 ## [decision] decisions.md
 
@@ -179,6 +191,17 @@ Question: Merge Phase 4 (PR #5) and roll out to kw
 
 Answer: Merge + roll out to kw (done 2026-10-04: PR #5 squash-merged, images published, rollout commits 9832a84/492055b/290e473)
 
+## [decision] decisions.md
+
+Key: 5dc2499014b1
+Question: Phase 7 in-call HA scope
+
+- In-call HA for anchored calls only; NAT'd direct-media calls stay best-effort (documented limitation)
+- Always-on anchoring for every call so all calls get in-call HA (reverses the Phase 5 conditional decision)
+- Defer Phase 7; stop at Phase 6 scope
+
+Answer: Anchor everything + full HA (all calls anchor, LAN-to-LAN included; reverses Phase 5 conditional anchoring deliberately)
+
 ## (no longer asked)
 
 Key: 61fa8fc32239
@@ -226,13 +249,10 @@ Question: Phase 1 delivery
 
 Answer: Push phase-1-minimum-pbx and open a PR to main
 
-## [decision] decisions.md
+## (no longer asked)
 
 Key: 8a983b0caee7
 Question: Merge Phase 5 (PR #6) and roll out to kw
-
-- Merge PR #6, pin the published digests, add RTP/anchor env to deploy/kuvryn-sync/kw, let Sync roll it out
-- Hold PR #6 for review; kw stays on Phase 4 until reviewed
 
 Answer: Merge + roll out to kw
 

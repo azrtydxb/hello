@@ -78,6 +78,9 @@ func (c *call) homed() *homedCall {
 // false while the call is not a recoverable connected two-leg call: an
 // announcement or voicemail call has no second endpoint to re-INVITE.
 func (c *call) haState() (livestate.DialogState, bool) {
+	if hom := c.homed(); hom != nil {
+		return c.haHomedState(hom)
+	}
 	c.mu.Lock()
 	w, dss, relay, anchored, yielded := c.winner, c.dss, c.relay, c.anchored, c.haYielded
 	detail := c.haDetail
@@ -138,6 +141,42 @@ func (c *call) haState() (livestate.DialogState, bool) {
 	b.LocalIdentity = uriString(*dcs.InviteRequest.From().Address.Clone())
 	b.RemoteIdentity = uriString(*dcs.InviteRequest.To().Address.Clone())
 	state.Legs[1] = b
+	return state, true
+}
+
+// haHomedState builds the replicated state of a taken-over call from its
+// rebuilt legs: a homed call has no sipgo sessions to read the dialogs from,
+// so its own leg records and relay are the source of truth.
+func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
+	c.mu.Lock()
+	relay, anchored, yielded := c.relay, c.anchored, c.haYielded
+	detail, host := c.haDetail, c.anchorHost
+	c.mu.Unlock()
+	if yielded || !anchored || relay == nil {
+		return livestate.DialogState{}, false
+	}
+	off, ok := haOffer(hom.legs[0], hom.legs[1])
+	if !ok {
+		return livestate.DialogState{}, false
+	}
+	state := livestate.DialogState{
+		CallID: hom.legs[0].callID, OwnerNode: c.s.cfg.NodeID, Correlation: c.id,
+		State: c.haStateName(), StateDetail: detail,
+		RelayPorts: [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)},
+	}
+	for i, l := range hom.legs {
+		l.mu.Lock()
+		leg := livestate.DialogLeg{
+			CallID: l.callID, LocalTag: l.localTag, RemoteTag: l.remoteTag,
+			LocalCSeq: l.localCSeq, RemoteCSeq: l.remoteCSeq,
+			RouteSet: l.routes, Contact: contactURI(c.s),
+			RemoteTarget: l.remoteTarget, SDP: relaySDP(host, relay, legName(i == 1), off),
+			Endpoint: l.endpoint, Source: l.source,
+			LocalIdentity: l.localID, RemoteIdentity: l.remoteID,
+		}
+		l.mu.Unlock()
+		state.Legs[i] = leg
+	}
 	return state, true
 }
 

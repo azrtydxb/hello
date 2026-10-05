@@ -25,6 +25,10 @@ import (
 // (spec S-4). Exceeding it is logged; the CDR trace records the real gap.
 const haMediaGap = 3 * time.Second
 
+// haReinviteTimeout bounds one takeover re-INVITE (Timer F); a var so the
+// tests can shrink it.
+var haReinviteTimeout = byeTimeout
+
 // haLeg is one dialog of a taken-over call, carried from the replicated
 // state. The endpoint's view of the dialog is unchanged: same Call-ID, same
 // tags, the CSeq continuing the old owner's counter, and the same route set
@@ -193,7 +197,7 @@ func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
 		return nil, false
 	}
 	l.useCSeq()
-	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), haReinviteTimeout)
 	defer cancel()
 	res, err := s.client.Do(ctx, req)
 	if err != nil || res == nil {

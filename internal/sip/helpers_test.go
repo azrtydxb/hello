@@ -334,6 +334,7 @@ func dev(id int64, user, ext, password string) snapshot.Device {
 
 type testPBX struct {
 	srv      *Server
+	stop     context.CancelFunc // kills the listener (the node "dies")
 	addr     string
 	cfg      Config
 	state    State
@@ -394,7 +395,7 @@ func startPBX(t *testing.T, devices []snapshot.Device, opts ...pbxOpt) *testPBX 
 		}
 	})
 	eventually(t, "pbx listener", srv.Serving) // all Serve startup writes done
-	p := &testPBX{srv: srv, addr: addr, cfg: cfg, state: deps.State, throttle: deps.Throttle,
+	p := &testPBX{srv: srv, stop: cancel, addr: addr, cfg: cfg, state: deps.State, throttle: deps.Throttle,
 		cdrs: deps.CDRs.(*fakeCDRs), snaps: snaps, reg: reg, m: deps.Metrics, conn: conn}
 	p.fake, _ = deps.State.(*fakeState)
 	return p
