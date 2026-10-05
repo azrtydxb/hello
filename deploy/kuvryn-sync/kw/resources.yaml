@@ -675,9 +675,9 @@ spec:
           # The official ghcr image is amd64-only and the kw nodes are
           # arm64; this is the Debian-trixie build from ci.yaml (docker/
           # kamailio/Dockerfile), pinned to the tag it published for
-          # commit 4f860ff (the full sha tag; the registry keeps no short
+          # commit 1c3fe03 (the full sha tag; the registry keeps no short
           # tags). Later: an immutable repository@sha256:... digest.
-          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
+          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-1c3fe035f3a7f4a5925f3ec5b973ecf8ee910913
           imagePullPolicy: IfNotPresent
           securityContext:
             # uid/gid of the image's kamailio user (read from the image).
@@ -829,8 +829,8 @@ spec:
       terminationGracePeriodSeconds: 120 # a drain must finish (lab: 2h, capped here)
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-60acf3a7c06abe741d452e949f20ed9a5805203c
-          # Pinned to the tag ci.yaml published for commit 4f860ff (the
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-1c3fe035f3a7f4a5925f3ec5b973ecf8ee910913
+          # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -1024,8 +1024,8 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-60acf3a7c06abe741d452e949f20ed9a5805203c
-          # Pinned to the tag ci.yaml published for commit 4f860ff (the
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-1c3fe035f3a7f4a5925f3ec5b973ecf8ee910913
+          # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -1202,7 +1202,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-1c3fe035f3a7f4a5925f3ec5b973ecf8ee910913
           command:
             - sh
             - -c
@@ -1274,8 +1274,8 @@ spec:
                   key: smtpFrom
       containers:
         - name: hello-control
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
-          # Pinned to the tag ci.yaml published for commit 4f860ff (the
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-1c3fe035f3a7f4a5925f3ec5b973ecf8ee910913
+          # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
@@ -1427,8 +1427,8 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-4f860ffa5a571adde832a01a1a5b4b01d6562534
-          # Pinned to the tag ci.yaml published for commit 4f860ff (the
+          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-1c3fe035f3a7f4a5925f3ec5b973ecf8ee910913
+          # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
