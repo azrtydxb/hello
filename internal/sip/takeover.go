@@ -501,16 +501,22 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	// this node's relay port for that leg, in the dialog's replicated
 	// direction (a held call stays held); the answer re-aims it.
 	bodyA := []byte(relaySDPDir(host, relay, legCaller, off, media.SDPDirection([]byte(a.sdp))))
-	if res, okA := s.haReinvite(a, bodyA); okA {
+	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCaller, "to", a.destination())
+	res, okA := s.haReinvite(a, bodyA)
+	if okA {
 		haAim(relay, legCaller, res.Body())
 	} else {
 		a.failed = true
+		s.log.Warn("takeover leg failed", "call_id", st.CallID, "leg", legCaller, "res", resStatus(res))
 	}
 	bodyB := []byte(relaySDPDir(host, relay, legCallee, off, media.SDPDirection([]byte(b.sdp))))
-	if res, okB := s.haReinvite(b, bodyB); okB {
+	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCallee, "to", b.destination())
+	res, okB := s.haReinvite(b, bodyB)
+	if okB {
 		haAim(relay, legCallee, res.Body())
 	} else {
 		b.failed = true
+		s.log.Warn("takeover leg failed", "call_id", st.CallID, "leg", legCallee, "res", resStatus(res))
 	}
 	gap := time.Since(start)
 	if !a.failed && !b.failed {
