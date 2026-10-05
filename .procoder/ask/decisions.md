@@ -179,3 +179,9 @@
 
 - In scope: named announcement sets played on demand (failure destinations, before transfer)
 - Out of scope for Phase 5
+
+## Phase 7 in-call HA scope
+
+- In-call HA for anchored calls only; NAT'd direct-media calls stay best-effort (documented limitation)
+- Always-on anchoring for every call so all calls get in-call HA (reverses the Phase 5 conditional decision)
+- Defer Phase 7; stop at Phase 6 scope
