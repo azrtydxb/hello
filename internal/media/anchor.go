@@ -39,10 +39,9 @@ func (a *Anchor) AdvertisedHost() string { return a.host }
 
 // Answer parses the caller's SDP offer, binds a UDP socket for the
 // anchored leg, starts the receive loop and returns the local answer SDP
-// plus the Session. The socket binds to port 0 so the kernel picks a free
-// port; a bind can still fail (ephemeral exhaustion, a race with a
-// just-closed socket), so the bind is retried a few times before Answer
-// gives up.
+// plus the Session. The socket binds an explicit port (bindRTP); a bind
+// can still fail (exhaustion, a race with a just-closed socket), so the
+// bind is retried a few times before Answer gives up.
 func (a *Anchor) Answer(offer []byte) ([]byte, Session, error) {
 	ip := net.ParseIP(a.host)
 	if ip == nil || ip.To4() == nil {
@@ -55,7 +54,7 @@ func (a *Anchor) Answer(offer []byte) ([]byte, Session, error) {
 	var conn *net.UDPConn
 	var bindErr error
 	for attempt := 0; attempt < 5; attempt++ {
-		c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+		c, err := bindRTP()
 		if err == nil {
 			conn = c
 			break
@@ -89,6 +88,28 @@ func (a *Anchor) Answer(offer []byte) ([]byte, Session, error) {
 	go s.loop()
 	answer := BuildAudioSDP(a.host, port, off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
 	return answer, s, nil
+}
+
+// bindRTP binds a wildcard UDP socket on an explicit port of the dynamic
+// range, chosen at random, falling back to a kernel-chosen one. Asking for
+// port 0 is not enough on BSD kernels (macOS): a wildcard bind to port 0
+// can be handed a port another socket holds on a specific address, and
+// datagrams to that address then reach the other socket, never this one
+// (the in-process tests' 127.0.0.1 phones). An explicit port is refused
+// when any socket holds it, on every kernel.
+func bindRTP() (*net.UDPConn, error) {
+	const lo, hi = 49152, 65535
+	var b [2]byte
+	for range 16 {
+		if _, err := rand.Read(b[:]); err != nil {
+			break
+		}
+		p := lo + int(binary.BigEndian.Uint16(b[:]))%(hi-lo+1)
+		if c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: p}); err == nil {
+			return c, nil
+		}
+	}
+	return net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 }
 
 // anchorSession is the Session implementation over one UDP socket.
