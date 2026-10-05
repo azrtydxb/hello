@@ -8,4 +8,7 @@ configure({ asyncUtilTimeout: 5000 });
 
 afterEach(() => {
   cleanup();
+  // The theme lives on <html> and in localStorage, both outside the render.
+  window.localStorage.clear();
+  delete document.documentElement.dataset.theme;
 });

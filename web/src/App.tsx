@@ -1,14 +1,34 @@
 import type { ComponentType } from "react";
 import {
+  Link,
   Navigate,
   NavLink,
   Outlet,
   Route,
   Routes,
+  useLocation,
   useNavigate,
 } from "react-router";
 import { AuthProvider, RequireAuth, useAuth } from "./auth";
-import { CURRENT_PHASE, NAV_ITEMS } from "./nav";
+import { HelloLogo } from "./brand";
+import {
+  Icon,
+  NavItemContent,
+  navItemClassName,
+  Sidebar,
+  SidebarNav,
+  SidebarNavGroup,
+  ThemeProvider,
+  ThemeToggle,
+  Topbar,
+} from "./design/azrty/components";
+import {
+  CURRENT_PHASE,
+  EXACT_PATHS,
+  NAV_GROUPS,
+  NAV_ITEMS,
+  pageTitle,
+} from "./nav";
 import { CallDetail } from "./pages/CallDetail";
 import { Cluster } from "./pages/Cluster";
 import { Calls } from "./pages/Calls";
@@ -28,6 +48,7 @@ import { RingGroups } from "./pages/RingGroups";
 import { System } from "./pages/System";
 import { Trunks } from "./pages/Trunks";
 import { Voicemail } from "./pages/Voicemail";
+import { useControlPlane } from "./useControlPlane";
 
 /** Pages that have content; any other nav item renders a placeholder. */
 const PAGES: Readonly<Record<string, ComponentType>> = {
@@ -44,11 +65,18 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/recordings": Recordings,
   "/announcements": Announcements,
   "/system": System,
+  "/routes/test": RouteTest,
 };
 
 function Shell() {
   const { state, signOut } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const controlPlane = useControlPlane();
+  const reachable = controlPlane.status === "reachable";
+  const title = pageTitle(location.pathname);
+  // Call detail belongs to Call history in the nav.
+  const historyDetail = /^\/history\/[^/]+$/.test(location.pathname);
 
   function onLogout() {
     // Leave first, so the sign-in page carries no ?next= back into the app.
@@ -57,34 +85,69 @@ function Shell() {
   }
 
   return (
-    <div className="shell">
+    <div className="app-shell" data-pillar="operate">
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <header className="brand">Hello</header>
-      <nav className="sidebar" aria-label="Primary">
-        <ul>
-          {NAV_ITEMS.map((item) => (
-            <li key={item.path}>
-              {/* NavLink sets aria-current="page" on the active link. */}
-              <NavLink to={item.path} end={item.path === "/"}>
-                {item.label}
-              </NavLink>
-            </li>
+      <Sidebar
+        brand={<HelloLogo layout="horizontal" size={40} />}
+        status={{
+          live: reachable,
+          label: reachable
+            ? `${window.location.host} · rev ${controlPlane.configRevision}`
+            : controlPlane.status === "checking"
+              ? "Checking control plane…"
+              : "Control plane unreachable",
+        }}
+        user={
+          state.status === "signedIn"
+            ? { name: state.username, role: "Administrator" }
+            : undefined
+        }
+        onSignOut={onLogout}
+      >
+        <SidebarNav label="Primary">
+          {NAV_GROUPS.map((group) => (
+            <SidebarNavGroup key={group.label} label={group.label}>
+              {group.items.map((item) => (
+                // NavLink sets aria-current="page" on the active link.
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  end={EXACT_PATHS.has(item.path)}
+                  className={({ isActive }) =>
+                    navItemClassName(
+                      isActive || (historyDetail && item.path === "/history"),
+                    )
+                  }
+                >
+                  <NavItemContent icon={item.icon} label={item.label} />
+                </NavLink>
+              ))}
+            </SidebarNavGroup>
           ))}
-        </ul>
-        <div className="session">
-          {state.status === "signedIn" && (
-            <p className="muted">Signed in as {state.username}</p>
-          )}
-          <button type="button" onClick={onLogout}>
-            Log out
-          </button>
-        </div>
-      </nav>
-      <main id="main" className="content" tabIndex={-1}>
-        <Outlet />
-      </main>
+        </SidebarNav>
+      </Sidebar>
+      <div className="app-shell__main-col">
+        <Topbar
+          crumbs={title ? ["Kuvryn Hello", title] : ["Kuvryn Hello"]}
+          live={reachable}
+        >
+          <Link
+            to="/routes/test"
+            className="az-btn az-btn--secondary az-btn--sm"
+          >
+            <Icon name="flask-conical" size={14} />
+            Test a number
+          </Link>
+          <ThemeToggle />
+        </Topbar>
+        <main id="main" className="app-shell__main" tabIndex={-1}>
+          <div className="app-page">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
@@ -92,37 +155,40 @@ function Shell() {
 /** The app: sign-in route plus the authenticated shell and its pages. */
 export function App() {
   return (
-    <AuthProvider>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route
-          element={
-            <RequireAuth>
-              <Shell />
-            </RequireAuth>
-          }
-        >
-          <Route index element={<Dashboard />} />
-          {NAV_ITEMS.filter((item) => item.path !== "/").map((item) => {
-            const Page = PAGES[item.path];
-            const element =
-              Page && item.phase <= CURRENT_PHASE ? (
-                <Page />
-              ) : (
-                <Placeholder title={item.label} phase={item.phase} />
-              );
-            return <Route key={item.path} path={item.path} element={element} />;
-          })}
-          <Route path="/routes/test" element={<RouteTest />} />
-          {/* Dial plans are the structured routes (spec §11). */}
+    <ThemeProvider>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<Login />} />
           <Route
-            path="/dial-plans"
-            element={<Navigate to="/routes" replace />}
-          />
-          <Route path="/history/:id" element={<CallDetail />} />
-          <Route path="*" element={<NotFound />} />
-        </Route>
-      </Routes>
-    </AuthProvider>
+            element={
+              <RequireAuth>
+                <Shell />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<Dashboard />} />
+            {NAV_ITEMS.filter((item) => item.path !== "/").map((item) => {
+              const Page = PAGES[item.path];
+              const element =
+                Page && item.phase <= CURRENT_PHASE ? (
+                  <Page />
+                ) : (
+                  <Placeholder title={item.label} phase={item.phase} />
+                );
+              return (
+                <Route key={item.path} path={item.path} element={element} />
+              );
+            })}
+            {/* Dial plans are the structured routes (spec §11). */}
+            <Route
+              path="/dial-plans"
+              element={<Navigate to="/routes" replace />}
+            />
+            <Route path="/history/:id" element={<CallDetail />} />
+            <Route path="*" element={<NotFound />} />
+          </Route>
+        </Routes>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
