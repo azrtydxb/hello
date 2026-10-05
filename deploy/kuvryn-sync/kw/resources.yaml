@@ -865,8 +865,13 @@ spec:
             - name: HELLO_SIP_TRUSTED_PROXIES
               # The kamailio pod IPs. kw's pod CIDR, confirmed from the node
               # podCIDRs (10.42.0.0/16): hello ignores Path/X-Hello-Client
-              # from anything else.
-              value: 10.42.0.0/16
+              # from anything else. The node CIDR 192.168.10.0/24 is here
+              # because kw masquerades kamailio's relay traffic to host
+              # -networked hello-sip pods when both sit on the same node, so
+              # the relay's datagrams arrive from a node address too; trusting
+              # both keeps the digest nonce bound to the stable phone address
+              # (X-Hello-Client) whichever node answers a retried INVITE.
+              value: 10.42.0.0/16,192.168.10.0/24
             - name: HELLO_SIP_ADVERTISED_ADDR
               # What hello tells Kamailio/phones this node is: its Service
               # name, resolvable in-cluster (dispatcher + dialog routes).
@@ -1060,8 +1065,13 @@ spec:
             - name: HELLO_SIP_TRUSTED_PROXIES
               # The kamailio pod IPs. kw's pod CIDR, confirmed from the node
               # podCIDRs (10.42.0.0/16): hello ignores Path/X-Hello-Client
-              # from anything else.
-              value: 10.42.0.0/16
+              # from anything else. The node CIDR 192.168.10.0/24 is here
+              # because kw masquerades kamailio's relay traffic to host
+              # -networked hello-sip pods when both sit on the same node, so
+              # the relay's datagrams arrive from a node address too; trusting
+              # both keeps the digest nonce bound to the stable phone address
+              # (X-Hello-Client) whichever node answers a retried INVITE.
+              value: 10.42.0.0/16,192.168.10.0/24
             - name: HELLO_SIP_ADVERTISED_ADDR
               # What hello tells Kamailio/phones this node is: its Service
               # name, resolvable in-cluster (dispatcher + dialog routes).
