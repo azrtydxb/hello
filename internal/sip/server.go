@@ -151,14 +151,18 @@ type Server struct {
 	uas     *sipgo.DialogUA // A legs: callers
 	uac     *sipgo.DialogUA // B legs: forks
 	bg      sync.WaitGroup
-	mu      sync.Mutex
-	dialogs map[string]dialogRef // Call-ID -> call side
-	calls   map[*call]struct{}
-	done    chan struct{} // closed when Serve returns
-	laddr   sip.Addr      // the listening socket, for requests we originate
-	peers   peers         // the cluster's SIP nodes, for the edge proxy
-	serving atomic.Bool   // the listener is up
-	trunks  *trunkManager
+	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
+	// (a call ending as the node stops) must not start more work on it.
+	bgMu     sync.Mutex
+	bgClosed bool
+	mu       sync.Mutex
+	dialogs  map[string]dialogRef // Call-ID -> call side
+	calls    map[*call]struct{}
+	done     chan struct{} // closed when Serve returns
+	laddr    sip.Addr      // the listening socket, for requests we originate
+	peers    peers         // the cluster's SIP nodes, for the edge proxy
+	serving  atomic.Bool   // the listener is up
+	trunks   *trunkManager
 	// registrations is the last count of bindings this node registered.
 	registrations atomic.Int64
 	// answerHook, when set (tests only), runs as a call's winning fork is
@@ -173,6 +177,10 @@ type Server struct {
 	// haOfflineMu).
 	haOfflineMu sync.Mutex
 	haOffline   map[string]*haOfflineNode
+	// haSent is the highest raw (outside sipgo's dialog sessions) CSeq
+	// this node sent per dialog Call-ID, so replicated CSeqs continue past
+	// it; entries go with the dialog's binding.
+	haSent sync.Map
 
 	// Presence (S-10) and feature-code (S-11) state. subs holds the live
 	// dialog subscriptions by Call-ID, byExt the per-extension index used
@@ -397,8 +405,22 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	stop()
 	close(s.done)
 	_ = ua.Close()
+	s.bgMu.Lock()
+	s.bgClosed = true
+	s.bgMu.Unlock()
 	s.bg.Wait()
 	return err
+}
+
+// goBG runs f as a background task that shutdown waits for; once shutdown
+// has begun, f is dropped (a WaitGroup must not grow while Wait runs).
+func (s *Server) goBG(f func()) {
+	s.bgMu.Lock()
+	defer s.bgMu.Unlock()
+	if s.bgClosed {
+		return
+	}
+	s.bg.Go(f)
 }
 
 // waitListening waits until sipgo serves the listener at addr.
@@ -741,6 +763,7 @@ func (s *Server) unbind(callID string, c *call) {
 	s.mu.Lock()
 	if r, ok := s.dialogs[callID]; ok && r.c == c {
 		delete(s.dialogs, callID)
+		s.haSent.Delete(callID)
 		if r.leg == nil {
 			delete(s.calls, c)
 		}

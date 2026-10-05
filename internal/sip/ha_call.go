@@ -23,6 +23,7 @@ type HAState interface {
 	ReleaseDialogClaim(ctx context.Context, callId string) error
 	ClaimOwner(ctx context.Context, callId string) (string, error)
 	OrphanedDialogs(ctx context.Context, offlineNode string) ([]livestate.DialogState, error)
+	TakenOver(ctx context.Context, node string) (int, error)
 }
 
 // Membership reports the cluster's nodes (Phase 3 membership);
@@ -37,7 +38,15 @@ const (
 	haPhaseRecording     = "recording"
 	haPhaseTransferring  = "transferring"
 	haPhaseAnnouncement  = "announcement"
+	haPhaseVoicemail     = "voicemail"
 	haRecordDetailPrefix = "announcement:"
+	// haReferDetailPrefix names the dialog a REFER arrived on while a
+	// transfer is in progress ("refer:caller" or "refer:callee"), so a
+	// taker can tell that transferor the transfer was abandoned.
+	haReferDetailPrefix = "refer:"
+	// haVoicemailDetailPrefix carries the voicemail application's restart
+	// data: "vm:<leave|retrieve>:<reason>:<box extension>".
+	haVoicemailDetailPrefix = "vm:"
 )
 
 // noteHAState records a replicated phase change ("" returns to talking) and
@@ -48,9 +57,17 @@ func (c *call) noteHAState(phase, detail string) {
 		return
 	}
 	c.mu.Lock()
+	rec := c.rec
+	c.mu.Unlock()
+	if phase == "" && rec != nil && rec.isActive() {
+		// Back from a hold, a transfer or an announcement while the call
+		// records: the recording is what a taker must restart.
+		phase = haPhaseRecording
+	}
+	c.mu.Lock()
 	c.haPhase, c.haDetail = phase, detail
 	c.mu.Unlock()
-	go c.replicate(phase)
+	go c.replicate()
 }
 
 // haStateName is the replicated call state (contract 1).
@@ -84,6 +101,7 @@ type haLegSnap struct {
 	localID, remoteID           string
 	remoteTarget, endpoint      string
 	source, sdp                 string
+	remoteSDP                   string // the endpoint's own SDP
 }
 
 // haRefresh rebuilds the replicated-dialog snapshot from the live dialogs.
@@ -105,14 +123,17 @@ func (c *call) haRefresh() {
 	offer, _ := media.ParseAudioSDP(c.inv.Body())
 	host := c.anchorHost
 	dirs := c.haDirs
+	s := c.s
 	c.mu.Lock()
 	c.haLegs = [2]haLegSnap{
 		{
 			callID:   c.callID,
 			localTag: tagParam(dss.InviteResponse.To()), remoteTag: tagParam(c.inv.From()),
-			// The next CSeq we would send with: Hello's in-dialog requests
-			// on a leg continue the dialog's INVITE CSeq (contract 2).
-			localCSeq: c.inv.CSeq().SeqNo + 1, remoteCSeq: c.inv.CSeq().SeqNo,
+			// The next CSeq we would send with: past the dialog's INVITE,
+			// past every request sipgo's session sent on it (relayed
+			// re-INVITEs), and past the raw ones (contract 2).
+			localCSeq:    s.nextCSeq(c.callID, c.inv.CSeq().SeqNo, dss.CSEQ()),
+			remoteCSeq:   c.inv.CSeq().SeqNo,
 			routes:       headerValues(c.inv, "Record-Route"),
 			localID:      uriString(*c.inv.To().Address.Clone()),
 			remoteID:     uriString(*c.inv.From().Address.Clone()),
@@ -120,11 +141,13 @@ func (c *call) haRefresh() {
 			endpoint:     c.s.aor(c.callerNum),
 			source:       c.inv.Source(),
 			sdp:          relaySDPDir(host, c.relay, legCaller, offer, dirs[0]),
+			remoteSDP:    string(c.inv.Body()),
 		},
 		{
 			callID:   w.callID,
 			localTag: tagParam(dcs.InviteRequest.From()), remoteTag: tagParam(dcs.InviteResponse.To()),
-			localCSeq: dcs.InviteRequest.CSeq().SeqNo + 1, remoteCSeq: dcs.InviteRequest.CSeq().SeqNo,
+			localCSeq:    s.nextCSeq(w.callID, dcs.InviteRequest.CSeq().SeqNo, dcs.CSEQ()),
+			remoteCSeq:   dcs.InviteRequest.CSeq().SeqNo,
 			routes:       headerValues(dcs.InviteResponse, "Record-Route"),
 			localID:      uriString(*dcs.InviteRequest.From().Address.Clone()),
 			remoteID:     uriString(*dcs.InviteRequest.To().Address.Clone()),
@@ -132,9 +155,78 @@ func (c *call) haRefresh() {
 			endpoint:     w.binding.AOR,
 			source:       dcs.InviteResponse.Source(),
 			sdp:          relaySDPDir(host, c.relay, legCallee, offer, dirs[1]),
+			remoteSDP:    string(dcs.InviteResponse.Body()),
 		},
 	}
 	c.mu.Unlock()
+}
+
+// haSoloRefresh takes the dialog snapshot of a call answered by Hello
+// itself (voicemail, an announcement destination): one leg, the caller's,
+// answered through the raw transaction with vmTag as Hello's tag. sdp is
+// the answer Hello gave; the caller's offer rides along, so a taker can
+// bind fresh media for the same codecs.
+func (c *call) haSoloRefresh(sdp string) {
+	if c.s.deps.HAState == nil {
+		return
+	}
+	c.mu.Lock()
+	tag := c.vmTag
+	c.mu.Unlock()
+	if tag == "" || c.inv == nil {
+		return
+	}
+	snap := haLegSnap{
+		callID: c.callID, localTag: tag, remoteTag: tagParam(c.inv.From()),
+		localCSeq:    c.s.nextCSeq(c.callID, c.inv.CSeq().SeqNo),
+		remoteCSeq:   c.inv.CSeq().SeqNo,
+		routes:       headerValues(c.inv, "Record-Route"),
+		localID:      uriString(*c.inv.To().Address.Clone()),
+		remoteID:     uriString(*c.inv.From().Address.Clone()),
+		remoteTarget: uriString(c.target()), endpoint: c.s.aor(c.callerNum),
+		source: c.inv.Source(), sdp: sdp, remoteSDP: string(c.inv.Body()),
+	}
+	c.mu.Lock()
+	c.haLegs = [2]haLegSnap{snap}
+	c.haSolo = true
+	c.mu.Unlock()
+}
+
+// haSoloPhase reports whether a solo call's phase is one a taker can
+// restart: the voicemail application, or an announcement destination's
+// playback. Anything else is a solo call about to end on its own.
+func haSoloPhase(phase string) bool {
+	return phase == haPhaseVoicemail || phase == haPhaseAnnouncement
+}
+
+// noteSentCSeq records a CSeq this node sent on a dialog outside sipgo's
+// dialog sessions (a transfer's NOTIFYs), so the replicated LocalCSeq
+// continues past it: an endpoint rejects an in-dialog request whose CSeq
+// does not exceed the last one it saw from this side of the dialog.
+func (s *Server) noteSentCSeq(callID string, seq uint32) {
+	for {
+		old, loaded := s.haSent.LoadOrStore(callID, seq)
+		if !loaded {
+			return
+		}
+		prev, _ := old.(uint32)
+		if prev >= seq || s.haSent.CompareAndSwap(callID, old, seq) {
+			return
+		}
+	}
+}
+
+// nextCSeq is the next local CSeq on a dialog: one past the highest of the
+// given counters and the raw requests noteSentCSeq recorded.
+func (s *Server) nextCSeq(callID string, counters ...uint32) uint32 {
+	var n uint32
+	if v, ok := s.haSent.Load(callID); ok {
+		n, _ = v.(uint32)
+	}
+	for _, c := range counters {
+		n = max(n, c)
+	}
+	return n + 1
 }
 
 // haState builds the call's replicated recovery state (contract 1); ok is
@@ -146,34 +238,54 @@ func (c *call) haState() (livestate.DialogState, bool) {
 	}
 	c.mu.Lock()
 	relay, anchored, yielded := c.relay, c.anchored, c.haYielded
-	detail := c.haDetail
+	detail, phase, solo, vm := c.haDetail, c.haPhase, c.haSolo, c.vmSession
 	legs := c.haLegs
 	contact := contactURI(c.s)
 	c.mu.Unlock()
-	if yielded || !anchored || relay == nil || legs[0].callID == "" || legs[1].callID == "" {
+	if yielded || legs[0].callID == "" {
 		return livestate.DialogState{}, false
 	}
-	return livestate.DialogState{
+	if solo {
+		// A one-legged call answered by Hello: recoverable while its
+		// application runs (the taker restarts it from the beginning).
+		if !haSoloPhase(phase) || (phase == haPhaseVoicemail && vm == nil) ||
+			(phase == haPhaseAnnouncement && relay == nil) {
+			return livestate.DialogState{}, false
+		}
+	} else if !anchored || relay == nil || legs[1].callID == "" {
+		return livestate.DialogState{}, false
+	}
+	c.mu.Lock()
+	caller, dest := c.callerNum, c.dialled
+	c.mu.Unlock()
+	st := livestate.DialogState{
 		CallID:      legs[0].callID,
 		OwnerNode:   c.s.cfg.NodeID,
 		Correlation: c.id,
 		State:       c.haStateName(),
 		StateDetail: detail,
-		RelayPorts:  [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)},
-		Legs: [2]livestate.DialogLeg{
-			haSnapLeg(legs[0], contact),
-			haSnapLeg(legs[1], contact),
-		},
-	}, true
+		Legs:        [2]livestate.DialogLeg{c.haSnapLeg(legs[0], contact)},
+		Caller:      caller,
+		Destination: dest,
+	}
+	if relay != nil {
+		st.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
+	}
+	if !solo {
+		st.Legs[1] = c.haSnapLeg(legs[1], contact)
+	}
+	return st, true
 }
 
-// haSnapLeg renders a snapshot leg as its replicated form.
-func haSnapLeg(l haLegSnap, contact string) livestate.DialogLeg {
+// haSnapLeg renders a snapshot leg as its replicated form. The CSeq is
+// re-checked against the raw requests sent since the snapshot (a NOTIFY
+// after the last quiescent point must not be reused by a taker).
+func (c *call) haSnapLeg(l haLegSnap, contact string) livestate.DialogLeg {
 	return livestate.DialogLeg{
 		CallID: l.callID, LocalTag: l.localTag, RemoteTag: l.remoteTag,
-		LocalCSeq: l.localCSeq, RemoteCSeq: l.remoteCSeq,
+		LocalCSeq: max(l.localCSeq, c.s.nextCSeq(l.callID)), RemoteCSeq: l.remoteCSeq,
 		RouteSet: l.routes, Contact: contact,
-		RemoteTarget: l.remoteTarget, SDP: l.sdp,
+		RemoteTarget: l.remoteTarget, SDP: l.sdp, RemoteSDP: l.remoteSDP,
 		Endpoint: l.endpoint, Source: l.source,
 		LocalIdentity: l.localID, RemoteIdentity: l.remoteID,
 	}
@@ -184,11 +296,15 @@ func haSnapLeg(l haLegSnap, contact string) livestate.DialogLeg {
 // so its own leg records and relay are the source of truth.
 func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 	c.mu.Lock()
-	relay, anchored, yielded := c.relay, c.anchored, c.haYielded
-	detail, host := c.haDetail, c.anchorHost
+	relay, yielded := c.relay, c.haYielded
+	detail, host, phase := c.haDetail, c.anchorHost, c.haPhase
+	caller, dest := c.callerNum, c.dialled
 	contact := contactURI(c.s)
 	c.mu.Unlock()
-	if yielded || !anchored || relay == nil {
+	solo := hom.legs[1] == nil
+	// A voicemail call's media is its anchor session, not a relay.
+	voicemail := solo && phase == haPhaseVoicemail
+	if yielded || (relay == nil && !voicemail) || (solo && !haSoloPhase(phase)) {
 		return livestate.DialogState{}, false
 	}
 	off, ok := haOffer(hom.legs[0], hom.legs[1])
@@ -201,17 +317,27 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 		Correlation: c.id,
 		State:       c.haStateName(),
 		StateDetail: detail,
-		RelayPorts:  [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)},
+		Caller:      caller,
+		Destination: dest,
+	}
+	if relay != nil {
+		state.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
 	}
 	for i, l := range hom.legs {
+		if l == nil {
+			continue
+		}
 		l.mu.Lock()
+		sdp := l.sdp
+		if relay != nil {
+			sdp = relaySDPDir(host, relay, legName(i == 0), off, media.SDPDirection([]byte(l.sdp)))
+		}
 		leg := livestate.DialogLeg{
 			CallID: l.callID, LocalTag: l.localTag, RemoteTag: l.remoteTag,
 			LocalCSeq: l.localCSeq, RemoteCSeq: l.remoteCSeq,
 			RouteSet: l.routes, Contact: contact,
-			RemoteTarget: l.remoteTarget,
-			SDP:          relaySDPDir(host, relay, legName(i == 1), off, media.SDPDirection([]byte(l.sdp))),
-			Endpoint:     l.endpoint, Source: l.source,
+			RemoteTarget: l.remoteTarget, SDP: sdp, RemoteSDP: l.remoteSDP,
+			Endpoint: l.endpoint, Source: l.source,
 			LocalIdentity: l.localID, RemoteIdentity: l.remoteID,
 		}
 		l.mu.Unlock()
@@ -223,16 +349,13 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 // replicate writes the call's recovery state (contract 1). A failure is
 // logged and counted, never fatal: an unreplicated call that loses its node
 // becomes a counted zombie, honestly (spec S-6).
-func (c *call) replicate(detail string) {
-	if c.s.deps.HAState == nil {
-		return
+func (c *call) replicate() {
+	if c.s.deps.HAState == nil || !c.s.serving.Load() {
+		return // a node shutting down leaves its records to the takers
 	}
 	st, ok := c.haState()
 	if !ok {
 		return
-	}
-	if detail != "" {
-		st.StateDetail = detail
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*c.s.cfg.StateTimeout)
 	defer cancel()
@@ -249,7 +372,7 @@ func (c *call) replicate(detail string) {
 // call when another node has claimed it — a slow owner reappearing after a
 // membership blip must not fight its taker (spec edge case).
 func (c *call) haLoop() {
-	c.replicate("established")
+	c.replicate()
 	t := time.NewTicker(c.s.cfg.HADialogHeartbeat)
 	defer t.Stop()
 	for {
@@ -266,7 +389,7 @@ func (c *call) haLoop() {
 				c.haYield(taker)
 				return
 			}
-			c.replicate("")
+			c.replicate()
 		}
 	}
 }

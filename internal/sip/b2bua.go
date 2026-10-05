@@ -130,6 +130,9 @@ type call struct {
 	haYielded bool
 	haStop    chan struct{}
 	homedCall *homedCall
+	// haSolo marks a call Hello answered itself (voicemail, an
+	// announcement destination): one replicated leg, the caller's.
+	haSolo bool
 	// transferNotify reports a transfer's outcome to the transferee's
 	// dialog (set by transferBlindVia for the rethreaded call).
 	transferNotify func(fragment string, final bool)
@@ -961,9 +964,13 @@ func (c *call) live() livestate.Call {
 	if c.connected {
 		state, answered = "connected", c.answerTime
 	}
+	ha := livestate.HAOwned
+	if c.homedCall != nil {
+		ha = livestate.HATakenOver
+	}
 	return livestate.Call{
 		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, State: state,
-		Node: c.s.cfg.NodeID, Media: "direct", StartedAt: c.start, AnsweredAt: answered,
+		Node: c.s.cfg.NodeID, Media: "direct", StartedAt: c.start, AnsweredAt: answered, HA: ha,
 	}
 }
 

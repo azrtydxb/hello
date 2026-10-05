@@ -24,20 +24,33 @@ type fakeHA struct {
 	claims   map[string]string
 	failSave bool
 	deleted  map[string]int
+	taken    map[string]int // claims per dead owner (TakenOver)
+	saves    map[string]int // replication writes per Call-ID
+	ttls     map[string]time.Duration
 }
 
 func newFakeHA() *fakeHA {
-	return &fakeHA{dialogs: map[string]livestate.DialogState{}, claims: map[string]string{}, deleted: map[string]int{}}
+	return &fakeHA{dialogs: map[string]livestate.DialogState{}, claims: map[string]string{}, deleted: map[string]int{},
+		taken: map[string]int{}, saves: map[string]int{}, ttls: map[string]time.Duration{}}
 }
 
-func (f *fakeHA) SaveDialogState(_ context.Context, sds livestate.DialogState, _ time.Duration) error {
+func (f *fakeHA) SaveDialogState(_ context.Context, sds livestate.DialogState, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failSave {
 		return errDown
 	}
+	sds.UpdatedAt = time.Now().UTC()
 	f.dialogs[sds.CallID] = sds
+	f.saves[sds.CallID]++
+	f.ttls[sds.CallID] = ttl
 	return nil
+}
+
+func (f *fakeHA) TakenOver(_ context.Context, node string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.taken[node], nil
 }
 
 func (f *fakeHA) DeleteDialogState(_ context.Context, id string) error {
@@ -59,6 +72,7 @@ func (f *fakeHA) ClaimDialog(_ context.Context, id, node string) (bool, livestat
 		return false, st, nil
 	}
 	f.claims[id] = node
+	f.taken[st.OwnerNode]++
 	return true, st, nil
 }
 
@@ -456,10 +470,14 @@ func liveCallsSkip(pbx *testPBX) []livestate.Call {
 }
 
 // TestTakeoverScenarioMatrix fails if a taken-over call does not survive
-// per its scenario's definition (spec S-5): a held call keeps its hold
-// direction across the takeover, a recording call keeps recording on the
-// taker under the same correlation, and an announcement call restarts its
-// announcement state.
+// per its scenario's definition (spec S-5): a connected call continues; a
+// held call keeps its hold direction; a recording call keeps recording on
+// the taker under the same correlation; a ringing call has nothing to take
+// over; a blind transfer whose target still rings continues untransferred
+// with its transferor told, and a completed one continues to its target;
+// an attended transfer's consultation survives as two calls and its
+// bridge as one; an announcement replays from the top; a voicemail caller
+// is re-homed and the application restarts from the greeting.
 func TestTakeoverScenarioMatrix(t *testing.T) {
 	t.Run("hold", func(t *testing.T) {
 		ha := newFakeHA()
@@ -609,4 +627,14 @@ func TestTakeoverScenarioMatrix(t *testing.T) {
 		hangupHomed(t, a, taker, ra, st.Legs[0])
 		waitReq(t, b.byes, "BYE to the callee after the caller hung up")
 	})
+	// The remaining rows (takeover_matrix_test.go).
+	t.Run("connected", TestTakeoverReINVITEs)
+	t.Run("ringing", matrixRinging)
+	t.Run("blind-transfer-ringing", matrixBlindTransfer)
+	t.Run("blind-transfer-answered", matrixBlindTransferAnswered)
+	t.Run("attended-transfer-half", matrixAttendedTransferHalf)
+	t.Run("attended-bridged-half", matrixAttendedBridged)
+	t.Run("announcement", matrixAnnouncement)
+	t.Run("announcement-destination", matrixAnnouncementDestination)
+	t.Run("voicemail", matrixVoicemail)
 }

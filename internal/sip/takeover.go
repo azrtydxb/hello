@@ -23,6 +23,11 @@ import (
 	"github.com/emiago/sipgo/sip"
 )
 
+// haReapDelay is how long after a node is first seen OFFLINE its
+// unrecoverable calls are counted: past the dialog TTL, so every taker had
+// its chance. A var so tests can count at once.
+var haReapDelay = livestate.DialogTTL + 15*time.Second
+
 // haMediaGap is the takeover target: audio restored within 3s of the claim
 // (spec S-4). Exceeding it is logged; the CDR trace records the real gap.
 const haMediaGap = 3 * time.Second
@@ -48,7 +53,8 @@ type haLeg struct {
 	remoteTarget string   // where requests to the endpoint go
 	endpoint     string   // the endpoint's AOR
 	source       string   // where the endpoint's requests come from
-	sdp          string   // the last SDP on this leg
+	sdp          string   // the last SDP on this leg (Hello's side)
+	remoteSDP    string   // the endpoint's own last SDP
 	uas          bool     // we are the dialog's UAS side (the caller leg)
 	failed       bool     // the takeover re-INVITE got no answer
 
@@ -66,7 +72,7 @@ func haLegFrom(d livestate.DialogLeg, uas bool) *haLeg {
 		localCSeq: d.LocalCSeq, remoteCSeq: d.RemoteCSeq,
 		routes: d.RouteSet, localID: d.LocalIdentity, remoteID: d.RemoteIdentity,
 		remoteTarget: d.RemoteTarget, endpoint: d.Endpoint, source: d.Source,
-		sdp: d.SDP, uas: uas,
+		sdp: d.SDP, remoteSDP: d.RemoteSDP, uas: uas,
 	}
 }
 
@@ -251,7 +257,11 @@ func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
 }
 
 // haBye ends a homed leg's dialog (CSeq continuity, route set honoured).
+// A solo call's missing second leg is a no-op.
 func (s *Server) haBye(l *haLeg) {
+	if l == nil {
+		return
+	}
 	req, err := l.request(s, sip.BYE, nil, "")
 	if err != nil {
 		return
@@ -344,22 +354,26 @@ func (s *Server) takeoverPass(ctx context.Context) {
 }
 
 // haReap counts, once and by exactly one survivor (the smallest READY node
-// ID), the calls of an OFFLINE node that no dialog record can save: its
-// live-call count at death less the dialogs still visible to take over.
-// It runs only after the takers had their chance, past the dialog TTL.
+// ID), the calls of an OFFLINE node that no dialog record could save: its
+// live-call count at death less the dialogs survivors claimed. A claimed
+// call either survived or was counted by its taker when its re-INVITE
+// failed, so every call is counted at most once and a taken-over call
+// never.
+// It runs only after the takers had their chance, haReapDelay after the
+// node was first seen OFFLINE.
 func (s *Server) haReap(members []cluster.Member, m cluster.Member, self string) {
 	e := s.haOfflineSee(m.ID, m.ActiveCalls)
 	if e.counted || time.Now().Before(e.deadline) || !s.haAmReaper(members, self) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout)
-	orphans, err := s.deps.HAState.OrphanedDialogs(ctx, m.ID)
+	taken, err := s.deps.HAState.TakenOver(ctx, m.ID)
 	cancel()
 	if err != nil {
 		return
 	}
 	s.haOfflineCount(m.ID)
-	lost := m.ActiveCalls - len(orphans)
+	lost := m.ActiveCalls - taken
 	if lost <= 0 {
 		return
 	}
@@ -397,7 +411,7 @@ func (s *Server) haOfflineSee(id string, active int) *haOfflineNode {
 	if e, ok := s.haOffline[id]; ok {
 		return e
 	}
-	e := &haOfflineNode{active: active, deadline: time.Now().Add(livestate.DialogTTL + 15*time.Second)}
+	e := &haOfflineNode{active: active, deadline: time.Now().Add(haReapDelay)}
 	s.haOffline[id] = e
 	return e
 }
@@ -459,6 +473,10 @@ func legName(caller bool) string {
 // record) and the call replicates from here on.
 func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	defer contain(s.log, "takeover")
+	if st.Legs[1].CallID == "" {
+		s.takeOverSolo(st, from)
+		return
+	}
 	start := time.Now()
 	a, b := haLegFrom(st.Legs[0], true), haLegFrom(st.Legs[1], false)
 	if a == nil || b == nil {
@@ -491,7 +509,7 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	s.log.Info("takeover claimed", "call_id", st.CallID, "from", from)
 	c := &call{
 		s: s, id: st.Correlation, callID: a.callID,
-		callerNum: userOf(a.remoteID), dialled: userOf(a.localID),
+		callerNum: orDefault(st.Caller, userOf(a.remoteID)), dialled: orDefault(st.Destination, userOf(a.localID)),
 		start: start, direction: cdr.DirectionInternal, mediaMode: "anchored",
 		canceled: make(chan struct{}), stopHB: make(chan struct{}),
 		setupDone: make(chan struct{}), aborted: make(chan struct{}),
@@ -561,20 +579,32 @@ func (s *Server) haHome(c *call, st livestate.DialogState, from string, gap time
 	s.m.ActiveCalls.Inc()
 	c.publish()
 	go c.heartbeat()
+	// The record names this node before the claim goes: released first, a
+	// survivor's next scan would find the dialog still owned by the dead
+	// node and unclaimed, and take the call over a second time.
+	c.replicate()
 	go c.haLoop()
 	s.releaseClaim(st.CallID)
 	switch st.State {
 	case haPhaseRecording:
+		c.noteHAState(haPhaseRecording, "")
 		if c.rec.start("takeover") {
 			c.addTrace("Recording continues after the takeover")
 		}
 	case haPhaseAnnouncement:
-		if name := strings.TrimPrefix(st.StateDetail, haRecordDetailPrefix); name != "" {
-			if snap := s.deps.Snapshots.Current(); snap != nil {
-				if obj, ok := snap.Announcement(name); ok {
-					go c.playAnnouncementObject(obj)
-				}
-			}
+		// The detail carries the announcement's object: it replays from
+		// its beginning (spec S-4).
+		if obj := strings.TrimPrefix(st.StateDetail, haRecordDetailPrefix); obj != "" && obj != st.StateDetail {
+			c.addTrace("Announcement restarts from its beginning after the takeover")
+			go c.playAnnouncementObject(obj)
+		}
+	case haPhaseTransferring:
+		// The transfer's origination died with its node: the call
+		// continues as it was, and the transferor learns the transfer
+		// failed (a final NOTIFY on the dialog its REFER came on).
+		if side := strings.TrimPrefix(st.StateDetail, haReferDetailPrefix); side != st.StateDetail {
+			c.addTrace("Transfer abandoned by the takeover: the call continues untransferred")
+			go s.haReferFailed(hom.leg(side == "callee"))
 		}
 	}
 	if m := s.deps.Media; m != nil {
@@ -647,6 +677,20 @@ func (c *call) setHADirs(fromCaller bool, dir string) {
 // takeover and both dialogs keep pointing at this node's relay.
 func (c *call) haInDialog(hom *homedCall, req *sip.Request, tx sip.ServerTransaction, fromCaller bool) {
 	s := c.s
+	if c.anchorRelay() == nil {
+		// A solo voicemail call: its media is the anchor session, which
+		// keeps its port; the offer is answered with the SDP the
+		// takeover gave the caller.
+		l := hom.leg(!fromCaller)
+		l.mu.Lock()
+		ans := []byte(l.sdp)
+		l.mu.Unlock()
+		res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", ans)
+		res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+		res.AppendHeader(sip.HeaderClone(&s.contact))
+		s.send(tx, res)
+		return
+	}
 	off, err := media.ParseAudioSDP(req.Body())
 	var ans, peer []byte
 	if err == nil {
@@ -669,6 +713,9 @@ func (c *call) haInDialog(hom *homedCall, req *sip.Request, tx sip.ServerTransac
 	}
 	caller := hom.leg(false)
 	callee := hom.leg(true)
+	if caller == nil || callee == nil {
+		return // a solo call has no peer to mirror to
+	}
 	go func() {
 		defer contain(s.log, "homed re-INVITE")
 		if fromCaller {
@@ -677,4 +724,198 @@ func (c *call) haInDialog(hom *homedCall, req *sip.Request, tx sip.ServerTransac
 		}
 		s.haReinvite(caller, peer)
 	}()
+}
+
+// haReferFailed tells a transferor whose transfer died with its node that
+// the transfer failed: the final NOTIFY of the REFER's implicit
+// subscription, on the homed leg its REFER came on, CSeq continuing the
+// dialog.
+func (s *Server) haReferFailed(l *haLeg) {
+	defer contain(s.log, "takeover refer notify")
+	if l == nil {
+		return
+	}
+	req, err := l.request(s, sip.NOTIFY, []byte("SIP/2.0 503 Service Unavailable\r\n"), "message/sipfrag")
+	if err != nil {
+		return
+	}
+	l.useCSeq()
+	req.AppendHeader(sip.NewHeader("Event", "refer"))
+	req.AppendHeader(sip.NewHeader("Subscription-State", "terminated;reason=noresource"))
+	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
+	defer cancel()
+	res, err := s.client.Do(ctx, req)
+	if err != nil {
+		s.log.Debug("takeover refer NOTIFY failed", "error", err)
+		return
+	}
+	s.m.response(res.StatusCode)
+}
+
+// takeOverSolo re-homes a call Hello answered itself — a voicemail call or
+// an announcement destination — whose only dialog is the caller's (spec
+// S-5, edge case "mid-voicemail-prompt: the prompt restarts"). The taker
+// binds fresh media of its own (an anchor session for voicemail, a relay
+// for an announcement), re-INVITEs the caller onto it, and restarts the
+// application from its beginning: the greeting and beep before a new
+// recording, or the announcement from the top. The caller failing the
+// re-INVITE closes the call and counts the zombie, as for a two-legged
+// call.
+func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
+	start := time.Now()
+	a := haLegFrom(st.Legs[0], true)
+	if a == nil || !haSoloPhase(st.State) {
+		s.haAbandon(st, from, "incomplete replicated state")
+		return
+	}
+	c := &call{
+		s: s, id: st.Correlation, callID: a.callID,
+		callerNum: orDefault(st.Caller, userOf(a.remoteID)), dialled: orDefault(st.Destination, userOf(a.localID)),
+		start: start, direction: cdr.DirectionInternal, mediaMode: "anchored",
+		canceled: make(chan struct{}), stopHB: make(chan struct{}),
+		setupDone: make(chan struct{}), aborted: make(chan struct{}),
+		haStop: make(chan struct{}), haSolo: true,
+	}
+	var (
+		body []byte
+		sess media.Session
+	)
+	switch st.State {
+	case haPhaseVoicemail:
+		anchor := s.anchor.Load()
+		if anchor == nil {
+			s.haAbandon(st, from, "no voicemail media anchor on this node")
+			return
+		}
+		ans, vs, err := anchor.Answer([]byte(a.remoteSDP))
+		if err != nil {
+			s.haAbandon(st, from, "voicemail media: "+err.Error())
+			return
+		}
+		body, sess = ans, vs
+		c.vmSession = vs
+	default: // an announcement destination
+		off, err := media.ParseAudioSDP([]byte(a.remoteSDP))
+		if err != nil {
+			s.haAbandon(st, from, "replicated SDP unusable")
+			return
+		}
+		relay, err := media.NewRelay(s.cfg.RTPPortMin, s.cfg.RTPPortMax)
+		if err != nil {
+			s.haAbandon(st, from, "relay ports: "+err.Error())
+			return
+		}
+		for _, leg := range []string{legCaller, legCallee} {
+			if _, err := relay.AddLeg(leg); err != nil {
+				relay.Close()
+				s.haAbandon(st, from, "relay leg: "+err.Error())
+				return
+			}
+			relay.SetPayloadTypes(leg, off.PayloadType, off.DTMFPayloadType)
+		}
+		relay.SetTarget(legCaller, udpAddr(off.Address, off.Port))
+		c.anchorHost = s.anchorHostOr(off.Address)
+		c.relay, c.anchored, c.anchorReason = relay, true, AnchorPolicy
+		c.rec = &recording{}
+		relay.Start()
+		if m := s.deps.Media; m != nil {
+			m.NoteStart()
+		}
+		body = media.BuildAudioSDP(c.anchorHost, relay.LegPort(legCaller), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
+	}
+	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCaller, "to", a.destination(s), "app", st.State)
+	res, ok := s.haReinvite(a, body)
+	if !ok {
+		s.log.Warn("takeover leg failed", "call_id", st.CallID, "leg", legCaller, "res", resStatus(res))
+		if sess != nil {
+			_ = sess.Close()
+		}
+		c.addTrace(fmt.Sprintf("Takeover from %s failed: the caller did not answer the re-INVITE", from))
+		c.mu.Lock()
+		c.connected, c.answerTime = true, start
+		c.mu.Unlock()
+		c.end(sip.StatusServiceUnavailable, cdr.SideSystem, "takeover failed: the caller did not answer the re-INVITE", ResultFailed)
+		s.m.ZombieCalls.Inc()
+		return
+	}
+	if relay := c.anchorRelay(); relay != nil {
+		haAim(relay, legCaller, res.Body())
+	}
+	a.mu.Lock()
+	a.sdp = string(body)
+	a.mu.Unlock()
+	gap := time.Since(start)
+	c.mu.Lock()
+	c.homedCall = &homedCall{takenFrom: from, takenAt: start, legs: [2]*haLeg{a, nil}}
+	c.connected, c.answerTime = true, start
+	c.haPhase, c.haDetail = st.State, st.StateDetail
+	c.mu.Unlock()
+	s.log.Info("takeover re-homed", "call_id", st.CallID, "from", from, "gap", gap.String(), "app", st.State)
+	c.addTrace(fmt.Sprintf("ha: taken over from %s in %s (media gap %s)", from,
+		gap.Round(time.Millisecond), gap.Round(time.Millisecond)))
+	s.m.DialogTakeovers.Inc()
+	s.bind(a.callID, dialogRef{c: c})
+	s.m.ActiveCalls.Inc()
+	c.publish()
+	go c.heartbeat()
+	c.replicate()
+	go c.haLoop()
+	s.releaseClaim(st.CallID)
+	c.mu.Lock()
+	if !c.ended {
+		c.maxTimer = time.AfterFunc(s.cfg.MaxCallDuration, c.expire)
+	}
+	c.mu.Unlock()
+	if st.State == haPhaseVoicemail {
+		mode, reason, box := parseVoicemailDetail(st.StateDetail)
+		if box != "" {
+			c.mu.Lock()
+			c.dialled = box
+			c.mu.Unlock()
+		}
+		c.addTrace("Voicemail restarts from its greeting after the takeover")
+		go c.voicemailFlow(mode, reason, sess)
+		return
+	}
+	obj := strings.TrimPrefix(st.StateDetail, haRecordDetailPrefix)
+	c.addTrace("Announcement restarts from its beginning after the takeover")
+	go func() {
+		defer contain(s.log, "announcement destination after takeover")
+		if obj != "" && obj != st.StateDetail {
+			c.playAnnouncementObject(obj)
+		}
+		c.announcementEnd()
+	}()
+}
+
+// voicemailDetail encodes the voicemail application's restart data into a
+// replicated state detail; parseVoicemailDetail decodes it.
+func voicemailDetail(mode int, reason, box string) string {
+	m := "leave"
+	if mode == vmRetrieve {
+		m = "retrieve"
+	}
+	return haVoicemailDetailPrefix + m + ":" + reason + ":" + box
+}
+
+func parseVoicemailDetail(detail string) (mode int, reason, box string) {
+	parts := strings.SplitN(strings.TrimPrefix(detail, haVoicemailDetailPrefix), ":", 3)
+	if len(parts) > 0 && parts[0] == "retrieve" {
+		mode = vmRetrieve
+	}
+	if len(parts) > 1 {
+		reason = parts[1]
+	}
+	if len(parts) > 2 {
+		box = parts[2]
+	}
+	return mode, reason, box
+}
+
+// orDefault is v, or def when v is empty.
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
 }

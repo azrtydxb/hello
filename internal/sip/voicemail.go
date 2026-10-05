@@ -100,6 +100,16 @@ func (c *call) startVoicemail(mode int, reason string) {
 	if !c.answerSelf(answer) {
 		return
 	}
+	if sess != nil && s.deps.HAState != nil {
+		// The voicemail call replicates like any (incall-ha S-5): a taker
+		// re-INVITEs the caller onto its own anchor and restarts the
+		// application from the greeting.
+		c.haSoloRefresh(string(answer))
+		c.mu.Lock()
+		c.haPhase, c.haDetail = haPhaseVoicemail, voicemailDetail(mode, reason, c.dialled)
+		c.mu.Unlock()
+		go c.haLoop()
+	}
 	go c.voicemailFlow(mode, reason, sess)
 }
 
@@ -183,6 +193,11 @@ func (c *call) vmCtx() (context.Context, context.CancelFunc) {
 // by the StateTimeout discipline.
 func (c *call) voicemailFlow(mode int, reason string, sess media.Session) {
 	defer contain(c.s.log, "voicemail flow")
+	if sess != nil {
+		// The application owns the session's socket: it closes once the
+		// message is stored (or the retrieval is over).
+		defer func() { _ = sess.Close() }()
+	}
 	ctx, cancel := c.vmCtx()
 	defer cancel()
 	box := c.boxDetails()
@@ -479,7 +494,7 @@ func (s *Server) sendMWI(ext string) {
 	if s.deps.Voicemails == nil {
 		return
 	}
-	s.bg.Go(func() {
+	s.goBG(func() {
 		defer contain(s.log, "MWI")
 		ctx, cancel := context.WithTimeout(context.Background(), 2*s.cfg.StateTimeout)
 		defer cancel()
