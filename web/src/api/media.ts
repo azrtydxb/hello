@@ -63,9 +63,9 @@ export function greetingLabel(box: VoicemailBoxDetail): string {
 
 // --- recordings ---------------------------------------------------------------
 
-/** A recording with the parties of its call's first CDR. */
+/** A recording with the parties of its call's CDR. */
 export interface CallRecording extends Recording {
-  /** The call's first CDR; absent until the CDR is written. */
+  /** The call's CDR; absent until the CDR is written. */
   cdrId?: Id;
   /** "" until the CDR is written. */
   source?: string;

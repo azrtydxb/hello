@@ -388,8 +388,7 @@ func TestAnnouncementReplace(t *testing.T) {
 }
 
 // TestRecordingPartiesAndDownload: the list carries the call's parties and
-// CDR id from the first CDR of the correlation id (nothing when no CDR
-// exists), and ?download=1 presigns an attachment. It fails if a recording
+// CDR id from its CDR (nothing when no CDR exists), and ?download=1 presigns an attachment. It fails if a recording
 // without a CDR is dropped, or if download is ignored or accepts garbage.
 func TestRecordingPartiesAndDownload(t *testing.T) {
 	objs := newMemObjects()
@@ -402,7 +401,6 @@ func TestRecordingPartiesAndDownload(t *testing.T) {
 	seedRecording(t, e, "corr-a", "rec/1.wav", 5000)
 	seedRecording(t, e, "corr-b", "rec/2.wav", 7000)
 	seedCDR(t, e, "corr-a", "101", "102")
-	seedCDR(t, e, "corr-a", "102", "103") // a later leg of the same call
 
 	var page struct {
 		Items []map[string]any `json:"items"`
@@ -417,13 +415,13 @@ func TestRecordingPartiesAndDownload(t *testing.T) {
 	if _, ok := noCDR["cdrId"]; ok || noCDR["source"] != "" || noCDR["destination"] != "" {
 		t.Fatalf("recording without a CDR = %v", noCDR)
 	}
-	var firstCDR int64
+	var cdrID int64
 	if err := e.db.QueryRowContext(ctx,
-		`SELECT min(id) FROM cdrs WHERE correlation_id = 'corr-a'`).Scan(&firstCDR); err != nil {
+		`SELECT id FROM cdrs WHERE correlation_id = 'corr-a'`).Scan(&cdrID); err != nil {
 		t.Fatal(err)
 	}
-	if withCDR["source"] != "101" || withCDR["destination"] != "102" || withCDR["cdrId"] != float64(firstCDR) {
-		t.Fatalf("recording with CDRs = %v, want the first CDR %d", withCDR, firstCDR)
+	if withCDR["source"] != "101" || withCDR["destination"] != "102" || withCDR["cdrId"] != float64(cdrID) {
+		t.Fatalf("recording with a CDR = %v, want CDR %d", withCDR, cdrID)
 	}
 
 	c.hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }

@@ -3262,15 +3262,15 @@
           "cdrId": {
             "type": "integer",
             "format": "int64",
-            "description": "The call's first CDR (lowest id with the same correlationId); absent until the CDR is written."
+            "description": "The call's CDR (same correlationId); absent until the CDR is written."
           },
           "source": {
             "type": "string",
-            "description": "The first CDR's source; empty until the CDR is written."
+            "description": "The CDR's source; empty until the CDR is written."
           },
           "destination": {
             "type": "string",
-            "description": "The first CDR's destination; empty until the CDR is written."
+            "description": "The CDR's destination; empty until the CDR is written."
           }
         }
       },

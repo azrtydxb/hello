@@ -23,9 +23,9 @@ type Recording struct {
 	InitiatedBy   string    `json:"initiatedBy"`
 	DurationMs    int64     `json:"durationMs"`
 	CreatedAt     time.Time `json:"createdAt"`
-	// CDRID, Source and Destination come from the call's first CDR (the
-	// lowest id with the same correlation id); a recording whose CDR is not
-	// written yet has no CDRID and empty parties.
+	// CDRID, Source and Destination come from the call's CDR (one per
+	// correlation id); a recording whose CDR is not written yet has no CDRID
+	// and empty parties.
 	CDRID       *int64 `json:"cdrId,omitempty"`
 	Source      string `json:"source"`
 	Destination string `json:"destination"`
@@ -35,13 +35,11 @@ type Recording struct {
 }
 
 // recordingFrom selects recordingCols: the recording joined to its call's
-// first CDR, so a list shows who called whom.
+// CDR, so a list shows who called whom.
 const (
 	recordingCols = `r.id, r.correlation_id, r.initiated_by, r.duration_ms, r.created_at, r.minio_object,
 		c.id, COALESCE(c.source, ''), COALESCE(c.destination, '')`
-	recordingFrom = ` FROM recordings r LEFT JOIN LATERAL (
-		SELECT id, source, destination FROM cdrs
-		WHERE cdrs.correlation_id = r.correlation_id ORDER BY id LIMIT 1) c ON true`
+	recordingFrom = ` FROM recordings r LEFT JOIN cdrs c ON c.correlation_id = r.correlation_id`
 )
 
 func scanRecording(r interface{ Scan(...any) error }) (Recording, error) {
