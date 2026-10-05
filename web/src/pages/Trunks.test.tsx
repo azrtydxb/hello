@@ -79,7 +79,7 @@ describe("Trunks", () => {
     });
     renderApp("/trunks");
 
-    expect(await screen.findByText("No trunks yet.")).toBeVisible();
+    expect(await screen.findByText("No trunks yet")).toBeVisible();
     fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
     const drawer = screen.getByRole("dialog", { name: "New trunk" });
     expect(within(drawer).getByLabelText("Name")).toHaveFocus();
@@ -287,7 +287,7 @@ describe("Trunks", () => {
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Delete trunk" }),
     );
-    expect(await screen.findByText("No trunks yet.")).toBeVisible();
+    expect(await screen.findByText("No trunks yet")).toBeVisible();
     expect(screen.getByText("Trunk carrier-primary deleted.")).toBeVisible();
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
   });
@@ -316,7 +316,7 @@ describe("Trunks", () => {
     });
     renderApp("/trunks");
 
-    await screen.findByText("No trunks yet.");
+    await screen.findByText("No trunks yet");
     fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
     field("Name", "carrier-x");
     field("Host 1", "nowhere.invalid");

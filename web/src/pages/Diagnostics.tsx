@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import {
   errorMessage,
   getCdr,
@@ -31,18 +31,22 @@ import {
 import {
   Alert,
   Badge,
+  type BadgeTone,
   Button,
   EmptyState,
   Icon,
   Input,
+  LinkButton,
+  PageHeader,
+  type Property,
   PropertyList,
   Select,
+  Spinner,
   Table,
   Tabs,
-  type BadgeTone,
-  type Property,
+  useToast,
 } from "../design/azrty/components";
-import { sortedSteps } from "../components/TraceList";
+import { sortedSteps } from "../format";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import {
   ago,
@@ -51,7 +55,7 @@ import {
   until,
   type HealthCheck,
 } from "./platform/health";
-import { PageHeader, useToast } from "./platform/ui";
+import "./platform/platform.css";
 
 type TabId = "trace" | "reg" | "probes" | "health";
 const TABS: readonly TabId[] = ["trace", "reg", "probes", "health"];
@@ -111,7 +115,8 @@ export function Diagnostics() {
   const tab: TabId = tabParam && TABS.includes(tabParam) ? tabParam : "trace";
   const live = usePolling(loadLive, LIVE_REFRESH_MS);
   const data: Live = live.status === "loading" ? {} : (live.data ?? {});
-  const [toast, showToast] = useToast();
+  const toast = useToast();
+  const showToast = toast.show;
 
   const checks = healthChecks({
     cluster: data.cluster,
@@ -133,20 +138,15 @@ export function Diagnostics() {
   return (
     <section aria-labelledby="page-title">
       <PageHeader
+        eyebrow="Platform"
         title="Diagnostics"
         description="Call traces, registration attempts, trunk probes and cluster checks. Secrets and digest responses are never shown."
-      >
-        <div className="pf-head__actions">
-          <Link
-            to="/routes/test"
-            className="az-btn az-btn--secondary"
-            style={{ textDecoration: "none" }}
-          >
-            <Icon name="flask-conical" size={15} />
+        actions={
+          <LinkButton to="/routes/test" icon="flask-conical">
             Route tester
-          </Link>
-        </div>
-      </PageHeader>
+          </LinkButton>
+        }
+      />
       <Tabs<TabId>
         className="pf-tabs"
         aria-label="Diagnostics"
@@ -169,7 +169,12 @@ export function Diagnostics() {
         id={`diag-panel-${tab}`}
         aria-labelledby={`diag-tab-${tab}`}
       >
-        {tab === "trace" && <TraceTab />}
+        {tab === "trace" && (
+          <TraceTab
+            callParam={params.get("call")}
+            onCall={(id) => go("trace", { call: id })}
+          />
+        )}
         {tab === "reg" && (
           <RegistrationsTab
             live={data}
@@ -189,7 +194,7 @@ export function Diagnostics() {
           />
         )}
       </div>
-      {toast}
+      {toast.node}
     </section>
   );
 }
@@ -210,10 +215,21 @@ function statusTone(code: number): BadgeTone {
 
 const loadRecent = (signal: AbortSignal) => listCdrs({ limit: 25 }, signal);
 
-function TraceTab() {
+/**
+ * The Call trace tab: recent calls on the left, the selected call's trace on
+ * the right. ?call=<id> selects a call (Call detail's "SIP trace" links
+ * here), even one no longer in the recent list.
+ */
+function TraceTab({
+  callParam,
+  onCall,
+}: {
+  callParam: string | null;
+  onCall: (id: string) => void;
+}) {
   const recent = usePolling(loadRecent, LIVE_REFRESH_MS);
   const [q, setQ] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
+  const selected = callParam || null;
   const calls: Cdr[] =
     recent.status === "loading" ? [] : (recent.data?.items ?? []);
   const needle = q.trim().toLowerCase();
@@ -242,13 +258,9 @@ function TraceTab() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        {recent.status === "loading" && (
-          <p role="status" aria-live="polite" className="pf-muted">
-            Loading calls…
-          </p>
-        )}
+        {recent.status === "loading" && <Spinner label="Loading calls…" />}
         {recent.status === "error" && !recent.data && (
-          <Alert tone="bad" title="Could not load calls.">
+          <Alert tone="bad" title="Could not load calls">
             {recent.message}
           </Alert>
         )}
@@ -274,7 +286,7 @@ function TraceTab() {
                       aria-current={
                         String(c.id) === current ? "true" : undefined
                       }
-                      onClick={() => setSelected(String(c.id))}
+                      onClick={() => onCall(String(c.id))}
                     >
                       <span className="pf-call__top">
                         <Icon
@@ -338,15 +350,13 @@ function CallTrace({ id }: { id: string }) {
   if (state.status === "loading") {
     return (
       <div className="az-card pf-card">
-        <p role="status" aria-live="polite" className="pf-muted">
-          Loading call {id}…
-        </p>
+        <Spinner label={`Loading call ${id}…`} />
       </div>
     );
   }
   if (state.status === "error") {
     return (
-      <Alert tone="bad" title={`Could not load call ${id}.`}>
+      <Alert tone="bad" title={`Could not load call ${id}`}>
         {state.message}
       </Alert>
     );
@@ -369,14 +379,13 @@ function CallTrace({ id }: { id: string }) {
           </div>
         </div>
         <div className="pf-tracehead__actions">
-          <Link
+          <LinkButton
             to={`/history/${encodeURIComponent(String(c.id))}`}
-            className="az-btn az-btn--secondary az-btn--sm"
-            style={{ textDecoration: "none" }}
+            size="sm"
+            icon="file-text"
           >
-            <Icon name="file-text" size={13} />
             Call record
-          </Link>
+          </LinkButton>
         </div>
       </div>
       {c.explanation && (
@@ -467,7 +476,7 @@ function RegistrationsTab({
   return (
     <>
       {devices === undefined ? (
-        <Alert tone="bad" title="Could not load devices.">
+        <Alert tone="bad" title="Could not load devices">
           The device list is unavailable; try again shortly.
         </Alert>
       ) : devices.length === 0 ? (
@@ -642,13 +651,9 @@ function DeviceReg({
           value={deviceId}
           onChange={(e) => onDevice(e.target.value)}
         />
-        {diag.status === "loading" && (
-          <p role="status" aria-live="polite" className="pf-muted">
-            Loading diagnostics…
-          </p>
-        )}
+        {diag.status === "loading" && <Spinner label="Loading diagnostics…" />}
         {diag.status === "error" && (
-          <Alert tone="bad" title="Could not load diagnostics.">
+          <Alert tone="bad" title="Could not load diagnostics">
             {diag.message}
           </Alert>
         )}
@@ -666,13 +671,9 @@ function DeviceReg({
                 title="Why it is not registered"
                 action={
                   VERDICT_ACTION[d.verdict.code] ? (
-                    <Link
-                      to="/devices"
-                      className="az-btn az-btn--secondary az-btn--sm"
-                      style={{ textDecoration: "none" }}
-                    >
+                    <LinkButton to="/devices" size="sm">
                       Open devices
-                    </Link>
+                    </LinkButton>
                   ) : undefined
                 }
               >
@@ -752,7 +753,7 @@ interface ProbeRow {
 function ProbesTab({ live }: { live: Live }) {
   if (live.trunkStatus === undefined) {
     return (
-      <Alert tone="bad" title="Could not load trunk status.">
+      <Alert tone="bad" title="Could not load trunk status">
         Live state (Valkey) is unavailable; try again shortly.
       </Alert>
     );
@@ -862,11 +863,7 @@ function HealthTab({
   onTab: (tab: string) => void;
 }) {
   if (loading) {
-    return (
-      <p role="status" aria-live="polite" className="pf-muted">
-        Running checks…
-      </p>
-    );
+    return <Spinner label="Running checks…" />;
   }
   return (
     <>
@@ -899,14 +896,14 @@ function HealthTab({
                 </div>
                 {c.link &&
                   (c.link.to ? (
-                    <Link
+                    <LinkButton
                       to={c.link.to}
-                      className="az-btn az-btn--ghost az-btn--sm"
-                      style={{ textDecoration: "none" }}
+                      variant="ghost"
+                      size="sm"
+                      iconRight="arrow-right"
                     >
                       {c.link.label}
-                      <Icon name="arrow-right" size={13} />
-                    </Link>
+                    </LinkButton>
                   ) : (
                     <Button
                       variant="ghost"

@@ -18,22 +18,19 @@ import {
   Alert,
   Badge,
   Button,
+  ConfirmDialog,
   EmptyState,
   Icon,
   IconButton,
+  PageHeader,
   Select,
   Spinner,
   Table,
   type TableColumn,
+  useToast,
 } from "../design/azrty/components";
 import { formatDuration, formatTime } from "../format";
-import {
-  ConfirmDelete,
-  MediaHeader,
-  NowPlaying,
-  usePlayback,
-  useToast,
-} from "./media/MediaParts";
+import { NowPlaying, usePlayback } from "./media/MediaParts";
 
 export const PAGE_SIZE = 50;
 
@@ -63,7 +60,8 @@ export function Recordings() {
   const [cursors, setCursors] = useState<string[]>([""]);
   const [state, setState] = useState<ListState>({ status: "loading" });
   const [deleting, setDeleting] = useState<CallRecording | null>(null);
-  const [toast, showToast] = useToast();
+  const toast = useToast();
+  const showToast = toast.show;
   const playback = usePlayback(() => "Could not play the recording");
   const before = cursors[cursors.length - 1] ?? "";
 
@@ -111,7 +109,7 @@ export function Recordings() {
     );
     if (String(playback.playing) === String(rec.id)) playback.stop();
     setDeleting(null);
-    showToast(`Recording ${rec.correlationId} deleted`);
+    showToast(`Recording ${rec.correlationId} deleted.`);
   }
 
   const page = state.status === "ready" ? state.page : undefined;
@@ -230,7 +228,8 @@ export function Recordings() {
 
   return (
     <section aria-labelledby="page-title">
-      <MediaHeader
+      <PageHeader
+        eyebrow="Media"
         title="Recordings"
         description={
           <>
@@ -238,19 +237,22 @@ export function Recordings() {
             <span className="media-mono">*1</span> mid-call, or through the API.
           </>
         }
-      >
-        <Select
-          size="sm"
-          className="rec-filter"
-          aria-label="Filter by extension"
-          options={options}
-          value={filter}
-          onChange={(e) => {
-            setFilter(e.target.value);
-            setCursors([""]);
-          }}
-        />
-      </MediaHeader>
+        actions={
+          <>
+            <Select
+              size="sm"
+              className="rec-filter"
+              aria-label="Filter by extension"
+              options={options}
+              value={filter}
+              onChange={(e) => {
+                setFilter(e.target.value);
+                setCursors([""]);
+              }}
+            />
+          </>
+        }
+      />
       <div className="media-stack">
         {extensionsError && (
           <Alert tone="warn" title="Could not load the extension filter">
@@ -317,7 +319,7 @@ export function Recordings() {
         </Button>
       </nav>
       {deleting && (
-        <ConfirmDelete
+        <ConfirmDialog
           title="Delete recording?"
           description={`The recording of ${deleting.correlationId} and its audio are removed. This cannot be undone.`}
           confirmLabel="Delete recording"
@@ -325,7 +327,7 @@ export function Recordings() {
           onClose={() => setDeleting(null)}
         />
       )}
-      {toast}
+      {toast.node}
     </section>
   );
 }

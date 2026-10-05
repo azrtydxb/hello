@@ -4,12 +4,13 @@ import {
   Alert,
   Badge,
   EmptyState,
+  LiveTag,
+  PageHeader,
   Spinner,
   Table,
   type TableColumn,
 } from "../design/azrty/components";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
-import { PageHeader } from "./directory/PageHeader";
 import "./directory/directory.css";
 
 const columns: TableColumn<Binding>[] = [
@@ -67,12 +68,9 @@ export function Registrations() {
         title="Registrations"
         description="Contacts bound in Valkey, as received by each SIP node through Kamailio."
         actions={
-          state.status === "ready" ? (
-            <span className="az-live">
-              <span className="az-dot az-dot--pulse" aria-hidden="true" />
-              LIVE · 5 S
-            </span>
-          ) : undefined
+          state.status === "loading" ? undefined : (
+            <LiveTag every="5 s" live={state.status === "ready"} />
+          )
         }
       />
       <div className="dir-stack">
@@ -80,7 +78,7 @@ export function Registrations() {
           <Spinner label="Loading registrations…" />
         )}
         {state.status === "error" && (
-          <Alert tone="bad" title="Could not load registrations.">
+          <Alert tone="bad" title="Could not load registrations">
             {state.message}
             {items ? " Showing the last list received." : ""}
           </Alert>

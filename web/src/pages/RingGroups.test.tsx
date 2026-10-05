@@ -64,9 +64,12 @@ describe("RingGroups", () => {
         ),
     });
     renderApp("/ring-groups");
-    fireEvent.click(
-      (await screen.findAllByRole("button", { name: "New ring group" }))[0]!,
-    );
+    const [create] = await screen.findAllByRole("button", {
+      name: "New ring group",
+    });
+    // Enabled once the list the new group lands in has loaded.
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create!);
 
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Support" },
@@ -88,14 +91,11 @@ describe("RingGroups", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
     fireEvent.click(screen.getByRole("button", { name: "Create group" }));
 
-    // CI's runners are slow enough that the refresh after the create can
-    // outlast the default one-second wait.
-    await screen.findByRole(
-      "listitem",
-      { name: "Support" },
-      { timeout: 10000 },
-    );
-    expect(screen.getByText("Ring group Support created.")).toBeVisible();
+    // The toast says the create landed; the list then holds the group.
+    expect(
+      await screen.findByText("Ring group Support created."),
+    ).toBeVisible();
+    expect(screen.getByRole("listitem", { name: "Support" })).toBeVisible();
     expect(calls).toContainEqual({
       method: "POST",
       url: "/api/v1/ring-groups",
@@ -199,7 +199,7 @@ describe("RingGroups", () => {
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Delete group" }),
     );
-    await screen.findByText("No ring groups yet.");
+    await screen.findByText("No ring groups yet");
     expect(calls).toContainEqual({
       method: "DELETE",
       url: "/api/v1/ring-groups/5",

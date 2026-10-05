@@ -29,9 +29,12 @@ import {
   Badge,
   Button,
   Icon,
+  LiveTag,
   Modal,
-  PropertyList,
+  PageHeader,
   type Property,
+  PropertyList,
+  Spinner,
 } from "../design/azrty/components";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import {
@@ -42,7 +45,7 @@ import {
   stateLabel,
   type Tone,
 } from "./platform/health";
-import { LiveTag, PageHeader } from "./platform/ui";
+import "./platform/platform.css";
 
 /** The live views around the cluster; each is absent when it cannot be read. */
 interface Around {
@@ -130,6 +133,7 @@ export function Cluster() {
   return (
     <section aria-labelledby="page-title">
       <PageHeader
+        eyebrow="Platform"
         title="Cluster"
         description={
           <>
@@ -138,26 +142,27 @@ export function Cluster() {
             {data ? (data.configRevision ?? "—") : "—"}.
           </>
         }
-      >
-        <LiveTag every="5 s" live={state.status === "ready"} />
-      </PageHeader>
+        actions={
+          <>
+            <LiveTag every="5 s" live={state.status === "ready"} />
+          </>
+        }
+      />
       <p className="pf-notice" role="status" aria-live="polite">
         {notice}
       </p>
       {state.status === "loading" && (
-        <p role="status" aria-live="polite">
-          Loading cluster status…
-        </p>
+        <Spinner label="Loading cluster status…" />
       )}
       {state.status === "error" && (
-        <Alert tone="bad" title="Could not load cluster status.">
+        <Alert tone="bad" title="Could not load cluster status">
           {state.message}
         </Alert>
       )}
       {data && sip.length > 0 && sipReady === 0 && (
         <Alert
           tone="bad"
-          title="No SIP node is READY."
+          title="No SIP node is READY"
           style={{ marginBottom: "var(--az-space-4)" }}
         >
           New calls are rejected (503) until a SIP node returns to READY.

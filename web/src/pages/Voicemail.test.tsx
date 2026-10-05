@@ -203,6 +203,9 @@ describe("Voicemail", () => {
       }),
     );
     expect(await within(row).findByText("Heard")).toBeVisible();
+    expect(
+      await screen.findByText("Message from 201 marked heard."),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: /100/ })).not.toHaveTextContent(
       "unheard",
     );
@@ -220,6 +223,9 @@ describe("Voicemail", () => {
       }),
     );
     expect(await within(row).findByText("New")).toBeVisible();
+    expect(
+      await screen.findByText("Message from 201 marked unheard."),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: /100/ })).toHaveTextContent(
       "1 unheard",
     );
@@ -245,7 +251,7 @@ describe("Voicemail", () => {
       within(dialog).getByRole("button", { name: "Delete message" }),
     );
     expect(
-      await screen.findByText("Message from 201 deleted"),
+      await screen.findByText("Message from 201 deleted."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("row", { name: /201/ })).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -304,7 +310,7 @@ describe("Voicemail", () => {
         body: { email: "front@hello.lab" },
       }),
     );
-    expect(await screen.findByText("Box 100 saved")).toBeInTheDocument();
+    expect(await screen.findByText("Box 100 saved.")).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByText("front@hello.lab")).toBeVisible();
   });

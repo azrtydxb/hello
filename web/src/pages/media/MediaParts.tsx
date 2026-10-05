@@ -1,49 +1,11 @@
-// Pieces the three Media pages share, built from design components: the page
-// header, the now-playing card, the playback gate, the delete confirmation,
-// the WAV drop field and the toast.
+// Pieces the Media pages share, built from design components: the
+// now-playing card, the playback gate and the WAV drop field.
 
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { errorMessage, isPlayableAudio, type Id } from "../../api";
-import {
-  Alert,
-  Button,
-  Icon,
-  Meter,
-  Modal,
-} from "../../design/azrty/components";
+import { Button, Icon, Meter } from "../../design/azrty/components";
 import { formatDuration } from "../../format";
 import "./media.css";
-
-/** The design's page header: "Media" eyebrow, title, one-line description. */
-export function MediaHeader({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <header className="media-head">
-      <div>
-        <span className="az-eyebrow media-head__eyebrow">Media</span>
-        <h1 id="page-title" className="media-head__title">
-          {title}
-        </h1>
-        <p className="media-head__desc">{description}</p>
-      </div>
-      {children}
-    </header>
-  );
-}
 
 /**
  * The playback gate: GET the audio route first and only play when it
@@ -152,72 +114,6 @@ export function NowPlaying({
   );
 }
 
-/** A delete confirmation: the danger action, Cancel focused first. */
-export function ConfirmDelete({
-  title,
-  description,
-  confirmLabel,
-  onConfirm,
-  onClose,
-}: {
-  title: string;
-  description: ReactNode;
-  confirmLabel: string;
-  /** Rejects with the error to show; resolves when done. */
-  onConfirm: () => Promise<void>;
-  onClose: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function confirm() {
-    setBusy(true);
-    setError(null);
-    try {
-      await onConfirm();
-    } catch (err: unknown) {
-      setError(errorMessage(err));
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      title={title}
-      description={description}
-      onClose={busy ? undefined : onClose}
-      actions={
-        <>
-          <Button
-            autoFocus
-            variant="secondary"
-            size="sm"
-            disabled={busy}
-            onClick={onClose}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            size="sm"
-            icon="trash-2"
-            disabled={busy}
-            onClick={() => void confirm()}
-          >
-            {confirmLabel}
-          </Button>
-        </>
-      }
-    >
-      {error && (
-        <Alert tone="bad" title="Could not delete">
-          {error}
-        </Alert>
-      )}
-    </Modal>
-  );
-}
-
 /**
  * The design's dashed WAV drop field: a file input stretched over the box,
  * so a click browses and a dropped file lands in the input.
@@ -282,27 +178,4 @@ export function checkWav(file: File | null, maxBytes: number): string | null {
   if (file.size === 0) return "The file is empty.";
   if (file.size > maxBytes) return "The file is larger than 10 MB.";
   return null;
-}
-
-/** The design's toast: a short confirmation, bottom right, for 3 s. */
-export function useToast(): [ReactNode, (message: string) => void] {
-  const [message, setMessage] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  const show = useCallback((text: string) => {
-    clearTimeout(timer.current);
-    setMessage(text);
-    timer.current = setTimeout(() => setMessage(null), 3000);
-  }, []);
-  const node = (
-    <div role="status" aria-live="polite">
-      {message && (
-        <div className="az-card media-toast">
-          <Icon name="circle-check" size={16} />
-          {message}
-        </div>
-      )}
-    </div>
-  );
-  return [node, show];
 }

@@ -21,27 +21,24 @@ import {
 import {
   Alert,
   Badge,
+  type BadgeTone,
   Button,
+  ConfirmDialog,
   EmptyState,
   Icon,
   IconButton,
   Input,
   Modal,
   navItemClassName,
+  PageHeader,
   Spinner,
   Table,
-  type BadgeTone,
   type TableColumn,
+  useToast,
 } from "../design/azrty/components";
 import { formatDuration, formatTime } from "../format";
 import { mapFieldErrors } from "../forms";
-import {
-  ConfirmDelete,
-  MediaHeader,
-  NowPlaying,
-  usePlayback,
-  useToast,
-} from "./media/MediaParts";
+import { NowPlaying, usePlayback } from "./media/MediaParts";
 
 type Load<T> =
   | { status: "loading" }
@@ -64,7 +61,8 @@ export function Voicemail() {
     status: "loading",
   });
   const [selectedId, setSelectedId] = useState<string>("");
-  const [toast, showToast] = useToast();
+  const toast = useToast();
+  const showToast = toast.show;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,7 +106,8 @@ export function Voicemail() {
 
   return (
     <section aria-labelledby="page-title">
-      <MediaHeader
+      <PageHeader
+        eyebrow="Media"
         title="Voicemail"
         description="One box per extension. Messages are stored in object storage and can be emailed."
       />
@@ -163,7 +162,7 @@ export function Voicemail() {
           )}
         </div>
       )}
-      {toast}
+      {toast.node}
     </section>
   );
 }
@@ -225,6 +224,9 @@ function BoxPanel({
           : prev,
       );
       if (msg.heard !== heard) onUnheard(heard ? -1 : 1);
+      onToast(
+        `Message from ${msg.caller} marked ${heard ? "heard" : "unheard"}.`,
+      );
     } catch (err: unknown) {
       setActionError(
         `Could not mark the message from ${msg.caller}: ${errorMessage(err)}`,
@@ -242,7 +244,7 @@ function BoxPanel({
     onUnheard(msg.heard ? 0 : -1, -1);
     if (String(playback.playing) === String(msg.id)) playback.stop();
     setDeleting(null);
-    onToast(`Message from ${msg.caller} deleted`);
+    onToast(`Message from ${msg.caller} deleted.`);
   }
 
   const items = messages.status === "ready" ? messages.value : [];
@@ -407,7 +409,7 @@ function BoxPanel({
         />
       )}
       {deleting && (
-        <ConfirmDelete
+        <ConfirmDialog
           title="Delete message?"
           description={`The message from ${deleting.caller} and its audio are removed. This cannot be undone.`}
           confirmLabel="Delete message"
@@ -423,7 +425,7 @@ function BoxPanel({
           onSaved={(value) => {
             setDetail({ status: "ready", value });
             setSettingsOpen(false);
-            onToast(`Box ${box.number} saved`);
+            onToast(`Box ${box.number} saved.`);
           }}
         />
       )}

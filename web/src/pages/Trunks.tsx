@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router";
 import {
   createTrunk,
   deleteTrunk,
@@ -16,18 +15,24 @@ import {
 import {
   Alert,
   Badge,
+  type BadgeTone,
   Button,
+  ConfirmDialog,
   Drawer,
   EmptyState,
   Icon,
   IconButton,
   Input,
+  LinkButton,
   Meter,
+  PageHeader,
+  type Property,
   PropertyList,
   Select,
+  Spinner,
   Switch,
-  type BadgeTone,
-  type Property,
+  useRestoreFocus,
+  useToast,
 } from "../design/azrty/components";
 import { mapFieldErrors, splitList, type ErrorMap } from "../forms";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
@@ -37,14 +42,7 @@ import {
   orUnknown,
   UNKNOWN,
 } from "./callflow/format";
-import {
-  ConfirmDialog,
-  FormAlert,
-  Loading,
-  PageHeader,
-  useRestoreFocus,
-  useToast,
-} from "./callflow/ui";
+import { FormAlert } from "./callflow/ui";
 
 const TRUNK_NAME_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const FORM_ID = "trunk-form";
@@ -272,6 +270,7 @@ export function Trunks() {
   return (
     <section aria-labelledby="page-title">
       <PageHeader
+        eyebrow="Call flow"
         title="Trunks"
         description="Carrier accounts and IP peers. Destinations are health-checked with OPTIONS; status refreshes every 5 s."
         actions={newTrunk}
@@ -283,16 +282,16 @@ export function Trunks() {
             it returns.
           </Alert>
         )}
-        {list.status === "loading" && <Loading what="trunks" />}
+        {list.status === "loading" && <Spinner label="Loading trunks…" />}
         {list.status === "error" && (
-          <Alert tone="bad" title="Could not load trunks.">
+          <Alert tone="bad" title="Could not load trunks">
             {list.message}
           </Alert>
         )}
         {list.status === "ready" && list.items.length === 0 && (
           <EmptyState
             icon="cable"
-            title="No trunks yet."
+            title="No trunks yet"
             description="Add a carrier account or an IP peer to call numbers outside Hello."
             action={newTrunk}
           />
@@ -524,13 +523,14 @@ function TrunkCard({
         >
           Edit
         </Button>
-        <Link
-          className="az-btn az-btn--ghost az-btn--sm"
-          to={`/routes/test?from=${encodeURIComponent(`trunk:${String(t.id)}`)}`}
+        <LinkButton
+          to={`/routes/test?${new URLSearchParams({ from: `trunk:${String(t.id)}` }).toString()}`}
+          variant="ghost"
+          size="sm"
+          icon="flask-conical"
         >
-          <Icon name="flask-conical" size={13} />
           Test a route
-        </Link>
+        </LinkButton>
         <Button
           variant="ghost"
           size="sm"

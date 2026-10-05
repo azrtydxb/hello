@@ -1,6 +1,5 @@
 import type { ComponentType } from "react";
 import {
-  Link,
   Navigate,
   NavLink,
   Outlet,
@@ -12,7 +11,7 @@ import {
 import { AuthProvider, RequireAuth, useAuth } from "./auth";
 import { HelloLogo } from "./brand";
 import {
-  Icon,
+  LinkButton,
   NavItemContent,
   navItemClassName,
   Sidebar,
@@ -141,13 +140,9 @@ function Shell() {
           crumbs={title ? ["Kuvryn Hello", title] : ["Kuvryn Hello"]}
           live={reachable}
         >
-          <Link
-            to="/routes/test"
-            className="az-btn az-btn--secondary az-btn--sm"
-          >
-            <Icon name="flask-conical" size={14} />
+          <LinkButton to="/routes/test" size="sm" icon="flask-conical">
             Test a number
-          </Link>
+          </LinkButton>
           <ThemeToggle />
         </Topbar>
         <main id="main" className="app-shell__main" tabIndex={-1}>

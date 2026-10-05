@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { json, ME, mockApi, renderApp } from "../test/api";
 
@@ -89,7 +89,7 @@ describe("CallDetail", () => {
     // The actions open the SIP trace and the route test for this call.
     expect(screen.getByRole("link", { name: "SIP trace" })).toHaveAttribute(
       "href",
-      "/diagnostics?tab=trace",
+      "/diagnostics?tab=trace&call=77",
     );
     expect(
       screen.getByRole("link", { name: "Re-test this number" }),
@@ -173,5 +173,38 @@ describe("CallDetail", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Call 77" }),
     ).toBeVisible();
+  });
+
+  it("re-tests an inbound call from the trunk it arrived on", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/80": () =>
+        json({
+          ...BASE,
+          id: 80,
+          direction: "inbound",
+          source: "+971501112233",
+          originalDestination: "+97142009999",
+          trunk: "carrier-primary",
+          finalStatus: 200,
+          trace: [],
+        }),
+      "GET /api/v1/trunks": () =>
+        json({ items: [{ id: 4, name: "carrier-primary" }] }),
+    });
+    renderApp("/history/80");
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("link", { name: "Re-test this number" }),
+      ).toHaveAttribute(
+        "href",
+        "/routes/test?from=trunk%3A4&number=%2B97142009999",
+      ),
+    );
+    expect(screen.getByRole("link", { name: "SIP trace" })).toHaveAttribute(
+      "href",
+      "/diagnostics?tab=trace&call=80",
+    );
   });
 });

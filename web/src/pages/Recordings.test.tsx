@@ -121,7 +121,7 @@ describe("Recordings", () => {
       within(dialog).getByRole("button", { name: "Delete recording" }),
     );
     expect(
-      await screen.findByText("Recording corr-31 deleted"),
+      await screen.findByText("Recording corr-31 deleted."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("row", { name: /corr-31/ })).toBeNull();
     expect(calls).toContainEqual({

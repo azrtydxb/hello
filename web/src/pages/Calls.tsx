@@ -9,6 +9,8 @@ import {
   Alert,
   Badge,
   EmptyState,
+  LiveTag,
+  PageHeader,
   Spinner,
   Table,
   type TableColumn,
@@ -18,9 +20,7 @@ import {
   callDuration,
   callState,
   clock,
-  LiveMarker,
   mediaLabel,
-  PageHeader,
   Party,
   shortCallId,
   useExtensionNames,
@@ -126,8 +126,8 @@ export function Calls() {
       <PageHeader
         eyebrow="Activity"
         title="Active calls"
-        subtitle="Calls in progress on every SIP node, from live state in Valkey."
-        actions={<LiveMarker live={state.status === "ready"} />}
+        description="Calls in progress on every SIP node, from live state in Valkey."
+        actions={<LiveTag every="5 s" live={state.status === "ready"} />}
       />
       {state.status === "error" && (
         <Alert

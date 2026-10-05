@@ -8,7 +8,13 @@ export { Alert, type AlertProps, type Tone } from "./Alert";
 export { Avatar, type AvatarProps } from "./Avatar";
 export { Badge, type BadgeProps, type BadgeTone } from "./Badge";
 export { Button, type ButtonProps, type ButtonVariant } from "./Button";
+export { Checkbox, type CheckboxProps } from "./Checkbox";
 export { CodeBlock, type CodeBlockProps } from "./CodeBlock";
+export {
+  ConfirmDialog,
+  type ConfirmDialogProps,
+  useRestoreFocus,
+} from "./ConfirmDialog";
 export { Drawer, type DrawerProps } from "./Drawer";
 export { EmptyState, type EmptyStateProps } from "./EmptyState";
 export { Icon, type IconProps } from "./Icon";
@@ -16,6 +22,8 @@ export { IconButton, type IconButtonProps } from "./IconButton";
 export { Input, type InputProps } from "./Input";
 export { LineChart, type LineChartProps, type LineSeries } from "./LineChart";
 export { Logo, type LogoProps } from "./Logo";
+export { LinkButton, type LinkButtonProps } from "./LinkButton";
+export { LiveTag, type LiveTagProps } from "./LiveTag";
 export {
   Meter,
   type MeterProps,
@@ -23,6 +31,7 @@ export {
   type MeterTone,
 } from "./Meter";
 export { Modal, type ModalProps } from "./Modal";
+export { PageHeader, type PageHeaderProps } from "./PageHeader";
 export { ProductLogo, type Pillar, type ProductLogoProps } from "./ProductLogo";
 export {
   PropertyList,
@@ -49,6 +58,13 @@ export { StatCard, type StatCardProps } from "./StatCard";
 export { Switch, type SwitchProps } from "./Switch";
 export { Table, type TableColumn, type TableProps } from "./Table";
 export { type TabItem, Tabs, type TabsProps } from "./Tabs";
+export {
+  Toast,
+  TOAST_MS,
+  type ToastHandle,
+  type ToastProps,
+  useToast,
+} from "./Toast";
 export { Topbar, type TopbarProps } from "./Topbar";
 export {
   applyTheme,

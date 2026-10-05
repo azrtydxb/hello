@@ -30,7 +30,10 @@ import {
   type BadgeTone,
   EmptyState,
   LineChart,
+  LinkButton,
+  LiveTag,
   Meter,
+  PageHeader,
   SegmentedControl,
   Spinner,
   StatCard,
@@ -42,9 +45,6 @@ import {
   callDuration,
   callState,
   clock,
-  LinkButton,
-  LiveMarker,
-  PageHeader,
   Party,
   useExtensionNames,
   useNow,
@@ -74,8 +74,8 @@ export function trunkState(
   trunk: Trunk,
   status: TrunkStatus | undefined,
 ): { label: string; tone: BadgeTone } {
-  if (!trunk.enabled) return { label: "Disabled", tone: "neutral" };
-  if (!status) return { label: "Unknown", tone: "neutral" };
+  if (!trunk.enabled) return { label: "Disabled", tone: "outline" };
+  if (!status) return { label: "Status unknown", tone: "outline" };
   const total = status.destinations.length;
   const down = status.destinations.filter((d) => !d.up).length;
   if (trunk.mode === "registration") {
@@ -181,7 +181,7 @@ export function Dashboard() {
       <PageHeader
         eyebrow="Overview"
         title="Dashboard"
-        subtitle={
+        description={
           info ? (
             <>
               hello-control {/^\d/.test(info.version) ? "v" : ""}
@@ -210,7 +210,6 @@ export function Dashboard() {
         cluster={dataOf(cluster)}
         trunks={dataOf(trunks)}
         statuses={statuses}
-        onOpen={(path) => void navigate(path)}
       />
       <div className="calls-stats">
         <StatCard
@@ -277,7 +276,7 @@ export function Dashboard() {
               Active calls
               <Badge tone="neutral">{calls ? calls.length : "—"}</Badge>
             </h2>
-            <LiveMarker live={callsState.status === "ready"} />
+            <LiveTag every="5 s" live={callsState.status === "ready"} />
           </div>
           {callsState.status === "loading" && (
             <Spinner label="Loading active calls" />
@@ -425,31 +424,21 @@ export function HealthAlerts({
   cluster,
   trunks,
   statuses,
-  onOpen,
 }: {
   cluster?: ClusterStatus;
   trunks?: Trunk[];
   statuses?: TrunkStatus[];
-  onOpen: (path: string) => void;
 }) {
   const alerts: ReactNode[] = [];
   const openCluster = (
-    <button
-      type="button"
-      className="az-btn az-btn--secondary az-btn--sm"
-      onClick={() => onOpen("/cluster")}
-    >
+    <LinkButton to="/cluster" size="sm">
       Open cluster
-    </button>
+    </LinkButton>
   );
   const openTrunks = (
-    <button
-      type="button"
-      className="az-btn az-btn--secondary az-btn--sm"
-      onClick={() => onOpen("/trunks")}
-    >
+    <LinkButton to="/trunks" size="sm">
       Open trunks
-    </button>
+    </LinkButton>
   );
   if (cluster && !cluster.valkey.up) {
     alerts.push(

@@ -11,6 +11,7 @@ design system's own components.
 | `styles.css`                                        | Entry point: imports every token file and `components/components.css`. Loaded once in `main.tsx`.                                    | No (vendored) |
 | `tokens/*.css`                                      | `--az-*` tokens: colours, pillars, type, spacing, motion, icon font, fonts, base element styles.                                     | No (vendored) |
 | `components/components.css`                         | Every `az-*` component class.                                                                                                        | No (vendored) |
+| `components/hello.css`                              | Hello's additions for console patterns the bundle has no class for (`az-pagehead`, the paused LIVE dot). Tokens only.                | Yes           |
 | `assets/fonts/*.woff2`, `assets/icons/lucide.woff2` | Self-hosted Geist, Geist Mono, Instrument Sans and the Lucide icon font. No CDN.                                                     | No (vendored) |
 | `components/*.tsx`                                  | Typed React components, same markup and classes as the design system bundle (`_ds_bundle.js`, namespace `AzrtyDesignSystem_c1ca7a`). | Yes           |
 | `components/index.ts`                               | The only import path for pages.                                                                                                      | Yes           |
@@ -36,17 +37,22 @@ through `procoder format`, and keep the `az-` prefix and `--az-` token names.
   (`mono` on `Input`, `Table` columns, `PropertyList` items).
 - Motion is the design system's: 120/180/260 ms, ease-out, and
   `prefers-reduced-motion` is respected globally. Do not add animations.
-- `web/src/index.css` holds the pre-design page rules in `@layer legacy`; any
-  `az-` class beats them. When a page moves to design components, delete the
-  legacy rules it no longer uses.
+- `web/src/index.css` holds the few pre-design element defaults left, in
+  `@layer legacy`; any `az-` class beats them. Delete a rule once nothing
+  renders the bare element.
+- A page builds no local copy of a component listed here. If two pages need
+  the same piece, it moves into `components/` (matching the console design's
+  markup), gets exported from `index.ts` and listed below.
 
 ## Components
 
-`Alert`, `Avatar`, `Badge`, `Button`, `CodeBlock`, `Drawer`, `EmptyState`,
-`Icon`, `IconButton`, `Input`, `LineChart`, `Logo`, `Meter`, `Modal`,
-`ProductLogo`, `PropertyList`, `SegmentedControl`, `Select`, `Sidebar`
-(+ `SidebarNav`, `SidebarNavGroup`, `NavItemContent`, `navItemClassName`),
-`Sparkline`, `Spinner`, `StatCard`, `Switch`, `Table`, `Tabs`, `Topbar`.
+`Alert`, `Avatar`, `Badge`, `Button`, `Checkbox`, `CodeBlock`,
+`ConfirmDialog` (+ `useRestoreFocus`), `Drawer`, `EmptyState`, `Icon`,
+`IconButton`, `Input`, `LineChart`, `LinkButton`, `LiveTag`, `Logo`, `Meter`,
+`Modal`, `PageHeader`, `ProductLogo`, `PropertyList`, `SegmentedControl`,
+`Select`, `Sidebar` (+ `SidebarNav`, `SidebarNavGroup`, `NavItemContent`,
+`navItemClassName`), `Sparkline`, `Spinner`, `StatCard`, `Switch`, `Table`,
+`Tabs`, `Toast` (+ `useToast`), `Topbar`.
 
 ```tsx
 import { Alert, Button, Input, Table } from "../design/azrty/components";
@@ -61,6 +67,27 @@ import { Alert, Button, Input, Table } from "../design/azrty/components";
   rowKey={(e) => e.id}
 />
 ```
+
+### Console patterns
+
+Every page follows the same patterns, from `Kuvryn Hello Console.dc.html`:
+
+| Pattern              | Use                                                                                                                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Page header          | `<PageHeader eyebrow="Directory" title="Extensions" description="…" actions={…} />`, the page's only `h1` (`id="page-title"`, so the page is `<section aria-labelledby="page-title">`). `back` replaces the eyebrow with a back link on a detail page. |
+| Live views           | `<LiveTag every="5 s" live={state.status === "ready"} />` in the header actions; PAUSED when a refresh failed.                                                                                                                                         |
+| Loading              | `<Spinner label="Loading trunks…" />` (role="status").                                                                                                                                                                                                 |
+| Load failure         | `<Alert tone="bad" title="Could not load trunks">{message}</Alert>`; titles carry no full stop.                                                                                                                                                        |
+| Empty list           | `<EmptyState icon="…" title="No trunks yet" description="…" action={…} />`; "No X match" when a filter hides everything.                                                                                                                               |
+| Unknown value        | "—", never 0 or a blank. A badge says "Status unknown".                                                                                                                                                                                                |
+| After a change       | One toast, a sentence with a full stop: `const toast = useToast(); toast.show("Trunk carrier-primary saved.")`, and render `{toast.node}` once in the page.                                                                                            |
+| Destructive action   | `<ConfirmDialog title="Delete trunk X?" description="…" confirmLabel="Delete trunk" onConfirm={…} onClose={…} />`. Cancel has focus first; a rejection stays in the dialog. Draining a node keeps the design's in-place confirmation.                  |
+| Link to another page | `<LinkButton to="/routes/test?from=101&number=112">`, never a button that navigates. The receiving page honours the query (see below).                                                                                                                 |
+
+Query parameters pages honour: `/extensions?new=1` opens New extension;
+`/routes/test?from=<extension or trunk:id>&number=` fills the tester and runs
+it when both are given; `/routes?tab=inbound`; `/history?tab=failed`;
+`/diagnostics?tab=trace&call=<cdr id>` and `?tab=reg&device=<id>`.
 
 Icons are Lucide names (`<Icon name="phone-call" />`); the full list is in
 `tokens/icons.css`. Decorative icons are `aria-hidden`; pass `label` when an
@@ -79,8 +106,7 @@ One source of truth: `data-theme="dark" | "light"` on `<html>`, set by
 `ThemeProvider` (in `App`) and before first paint in `main.tsx`. Dark is the
 default; the viewer's choice is stored in `localStorage` under `hello.theme`
 (wrapped in try/catch). The pillar is fixed: `data-pillar="operate"` on
-`<html>`. The legacy page variables in `index.css` (`--bg`, `--text`, …) are
-aliases of `--az-*` tokens, so un-migrated pages follow the same switch.
+`<html>`.
 
 Use `useTheme()` to read or set it, `<ThemeToggle />` for the Dark/Light
 control. Never read `prefers-color-scheme` in a page.

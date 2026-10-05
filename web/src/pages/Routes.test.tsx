@@ -339,7 +339,7 @@ describe("Routes", () => {
     renderApp("/routes?tab=inbound");
 
     expect(
-      await screen.findByText("Could not load the trunk list."),
+      await screen.findByText("Could not load the trunk list"),
     ).toBeVisible();
     fireEvent.click(await screen.findByRole("button", { name: "Edit Main" }));
 
@@ -413,14 +413,11 @@ describe("Routes", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Create route" }));
 
+    // The toast says the create landed; the table then holds the route.
     expect(
-      // The runner is slow; the default 5s wait flaked in CI.
-      await screen.findByRole(
-        "row",
-        { name: /Office hours/ },
-        { timeout: 15000 },
-      ),
+      await screen.findByText("Route Office hours created."),
     ).toBeVisible();
+    expect(screen.getByRole("row", { name: /Office hours/ })).toBeVisible();
     expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
       name: "Office hours",
       didKind: "exact",

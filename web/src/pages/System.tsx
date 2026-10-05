@@ -20,26 +20,33 @@ import {
 import {
   Alert,
   Badge,
+  type BadgeTone,
   Button,
+  ConfirmDialog,
   EmptyState,
   Icon,
   IconButton,
   Input,
+  LiveTag,
   Modal,
+  PageHeader,
   Select,
-  type BadgeTone,
+  Spinner,
+  useToast,
 } from "../design/azrty/components";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import { ago } from "./platform/health";
-import { LiveTag, PageHeader, useToast } from "./platform/ui";
+import "./platform/platform.css";
 
 /** System: feature codes, live presence and API tokens. */
 export function System() {
-  const [toast, showToast] = useToast();
+  const toast = useToast();
+  const showToast = toast.show;
   return (
     <section aria-labelledby="page-title">
       <PageHeader
+        eyebrow="Platform"
         title="System"
         description="Feature codes, live presence and API tokens."
       />
@@ -50,7 +57,7 @@ export function System() {
           <Tokens showToast={showToast} />
         </div>
       </div>
-      {toast}
+      {toast.node}
     </section>
   );
 }
@@ -165,13 +172,9 @@ function FeatureCodes({ onSaved }: { onSaved: () => void }) {
           DND on. Saving replaces the whole list.
         </p>
       </div>
-      {list.status === "loading" && (
-        <p role="status" aria-live="polite" className="pf-muted">
-          Loading feature codes…
-        </p>
-      )}
+      {list.status === "loading" && <Spinner label="Loading feature codes…" />}
       {list.status === "error" && (
-        <Alert tone="bad" title="Could not load the feature codes.">
+        <Alert tone="bad" title="Could not load the feature codes">
           {list.message}
         </Alert>
       )}
@@ -296,15 +299,11 @@ function Presence() {
         </h2>
         <LiveTag live={presence.status === "ready"} />
       </div>
-      {presence.status === "loading" && (
-        <p role="status" aria-live="polite" className="pf-muted">
-          Loading presence…
-        </p>
-      )}
+      {presence.status === "loading" && <Spinner label="Loading presence…" />}
       {presence.status === "error" && (
         <Alert
           tone="bad"
-          title={presence.data ? "Refresh failed." : "Could not load presence."}
+          title={presence.data ? "Refresh failed" : "Could not load presence"}
         >
           {presence.message}
         </Alert>
@@ -379,13 +378,9 @@ function Tokens({ showToast }: { showToast: (message: string) => void }) {
           New token
         </Button>
       </div>
-      {state.status === "loading" && (
-        <p role="status" aria-live="polite" className="pf-muted">
-          Loading tokens…
-        </p>
-      )}
+      {state.status === "loading" && <Spinner label="Loading tokens…" />}
       {state.status === "error" && (
-        <Alert tone="bad" title="Could not load API tokens.">
+        <Alert tone="bad" title="Could not load API tokens">
           {state.message}
         </Alert>
       )}
@@ -435,14 +430,19 @@ function Tokens({ showToast }: { showToast: (message: string) => void }) {
         <CreatedTokenModal token={created} onClose={() => setCreated(null)} />
       )}
       {revoking && (
-        <RevokeModal
-          token={revoking}
-          onClose={() => setRevoking(null)}
-          onRevoked={() => {
+        <ConfirmDialog
+          title={`Revoke ${revoking.name}?`}
+          description="Requests with this token are refused from now on."
+          confirmLabel="Revoke token"
+          confirmIcon="key-round"
+          errorTitle="Could not revoke the token"
+          onConfirm={async () => {
+            await deleteToken(revoking.id);
             showToast(`Token ${revoking.name} revoked.`);
             setRevoking(null);
             reload();
           }}
+          onClose={() => setRevoking(null)}
         />
       )}
     </div>
@@ -565,57 +565,6 @@ function CreatedTokenModal({
           Copy
         </Button>
       </div>
-    </Modal>
-  );
-}
-
-function RevokeModal({
-  token,
-  onClose,
-  onRevoked,
-}: {
-  token: ApiToken;
-  onClose: () => void;
-  onRevoked: () => void;
-}) {
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  async function revoke() {
-    setBusy(true);
-    setError(null);
-    try {
-      await deleteToken(token.id);
-      onRevoked();
-    } catch (err) {
-      setError(errorMessage(err));
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal
-      title={`Revoke ${token.name}?`}
-      description="Requests with this token are refused from now on."
-      onClose={onClose}
-      actions={
-        <>
-          <Button variant="secondary" onClick={onClose} autoFocus>
-            Keep token
-          </Button>
-          <Button
-            variant="danger"
-            disabled={busy}
-            onClick={() => void revoke()}
-          >
-            Revoke token
-          </Button>
-        </>
-      }
-    >
-      {error && (
-        <Alert tone="bad" title="Could not revoke the token">
-          {error}
-        </Alert>
-      )}
     </Modal>
   );
 }
