@@ -3354,7 +3354,8 @@
           "enabled",
           "createdAt",
           "updatedAt",
-          "secret"
+          "secret",
+          "sipDomain"
         ],
         "properties": {
           "id": {
@@ -3385,6 +3386,11 @@
             "type": "string",
             "description": "24 random bytes, base64url without padding. Shown only once.",
             "example": "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          "sipDomain": {
+            "type": "string",
+            "description": "The SIP domain (digest realm, HELLO_SIP_DOMAIN) the secret is valid for: what the phone uses as its domain.",
+            "example": "pbx.hello.lab"
           }
         }
       },
@@ -3490,7 +3496,8 @@
           "state",
           "node",
           "media",
-          "startedAt"
+          "startedAt",
+          "ha"
         ],
         "properties": {
           "id": {
@@ -3516,6 +3523,11 @@
           "media": {
             "type": "string",
             "example": "direct"
+          },
+          "ha": {
+            "type": "string",
+            "enum": ["owned", "taken-over"],
+            "description": "In-call HA state: owned while the node that set the call up carries it; taken-over once a surviving node re-homed the call after its owner died"
           },
           "startedAt": {
             "type": "string",

@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -100,17 +101,45 @@ func (c *call) startVoicemail(mode int, reason string) {
 	if !c.answerSelf(answer) {
 		return
 	}
+	if sess != nil && s.deps.HAState != nil {
+		// The voicemail call replicates like any (incall-ha S-5): a taker
+		// re-INVITEs the caller onto its own anchor and restarts the
+		// application from the greeting.
+		c.haSoloRefresh(string(answer))
+		c.mu.Lock()
+		c.haPhase, c.haDetail = haPhaseVoicemail, voicemailDetail(mode, reason, c.dialled)
+		c.mu.Unlock()
+		go c.haLoop()
+	}
 	go c.voicemailFlow(mode, reason, sess)
 }
 
 // answerAnchored binds the media anchor for this call and builds the answer
 // SDP from the caller's offer.
 func (s *Server) answerAnchored(offer []byte) ([]byte, media.Session, error) {
-	anchor := s.anchor.Load()
+	anchor := s.voicemailAnchor(offer)
 	if s.deps.Objects == nil || anchor == nil {
 		return nil, nil, errors.New("voicemail media disabled")
 	}
 	return anchor.Answer(offer)
+}
+
+// voicemailAnchor is the node's media anchor; without an advertised anchor
+// host (HELLO_MEDIA_ANCHOR_HOST unset, as in the lab) it advertises the
+// offer's own address, the way the relay mirrors it (anchorHostOr), so
+// voicemail still records. nil when neither gives an address.
+func (s *Server) voicemailAnchor(offer []byte) *media.Anchor {
+	if a := s.anchor.Load(); a != nil {
+		return a
+	}
+	off, err := media.ParseAudioSDP(offer)
+	if err != nil {
+		return nil
+	}
+	if ip := net.ParseIP(off.Address); ip == nil || ip.To4() == nil {
+		return nil
+	}
+	return media.NewAnchor(off.Address, s.log)
 }
 
 // answerSelf connects a call with no B leg (voicemail, feature codes):
@@ -183,6 +212,11 @@ func (c *call) vmCtx() (context.Context, context.CancelFunc) {
 // by the StateTimeout discipline.
 func (c *call) voicemailFlow(mode int, reason string, sess media.Session) {
 	defer contain(c.s.log, "voicemail flow")
+	if sess != nil {
+		// The application owns the session's socket: it closes once the
+		// message is stored (or the retrieval is over).
+		defer func() { _ = sess.Close() }()
+	}
 	ctx, cancel := c.vmCtx()
 	defer cancel()
 	box := c.boxDetails()
@@ -479,7 +513,7 @@ func (s *Server) sendMWI(ext string) {
 	if s.deps.Voicemails == nil {
 		return
 	}
-	s.bg.Go(func() {
+	s.goBG(func() {
 		defer contain(s.log, "MWI")
 		ctx, cancel := context.WithTimeout(context.Background(), 2*s.cfg.StateTimeout)
 		defer cancel()

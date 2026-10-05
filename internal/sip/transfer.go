@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo"
@@ -48,7 +49,13 @@ func (s *Server) handleRefer(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, sip.StatusBadRequest, "Bad Request")
 		return
 	}
-	c.noteHAState(haPhaseTransferring, "") // a transfer's dialog is being rewired
+	// A transfer's dialogs are being rewired; the detail names the dialog
+	// the REFER came on, so a taker can tell that transferor it failed.
+	referSide := "caller"
+	if ref.leg != nil {
+		referSide = "callee"
+	}
+	c.noteHAState(haPhaseTransferring, haReferDetailPrefix+referSide)
 	// The transfer target is the URI's user part: an extension number or an
 	// external number, routed as the transferee would dial it.
 	var tu sip.Uri
@@ -141,12 +148,14 @@ func (c *call) transferBlindVia(transfereeExt, target, kind string, viaLeg *leg)
 		c.addTrace("Transfer refused: target is the transferee")
 		s.m.Transfers.WithLabelValues(kind, TransferFailed).Inc()
 		notify("SIP/2.0 403 Forbidden", true)
+		c.noteHAState("", "")
 		return
 	}
 	notify("SIP/2.0 100 Trying", false)
 	snap := s.deps.Snapshots.Current()
 	if snap == nil {
 		notify("SIP/2.0 503 Service Unavailable", true)
+		c.noteHAState("", "")
 		return
 	}
 	c2, legs, ok := c.originateFor(target, snap)
@@ -154,6 +163,7 @@ func (c *call) transferBlindVia(transfereeExt, target, kind string, viaLeg *leg)
 		c.addTrace(fmt.Sprintf("Transfer to %s failed: nothing to ring", target))
 		s.m.Transfers.WithLabelValues(kind, TransferFailed).Inc()
 		notify("SIP/2.0 404 Not Found", true)
+		c.noteHAState("", "")
 		return
 	}
 	c2.transferNotify = notify
@@ -265,6 +275,10 @@ func (c2 *call) awaitTransfer(from *call, w *leg, legs []*leg, kind, transfereeE
 					c2.mu.Unlock()
 				}
 				from.end(sip.StatusOK, cdr.SideCallee, kind+" transfer", ResultAnswered)
+				// The transferred call replicates from here on (incall-ha
+				// S-5): after from.end, whose record deletion shares the
+				// caller dialog's key.
+				c2.haStart()
 				s.noteCallEnd(from.callerNum, c2.dialled)
 				s.m.Transfers.WithLabelValues(kind, TransferAnswered).Inc()
 				c2.addTrace(fmt.Sprintf("Transferred call answered by %s; transferee %s released", c2.dialled, transfereeExt))
@@ -316,6 +330,7 @@ func (c2 *call) transferFailed(from *call, w *leg, kind string, code int) {
 	s.mu.Unlock()
 	c2.addTrace(fmt.Sprintf("Transfer to %s failed: %d", c2.dialled, code))
 	s.m.Transfers.WithLabelValues(kind, TransferFailed).Inc()
+	from.noteHAState("", "") // the original call talks on, untransferred
 	if from.transferNotify != nil {
 		from.transferNotify(fmt.Sprintf("SIP/2.0 %d %s", code, statusText(code)), true)
 		return
@@ -326,6 +341,9 @@ func (c2 *call) transferFailed(from *call, w *leg, kind string, code int) {
 // handOver moves the caller's media from the transferee's leg to the new
 // leg: the bridge sequence of re-INVITEs, each answering the other.
 func (c2 *call) handOver(from *call, l *leg) {
+	if c2.handOverAnchored(from, l) {
+		return
+	}
 	aSDP := from.inv.Body()
 	if len(aSDP) == 0 {
 		aSDP = l.session().InviteResponse.Body()
@@ -389,10 +407,17 @@ func (c *call) notifyReferDialog(inv *sip.Request, res *sip.Response, fragment s
 	req.AppendHeader(from)
 	req.AppendHeader(to)
 	req.AppendHeader(&callID)
-	req.AppendHeader(&sip.CSeqHeader{SeqNo: res.CSeq().SeqNo + 1, MethodName: sip.NOTIFY})
+	seq := res.CSeq().SeqNo + 1
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: seq, MethodName: sip.NOTIFY})
 	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
 	req.AppendHeader(sip.HeaderClone(&s.contact))
 	req.AppendHeader(sip.NewHeader("Event", "refer"))
+	// The NOTIFY's CSeq is outside sipgo's dialog counters: a taker's
+	// requests on this dialog must continue past it.
+	s.noteSentCSeq(callID.Value(), seq)
+	if s.deps.HAState != nil {
+		go c.replicate()
+	}
 	req.AppendHeader(sip.NewHeader("Subscription-State", state))
 	req.AppendHeader(sip.NewHeader("Content-Type", "message/sipfrag"))
 	req.SetBody([]byte(fragment + "\r\n"))
@@ -442,6 +467,7 @@ func (c *call) attendedReplaces(w *leg, target, replaces string, viaCaller bool)
 	if !ok || ref.c == c {
 		c.addTrace("Attended transfer: unknown Replaces call")
 		c.notifyRefer(w, "SIP/2.0 481 Call/Transaction Does Not Exist", true)
+		c.noteHAState("", "")
 		return
 	}
 	other := ref.c
@@ -469,6 +495,7 @@ func (c *call) attendedReplaces(w *leg, target, replaces string, viaCaller bool)
 	notify("SIP/2.0 100 Trying", false)
 	if !c.bridge(other) {
 		notify("SIP/2.0 488 Not Acceptable Here", true)
+		c.noteHAState("", "")
 		return
 	}
 	s.m.Transfers.WithLabelValues(TransferAttended, TransferAnswered).Inc()
@@ -489,24 +516,29 @@ func (c *call) bridge(other *call) bool {
 	if wB == nil || wA == nil {
 		return false
 	}
-	aSDP := other.inv.Body()
-	if len(aSDP) == 0 {
-		// Late offer: the caller's answer lives in the ACK; use the leg's
-		// negotiated SDP both ways (the phones renegotiate).
-		aSDP = wA.session().InviteResponse.Body()
-	}
-	// 1. re-INVITE C (the second party's leg) with A's SDP as the offer.
-	cSDP, ok := reinvite(wB.session(), aSDP)
-	if !ok {
+	relay, anchoredOK := other.bridgeAnchored(wB)
+	if relay == nil && !anchoredOK {
+		aSDP := other.inv.Body()
+		if len(aSDP) == 0 {
+			// Late offer: the caller's answer lives in the ACK; use the leg's
+			// negotiated SDP both ways (the phones renegotiate).
+			aSDP = wA.session().InviteResponse.Body()
+		}
+		// 1. re-INVITE C (the second party's leg) with A's SDP as the offer.
+		cSDP, ok := reinvite(wB.session(), aSDP)
+		if !ok {
+			return false
+		}
+		// 2. re-INVITE A (the original caller) with C's answer.
+		aAns, ok := reinviteA(other.dss, cSDP)
+		if !ok {
+			return false
+		}
+		// 3. C's ACK carries A's answer.
+		ackLate(wB.session(), aAns)
+	} else if !anchoredOK {
 		return false
 	}
-	// 2. re-INVITE A (the original caller) with C's answer.
-	aAns, ok := reinviteA(other.dss, cSDP)
-	if !ok {
-		return false
-	}
-	// 3. C's ACK carries A's answer.
-	ackLate(wB.session(), aAns)
 	// 4. Build the bridged call that now owns A's dialog and C's leg.
 	c3 := s.newCall(other.inv)
 	c3.callID = other.callID
@@ -521,6 +553,11 @@ func (c *call) bridge(other *call) bool {
 	c3.connected = true
 	c3.answerTime = time.Now()
 	c3.mu.Unlock()
+	if relay != nil {
+		// The bridged call keeps A's anchor: the relay moves from the
+		// original call (whose end must not close it) to the bridge.
+		c3.adoptRelay(other, relay)
+	}
 	s.mu.Lock()
 	s.dialogs[other.callID] = dialogRef{c: c3}
 	s.dialogs[wB.callID] = dialogRef{c: c3, leg: wB}
@@ -546,6 +583,10 @@ func (c *call) bridge(other *call) bool {
 	s.m.ActiveCalls.Inc()
 	c3.publish()
 	go c3.heartbeat()
+	// The bridged call replicates from here on (incall-ha S-5, the bridged
+	// half): after both originals ended, whose record deletions share its
+	// caller dialog's key.
+	c3.haStart()
 	if h := s.answerHook.Load(); h != nil {
 		(*h)()
 	}
@@ -664,4 +705,109 @@ func byeDialog(s *Server, dss *sipgo.DialogServerSession) {
 		return
 	}
 	s.m.response(res.StatusCode)
+}
+
+// handOverAnchored keeps an anchored call anchored across a blind transfer
+// (always-anchor, S-7; incall-ha S-5): the transferred call inherits the
+// original call's relay. The caller already sends to the relay's caller
+// port; the target is re-INVITEd onto its callee port, and the caller is
+// refreshed with its own port in sendrecv (a transferor's hold is over).
+// false leaves the hand-over to the direct path (the call was not
+// anchored).
+func (c2 *call) handOverAnchored(from *call, l *leg) bool {
+	from.mu.Lock()
+	relay, host := from.relay, from.anchorHost
+	if relay == nil || !from.anchored {
+		from.mu.Unlock()
+		return false
+	}
+	from.mu.Unlock()
+	off, err := media.ParseAudioSDP(from.inv.Body())
+	if err != nil {
+		if off, err = media.ParseAudioSDP(l.session().InviteResponse.Body()); err != nil {
+			return false
+		}
+	}
+	c2.mu.Lock()
+	c2.anchorHost = host
+	c2.mu.Unlock()
+	c2.adoptRelay(from, relay)
+	cOffer := media.BuildAudioSDP(host, relay.LegPort(legCallee), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
+	cAns, ok := reinvite(l.session(), cOffer)
+	if !ok {
+		c2.addTrace("Transferred leg re-INVITE onto the anchor failed; its media follows the original offer")
+		return true
+	}
+	ackLate(l.session(), nil)
+	haAim(relay, legCallee, cAns)
+	aOffer := media.BuildAudioSDP(host, relay.LegPort(legCaller), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
+	if aAns, ok := reinviteA(from.dss, aOffer); ok {
+		haAim(relay, legCaller, aAns)
+	}
+	c2.addTrace("Caller media handed to the transferred leg through the anchor")
+	return true
+}
+
+// bridgeAnchored re-points an anchored original call's relay at the
+// attended transfer's second party (wB): C is re-INVITEd onto the relay's
+// callee port and A refreshed with its own caller port in sendrecv, so the
+// bridged call stays anchored. relay is nil when the call is not anchored
+// (the direct bridge runs instead); ok is false when C refused.
+func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
+	other.mu.Lock()
+	relay, host, anchored := other.relay, other.anchorHost, other.anchored
+	other.mu.Unlock()
+	if relay == nil || !anchored {
+		return nil, false
+	}
+	off, err := media.ParseAudioSDP(other.inv.Body())
+	if err != nil {
+		return nil, false
+	}
+	cOffer := media.BuildAudioSDP(host, relay.LegPort(legCallee), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
+	cAns, ok := reinvite(wB.session(), cOffer)
+	if !ok {
+		return relay, false
+	}
+	ackLate(wB.session(), nil)
+	haAim(relay, legCallee, cAns)
+	aOffer := media.BuildAudioSDP(host, relay.LegPort(legCaller), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
+	if aAns, ok := reinviteA(other.dss, aOffer); ok {
+		haAim(relay, legCaller, aAns)
+	}
+	return relay, true
+}
+
+// adoptRelay moves an anchored call's relay to c: the original call's end
+// no longer closes it (closeMedia sees no relay), its taps report to c, and
+// the media metrics keep counting one anchored session.
+func (c *call) adoptRelay(from *call, relay *media.Relay) {
+	from.mu.Lock()
+	if from.relay == relay {
+		from.relay = nil
+		from.anchored = false
+	}
+	reason, host := from.anchorReason, from.anchorHost
+	from.mu.Unlock()
+	relay.OnPacket(c.recTap)
+	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
+	c.mu.Lock()
+	c.relay, c.anchored, c.anchorReason = relay, true, reason
+	if c.anchorHost == "" {
+		c.anchorHost = host
+	}
+	c.mediaMode = "anchored"
+	c.rec = &recording{}
+	c.haDirs = [2]string{}
+	c.mu.Unlock()
+}
+
+// haStart begins replicating a call that came out of a transfer: the
+// dialog snapshot, then the replication heartbeat.
+func (c *call) haStart() {
+	if c.s.deps.HAState == nil || !c.isAnchored() {
+		return
+	}
+	c.haRefresh()
+	go c.haLoop()
 }

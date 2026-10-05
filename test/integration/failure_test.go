@@ -9,12 +9,14 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/test/sipua"
 )
 
@@ -387,11 +389,12 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	// OFFLINE 15s after its last heartbeat, so the jittered 1-3s poll, the
 	// claim and the re-INVITEs land well inside 30s of the kill.
 	var rehomed time.Time
+	var ha string
 	deadline := killed.Add(30 * time.Second)
 	for rehomed.IsZero() && time.Now().Before(deadline) {
 		for _, c := range lc.calls() {
 			if c.To == ext && c.Node == taker {
-				rehomed = time.Now()
+				rehomed, ha = time.Now(), c.HA
 			}
 		}
 		time.Sleep(250 * time.Millisecond)
@@ -424,11 +427,18 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 		t.Fatalf("the call was not taken over by %s within 30s of the kill", taker)
 	}
 	t.Logf("takeover completed %s after the kill", rehomed.Sub(killed).Round(time.Millisecond))
+	// The live view marks the call taken over (spec S-6).
+	if ha != livestate.HATakenOver {
+		t.Fatalf("live view ha = %q on the taker, want %q", ha, livestate.HATakenOver)
+	}
 	// Both endpoints saw the takeover re-INVITE (the phone answered it).
 	if rehomed.Sub(killed) > 6*time.Second {
 		t.Logf("the re-home took %s; the endpoints' answers were the slow part", rehomed.Sub(killed))
 	}
 	for _, p := range []*sipua.Phone{a, b} {
+		if p == nil {
+			continue // a one-legged call (voicemail) has no second phone
+		}
 		select {
 		case <-p.Reinvites():
 		case <-time.After(5 * time.Second):
@@ -456,14 +466,27 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	// The CDR closed answered, and the taker counted the takeover without
 	// zombies (the honesty flags, spec S-6; the taken-over mark itself is
 	// asserted on the trace in internal/sip's takeover tests).
+	var closed labCDR
 	eventually(t, 30*time.Second, "the takeover call's CDR closed answered", func() error {
 		for _, c := range lc.cdrsTo(ext) {
-			if c.FinalStatus == 200 && c.BillableMs > 0 {
+			if c.FinalStatus == 200 && c.BillableMs > 0 && c.SIPNode == taker {
+				closed = c
 				return nil
 			}
 		}
 		return errors.New("no answered CDR yet")
 	})
+	// The CDR carries the takeover mark, with the media gap the taker
+	// measured from its claim to both endpoints re-homed: at most 3s (spec
+	// S-4, S-6).
+	gap, ok := takeoverGap(lc.cdrTrace(closed.ID))
+	if !ok {
+		t.Fatalf("CDR %d trace lacks the takeover mark: %v", closed.ID, lc.cdrTrace(closed.ID))
+	}
+	t.Logf("media gap from the claim: %s", gap)
+	if gap > 3*time.Second {
+		t.Fatalf("media gap %s > 3s", gap)
+	}
 	m := nodeMetrics(t, taker)
 	if m["hello_dialog_takeovers_total"] < 1 {
 		t.Fatalf("hello_dialog_takeovers_total = %v on %s", m["hello_dialog_takeovers_total"], taker)
@@ -471,6 +494,21 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	if z := m["hello_zombie_calls_total"]; z != 0 {
 		t.Fatalf("hello_zombie_calls_total = %v, want 0", z)
 	}
+}
+
+// takeoverGapRe reads the taker's trace step: "ha: taken over from <node>
+// in <d> (media gap <d>)".
+var takeoverGapRe = regexp.MustCompile(`^ha: taken over from \S+ in \S+ \(media gap ([^)]+)\)$`)
+
+// takeoverGap finds the takeover step in a CDR trace and its media gap.
+func takeoverGap(trace []string) (time.Duration, bool) {
+	for _, s := range trace {
+		if m := takeoverGapRe.FindStringSubmatch(s); m != nil {
+			d, err := time.ParseDuration(m[1])
+			return d, err == nil
+		}
+	}
+	return 0, false
 }
 
 // nodeMetrics scrapes a node's Prometheus endpoint into a name->value map.
@@ -631,6 +669,54 @@ func TestHonestyFlags(t *testing.T) {
 	_ = b
 }
 
+// TestKillSIPNodeDuringVoicemail fails if a caller in voicemail is lost
+// with its node (spec S-5, edge case "mid-voicemail-prompt"): the survivor
+// must take the one-legged call over end to end — re-INVITE the caller
+// through Kamailio onto its own media anchor, list the call taken over,
+// restart the application, accept the caller's hangup through Kamailio's
+// in-dialog reroute, close the CDR answered with the takeover mark, and
+// count no zombie.
+func TestKillSIPNodeDuringVoicemail(t *testing.T) {
+	lc := newLabClient(t)
+	caller := lc.devices("desk")[0]
+	a := kamPhone(t, caller)
+	// An extension with no device: its fresh voicemail box answers.
+	box := "7" + randDigits(7)
+	lc.must("POST", "/api/v1/extensions", map[string]string{"number": box, "name": "vm-ha"}, nil, 201)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	var out *sipua.Outgoing
+	eventually(t, 15*time.Second, "voicemail answers", func() error {
+		o, err := a.Dial(ctx, box, sdpOffer)
+		if err != nil {
+			return err
+		}
+		if o.Status != 200 {
+			return fmt.Errorf("dial %s = %d, want 200 from voicemail", box, o.Status)
+		}
+		out = o
+		return nil
+	})
+	node := callNode(t, lc, box)
+	other := otherNode(node)
+	t.Cleanup(func() { restore(t, lc, node) })
+	var callID string
+	eventually(t, 10*time.Second, "the voicemail call is replicated", func() error {
+		for _, c := range lc.calls() {
+			if c.To == box {
+				callID = c.SIPCallID
+			}
+		}
+		rec := valkeyCLI(t, "GET", "hello:dialog:"+callID)
+		if strings.Contains(rec, `"ownerNode":"`+node+`"`) && strings.Contains(rec, `"state":"voicemail"`) {
+			return nil
+		}
+		return fmt.Errorf("dialog record = %q", strings.TrimSpace(rec))
+	})
+	killed := kill(t, node)
+	takeoverAssertions(t, lc, a, nil, nil, out, box, other, killed, callID)
+}
+
 func TestDrainKeepsCallsAndExits(t *testing.T) {
 	lc := newLabClient(t)
 	caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
@@ -657,6 +743,39 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 	t.Cleanup(func() { restore(t, lc, node) })
 	// Runs first (LIFO): a node the test left draining comes back READY.
 	t.Cleanup(func() { undrain(lc, node) })
+	// A call still ringing is never handed off (it has no dialog yet): one
+	// ringing on the node keeps it alive through the drain checks below,
+	// until the ring timeout (10s), while the answered call is handed off.
+	ringer := lc.devices("desk")[0]
+	rp := kamPhone(t, ringer)
+	go func() {
+		if in, err := rp.Next(ctx); err == nil {
+			_ = in.Ring()
+		}
+	}()
+	dialer := phone(t, lc.devices("desk")[0], nodeHostPort[node])
+	// The new extensions reach the node with its next snapshot: until then
+	// the dial fails fast, and is placed again.
+	dialed := make(chan struct{})
+	close(dialed)
+	eventually(t, 20*time.Second, "a call ringing on "+node, func() error {
+		for _, c := range lc.calls() {
+			if c.To == ringer.Extension && c.Node == node {
+				return nil
+			}
+		}
+		select {
+		case <-dialed:
+			done := make(chan struct{})
+			dialed = done
+			go func() {
+				defer close(done)
+				_, _ = dialer.Dial(ctx, ringer.Extension, sdpOffer)
+			}()
+		default:
+		}
+		return errors.New("not ringing")
+	})
 	lc.must("POST", "/api/v1/cluster/nodes/"+node+"/drain?force=true", nil, nil, 204)
 	lc.waitState(node, "DRAINING", 10*time.Second)
 	// The spec's 15s starts when the node starts failing (503 or gone),
@@ -664,13 +783,13 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 	// seconds finishing its drain before it exits.
 	drained := time.Now()
 
-	// New work goes elsewhere: Kamailio marks the node inactive...
-	dispatcherInactiveBy(t, node, drained.Add(15*time.Second))
-	// ...an INVITE sent to it directly is refused...
+	// New work goes elsewhere: an INVITE sent to it directly is refused...
 	direct := phone(t, lc.devices("desk")[0], nodeHostPort[node])
 	if res, err := direct.Dial(ctx, callee.Extension, sdpOffer); err != nil || res.Status != 503 {
 		t.Fatalf("INVITE straight to the draining node = %+v, %v; want 503", res, err)
 	}
+	// ...Kamailio marks the node inactive...
+	dispatcherInactiveBy(t, node, drained.Add(15*time.Second))
 	// ...new registrations land on the other node...
 	for range 4 {
 		d := lc.devices("desk")[0]
@@ -687,18 +806,39 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 		}
 		return nil
 	})
-	// The draining node keeps the call and does not exit while it lasts.
-	if !callListedOn(lc, node) || containerState(t, node) != "running" {
-		t.Fatal("draining node dropped its call or exited early")
+	// In-call HA hands the call to the READY node instead of keeping it
+	// until it ends (handoff on drain): it re-homes there, marked taken
+	// over, without being dropped, and the drained node exits.
+	eventually(t, 20*time.Second, "the call handed off to "+other, func() error {
+		for _, c := range lc.calls() {
+			if c.To == callee.Extension && c.Node == other && c.HA == livestate.HATakenOver {
+				return nil
+			}
+		}
+		return errors.New("not handed off")
+	})
+	select {
+	case <-in.Ended():
+		t.Fatal("the handoff dropped the call")
+	default:
 	}
-	if err := in.Hangup(ctx); err != nil {
-		t.Fatalf("hang up the drained node's call: %v", err)
-	}
-	eventually(t, 30*time.Second, "drained node exits after its last call", func() error {
+	eventually(t, 30*time.Second, "drained node exits once its call is handed off", func() error {
 		if s := containerState(t, node); s == "running" {
 			return errors.New("still running")
 		}
 		return nil
+	})
+	// The call still ends normally, now on the survivor.
+	if err := in.Hangup(ctx); err != nil {
+		t.Fatalf("hang up the handed-off call: %v", err)
+	}
+	eventually(t, 20*time.Second, "the caller's dialog ended", func() error {
+		select {
+		case <-out.Ended():
+			return nil
+		default:
+			return errors.New("still up")
+		}
 	})
 
 	// With a short drain timeout, a remaining call is hung up and the node
@@ -730,6 +870,16 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 	if n := callNode(t, lc, e2.Extension); n != node {
 		t.Fatalf("second call on %s, want %s", n, node)
 	}
+	// No READY node to hand the call to: the other node drains (and,
+	// call-free, exits), so the drain timeout is what ends this call.
+	// (409: it already exited call-free after its earlier drain.)
+	_ = lc.do("POST", "/api/v1/cluster/nodes/"+other+"/drain?force=true", nil, nil, 204)
+	eventually(t, 10*time.Second, other+" not READY", func() error {
+		if st := lc.memberState(other); st != "DRAINING" && st != "OFFLINE" {
+			return fmt.Errorf("state %s", st)
+		}
+		return nil
+	})
 	lc.must("POST", "/api/v1/cluster/nodes/"+node+"/drain?force=true", nil, nil, 204)
 	select {
 	case <-out2.Ended():
@@ -988,14 +1138,28 @@ func TestRollingUpgrade(t *testing.T) {
 		t.Fatal("the long call was dropped while the other node upgraded")
 	default:
 	}
-	// Upgrade the node with the call: it waits for the call, which the
-	// users end normally. A new call during the drain goes to the
-	// upgraded node.
+	// Upgrade the node with the call: it hands the call to the upgraded
+	// node (handoff on drain) and exits; the users end the call normally
+	// afterwards. A new call during the drain goes to the upgraded node.
 	rec = newRecovery(t, lc)
 	drained = time.Now()
 	lc.must("POST", "/api/v1/cluster/nodes/"+withCall+"/drain?force=true", nil, nil, 204)
 	lc.waitState(withCall, "DRAINING", 10*time.Second)
 	rec.by(drained.Add(20 * time.Second))
+	eventually(t, 20*time.Second, "the long call handed off to "+first, func() error {
+		for _, c := range lc.calls() {
+			if c.To == callee.Extension && c.Node == first && c.HA == livestate.HATakenOver {
+				return nil
+			}
+		}
+		return errors.New("not handed off")
+	})
+	eventually(t, 30*time.Second, withCall+" exits once its call is handed off", func() error {
+		if containerState(t, withCall) == "running" {
+			return errors.New("still running")
+		}
+		return nil
+	})
 	select {
 	case <-in.Ended():
 		t.Fatal("draining dropped the long call")
@@ -1004,12 +1168,6 @@ func TestRollingUpgrade(t *testing.T) {
 	if err := out.Hangup(ctx); err != nil {
 		t.Fatalf("hang up the long call: %v", err)
 	}
-	eventually(t, 30*time.Second, withCall+" exits after the call", func() error {
-		if containerState(t, withCall) == "running" {
-			return errors.New("still running")
-		}
-		return nil
-	})
 	restore(t, lc, withCall)
 	newRecovery(t, lc).by(time.Now().Add(20 * time.Second))
 }
