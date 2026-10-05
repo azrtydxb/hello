@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { useSearchParams } from "react-router";
 import {
   createExtension,
   deleteExtension,
@@ -29,6 +29,7 @@ import {
   Drawer,
   EmptyState,
   Input,
+  LinkButton,
   Modal,
   PageHeader,
   Spinner,
@@ -108,8 +109,18 @@ export function Extensions() {
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Extension["id"] | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [params, setParams] = useSearchParams();
+  // ?new=1 (the Dashboard's "New extension") opens the New extension modal.
+  const [creating, setCreating] = useState(params.get("new") === "1");
   const toast = useToast();
+
+  useEffect(() => {
+    if (params.get("new") !== "1") return;
+    // Drop the flag so closing the modal or reloading does not reopen it.
+    const next = new URLSearchParams(params);
+    next.delete("new");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
   const liveState = usePolling(loadLiveDirectory, LIVE_REFRESH_MS);
   const live: LiveDirectory =
     liveState.status === "loading" ? {} : (liveState.data ?? {});
@@ -220,7 +231,12 @@ export function Extensions() {
         title="Extensions"
         description="Dialable numbers, their devices and call features."
         actions={
-          <Button icon="plus" onClick={() => setCreating(true)}>
+          // A create needs the list it lands in: enabled once it has loaded.
+          <Button
+            icon="plus"
+            disabled={list.status !== "ready"}
+            onClick={() => setCreating(true)}
+          >
             New extension
           </Button>
         }
@@ -312,7 +328,7 @@ export function Extensions() {
         />
       )}
 
-      {creating && (
+      {creating && list.status === "ready" && (
         <NewExtension
           onClose={() => setCreating(false)}
           onCreated={(ext) => {
@@ -453,7 +469,6 @@ function ExtensionDrawer({
   onSaved: (ext: Extension) => void;
   onDeleted: () => void;
 }) {
-  const navigate = useNavigate();
   const [draft, setDraft] = useState<Draft>({
     number: ext.number,
     name: ext.name,
@@ -697,15 +712,15 @@ function ExtensionDrawer({
                 );
               })}
             </ul>
-            <Button
+            <LinkButton
+              to="/devices"
               variant="ghost"
               size="sm"
               iconRight="arrow-right"
               className="dir-manage"
-              onClick={() => navigate("/devices")}
             >
               Manage devices
-            </Button>
+            </LinkButton>
           </section>
         </form>
       </Drawer>

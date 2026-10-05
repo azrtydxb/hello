@@ -1,5 +1,12 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { LIVE_REFRESH_MS } from "../usePolling";
 import { json, ME, mockApi, noContent, renderApp } from "../test/api";
 import { geometry } from "./Cluster";
 
@@ -59,6 +66,10 @@ async function openBox(title: string) {
 }
 
 describe("Cluster", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("draws every node with its state and load, and the dependencies", async () => {
     mockApi({
       ...ME,
@@ -218,19 +229,19 @@ describe("Cluster", () => {
           ]),
       ],
     });
+    // The poll's timer is driven by the test, not by the wall clock.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     renderApp("/cluster");
     await screen.findByRole("button", { name: "hello-sip-1: Ready" });
+
+    await act(() => vi.advanceTimersByTimeAsync(LIVE_REFRESH_MS));
     expect(
-      await screen.findByRole(
-        "button",
-        { name: "hello-sip-1: Unhealthy" },
-        { timeout: 6000 },
-      ),
+      await screen.findByRole("button", { name: "hello-sip-1: Unhealthy" }),
     ).toHaveTextContent("valkey unreachable");
     expect(
       calls.filter((c) => c.url === "/api/v1/cluster").length,
     ).toBeGreaterThanOrEqual(2);
-  }, 10000);
+  });
 
   it("drains a node only after an in-dialog confirmation", async () => {
     const calls = mockApi({
@@ -245,6 +256,8 @@ describe("Cluster", () => {
       ],
       [DRAIN_1]: noContent,
     });
+    // No poll fires on its own, so a second read is the re-read after drain.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     renderApp("/cluster");
 
     const dialog = await openBox("hello-sip-1");
@@ -263,13 +276,9 @@ describe("Cluster", () => {
     expect(calls.filter((c) => c.method === "POST").map((c) => c.url)).toEqual([
       "/api/v1/cluster/nodes/hello-sip-1/drain",
     ]);
-    // The page re-reads the cluster right away, well before the next poll.
-    await waitFor(
-      () =>
-        expect(box("hello-sip-1")).toHaveAccessibleName(
-          "hello-sip-1: Draining",
-        ),
-      { timeout: 2000 },
+    // The page re-reads the cluster right away, not at the next poll.
+    await waitFor(() =>
+      expect(box("hello-sip-1")).toHaveAccessibleName("hello-sip-1: Draining"),
     );
   });
 

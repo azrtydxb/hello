@@ -235,7 +235,11 @@ describe("Dashboard", () => {
     expect(screen.getByText("sbc1 down")).toBeVisible();
     expect(screen.getByText("hello-sip-2 unhealthy")).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open trunks" }));
+    fireEvent.click(
+      within(dest.closest(".az-alert") as HTMLElement).getByRole("link", {
+        name: "Open trunks",
+      }),
+    );
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/trunks$/);
   });
 
@@ -296,5 +300,20 @@ describe("Dashboard helpers", () => {
       "13:30",
       "15:00",
     ]);
+  });
+
+  it("opens the New extension modal from the header link", async () => {
+    mockApi({
+      ...routes(false),
+      "GET /api/v1/extensions": () => json({ items: [] }),
+    });
+    renderApp("/");
+
+    const link = await screen.findByRole("link", { name: "New extension" });
+    expect(link).toHaveAttribute("href", "/extensions?new=1");
+    fireEvent.click(link);
+    expect(
+      await screen.findByRole("dialog", { name: "New extension" }),
+    ).toBeVisible();
   });
 });

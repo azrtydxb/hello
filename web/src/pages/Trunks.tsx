@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router";
 import {
   createTrunk,
   deleteTrunk,
@@ -24,6 +23,7 @@ import {
   Icon,
   IconButton,
   Input,
+  LinkButton,
   Meter,
   PageHeader,
   type Property,
@@ -523,13 +523,14 @@ function TrunkCard({
         >
           Edit
         </Button>
-        <Link
-          className="az-btn az-btn--ghost az-btn--sm"
-          to={`/routes/test?from=${encodeURIComponent(`trunk:${String(t.id)}`)}`}
+        <LinkButton
+          to={`/routes/test?${new URLSearchParams({ from: `trunk:${String(t.id)}` }).toString()}`}
+          variant="ghost"
+          size="sm"
+          icon="flask-conical"
         >
-          <Icon name="flask-conical" size={13} />
           Test a route
-        </Link>
+        </LinkButton>
         <Button
           variant="ghost"
           size="sm"

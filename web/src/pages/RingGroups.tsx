@@ -152,7 +152,11 @@ export function RingGroups() {
   }
 
   const newGroup = (
-    <Button icon="plus" onClick={() => setEditing({ kind: "new" })}>
+    <Button
+      icon="plus"
+      disabled={list.status !== "ready"}
+      onClick={() => setEditing({ kind: "new" })}
+    >
       New ring group
     </Button>
   );

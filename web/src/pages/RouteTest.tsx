@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 import {
   errorMessage,
   fieldErrors,
@@ -24,6 +24,7 @@ import {
   EmptyState,
   Icon,
   Input,
+  LinkButton,
   PageHeader,
   type Property,
   PropertyList,
@@ -190,8 +191,17 @@ function initialFrom(params: URLSearchParams) {
   };
 }
 
-/** Route tester: decide a call against the live configuration without placing it. */
+/**
+ * Route tester: decide a call against the live configuration without placing
+ * it. Keyed by the query, so following another link to the tester (the top
+ * bar's "Test a number", a trunk's "Test a route") starts a fresh form.
+ */
 export function RouteTest() {
+  const { search } = useLocation();
+  return <RouteTester key={search} />;
+}
+
+function RouteTester() {
   const [params] = useSearchParams();
   const [initial] = useState(() => initialFrom(params));
   const [extensions, setExtensions] = useState<Load<Extension>>({
@@ -336,13 +346,15 @@ export function RouteTest() {
         title="Route tester"
         description="Shows how a call would be routed now, or at a chosen time, against the live configuration. No call is placed."
         back={
-          <Link
+          <LinkButton
             to="/routes"
-            className="az-btn az-btn--ghost az-btn--sm cf-back"
+            variant="ghost"
+            size="sm"
+            icon="arrow-left"
+            className="cf-back"
           >
-            <Icon name="arrow-left" size={14} />
             Routes
-          </Link>
+          </LinkButton>
         }
       />
       <div className="cf-tester">

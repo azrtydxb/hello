@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import {
   errorMessage,
   getCdr,
@@ -168,7 +168,12 @@ export function Diagnostics() {
         id={`diag-panel-${tab}`}
         aria-labelledby={`diag-tab-${tab}`}
       >
-        {tab === "trace" && <TraceTab />}
+        {tab === "trace" && (
+          <TraceTab
+            callParam={params.get("call")}
+            onCall={(id) => go("trace", { call: id })}
+          />
+        )}
         {tab === "reg" && (
           <RegistrationsTab
             live={data}
@@ -209,10 +214,21 @@ function statusTone(code: number): BadgeTone {
 
 const loadRecent = (signal: AbortSignal) => listCdrs({ limit: 25 }, signal);
 
-function TraceTab() {
+/**
+ * The Call trace tab: recent calls on the left, the selected call's trace on
+ * the right. ?call=<id> selects a call (Call detail's "SIP trace" links
+ * here), even one no longer in the recent list.
+ */
+function TraceTab({
+  callParam,
+  onCall,
+}: {
+  callParam: string | null;
+  onCall: (id: string) => void;
+}) {
   const recent = usePolling(loadRecent, LIVE_REFRESH_MS);
   const [q, setQ] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
+  const selected = callParam || null;
   const calls: Cdr[] =
     recent.status === "loading" ? [] : (recent.data?.items ?? []);
   const needle = q.trim().toLowerCase();
@@ -273,7 +289,7 @@ function TraceTab() {
                       aria-current={
                         String(c.id) === current ? "true" : undefined
                       }
-                      onClick={() => setSelected(String(c.id))}
+                      onClick={() => onCall(String(c.id))}
                     >
                       <span className="pf-call__top">
                         <Icon
@@ -368,14 +384,13 @@ function CallTrace({ id }: { id: string }) {
           </div>
         </div>
         <div className="pf-tracehead__actions">
-          <Link
+          <LinkButton
             to={`/history/${encodeURIComponent(String(c.id))}`}
-            className="az-btn az-btn--secondary az-btn--sm"
-            style={{ textDecoration: "none" }}
+            size="sm"
+            icon="file-text"
           >
-            <Icon name="file-text" size={13} />
             Call record
-          </Link>
+          </LinkButton>
         </div>
       </div>
       {c.explanation && (
@@ -665,13 +680,9 @@ function DeviceReg({
                 title="Why it is not registered"
                 action={
                   VERDICT_ACTION[d.verdict.code] ? (
-                    <Link
-                      to="/devices"
-                      className="az-btn az-btn--secondary az-btn--sm"
-                      style={{ textDecoration: "none" }}
-                    >
+                    <LinkButton to="/devices" size="sm">
                       Open devices
-                    </Link>
+                    </LinkButton>
                   ) : undefined
                 }
               >
@@ -898,14 +909,14 @@ function HealthTab({
                 </div>
                 {c.link &&
                   (c.link.to ? (
-                    <Link
+                    <LinkButton
                       to={c.link.to}
-                      className="az-btn az-btn--ghost az-btn--sm"
-                      style={{ textDecoration: "none" }}
+                      variant="ghost"
+                      size="sm"
+                      iconRight="arrow-right"
                     >
                       {c.link.label}
-                      <Icon name="arrow-right" size={13} />
-                    </Link>
+                    </LinkButton>
                   ) : (
                     <Button
                       variant="ghost"

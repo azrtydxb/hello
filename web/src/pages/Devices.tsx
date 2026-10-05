@@ -26,6 +26,7 @@ import {
   EmptyState,
   IconButton,
   Input,
+  LinkButton,
   Modal,
   PageHeader,
   Select,
@@ -261,9 +262,7 @@ export function Devices() {
             }
             action={
               list.extensions.length === 0 ? (
-                <Link to="/extensions" className="az-btn az-btn--secondary">
-                  Open extensions
-                </Link>
+                <LinkButton to="/extensions">Open extensions</LinkButton>
               ) : (
                 <Button icon="plus" onClick={() => setCreating(true)}>
                   New device

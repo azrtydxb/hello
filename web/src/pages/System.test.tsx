@@ -1,5 +1,6 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { LIVE_REFRESH_MS } from "../usePolling";
 import { apiError, json, ME, mockApi, noContent, renderApp } from "../test/api";
 
 const CODES = [
@@ -33,6 +34,10 @@ function setup(extra: Parameters<typeof mockApi>[0] = {}) {
 }
 
 describe("System", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("lists feature codes and saves the edited list", async () => {
     const calls = setup({
       "PUT /api/v1/feature-codes": noContent,
@@ -103,6 +108,8 @@ describe("System", () => {
 
   it("lists presence and refreshes it", async () => {
     const calls = setup();
+    // The poll's timer is driven by the test, not by the wall clock.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     renderApp("/system");
     const list = await screen.findByRole("list", { name: "Presence" });
     const row = within(list).getByText("desk-100").closest("li")!;
@@ -112,13 +119,10 @@ describe("System", () => {
       "Idle",
     );
 
-    await waitFor(
-      () =>
-        expect(
-          calls.filter((c) => c.url === "/api/v1/presence").length,
-        ).toBeGreaterThanOrEqual(2),
-      { timeout: 7000 },
-    );
+    const reads = () => calls.filter((c) => c.url === "/api/v1/presence");
+    const before = reads().length;
+    await act(() => vi.advanceTimersByTimeAsync(LIVE_REFRESH_MS));
+    expect(reads()).toHaveLength(before + 1);
   });
 
   it("creates an API token, shows it once, and revokes one after confirming", async () => {

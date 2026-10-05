@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
-import { errorMessage } from "../api";
+import { errorMessage, listTrunks } from "../api";
 import { getCallRecord, type CallRecord } from "../api/calls";
 import {
   Alert,
@@ -96,12 +96,41 @@ function Subtitle({ cdr }: { cdr: CallRecord }) {
   );
 }
 
+/**
+ * Where "Re-test this number" starts the call from: the calling extension,
+ * or for an inbound call the trunk it arrived on (the tester takes
+ * trunk:<id>, the record carries the trunk's name, so it is looked up).
+ * Undefined while the lookup runs; "" when the origin is unknown.
+ */
+function useRetestFrom(cdr: CallRecord): string | undefined {
+  const lookup = cdr.direction === "inbound" && cdr.trunk ? cdr.trunk : "";
+  const [found, setFound] = useState<{ name: string; from: string }>();
+  useEffect(() => {
+    if (!lookup) return;
+    const controller = new AbortController();
+    listTrunks(controller.signal)
+      .then((trunks) => {
+        const t = trunks.find((x) => x.name === lookup);
+        setFound({ name: lookup, from: t ? `trunk:${String(t.id)}` : "" });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setFound({ name: lookup, from: "" });
+      });
+    return () => controller.abort();
+  }, [lookup]);
+  if (cdr.direction !== "inbound") return cdr.source;
+  if (!lookup) return "";
+  return found?.name === lookup ? found.from : undefined;
+}
+
 function Actions({ cdr }: { cdr: CallRecord }) {
   const number = cdr.originalDestination || cdr.destination;
-  const retest = new URLSearchParams({ from: cdr.source, number });
+  const from = useRetestFrom(cdr);
+  const retest = new URLSearchParams(from ? { from, number } : { number });
+  const trace = new URLSearchParams({ tab: "trace", call: String(cdr.id) });
   return (
     <>
-      <LinkButton to="/diagnostics?tab=trace" icon="activity">
+      <LinkButton to={`/diagnostics?${trace.toString()}`} icon="activity">
         SIP trace
       </LinkButton>
       <LinkButton to={`/routes/test?${retest.toString()}`} icon="flask-conical">

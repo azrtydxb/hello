@@ -376,4 +376,45 @@ describe("Diagnostics", () => {
     });
     expect(screen.getByText("No call matches")).toBeVisible();
   });
+
+  it("selects the call named by ?call=, even one not in the recent list", async () => {
+    const calls = base({
+      "GET /api/v1/cdrs?limit=25": () =>
+        json({
+          items: [
+            {
+              id: 4819,
+              source: "1002",
+              destination: "1003",
+              startTime: ago(20),
+              endTime: ago(10),
+              finalStatus: 200,
+              direction: "internal",
+            },
+          ],
+          next: "",
+        }),
+      "GET /api/v1/cdrs/77": () =>
+        json({
+          id: 77,
+          source: "101",
+          destination: "0501234567",
+          originalDestination: "0501234567",
+          finalStatus: 503,
+          trace: [{ n: 1, text: "Route UAE Mobile matched" }],
+        }),
+    });
+    renderApp("/diagnostics?tab=trace&call=77");
+
+    expect(
+      await screen.findByRole("list", { name: "Trace of call 77" }),
+    ).toHaveTextContent("Route UAE Mobile matched");
+    expect(calls.map((c) => c.url)).not.toContain("/api/v1/cdrs/4819");
+
+    // Picking another call puts it in the URL.
+    fireEvent.click(await screen.findByRole("button", { name: /Call 4819/ }));
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/diagnostics?tab=trace&call=4819",
+    );
+  });
 });

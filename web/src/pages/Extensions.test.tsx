@@ -55,11 +55,8 @@ async function openNew() {
   const [button] = await screen.findAllByRole("button", {
     name: "New extension",
   });
-  // The header button shows while the list still loads; a create made then
-  // would be overwritten by the list arriving, so wait for the list first.
-  await waitFor(() =>
-    expect(screen.queryByText("Loading extensions…")).toBeNull(),
-  );
+  // The header button is enabled once the list it adds to has loaded.
+  await waitFor(() => expect(button).toBeEnabled());
   fireEvent.click(button!);
   return screen.getByRole("dialog", { name: "New extension" });
 }
@@ -151,11 +148,14 @@ describe("Extensions", () => {
     });
     fill(dialog, "0123456789", "Desk");
 
+    // The toast says the create landed; the list then holds the new row.
     expect(
-      await screen.findByRole("row", { name: /0123456789/ }),
-    ).toHaveTextContent("Desk");
+      await screen.findByText("Extension 0123456789 created."),
+    ).toBeVisible();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByText("Extension 0123456789 created.")).toBeVisible();
+    expect(screen.getByRole("row", { name: /0123456789/ })).toHaveTextContent(
+      "Desk",
+    );
     expect(calls).toContainEqual({
       method: "POST",
       url: "/api/v1/extensions",
@@ -458,5 +458,21 @@ describe("Extensions", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("opens the New extension modal from ?new=1 and drops the flag", async () => {
+    api([EXT]);
+    renderApp("/extensions?new=1");
+
+    expect(
+      await screen.findByRole("dialog", { name: "New extension" }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        /^\/extensions$/,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "New extension" })).toBeNull();
   });
 });

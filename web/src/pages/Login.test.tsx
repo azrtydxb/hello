@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { safeNext } from "../api";
 import { apiError, json, ME, mockApi, noContent, renderApp } from "../test/api";
@@ -26,13 +26,19 @@ async function signInScreen() {
 describe("Login", () => {
   it("redirects to /login with next when an API call answers 401", async () => {
     // The session looks valid at load, then the API rejects it (expired).
-    mockApi({ ...ME, "GET /api/v1/extensions": UNAUTHORIZED });
+    const calls = mockApi({ ...ME, "GET /api/v1/extensions": UNAUTHORIZED });
     renderApp("/extensions");
 
-    expect(await signInScreen()).toBeInTheDocument();
-    expect(screen.getByTestId("location")).toHaveTextContent(
-      "/login?next=%2Fextensions",
+    // Wait on what the 401 causes: the request, then the move to sign-in.
+    await waitFor(() =>
+      expect(calls.map((c) => c.url)).toContain("/api/v1/extensions"),
     );
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/login?next=%2Fextensions",
+      ),
+    );
+    expect(await signInScreen()).toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Primary" })).toBeNull();
   });
 

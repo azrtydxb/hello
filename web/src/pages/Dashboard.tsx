@@ -210,7 +210,6 @@ export function Dashboard() {
         cluster={dataOf(cluster)}
         trunks={dataOf(trunks)}
         statuses={statuses}
-        onOpen={(path) => void navigate(path)}
       />
       <div className="calls-stats">
         <StatCard
@@ -425,31 +424,21 @@ export function HealthAlerts({
   cluster,
   trunks,
   statuses,
-  onOpen,
 }: {
   cluster?: ClusterStatus;
   trunks?: Trunk[];
   statuses?: TrunkStatus[];
-  onOpen: (path: string) => void;
 }) {
   const alerts: ReactNode[] = [];
   const openCluster = (
-    <button
-      type="button"
-      className="az-btn az-btn--secondary az-btn--sm"
-      onClick={() => onOpen("/cluster")}
-    >
+    <LinkButton to="/cluster" size="sm">
       Open cluster
-    </button>
+    </LinkButton>
   );
   const openTrunks = (
-    <button
-      type="button"
-      className="az-btn az-btn--secondary az-btn--sm"
-      onClick={() => onOpen("/trunks")}
-    >
+    <LinkButton to="/trunks" size="sm">
       Open trunks
-    </button>
+    </LinkButton>
   );
   if (cluster && !cluster.valkey.up) {
     alerts.push(

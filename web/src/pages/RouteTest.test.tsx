@@ -185,4 +185,25 @@ describe("RouteTest", () => {
     expect(screen.getByRole("combobox", { name: "Trunk" })).toHaveValue("4");
     expect(screen.getByLabelText("Called number (DID)")).toHaveValue("");
   });
+
+  it("starts a fresh form from the top bar's Test a number", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/extensions": () => json({ items: [] }),
+      "GET /api/v1/trunks": () =>
+        json({ items: [{ id: 4, name: "carrier-primary" }] }),
+    });
+    renderApp("/routes/test?from=trunk%3A4");
+    expect(
+      await screen.findByRole("radio", { name: "Trunk (inbound)" }),
+    ).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(screen.getByRole("link", { name: "Test a number" }));
+    expect(
+      await screen.findByRole("radio", { name: "Extension" }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      /^\/routes\/test$/,
+    );
+  });
 });

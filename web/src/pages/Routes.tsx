@@ -7,7 +7,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import {
   createInboundRoute,
   createOutboundRoute,
@@ -53,6 +53,7 @@ import {
   Icon,
   IconButton,
   Input,
+  LinkButton,
   PageHeader,
   Select,
   Spinner,
@@ -212,10 +213,9 @@ export function RoutesPage() {
         description="Matched top to bottom; the first enabled match wins. Drag to reorder."
         actions={
           <>
-            <Link to="/routes/test" className="az-btn az-btn--secondary">
-              <Icon name="flask-conical" size={15} />
+            <LinkButton to="/routes/test" icon="flask-conical">
               Route tester
-            </Link>
+            </LinkButton>
             <Button
               icon="plus"
               onClick={() => setEditing({ kind: "new", direction: tab })}
