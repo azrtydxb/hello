@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -305,10 +306,12 @@ func (s *server) deleteExtension(w http.ResponseWriter, r *http.Request) {
 // Devices.
 
 // deviceWithSecret is the only shape that ever carries a device secret: the
-// create and rotate-secret responses.
+// create and rotate-secret responses. SIPDomain is the realm the secret is
+// valid for, so the console can say what to enter in the phone.
 type deviceWithSecret struct {
 	store.Device
-	Secret string `json:"secret"`
+	Secret    string `json:"secret"`
+	SIPDomain string `json:"sipDomain"`
 }
 
 func (s *server) listDevices(w http.ResponseWriter, r *http.Request) {
@@ -360,7 +363,7 @@ func (s *server) createDevice(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "device", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, deviceWithSecret{Device: d, Secret: secret})
+	writeJSON(w, http.StatusCreated, deviceWithSecret{Device: d, Secret: secret, SIPDomain: s.SIPDomain})
 }
 
 func (s *server) updateDevice(w http.ResponseWriter, r *http.Request) {
@@ -402,7 +405,7 @@ func (s *server) rotateSecret(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "device", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, deviceWithSecret{Device: d, Secret: secret})
+	writeJSON(w, http.StatusOK, deviceWithSecret{Device: d, Secret: secret, SIPDomain: s.SIPDomain})
 }
 
 func (s *server) deleteDevice(w http.ResponseWriter, r *http.Request) {
@@ -459,6 +462,13 @@ func (s *server) calls(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.liveDown(w, "list calls", err)
 		return
+	}
+	// Every call reports its in-call HA state (incall-ha S-6); a record
+	// from a node that predates the field was set up there and is owned.
+	for i := range cs {
+		if cs[i].HA == "" {
+			cs[i].HA = livestate.HAOwned
+		}
 	}
 	writeJSON(w, http.StatusOK, items(cs))
 }

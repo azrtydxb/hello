@@ -106,7 +106,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_SIP_REGISTER_MIN_EXPIRES` / `_MAX_EXPIRES` | sip     | `60s` / `1h`                                                                                                                  |
 | `HELLO_SIP_RING_TIMEOUT`                          | sip     | `30s`                                                                                                                         |
 | `HELLO_SIP_MAX_CALL_DURATION`                     | sip     | `4h`; a call with no BYE (phone gone) is cleared after this                                                                   |
-| `HELLO_SIP_AUTH_FAIL_LIMIT` / `_WINDOW`           | sip     | `10` failures per `5m` per source IP                                                                                          |
+| `HELLO_SIP_AUTH_FAIL_LIMIT` / `_WINDOW`           | sip     | `10` failures per `5m` per source IP; set the limit on control too (Diagnostics shows which sources it blocks)                |
 | `HELLO_SIP_STATE_TIMEOUT`                         | sip     | `200ms`; Valkey calls while handling SIP                                                                                      |
 | `HELLO_SIP_TRUSTED_PROXIES`                       | sip     | unset (trust none); CIDRs of the SIP balancers (Kamailio) whose `Path` and client address are believed                        |
 | `HELLO_DRAIN_TIMEOUT`                             | sip     | `2h`; a draining node hangs up remaining calls after this                                                                     |

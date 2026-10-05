@@ -101,10 +101,7 @@ function Actions({ cdr }: { cdr: CallRecord }) {
   const retest = new URLSearchParams({ from: cdr.source, number });
   return (
     <>
-      <LinkButton
-        to={`/diagnostics?${new URLSearchParams({ call: cdr.correlationId }).toString()}`}
-        icon="activity"
-      >
+      <LinkButton to="/diagnostics?tab=trace" icon="activity">
         SIP trace
       </LinkButton>
       <LinkButton to={`/routes/test?${retest.toString()}`} icon="flask-conical">

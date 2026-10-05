@@ -21,6 +21,7 @@ function call(
     state,
     node,
     media: "anchored",
+    ha: (id === "c2" ? "taken-over" : "owned") as "owned" | "taken-over",
     startedAt: STARTED,
     ...(state === "connected" ? { answeredAt: STARTED } : {}),
   };
@@ -62,6 +63,8 @@ describe("Active calls", () => {
     expect(within(table).getByText("Support desk")).toBeVisible();
     expect(within(table).getByText("Answered")).toHaveClass("az-badge--good");
     expect(within(table).getByText("Ringing")).toBeVisible();
+    expect(within(table).getByText("Taken over")).toHaveClass("az-badge--warn");
+    expect(within(table).getByText("Owned")).toBeVisible();
     expect(within(table).getAllByText("Anchored")).toHaveLength(2);
     expect(within(table).getAllByText(/^1:[0-5][0-9]$/).length).toBeGreaterThan(
       0,

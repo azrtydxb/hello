@@ -425,7 +425,7 @@ func TestDeviceSecretShownOnce(t *testing.T) {
 	if raw, err := base64.RawURLEncoding.DecodeString(secret); err != nil || len(raw) != 24 {
 		t.Fatalf("secret %q is not 24 random bytes base64url", secret)
 	}
-	if created["enabled"] != true || created["sipUsername"] != "101-desk" || created["extensionId"] != extID {
+	if created["enabled"] != true || created["sipUsername"] != "101-desk" || created["extensionId"] != extID || created["sipDomain"] != testDomain {
 		t.Fatalf("created device = %v", created)
 	}
 	id := fmt.Sprint(created["id"])
@@ -464,7 +464,7 @@ func TestDeviceSecretShownOnce(t *testing.T) {
 
 	rotated := c.must(http.StatusOK, "POST", "/api/v1/devices/"+id+"/rotate-secret", nil).json(t)
 	newSecret, _ := rotated["secret"].(string)
-	if newSecret == "" || newSecret == secret || fmt.Sprint(rotated["id"]) != id {
+	if newSecret == "" || newSecret == secret || fmt.Sprint(rotated["id"]) != id || rotated["sipDomain"] != testDomain {
 		t.Fatalf("rotate = %v, want the device with a new secret", rotated)
 	}
 	checkHidden(newSecret)

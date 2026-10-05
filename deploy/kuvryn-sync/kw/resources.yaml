@@ -449,6 +449,10 @@ data:
     # Forward to the Hello node in $du with the client's address.
     route[TO_HELLO] {
     	$fsn = "hello";
+    	# Hello answers at the source port of what we send it (rport), not at a
+    	# Via port that a replaced pod or a NAT no longer owns (kw: stale
+    	# conntrack on 5070 after a Kamailio pod replacement).
+    	add_local_rport();
     	if (is_method("INVITE")) {
     		t_set_fr(INVITE_TIMEOUT, 1500);
     	}
@@ -722,7 +726,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: 96869ffb4230115d976d02d2fdaa8bea7bc6b8a561430f2a3c557bbf961e225b
+        hello.watteel.com/kamailio-config-sha256: 756b25bba716cfa7cfb1cb2349b179e58df34a8cc189310494043318078c6b43
     spec:
       securityContext:
         # /run/kamailio is an emptyDir the kamailio user (102) must write its
@@ -1009,9 +1013,19 @@ spec:
 # No RTP Service here, and none is needed: the relay binds its UDP
 # 20000-21000 legs on the host network, so anchored RTP lands on the node
 # IP that HELLO_MEDIA_ANCHOR_HOST advertises in the SDP answers
-# (docs/media.md). The ClusterIP Services stay only for the in-cluster
-# paths: Kamailio's dispatcher set 1 and the dialog routes (Contact =
+# (docs/media.md). The Services stay only for the in-cluster paths:
+# Kamailio's dispatcher set 1 and the dialog routes (Contact =
 # HELLO_SIP_ADVERTISED_ADDR, the Service name).
+#
+# Headless (clusterIP: None): the name resolves straight to the pod's
+# (host-network, so the node's) IP. Through a ClusterIP, Cilium's socket-LB
+# translates Kamailio's sends on its listening UDP socket, and when the
+# backend pod goes it force-terminates that socket
+# (bpf-lb-sock-terminate-pod-connections): Kamailio got ECONNABORTED and
+# exited, killing in-flight signalling, the moment a hello-sip pod was
+# deleted. With no service IP there is nothing for socket-LB to translate
+# or terminate. clusterIP is immutable: converting an existing Service
+# means deleting it once and letting Sync recreate it.
 apiVersion: v1
 kind: Service
 metadata:
@@ -1024,6 +1038,7 @@ metadata:
     app.kubernetes.io/managed-by: kuvryn-sync
 spec:
   type: ClusterIP
+  clusterIP: None # headless: see the note above hello-sip-1
   selector:
     app.kubernetes.io/name: hello
     app.kubernetes.io/instance: hello
@@ -1220,6 +1235,7 @@ metadata:
     app.kubernetes.io/managed-by: kuvryn-sync
 spec:
   type: ClusterIP
+  clusterIP: None # headless: see the note above hello-sip-1
   selector:
     app.kubernetes.io/name: hello
     app.kubernetes.io/instance: hello

@@ -89,7 +89,7 @@ describe("CallDetail", () => {
     // The actions open the SIP trace and the route test for this call.
     expect(screen.getByRole("link", { name: "SIP trace" })).toHaveAttribute(
       "href",
-      "/diagnostics?call=corr-77",
+      "/diagnostics?tab=trace",
     );
     expect(
       screen.getByRole("link", { name: "Re-test this number" }),

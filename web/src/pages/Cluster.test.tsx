@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { json, ME, mockApi, noContent, renderApp } from "../test/api";
+import { geometry } from "./Cluster";
 
 const NOW = Date.now();
 const ago = (s: number) => new Date(NOW - s * 1000).toISOString();
@@ -44,11 +45,21 @@ const LAST_READY = () =>
     409,
   );
 
-const rowOf = (id: string) =>
-  screen.getByRole("row", { name: (name) => name.includes(id) });
+/** The topology box of a service, by its title. */
+const box = (title: string) =>
+  screen.getByRole("button", { name: (n) => n.startsWith(`${title}:`) });
+
+async function openBox(title: string) {
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: (n) => n.startsWith(`${title}:`),
+    }),
+  );
+  return screen.findByRole("dialog", { name: title });
+}
 
 describe("Cluster", () => {
-  it("shows each node's state, load, version, revision lag and heartbeat, and the dependencies", async () => {
+  it("draws every node with its state and load, and the dependencies", async () => {
     mockApi({
       ...ME,
       "GET /api/v1/cluster": () =>
@@ -68,6 +79,7 @@ describe("Cluster", () => {
           member("hello-control-1", {
             kind: "control",
             sipAddr: undefined,
+            httpAddr: "10.0.0.20:8081",
             transports: undefined,
             activeCalls: 0,
             registrations: 0,
@@ -76,93 +88,120 @@ describe("Cluster", () => {
     });
     renderApp("/cluster");
 
-    const one = await screen.findByRole("row", { name: /hello-sip-1/ });
-    const cells = (row: HTMLElement) =>
-      within(row)
-        .getAllByRole("cell")
-        .map((c) => c.textContent);
-    // The heartbeat cell is time-relative ("N s ago"): on a loaded runner the
-    // recompute at render time can read one second higher than the mock.
-    const heartbeatSeconds = (row: HTMLElement): number => {
-      const text = cells(row)[7] ?? "";
-      expect(text).toMatch(/^\d+ s ago$/);
-      return Number.parseInt(text, 10);
-    };
-    expect(cells(one).slice(0, 7)).toEqual([
-      "SIP",
-      "Ready",
-      "10.0.0.11:5060 (udp)",
-      "12",
-      "241",
-      "0.3.0",
-      "current (rev 1284)",
-    ]);
-    expect(heartbeatSeconds(one)).toBeGreaterThanOrEqual(3);
-    expect(cells(rowOf("hello-sip-2")).slice(0, 7)).toEqual([
-      "SIP",
-      "Draining — drain requested",
-      "10.0.0.12:5060 (udp)",
-      "2",
-      "96",
-      "0.2.9",
-      "3 behind (rev 1281)",
-    ]);
-    expect(heartbeatSeconds(rowOf("hello-sip-2"))).toBeGreaterThanOrEqual(7);
-    expect(within(rowOf("hello-control-1")).getByText("Control")).toBeVisible();
-    for (const h of [
-      "State",
-      "Calls",
-      "Registrations",
-      "Version",
-      "Revision lag",
-      "Heartbeat",
-    ]) {
-      expect(screen.getByRole("columnheader", { name: h })).toBeVisible();
-    }
-
-    const deps = screen.getByRole("table", { name: "Dependencies" });
+    const one = await screen.findByRole("button", {
+      name: "hello-sip-1: Ready",
+    });
+    expect(one).toHaveTextContent("10.0.0.11:5060 · 0.3.0");
+    expect(one).toHaveTextContent("Revision current (rev 1284)");
+    expect(one).toHaveTextContent("Calls12");
+    expect(one).toHaveTextContent("Regs241");
+    const two = box("hello-sip-2");
+    expect(two).toHaveAccessibleName("hello-sip-2: Draining");
+    expect(two).toHaveTextContent("drain requested");
+    expect(box("hello-control")).toHaveTextContent("hello-control-1Ready");
+    expect(box("valkey")).toHaveAccessibleName("valkey: Up");
+    expect(box("valkey")).toHaveTextContent("Primary 10.0.0.21:6379");
+    expect(box("postgres")).toHaveAccessibleName("postgres: Up");
+    expect(box("kamailio")).toHaveAccessibleName("kamailio: Not monitored");
     expect(
-      within(deps).getByRole("row", { name: /PostgreSQL/ }),
-    ).toHaveTextContent("PostgreSQLUp");
-    expect(within(deps).getByRole("row", { name: /Valkey/ })).toHaveTextContent(
-      "ValkeyUpSentinel, primary 10.0.0.21:6379",
+      screen.getByText(/Configuration revision 1284\./),
+    ).toBeInTheDocument();
+
+    const dialog = await openBox("hello-sip-2");
+    expect(within(dialog).getByText("SIP node · 0.2.9")).toBeVisible();
+    expect(within(dialog).getByText("Draining")).toBeVisible();
+    expect(within(dialog).getByText("drain requested")).toBeVisible();
+    expect(within(dialog).getByText("10.0.0.12:5060 (udp)")).toBeVisible();
+    expect(within(dialog).getByText("3 behind (rev 1281)")).toBeVisible();
+    expect(within(dialog).getByText(/^\d+ s ago$/)).toBeVisible();
+    // Focus moves into the dialog, and Close returns it to the box.
+    await waitFor(() =>
+      expect(
+        within(dialog).getAllByRole("button", { name: "Close" })[0],
+      ).toHaveFocus(),
     );
-    expect(screen.getByText("Configuration revision:")).toHaveTextContent(
-      "Configuration revision: 1284",
+    fireEvent.click(
+      within(dialog).getAllByRole("button", { name: "Close" })[1]!,
     );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(box("hello-sip-2")).toHaveFocus();
   });
 
-  it("shows unknown lag and revision while PostgreSQL is down, and the Valkey error", async () => {
+  it("shows live views around the cluster, and — for what it cannot read", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cluster": () => cluster([member("hello-sip-1")]),
+      "GET /api/v1/devices": () =>
+        json({
+          items: [
+            { id: 1, extensionId: 1, sipUsername: "desk", enabled: true },
+            { id: 2, extensionId: 1, sipUsername: "lobby", enabled: true },
+          ],
+        }),
+      "GET /api/v1/registrations": () =>
+        json({ items: [{ device: "desk", aor: "sip:desk@pbx.test" }] }),
+      "GET /api/v1/calls": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () =>
+        json({
+          items: [
+            {
+              trunkId: 4,
+              name: "carrier-primary",
+              activeCalls: 3,
+              destinations: [
+                {
+                  destination: "sbc1:5060",
+                  up: false,
+                  lastCode: 408,
+                  checkedAt: ago(5),
+                },
+                { destination: "sbc2:5060", up: true, checkedAt: ago(5) },
+              ],
+            },
+          ],
+        }),
+      "GET /api/v1/trunks": () =>
+        json({
+          items: [
+            { id: 4, name: "carrier-primary", maxCalls: 30, destinations: [] },
+          ],
+        }),
+    });
+    renderApp("/cluster");
+
+    await waitFor(() =>
+      expect(box("Phones")).toHaveAccessibleName("Phones: 1 reg"),
+    );
+    expect(box("Phones")).toHaveTextContent("Devices2Registered1Calls0");
+    expect(box("Carriers")).toHaveAccessibleName("Carriers: Degraded");
+    expect(box("Carriers")).toHaveTextContent("carrier-primary3 / 30");
+    expect(box("Carriers")).toHaveTextContent("1 of 2 destinations up");
+
+    const dialog = await openBox("Phones");
+    expect(within(dialog).getByText("lobby")).toBeVisible();
+  });
+
+  it("shows unknown revision while PostgreSQL is down, and the Valkey error", async () => {
     mockApi({
       ...ME,
       "GET /api/v1/cluster": () =>
         json({
           members: [member("hello-sip-1", { revisionLag: undefined })],
           postgres: { up: false, error: "unavailable" },
-          valkey: {
-            up: false,
-            mode: "sentinel",
-            error: "members unavailable",
-          },
+          valkey: { up: false, mode: "sentinel", error: "members unavailable" },
           configRevision: null,
         }),
     });
     renderApp("/cluster");
 
-    const one = await screen.findByRole("row", { name: /hello-sip-1/ });
-    expect(within(one).getAllByRole("cell")[6]).toHaveTextContent(
-      "— (rev 1284)",
-    );
-    expect(screen.getByText("Configuration revision:")).toHaveTextContent(
-      "Configuration revision: —",
-    );
-    const deps = screen.getByRole("table", { name: "Dependencies" });
     expect(
-      within(deps).getByRole("row", { name: /PostgreSQL/ }),
-    ).toHaveTextContent("PostgreSQLDownunavailable");
-    expect(within(deps).getByRole("row", { name: /Valkey/ })).toHaveTextContent(
-      "ValkeyDownSentinel — members unavailable",
-    );
+      await screen.findByRole("button", { name: "hello-sip-1: Ready" }),
+    ).toHaveTextContent("Revision — (rev 1284)");
+    expect(screen.getByText(/Configuration revision —\./)).toBeInTheDocument();
+    expect(box("postgres")).toHaveAccessibleName("postgres: Down");
+    expect(box("postgres")).toHaveTextContent("unavailable");
+    expect(box("valkey")).toHaveAccessibleName("valkey: Down");
+    expect(box("valkey")).toHaveTextContent("members unavailable");
   });
 
   it("refreshes every 5 seconds", async () => {
@@ -180,14 +219,20 @@ describe("Cluster", () => {
       ],
     });
     renderApp("/cluster");
-    await screen.findByRole("row", { name: /hello-sip-1/ });
+    await screen.findByRole("button", { name: "hello-sip-1: Ready" });
     expect(
-      await screen.findByText("— valkey unreachable", {}, { timeout: 6000 }),
-    ).toBeVisible();
-    expect(calls.filter((c) => c.url === "/api/v1/cluster").length).toBe(2);
+      await screen.findByRole(
+        "button",
+        { name: "hello-sip-1: Unhealthy" },
+        { timeout: 6000 },
+      ),
+    ).toHaveTextContent("valkey unreachable");
+    expect(
+      calls.filter((c) => c.url === "/api/v1/cluster").length,
+    ).toBeGreaterThanOrEqual(2);
   }, 10000);
 
-  it("drains a node only after an in-page confirmation", async () => {
+  it("drains a node only after an in-dialog confirmation", async () => {
     const calls = mockApi({
       ...ME,
       "GET /api/v1/cluster": [
@@ -202,11 +247,14 @@ describe("Cluster", () => {
     });
     renderApp("/cluster");
 
+    const dialog = await openBox("hello-sip-1");
     fireEvent.click(
-      await screen.findByRole("button", { name: "Drain hello-sip-1" }),
+      within(dialog).getByRole("button", { name: "Drain hello-sip-1" }),
     );
     expect(calls.some((c) => c.method === "POST")).toBe(false);
-    const confirm = screen.getByRole("group", { name: "Drain hello-sip-1?" });
+    const confirm = within(dialog).getByRole("group", {
+      name: "Drain hello-sip-1?",
+    });
     fireEvent.click(
       within(confirm).getByRole("button", { name: "Drain node" }),
     );
@@ -218,9 +266,9 @@ describe("Cluster", () => {
     // The page re-reads the cluster right away, well before the next poll.
     await waitFor(
       () =>
-        expect(
-          within(rowOf("hello-sip-1")).getByText("Draining"),
-        ).toBeVisible(),
+        expect(box("hello-sip-1")).toHaveAccessibleName(
+          "hello-sip-1: Draining",
+        ),
       { timeout: 2000 },
     );
   });
@@ -238,12 +286,13 @@ describe("Cluster", () => {
     });
     renderApp("/cluster");
 
+    const dialog = await openBox("hello-sip-1");
     fireEvent.click(
-      await screen.findByRole("button", { name: "Drain hello-sip-1" }),
+      within(dialog).getByRole("button", { name: "Drain hello-sip-1" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Drain node" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Drain node" }));
 
-    const warn = await screen.findByRole("group", {
+    const warn = await within(dialog).findByRole("group", {
       name: "Drain hello-sip-1 anyway?",
     });
     expect(within(warn).getByRole("alert")).toHaveTextContent(
@@ -252,8 +301,7 @@ describe("Cluster", () => {
     const posts = () =>
       calls.filter((c) => c.method === "POST").map((c) => c.url);
     expect(posts()).toEqual(["/api/v1/cluster/nodes/hello-sip-1/drain"]);
-    // The safe choice has focus. Focus is applied in an effect, which on a
-    // loaded runner can land after findByRole already returned the group.
+    // The safe choice has focus.
     await waitFor(() =>
       expect(
         within(warn).getByRole("button", {
@@ -270,7 +318,7 @@ describe("Cluster", () => {
     ]);
   });
 
-  it("never forces a drain when the warning is declined", async () => {
+  it("never forces a drain when the warning is declined, and Escape cancels without closing", async () => {
     const calls = mockApi({
       ...ME,
       "GET /api/v1/cluster": () => cluster([member("hello-sip-1")]),
@@ -278,18 +326,27 @@ describe("Cluster", () => {
     });
     renderApp("/cluster");
 
+    const dialog = await openBox("hello-sip-1");
     fireEvent.click(
-      await screen.findByRole("button", { name: "Drain hello-sip-1" }),
+      within(dialog).getByRole("button", { name: "Drain hello-sip-1" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Drain node" }));
+    fireEvent.keyDown(
+      within(dialog).getByRole("button", { name: "Drain node" }),
+      { key: "Escape" },
+    );
+    expect(screen.getByRole("dialog", { name: "hello-sip-1" })).toBeVisible();
     fireEvent.click(
-      await screen.findByRole("button", {
+      within(dialog).getByRole("button", { name: "Drain hello-sip-1" }),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Drain node" }));
+    fireEvent.click(
+      await within(dialog).findByRole("button", {
         name: "Keep hello-sip-1 in service",
       }),
     );
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Drain hello-sip-1" }),
+        within(dialog).getByRole("button", { name: "Drain hello-sip-1" }),
       ).toHaveFocus(),
     );
     expect(calls.filter((c) => c.method === "POST")).toHaveLength(1);
@@ -313,14 +370,19 @@ describe("Cluster", () => {
     });
     renderApp("/cluster");
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "No SIP node is READY.",
-    );
+    expect(
+      (await screen.findAllByRole("alert")).some((a) =>
+        a.textContent?.includes("No SIP node is READY."),
+      ),
+    ).toBe(true);
+    const dialog = await openBox("hello-sip-1");
     fireEvent.click(
-      await screen.findByRole("button", { name: "Undrain hello-sip-1" }),
+      within(dialog).getByRole("button", { name: "Undrain hello-sip-1" }),
     );
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Undrain node" }));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Undrain node" }),
+    );
 
     expect(
       await screen.findByText("hello-sip-1 is returning to service."),
@@ -331,8 +393,21 @@ describe("Cluster", () => {
       body: undefined,
     });
     await waitFor(() =>
-      expect(within(rowOf("hello-sip-1")).getByText("Ready")).toBeVisible(),
+      expect(box("hello-sip-1")).toHaveAccessibleName("hello-sip-1: Ready"),
     );
     expect(screen.queryByText("No SIP node is READY.")).toBeNull();
+  });
+
+  it("lays out any number of SIP nodes without overlap", () => {
+    for (const n of [0, 1, 2, 5]) {
+      const g = geometry(n);
+      expect(g.sip).toHaveLength(n);
+      g.sip.forEach((y, i) => {
+        if (i > 0) expect(y).toBeGreaterThanOrEqual(g.sip[i - 1]! + 150);
+      });
+      expect(g.control).toBeGreaterThanOrEqual((g.sip.at(-1) ?? 0) + 150);
+      expect(g.height).toBeGreaterThanOrEqual(g.control + 150);
+      expect(g.minio).toBeGreaterThan(g.pg + 132);
+    }
   });
 });

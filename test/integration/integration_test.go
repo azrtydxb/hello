@@ -234,8 +234,16 @@ func labSmokeTrunk(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	rang := answerNext(ctx, p)
+	// The new DID reaches the node with its next snapshot: until then the
+	// node answers 404 (it does not know the number), so retry that only.
 	var res struct{ Status int }
-	carrierDo(t, primaryHTTP, "POST", "/call", map[string]any{"from": "+97145556666", "to": did, "target": "hello-sip-1:5060", "hangupAfterMs": 100}, &res)
+	eventually(t, 15*time.Second, "the inbound route is live", func() error {
+		carrierDo(t, primaryHTTP, "POST", "/call", map[string]any{"from": "+97145556666", "to": did, "target": "hello-sip-1:5060", "hangupAfterMs": 100}, &res)
+		if res.Status == 404 {
+			return errors.New("404: the DID is not in the node's snapshot yet")
+		}
+		return nil
+	})
 	if res.Status != 200 || <-rang == nil {
 		t.Fatalf("inbound smoke call from carrier-primary = %d", res.Status)
 	}

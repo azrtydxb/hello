@@ -138,6 +138,11 @@ type Config struct {
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects
+	// Diagnostics reads REGISTER attempts and the failed-auth throttle for
+	// the Diagnostics view; nil answers 503. AuthFailLimit is hello-sip's
+	// HELLO_SIP_AUTH_FAIL_LIMIT (0 means its default, 10).
+	Diagnostics   DiagnosticsLive
+	AuthFailLimit int
 }
 
 type server struct{ Config }
@@ -245,6 +250,10 @@ func Handler(c Config) http.Handler {
 	private("GET /api/v1/cluster/nodes", s.clusterNodes)
 	private("POST /api/v1/cluster/nodes/{id}/drain", s.requestDrain)
 	private("DELETE /api/v1/cluster/nodes/{id}/drain", s.cancelDrain)
+
+	private("GET /api/v1/diagnostics/devices/{id}", s.deviceDiagnostics)
+	private("GET /api/v1/diagnostics/auth-failures", s.listAuthFailures)
+	private("DELETE /api/v1/diagnostics/auth-failures/{ip}", s.clearAuthFailures)
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.

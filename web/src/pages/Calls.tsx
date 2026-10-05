@@ -1,4 +1,5 @@
 import {
+  type CallHA,
   getCluster,
   listCalls,
   type ActiveCall,
@@ -107,6 +108,7 @@ export function Calls() {
     },
     { key: "node", label: "Node", mono: true },
     { key: "media", label: "Media", render: (c) => mediaLabel(c.media) },
+    { key: "ha", label: "HA", render: (c) => <HABadge ha={c.ha} /> },
     {
       key: "callId",
       label: "SIP Call-ID",
@@ -175,4 +177,21 @@ export function Calls() {
       )}
     </section>
   );
+}
+
+/**
+ * The call's in-call HA state: a call a surviving node took over after its
+ * owner died is badged, so operators see which calls survived a takeover.
+ */
+export function HABadge({ ha }: { ha: CallHA }) {
+  if (ha === "taken-over") {
+    return (
+      <span title="Re-homed onto this node after its owning node died">
+        <Badge tone="warn" icon="shuffle">
+          Taken over
+        </Badge>
+      </span>
+    );
+  }
+  return <span className="calls-muted">Owned</span>;
 }
