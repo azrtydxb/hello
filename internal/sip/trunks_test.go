@@ -61,17 +61,15 @@ func TestOutboundFailover503ToBackup(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("call: %v", r.err)
 	}
-	if string(r.dcs.InviteResponse.Body()) != backup.sdp {
-		t.Fatalf("answer SDP = %q", r.dcs.InviteResponse.Body())
-	}
+	// The call anchors (spec S-7): the caller's answer is the anchor's
+	// leg-a SDP, not the carrier's.
+	anchoredSDP(t, pbx, r.dcs.InviteResponse.Body())
 	waitReq(t, primary.invites, "INVITE to the primary")
 	inv := waitReq(t, backup.invites, "INVITE to the backup")
 	if inv.Recipient.User != "+971501234567" || inv.From().Address.User != "+97140000100" || inv.From().Address.Host != "carrier-backup.example" {
 		t.Fatalf("backup INVITE: R-URI %s From %s", inv.Recipient.String(), inv.From().Address.String())
 	}
-	if string(inv.Body()) != a.sdp {
-		t.Fatalf("offer SDP changed: %q", inv.Body())
-	}
+	anchoredSDP(t, pbx, inv.Body()) // the carrier leg's offer is the anchor's leg-b SDP
 	waitReq(t, backup.acks, "ACK to the backup")
 	if st.activeCalls(2) != 1 || st.activeCalls(1) != 0 {
 		t.Fatalf("slots during the call: primary %d backup %d; want 0 and 1", st.activeCalls(1), st.activeCalls(2))

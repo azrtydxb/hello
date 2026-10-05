@@ -121,6 +121,17 @@ type SIP struct {
 	// keeps the old behaviour of mirroring the offer's own c= address,
 	// which only carries audio when the peer can reach the pod directly.
 	MediaAnchorHost string
+	// HATakeoverEnabled (HELLO_HA_TAKEOVER_ENABLED, default true) lets the
+	// node poll for orphaned dialogs and take calls over; disabling it
+	// leaves the node replication-only.
+	HATakeoverEnabled bool
+	// HATakeoverPoll (HELLO_HA_TAKEOVER_POLL, default 1s) is the base
+	// interval between orphan scans.
+	HATakeoverPoll time.Duration
+	// HATakeoverJitter (HELLO_HA_TAKEOVER_JITTER, default 2s) is the
+	// random extra delay (0..jitter) added to each poll, so two survivors
+	// do not scan in lockstep (thundering herd).
+	HATakeoverJitter time.Duration
 }
 
 // LogValue keeps the database password out of logs.
@@ -217,13 +228,19 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		r.fail("HELLO_DRAIN_TIMEOUT", errors.New("must be positive"))
 	}
 	c.MemberHeartbeat = r.duration("HELLO_MEMBER_HEARTBEAT", 5*time.Second)
+	c.HATakeoverEnabled = r.getenv("HELLO_HA_TAKEOVER_ENABLED") != "false"
+	c.HATakeoverPoll = r.duration("HELLO_HA_TAKEOVER_POLL", time.Second)
+	c.HATakeoverJitter = r.duration("HELLO_HA_TAKEOVER_JITTER", 2*time.Second)
 	switch {
 	case c.MemberHeartbeat == 0:
 		r.fail("HELLO_MEMBER_HEARTBEAT", errors.New("must be positive"))
 	case c.MemberHeartbeat > cluster.TTL/3:
-		// Three heartbeats must fit in the record TTL, or a live node's
-		// record expires between heartbeats and it flaps OFFLINE.
+		// Three heartbeats worst-case marks a live node OFFLINE; three
+		// heartbeats must fit in the record TTL.
 		r.fail("HELLO_MEMBER_HEARTBEAT", fmt.Errorf("must not exceed %s (a third of the membership TTL)", cluster.TTL/3))
+	}
+	if c.HATakeoverPoll <= 0 {
+		r.fail("HELLO_HA_TAKEOVER_POLL", errors.New("must be positive"))
 	}
 	if c.NonceSecret != "" && len(c.NonceSecret) < 32 {
 		r.fail("HELLO_SIP_NONCE_SECRET", errors.New("must be at least 32 bytes"))

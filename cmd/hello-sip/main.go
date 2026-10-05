@@ -138,6 +138,7 @@ func run(args []string) error {
 		return fmt.Errorf("HELLO_SECRET_KEY: %w", err)
 	}
 	live := livestate.New(vk)
+	members := cluster.New(vk)
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
 		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev,
 		DNSFailures: dnsFailures}
@@ -148,6 +149,8 @@ func run(args []string) error {
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
+		HADialogHeartbeat: cfg.MemberHeartbeat, HATakeoverEnabled: cfg.HATakeoverEnabled,
+		HATakeoverPoll: cfg.HATakeoverPoll, HATakeoverJitter: cfg.HATakeoverJitter,
 	}, sip.Deps{
 		Snapshots: watcher, State: live, Trunks: live,
 		Throttle: sip.ValkeyThrottle{Client: vk, Window: cfg.AuthFailWindow},
@@ -155,6 +158,7 @@ func run(args []string) error {
 		Presence:   sip.ValkeyPresence{Client: vk},
 		Voicemails: voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings,
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
+		HAState: live, Membership: members,
 	})
 	if err != nil {
 		return err
@@ -168,7 +172,6 @@ func run(args []string) error {
 	}
 	watcher.OnReload = srv.SnapshotChanged
 
-	members := cluster.New(vk)
 	machine := lifecycle.New(lifecycle.Options{
 		Member: cluster.Member{ID: cfg.NodeID, Kind: cluster.KindSIP, SIPAddr: cfg.SIPAdvertisedAddr, HTTPAddr: cfg.HTTPAddr,
 			Transports: []string{"udp"}, Version: version.Version},

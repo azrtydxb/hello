@@ -47,6 +47,14 @@ type Phone struct {
 	cliDlg   map[string]*sipgo.DialogClientSession // by Call-ID
 	conn     net.PacketConn
 	incoming chan *Incoming
+
+	// reinvites carries in-dialog re-INVITEs (a hold, or a takeover's
+	// media re-homing); the phone answers each 200 with its own SDP.
+	reinvites chan *sip.Request
+
+	// answer is the SDP the phone last answered a call with (re-INVITEs
+	// get it back, so the relay's target does not move).
+	answer []byte
 }
 
 func init() {
@@ -97,12 +105,13 @@ func New(opts Options) (*Phone, error) {
 		return nil, err
 	}
 	p := &Phone{
-		opts:     opts,
-		ua:       ua,
-		client:   client,
-		server:   server,
-		contact:  sip.ContactHeader{Address: sip.Uri{User: opts.User, Host: host, Port: port}},
-		incoming: make(chan *Incoming, 8),
+		opts:      opts,
+		ua:        ua,
+		client:    client,
+		server:    server,
+		contact:   sip.ContactHeader{Address: sip.Uri{User: opts.User, Host: host, Port: port}},
+		incoming:  make(chan *Incoming, 8),
+		reinvites: make(chan *sip.Request, 8),
 	}
 	p.dua = &sipgo.DialogUA{Client: client, ContactHDR: p.contact, RewriteContact: true}
 	p.srvDlg = map[string]*sipgo.DialogServerSession{}
@@ -128,8 +137,33 @@ func New(opts Options) (*Phone, error) {
 	return p, nil
 }
 
+// sdpAnswer is the SDP the phone answers re-INVITEs with: the last answer
+// it gave (or the offer mirrored, when it never answered), so the relay
+// keeps aiming at a reachable RTP port.
+func (p *Phone) sdpAnswer() []byte {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.answer
+}
+
+// Reinvites returns the in-dialog re-INVITEs the phone has answered.
+func (p *Phone) Reinvites() <-chan *sip.Request { return p.reinvites }
+
 func (p *Phone) routes() {
 	p.server.OnInvite(func(req *sip.Request, tx sip.ServerTransaction) {
+		if _, ok := req.To().Params.Get("tag"); ok {
+			// In-dialog re-INVITE (a hold, or a takeover re-homing the
+			// media): answer 200 with this phone's SDP in the same dialog.
+			select {
+			case p.reinvites <- req:
+			default:
+			}
+			res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", p.sdpAnswer())
+			res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+			res.AppendHeader(sip.HeaderClone(&p.contact))
+			_ = tx.Respond(res)
+			return
+		}
 		sess, err := p.dua.ReadInvite(req, tx)
 		if err != nil {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, sip.StatusBadRequest, err.Error(), nil))
@@ -138,7 +172,7 @@ func (p *Phone) routes() {
 		p.mu.Lock()
 		p.srvDlg[req.CallID().Value()] = sess
 		p.mu.Unlock()
-		in := &Incoming{Request: req, sess: sess, canceled: make(chan struct{}), final: make(chan struct{})}
+		in := &Incoming{Request: req, sess: sess, phone: p, canceled: make(chan struct{}), final: make(chan struct{})}
 		tx.OnCancel(func(*sip.Request) { in.cancelOnce.Do(func() { close(in.canceled) }) })
 		_ = sess.Respond(sip.StatusTrying, "Trying", nil)
 		select {
@@ -297,6 +331,7 @@ func (o *Outgoing) Ended() <-chan struct{} { return ended(&o.sess.Dialog) }
 type Incoming struct {
 	Request    *sip.Request
 	sess       *sipgo.DialogServerSession
+	phone      *Phone
 	canceled   chan struct{}
 	cancelOnce sync.Once
 	final      chan struct{}
@@ -319,6 +354,11 @@ func (i *Incoming) Ring() error { return i.sess.Respond(sip.StatusRinging, "Ring
 // Answer sends 200 OK with the SDP answer.
 func (i *Incoming) Answer(sdp []byte) error {
 	defer i.finalOnce.Do(func() { close(i.final) })
+	if i.phone != nil {
+		i.phone.mu.Lock()
+		i.phone.answer = sdp
+		i.phone.mu.Unlock()
+	}
 	return i.sess.RespondSDP(sdp)
 }
 

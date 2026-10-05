@@ -48,6 +48,7 @@ func (s *Server) handleRefer(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, sip.StatusBadRequest, "Bad Request")
 		return
 	}
+	c.noteHAState(haPhaseTransferring, "") // a transfer's dialog is being rewired
 	// The transfer target is the URI's user part: an extension number or an
 	// external number, routed as the transferee would dial it.
 	var tu sip.Uri

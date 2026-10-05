@@ -192,3 +192,8 @@
 - Always-on anchoring: every call anchored so all calls get in-call HA
 - In-call HA for anchored calls + policy change: LAN-to-LAN calls also anchor (cheap on a LAN, makes every call survivable)
 - Defer Phase 7; stop at the current scope
+
+## Merge Phase 7 (PR #8) and roll out to kw
+
+- Merge PR #8, wire the live-view ha flag, publish images, pin digests, Sync rollout, then kill a node mid-call on kw to prove takeover live
+- Hold PR #8 for review; kw stays on current behavior

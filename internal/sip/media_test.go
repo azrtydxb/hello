@@ -59,12 +59,12 @@ func inviteTo(number string) *sip.Request {
 	return req
 }
 
-// TestConditionalAnchor fails if a clean direct call anchors, if a
-// NAT-simulated, recording, announcement or voicemail call does not
-// anchor, or if the force switch does not anchor a clean call (spec S-1).
-// Mutation: dropping the contact-vs-source comparison in EndpointInfo.nat
-// fails the NAT cases; dropping the force tail fails the forced case.
-func TestConditionalAnchor(t *testing.T) {
+// TestAnchorPolicyDecision fails if the anchoring decision is not policy
+// for every call (spec S-7), or if the conditional triggers (contract 2)
+// did not survive as the trace's second opinion. Mutation: making anchorTrigger
+// always return nat fails the recording/announcement/voicemail cases;
+// making decideAnchor honour force fails the no-op case.
+func TestAnchorPolicyDecision(t *testing.T) {
 	base := func() *snapshot.Snapshot {
 		return snapshot.New(1, testDomain, callerDevices()).
 			WithExtensionData([]snapshot.Extension{
@@ -85,24 +85,27 @@ func TestConditionalAnchor(t *testing.T) {
 		from  EndpointInfo
 		to    EndpointInfo
 		force bool
-		want  AnchorReason
+		want  AnchorReason // what the conditional decision would have been
 	}{
-		{"direct stays direct", inviteTo("200"), base(), from100, EndpointInfo{Extension: "100"}, false, AnchorNone},
+		{"a plain LAN call anchors by policy", inviteTo("200"), base(), from100, EndpointInfo{Extension: "100"}, false, AnchorNone},
 		{"source port differs from contact", inviteTo("200"), base(), natted, EndpointInfo{Extension: "200"}, false, AnchorNAT},
 		{"contact host differs from source", inviteTo("200"), base(), natHost, EndpointInfo{Extension: "200"}, false, AnchorNAT},
 		{"phase 3 NAT flag", inviteTo("200"), base(), natKnown, EndpointInfo{Extension: "200"}, false, AnchorNAT},
-		{"callee record default anchors", inviteTo("200"), base(), from100, EndpointInfo{Extension: "200"}, false, AnchorRecording},
-		{"caller record default anchors", inviteTo("300"), base(),
+		{"callee record default would anchor", inviteTo("200"), base(), from100, EndpointInfo{Extension: "200"}, false, AnchorRecording},
+		{"caller record default would anchor", inviteTo("300"), base(),
 			EndpointInfo{ContactHost: "10.0.0.9", ContactPort: 5060, SourceHost: "10.0.0.9", SourcePort: 5060, Extension: "200"},
 			EndpointInfo{Extension: "300"}, false, AnchorRecording},
 		{"announcement feature code", inviteTo("*89"), base(), from100, EndpointInfo{}, false, AnchorAnnouncement},
-		{"voicemail handoff anchors", inviteTo("300"), base(), from100,
+		{"voicemail handoff would anchor", inviteTo("300"), base(), from100,
 			EndpointInfo{Extension: "300"}, false, AnchorVoicemail},
-		{"force anchors a clean call", inviteTo("200"), base(), from100, EndpointInfo{Extension: "100"}, true, AnchorForced},
+		{"force is a no-op with a trace", inviteTo("200"), base(), from100, EndpointInfo{Extension: "100"}, true, AnchorForced},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := decideAnchor(tc.req, tc.snap, tc.from, tc.to, tc.force); got != tc.want {
-				t.Fatalf("decideAnchor = %q, want %q", got, tc.want)
+			if got := decideAnchor(tc.req, tc.snap, tc.from, tc.to, tc.force); got != AnchorPolicy {
+				t.Fatalf("decideAnchor = %q, want policy for every call", got)
+			}
+			if got := anchorTrigger(tc.req, tc.snap, tc.from, tc.to, tc.force); got != tc.want {
+				t.Fatalf("anchorTrigger = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -140,23 +143,20 @@ func TestRecording(t *testing.T) {
 	c.register(t)
 	c.setCallee(answerAfter(nil))
 
-	// Part 1: *1 on a direct call re-anchors live and records; *1 again
-	// stops and stores while the call stays up.
+	// Part 1: every call anchors at setup now (spec S-7), so *1 starts the
+	// recording straight away; *1 again stops and stores while the call
+	// stays up.
 	r := waitCall(t, dial(t.Context(), a, "300"))
 	if r.err != nil {
 		t.Fatalf("call: %v", r.err)
 	}
-	waitReq(t, c.invites, "INVITE to c")
+	invC := waitReq(t, c.invites, "INVITE to c")
+	waitReq(t, c.acks, "ACK to c")
+	feedA := startRTPFeed(t, r.dcs.InviteResponse.Body())
+	feedC := startRTPFeed(t, invC.Body())
 	var seq = r.dcs.InviteRequest.CSeq().SeqNo + 10
 	sendDigits(t, a, r.dcs, "*1", &seq)
-	reqA := waitReq(t, a.reinvites, "re-INVITE to a with the anchor's offer")
-	reqC := waitReq(t, c.reinvites, "re-INVITE to c with the anchor's offer")
-	if len(reqA.Body()) == 0 || len(reqC.Body()) == 0 {
-		t.Fatal("the re-INVITEs carry no SDP")
-	}
-	feedA := startRTPFeed(t, reqA.Body())
-	feedC := startRTPFeed(t, reqC.Body())
-	feedA.silence(1)
+	feedA.silence(1) // captured: the recording is live
 	feedC.silence(1)
 	sendDigits(t, a, r.dcs, "*1", &seq)
 	deadline := time.Now().Add(5 * time.Second)
@@ -235,12 +235,12 @@ func sendDigits(t *testing.T, p *phone, dcs *sipgo.DialogClientSession, digits s
 	}
 }
 
-// TestReAnchorMidCall fails if a mid-call anchor need (here *1 on a direct
-// call) does not re-anchor live: both dialogs must be re-INVITEd to the
-// anchor, the CDR must say anchored, and the anchor must not churn back to
-// direct (spec S-1, TestReAnchorMidCall). Mutation: making reanchorLive a
-// no-op fails the re-INVITE waits and the CDR media column.
-func TestReAnchorMidCall(t *testing.T) {
+// TestAlwaysAnchorPolicy fails if a plain LAN-to-LAN call does not anchor
+// after Phase 7 (spec S-7): both dialogs must carry the relay's SDP from
+// setup, the anchored-calls gauge must move, and the CDR must say anchored
+// with the policy reason. Mutation: making considerAnchor skip clean calls
+// fails every assertion here.
+func TestAlwaysAnchorPolicy(t *testing.T) {
 	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), withMedia(false),
 		withVoicemail(newVMStore(), &fakeObjects{}))
 	a := newPhone(t, pbx, "a1", "pa")
@@ -252,32 +252,15 @@ func TestReAnchorMidCall(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("call: %v", r.err)
 	}
-	waitReq(t, c.invites, "INVITE to c")
-	var seq = r.dcs.InviteRequest.CSeq().SeqNo + 10
-	sendDigits(t, a, r.dcs, "*1", &seq)
-	reqA := waitReq(t, a.reinvites, "re-INVITE to a")
-	reqC := waitReq(t, c.reinvites, "re-INVITE to c")
-	for _, body := range [][]byte{reqA.Body(), reqC.Body()} {
-		sdp, err := media.ParseAudioSDP(body)
-		if err != nil || !strings.Contains(string(body), "m=audio") {
-			t.Fatalf("re-INVITE body is not the anchor's SDP: %q (%v)", body, err)
-		}
-		if sdp.Address != "127.0.0.1" {
-			t.Fatalf("re-INVITE names %s, want the anchor host", sdp.Address)
-		}
+	invC := waitReq(t, c.invites, "INVITE to c")
+	waitReq(t, c.acks, "ACK to c")
+	offB := anchoredSDP(t, pbx, invC.Body())
+	ans := anchoredSDP(t, pbx, r.dcs.InviteResponse.Body())
+	if offB.Port == ans.Port {
+		t.Fatalf("both relay legs share port %d", ans.Port)
 	}
 	if v := pbx.metric(t, "hello_media_anchored_calls", nil); v != 1 {
 		t.Fatalf("anchored calls = %v, want 1", v)
-	}
-	// A second re-INVITE from a (a hold toggle) must not churn the anchor
-	// away: the anchored path answers with the anchor's SDP.
-	res := a.reinviteAsCaller(t, r.dcs, "v=0\r\no=a 2 2 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 4970 RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\na=sendonly\r\n")
-	if res.StatusCode != 200 {
-		t.Fatalf("hold re-INVITE = %d", res.StatusCode)
-	}
-	reqA2 := waitReq(t, c.reinvites, "hold mirrored to c")
-	if !strings.Contains(string(reqA2.Body()), "sendonly") {
-		t.Fatalf("hold not mirrored: %q", reqA2.Body())
 	}
 	hangup(t, r.dcs)
 	hangup(t, r.dcs)
@@ -285,8 +268,8 @@ func TestReAnchorMidCall(t *testing.T) {
 	if cd.MediaMode != "anchored" {
 		t.Fatalf("CDR media = %q, want anchored", cd.MediaMode)
 	}
-	if !strings.Contains(traceText(cd.Trace), "Media anchored mid-call (recording)") {
-		t.Fatalf("CDR trace lacks the anchor step: %s", traceText(cd.Trace))
+	if !strings.Contains(traceText(cd.Trace), "Media anchored (policy)") {
+		t.Fatalf("CDR trace lacks the policy anchor step: %s", traceText(cd.Trace))
 	}
 }
 
@@ -537,7 +520,7 @@ func TestNATAnchorCarrier(t *testing.T) {
 	if cd.MediaMode != "anchored" {
 		t.Fatalf("CDR media = %q, want anchored", cd.MediaMode)
 	}
-	if !strings.Contains(traceText(cd.Trace), "Media anchored (nat)") {
+	if !strings.Contains(traceText(cd.Trace), "Media anchored (policy; trigger: nat)") {
 		t.Fatalf("CDR trace lacks the NAT anchor step: %s", traceText(cd.Trace))
 	}
 }

@@ -46,8 +46,10 @@ func (c *call) setHeld(held bool) {
 	if held {
 		c.s.m.HoldActive.Inc()
 		c.addTrace("Call held")
+		c.noteHAState("", "") // the replicated state reads hold from c.held
 		return
 	}
 	c.s.m.HoldActive.Dec()
 	c.addTrace("Call resumed")
+	c.noteHAState("", "")
 }

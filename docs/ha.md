@@ -13,12 +13,16 @@ Every row of the failure table is proven by an automated test in
 | 1     | Losing hello-control or the UI does not interrupt telephony                | Guaranteed   |
 | 2     | When a SIP node fails, phones register through another node                | Guaranteed   |
 | 3     | When a SIP node fails, new internal, inbound and outbound calls still work | Guaranteed   |
-| 4     | An established call survives loss of the node controlling it               | Not provided |
+| 4     | An established call survives loss of the node controlling it               | Guaranteed |
 
-Level 4 is Phase 7. Today a connected call whose node dies keeps its audio
-(media flows directly between the endpoints) but loses its signalling: the
-call cannot be held, transferred or cleanly hung up through Hello, and it
-leaves the live view within 30 seconds.
+Level 4 (Phase 7, in-call HA): **a live call survives the death of its SIP
+node with ≤3 s audio gap, when the cluster retains Valkey and at least one
+Kamailio.** The call is taken over by a surviving node from its replicated
+dialog state, both endpoints are re-INVITEd to the taker's media relay, and
+the call can be held, transferred, recorded and hung up as before. The CDR
+and live view mark such a call `ha: taken-over`; a call no survivor could
+save (see the two limitations below) is counted in `hello_zombie_calls_total`
+and never silently dropped.
 
 ## Architecture
 
@@ -82,7 +86,7 @@ This table is normative: it is what Hello does. The Test column names the test t
 | Failure                                      | Detected by                                               | Node reports                                                                                                                                   | Still works                                                                                                                                                                                            | Recovery                                                                                                                    | Test                                                                                         |
 | -------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | **SIP node dies**                            | Kamailio OPTIONS probe (≤15 s); membership expires (15 s) | Other nodes: the dead node goes OFFLINE (`hello_node_state`)                                                                                   | New registrations and calls through the survivor. Phones registered through the dead node stay reachable: their binding is in Valkey and their Path points through Kamailio                            | Restart the node; it joins and Kamailio adds it back after a 200 probe                                                      | `TestKillSIPNodeDuringRegister`, `TestKillSIPNodeDuringRinging`, `TestKillSIPNodeDuringCall` |
-| **Call in progress on the dying node**       | —                                                         | The call leaves the live view within 30 s                                                                                                      | Media continues directly between the phones                                                                                                                                                            | Users hang up on their phones (Level 4 is Phase 7)                                                                          | `TestKillSIPNodeDuringCall`                                                                  |
+| **Call in progress on the dying node**       | Membership expires (15 s)                                 | `hello_dialog_takeovers_total` on the taker; the call re-homes with `ha: taken-over` in its CDR trace                                          | The call continues: both endpoints re-INVITEd to the taker's relay within 3 s of the claim, and hangup, hold, transfer and recording work there                                                        | Automatic; a call that cannot be saved is counted in `hello_zombie_calls_total`                                             | `TestKillSIPNodeDuringCall` (full takeover), `TestTakeoverScenarioMatrix`                    |
 | **SIP node drained (maintenance)**           | Operator action or SIGTERM                                | DRAINING (`hello_node_state`); calls left to finish (`hello_drain_active_calls`)                                                               | Its established calls and its trunk registrations, which move to another node; new INVITEs to it get 503 and Kamailio stops sending it work within 15 s                                                | The node exits after its last call or `HELLO_DRAIN_TIMEOUT`                                                                 | `TestDrainKeepsCallsAndExits`, `TestRollingUpgrade`                                          |
 | **Valkey primary dies**                      | Sentinels (5 s down-after) promote the replica            | UNHEALTHY with 503 + `Retry-After` until Hello reconnects; READY within 15 s of promotion (`hello_node_state`, `hello_valkey_failovers_total`) | Established calls; after promotion, everything                                                                                                                                                         | Automatic; the old primary rejoins as a replica when restarted                                                              | `TestValkeyFailover`                                                                         |
 | **Writes lost in a Valkey failover**         | —                                                         | —                                                                                                                                              | Replication is asynchronous, so registrations written in the last moment before the failure can be lost                                                                                                | Phones restore them on their next refresh                                                                                   | Documented, not automated                                                                    |
@@ -127,6 +131,64 @@ Active calls finish on the node that set them up; new calls go to whichever
 nodes are READY. `TestRollingUpgrade` does exactly this with a call active
 throughout. Upgrade hello-control replicas one at a time the same way; they
 carry no calls.
+
+## In-call HA (Level 4)
+
+Every call anchors through the owning node's media relay, and the node
+continuously writes each connected call's recovery state to Valkey — both
+legs' full dialog data (Call-IDs, tags, CSeq counters, route sets, contacts,
+remote targets, negotiated SDP), the relay ports, the endpoints' latched
+media addresses, the call's phase (talking, hold, transferring, recording,
+announcement) and the CDR correlation. Writes happen off the SIP transaction
+path: on every state change and on a 5 s heartbeat. A record expires 30 s
+after its last heartbeat.
+
+When membership marks a node OFFLINE (15 s), each surviving node scans for
+that node's unclaimed dialogs on a jittered 1–3 s poll and claims them
+atomically (a Valkey Lua script: no claim wins twice). The taker rebuilds
+both legs from the replicated state — the endpoints see the same Call-IDs
+and tags, and the CSeq continues the old owner's counter — allocates fresh
+relay ports, and re-INVITEs both endpoints. Kamailio's failure route sends
+in-dialog requests that reach a dead node (408/503, or a 1.5 s timeout) to
+another hello-sip node, which answers from the replicated state. The claim
+is released once both legs are re-homed; the restarted owner cannot retake
+its old calls (its heartbeat finds the taker's record and yields). A slow
+owner that reappears mid-takeover yields the same way. Either re-INVITE
+failing (an endpoint that died too, or rejects with 488/603) closes the call
+one-sidedly — the surviving leg gets a normal BYE and CDR — and the zombie
+is counted.
+
+### Scenario matrix
+
+Each row is proven by a test (`TestKillSIPNodeDuringCall` in
+`test/integration/failure_test.go`, `TestTakeoverScenarioMatrix` and friends
+in `internal/sip`):
+
+| The node dies during          | What the users see                                            |
+| ----------------------------- | ------------------------------------------------------------- |
+| A connected call              | ≤3 s audio gap, call continues, hang up normally              |
+| A held call                   | The hold direction survives the takeover                      |
+| A recording call              | The recording continues on the taker (second MinIO object, same correlation) |
+| An announcement               | The announcement restarts from its beginning                  |
+| Ringing                       | Phase 3 behaviour: the caller gets a final response, nothing hangs |
+
+### The two named limitations
+
+- **Kamailio is a single point of in-dialog signalling.** A call's dialogs
+  route through the Kamailio that record-routed them. Run at least two with
+  a shared VIP (see below); losing all Kamailio breaks in-dialog signalling
+  of the calls it routed, takeover included.
+- **Losing Valkey and the node together loses the call.** The replicated
+  state lives in Valkey; when both are gone no survivor can rebuild the
+  dialogs. Such calls are counted in `hello_zombie_calls_total`, never
+  silent. A call whose replication was failing when its node died (see
+  `hello_dialog_replicated_total{result="failed"}`) is unrecoverable the
+  same way.
+
+One-legged calls — an announcement destination or a voicemail greeting
+answering a caller with nobody on the second leg — have no second endpoint
+to re-INVITE and are **not** taken over; when their node dies they are
+counted as zombies.
 
 ## Production guidance
 

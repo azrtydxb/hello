@@ -68,18 +68,16 @@ func TestEdgeCallAcrossNodes(t *testing.T) {
 	if rr := inv.GetHeader("Record-Route"); rr == nil || !strings.Contains(rr.Value(), nodeA.addr) || !strings.Contains(rr.Value(), "hflow=") {
 		t.Fatalf("Record-Route = %v, want node A with its flow token", rr)
 	}
-	if string(inv.Body()) != caller.sdp {
-		t.Fatalf("SDP changed across the edge: %q", inv.Body())
-	}
+	// The call anchors (spec S-7): the callee's offer is the anchor's
+	// leg-b SDP, not the caller's body.
+	anchoredSDP(t, nodeB, inv.Body())
 	waitRing(t, caller)
 	close(answer)
 	r := waitCall(t, res)
 	if r.err != nil {
 		t.Fatalf("call: %v", r.err)
 	}
-	if string(r.dcs.InviteResponse.Body()) != callee.sdp {
-		t.Fatalf("answer SDP changed: %q", r.dcs.InviteResponse.Body())
-	}
+	anchoredSDP(t, nodeB, r.dcs.InviteResponse.Body())
 	waitReq(t, callee.acks, "ACK through the edge")
 
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
@@ -91,8 +89,8 @@ func TestEdgeCallAcrossNodes(t *testing.T) {
 	if res, err := r.dcs.Do(ctx, re); err != nil || res.StatusCode != 200 {
 		t.Fatalf("re-INVITE = %v, %v", res, err)
 	}
-	if got := waitReq(t, callee.reinvites, "re-INVITE through the edge"); string(got.Body()) != hold {
-		t.Fatalf("re-INVITE body = %q", got.Body())
+	if got := waitReq(t, callee.reinvites, "re-INVITE through the edge"); !strings.Contains(string(got.Body()), "sendonly") {
+		t.Fatalf("hold re-INVITE body = %q", got.Body())
 	}
 	if err := r.dcs.WriteRequest(sip.NewRequest(sip.ACK, r.dcs.InviteResponse.Contact().Address)); err != nil {
 		t.Fatal(err)
