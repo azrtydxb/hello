@@ -431,6 +431,7 @@ async function errorFrom(
   );
 }
 
+/** One API call: JSON in and out, the error envelope as ApiError, 401 handled. */
 export async function request<T>(
   method: string,
   path: string,

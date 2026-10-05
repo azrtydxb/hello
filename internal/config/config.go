@@ -47,6 +47,10 @@ type Control struct {
 	// SIPDomain is the digest realm device HA1 values are computed for; it
 	// must equal hello-sip's HELLO_SIP_DOMAIN.
 	SIPDomain string
+	// AuthFailLimit is hello-sip's HELLO_SIP_AUTH_FAIL_LIMIT, read so the
+	// Diagnostics view can tell which throttled sources are blocked; set it
+	// to the same value on both.
+	AuthFailLimit int
 	// BootstrapAdminPassword creates the first admin user when none exist.
 	BootstrapAdminPassword string
 	SessionTTL             time.Duration
@@ -166,6 +170,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		DatabaseURL:            r.required("HELLO_DATABASE_URL"),
 		ValkeyAddr:             r.optional("HELLO_VALKEY_ADDR", ""),
 		SIPDomain:              r.required("HELLO_SIP_DOMAIN"),
+		AuthFailLimit:          r.positiveInt("HELLO_SIP_AUTH_FAIL_LIMIT", 10),
 		BootstrapAdminPassword: r.optional("HELLO_BOOTSTRAP_ADMIN_PASSWORD", ""),
 		SessionTTL:             r.duration("HELLO_SESSION_TTL", 12*time.Hour),
 	}

@@ -22,7 +22,45 @@ describe("App navigation", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Diagnostics" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Arrives in Phase 3.")).toBeInTheDocument();
+  });
+
+  it("badges Cluster and Trunks while they are degraded", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cluster": () =>
+        json({
+          members: [
+            { id: "hello-sip-1", kind: "sip", state: "READY" },
+            { id: "hello-sip-2", kind: "sip", state: "UNHEALTHY" },
+          ],
+          postgres: { up: true },
+          valkey: { up: false, mode: "single", error: "down" },
+          configRevision: 1,
+        }),
+      "GET /api/v1/trunks/status": () =>
+        json({
+          items: [
+            {
+              trunkId: 1,
+              name: "carrier",
+              activeCalls: 0,
+              destinations: [
+                { destination: "a:5060", up: false, checkedAt: "" },
+                { destination: "b:5060", up: true, checkedAt: "" },
+              ],
+            },
+          ],
+        }),
+    });
+    renderApp("/");
+    const nav = await screen.findByRole("navigation", { name: "Primary" });
+    expect(
+      await within(nav).findByRole("link", { name: /^Cluster\s*, 2 issues$/ }),
+    ).toHaveAttribute("href", "/cluster");
+    expect(
+      within(nav).getByRole("link", { name: /^Trunks\s*, 1 issue$/ }),
+    ).toHaveAttribute("href", "/trunks");
+    expect(within(nav).getByRole("link", { name: "Routes" })).toBeVisible();
   });
 
   it("lists Registrations and gives every Phase 1 page real content", async () => {
