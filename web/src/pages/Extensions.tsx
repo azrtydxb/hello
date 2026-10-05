@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router";
 import {
   createExtension,
@@ -112,6 +112,10 @@ export function Extensions() {
   const [params, setParams] = useSearchParams();
   // ?new=1 (the Dashboard's "New extension") opens the New extension modal.
   const [creating, setCreating] = useState(params.get("new") === "1");
+  // Extensions created while the list was still loading (from the header or
+  // ?new=1): the list response may predate them, so they are merged in when
+  // it lands.
+  const createdEarly = useRef<Extension[]>([]);
   const toast = useToast();
 
   useEffect(() => {
@@ -131,9 +135,16 @@ export function Extensions() {
       listExtensions(controller.signal),
       listDevices(controller.signal),
     ])
-      .then(([extensions, devices]) =>
-        setList({ status: "ready", extensions, devices }),
-      )
+      .then(([extensions, devices]) => {
+        const early = createdEarly.current.filter(
+          (c) => !extensions.some((e) => e.id === c.id),
+        );
+        setList({
+          status: "ready",
+          extensions: [...extensions, ...early],
+          devices,
+        });
+      })
       .catch((err: unknown) => {
         if (!controller.signal.aborted) {
           setList({ status: "error", message: errorMessage(err) });
@@ -231,12 +242,7 @@ export function Extensions() {
         title="Extensions"
         description="Dialable numbers, their devices and call features."
         actions={
-          // A create needs the list it lands in: enabled once it has loaded.
-          <Button
-            icon="plus"
-            disabled={list.status !== "ready"}
-            onClick={() => setCreating(true)}
-          >
+          <Button icon="plus" onClick={() => setCreating(true)}>
             New extension
           </Button>
         }
@@ -328,10 +334,11 @@ export function Extensions() {
         />
       )}
 
-      {creating && list.status === "ready" && (
+      {creating && (
         <NewExtension
           onClose={() => setCreating(false)}
           onCreated={(ext) => {
+            if (list.status !== "ready") createdEarly.current.push(ext);
             setExtensions((items) => [...items, ext]);
             setCreating(false);
             toast.show(`Extension ${ext.number} created.`);

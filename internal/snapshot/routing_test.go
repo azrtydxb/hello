@@ -190,6 +190,24 @@ func TestKeepLastGoodRouter(t *testing.T) {
 	}
 }
 
+// TestRevisionGauge fails if hello_config_revision does not follow the
+// snapshot in use: the lab waits on it to know a node has a new device
+// before registering it, instead of probing with REGISTERs that count as
+// failed authentications.
+func TestRevisionGauge(t *testing.T) {
+	rev := prometheus.NewGauge(prometheus.GaugeOpts{Name: "rev"})
+	w := &Watcher{Domain: domain, Revision: rev}
+	empty := buildRouting(routing.Config{Extensions: map[string]string{}}, nil, nil)
+	w.install(New(4, domain, nil).WithRouting(empty))
+	if gauge(rev) != 4 {
+		t.Fatalf("hello_config_revision = %v after loading revision 4", gauge(rev))
+	}
+	w.install(New(7, domain, nil).WithRouting(empty))
+	if gauge(rev) != 7 || w.Current().Revision != 7 {
+		t.Fatalf("hello_config_revision = %v after loading revision 7", gauge(rev))
+	}
+}
+
 type fakeResolver struct {
 	mu    sync.Mutex
 	hosts map[string][]string

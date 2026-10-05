@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/cookiejar"
@@ -192,7 +193,22 @@ func randDigits(n int) string {
 }
 
 // extension creates an extension with the given devices and returns them.
+//
+// It returns once every ready SIP node serves a snapshot holding the new
+// devices, so a test's first REGISTER succeeds. Registering earlier gets
+// 403 for an unknown device, and every such 403 counts toward the per-IP
+// failed-authentication throttle; the lab's phones all share the runner's
+// address, so a few dozen of those within the throttle window lock every
+// later test out with 403 until the window ends.
 func (lc *labClient) extension(devices ...string) []labDevice {
+	lc.t.Helper()
+	out := lc.createExtension(devices...)
+	lc.waitSnapshots(10 * time.Second)
+	return out
+}
+
+// createExtension is extension without waiting for the SIP nodes.
+func (lc *labClient) createExtension(devices ...string) []labDevice {
 	lc.t.Helper()
 	number := "7" + randDigits(7)
 	var ext struct{ ID int64 }
@@ -208,6 +224,68 @@ func (lc *labClient) extension(devices ...string) []labDevice {
 		out = append(out, labDevice{ID: dev.ID, Extension: number, User: user, Secret: dev.Secret})
 	}
 	return out
+}
+
+// labNodeHTTP maps each SIP node to its published health/metrics address.
+var labNodeHTTP = map[string]string{"hello-sip-1": "http://localhost:8082", "hello-sip-2": "http://localhost:8083"}
+
+// configRevision is the control plane's current configuration revision.
+func (lc *labClient) configRevision() int64 {
+	lc.t.Helper()
+	var v struct{ ConfigRevision int64 }
+	lc.must("GET", "/api/v1/version", nil, &v, 200)
+	return v.ConfigRevision
+}
+
+// waitSnapshots waits until every ready SIP node serves the control plane's
+// current revision, failing the test after d. A node that is not ready
+// (killed, partitioned, draining) takes no new registrations and is skipped.
+func (lc *labClient) waitSnapshots(d time.Duration) {
+	lc.t.Helper()
+	want := lc.configRevision()
+	for _, node := range []string{"hello-sip-1", "hello-sip-2"} {
+		if readyz(lc.t, labNodeHTTP[node]+"/readyz") != 200 {
+			continue
+		}
+		waitSnapshot(lc.t, node, want, time.Now().Add(d))
+	}
+}
+
+// waitSnapshot waits until node serves configuration revision want or newer,
+// failing the test unless that happens by deadline. It reads the node's
+// hello_config_revision gauge, so waiting sends no REGISTER.
+func waitSnapshot(t *testing.T, node string, want int64, deadline time.Time) {
+	t.Helper()
+	eventuallyBy(t, deadline, node+" serving configuration revision "+strconv.FormatInt(want, 10), func(context.Context) error {
+		got, err := nodeConfigRevision(node)
+		if err != nil {
+			return err
+		}
+		if got < want {
+			return fmt.Errorf("at revision %d", got)
+		}
+		return nil
+	})
+}
+
+// nodeConfigRevision reads node's hello_config_revision gauge.
+func nodeConfigRevision(node string) (int64, error) {
+	res, err := (&http.Client{Timeout: time.Second}).Get(labNodeHTTP[node] + "/metrics")
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return 0, err
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		if v, ok := strings.CutPrefix(line, "hello_config_revision "); ok {
+			f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+			return int64(f), err
+		}
+	}
+	return 0, errors.New("no hello_config_revision in the node's metrics")
 }
 
 // extensionID looks up an extension's id by number, for the PATCH paths
@@ -244,25 +322,19 @@ func phone(t *testing.T, d labDevice, node string) *sipua.Phone {
 }
 
 // register registers p for an hour and fails the test on anything but 200.
+// Devices from lc.extension are already in the ready nodes' snapshots, so
+// there is nothing to retry: a 403 here is a real failure (and a counted
+// failed authentication).
 func register(t *testing.T, p *sipua.Phone) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// A device created a moment ago reaches the nodes' snapshots within the
-	// spec's 2s (S-5); until then REGISTER is refused with 403.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		res, err := p.Register(ctx, time.Hour)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if res.StatusCode == 200 {
-			return
-		}
-		if res.StatusCode != 403 || time.Now().After(deadline) {
-			t.Fatalf("REGISTER = %d %s", res.StatusCode, res.Reason)
-		}
-		time.Sleep(100 * time.Millisecond)
+	res, err := p.Register(ctx, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("REGISTER = %d %s", res.StatusCode, res.Reason)
 	}
 }
 

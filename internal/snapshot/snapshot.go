@@ -461,6 +461,11 @@ type Watcher struct {
 	// InvalidRevision holds that revision (0 when routing is current).
 	ConfigInvalid   prometheus.Gauge
 	InvalidRevision prometheus.Gauge
+	// Revision, when set, holds the configuration revision of the snapshot
+	// in use (hello_config_revision): set just before the snapshot serves
+	// requests, so a reader that sees revision N knows N's devices
+	// authenticate on this node.
+	Revision prometheus.Gauge
 	// DNSFailures, when set, counts trunk destination lookups that failed
 	// (hello_dns_resolve_failures_total); the previous result is kept.
 	DNSFailures prometheus.Counter
@@ -512,6 +517,9 @@ func (w *Watcher) install(s *Snapshot) {
 		w.setInvalid(0, 0)
 	}
 	w.cur.Store(s)
+	if w.Revision != nil {
+		w.Revision.Set(float64(s.Revision))
+	}
 	w.triggerResolve()
 	if w.Log != nil {
 		w.Log.Info("configuration snapshot loaded", "revision", s.Revision, "devices", len(s.byUser))
