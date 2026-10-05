@@ -872,8 +872,14 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 	}
 	// No READY node to hand the call to: the other node drains (and,
 	// call-free, exits), so the drain timeout is what ends this call.
-	lc.must("POST", "/api/v1/cluster/nodes/"+other+"/drain?force=true", nil, nil, 204)
-	lc.waitState(other, "DRAINING", 10*time.Second)
+	// (409: it already exited call-free after its earlier drain.)
+	_ = lc.do("POST", "/api/v1/cluster/nodes/"+other+"/drain?force=true", nil, nil, 204)
+	eventually(t, 10*time.Second, other+" not READY", func() error {
+		if st := lc.memberState(other); st != "DRAINING" && st != "OFFLINE" {
+			return fmt.Errorf("state %s", st)
+		}
+		return nil
+	})
 	lc.must("POST", "/api/v1/cluster/nodes/"+node+"/drain?force=true", nil, nil, 204)
 	select {
 	case <-out2.Ended():
