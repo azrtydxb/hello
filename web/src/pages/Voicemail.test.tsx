@@ -169,7 +169,10 @@ describe("Voicemail", () => {
       "Playback of the message from 201",
     );
     expect(audio).toHaveAttribute("src", "/api/v1/voicemail/messages/21/audio");
-    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+    // The player starts from an effect, which may land after the element.
+    await waitFor(() =>
+      expect(HTMLMediaElement.prototype.play).toHaveBeenCalled(),
+    );
     // The card shows the caller and the length from the server.
     expect(screen.getByRole("meter", { name: "201" })).toBeVisible();
     expect(screen.getByText("0:00 / 0:15")).toBeVisible();
