@@ -43,9 +43,15 @@ func TestTakeoverLoopOnValkey(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := orphanState("ci-orphan-1", dead.ID, "sip:x@127.0.0.1:1") // the callee endpoint is gone: one-sided close
+	// Shrink the owner-freshness window (2x the heartbeat) so the just
+	// saved state is claimable, as it would be 15s into a real outage.
+	oldHB := livestate.HAHeartbeat
+	livestate.HAHeartbeat = 40 * time.Millisecond
+	t.Cleanup(func() { livestate.HAHeartbeat = oldHB })
 	if err := live.SaveDialogState(ctx, st, livestate.DialogTTL); err != nil {
 		t.Fatal(err)
 	}
+	time.Sleep(2 * livestate.HAHeartbeat)
 
 	mem := &fakeMembership{}
 	mem.set(dead) // membership as this node reads it (the real store backs HAState)
