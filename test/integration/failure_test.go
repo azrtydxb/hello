@@ -404,10 +404,22 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 				strings.TrimSpace(valkeyCLI(t, "TTL", "hello:dialog:"+callID)))
 		}
 		t.Logf("taker metrics: %v", nodeMetrics(t, taker))
-		if out, err := compose("logs", "--tail", "80", taker).CombinedOutput(); err != nil {
-			t.Logf("%s logs unavailable: %v", taker, err)
-		} else {
-			t.Logf("%s logs:\n%s", taker, string(out))
+		for _, svc := range []string{taker, "kamailio"} {
+			out, err := exec.Command("docker", "logs", "--tail", "120", container(t, svc)).CombinedOutput()
+			if err != nil {
+				t.Logf("%s logs unavailable: %v", svc, err)
+				continue
+			}
+			var kept []string
+			for _, line := range strings.Split(string(out), "\n") {
+				for _, want := range []string{"takeover", "orphan", "claim", "WARNING", "ERROR", "re-INVITE", "dialog"} {
+					if strings.Contains(line, want) {
+						kept = append(kept, line)
+						break
+					}
+				}
+			}
+			t.Logf("%s log lines of interest:\n\t%s", svc, strings.Join(kept, "\n\t"))
 		}
 		t.Fatalf("the call was not taken over by %s within 30s of the kill", taker)
 	}
