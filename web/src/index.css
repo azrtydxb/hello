@@ -428,30 +428,6 @@
     margin-top: 1.5rem;
   }
 
-  .state-ready {
-    color: var(--ok);
-  }
-
-  .state-draining,
-  .state-joining {
-    color: var(--warning-text);
-  }
-
-  .state-unhealthy,
-  .state-offline {
-    color: var(--danger);
-  }
-
-  .reason {
-    font-size: 0.875rem;
-  }
-
-  .warn-confirm {
-    flex-direction: column;
-    align-items: flex-start;
-    max-width: 24rem;
-  }
-
   @media (max-width: 640px) {
     .row-actions {
       justify-content: flex-start;

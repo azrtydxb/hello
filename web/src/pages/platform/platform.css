@@ -1,0 +1,669 @@
+/*
+ * Platform pages (Cluster, Diagnostics, System), measured from the Kuvryn
+ * Hello console design. Tokens only, no raw colours.
+ */
+
+/* --- page header -------------------------------------------------------- */
+
+.pf-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 20px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.pf-head__eyebrow {
+  color: var(--az-accent-text);
+}
+.pf-head__title {
+  margin: 6px 0 0;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.3;
+}
+.pf-head__desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--az-muted);
+}
+.pf-head__actions {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.pf-notice {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--az-muted);
+}
+.pf-notice:empty {
+  display: none;
+}
+.pf-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.pf-muted {
+  margin: 0;
+  font-size: 12px;
+  color: var(--az-muted);
+}
+.pf-mono {
+  font-family: var(--az-font-mono);
+}
+.pf-dot--idle {
+  background: var(--az-faint);
+}
+
+/* Tones: text and dots. Status always carries a label next to them. */
+.pf-tone--good {
+  --pf-tone: var(--az-good);
+  --pf-tone-strong: var(--az-good-strong);
+}
+.pf-tone--warn {
+  --pf-tone: var(--az-warn);
+  --pf-tone-strong: var(--az-warn-strong);
+}
+.pf-tone--bad {
+  --pf-tone: var(--az-bad);
+  --pf-tone-strong: var(--az-bad-strong);
+}
+.pf-tone--info {
+  --pf-tone: var(--az-info);
+  --pf-tone-strong: var(--az-info-strong);
+}
+.pf-tone--neutral {
+  --pf-tone: var(--az-faint);
+  --pf-tone-strong: var(--az-muted);
+}
+.pf-dot {
+  background: var(--pf-tone, var(--az-faint));
+}
+
+/* --- cluster topology --------------------------------------------------- */
+
+.pf-topo {
+  padding: 20px 22px 18px;
+  overflow-x: auto;
+}
+.pf-topo__canvas {
+  position: relative;
+  width: 1160px;
+  margin: 0 auto;
+}
+.pf-topo__label {
+  position: absolute;
+  font-size: 10px;
+}
+.pf-topo__zone {
+  position: absolute;
+  border: 1px dashed var(--az-border-strong);
+  border-radius: 12px;
+  box-sizing: border-box;
+}
+.pf-topo__zone > .az-eyebrow {
+  position: absolute;
+  left: 12px;
+  top: -7px;
+  padding: 0 6px;
+  background: var(--az-surface);
+  font-size: 10px;
+}
+.pf-topo__svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+.pf-topo__wire {
+  position: absolute;
+  font-family: var(--az-font-mono);
+  font-size: 10px;
+  color: var(--az-faint);
+}
+.pf-link {
+  fill: none;
+  stroke: var(--az-border-strong);
+  stroke-width: 1.5;
+}
+.pf-link--live {
+  stroke: var(--az-indicator);
+}
+.pf-link--warn {
+  stroke: var(--az-warn);
+  stroke-dasharray: 5 4;
+}
+.pf-link--bad {
+  stroke: var(--az-bad);
+  stroke-dasharray: 5 4;
+}
+
+.pf-svc {
+  all: unset;
+  position: absolute;
+  width: 230px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  background: var(--az-surface);
+  border: 1px solid var(--az-border-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  font-size: 14px;
+  color: var(--az-text);
+}
+.pf-svc:hover {
+  background: var(--az-hover);
+}
+.pf-svc:focus-visible {
+  outline: 2px solid var(--az-focus-ring);
+  outline-offset: 2px;
+}
+.pf-svc--warn {
+  border-color: var(--az-warn);
+}
+.pf-svc--bad {
+  border-color: var(--az-bad);
+}
+.pf-svc__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pf-svc__head > .az-icon {
+  color: var(--az-muted);
+}
+.pf-svc__name {
+  font-family: var(--az-font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+.pf-svc__state {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--pf-tone-strong);
+}
+.pf-svc__sub,
+.pf-svc__line,
+.pf-svc__reason {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+.pf-svc__sub {
+  font-size: 11px;
+  color: var(--az-muted);
+  font-family: var(--az-font-mono);
+}
+.pf-svc__line {
+  font-size: 12px;
+  color: var(--az-text-2);
+}
+.pf-svc__reason {
+  font-size: 11px;
+  color: var(--az-bad-strong);
+}
+.pf-svc__foot {
+  margin-top: auto;
+  font-size: 11px;
+  color: var(--pf-tone-strong, var(--az-muted));
+}
+.pf-svc__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--az-border);
+  flex-shrink: 0;
+}
+.pf-svc__metrics .az-eyebrow {
+  font-size: 9px;
+}
+.pf-svc__metric {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+.pf-svc__metric--mono {
+  font-size: 12px;
+  font-family: var(--az-font-mono);
+}
+.pf-svc__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+.pf-svc__row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  min-width: 0;
+}
+.pf-svc__row-name {
+  font-family: var(--az-font-mono);
+  color: var(--az-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pf-svc__row-meta {
+  margin-left: auto;
+  color: var(--az-muted);
+  white-space: nowrap;
+  font-family: var(--az-font-mono);
+  font-size: 11px;
+}
+
+.pf-legend {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--az-border);
+  font-size: 12px;
+  color: var(--az-muted);
+}
+.pf-legend > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pf-legend__end {
+  margin-left: auto;
+}
+.pf-legend__dash {
+  width: 16px;
+  border-top: 1.5px dashed var(--az-bad);
+}
+
+/* Service details (in the modal). */
+.pf-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pf-detail__reason {
+  font-size: 13px;
+  color: var(--az-bad-strong);
+}
+.pf-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  border-top: 1px solid var(--az-border);
+  padding-top: 14px;
+}
+.pf-metrics__value {
+  font-size: 20px;
+  font-weight: 500;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.pf-drain {
+  border-top: 1px solid var(--az-border);
+  padding-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pf-drain__prompt {
+  font-size: 13px;
+  color: var(--az-text-2);
+}
+.pf-drain__actions {
+  display: flex;
+  gap: 8px;
+}
+.pf-node + .pf-node {
+  border-top: 1px solid var(--az-border);
+  padding-top: 14px;
+}
+.pf-node__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  font-family: var(--az-font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* --- diagnostics ------------------------------------------------------- */
+
+.pf-tabs {
+  margin-bottom: 20px;
+}
+.pf-grid2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.pf-grid2--wide {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
+}
+.pf-card {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.pf-card--tight {
+  gap: 12px;
+}
+.pf-h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.pf-h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.pf-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 32px 0 12px;
+  flex-wrap: wrap;
+}
+.pf-aor {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pf-aor > .pf-mono {
+  font-size: 14px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.pf-aor > .az-badge {
+  margin-left: auto;
+}
+.pf-foot {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--az-muted);
+}
+
+.pf-trace {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.pf-trace__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 260px;
+  max-width: 100%;
+  min-width: 0;
+}
+.pf-trace__main {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  flex: 999 1 560px;
+}
+.pf-calls {
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  margin: 0;
+  list-style: none;
+}
+.pf-call {
+  all: unset;
+  box-sizing: border-box;
+  width: 100%;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  line-height: 1.4;
+}
+.pf-call:hover {
+  background: var(--az-hover);
+}
+.pf-call:focus-visible {
+  outline: 2px solid var(--az-focus-ring);
+  outline-offset: -2px;
+}
+.pf-call[aria-current="true"] {
+  background: var(--az-selected-bg);
+}
+.pf-call__top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pf-call__top > .az-icon {
+  color: var(--az-muted);
+}
+.pf-call__route {
+  font-family: var(--az-font-mono);
+  font-size: 12px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pf-call__top > .az-badge {
+  margin-left: auto;
+  font-family: var(--az-font-mono);
+}
+.pf-call__meta {
+  font-size: 11px;
+  color: var(--az-muted);
+  font-family: var(--az-font-mono);
+}
+.pf-tracehead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.pf-tracehead__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pf-tracehead__title > .az-badge {
+  font-family: var(--az-font-mono);
+}
+.pf-tracehead__meta {
+  font-size: 12px;
+  color: var(--az-muted);
+  margin-top: 4px;
+  font-family: var(--az-font-mono);
+  overflow-wrap: anywhere;
+}
+.pf-tracehead__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.pf-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.pf-steps > li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--az-border);
+  font-size: 13px;
+  color: var(--az-text-2);
+}
+.pf-steps__n {
+  font-family: var(--az-font-mono);
+  font-size: 11px;
+  color: var(--az-faint);
+  padding-top: 2px;
+}
+
+.pf-checks {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pf-check {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--az-border);
+}
+.pf-check:last-child {
+  border-bottom: none;
+}
+.pf-check > .az-icon {
+  color: var(--pf-tone-strong);
+  margin-top: 1px;
+}
+.pf-check__title {
+  font-weight: 500;
+  color: var(--az-text);
+}
+.pf-check__detail {
+  font-size: 13px;
+  color: var(--az-muted);
+  margin-top: 4px;
+  text-wrap: pretty;
+}
+.pf-badge-mono {
+  font-family: var(--az-font-mono);
+}
+.pf-small {
+  display: block;
+  font-family: var(--az-font-sans);
+}
+
+/* --- system ------------------------------------------------------------ */
+
+.pf-codes__head,
+.pf-codes__row {
+  display: grid;
+  grid-template-columns: 80px 1fr 1fr 32px;
+  gap: 10px;
+  align-items: start;
+}
+.pf-codes__head {
+  padding: 8px 0;
+}
+.pf-codes__row {
+  padding: 6px 0;
+  border-top: 1px solid var(--az-border);
+}
+.pf-codes__row .az-iconbtn {
+  margin-top: 2px;
+}
+.pf-codes__actions {
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid var(--az-border);
+  padding-top: 14px;
+}
+.pf-codes__actions > :last-child {
+  margin-left: auto;
+}
+.pf-cardhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.pf-presence {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.pf-presence > li {
+  display: grid;
+  grid-template-columns: 1fr 70px auto;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 0;
+  border-top: 1px solid var(--az-border);
+  font-size: 13px;
+}
+.pf-presence__ext {
+  font-family: var(--az-font-mono);
+  color: var(--az-muted);
+}
+.pf-tokens {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pf-tokens > li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--az-border);
+}
+.pf-tokens > li > .az-icon {
+  color: var(--az-muted);
+}
+.pf-tokens__meta {
+  flex: 1;
+  min-width: 0;
+}
+.pf-tokens__name {
+  font-family: var(--az-font-mono);
+  font-size: 13px;
+}
+.pf-tokens__when {
+  font-size: 12px;
+  color: var(--az-muted);
+  margin-top: 3px;
+}
+.pf-revoke {
+  color: var(--az-bad-strong);
+}
+.pf-secret {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.pf-secret > .az-field {
+  flex: 1;
+}
