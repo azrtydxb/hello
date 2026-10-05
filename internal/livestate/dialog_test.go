@@ -1,0 +1,108 @@
+package livestate
+
+import (
+	"context"
+	"testing"
+	"time"
+)
+
+// TestDialogStateLifecycle fails if the claim is not atomic (two claimants,
+// one winner), if the owner's fresh heartbeat blocks a claim while an aged
+// one does not, if a claimed dialog is still offered to other takers, or if
+// a record outlives its TTL. Runs only against a real Valkey (CI).
+func TestDialogStateLifecycle(t *testing.T) {
+	s, ctx := store(t), context.Background()
+	oldHB := HAHeartbeat
+	HAHeartbeat = 40 * time.Millisecond // the freshness window is 2x this
+	t.Cleanup(func() { HAHeartbeat = oldHB })
+
+	st := DialogState{
+		CallID: "c1", OwnerNode: "sip-1", Correlation: "corr-1", State: "talking",
+		RelayPorts: [2]int{20000, 20002},
+		Legs: [2]DialogLeg{
+			{CallID: "legA", LocalTag: "ta", RemoteTag: "ra", LocalCSeq: 3, RemoteCSeq: 2,
+				RouteSet:     []string{"<sip:kam:5070;lr>"},
+				Contact:      "sip:hello-sip-1:5060;transport=udp",
+				RemoteTarget: "sip:101@10.0.0.9:5060", SDP: "v=0", Endpoint: "sip:101@hello.test"},
+			{CallID: "legB", LocalTag: "tb", RemoteTag: "rb", LocalCSeq: 2, RemoteCSeq: 5,
+				Contact:      "sip:hello-sip-1:5060;transport=udp",
+				RemoteTarget: "sip:102@10.0.0.10:5060", Endpoint: "sip:102@hello.test"},
+		},
+	}
+	if err := s.SaveDialogState(ctx, st, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	// The record's expiry is the heartbeat: PTTL within the HA TTL.
+	pttl, err := s.c.Do(ctx, s.c.B().Pttl().Key(dialogKey("c1")).Build()).AsInt64()
+	if err != nil || pttl <= 0 || pttl > int64(DialogTTL/time.Millisecond) {
+		t.Fatalf("PTTL = %d, %v; want 0 < pttl <= %d", pttl, err, int64(DialogTTL/time.Millisecond))
+	}
+
+	// A dialog of another node is invisible; the owner's is listed.
+	if got, err := s.OrphanedDialogs(ctx, "sip-2"); err != nil || len(got) != 0 {
+		t.Fatalf("OrphanedDialogs(other node) = %v, %v", got, err)
+	}
+	got, err := s.OrphanedDialogs(ctx, "sip-1")
+	if err != nil || len(got) != 1 || got[0].CallID != "c1" {
+		t.Fatalf("OrphanedDialogs(sip-1) = %v, %v; want [c1]", got, err)
+	}
+
+	// Fresh heartbeat: a claim is refused while the owner looks alive.
+	if ok, _, err := s.ClaimDialog(ctx, "c1", "sip-2"); ok || err != nil {
+		t.Fatalf("fresh claim = %v, %v; want refused", ok, err)
+	}
+
+	// After the freshness window the claim succeeds exactly once.
+	time.Sleep(2*HAHeartbeat + 20*time.Millisecond)
+	ok, state, err := s.ClaimDialog(ctx, "c1", "sip-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("aged claim refused")
+	}
+	if state.CallID != "c1" || state.OwnerNode != "sip-1" || state.Legs[0].LocalCSeq != 3 ||
+		state.Legs[1].RemoteCSeq != 5 || state.RelayPorts[1] != 20002 {
+		t.Fatalf("claimed state incomplete: %+v", state)
+	}
+
+	// A claimed dialog is not offered to other survivors, and the second
+	// claimant loses the race.
+	if got, _ := s.OrphanedDialogs(ctx, "sip-1"); len(got) != 0 {
+		t.Fatalf("claimed dialog still orphaned: %v", got)
+	}
+	if ok, _, _ := s.ClaimDialog(ctx, "c1", "sip-3"); ok {
+		t.Fatal("second claimant won")
+	}
+
+	// The owner sees the claim (the yield signal) and who holds it.
+	owner, err := s.ClaimOwner(ctx, "c1")
+	if err != nil || owner != "sip-2" {
+		t.Fatalf("ClaimOwner = %q, %v; want sip-2", owner, err)
+	}
+
+	// Release puts the dialog back in the orphan list (claim expiry does
+	// too, but the test cannot wait 30s).
+	if err := s.ReleaseDialogClaim(ctx, "c1"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.OrphanedDialogs(ctx, "sip-1"); len(got) != 1 {
+		t.Fatalf("dialog not orphaned again after release: %v", got)
+	}
+	if owner, _ := s.ClaimOwner(ctx, "c1"); owner != "" {
+		t.Fatalf("claim survived release: %q", owner)
+	}
+
+	// Expiry: a short-TTL record vanishes, leaving nothing to claim.
+	if err := s.SaveDialogState(ctx, st, 150*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(400 * time.Millisecond)
+	if ok, _, _ := s.ClaimDialog(ctx, "c1", "sip-2"); ok {
+		t.Fatal("claimed a dialog whose state expired")
+	}
+	if got, _ := s.OrphanedDialogs(ctx, "sip-1"); len(got) != 0 {
+		t.Fatalf("expired dialog still listed: %v", got)
+	}
+}
