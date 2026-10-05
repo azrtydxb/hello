@@ -808,6 +808,24 @@ spec:
         app.kubernetes.io/component: sip
         hello.dev/node: hello-sip-1
     spec:
+      # Anchored media needs a LAN-reachable RTP address: with the host
+      # network the SIP listener and the relay's 20000-21000 legs bind the
+      # node IP directly (see HELLO_MEDIA_ANCHOR_HOST below).
+      hostNetwork: true
+      # Keep cluster DNS on a host-networked pod (sentinels, MinIO, postgres).
+      dnsPolicy: ClusterFirstWithHostNet
+      # One hello-sip per node: the pods bind node UDP 5060 and TCP 8082,
+      # so two on one node would fight over the ports.
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/component
+                    operator: In
+                    values:
+                      - sip
+              topologyKey: kubernetes.io/hostname
       terminationGracePeriodSeconds: 120 # a drain must finish (lab: 2h, capped here)
       containers:
         - name: hello-sip
@@ -875,13 +893,19 @@ spec:
               value: "false"
             - name: HELLO_RTP_PORT_MIN
               # Phase 5 anchored media (spec .procoder/specs/media-anchoring.md):
-              # relay legs bind UDP 20000-21000 on the pod IP. No Service
-              # exposes the range (see below), so off-cluster endpoints cannot
-              # reach it; keep the range off the Service until the anchor
-              # advertises a reachable host:port in its SDP.
+              # relay legs bind UDP 20000-21000 on the host network, so the
+              # range is reachable on the node IP (no Service maps a range).
               value: "20000"
             - name: HELLO_RTP_PORT_MAX
               value: "21000"
+            - name: HELLO_MEDIA_ANCHOR_HOST
+              # The IPv4 stamped into anchored SDP answers: this pod's node
+              # IP via the Downward API, so it stays correct wherever the
+              # pod schedules (no per-node hardcoding). LAN phones send
+              # their RTP here; see docs/media.md, "Anchored media on kw".
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
             - name: HELLO_MEDIA_FORCE_ANCHOR
               # The operator override stays off: anchor only when a feature
               # needs it (NAT detection, recording, announcement, voicemail).
@@ -919,14 +943,12 @@ spec:
               drop:
                 - ALL
 ---
-# No RTP exposure here on purpose: the anchored-media relay binds UDP
-# 20000-21000 on the pod IP, but a Service port list cannot map a range
-# (one entry per port), and the pinned build's anchored SDP answers mirror
-# the offer's own c= address (no anchor host is wired), so even a NodePort
-# range would not carry audio: the phone would still send RTP to the
-# address in the answer, not to a node. LAN phones get anchored audio only
-# once hello-sip advertises a reachable anchor host:port in SDP; until
-# then the RTP range stays pod-only (see docs/media.md).
+# No RTP Service here, and none is needed: the relay binds its UDP
+# 20000-21000 legs on the host network, so anchored RTP lands on the node
+# IP that HELLO_MEDIA_ANCHOR_HOST advertises in the SDP answers
+# (docs/media.md). The ClusterIP Services stay only for the in-cluster
+# paths: Kamailio's dispatcher set 1 and the dialog routes (Contact =
+# HELLO_SIP_ADVERTISED_ADDR, the Service name).
 apiVersion: v1
 kind: Service
 metadata:
@@ -985,6 +1007,20 @@ spec:
         app.kubernetes.io/component: sip
         hello.dev/node: hello-sip-2
     spec:
+      # The host network, DNS and anti-affinity reasoning is on the
+      # hello-sip-1 pod spec above.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/component
+                    operator: In
+                    values:
+                      - sip
+              topologyKey: kubernetes.io/hostname
       terminationGracePeriodSeconds: 120
       containers:
         - name: hello-sip
@@ -1052,13 +1088,19 @@ spec:
               value: "false"
             - name: HELLO_RTP_PORT_MIN
               # Phase 5 anchored media (spec .procoder/specs/media-anchoring.md):
-              # relay legs bind UDP 20000-21000 on the pod IP. No Service
-              # exposes the range (see below), so off-cluster endpoints cannot
-              # reach it; keep the range off the Service until the anchor
-              # advertises a reachable host:port in its SDP.
+              # relay legs bind UDP 20000-21000 on the host network, so the
+              # range is reachable on the node IP (no Service maps a range).
               value: "20000"
             - name: HELLO_RTP_PORT_MAX
               value: "21000"
+            - name: HELLO_MEDIA_ANCHOR_HOST
+              # The IPv4 stamped into anchored SDP answers: this pod's node
+              # IP via the Downward API, so it stays correct wherever the
+              # pod schedules (no per-node hardcoding). LAN phones send
+              # their RTP here; see docs/media.md, "Anchored media on kw".
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
             - name: HELLO_MEDIA_FORCE_ANCHOR
               # The operator override stays off: anchor only when a feature
               # needs it (NAT detection, recording, announcement, voicemail).
@@ -1096,8 +1138,8 @@ spec:
               drop:
                 - ALL
 ---
-# See the hello-sip-1 Service above: no RTP exposure on purpose; the same
-# SDP limitation applies (docs/media.md).
+# See the hello-sip-1 Service above: no RTP Service, by the same
+# host-network argument (docs/media.md).
 apiVersion: v1
 kind: Service
 metadata:

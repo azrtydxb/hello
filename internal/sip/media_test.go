@@ -280,6 +280,7 @@ func TestReAnchorMidCall(t *testing.T) {
 		t.Fatalf("hold not mirrored: %q", reqA2.Body())
 	}
 	hangup(t, r.dcs)
+	hangup(t, r.dcs)
 	cd := pbx.nextCDR(t)
 	if cd.MediaMode != "anchored" {
 		t.Fatalf("CDR media = %q, want anchored", cd.MediaMode)
@@ -531,6 +532,7 @@ func TestNATAnchorCarrier(t *testing.T) {
 		t.Fatal("the callee feed received nothing: one-way audio")
 	}
 	hangup(t, r.dcs)
+	hangup(t, r.dcs)
 	cd := pbx.nextCDR(t)
 	if cd.MediaMode != "anchored" {
 		t.Fatalf("CDR media = %q, want anchored", cd.MediaMode)
@@ -639,5 +641,55 @@ func TestRTPMetrics(t *testing.T) {
 	}
 	if v := pbx2.metric(t, "hello_media_anchor_failures_total", nil); v != 1 {
 		t.Fatalf("anchor failures = %v, want 1", v)
+	}
+}
+
+// TestAdvertisedAnchorSDP fails if a set media anchor host is not stamped
+// into both SDP answers (the caller's 200 and the fork's offer to the
+// callee), or if the advertised port is not one of the relay's allocated
+// ports from the configured RTP range — what a LAN phone dials its RTP to
+// (spec S-2, the kw defect). Mutation: unwiring SetMediaAnchor in
+// cmd/hello-sip restores the offer-mirroring fallback and fails the host
+// assertions; advertising the offer's port instead of the leg's fails the
+// range assertions.
+func TestAdvertisedAnchorSDP(t *testing.T) {
+	pbx := startPBX(t, callerDevices(), withMedia(true))
+	pbx.srv.SetMediaAnchor(media.NewAnchor("192.0.2.10", discard))
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	b := newPhone(t, pbx, "b1", "pb1")
+	b.register(t)
+	b.setCallee(answerAfter(nil))
+	r := waitCall(t, dial(t.Context(), a, "200"))
+	if r.err != nil {
+		t.Fatalf("call: %v", r.err)
+	}
+	// The caller's answer: the anchor host and an allocated relay port.
+	sdpA, err := media.ParseAudioSDP(r.dcs.InviteResponse.Body())
+	if err != nil {
+		t.Fatalf("caller answer SDP: %v", err)
+	}
+	if sdpA.Address != "192.0.2.10" {
+		t.Fatalf("caller answer advertises %q, want the anchor host 192.0.2.10", sdpA.Address)
+	}
+	if sdpA.Port < 30000 || sdpA.Port > 31000 {
+		t.Fatalf("caller answer port %d, want a relay leg from 30000-31000", sdpA.Port)
+	}
+	// The callee's offer: the same anchor host, its own allocated leg.
+	invB := waitReq(t, b.invites, "INVITE to b")
+	sdpB, err := media.ParseAudioSDP(invB.Body())
+	if err != nil {
+		t.Fatalf("fork offer SDP: %v", err)
+	}
+	if sdpB.Address != "192.0.2.10" {
+		t.Fatalf("fork offer advertises %q, want the anchor host 192.0.2.10", sdpB.Address)
+	}
+	if sdpB.Port < 30000 || sdpB.Port > 31000 || sdpB.Port == sdpA.Port {
+		t.Fatalf("fork offer port %d, want a second relay leg from 30000-31000 (answer was %d)", sdpB.Port, sdpA.Port)
+	}
+	hangup(t, r.dcs)
+	cd := pbx.nextCDR(t)
+	if cd.MediaMode != "anchored" {
+		t.Fatalf("CDR media = %q, want anchored", cd.MediaMode)
 	}
 }
