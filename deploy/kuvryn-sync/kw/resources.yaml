@@ -25,7 +25,9 @@ metadata:
   annotations:
     sync.kuvryn.io/prune: disabled
 data:
-  # Verbatim copy of deploy/kamailio/kamailio.cfg. The pod's env sets
+  # Verbatim copy of deploy/kamailio/kamailio.cfg, enforced by
+  # test/deploy (TestKwKamailioConfigMatchesSource); kw-specific values come
+  # from the #!trydefenv parameters, never text edits. The pod's env sets
   # KAMAILIO_LISTEN_IP from status.podIP, so the "hello" socket's Path and
   # Record-Route name the kamailio pod itself — reachable in-cluster with no
   # advertise override — and the phones socket advertises
@@ -51,10 +53,16 @@ data:
     # list of NATed phones (rebuilt from the next REGISTER after a restart; it is
     # never used for routing).
     #
-    # Two kinds of peers, told apart by source address:
-    #   - Hello nodes: the source IP is in dispatcher set 1. Their requests go to
-    #     phones (Route = the Path or Record-Route Kamailio put there).
-    #   - Phones: everything else. Their requests only ever go to Hello nodes.
+    # Two kinds of peers, told apart by the socket a request arrives on (not by
+    # source address):
+    #   - Hello nodes: requests received on the "hello" socket (UDP 5070). Their
+    #     requests go to phones (Route = the Path or Record-Route Kamailio put
+    #     there, both of which name the hello socket).
+    #   - Phones: requests received on the "phones" socket (UDP 5060). Their
+    #     requests only ever go to Hello nodes.
+    # The source address cannot decide this: on kw the hello-sip pods run with
+    # hostNetwork, so their datagrams reach Kamailio SNAT'd from a node address
+    # that matches no dispatcher entry (those are Service names/ClusterIPs).
     #
     # Never log message bodies or Authorization/Proxy-Authorization headers:
     # the lab's TestNoSecretsInLogs fails on 'Authorization: Digest' or
@@ -114,7 +122,8 @@ data:
 
     # Dispatcher: set "1" is the hello-sip nodes; algorithm "7" hashes over
     # hash_pvar ($fU, the From user), "4" is round robin. Match mode "3" in
-    # ds_is_from_list ignores port and protocol.
+    # ds_is_from_list ignores port and protocol (used only to vet the target of
+    # a phone's in-dialog request, route PHONE_IN_DIALOG).
 
     ####### Global parameters #######
 
@@ -137,6 +146,12 @@ data:
     #   hello  - UDP 5070, internal to the edge network. Kamailio talks to the
     #            hello-sip nodes from here: dispatcher probes, Path, the
     #            Hello-facing Record-Route. Hello nodes send here.
+    # TRUST ASSUMPTION: every request received on the hello socket is treated as
+    # coming from a Hello node (request_route sets FLT_FROM_HELLO on it) and may
+    # be relayed to any phone. So 5070 must stay internal: never published to
+    # the host in compose, never exposed through a NodePort/LoadBalancer
+    # Service on Kubernetes (deploy/kuvryn-sync/kw exposes only 5060, as
+    # NodePort 30508). Phones only ever learn the advertised phones socket.
     # A request crossing from one socket to the other gets two Record-Route
     # headers (rr enable_double_rr), each naming the socket its side uses.
     listen=udp:LISTEN_IP:5060 advertise PUBLIC_HOST:PUBLIC_PORT name "phones"
@@ -269,8 +284,9 @@ data:
 
     	route(REQINIT);
 
-    	if (ds_is_from_list("1", "3")) {
-    		# Source IP (any port, any protocol) is a hello-sip node.
+    	if ($Rn == "hello") {
+    		# Received on the Hello-facing socket (5070): a hello-sip node. See
+    		# the trust assumption at the listen lines.
     		setflag(FLT_FROM_HELLO);
     	}
 
@@ -406,7 +422,10 @@ data:
     		exit;
     	}
     	# loose_route leaves the next hop in $du (another Route) or the R-URI
-    	# (Hello's Contact, e.g. sip:hello-sip-1:5060).
+    	# (Hello's Contact, e.g. sip:hello-sip-1:5060). Hello writes its
+    	# HELLO_SIP_ADVERTISED_ADDR there - an address (lab) or Service name
+    	# (kw) resolving to the same IP as its dispatcher entry, even when the
+    	# node runs with hostNetwork - so the target is checked against set 1.
     	if ($du != $null && $du != "") {
     		$var(next) = $du;
     	} else {
@@ -420,6 +439,10 @@ data:
     	if (is_method("INVITE|UPDATE")) {
     		set_contact_alias(); # a re-INVITE may move the phone
     	}
+    	# In-call HA (Phase 7): if the owning node is dead (408/503 or a branch
+    	# timeout), the request is retried against another hello-sip node, which
+    	# answers from the replicated dialog state.
+    	t_on_failure("HELLO_IN_DIALOG");
     	route(TO_HELLO);
     }
 
@@ -519,6 +542,40 @@ data:
     	}
     }
 
+    # In-call HA (Phase 7): an in-dialog request whose owning hello-sip node is
+    # dead is retried against another node of the dispatcher set, skipping the
+    # dead one. The taker answers from the replicated dialog state, so the
+    # phone never sees the node change.
+    failure_route[HELLO_IN_DIALOG] {
+    	if (t_is_canceled()) {
+    		exit;
+    	}
+    	if (isflagset(FLT_RETRIED)) {
+    		exit;
+    	}
+    	if (!t_check_status("408|503") && !(t_branch_timeout() && !t_branch_replied())) {
+    		exit;
+    	}
+    	$var(dead) = $du;
+    	if ($var(dead) == $null) {
+    		$var(dead) = $ru;
+    	}
+    	if (!ds_select_dst("1", "4")) {
+    		xlog("L_WARN", "in-dialog failover of $rm: no other hello-sip node\n");
+    		exit;
+    	}
+    	if ($var(dead) == $du) {
+    		if (!ds_next_dst()) {
+    			xlog("L_WARN", "in-dialog failover of $rm: only the dead node is listed\n");
+    			exit;
+    		}
+    	}
+    	setflag(FLT_RETRIED);
+    	xlog("L_INFO", "in-dialog failover of $rm: $var(dead) is dead, trying $du\n");
+    	t_relay();
+    	exit;
+    }
+
     # Contract 7: a relay that times out or gets 503 is retried once on the next
     # active node; the phone gets the last answer otherwise.
     failure_route[HELLO_FAILOVER] {
@@ -571,11 +628,6 @@ data:
     	}
     	xhttp_reply("404", "Not Found", "text/plain", "not found\n");
     }
-  # On kw the hello-sip nodes sit behind Services, not fixed edge IPs
-  # (10.89.53.11/.12 in the lab's dispatcher.list): a ClusterIP name resolves
-  # even with no ready endpoints, so a restarted node's entry always loads and
-  # is merely probed inactive until it answers — the property the lab's
-  # fixed-IP entries existed to preserve. duid matches HELLO_NODE_ID.
   dispatcher.list: |
     # Hello SIP edge dispatcher destinations (lab twin:
     # deploy/kamailio/dispatcher.list). Format:
@@ -665,6 +717,12 @@ spec:
         app.kubernetes.io/name: hello
         app.kubernetes.io/instance: hello
         app.kubernetes.io/component: edge
+      annotations:
+        # sha256 of the hello-kamailio ConfigMap's kamailio.cfg followed by
+        # its dispatcher.list. Kamailio reads its config only at startup and
+        # Sync does not restart pods on a ConfigMap change, so this rolls the
+        # pod whenever the config changes. test/deploy enforces it.
+        hello.watteel.com/kamailio-config-sha256: 96869ffb4230115d976d02d2fdaa8bea7bc6b8a561430f2a3c557bbf961e225b
     spec:
       securityContext:
         # /run/kamailio is an emptyDir the kamailio user (102) must write its
