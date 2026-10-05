@@ -1,6 +1,8 @@
 import { useId } from "react";
 import type { Schedule, ScheduleWindow, Transform } from "../api";
-import { Field, fieldId, type ErrorMap } from "../forms";
+import { Button, IconButton, Input, Switch } from "../design/azrty/components";
+import { fieldId, type ErrorMap } from "../forms";
+import { Checkbox } from "../pages/callflow/ui";
 
 /** The form's view of a Transform: every field as typed. */
 export interface TransformDraft {
@@ -83,75 +85,56 @@ export function TransformEditor({
     onChange({ ...value, [f]: v });
   return (
     <fieldset
-      className="group"
+      className="cf-form__section"
       aria-describedby={groupError ? groupErrorId : undefined}
     >
-      <legend>{legend}</legend>
+      <legend className="az-eyebrow">{legend}</legend>
       {groupError && (
-        <p id={groupErrorId} className="field-error">
+        <p id={groupErrorId} className="cf-form__error">
           {groupError}
         </p>
       )}
-      <p className="hint">
+      <p className="cf-form__note">
         Applied in order: strip leading digits, add the prefix, then replace a
         regex match with the template (<code>{"${1}"}</code> refers to a group).
         Leave all empty to keep the number unchanged.
       </p>
-      <div className="fields">
-        <Field
+      <div className="cf-two">
+        <Input
           id={id("strip")}
           label="Strip digits"
+          mono
+          inputMode="numeric"
+          value={value.strip}
           error={errors[`${base}.strip`]}
-        >
-          {(p) => (
-            <input
-              {...p}
-              className="narrow"
-              inputMode="numeric"
-              value={value.strip}
-              onChange={(e) => set("strip", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field
+          onChange={(e) => set("strip", e.target.value)}
+        />
+        <Input
           id={id("prefix")}
           label="Prefix"
+          mono
+          value={value.prefix}
           error={errors[`${base}.prefix`]}
-        >
-          {(p) => (
-            <input
-              {...p}
-              value={value.prefix}
-              onChange={(e) => set("prefix", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field id={id("regex")} label="Regex" error={errors[`${base}.regex`]}>
-          {(p) => (
-            <input
-              {...p}
-              className="mono"
-              spellCheck={false}
-              value={value.regex}
-              onChange={(e) => set("regex", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field
+          onChange={(e) => set("prefix", e.target.value)}
+        />
+        <Input
+          id={id("regex")}
+          label="Regex"
+          mono
+          spellCheck={false}
+          value={value.regex}
+          error={errors[`${base}.regex`]}
+          onChange={(e) => set("regex", e.target.value)}
+        />
+        <Input
           id={id("template")}
           label="Template"
+          mono
+          spellCheck={false}
+          value={value.template}
           error={errors[`${base}.template`]}
-        >
-          {(p) => (
-            <input
-              {...p}
-              className="mono"
-              spellCheck={false}
-              value={value.template}
-              onChange={(e) => set("template", e.target.value)}
-            />
-          )}
-        </Field>
+          onChange={(e) => set("template", e.target.value)}
+        />
       </div>
     </fieldset>
   );
@@ -249,45 +232,34 @@ export function ScheduleEditor({
 
   return (
     <fieldset
-      className="group"
+      className="cf-form__section"
       aria-describedby={groupError ? groupErrorId : undefined}
     >
-      <legend>Schedule</legend>
-      <div className="field checkbox">
-        <input
-          id={id("schedule.on")}
-          type="checkbox"
-          checked={value !== null}
-          onChange={(e) => onChange(e.target.checked ? newSchedule() : null)}
-        />
-        <label htmlFor={id("schedule.on")}>Only during these times</label>
-      </div>
+      <legend className="az-eyebrow">Schedule</legend>
+      <Switch
+        id={id("schedule.on")}
+        label="Only during these times"
+        labelPosition="end"
+        checked={value !== null}
+        onChange={(e) => onChange(e.target.checked ? newSchedule() : null)}
+      />
       {groupError && (
-        <p id={groupErrorId} className="field-error">
+        <p id={groupErrorId} className="cf-form__error">
           {groupError}
         </p>
       )}
-      {value === null ? (
-        <p className="hint">Always open.</p>
-      ) : (
+      {value === null && <p className="cf-form__note">Always open.</p>}
+      {value !== null && (
         <>
-          <Field
+          <Input
             id={id("schedule.timeZone")}
             label="Time zone"
+            list={listId}
+            value={value.timeZone}
             error={errors["schedule.timeZone"]}
             hint="IANA name, e.g. Asia/Dubai."
-          >
-            {(p) => (
-              <input
-                {...p}
-                list={listId}
-                value={value.timeZone}
-                onChange={(e) =>
-                  onChange({ ...value, timeZone: e.target.value })
-                }
-              />
-            )}
-          </Field>
+            onChange={(e) => onChange({ ...value, timeZone: e.target.value })}
+          />
           <datalist id={listId}>
             {timeZones().map((tz) => (
               <option key={tz} value={tz} />
@@ -301,99 +273,88 @@ export function ScheduleEditor({
             return (
               <fieldset
                 key={i}
-                className="window"
+                className="cf-window"
                 aria-describedby={
                   daysError ? `${id(daysKey)}-error` : undefined
                 }
               >
                 <legend>Window {n}</legend>
-                <div className="days">
+                <div className="cf-days">
                   {DAY_NAMES.map((day, d) => (
-                    <label key={day} className="day">
-                      <input
-                        type="checkbox"
-                        aria-label={day}
-                        checked={w.days.includes(d)}
-                        onChange={(e) =>
-                          setWindow(i, {
-                            days: e.target.checked
-                              ? [...w.days, d].sort((a, b) => a - b)
-                              : w.days.filter((x) => x !== d),
-                          })
-                        }
-                      />
-                      <span aria-hidden="true">{day.slice(0, 3)}</span>
-                    </label>
+                    <Checkbox
+                      key={day}
+                      aria-label={day}
+                      label={<span aria-hidden="true">{day.slice(0, 3)}</span>}
+                      checked={w.days.includes(d)}
+                      onChange={(e) =>
+                        setWindow(i, {
+                          days: e.target.checked
+                            ? [...w.days, d].sort((a, b) => a - b)
+                            : w.days.filter((x) => x !== d),
+                        })
+                      }
+                    />
                   ))}
                 </div>
                 {daysError && (
-                  <p id={`${id(daysKey)}-error`} className="field-error">
+                  <p id={`${id(daysKey)}-error`} className="cf-form__error">
                     {daysError}
                   </p>
                 )}
-                <div className="fields">
-                  <Field
-                    id={id(`schedule.windows[${i}].start`)}
-                    label={`Start ${n}`}
-                    error={errors[`schedule.windows[${i}].start`]}
-                  >
-                    {(p) => (
-                      <input
-                        {...p}
-                        type="time"
-                        value={w.start}
-                        onChange={(e) =>
-                          setWindow(i, { start: e.target.value })
-                        }
-                      />
-                    )}
-                  </Field>
-                  <Field
-                    id={id(`schedule.windows[${i}].end`)}
-                    label={`End ${n}`}
-                    error={errors[`schedule.windows[${i}].end`]}
-                    hint="Before the start means it runs past midnight."
-                  >
-                    {(p) => (
-                      <input
-                        {...p}
-                        type="time"
-                        value={w.end}
-                        onChange={(e) => setWindow(i, { end: e.target.value })}
-                      />
-                    )}
-                  </Field>
-                  <button
-                    type="button"
-                    className="align-end"
-                    aria-label={`Remove window ${n}`}
+                <div className="cf-row">
+                  <div className="cf-row__fields">
+                    <Input
+                      id={id(`schedule.windows[${i}].start`)}
+                      label={`Start ${n}`}
+                      type="time"
+                      size="sm"
+                      value={w.start}
+                      error={errors[`schedule.windows[${i}].start`]}
+                      onChange={(e) => setWindow(i, { start: e.target.value })}
+                    />
+                    <Input
+                      id={id(`schedule.windows[${i}].end`)}
+                      label={`End ${n}`}
+                      type="time"
+                      size="sm"
+                      value={w.end}
+                      error={errors[`schedule.windows[${i}].end`]}
+                      hint="Before the start runs past midnight."
+                      onChange={(e) => setWindow(i, { end: e.target.value })}
+                    />
+                  </div>
+                  <IconButton
+                    icon="trash-2"
+                    label={`Remove window ${n}`}
                     onClick={() =>
                       onChange({
                         ...value,
                         windows: value.windows.filter((_, j) => j !== i),
                       })
                     }
-                  >
-                    Remove
-                  </button>
+                  />
                 </div>
               </fieldset>
             );
           })}
-          <button
-            type="button"
-            onClick={() =>
-              onChange({
-                ...value,
-                windows: [
-                  ...value.windows,
-                  { days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" },
-                ],
-              })
-            }
-          >
-            Add window
-          </button>
+          <div>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="plus"
+              onClick={() =>
+                onChange({
+                  ...value,
+                  windows: [
+                    ...value.windows,
+                    { days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" },
+                  ],
+                })
+              }
+            >
+              Add window
+            </Button>
+          </div>
         </>
       )}
     </fieldset>

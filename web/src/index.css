@@ -289,30 +289,6 @@
     margin-bottom: 0.5rem;
   }
 
-  fieldset.window {
-    margin: 0.75rem 0;
-    padding: 0.5rem 0.75rem 0.75rem;
-    border: 1px dashed var(--border);
-    border-radius: 6px;
-  }
-
-  .days {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem 0.75rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .day {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-  }
-
-  .destination {
-    margin-bottom: 0.25rem;
-  }
-
   input.narrow {
     width: 6rem;
   }
@@ -330,48 +306,15 @@
     justify-content: flex-start;
   }
 
-  .label {
-    font-weight: 400;
-  }
-
-  .password-state {
-    margin: 0;
-    font-weight: 600;
-  }
-
-  .tabs {
-    display: flex;
-    gap: 0.25rem;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 1rem;
-  }
-
-  .tabs [role="tab"] {
-    border: 1px solid transparent;
-    border-bottom: none;
-    border-radius: 6px 6px 0 0;
-    background: transparent;
-    margin-bottom: -1px;
-  }
-
-  .tabs [role="tab"][aria-selected="true"] {
-    border-color: var(--border);
-    background: var(--bg);
-    font-weight: 600;
-  }
-
   .state {
     font-weight: 600;
   }
 
-  .state-registered,
   .state-up {
     color: var(--ok);
   }
 
-  .state-failed,
-  .state-down,
-  .state-misconfigured {
+  .state-down {
     color: var(--danger);
   }
 
@@ -379,30 +322,6 @@
     list-style: none;
     margin: 0;
     padding: 0;
-  }
-
-  ol.picked {
-    margin: 0 0 0.75rem;
-    padding-left: 1.5rem;
-  }
-
-  ol.picked li {
-    margin-bottom: 0.25rem;
-  }
-
-  ol.picked li > span {
-    display: inline-block;
-    min-width: 8rem;
-    margin-right: 0.5rem;
-  }
-
-  ol.picked button {
-    margin-right: 0.25rem;
-  }
-
-  ol.inline-list {
-    margin: 0;
-    padding-left: 1.25rem;
   }
 
   ol.trace {
@@ -422,10 +341,6 @@
   .notice,
   section > .error[role="note"] {
     margin-bottom: 1rem;
-  }
-
-  .result {
-    margin-top: 1.5rem;
   }
 
   .state-ready {

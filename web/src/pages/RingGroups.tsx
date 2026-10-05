@@ -7,49 +7,103 @@ import {
   listExtensions,
   listRingGroups,
   updateRingGroup,
+  EXTENSION_NUMBER_PATTERN,
   RING_STRATEGIES,
   RING_STRATEGY_LABEL,
+  SIP_USERNAME_PATTERN,
   type Extension,
+  type FailureKind,
   type FieldError,
   type Id,
   type RingGroup,
   type RingGroupFields,
   type RingStrategy,
-  type FailureKind,
 } from "../api";
-import { ConfirmButton } from "../components/ConfirmButton";
 import {
-  Field,
-  fieldId,
-  FormError,
-  mapFieldErrors,
-  type ErrorMap,
-} from "../forms";
-import { EXTENSION_NUMBER_PATTERN, SIP_USERNAME_PATTERN } from "../api";
+  Alert,
+  Avatar,
+  Badge,
+  Button,
+  Drawer,
+  EmptyState,
+  Icon,
+  IconButton,
+  Input,
+  Select,
+  Switch,
+} from "../design/azrty/components";
+import { mapFieldErrors, type ErrorMap } from "../forms";
+import { UNKNOWN } from "./callflow/format";
+import {
+  ConfirmDialog,
+  FormAlert,
+  Loading,
+  PageHeader,
+  useRestoreFocus,
+  useToast,
+} from "./callflow/ui";
+
+const FORM_ID = "group-form";
 
 type ListState<T> =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; items: T[] };
 
+const findExt = (extensionId: Id, extensions: readonly Extension[]) =>
+  extensions.find((e) => String(e.id) === String(extensionId));
+
 /** The extension's number, or `#id` when the list has not loaded it. */
 function extLabel(extensionId: Id, extensions: readonly Extension[]): string {
-  const ext = extensions.find((e) => String(e.id) === String(extensionId));
-  return ext ? ext.number : `#${String(extensionId)}`;
+  return findExt(extensionId, extensions)?.number ?? `#${String(extensionId)}`;
+}
+
+/** "Rings 25 s · respects DND", "Hunt · 5 s between members · rings 60 s". */
+function groupMeta(g: RingGroup): string {
+  return [
+    g.hunt ? "Hunt" : null,
+    g.memberDelay > 0 ? `${g.memberDelay} s between members` : null,
+    `${g.hunt ? "rings" : "Rings"} ${g.ringTimeout} s`,
+    g.ignoreDnd ? "ignores DND" : "respects DND",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** What a member's row says on the right: its weight or its ring time. */
+function memberExtra(g: RingGroup, m: RingGroup["members"][number]): string {
+  if (g.strategy === "weighted") return `weight ${m.weight}`;
+  if (m.delay > 0) return `${m.delay} s`;
+  return UNKNOWN;
+}
+
+function failureText(g: RingGroup): string {
+  switch (g.failureKind) {
+    case "voicemail":
+      return `Voicemail box ${g.failureTarget || UNKNOWN}`;
+    case "announcement":
+      return `Announcement ${g.failureTarget || UNKNOWN}`;
+    case "external":
+      return `External ${g.failureTarget || UNKNOWN}`;
+    default:
+      return "Hang up";
+  }
 }
 
 /**
- * Ring and hunt groups: create, edit and delete groups with their strategy,
- * members (with per-member weight and delay) and failure destination.
+ * Ring and hunt groups as cards: strategy, members in ring order and the
+ * failure destination; created and edited in a drawer.
  */
 export function RingGroups() {
   const [list, setList] = useState<ListState<RingGroup>>({ status: "loading" });
   const [extensions, setExtensions] = useState<Extension[]>([]);
+  const [extReady, setExtReady] = useState(false);
   const [extError, setExtError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<RingGroup | null>(null);
   const [editing, setEditing] = useState<
     { kind: "new" } | { kind: "edit"; group: RingGroup } | null
   >(null);
+  const toast = useToast();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -66,7 +120,10 @@ export function RingGroups() {
   useEffect(() => {
     const controller = new AbortController();
     listExtensions(controller.signal)
-      .then(setExtensions)
+      .then((items) => {
+        setExtensions(items);
+        setExtReady(true);
+      })
       .catch((err: unknown) => {
         if (!controller.signal.aborted) {
           setExtError(errorMessage(err));
@@ -84,137 +141,186 @@ export function RingGroups() {
   }
 
   async function onDelete(group: RingGroup) {
-    setActionError(null);
     try {
       await deleteRingGroup(group.id);
-      replaceItems((items) => items.filter((g) => g.id !== group.id));
     } catch (err: unknown) {
-      setActionError(`Could not delete ${group.name}: ${errorMessage(err)}`);
+      throw new Error(`Could not delete ${group.name}: ${errorMessage(err)}`, {
+        cause: err,
+      });
     }
+    replaceItems((items) => items.filter((g) => g.id !== group.id));
+    setDeleting(null);
+    toast.show(`Ring group ${group.name} deleted.`);
   }
 
-  const extensionLabel = (extensionId: Id) => {
-    const ext = extensions.find((e) => String(e.id) === String(extensionId));
-    return ext ? ext.number : `#${String(extensionId)}`;
-  };
+  const newGroup = (
+    <Button icon="plus" onClick={() => setEditing({ kind: "new" })}>
+      New ring group
+    </Button>
+  );
 
   return (
     <section aria-labelledby="page-title">
-      <h1 id="page-title">Ring Groups</h1>
-      {editing ? (
-        <RingGroupForm
+      <PageHeader
+        title="Ring groups"
+        description="Ring several extensions for one call, then fall through to a failure destination."
+        actions={newGroup}
+      />
+      <div className="cf-stack">
+        {extError && (
+          <Alert tone="warn" title="Could not load the extension list.">
+            {extError} Members show by id, and the member picker needs it.
+          </Alert>
+        )}
+        {list.status === "loading" && <Loading what="ring groups" />}
+        {list.status === "error" && (
+          <Alert tone="bad" title="Could not load the groups.">
+            {list.message}
+          </Alert>
+        )}
+        {list.status === "ready" && list.items.length === 0 && (
+          <EmptyState
+            icon="users-round"
+            title="No ring groups yet."
+            description="A ring group rings several extensions for one number, all at once or in turn."
+            action={newGroup}
+          />
+        )}
+        {list.status === "ready" && list.items.length > 0 && (
+          <ul
+            className="cf-grid cf-grid--groups cf-plain"
+            aria-label="Ring groups"
+          >
+            {list.items.map((g) => (
+              <GroupCard
+                key={String(g.id)}
+                group={g}
+                extensions={extensions}
+                onEdit={() => setEditing({ kind: "edit", group: g })}
+                onDelete={() => setDeleting(g)}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {editing && (
+        <RingGroupDrawer
           key={editing.kind === "edit" ? String(editing.group.id) : "new"}
           group={editing.kind === "edit" ? editing.group : null}
           extensions={extensions}
-          extReady={extensions.length > 0}
-          onCancel={() => setEditing(null)}
-          onSaved={(saved) => {
+          extReady={extReady}
+          onClose={() => setEditing(null)}
+          onSaved={(saved, created) => {
             replaceItems((items) =>
               items.some((g) => g.id === saved.id)
                 ? items.map((g) => (g.id === saved.id ? saved : g))
                 : [...items, saved],
             );
             setEditing(null);
+            toast.show(
+              created
+                ? `Ring group ${saved.name} created.`
+                : `Ring group ${saved.name} saved.`,
+            );
           }}
         />
-      ) : (
-        <p>
-          <button
-            type="button"
-            className="primary"
-            onClick={() => setEditing({ kind: "new" })}
-          >
-            New ring group
-          </button>
-        </p>
       )}
-
-      <h2 id="groups-list">All groups</h2>
-      {actionError && (
-        <p role="alert" className="error">
-          {actionError}
-        </p>
+      {deleting && (
+        <ConfirmDialog
+          title={`Delete ring group ${deleting.name}?`}
+          description="Routes and forwards that send calls to it stop working until they are changed."
+          confirmLabel="Delete group"
+          onConfirm={() => onDelete(deleting)}
+          onClose={() => setDeleting(null)}
+        />
       )}
-      {list.status === "loading" && (
-        <p role="status" aria-live="polite">
-          Loading groups…
-        </p>
-      )}
-      {list.status === "error" && (
-        <div role="alert" className="error">
-          <strong>Could not load the groups.</strong>
-          <p>{list.message}</p>
-        </div>
-      )}
-      {list.status === "ready" && list.items.length === 0 && (
-        <p className="muted">No ring groups yet.</p>
-      )}
-      {list.status === "ready" && list.items.length > 0 && (
-        <div className="table-wrap">
-          <table aria-labelledby="groups-list">
-            <thead>
-              <tr>
-                <th scope="col">Name</th>
-                <th scope="col">Strategy</th>
-                <th scope="col">Hunt</th>
-                <th scope="col">Members</th>
-                <th scope="col">Timeout</th>
-                <th scope="col">Ignore DND</th>
-                <th scope="col">Failure destination</th>
-                <th scope="col">
-                  <span className="visually-hidden">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.items.map((group) => (
-                <tr key={String(group.id)}>
-                  <th scope="row">{group.name}</th>
-                  <td>{RING_STRATEGY_LABEL[group.strategy]}</td>
-                  <td>{group.hunt ? "Yes" : "No"}</td>
-                  <td>
-                    {group.members
-                      .slice()
-                      .sort((a, b) => a.position - b.position)
-                      .map((m) => extensionLabel(m.extensionId))
-                      .join(", ")}
-                  </td>
-                  <td>{group.ringTimeout}s</td>
-                  <td>{group.ignoreDnd ? "Yes" : "No"}</td>
-                  <td>
-                    {group.failureKind === "none"
-                      ? "Hang up"
-                      : `${group.failureKind}: ${group.failureTarget}`}
-                  </td>
-                  <td className="row-actions">
-                    <button
-                      type="button"
-                      aria-label={`Edit ring group ${group.name}`}
-                      onClick={() => setEditing({ kind: "edit", group })}
-                    >
-                      Edit
-                    </button>
-                    <ConfirmButton
-                      label="Delete"
-                      accessibleLabel={`Delete ring group ${group.name}`}
-                      prompt={`Delete ring group ${group.name}?`}
-                      confirmLabel="Delete group"
-                      onConfirm={() => onDelete(group)}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {extError && (
-        <p role="alert" className="error">
-          Could not load the extension list: {extError} The member picker needs
-          it.
-        </p>
-      )}
+      {toast.node}
     </section>
+  );
+}
+
+function GroupCard({
+  group: g,
+  extensions,
+  onEdit,
+  onDelete,
+}: {
+  group: RingGroup;
+  extensions: readonly Extension[];
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const titleId = `group-${String(g.id)}-name`;
+  const members = g.members.slice().sort((a, b) => a.position - b.position);
+  return (
+    <li className="az-card cf-card" aria-labelledby={titleId}>
+      <div className="cf-card__head cf-card__head--top">
+        <div style={{ minWidth: 0 }}>
+          <h2 className="cf-card__group-name" id={titleId}>
+            {g.name}
+          </h2>
+          <div className="cf-card__sub">{groupMeta(g)}</div>
+        </div>
+        <Badge tone="pillar">
+          {RING_STRATEGY_LABEL[g.strategy] ?? g.strategy}
+        </Badge>
+      </div>
+      {members.length === 0 ? (
+        <p className="cf-form__note">No members.</p>
+      ) : (
+        <ol
+          className="cf-members"
+          aria-label={`Members of ${g.name}, in ring order`}
+        >
+          {members.map((m, i) => {
+            const ext = findExt(m.extensionId, extensions);
+            return (
+              <li className="cf-member" key={String(m.extensionId)}>
+                <span className="cf-member__pos" aria-hidden="true">
+                  {i + 1}
+                </span>
+                <span className="cf-member__who">
+                  <Avatar name={ext?.name || ext?.number || "?"} size={26} />
+                  <span>
+                    <span className="cf-mono">
+                      {ext?.number ?? `#${String(m.extensionId)}`}
+                    </span>{" "}
+                    {ext?.name ?? ""}
+                  </span>
+                </span>
+                <span className="cf-member__extra">{memberExtra(g, m)}</span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      <div className="cf-failure">
+        <Icon name="corner-down-right" size={14} />
+        If nobody answers: <strong>{failureText(g)}</strong>
+      </div>
+      <div className="cf-card__foot">
+        <Button
+          variant="secondary"
+          size="sm"
+          icon="pencil"
+          aria-label={`Edit ring group ${g.name}`}
+          onClick={onEdit}
+        >
+          Edit
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon="trash-2"
+          className="cf-danger"
+          aria-label={`Delete ring group ${g.name}`}
+          onClick={onDelete}
+        >
+          Delete
+        </Button>
+      </div>
+    </li>
   );
 }
 
@@ -330,8 +436,12 @@ function validateGroup(d: GroupDraft): Record<string, string> {
       e.failureTarget = "Use 2 to 20 digits, optionally starting with +.";
     }
   }
-  if (d.failureKind === "voicemail" && d.failureTarget.trim() === "") {
-    e.failureTarget = "Enter the extension whose box takes the call.";
+  if (d.failureKind === "voicemail") {
+    if (d.failureTarget.trim() === "") {
+      e.failureTarget = "Enter the extension whose box takes the call.";
+    } else if (!EXTENSION_NUMBER_PATTERN.test(d.failureTarget.trim())) {
+      e.failureTarget = "Use an extension number (2 to 10 digits).";
+    }
   }
   if (d.failureKind === "announcement") {
     if (d.failureTarget.trim() === "") {
@@ -341,31 +451,24 @@ function validateGroup(d: GroupDraft): Record<string, string> {
         "Use the announcement's name (1-64 of A-Z a-z 0-9 . _ -).";
     }
   }
-  if (
-    d.failureKind === "voicemail" &&
-    d.failureTarget.trim() !== "" &&
-    !EXTENSION_NUMBER_PATTERN.test(d.failureTarget.trim())
-  ) {
-    e.failureTarget = "Use an extension number (2 to 10 digits).";
-  }
   return e;
 }
 
-/** The create/edit form for one group. */
-function RingGroupForm({
+/** The create/edit drawer for one group. */
+function RingGroupDrawer({
   group,
   extensions,
   extReady,
-  onCancel,
+  onClose,
   onSaved,
 }: {
   group: RingGroup | null;
   extensions: Extension[];
   extReady: boolean;
-  onCancel: () => void;
-  onSaved: (g: RingGroup) => void;
+  onClose: () => void;
+  onSaved: (g: RingGroup, created: boolean) => void;
 }) {
-  const form = "group";
+  useRestoreFocus();
   const [d, setD] = useState(() => groupDraft(group));
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<ErrorMap>({});
@@ -374,11 +477,12 @@ function RingGroupForm({
   const [pick, setPick] = useState("");
   const set = <K extends keyof GroupDraft>(k: K, v: GroupDraft[K]) =>
     setD((prev) => ({ ...prev, [k]: v }));
-  const id = (k: string) => fieldId(form, k);
+  const fid = (k: string) => `group-${k.replace(/[^A-Za-z0-9_-]+/g, "-")}`;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setFormError(null);
+    setUnmatched([]);
     const found = validateGroup(d);
     setErrors(found);
     if (Object.keys(found).length > 0) {
@@ -392,6 +496,7 @@ function RingGroupForm({
         group
           ? await updateRingGroup(group.id, body)
           : await createRingGroup(body),
+        group === null,
       );
     } catch (err: unknown) {
       const mapped = mapFieldErrors(fieldErrors(err), groupKeys(d));
@@ -411,281 +516,236 @@ function RingGroupForm({
     next[j] = a;
     set("members", next);
   };
+  const setMember = (i: number, patch: Partial<MemberDraft>) =>
+    set(
+      "members",
+      d.members.map((x, j) => (j === i ? { ...x, ...patch } : x)),
+    );
 
   const available = extensions.filter(
     (e) => !d.members.some((m) => String(m.extensionId) === String(e.id)),
   );
 
   return (
-    <form
-      className="inline-form"
-      aria-labelledby="group-form-title"
-      onSubmit={(e) => void onSubmit(e)}
-      noValidate
+    <Drawer
+      title={group ? `Ring group ${group.name}` : "New ring group"}
+      description="Members ring in the order shown; the failure destination takes calls nobody answers."
+      onClose={busy ? undefined : onClose}
+      width={560}
+      footer={
+        <>
+          <Button variant="secondary" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form={FORM_ID} disabled={busy}>
+            {group ? "Save group" : "Create group"}
+          </Button>
+        </>
+      }
     >
-      <h2 id="group-form-title">
-        {group ? `Edit ring group ${group.name}` : "New ring group"}
-      </h2>
-      <div className="fields">
-        <Field id={id("name")} label="Name" error={errors.name}>
-          {(p) => (
-            <input
-              {...p}
-              value={d.name}
-              onChange={(e) => set("name", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field id={id("strategy")} label="Strategy" error={errors.strategy}>
-          {(p) => (
-            <select
-              {...p}
-              value={d.strategy}
-              onChange={(e) => set("strategy", e.target.value as RingStrategy)}
-            >
-              {RING_STRATEGIES.map((s) => (
-                <option key={s} value={s}>
-                  {RING_STRATEGY_LABEL[s]}
-                </option>
-              ))}
-            </select>
-          )}
-        </Field>
-        <Field
-          id={id("ringTimeout")}
-          label="Ring timeout (seconds)"
-          error={errors.ringTimeout}
-          hint="How long the group rings before the failure destination."
-        >
-          {(p) => (
-            <input
-              {...p}
-              className="narrow"
-              inputMode="numeric"
-              value={d.ringTimeout}
-              onChange={(e) => set("ringTimeout", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field
-          id={id("memberDelay")}
-          label="Member delay (seconds)"
-          error={errors.memberDelay}
-          hint="Pause before starting the next member."
-        >
-          {(p) => (
-            <input
-              {...p}
-              className="narrow"
-              inputMode="numeric"
-              value={d.memberDelay}
-              onChange={(e) => set("memberDelay", e.target.value)}
-            />
-          )}
-        </Field>
-        <div className="field checkbox">
-          <input
-            id={id("hunt")}
-            type="checkbox"
+      <form
+        id={FORM_ID}
+        className="cf-form"
+        aria-label={group ? `Edit ring group ${group.name}` : "New ring group"}
+        onSubmit={(e) => void onSubmit(e)}
+        noValidate
+      >
+        <div className="cf-two">
+          <Input
+            id={fid("name")}
+            label="Name"
+            autoFocus
+            value={d.name}
+            error={errors.name}
+            onChange={(e) => set("name", e.target.value)}
+          />
+          <Select
+            id={fid("strategy")}
+            label="Strategy"
+            value={d.strategy}
+            error={errors.strategy}
+            options={RING_STRATEGIES.map((s) => ({
+              value: s,
+              label: RING_STRATEGY_LABEL[s],
+            }))}
+            onChange={(e) => set("strategy", e.target.value as RingStrategy)}
+          />
+        </div>
+        <div className="cf-two">
+          <Input
+            id={fid("ringTimeout")}
+            label="Ring timeout (s)"
+            inputMode="numeric"
+            value={d.ringTimeout}
+            error={errors.ringTimeout}
+            hint="How long the group rings before the failure destination."
+            onChange={(e) => set("ringTimeout", e.target.value)}
+          />
+          <Input
+            id={fid("memberDelay")}
+            label="Member delay (s)"
+            inputMode="numeric"
+            value={d.memberDelay}
+            error={errors.memberDelay}
+            hint="Pause before starting the next member."
+            onChange={(e) => set("memberDelay", e.target.value)}
+          />
+        </div>
+        <div className="cf-field-group">
+          <Switch
+            label="Hunt"
+            hint="One member at a time, moving on when one does not answer or is busy"
+            labelPosition="end"
             checked={d.hunt}
             onChange={(e) => set("hunt", e.target.checked)}
           />
-          <label htmlFor={id("hunt")}>Hunt (one member at a time)</label>
-        </div>
-        <div className="field checkbox">
-          <input
-            id={id("ignoreDnd")}
-            type="checkbox"
+          <Switch
+            label="Ignore DND"
+            hint="Ring members even when they are on do not disturb"
+            labelPosition="end"
             checked={d.ignoreDnd}
             onChange={(e) => set("ignoreDnd", e.target.checked)}
           />
-          <label htmlFor={id("ignoreDnd")}>Ignore DND</label>
         </div>
-      </div>
 
-      <fieldset
-        className="group"
-        aria-describedby={errors.members ? `${id("members")}-error` : undefined}
-      >
-        <legend>Members, in ring order</legend>
-        {errors.members && (
-          <p id={`${id("members")}-error`} className="field-error">
-            {errors.members}
-          </p>
-        )}
-        {d.members.length === 0 && <p className="hint">No members chosen.</p>}
-        <ol className="picked">
-          {d.members.map((m, i) => {
-            const label = extLabel(m.extensionId, extensions);
-            return (
-              <li key={String(m.extensionId)}>
-                <span>{label}</span>
-                <button
-                  type="button"
-                  aria-label={`Ring ${label} earlier`}
-                  disabled={i === 0}
-                  onClick={() => swap(i, i - 1)}
-                >
-                  <span aria-hidden="true">↑</span> Up
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Ring ${label} later`}
-                  disabled={i === d.members.length - 1}
-                  onClick={() => swap(i, i + 1)}
-                >
-                  <span aria-hidden="true">↓</span> Down
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Remove ${label}`}
-                  onClick={() =>
-                    set(
-                      "members",
-                      d.members.filter((_, j) => j !== i),
-                    )
-                  }
-                >
-                  Remove
-                </button>
-                <label
-                  className="visually-hidden"
-                  htmlFor={id(`members[${i}].weight`)}
-                >
-                  Weight for {label}
-                </label>
-                <input
-                  id={id(`members[${i}].weight`)}
-                  className="narrow"
-                  inputMode="numeric"
-                  value={m.weight}
-                  aria-invalid={
-                    errors[`members[${i}].weight`] ? true : undefined
-                  }
-                  aria-describedby={
-                    errors[`members[${i}].weight`]
-                      ? `${id(`members[${i}].weight`)}-error`
-                      : undefined
-                  }
-                  onChange={(e) =>
-                    set(
-                      "members",
-                      d.members.map((x, j) =>
-                        j === i ? { ...x, weight: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-                {errors[`members[${i}].weight`] && (
-                  <p
-                    id={`${id(`members[${i}].weight`)}-error`}
-                    className="field-error"
-                  >
-                    {errors[`members[${i}].weight`]}
-                  </p>
-                )}
-                <label
-                  className="visually-hidden"
-                  htmlFor={id(`members[${i}].delay`)}
-                >
-                  Delay for {label}
-                </label>
-                <input
-                  id={id(`members[${i}].delay`)}
-                  className="narrow"
-                  inputMode="numeric"
-                  value={m.delay}
-                  aria-invalid={
-                    errors[`members[${i}].delay`] ? true : undefined
-                  }
-                  aria-describedby={
-                    errors[`members[${i}].delay`]
-                      ? `${id(`members[${i}].delay`)}-error`
-                      : undefined
-                  }
-                  onChange={(e) =>
-                    set(
-                      "members",
-                      d.members.map((x, j) =>
-                        j === i ? { ...x, delay: e.target.value } : x,
-                      ),
-                    )
-                  }
-                />
-                {errors[`members[${i}].delay`] && (
-                  <p
-                    id={`${id(`members[${i}].delay`)}-error`}
-                    className="field-error"
-                  >
-                    {errors[`members[${i}].delay`]}
-                  </p>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-        <div className="fields">
-          <div className="field">
-            <label htmlFor={id("member-pick")}>Add member</label>
-            <select
-              id={id("member-pick")}
+        <fieldset
+          className="cf-form__section"
+          aria-describedby={
+            errors.members ? `${fid("members")}-error` : undefined
+          }
+        >
+          <legend className="az-eyebrow">Members, in ring order</legend>
+          {errors.members && (
+            <p id={`${fid("members")}-error`} className="cf-form__error">
+              {errors.members}
+            </p>
+          )}
+          {d.members.length === 0 && (
+            <p className="cf-form__note">No members chosen.</p>
+          )}
+          <ol className="cf-rows">
+            {d.members.map((m, i) => {
+              const label = extLabel(m.extensionId, extensions);
+              const name = findExt(m.extensionId, extensions)?.name;
+              return (
+                <li className="cf-row" key={String(m.extensionId)}>
+                  <div className="cf-stack" style={{ gap: 8, minWidth: 0 }}>
+                    <span className="cf-row__label">
+                      <span className="cf-member__pos">{i + 1}</span>
+                      <Avatar name={name || label} size={26} />
+                      <span>
+                        <span className="cf-mono">{label}</span> {name ?? ""}
+                      </span>
+                    </span>
+                    <div className="cf-row__fields">
+                      <Input
+                        id={fid(`members[${i}].weight`)}
+                        label={`Weight for ${label}`}
+                        mono
+                        size="sm"
+                        inputMode="numeric"
+                        value={m.weight}
+                        error={errors[`members[${i}].weight`]}
+                        onChange={(e) =>
+                          setMember(i, { weight: e.target.value })
+                        }
+                      />
+                      <Input
+                        id={fid(`members[${i}].delay`)}
+                        label={`Delay for ${label} (s)`}
+                        mono
+                        size="sm"
+                        inputMode="numeric"
+                        value={m.delay}
+                        error={errors[`members[${i}].delay`]}
+                        onChange={(e) =>
+                          setMember(i, { delay: e.target.value })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="cf-row__actions">
+                    <IconButton
+                      icon="arrow-up"
+                      label={`Ring ${label} earlier`}
+                      disabled={i === 0}
+                      onClick={() => swap(i, i - 1)}
+                    />
+                    <IconButton
+                      icon="arrow-down"
+                      label={`Ring ${label} later`}
+                      disabled={i === d.members.length - 1}
+                      onClick={() => swap(i, i + 1)}
+                    />
+                    <IconButton
+                      icon="trash-2"
+                      label={`Remove ${label}`}
+                      onClick={() =>
+                        set(
+                          "members",
+                          d.members.filter((_, j) => j !== i),
+                        )
+                      }
+                    />
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+          <div className="cf-add">
+            <Select
+              id={fid("member-pick")}
+              label="Add member"
+              size="sm"
               value={pick}
               disabled={!extReady}
+              options={[
+                { value: "", label: extReady ? "Choose…" : "Loading…" },
+                ...available.map((e) => ({
+                  value: String(e.id),
+                  label: e.name ? `${e.number} · ${e.name}` : e.number,
+                })),
+              ]}
               onChange={(e) => setPick(e.target.value)}
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="plus"
+              disabled={pick === ""}
+              onClick={() => {
+                const chosen = extensions.find((x) => String(x.id) === pick);
+                if (!chosen) return;
+                set("members", [
+                  ...d.members,
+                  { extensionId: chosen.id, weight: "1", delay: "0" },
+                ]);
+                setPick("");
+              }}
             >
-              <option value="">Choose…</option>
-              {available.map((e) => (
-                <option key={String(e.id)} value={String(e.id)}>
-                  {e.number} — {e.name}
-                </option>
-              ))}
-            </select>
+              Add
+            </Button>
           </div>
-          <button
-            type="button"
-            className="align-end"
-            disabled={pick === ""}
-            onClick={() => {
-              const chosen = extensions.find((x) => String(x.id) === pick);
-              if (!chosen) return;
-              set("members", [
-                ...d.members,
-                { extensionId: chosen.id, weight: "1", delay: "0" },
-              ]);
-              setPick("");
-            }}
-          >
-            Add
-          </button>
-        </div>
-      </fieldset>
+        </fieldset>
 
-      <fieldset className="group">
-        <legend>Failure destination</legend>
-        <div className="fields">
-          <Field
-            id={id("failureKind")}
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">If nobody answers</legend>
+          <Select
+            id={fid("failureKind")}
             label="When no one answers"
+            value={d.failureKind}
             error={errors.failureKind}
-          >
-            {(p) => (
-              <select
-                {...p}
-                value={d.failureKind}
-                onChange={(e) =>
-                  set("failureKind", e.target.value as FailureKind)
-                }
-              >
-                <option value="none">Hang up</option>
-                <option value="voicemail">Voicemail</option>
-                <option value="external">External number</option>
-                <option value="announcement">Announcement</option>
-              </select>
-            )}
-          </Field>
+            options={[
+              { value: "none", label: "Hang up" },
+              { value: "voicemail", label: "Voicemail" },
+              { value: "external", label: "External number" },
+              { value: "announcement", label: "Announcement" },
+            ]}
+            onChange={(e) => set("failureKind", e.target.value as FailureKind)}
+          />
           {d.failureKind !== "none" && (
-            <Field
-              id={id("failureTarget")}
+            <Input
+              id={fid("failureTarget")}
               label={
                 d.failureKind === "voicemail"
                   ? "Box extension"
@@ -693,6 +753,8 @@ function RingGroupForm({
                     ? "Announcement name"
                     : "External number"
               }
+              mono
+              value={d.failureTarget}
               error={errors.failureTarget}
               hint={
                 d.failureKind === "voicemail"
@@ -701,28 +763,12 @@ function RingGroupForm({
                     ? "The uploaded announcement's name."
                     : "2 to 20 digits, optionally starting with +."
               }
-            >
-              {(p) => (
-                <input
-                  {...p}
-                  value={d.failureTarget}
-                  onChange={(e) => set("failureTarget", e.target.value)}
-                />
-              )}
-            </Field>
+              onChange={(e) => set("failureTarget", e.target.value)}
+            />
           )}
-        </div>
-      </fieldset>
-
-      <FormError message={formError} unmatched={unmatched} />
-      <div className="actions start">
-        <button type="submit" className="primary" disabled={busy}>
-          {group ? "Save group" : "Create group"}
-        </button>
-        <button type="button" disabled={busy} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </form>
+        </fieldset>
+        <FormAlert message={formError} unmatched={unmatched} />
+      </form>
+    </Drawer>
   );
 }
