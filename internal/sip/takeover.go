@@ -273,6 +273,7 @@ func (s *Server) takeoverPass(ctx context.Context) {
 		orphans, err := s.deps.HAState.OrphanedDialogs(cctx, m.ID)
 		cancel()
 		if err != nil {
+			s.log.Warn("orphan scan failed", "node", m.ID, "error", err)
 			continue
 		}
 		for _, o := range orphans {
@@ -282,9 +283,14 @@ func (s *Server) takeoverPass(ctx context.Context) {
 			cctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
 			ok, st, err := s.deps.HAState.ClaimDialog(cctx, o.CallID, self)
 			cancel()
-			if err != nil || !ok {
+			if err != nil {
+				s.log.Warn("claim failed", "call_id", o.CallID, "error", err)
+				continue
+			}
+			if !ok {
 				continue // another survivor won, or the owner came back
 			}
+			s.log.Info("taking over a call", "call_id", o.CallID, "from", m.ID)
 			go s.takeOverCall(st, m.ID)
 		}
 	}

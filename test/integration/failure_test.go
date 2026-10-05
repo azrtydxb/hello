@@ -399,7 +399,9 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	if rehomed.IsZero() {
 		t.Logf("orphaned dialogs: %q", strings.TrimSpace(valkeyCLI(t, "--scan", "--pattern", "hello:dialog:*")))
 		t.Logf("taker metrics: %v", nodeMetrics(t, taker))
-		if out, err := compose("logs", "--tail", "60", taker).CombinedOutput(); err == nil {
+		if out, err := compose("logs", "--tail", "80", taker).CombinedOutput(); err != nil {
+			t.Logf("%s logs unavailable: %v", taker, err)
+		} else {
 			t.Logf("%s logs:\n%s", taker, string(out))
 		}
 		t.Fatalf("the call was not taken over by %s within 30s of the kill", taker)
