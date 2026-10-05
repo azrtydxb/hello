@@ -371,7 +371,7 @@ func TestKillSIPNodeDuringCall(t *testing.T) {
 	}
 	killed := kill(t, node)
 	rec.by(killed.Add(20 * time.Second))
-	takeoverAssertions(t, lc, a, b, in, out, callee.Extension, other, killed)
+	takeoverAssertions(t, lc, a, b, in, out, callee.Extension, other, killed, callID)
 	goneBy(t, lc, node, killed.Add(40*time.Second))
 }
 
@@ -381,7 +381,7 @@ func TestKillSIPNodeDuringCall(t *testing.T) {
 // the takeover re-INVITE, the call is still hangup-able afterwards (the
 // caller's BYE exercises Kamailio's in-dialog reroute to the taker), and
 // no zombie was counted.
-func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipua.Incoming, out *sipua.Outgoing, ext, taker string, killed time.Time) {
+func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipua.Incoming, out *sipua.Outgoing, ext, taker string, killed time.Time, callID string) {
 	t.Helper()
 	// The live call re-homes to the taker. Membership marks the dead node
 	// OFFLINE 15s after its last heartbeat, so the jittered 1-3s poll, the
@@ -398,6 +398,11 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	}
 	if rehomed.IsZero() {
 		t.Logf("orphaned dialogs: %q", strings.TrimSpace(valkeyCLI(t, "--scan", "--pattern", "hello:dialog:*")))
+		t.Logf("claims: %q", strings.TrimSpace(valkeyCLI(t, "--scan", "--pattern", "hello:dialog-claim:*")))
+		if callID != "" {
+			t.Logf("dialog record: %q (TTL %s)", strings.TrimSpace(valkeyCLI(t, "GET", "hello:dialog:"+callID)),
+				strings.TrimSpace(valkeyCLI(t, "TTL", "hello:dialog:"+callID)))
+		}
 		t.Logf("taker metrics: %v", nodeMetrics(t, taker))
 		if out, err := compose("logs", "--tail", "80", taker).CombinedOutput(); err != nil {
 			t.Logf("%s logs unavailable: %v", taker, err)
@@ -607,7 +612,7 @@ func TestHonestyFlags(t *testing.T) {
 	other := otherNode(node)
 	t.Cleanup(func() { restore(t, lc, node) })
 	killed := kill(t, node)
-	takeoverAssertions(t, lc, a, b, nil, out, callee.Extension, other, killed)
+	takeoverAssertions(t, lc, a, b, nil, out, callee.Extension, other, killed, "")
 	_ = b
 }
 
