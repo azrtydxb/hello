@@ -41,7 +41,18 @@ type Call struct {
 	Media      string    `json:"media"` // direct
 	StartedAt  time.Time `json:"startedAt"`
 	AnsweredAt time.Time `json:"answeredAt,omitzero"`
+	// HA is the call's in-call HA state (incall-ha S-6): "owned" while the
+	// node that set the call up still carries it, "taken-over" once a
+	// surviving node re-homed it after its owner died. Records written by
+	// nodes predating the field read as "" and are reported as owned.
+	HA string `json:"ha,omitempty"`
 }
+
+// The live call's in-call HA states (Call.HA).
+const (
+	HAOwned     = "owned"
+	HATakenOver = "taken-over"
+)
 
 const (
 	regPrefix  = "hello:reg:"

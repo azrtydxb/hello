@@ -1,4 +1,4 @@
-import { listCalls } from "../api";
+import { type CallHA, listCalls } from "../api";
 import { LiveStatus } from "../components/LiveStatus";
 import { formatTime } from "../format";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
@@ -26,6 +26,7 @@ export function Calls() {
               <th scope="col">Answered</th>
               <th scope="col">Node</th>
               <th scope="col">Media</th>
+              <th scope="col">HA</th>
             </tr>
           </thead>
           <tbody>
@@ -38,6 +39,9 @@ export function Calls() {
                 <td>{formatTime(c.answeredAt)}</td>
                 <td>{c.node}</td>
                 <td>{c.media}</td>
+                <td>
+                  <HABadge ha={c.ha} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -45,4 +49,22 @@ export function Calls() {
       )}
     </section>
   );
+}
+
+/**
+ * The call's in-call HA state: a call a surviving node took over after its
+ * owner died is badged, so operators see which calls survived a takeover.
+ */
+function HABadge({ ha }: { ha: CallHA }) {
+  if (ha === "taken-over") {
+    return (
+      <span
+        className="badge badge-taken-over"
+        title="Re-homed onto this node after its owning node died"
+      >
+        Taken over
+      </span>
+    );
+  }
+  return <span className="muted">Owned</span>;
 }

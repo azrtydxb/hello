@@ -97,7 +97,12 @@ export interface ActiveCall {
   media: string;
   startedAt: string;
   answeredAt?: string;
+  /** In-call HA: "taken-over" once a surviving node re-homed the call. */
+  ha: CallHA;
 }
+
+/** A live call's in-call HA state (GET /api/v1/calls `ha`). */
+export type CallHA = "owned" | "taken-over";
 
 /** A call detail record; null times are omitted. */
 export interface Cdr {

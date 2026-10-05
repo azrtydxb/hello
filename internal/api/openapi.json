@@ -3331,7 +3331,8 @@
           "state",
           "node",
           "media",
-          "startedAt"
+          "startedAt",
+          "ha"
         ],
         "properties": {
           "id": {
@@ -3357,6 +3358,11 @@
           "media": {
             "type": "string",
             "example": "direct"
+          },
+          "ha": {
+            "type": "string",
+            "enum": ["owned", "taken-over"],
+            "description": "In-call HA state: owned while the node that set the call up carries it; taken-over once a surviving node re-homed the call after its owner died"
           },
           "startedAt": {
             "type": "string",
