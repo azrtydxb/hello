@@ -119,13 +119,36 @@ func (l *haLeg) request(s *Server, method sip.RequestMethod, body []byte, conten
 		req.SetBody(body)
 	}
 	req.SetTransport("UDP")
-	if len(routes) > 0 {
-		var first sip.Uri
-		if err := sip.ParseUri(strings.Trim(routes[0], "<> "), &first); err == nil {
-			req.SetDestination(hostPort(first)) // via Kamailio, like the owner's requests
-		}
+	// Transport destination: the route hop on Hello's side of the dialog.
+	// The dialog's route set crosses the edge proxy's two interfaces: on
+	// the caller's leg (Hello is the UAS) it runs phone-edge-first, so
+	// Hello's hop is the last; on Hello's own forks it is the first.
+	if hop, ok := l.helloHop(); ok {
+		req.SetDestination(hop)
 	}
 	return req, nil
+}
+
+// helloHop is the address of the route hop adjacent to Hello, for the
+// transport destination of the leg's requests.
+func (l *haLeg) helloHop() (string, bool) {
+	l.mu.Lock()
+	routes, uas := l.routes, l.uas
+	l.mu.Unlock()
+	var raw string
+	switch {
+	case len(routes) == 0:
+		return "", false
+	case uas:
+		raw = routes[len(routes)-1]
+	default:
+		raw = routes[0]
+	}
+	var hop sip.Uri
+	if err := sip.ParseUri(strings.Trim(raw, "<> "), &hop); err != nil {
+		return "", false
+	}
+	return hostPort(hop), true
 }
 
 // parseOr parses a URI string, falling back to fallback.
@@ -138,7 +161,7 @@ func parseOr(raw string, fallback sip.Uri) sip.Uri {
 }
 
 // haAck confirms an in-dialog INVITE's 2xx on a homed leg.
-func (s *Server) haAck(inv *sip.Request, res *sip.Response) {
+func (s *Server) haAck(l *haLeg, inv *sip.Request, res *sip.Response) {
 	target := inv.Recipient
 	if ct := res.Contact(); ct != nil {
 		target = ct.Address
@@ -152,21 +175,12 @@ func (s *Server) haAck(inv *sip.Request, res *sip.Response) {
 	ack.AppendHeader(&cseq)
 	ack.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
 	ack.SetTransport("UDP")
-	if dest := s.haDestinationOf(inv); dest != "" {
-		ack.SetDestination(dest)
+	if hop, ok := l.helloHop(); ok {
+		ack.SetDestination(hop)
 	}
 	if err := s.client.WriteRequest(ack, sipgo.ClientRequestAddVia); err != nil {
 		s.log.Debug("takeover ACK failed", "error", err)
 	}
-}
-
-// haDestinationOf is the first route hop of a request we built (its Route
-// headers carry the dialog's service route).
-func (s *Server) haDestinationOf(req *sip.Request) string {
-	if r := req.Route(); r != nil {
-		return hostPort(r.Address)
-	}
-	return ""
 }
 
 // haReinvite re-INVITEs a leg with a new offer and re-learns the dialog
@@ -186,10 +200,10 @@ func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
 		return nil, false
 	}
 	if !res.IsSuccess() {
-		s.haAck(req, res) // a final response to an INVITE must be ACKed
+		s.haAck(l, req, res) // a final response to an INVITE must be ACKed
 		return res, false
 	}
-	s.haAck(req, res)
+	s.haAck(l, req, res)
 	l.mu.Lock()
 	if ct := res.Contact(); ct != nil {
 		l.remoteTarget = uriString(ct.Address)
