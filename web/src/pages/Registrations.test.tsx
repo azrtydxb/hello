@@ -1,6 +1,6 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { json, mockApi } from "../test/api";
+import { apiError, json, mockApi } from "../test/api";
 import { Calls } from "./Calls";
 import { Registrations } from "./Registrations";
 
@@ -43,23 +43,50 @@ describe("live pages", () => {
   });
 
   it("Registrations refreshes every 5 seconds", async () => {
+    vi.setSystemTime(new Date("2026-10-01T10:06:55Z"));
     const calls = mockApi({
       "GET /api/v1/registrations": [
         () => json({ items: [] }),
         () => json({ items: [BINDING] }),
+        () => apiError(503, "unavailable", "live state is unavailable"),
       ],
     });
     render(<Registrations />);
     await flush();
-    expect(screen.getByText("No devices are registered.")).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "No devices are registered" }),
+    ).toBeVisible();
+    expect(screen.getByText("LIVE · 5 S")).toBeVisible();
 
     await flush(4900);
     expect(calls).toHaveLength(1);
     await flush(100);
     expect(calls).toHaveLength(2);
-    expect(screen.getByRole("columnheader", { name: "Device" })).toBeVisible();
-    expect(screen.getByRole("rowheader", { name: "101" })).toBeVisible();
-    expect(screen.getByText("TestPhone/1.0")).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "AOR" })).toBeVisible();
+    const row = screen.getByRole("row", { name: /desk-phone@pbx.test/ });
+    expect(
+      within(row)
+        .getAllByRole("cell")
+        .map((c) => c.textContent),
+    ).toEqual([
+      "sip:desk-phone@pbx.testdesk-phone",
+      "sip:desk-phone@192.0.2.10:5060",
+      "192.0.2.10:5060",
+      "UDP",
+      "TestPhone/1.0",
+      "hello-sip-1",
+      "53 min",
+    ]);
+
+    // A failed refresh keeps the last list and says so.
+    await flush(5000);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /Could not load registrations.*Showing the last list received/,
+    );
+    expect(
+      screen.getByRole("row", { name: /desk-phone@pbx.test/ }),
+    ).toBeVisible();
+    expect(screen.queryByText("LIVE · 5 S")).toBeNull();
   });
 
   it("Active Calls refreshes every 5 seconds and stops on unmount", async () => {

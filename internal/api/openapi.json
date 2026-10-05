@@ -3195,7 +3195,8 @@
           "enabled",
           "createdAt",
           "updatedAt",
-          "secret"
+          "secret",
+          "sipDomain"
         ],
         "properties": {
           "id": {
@@ -3226,6 +3227,11 @@
             "type": "string",
             "description": "24 random bytes, base64url without padding. Shown only once.",
             "example": "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAA"
+          },
+          "sipDomain": {
+            "type": "string",
+            "description": "The SIP domain (digest realm, HELLO_SIP_DOMAIN) the secret is valid for: what the phone uses as its domain.",
+            "example": "pbx.hello.lab"
           }
         }
       },

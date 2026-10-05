@@ -43,7 +43,7 @@ describe("App navigation", () => {
       within(nav).getByRole("link", { name: "Call history" }),
     ).toHaveAttribute("href", "/history");
     expect(
-      await screen.findByText("No devices are registered."),
+      await screen.findByText("No devices are registered"),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Arrives in Phase/)).not.toBeInTheDocument();
   });
