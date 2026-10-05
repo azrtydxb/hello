@@ -348,10 +348,20 @@ func TestKillSIPNodeDuringCall(t *testing.T) {
 	node := callNode(t, lc, callee.Extension)
 	other := otherNode(node)
 	t.Cleanup(func() { restore(t, lc, node) })
+	// The owner replicates the call before anything can take it over.
+	eventually(t, 10*time.Second, "the call's dialog is replicated", func() error {
+		if keys := strings.Fields(valkeyCLI(t, "--scan", "--pattern", "hello:dialog:*")); len(keys) >= 1 {
+			return nil
+		}
+		return errors.New("no dialog records in Valkey")
+	})
+	if m := nodeMetrics(t, node); m["hello_dialog_replicated_total"] < 1 {
+		t.Fatalf("the owner has not replicated: %v", m)
+	}
 	killed := kill(t, node)
 	rec.by(killed.Add(20 * time.Second))
-	goneBy(t, lc, node, killed.Add(40*time.Second))
 	takeoverAssertions(t, lc, a, b, in, out, callee.Extension, other, killed)
+	goneBy(t, lc, node, killed.Add(40*time.Second))
 }
 
 // takeoverAssertions is the Phase 7 (in-call HA) assertion set for a node
@@ -363,17 +373,18 @@ func TestKillSIPNodeDuringCall(t *testing.T) {
 func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipua.Incoming, out *sipua.Outgoing, ext, taker string, killed time.Time) {
 	t.Helper()
 	// The live call re-homes to the taker. Membership marks the dead node
-	// OFFLINE 15s after its last heartbeat, so 3s of claim plus the
-	// re-INVITEs land well inside 25s of the kill.
+	// OFFLINE 15s after its last heartbeat, so the jittered 1-3s poll, the
+	// claim and the re-INVITEs land well inside 30s of the kill.
 	var rehomed time.Time
-	eventuallyBy(t, killed.Add(25*time.Second), "call taken over by "+taker, func(context.Context) error {
+	eventuallyBy(t, killed.Add(30*time.Second), "call taken over by "+taker, func(context.Context) error {
 		for _, c := range lc.calls() {
 			if c.To == ext && c.Node == taker {
 				rehomed = time.Now()
 				return nil
 			}
 		}
-		return errors.New("not re-homed")
+		return errors.New("not re-homed; orphaned dialogs: " +
+			strings.TrimSpace(valkeyCLI(t, "--scan", "--pattern", "hello:dialog:*")))
 	})
 	t.Logf("takeover completed %s after the kill", rehomed.Sub(killed).Round(time.Millisecond))
 	// Both endpoints saw the takeover re-INVITE (the phone answered it).
