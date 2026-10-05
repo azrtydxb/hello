@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -822,9 +823,18 @@ func (p *phone) register(t *testing.T) {
 
 // call dials ext through the PBX (outbound-proxy style Route header) and
 // waits for the final answer; on 2xx it ACKs.
-func (p *phone) call(ctx context.Context, ext string) (*sipgo.DialogClientSession, error) {
+func (p *phone) call(ctx context.Context, ext string) (dcs *sipgo.DialogClientSession, err error) {
+	// sipgo v1.6.0's WaitAnswer CANCELs on ctx cancellation and
+	// dereferences the CANCEL's response even when its transaction ended
+	// without one (the PBX was stopped): a nil dereference in this test
+	// phone, not in Hello, that would abort the whole test binary.
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("phone %s: sipgo panicked cancelling the INVITE: %v", p.user, r)
+		}
+	}()
 	req := p.inviteReq(ext)
-	dcs, err := p.dua.WriteInvite(ctx, req)
+	dcs, err = p.dua.WriteInvite(ctx, req)
 	if err != nil {
 		return nil, err
 	}

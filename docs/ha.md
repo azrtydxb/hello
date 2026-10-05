@@ -283,11 +283,19 @@ the node dies is abandoned, as in the table.
   Kamailio's UDP socket when the backend pod goes, and Kamailio exits. Hello
   answers every probe and request at the address it came from, and
   Kamailio asks for that (rport) on what it sends Hello, so a replaced
-  Kamailio pod is probed UP without flushing conntrack.
+  Kamailio pod is probed UP without flushing conntrack. Kamailio
+  re-resolves those names every 5s (`ds_dns_mode` 1|4, `ds_dns_interval`
+  5, DNS cache capped at 5s), keeping each node's probing state, so a
+  hostNetwork pod that returns on another node is accepted as an in-dialog
+  target again within seconds, with no `dispatcher.reload`.
 - **Trusted proxies:** set `HELLO_SIP_TRUSTED_PROXIES` to the Hello-facing
   address of every Kamailio, and nothing else. Hello trusts the client address
   and `Path` that Kamailio sends, and ignores them from anywhere else; a
-  Kamailio missing from the list breaks registration through it.
+  Kamailio missing from the list breaks registration through it. A
+  taken-over call accepts its endpoints' in-dialog requests by dialog
+  identity (Call-ID and tags) from any trusted proxy address, since the
+  edge reaches the taker from another address than the one the dead owner
+  recorded.
 - **Valkey:** one primary and at least one replica. Hello uses
   `HELLO_VALKEY_SENTINELS` and `HELLO_VALKEY_MASTER`. Hello needs Valkey 9 or
   later.

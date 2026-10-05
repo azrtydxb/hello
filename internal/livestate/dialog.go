@@ -63,6 +63,10 @@ type DialogState struct {
 	// draining): survivors claim it at once, without waiting for the owner
 	// to go OFFLINE or its heartbeat to age.
 	Handoff bool `json:"handoff,omitempty"`
+	// AnsweredAt is when the call was first answered: the start of its
+	// maximum-duration clock, which a taker continues instead of
+	// restarting (zero from older nodes: the taker starts it afresh).
+	AnsweredAt time.Time `json:"answeredAt,omitzero"`
 }
 
 // HA timing: the owner refreshes its records every heartbeat and they expire

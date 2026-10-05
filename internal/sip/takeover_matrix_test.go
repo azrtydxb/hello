@@ -925,7 +925,14 @@ func matrixVoicemail(t *testing.T) {
 	}
 	eventually(t, "the voicemail call lives on the taker", func() bool { return connectedOn(taker, "200", livestate.HATakenOver) })
 	// The caller leaves the message on the taker: the record loop runs
-	// there, past the restarted greeting and beep.
+	// there, past the restarted greeting and beep. The taker's application
+	// starts with its box lookup (the owner's was the first); its recording
+	// clock starts right after, so the caller speaks only from then on.
+	eventually(t, "the taker restarts the voicemail application", func() bool {
+		vm.mu.Lock()
+		defer vm.mu.Unlock()
+		return vm.lookups >= 2
+	})
 	feed := startRTPFeed(t, ra.Body())
 	feed.silence(2.5)
 	feed.digit('#')

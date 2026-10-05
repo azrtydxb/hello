@@ -168,6 +168,11 @@ data:
     dns_try_ipv6=no
     use_dns_failover=no
     use_dns_cache=on
+    # Names in Route/Contact and $du (kw: hello-sip-N Service names) are
+    # resolved through this cache when relaying, failing over in-dialog
+    # (failure_route HELLO_IN_DIALOG) and probing: keep no answer longer than
+    # 5s, so a hello-sip pod back on another node is reached at its new IP.
+    dns_cache_max_ttl=5
     dst_blocklist_init=off
 
     ####### Modules #######
@@ -236,6 +241,20 @@ data:
     modparam("dispatcher", "xavp_ctx", "_dsctx_")
     modparam("dispatcher", "ds_load_mode", 1)           # a bad entry is fatal
     modparam("dispatcher", "ds_default_sockname", "hello") # probes from 5070
+    # Re-resolve destination names in place (kw: hello-sip-N.hello.svc names
+    # of headless Services; a hostNetwork pod that returns on another node has a
+    # new IP). ds_dns_mode 1|4: resolve at load and again every ds_dns_interval
+    # seconds, updating each destination's stored address without a reload, so
+    # its probing state (active/inactive) is kept - a periodic ds_reload()
+    # would rebuild the list and could mark a dead node active again until
+    # three probes fail. The stored address is what ds_is_from_list compares
+    # (the 403 non-Hello-target check in PHONE_IN_DIALOG). ds_dns_ttl caps how
+    # long the core DNS cache keeps these answers, so the next refresh (and the
+    # lookup of the target being checked) asks DNS again. The lab's list holds
+    # IP addresses, which resolve to themselves.
+    modparam("dispatcher", "ds_dns_mode", 5)
+    modparam("dispatcher", "ds_dns_interval", 5)
+    modparam("dispatcher", "ds_dns_ttl", 5)
     # A Hello OPTIONS answer of 503 (draining, unhealthy) or none counts as a
     # failure; nothing else is accepted.
 
@@ -637,7 +656,9 @@ data:
     # deploy/kamailio/dispatcher.list). Format:
     #   setid destination flags priority attributes
     # Flags 0: start active; probing (ds_probing_mode 1) then keeps each
-    # destination's state from its OPTIONS answers.
+    # destination's state from its OPTIONS answers. The names are
+    # re-resolved every 5s (ds_dns_mode in kamailio.cfg): a hostNetwork
+    # hello-sip pod that returns on another node keeps its entry.
     1 sip:hello-sip-1.hello.svc.cluster.local:5060 0 0 duid=hello-sip-1
     1 sip:hello-sip-2.hello.svc.cluster.local:5060 0 0 duid=hello-sip-2
 ---
@@ -726,7 +747,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: 756b25bba716cfa7cfb1cb2349b179e58df34a8cc189310494043318078c6b43
+        hello.watteel.com/kamailio-config-sha256: 4b2c4efb7fd9211413ce742eba3de03ef08af0e8abebfda0f4290aa107b35e82
     spec:
       securityContext:
         # /run/kamailio is an emptyDir the kamailio user (102) must write its

@@ -137,6 +137,28 @@ type call struct {
 	// its record says so once (haHandoffWritten) and is never written
 	// again, so the taker's record is not overwritten.
 	haHandoff, haHandoffWritten bool
+	// haClaim is the Call-ID whose takeover claim this taker still holds:
+	// it is released only once a replication write names this node, so no
+	// survivor finds the dialog unclaimed and still owned by the dead node
+	// (and takes it a second time, counting a zombie when that fails).
+	haClaim string
+	// callerDialogUp marks a call that reuses an already confirmed caller
+	// dialog (a transferred call): it sends no responses on it.
+	callerDialogUp bool
+	// haShared marks a transferred call whose Call-ID keys the original
+	// call's replicated record: until it replicates itself (haStart) the
+	// record is the original's, and its end must not delete it.
+	haShared bool
+	// haWriteMu orders replication writes against the record's deletion:
+	// a heartbeat write in flight when the call ends must not land after
+	// haDelete and resurrect the record of an ended call (a survivor would
+	// take that ghost over: re-INVITEs on dead dialogs, a zombie counted).
+	// haDeleted (guarded by haWriteMu) stops every later write.
+	haWriteMu sync.Mutex
+	haDeleted bool
+	// maxFrom starts the maximum-duration clock when it is not the
+	// answer on this node: a taken-over call's original answer.
+	maxFrom time.Time
 	// transferNotify reports a transfer's outcome to the transferee's
 	// dialog (set by transferBlindVia for the rethreaded call).
 	transferNotify func(fragment string, final bool)
@@ -577,6 +599,16 @@ func (c *call) ringing() {
 // respondA sends a provisional or failure response to the caller; for a
 // final response it blocks until the caller's ACK. It is counted when sent.
 func (c *call) respondA(code int, reason string) {
+	c.mu.Lock()
+	up := c.callerDialogUp
+	c.mu.Unlock()
+	if up {
+		// The caller's INVITE was answered long ago (a transferred call
+		// reuses its confirmed dialog): its transaction is over, and
+		// sipgo would still store this response as the dialog's
+		// InviteResponse, under the original call reading it.
+		return
+	}
 	c.s.m.response(code)
 	if err := c.dss.Respond(code, reason, nil); err != nil {
 		c.s.log.Debug("respond to caller failed", "code", code, "error", err)
@@ -1253,12 +1285,24 @@ func (s *Server) handleAck(req *sip.Request, tx sip.ServerTransaction) {
 		return // a taken-over call's ACKs need no relay (its 200s are terminal)
 	}
 	c := ref.c
+	inviteAck := ref.leg == nil && req.CSeq().SeqNo == c.inv.CSeq().SeqNo
 	c.mu.Lock()
-	w, lateAck := c.winner, c.lateAck
-	if ref.leg == nil && req.CSeq().SeqNo == c.inv.CSeq().SeqNo {
+	w, lateAck, dss := c.winner, c.lateAck, c.dss
+	if inviteAck {
 		c.lateAck = false
 	}
 	c.mu.Unlock()
+	// The caller's ACK confirms its dialog whichever call the dialog is
+	// bound to by now: a REFER that overtook it binds the Call-ID to the
+	// transferred call (no winner while its target rings), and the
+	// original answer would otherwise wait out 64*T1 for an ACK it never
+	// reads, unreplicated.
+	if inviteAck && dss != nil {
+		if err := dss.ReadAck(req, tx); err != nil {
+			s.log.Debug("caller ACK rejected", "error", err)
+			return
+		}
+	}
 	if w == nil {
 		return
 	}
@@ -1267,13 +1311,7 @@ func (s *Server) handleAck(req *sip.Request, tx sip.ServerTransaction) {
 		ct = h.Value()
 	}
 	switch {
-	case ref.leg == nil && req.CSeq().SeqNo == c.inv.CSeq().SeqNo:
-		if c.dss != nil {
-			if err := c.dss.ReadAck(req, tx); err != nil {
-				s.log.Debug("caller ACK rejected", "error", err)
-				return
-			}
-		}
+	case inviteAck:
 		if lateAck {
 			w.ack(req.Body(), ct)
 		}
@@ -1365,8 +1403,13 @@ func (s *Server) matchDialog(req *sip.Request) (dialogRef, bool) {
 
 // matchHomed verifies an in-dialog request against a taken-over call's
 // replicated dialogs: the Call-ID selects the leg, and the request must
-// carry exactly that dialog's tags from the endpoint's side and come from
-// the endpoint's source (the edge proxy, as for the original owner).
+// carry exactly that dialog's tags from the endpoint's side. It must come
+// from the endpoint's replicated source or from any trusted edge proxy
+// (HELLO_SIP_TRUSTED_PROXIES): the source the old owner recorded is the
+// edge as that node saw it, and the edge reaches a taker on another node
+// from another address (kw: replicated 10.42.0.128:5070, the edge pod;
+// arriving from 192.168.10.102:5070, its node), so an exact match would
+// refuse every BYE after a takeover with 481.
 func (s *Server) matchHomed(c *call, hom *homedCall, req *sip.Request, ref dialogRef) (dialogRef, bool) {
 	l := hom.leg(ref.leg != nil)
 	if l == nil {
@@ -1375,7 +1418,10 @@ func (s *Server) matchHomed(c *call, hom *homedCall, req *sip.Request, ref dialo
 	l.mu.Lock()
 	localTag, remoteTag, source := l.localTag, l.remoteTag, l.source
 	l.mu.Unlock()
-	if tagParam(req.From()) != remoteTag || tagParam(req.To()) != localTag || req.Source() != source {
+	if tagParam(req.From()) != remoteTag || tagParam(req.To()) != localTag {
+		return dialogRef{}, false
+	}
+	if req.Source() != source && !s.fromTrustedProxy(req) {
 		return dialogRef{}, false
 	}
 	return ref, true

@@ -238,14 +238,17 @@ func (m *trunkManager) stop(id int64, release bool) {
 // timeout) and releases its lease; m.stopping tracks them. It does not
 // block: on a drain it runs inside the lifecycle's OnChange, which must
 // not delay publishing DRAINING by one unregister per unreachable carrier.
+// The stoppers are added under m.mu: a drain's stopAll racing shutdown's
+// stopAll-then-Wait either adds before that Wait (ordered by the lock) or
+// finds nothing held, so m.stopping never grows while Wait runs.
 func (m *trunkManager) stopAll() {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	held := m.held
 	m.held = map[int64]*heldTrunk{}
 	for id := range held {
 		m.releasing[id] = true
 	}
-	m.mu.Unlock()
 	for id, h := range held {
 		h.cancel()
 		m.stopping.Go(func() {

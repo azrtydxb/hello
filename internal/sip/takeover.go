@@ -585,14 +585,21 @@ func (s *Server) haHome(c *call, st livestate.DialogState, from string, gap time
 	go c.heartbeat()
 	// The record names this node before the claim goes: released first, a
 	// survivor's next scan would find the dialog still owned by the dead
-	// node and unclaimed, and take the call over a second time.
-	c.replicate()
+	// node and unclaimed, and take the call over a second time. A failed
+	// write keeps the claim until a heartbeat's write succeeds (haLoop).
+	c.mu.Lock()
+	c.haClaim = st.CallID
+	c.mu.Unlock()
+	c.haArmMaxDuration(st.AnsweredAt, hom.takenAt)
+	c.haSettleClaim(c.replicate())
 	go c.haLoop()
-	s.releaseClaim(st.CallID)
 	switch st.State {
 	case haPhaseRecording:
 		c.noteHAState(haPhaseRecording, "")
-		if c.rec.start("takeover") {
+		c.mu.Lock()
+		rec := c.rec
+		c.mu.Unlock()
+		if rec != nil && rec.start("takeover") {
 			c.addTrace("Recording continues after the takeover")
 		}
 	case haPhaseAnnouncement:
@@ -862,14 +869,12 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 	s.m.ActiveCalls.Inc()
 	c.publish()
 	go c.heartbeat()
-	c.replicate()
-	go c.haLoop()
-	s.releaseClaim(st.CallID)
 	c.mu.Lock()
-	if !c.ended {
-		c.maxTimer = time.AfterFunc(s.cfg.MaxCallDuration, c.expire)
-	}
+	c.haClaim = st.CallID
 	c.mu.Unlock()
+	c.haArmMaxDuration(st.AnsweredAt, start)
+	c.haSettleClaim(c.replicate())
+	go c.haLoop()
 	if st.State == haPhaseVoicemail {
 		mode, reason, box := parseVoicemailDetail(st.StateDetail)
 		if box != "" {

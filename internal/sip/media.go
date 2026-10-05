@@ -129,7 +129,9 @@ func (c *call) considerAnchor(snap *snapshot.Snapshot, to EndpointInfo) {
 	// Every call anchors since Phase 7 (spec S-7); the conditional trigger
 	// is trace information next to the policy reason.
 	trigger := anchorTrigger(c.inv, snap, c.callerEndpoint(snap), to, c.s.cfg.MediaForceAnchor)
+	c.mu.Lock()
 	c.policyTrigger = trigger
+	c.mu.Unlock()
 	c.startAnchor(snap, AnchorPolicy)
 }
 
@@ -229,6 +231,7 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	trigger := c.policyTrigger
 	c.relay = relay
 	c.mediaMode = "anchored"
+	c.rec = &recording{}
 	c.mu.Unlock()
 	if trigger == AnchorNone {
 		c.addTrace(fmt.Sprintf("Media anchored (%s)", reason))
@@ -240,8 +243,7 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 		relay.Observe(m.ObserveStats)
 		relay.OnFail(func(string) { m.AnchorFailures.Inc() })
 	}
-	c.rec = &recording{}
-	c.relay.Start()
+	relay.Start()
 	_ = portA
 	_ = portB
 }

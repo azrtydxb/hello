@@ -60,6 +60,7 @@ type fakeVMStore struct {
 	msgs    []VoicemailMessage
 	counts  [][2]int // per insert: unread, total after
 	failIns bool
+	lookups int // Box calls: one per voicemail application start
 }
 
 func newVMStore() *fakeVMStore {
@@ -69,6 +70,7 @@ func newVMStore() *fakeVMStore {
 func (f *fakeVMStore) Box(_ context.Context, ext string) (VoicemailBox, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.lookups++
 	b, ok := f.boxes[ext]
 	return b, ok, nil
 }
