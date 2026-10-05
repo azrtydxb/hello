@@ -99,11 +99,15 @@ func run(args []string) error {
 		Name: "hello_routing_config_invalid_revision",
 		Help: "The configuration revision whose routing does not compile; 0 when routing is current.",
 	})
+	configRevision := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "hello_config_revision",
+		Help: "The configuration revision of the snapshot this node serves from; compare with the control plane's to see reload lag.",
+	})
 	dnsFailures := prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "hello_dns_resolve_failures_total",
 		Help: "Trunk destination DNS lookups that failed; the previous addresses are kept.",
 	})
-	metrics.Registry.MustRegister(reloadFailures, routingInvalid, routingInvalidRev, dnsFailures)
+	metrics.Registry.MustRegister(reloadFailures, routingInvalid, routingInvalidRev, configRevision, dnsFailures)
 	sipMetrics := sip.NewMetrics(metrics.Registry)
 
 	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
@@ -140,7 +144,7 @@ func run(args []string) error {
 	live := livestate.New(vk)
 	members := cluster.New(vk)
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
-		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev,
+		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev, Revision: configRevision,
 		DNSFailures: dnsFailures}
 	srv, err := sip.New(sip.Config{
 		NodeID: cfg.NodeID, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
