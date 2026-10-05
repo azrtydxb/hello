@@ -103,8 +103,15 @@ type call struct {
 	anchored      bool
 	anchorReason  AnchorReason
 	policyTrigger AnchorReason // what the pre-Phase-7 decision would have been
-	relay         *media.Relay
-	rec           *recording
+	// haDirs is each dialog's current SDP direction ("sendrecv" both, or a
+	// hold's sendonly/recvonly pair), replicated so a taker's re-INVITEs
+	// keep the hold. haLegs is the dialog data snapshot taken at the same
+	// quiescent points — the replication heartbeat never reads sipgo's
+	// dialog objects, which are not thread-safe. Both guarded by mu.
+	haDirs [2]string
+	haLegs [2]haLegSnap
+	relay  *media.Relay
+	rec    *recording
 	// anchorHost is the advertised IPv4 for relay SDP answers.
 	anchorHost string
 
@@ -605,9 +612,6 @@ func (c *call) answer(w *leg) {
 	}
 	c.addTrace("Call established")
 	c.publish()
-	if c.s.deps.HAState != nil {
-		go c.haLoop() // replication: the write cadence is the owner's liveness
-	}
 	// record_default recordings start when the call is answered (spec
 	// S-4); the flow re-anchors when needed, but an anchored-for-recording
 	// call is already set up.
@@ -651,6 +655,13 @@ func (c *call) answer(w *leg) {
 			c.maxTimer = time.AfterFunc(c.s.cfg.MaxCallDuration, c.expire)
 		}
 		c.mu.Unlock()
+		// Replication starts with the dialog confirmed: the snapshot is
+		// taken here and after every in-dialog transaction, and the
+		// heartbeat's write cadence is the owner's liveness.
+		if c.s.deps.HAState != nil {
+			c.haRefresh()
+			go c.haLoop()
+		}
 		return
 	}
 	c.mu.Lock()
@@ -1491,4 +1502,5 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		relayed.AppendHeader(sip.HeaderClone(&s.contact))
 	}
 	s.send(tx, relayed)
+	c.haRefresh()
 }

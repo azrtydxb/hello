@@ -451,14 +451,15 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
 	relay.Start()
 	// Re-INVITE both endpoints to the new relay (spec S-4): the offer is
-	// this node's relay port for that leg; the answer re-aims it.
-	bodyA := []byte(relaySDP(host, relay, legCaller, off))
+	// this node's relay port for that leg, in the dialog's replicated
+	// direction (a held call stays held); the answer re-aims it.
+	bodyA := []byte(relaySDPDir(host, relay, legCaller, off, media.SDPDirection([]byte(a.sdp))))
 	if res, okA := s.haReinvite(a, bodyA); okA {
 		haAim(relay, legCaller, res.Body())
 	} else {
 		a.failed = true
 	}
-	bodyB := []byte(relaySDP(host, relay, legCallee, off))
+	bodyB := []byte(relaySDPDir(host, relay, legCallee, off, media.SDPDirection([]byte(b.sdp))))
 	if res, okB := s.haReinvite(b, bodyB); okB {
 		haAim(relay, legCallee, res.Body())
 	} else {
@@ -559,6 +560,18 @@ func (s *Server) releaseClaim(callID string) {
 	}
 }
 
+// setHADirs records a hold re-INVITE's directions: the offerer's dialog
+// answers mirrored, the peer's carries the direction as offered.
+func (c *call) setHADirs(fromCaller bool, dir string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if fromCaller {
+		c.haDirs[0], c.haDirs[1] = mirrorDirection(dir), dir
+		return
+	}
+	c.haDirs[1], c.haDirs[0] = mirrorDirection(dir), dir
+}
+
 // haInDialog terminates a re-INVITE/UPDATE on a taken-over call: the offer
 // is answered with the new relay's SDP for that side (direction mirrored)
 // and the peer is re-INVITEd in the same direction, so a hold survives the
@@ -570,6 +583,7 @@ func (c *call) haInDialog(hom *homedCall, req *sip.Request, tx sip.ServerTransac
 	if err == nil {
 		dir := media.SDPDirection(req.Body())
 		c.setHeld(dir == "sendonly" || dir == "inactive")
+		c.setHADirs(fromCaller, dir)
 		ans = media.BuildAudioSDPDir(c.anchorHost, c.legPortFor(fromCaller), off.PayloadType,
 			off.DTMFPayloadType, off.DTMFRate, mirrorDirection(dir))
 		peer = media.BuildAudioSDPDir(c.anchorHost, c.legPortFor(!fromCaller), off.PayloadType,

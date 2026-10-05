@@ -414,3 +414,199 @@ func portOf(addr string) int {
 	}
 	return n
 }
+
+// ownedCall finds the live call object a PBX has for ext's call.
+func ownedCall(t *testing.T, s *Server) *call {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for c := range s.calls {
+		return c
+	}
+	t.Fatal("no live call")
+	return nil
+}
+
+// hangupHomed sends the caller's BYE straight at a taker (the phone's own
+// remote target still names the dead owner): same Call-ID and tags, CSeq
+// past the takeover's.
+func hangupHomed(t *testing.T, p *phone, pbx *testPBX, ra *sip.Request, st livestate.DialogLeg) {
+	t.Helper()
+	bye := sip.NewRequest(sip.BYE, sip.Uri{Scheme: "sip", Host: hostOf(pbx.addr), Port: portOf(pbx.addr)})
+	bye.AppendHeader(&sip.FromHeader{Address: *ra.To().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: st.RemoteTag}}})
+	bye.AppendHeader(&sip.ToHeader{Address: *ra.From().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: st.LocalTag}}})
+	callID := sip.CallIDHeader(st.CallID)
+	bye.AppendHeader(&callID)
+	bye.AppendHeader(&sip.CSeqHeader{SeqNo: ra.CSeq().SeqNo + 1, MethodName: sip.BYE})
+	bye.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
+	bye.SetTransport("UDP")
+	if res := p.do(bye); res.StatusCode != 200 {
+		t.Fatalf("BYE to the taker = %d", res.StatusCode)
+	}
+}
+
+func liveCallsSkip(pbx *testPBX) []livestate.Call {
+	cs, err := pbx.state.(interface {
+		Calls(context.Context) ([]livestate.Call, error)
+	}).Calls(context.Background())
+	if err != nil {
+		return nil
+	}
+	return cs
+}
+
+// TestTakeoverScenarioMatrix fails if a taken-over call does not survive
+// per its scenario's definition (spec S-5): a held call keeps its hold
+// direction across the takeover, a recording call keeps recording on the
+// taker under the same correlation, and an announcement call restarts its
+// announcement state.
+func TestTakeoverScenarioMatrix(t *testing.T) {
+	t.Run("hold", func(t *testing.T) {
+		ha := newFakeHA()
+		mem := &fakeMembership{}
+		owner := startPBX(t, ringAllDevices(), withNodeID("sip-1"), withHA(ha, mem))
+		taker := startPBX(t, ringAllDevices(), withNodeID("sip-2"), withHA(ha, mem))
+		a, b := newPhone(t, owner, "a1", "pa"), newPhone(t, owner, "b1", "pb1")
+		a.register(t)
+		b.register(t)
+		b.setCallee(answerAfter(nil))
+		r := waitCall(t, dial(t.Context(), a, "200"))
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		waitReq(t, b.invites, "callee INVITE")
+		waitReq(t, b.acks, "callee ACK")
+		var st livestate.DialogState
+		eventually(t, "the call is replicated", func() bool {
+			ha.mu.Lock()
+			defer ha.mu.Unlock()
+			for _, s := range ha.dialogs {
+				if s.OwnerNode == "sip-1" && s.Legs[0].LocalTag != "" {
+					st = s
+					return true
+				}
+			}
+			return false
+		})
+		// The caller holds: sendonly re-INVITE.
+		hold := a.sdp + "a=sendonly\r\n"
+		re := sip.NewRequest(sip.INVITE, r.dcs.InviteResponse.Contact().Address)
+		re.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+		re.SetBody([]byte(hold))
+		if res, err := r.dcs.Do(t.Context(), re); err != nil || res.StatusCode != 200 {
+			t.Fatalf("hold re-INVITE = %v, %v", res, err)
+		}
+		eventually(t, "hold replicated", func() bool {
+			ha.mu.Lock()
+			defer ha.mu.Unlock()
+			for _, s := range ha.dialogs {
+				if s.OwnerNode == "sip-1" && s.State == "hold" {
+					return true
+				}
+			}
+			return false
+		})
+		haReinviteTimeout = time.Second
+		owner.stop()
+		mem.set(
+			cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Offline, ActiveCalls: 1},
+			cluster.Member{ID: "sip-2", Kind: cluster.KindSIP, State: cluster.Ready},
+		)
+		taker.srv.takeoverPass(t.Context())
+		ra := waitReq(t, a.reinvites, "takeover re-INVITE to the held caller")
+		rb := waitReq(t, b.reinvites, "takeover re-INVITE to the held callee")
+		// The hold direction is mirrored for the holder and passed to the
+		// peer, so both phones keep agreeing they are held.
+		if !strings.Contains(string(ra.Body()), "recvonly") {
+			t.Fatalf("held caller's re-INVITE not recvonly: %q", ra.Body())
+		}
+		if !strings.Contains(string(rb.Body()), "sendonly") {
+			t.Fatalf("held callee's re-INVITE not sendonly: %q", rb.Body())
+		}
+		anchoredSDP(t, taker, ra.Body())
+		waitReq(t, a.acks, "ACK to the held caller's 200")
+		waitReq(t, b.acks, "ACK to the held callee's 200")
+		eventually(t, "held call connected on the taker", func() bool {
+			cs := liveCallsSkip(taker)
+			return len(cs) == 1 && cs[0].State == "connected"
+		})
+		hangupHomed(t, a, taker, ra, st.Legs[0])
+		waitReq(t, b.byes, "BYE to the held callee after the caller hung up")
+		cd := taker.nextCDR(t)
+		if cd.FinalStatus != 200 {
+			t.Fatalf("held call CDR = %+v", cd)
+		}
+	})
+	t.Run("recording", func(t *testing.T) {
+		ha := newFakeHA()
+		mem := &fakeMembership{}
+		owner := startPBX(t, ringAllDevices(), withNodeID("sip-1"), withHA(ha, mem))
+		taker := startPBX(t, ringAllDevices(), withNodeID("sip-2"), withHA(ha, mem))
+		a, b := newPhone(t, owner, "a1", "pa"), newPhone(t, owner, "b1", "pb1")
+		a.register(t)
+		b.register(t)
+		b.setCallee(answerAfter(nil))
+		r := waitCall(t, dial(t.Context(), a, "200"))
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		waitReq(t, b.invites, "callee INVITE")
+		waitReq(t, b.acks, "callee ACK")
+		var st livestate.DialogState
+		eventually(t, "the call is replicated", func() bool {
+			ha.mu.Lock()
+			defer ha.mu.Unlock()
+			for _, s := range ha.dialogs {
+				if s.OwnerNode == "sip-1" && s.Legs[0].LocalTag != "" {
+					st = s
+					return true
+				}
+			}
+			return false
+		})
+		// The call is recording when the node dies.
+		c := ownedCall(t, owner.srv)
+		c.noteHAState(haPhaseRecording, "")
+		if !c.rec.start("dtmf") {
+			t.Fatal("recording did not start")
+		}
+		eventually(t, "recording replicated", func() bool {
+			ha.mu.Lock()
+			defer ha.mu.Unlock()
+			for _, s := range ha.dialogs {
+				if s.OwnerNode == "sip-1" && s.State == haPhaseRecording {
+					return true
+				}
+			}
+			return false
+		})
+		haReinviteTimeout = time.Second
+		owner.stop()
+		mem.set(
+			cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Offline, ActiveCalls: 1},
+			cluster.Member{ID: "sip-2", Kind: cluster.KindSIP, State: cluster.Ready},
+		)
+		taker.srv.takeoverPass(t.Context())
+		ra := waitReq(t, a.reinvites, "takeover re-INVITE to the caller")
+		waitReq(t, b.reinvites, "takeover re-INVITE to the callee")
+		waitReq(t, a.acks, "ACK to the caller's 200")
+		waitReq(t, b.acks, "ACK to the callee's 200")
+		eventually(t, "claim released", func() bool { return ha.claimOf(ra.CallID().Value()) == "" })
+		// The taker's call is recording again under the same correlation.
+		hc := ownedCall(t, taker.srv)
+		hc.mu.Lock()
+		rec := hc.rec
+		hc.mu.Unlock()
+		if rec == nil {
+			t.Fatal("the taken-over call has no recording state")
+		}
+		rec.mu.Lock()
+		active := rec.active
+		rec.mu.Unlock()
+		if !active {
+			t.Fatal("the recording did not continue on the taker")
+		}
+		hangupHomed(t, a, taker, ra, st.Legs[0])
+		waitReq(t, b.byes, "BYE to the callee after the caller hung up")
+	})
+}

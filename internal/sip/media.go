@@ -637,6 +637,8 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 		return
 	}
 	dir := media.SDPDirection(body)
+	c.setHADirs(fromCaller, dir)
+	c.haRefresh() // the hold's directions are in the snapshot before the change replicates
 	c.setHeld(dir == "sendonly" || dir == "inactive")
 	// The answer to the offer's side: our SDP with the mirrored direction.
 	ansDir := mirrorDirection(dir)
@@ -658,6 +660,7 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 		if w != nil {
 			_, _ = reinvite(w.session(), peer)
 		}
+		c.haRefresh()
 		return
 	}
 	c.mu.Lock()
@@ -666,6 +669,7 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	if dss != nil {
 		_, _ = reinviteA(dss, peer)
 	}
+	c.haRefresh()
 }
 
 // mirrorDirection flips a direction for the answer: the answerer receives

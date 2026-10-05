@@ -74,6 +74,69 @@ func (c *call) homed() *homedCall {
 	return c.homedCall
 }
 
+// haLegSnap is one leg's dialog data snapshot, taken at quiescent points
+// (the answer's 200 written, an in-dialog transaction finished) — never
+// while sipgo's dialog objects are being written.
+type haLegSnap struct {
+	callID, localTag, remoteTag string
+	localCSeq, remoteCSeq       uint32
+	routes                      []string
+	localID, remoteID           string
+	remoteTarget, endpoint      string
+	source, sdp                 string
+}
+
+// haRefresh rebuilds the replicated-dialog snapshot from the live dialogs.
+// It runs only where the dialogs are quiescent.
+func (c *call) haRefresh() {
+	if c.s.deps.HAState == nil {
+		return
+	}
+	c.mu.Lock()
+	w, dss := c.winner, c.dss
+	c.mu.Unlock()
+	if dss == nil || w == nil {
+		return
+	}
+	dcs := w.session()
+	if dcs == nil || dcs.InviteRequest == nil || dcs.InviteResponse == nil {
+		return
+	}
+	offer, _ := media.ParseAudioSDP(c.inv.Body())
+	host := c.anchorHost
+	dirs := c.haDirs
+	c.mu.Lock()
+	c.haLegs = [2]haLegSnap{
+		{
+			callID:   c.callID,
+			localTag: tagParam(dss.InviteResponse.To()), remoteTag: tagParam(c.inv.From()),
+			// The next CSeq we would send with: Hello's in-dialog requests
+			// on a leg continue the dialog's INVITE CSeq (contract 2).
+			localCSeq: c.inv.CSeq().SeqNo + 1, remoteCSeq: c.inv.CSeq().SeqNo,
+			routes:       headerValues(c.inv, "Record-Route"),
+			localID:      uriString(*c.inv.To().Address.Clone()),
+			remoteID:     uriString(*c.inv.From().Address.Clone()),
+			remoteTarget: uriString(c.target()),
+			endpoint:     c.s.aor(c.callerNum),
+			source:       c.inv.Source(),
+			sdp:          relaySDPDir(host, c.relay, legCaller, offer, dirs[0]),
+		},
+		{
+			callID:   w.callID,
+			localTag: tagParam(dcs.InviteRequest.From()), remoteTag: tagParam(dcs.InviteResponse.To()),
+			localCSeq: dcs.InviteRequest.CSeq().SeqNo + 1, remoteCSeq: dcs.InviteRequest.CSeq().SeqNo,
+			routes:       headerValues(dcs.InviteResponse, "Record-Route"),
+			localID:      uriString(*dcs.InviteRequest.From().Address.Clone()),
+			remoteID:     uriString(*dcs.InviteRequest.To().Address.Clone()),
+			remoteTarget: uriString(w.target()),
+			endpoint:     w.binding.AOR,
+			source:       dcs.InviteResponse.Source(),
+			sdp:          relaySDPDir(host, c.relay, legCallee, offer, dirs[1]),
+		},
+	}
+	c.mu.Unlock()
+}
+
 // haState builds the call's replicated recovery state (contract 1); ok is
 // false while the call is not a recoverable connected two-leg call: an
 // announcement or voicemail call has no second endpoint to re-INVITE.
@@ -82,66 +145,38 @@ func (c *call) haState() (livestate.DialogState, bool) {
 		return c.haHomedState(hom)
 	}
 	c.mu.Lock()
-	w, dss, relay, anchored, yielded := c.winner, c.dss, c.relay, c.anchored, c.haYielded
+	relay, anchored, yielded := c.relay, c.anchored, c.haYielded
 	detail := c.haDetail
+	legs := c.haLegs
+	contact := contactURI(c.s)
 	c.mu.Unlock()
-	if yielded || !anchored || relay == nil || dss == nil || w == nil {
+	if yielded || !anchored || relay == nil || legs[0].callID == "" || legs[1].callID == "" {
 		return livestate.DialogState{}, false
 	}
-	dcs := w.session()
-	if dcs == nil || dcs.InviteRequest == nil || dcs.InviteResponse == nil {
-		return livestate.DialogState{}, false
-	}
-	offer, _ := media.ParseAudioSDP(c.inv.Body())
-	host := c.anchorHost
-	state := livestate.DialogState{
-		CallID:      c.callID,
+	return livestate.DialogState{
+		CallID:      legs[0].callID,
 		OwnerNode:   c.s.cfg.NodeID,
 		Correlation: c.id,
 		State:       c.haStateName(),
 		StateDetail: detail,
 		RelayPorts:  [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)},
 		Legs: [2]livestate.DialogLeg{
-			{
-				CallID:    c.callID,
-				LocalTag:  tagParam(dss.InviteResponse.To()),
-				RemoteTag: tagParam(c.inv.From()),
-				// The next CSeq we would send with: Hello's in-dialog
-				// requests on a leg continue the dialog's INVITE CSeq
-				// (contract 2's continuity; the taker re-INVITEs with it).
-				LocalCSeq:    c.inv.CSeq().SeqNo + 1,
-				RemoteCSeq:   c.inv.CSeq().SeqNo,
-				RouteSet:     headerValues(c.inv, "Record-Route"),
-				Contact:      contactURI(c.s),
-				RemoteTarget: uriString(c.target()),
-				SDP:          relaySDP(host, relay, legCaller, offer),
-				Endpoint:     c.s.aor(c.callerNum),
-				Source:       c.inv.Source(),
-			},
-			{
-				CallID:       w.callID,
-				LocalTag:     tagParam(dcs.InviteRequest.From()),
-				RemoteTag:    tagParam(dcs.InviteResponse.To()),
-				LocalCSeq:    dcs.InviteRequest.CSeq().SeqNo + 1,
-				RemoteCSeq:   dcs.InviteRequest.CSeq().SeqNo,
-				RouteSet:     headerValues(dcs.InviteResponse, "Record-Route"),
-				Contact:      contactURI(c.s),
-				RemoteTarget: uriString(w.target()),
-				SDP:          relaySDP(host, relay, legCallee, offer),
-				Endpoint:     w.binding.AOR,
-				Source:       dcs.InviteResponse.Source(),
-			},
+			haSnapLeg(legs[0], contact),
+			haSnapLeg(legs[1], contact),
 		},
+	}, true
+}
+
+// haSnapLeg renders a snapshot leg as its replicated form.
+func haSnapLeg(l haLegSnap, contact string) livestate.DialogLeg {
+	return livestate.DialogLeg{
+		CallID: l.callID, LocalTag: l.localTag, RemoteTag: l.remoteTag,
+		LocalCSeq: l.localCSeq, RemoteCSeq: l.remoteCSeq,
+		RouteSet: l.routes, Contact: contact,
+		RemoteTarget: l.remoteTarget, SDP: l.sdp,
+		Endpoint: l.endpoint, Source: l.source,
+		LocalIdentity: l.localID, RemoteIdentity: l.remoteID,
 	}
-	a := state.Legs[0]
-	a.LocalIdentity = uriString(*c.inv.To().Address.Clone())
-	a.RemoteIdentity = uriString(*c.inv.From().Address.Clone())
-	state.Legs[0] = a
-	b := state.Legs[1]
-	b.LocalIdentity = uriString(*dcs.InviteRequest.From().Address.Clone())
-	b.RemoteIdentity = uriString(*dcs.InviteRequest.To().Address.Clone())
-	state.Legs[1] = b
-	return state, true
 }
 
 // haHomedState builds the replicated state of a taken-over call from its
@@ -151,6 +186,7 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 	c.mu.Lock()
 	relay, anchored, yielded := c.relay, c.anchored, c.haYielded
 	detail, host := c.haDetail, c.anchorHost
+	contact := contactURI(c.s)
 	c.mu.Unlock()
 	if yielded || !anchored || relay == nil {
 		return livestate.DialogState{}, false
@@ -160,18 +196,22 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 		return livestate.DialogState{}, false
 	}
 	state := livestate.DialogState{
-		CallID: hom.legs[0].callID, OwnerNode: c.s.cfg.NodeID, Correlation: c.id,
-		State: c.haStateName(), StateDetail: detail,
-		RelayPorts: [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)},
+		CallID:      hom.legs[0].callID,
+		OwnerNode:   c.s.cfg.NodeID,
+		Correlation: c.id,
+		State:       c.haStateName(),
+		StateDetail: detail,
+		RelayPorts:  [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)},
 	}
 	for i, l := range hom.legs {
 		l.mu.Lock()
 		leg := livestate.DialogLeg{
 			CallID: l.callID, LocalTag: l.localTag, RemoteTag: l.remoteTag,
 			LocalCSeq: l.localCSeq, RemoteCSeq: l.remoteCSeq,
-			RouteSet: l.routes, Contact: contactURI(c.s),
-			RemoteTarget: l.remoteTarget, SDP: relaySDP(host, relay, legName(i == 1), off),
-			Endpoint: l.endpoint, Source: l.source,
+			RouteSet: l.routes, Contact: contact,
+			RemoteTarget: l.remoteTarget,
+			SDP:          relaySDPDir(host, relay, legName(i == 1), off, media.SDPDirection([]byte(l.sdp))),
+			Endpoint:     l.endpoint, Source: l.source,
 			LocalIdentity: l.localID, RemoteIdentity: l.remoteID,
 		}
 		l.mu.Unlock()
@@ -219,6 +259,9 @@ func (c *call) haLoop() {
 		case <-c.s.done:
 			return
 		case <-t.C:
+			if !c.s.serving.Load() {
+				return // the node is shutting down; its calls die with it
+			}
 			if taker := c.s.haClaimedBy(c.callID); taker != "" && taker != c.s.cfg.NodeID {
 				c.haYield(taker)
 				return
@@ -298,12 +341,16 @@ func uriString(u sip.Uri) string {
 	return (&u).String()
 }
 
-// relaySDP is the relay leg's SDP body for the offer's negotiated codecs.
-func relaySDP(host string, r *media.Relay, leg string, off media.AudioSDP) string {
+// relaySDPDir is relaySDP with an explicit direction attribute (a hold's
+// sendonly/recvonly pair), so a taker's re-INVITEs keep the hold.
+func relaySDPDir(host string, r *media.Relay, leg string, off media.AudioSDP, dir string) string {
 	if r == nil {
 		return ""
 	}
-	return string(media.BuildAudioSDP(host, r.LegPort(leg), off.PayloadType, off.DTMFPayloadType, off.DTMFRate))
+	if dir == "" || dir == "sendrecv" {
+		return string(media.BuildAudioSDP(host, r.LegPort(leg), off.PayloadType, off.DTMFPayloadType, off.DTMFRate))
+	}
+	return string(media.BuildAudioSDPDir(host, r.LegPort(leg), off.PayloadType, off.DTMFPayloadType, off.DTMFRate, dir))
 }
 
 // userOf is the user part of a URI string ("" when absent).
