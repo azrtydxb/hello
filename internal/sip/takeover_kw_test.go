@@ -192,3 +192,35 @@ func TestHandoffCancelledDrain(t *testing.T) {
 		t.Fatal("the cancelled drain lost the call")
 	}
 }
+
+// TestHandoffAnsweredDuringDrain fails if a call that becomes recoverable
+// only after the drain began (here: still ringing at the drain, answered
+// during it) is not handed off too; it would hold the drained node until
+// the drain timeout.
+func TestHandoffAnsweredDuringDrain(t *testing.T) {
+	defer func(d time.Duration) { handoffPoll = d }(handoffPoll)
+	handoffPoll = 20 * time.Millisecond
+	haReinviteTimeout = time.Second
+	ha, mem, owner, taker := haPair(t, ringAllDevices())
+	a, b := newPhone(t, owner, "a1", "pa"), newPhone(t, owner, "b1", "pb1")
+	a.register(t)
+	b.register(t)
+	answer := make(chan struct{})
+	b.setCallee(answerAfter(answer))
+	res := dial(t.Context(), a, "200")
+	waitReq(t, b.invites, "INVITE to the callee")
+	mem.set(
+		cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Draining, ActiveCalls: 1},
+		cluster.Member{ID: "sip-2", Kind: cluster.KindSIP, State: cluster.Ready},
+	)
+	owner.srv.Drain()
+	close(answer)
+	if r := waitCall(t, res); r.err != nil {
+		t.Fatal(r.err)
+	}
+	// The survivor's own takeover loop claims it once it is marked.
+	_ = ha
+	waitReq(t, a.reinvites, "handoff re-INVITE to the caller")
+	eventually(t, "the call talks on the survivor", func() bool { return connectedOn(taker, "200", livestate.HATakenOver) })
+	eventually(t, "the drainer holds no call", func() bool { return owner.srv.ActiveCalls() == 0 })
+}

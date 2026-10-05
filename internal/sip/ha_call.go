@@ -565,78 +565,92 @@ func userOf(raw string) string {
 // taken over the calls it handed off; a var so tests can shrink it.
 var handoffPoll = 100 * time.Millisecond
 
-// HandOffCalls hands every recoverable live call to a surviving node: the
-// call's record is marked for handoff (survivors claim such dialogs of a
-// DRAINING node at once), and once a survivor has re-homed a call this
-// node yields its copy without touching the endpoints. A drain then ends
-// as soon as the calls are handed over instead of at the drain timeout;
-// calls nobody takes stay here and the drain timeout still applies.
+// HandOffCalls hands every recoverable live call to a surviving node,
+// for as long as the node drains: the call's record is marked for handoff
+// (survivors claim such dialogs of a DRAINING node at once), and once a
+// survivor has re-homed a call this node yields its copy without touching
+// the endpoints. A call that becomes recoverable during the drain (a
+// ringing call answered, a caller reaching voicemail) is handed off when
+// it does. The drain then ends as soon as the calls are handed over
+// instead of at the drain timeout; calls nobody takes stay here and the
+// drain timeout still applies.
 func (s *Server) HandOffCalls() {
 	if s.deps.HAState == nil || !s.cfg.HATakeoverEnabled {
 		return
 	}
-	s.mu.Lock()
-	calls := make([]*call, 0, len(s.calls))
-	for c := range s.calls {
-		calls = append(calls, c)
+	if s.handoff.Swap(true) {
+		return // already handing off
 	}
-	s.mu.Unlock()
-	var handed []*call
-	for _, c := range calls {
+	s.handoffMark()
+	s.goBG(s.handoffLoop)
+}
+
+// handoffMark marks every recoverable call not yet marked.
+func (s *Server) handoffMark() {
+	for _, c := range s.liveCalls() {
+		c.mu.Lock()
+		skip := c.haHandoff || c.haYielded || c.ended
+		c.mu.Unlock()
+		if skip {
+			continue
+		}
 		if _, ok := c.haState(); !ok {
-			continue // not recoverable (ringing, unreplicated): it stays
+			continue // not recoverable (yet): ringing, unreplicated
 		}
 		c.mu.Lock()
 		c.haHandoff, c.haHandoffWritten = true, false
 		c.mu.Unlock()
 		c.addTrace("Node draining: call handed off for takeover")
 		c.replicate()
-		handed = append(handed, c)
-	}
-	if len(handed) > 0 {
-		s.goBG(func() { s.handoffLoop(handed) })
 	}
 }
 
-// handoffLoop yields each handed-off call once a survivor took it over,
-// until none is left, the node stops, or the drain is cancelled.
-func (s *Server) handoffLoop(calls []*call) {
+// liveCalls snapshots the node's calls.
+func (s *Server) liveCalls() []*call {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	calls := make([]*call, 0, len(s.calls))
+	for c := range s.calls {
+		calls = append(calls, c)
+	}
+	return calls
+}
+
+// handoffLoop yields each handed-off call once a survivor took it over and
+// marks calls that became recoverable, until the node stops or the drain
+// is cancelled.
+func (s *Server) handoffLoop() {
 	t := time.NewTicker(handoffPoll)
 	defer t.Stop()
-	for len(calls) > 0 {
+	for s.handoff.Load() {
 		select {
 		case <-s.done:
 			return
 		case <-t.C:
 		}
-		left := calls[:0]
-		for _, c := range calls {
+		if !s.handoff.Load() {
+			return
+		}
+		s.handoffMark()
+		for _, c := range s.liveCalls() {
 			c.mu.Lock()
-			done := c.ended || c.haYielded || !c.haHandoff
+			pending := c.haHandoff && c.haHandoffWritten && !c.ended && !c.haYielded
 			c.mu.Unlock()
-			if done {
+			if !pending {
 				continue
 			}
 			if taker := s.haTakenBy(c.callID); taker != "" {
 				c.haYield(taker)
-				continue
 			}
-			left = append(left, c)
 		}
-		calls = left
 	}
 }
 
 // CancelHandOff takes back the calls not yet taken over when a drain is
 // cancelled: their records lose the handoff mark and replicate as before.
 func (s *Server) CancelHandOff() {
-	s.mu.Lock()
-	calls := make([]*call, 0, len(s.calls))
-	for c := range s.calls {
-		calls = append(calls, c)
-	}
-	s.mu.Unlock()
-	for _, c := range calls {
+	s.handoff.Store(false)
+	for _, c := range s.liveCalls() {
 		c.mu.Lock()
 		was := c.haHandoff && !c.haYielded
 		c.haHandoff, c.haHandoffWritten = false, false

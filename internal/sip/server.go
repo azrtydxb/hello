@@ -188,6 +188,9 @@ type Server struct {
 	// taker (the value is the taker): their in-dialog requests get 503 so
 	// the edge retries them on a survivor.
 	haGone sync.Map
+	// handoff is set while the node drains with in-call HA: its calls are
+	// being handed to survivors.
+	handoff atomic.Bool
 
 	// Presence (S-10) and feature-code (S-11) state. subs holds the live
 	// dialog subscriptions by Call-ID, byExt the per-extension index used

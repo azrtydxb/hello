@@ -743,6 +743,26 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 	t.Cleanup(func() { restore(t, lc, node) })
 	// Runs first (LIFO): a node the test left draining comes back READY.
 	t.Cleanup(func() { undrain(lc, node) })
+	// A call still ringing is never handed off (it has no dialog yet): one
+	// ringing on the node keeps it alive through the drain checks below,
+	// until the ring timeout (10s), while the answered call is handed off.
+	ringer := lc.devices("desk")[0]
+	rp := kamPhone(t, ringer)
+	go func() {
+		if in, err := rp.Next(ctx); err == nil {
+			_ = in.Ring()
+		}
+	}()
+	dialer := phone(t, lc.devices("desk")[0], nodeHostPort[node])
+	go func() { _, _ = dialer.Dial(ctx, ringer.Extension, sdpOffer) }()
+	eventually(t, 5*time.Second, "a call ringing on "+node, func() error {
+		for _, c := range lc.calls() {
+			if c.To == ringer.Extension && c.Node == node {
+				return nil
+			}
+		}
+		return errors.New("not ringing")
+	})
 	lc.must("POST", "/api/v1/cluster/nodes/"+node+"/drain?force=true", nil, nil, 204)
 	lc.waitState(node, "DRAINING", 10*time.Second)
 	// The spec's 15s starts when the node starts failing (503 or gone),
@@ -750,13 +770,13 @@ func TestDrainKeepsCallsAndExits(t *testing.T) {
 	// seconds finishing its drain before it exits.
 	drained := time.Now()
 
-	// New work goes elsewhere: Kamailio marks the node inactive...
-	dispatcherInactiveBy(t, node, drained.Add(15*time.Second))
-	// ...an INVITE sent to it directly is refused...
+	// New work goes elsewhere: an INVITE sent to it directly is refused...
 	direct := phone(t, lc.devices("desk")[0], nodeHostPort[node])
 	if res, err := direct.Dial(ctx, callee.Extension, sdpOffer); err != nil || res.Status != 503 {
 		t.Fatalf("INVITE straight to the draining node = %+v, %v; want 503", res, err)
 	}
+	// ...Kamailio marks the node inactive...
+	dispatcherInactiveBy(t, node, drained.Add(15*time.Second))
 	// ...new registrations land on the other node...
 	for range 4 {
 		d := lc.devices("desk")[0]
