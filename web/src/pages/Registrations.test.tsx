@@ -26,6 +26,7 @@ const CALL = {
   node: "hello-sip-2",
   media: "direct",
   startedAt: "2026-10-01T10:00:00Z",
+  ha: "owned",
 };
 
 async function flush(ms = 0) {
@@ -106,5 +107,31 @@ describe("live pages", () => {
     unmount();
     await flush(15000);
     expect(calls).toHaveLength(2);
+  });
+
+  it("Active Calls badges a taken-over call and marks the others owned", async () => {
+    mockApi({
+      "GET /api/v1/calls": json({
+        items: [
+          { ...CALL, id: "corr-owned", from: "101", state: "connected" },
+          {
+            ...CALL,
+            id: "corr-taken",
+            from: "103",
+            state: "connected",
+            node: "hello-sip-1",
+            ha: "taken-over",
+          },
+        ],
+      }),
+    });
+    render(<Calls />);
+    await flush();
+    expect(screen.getByRole("columnheader", { name: "HA" })).toBeVisible();
+    const taken = screen.getByRole("row", { name: /103/ });
+    expect(within(taken).getByText("Taken over")).toHaveClass("badge");
+    const owned = screen.getByRole("row", { name: /101/ });
+    expect(within(owned).getByText("Owned")).toBeVisible();
+    expect(within(owned).queryByText("Taken over")).toBeNull();
   });
 });

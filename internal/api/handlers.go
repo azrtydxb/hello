@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -461,6 +462,13 @@ func (s *server) calls(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.liveDown(w, "list calls", err)
 		return
+	}
+	// Every call reports its in-call HA state (incall-ha S-6); a record
+	// from a node that predates the field was set up there and is owned.
+	for i := range cs {
+		if cs[i].HA == "" {
+			cs[i].HA = livestate.HAOwned
+		}
 	}
 	writeJSON(w, http.StatusOK, items(cs))
 }

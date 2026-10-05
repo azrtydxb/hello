@@ -494,9 +494,12 @@ type phone struct {
 	// a BYE arriving at any phone is never before it.
 	reinviteHold     chan struct{}
 	reinviteAnswered time.Time
-	byeAt            time.Time
-	servers          map[string]*sipgo.DialogServerSession
-	clients          map[string]*sipgo.DialogClientSession
+	// reinviteOwnSDP answers re-INVITEs with the phone's own SDP (its media
+	// address) instead of echoing the offer, as a real phone does.
+	reinviteOwnSDP bool
+	byeAt          time.Time
+	servers        map[string]*sipgo.DialogServerSession
+	clients        map[string]*sipgo.DialogClientSession
 
 	invites    chan *sip.Request
 	reinvites  chan *sip.Request
@@ -652,7 +655,13 @@ func (p *phone) onReinvite(req *sip.Request, tx sip.ServerTransaction) {
 	p.mu.Lock()
 	p.reinviteAnswered = time.Now()
 	p.mu.Unlock()
-	res := sip.NewResponseFromRequest(req, 200, "OK", req.Body())
+	p.mu.Lock()
+	body := req.Body()
+	if p.reinviteOwnSDP && len(body) > 0 {
+		body = []byte(p.sdp)
+	}
+	p.mu.Unlock()
+	res := sip.NewResponseFromRequest(req, 200, "OK", body)
 	if ct := req.ContentType(); ct != nil {
 		res.AppendHeader(sip.HeaderClone(ct))
 	}

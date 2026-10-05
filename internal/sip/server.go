@@ -151,14 +151,18 @@ type Server struct {
 	uas     *sipgo.DialogUA // A legs: callers
 	uac     *sipgo.DialogUA // B legs: forks
 	bg      sync.WaitGroup
-	mu      sync.Mutex
-	dialogs map[string]dialogRef // Call-ID -> call side
-	calls   map[*call]struct{}
-	done    chan struct{} // closed when Serve returns
-	laddr   sip.Addr      // the listening socket, for requests we originate
-	peers   peers         // the cluster's SIP nodes, for the edge proxy
-	serving atomic.Bool   // the listener is up
-	trunks  *trunkManager
+	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
+	// (a call ending as the node stops) must not start more work on it.
+	bgMu     sync.Mutex
+	bgClosed bool
+	mu       sync.Mutex
+	dialogs  map[string]dialogRef // Call-ID -> call side
+	calls    map[*call]struct{}
+	done     chan struct{} // closed when Serve returns
+	laddr    sip.Addr      // the listening socket, for requests we originate
+	peers    peers         // the cluster's SIP nodes, for the edge proxy
+	serving  atomic.Bool   // the listener is up
+	trunks   *trunkManager
 	// registrations is the last count of bindings this node registered.
 	registrations atomic.Int64
 	// answerHook, when set (tests only), runs as a call's winning fork is
@@ -173,6 +177,20 @@ type Server struct {
 	// haOfflineMu).
 	haOfflineMu sync.Mutex
 	haOffline   map[string]*haOfflineNode
+	// haLastActive is each live SIP node's last published call count
+	// (guarded by haOfflineMu).
+	haLastActive map[string]int
+	// haSent is the highest raw (outside sipgo's dialog sessions) CSeq
+	// this node sent per dialog Call-ID, so replicated CSeqs continue past
+	// it; entries go with the dialog's binding.
+	haSent sync.Map
+	// haGone holds the dialog Call-IDs of calls this node yielded to a
+	// taker (the value is the taker): their in-dialog requests get 503 so
+	// the edge retries them on a survivor.
+	haGone sync.Map
+	// handoff is set while the node drains with in-call HA: its calls are
+	// being handed to survivors.
+	handoff atomic.Bool
 
 	// Presence (S-10) and feature-code (S-11) state. subs holds the live
 	// dialog subscriptions by Call-ID, byExt the per-extension index used
@@ -284,7 +302,7 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		rrPos:     map[int64]*atomic.Uint64{},
 		lastEnd:   map[string]time.Time{},
 		digits:    map[*call]*digitBuffer{},
-		haOffline: map[string]*haOfflineNode{},
+		haOffline: map[string]*haOfflineNode{}, haLastActive: map[string]int{},
 	}
 	setDefault(&cfg.HADialogHeartbeat, 5*time.Second)
 	setDefault(&cfg.HATakeoverPoll, time.Second)
@@ -397,8 +415,22 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	stop()
 	close(s.done)
 	_ = ua.Close()
+	s.bgMu.Lock()
+	s.bgClosed = true
+	s.bgMu.Unlock()
 	s.bg.Wait()
 	return err
+}
+
+// goBG runs f as a background task that shutdown waits for; once shutdown
+// has begun, f is dropped (a WaitGroup must not grow while Wait runs).
+func (s *Server) goBG(f func()) {
+	s.bgMu.Lock()
+	defer s.bgMu.Unlock()
+	if s.bgClosed {
+		return
+	}
+	s.bg.Go(f)
 }
 
 // waitListening waits until sipgo serves the listener at addr.
@@ -450,16 +482,32 @@ func (s *Server) wrap(h sipgo.RequestHandler) sipgo.RequestHandler {
 				return
 			}
 		}
+		if s.handedOff(req, tx) {
+			return
+		}
 		h(req, tx)
 	}
 }
 
 func (s *Server) respond(tx sip.ServerTransaction, req *sip.Request, code int, reason string, hdrs ...sip.Header) {
-	res := sip.NewResponseFromRequest(req, code, reason, nil)
+	res := symmetric(req, sip.NewResponseFromRequest(req, code, reason, nil))
 	for _, h := range hdrs {
 		res.AppendHeader(h)
 	}
 	s.send(tx, res)
+}
+
+// symmetric sends res back to the address its request came from (RFC 3581
+// behaviour whether or not the Via asked for rport). Without it a request
+// whose Via names another port than its source - an edge proxy's dispatcher
+// probe after the edge was replaced, a NATed peer - is answered at the Via
+// port, which on kw kept a replaced Kamailio's stale conntrack entries alive
+// and left both nodes probed DOWN.
+func symmetric(req *sip.Request, res *sip.Response) *sip.Response {
+	if src := req.Source(); src != "" {
+		res.SetDestination(src)
+	}
+	return res
 }
 
 func (s *Server) send(tx sip.ServerTransaction, res *sip.Response) {
@@ -487,14 +535,14 @@ func (s *Server) handleOptions(req *sip.Request, tx sip.ServerTransaction) {
 		// The Warning names the state only: the reason holds check errors
 		// (internal addresses) that anyone sending OPTIONS would read.
 		if st, _ := s.state(); st != cluster.Ready {
-			res := sip.NewResponseFromRequest(req, sip.StatusServiceUnavailable, "Service Unavailable", nil)
+			res := symmetric(req, sip.NewResponseFromRequest(req, sip.StatusServiceUnavailable, "Service Unavailable", nil))
 			res.AppendHeader(sip.NewHeader("Retry-After", "5"))
 			res.AppendHeader(sip.NewHeader("Warning", `399 hello "`+string(st)+`"`))
 			s.send(tx, res)
 			return
 		}
 	}
-	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil)
+	res := symmetric(req, sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil))
 	res.AppendHeader(sip.HeaderClone(&s.contact))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
 	res.AppendHeader(sip.NewHeader("Accept", "application/sdp"))
@@ -741,6 +789,7 @@ func (s *Server) unbind(callID string, c *call) {
 	s.mu.Lock()
 	if r, ok := s.dialogs[callID]; ok && r.c == c {
 		delete(s.dialogs, callID)
+		s.haSent.Delete(callID)
 		if r.leg == nil {
 			delete(s.calls, c)
 		}
