@@ -284,14 +284,14 @@ export function Trunks() {
         )}
         {list.status === "loading" && <Spinner label="Loading trunks…" />}
         {list.status === "error" && (
-          <Alert tone="bad" title="Could not load trunks.">
+          <Alert tone="bad" title="Could not load trunks">
             {list.message}
           </Alert>
         )}
         {list.status === "ready" && list.items.length === 0 && (
           <EmptyState
             icon="cable"
-            title="No trunks yet."
+            title="No trunks yet"
             description="Add a carrier account or an IP peer to call numbers outside Hello."
             action={newTrunk}
           />

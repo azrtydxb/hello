@@ -199,7 +199,7 @@ describe("RingGroups", () => {
     fireEvent.click(
       within(dialog).getByRole("button", { name: "Delete group" }),
     );
-    await screen.findByText("No ring groups yet.");
+    await screen.findByText("No ring groups yet");
     expect(calls).toContainEqual({
       method: "DELETE",
       url: "/api/v1/ring-groups/5",

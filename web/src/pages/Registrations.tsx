@@ -78,7 +78,7 @@ export function Registrations() {
           <Spinner label="Loading registrations…" />
         )}
         {state.status === "error" && (
-          <Alert tone="bad" title="Could not load registrations.">
+          <Alert tone="bad" title="Could not load registrations">
             {state.message}
             {items ? " Showing the last list received." : ""}
           </Alert>

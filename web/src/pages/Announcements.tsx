@@ -91,7 +91,7 @@ export function Announcements() {
     );
     if (String(playback.playing) === String(a.id)) playback.stop();
     setDeleting(null);
-    showToast(`Announcement ${a.name} deleted`);
+    showToast(`Announcement ${a.name} deleted.`);
   }
 
   const items = list.status === "ready" ? list.items : null;
@@ -168,7 +168,7 @@ export function Announcements() {
         <UploadCard
           onUploaded={(a) => {
             upsert(a);
-            showToast(`Announcement ${a.name} uploaded`);
+            showToast(`Announcement ${a.name} uploaded.`);
           }}
         />
         <div className="ann-list media-stack">
@@ -215,7 +215,7 @@ export function Announcements() {
             upsert(a);
             setReplacing(null);
             if (String(playback.playing) === String(a.id)) playback.stop();
-            showToast(`Audio of ${a.name} replaced`);
+            showToast(`Audio of ${a.name} replaced.`);
           }}
         />
       )}

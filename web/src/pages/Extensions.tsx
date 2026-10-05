@@ -244,7 +244,7 @@ export function Extensions() {
 
       {list.status === "loading" && <Spinner label="Loading extensions…" />}
       {list.status === "error" && (
-        <Alert tone="bad" title="Could not load extensions.">
+        <Alert tone="bad" title="Could not load extensions">
           {list.message}
         </Alert>
       )}
@@ -412,7 +412,7 @@ function NewExtension({
         noValidate
       >
         {serverError && (
-          <Alert tone="bad" title="Could not create the extension.">
+          <Alert tone="bad" title="Could not create the extension">
             {serverError}
           </Alert>
         )}

@@ -34,6 +34,7 @@ import {
   PageHeader,
   type Property,
   PropertyList,
+  Spinner,
 } from "../design/azrty/components";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import {
@@ -151,19 +152,17 @@ export function Cluster() {
         {notice}
       </p>
       {state.status === "loading" && (
-        <p role="status" aria-live="polite">
-          Loading cluster status…
-        </p>
+        <Spinner label="Loading cluster status…" />
       )}
       {state.status === "error" && (
-        <Alert tone="bad" title="Could not load cluster status.">
+        <Alert tone="bad" title="Could not load cluster status">
           {state.message}
         </Alert>
       )}
       {data && sip.length > 0 && sipReady === 0 && (
         <Alert
           tone="bad"
-          title="No SIP node is READY."
+          title="No SIP node is READY"
           style={{ marginBottom: "var(--az-space-4)" }}
         >
           New calls are rejected (503) until a SIP node returns to READY.

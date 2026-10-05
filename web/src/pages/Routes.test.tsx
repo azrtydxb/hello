@@ -339,7 +339,7 @@ describe("Routes", () => {
     renderApp("/routes?tab=inbound");
 
     expect(
-      await screen.findByText("Could not load the trunk list."),
+      await screen.findByText("Could not load the trunk list"),
     ).toBeVisible();
     fireEvent.click(await screen.findByRole("button", { name: "Edit Main" }));
 

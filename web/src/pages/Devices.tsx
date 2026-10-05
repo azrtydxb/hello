@@ -247,7 +247,7 @@ export function Devices() {
         {actionError && <Alert tone="bad">{actionError}</Alert>}
         {list.status === "loading" && <Spinner label="Loading devices…" />}
         {list.status === "error" && (
-          <Alert tone="bad" title="Could not load devices.">
+          <Alert tone="bad" title="Could not load devices">
             {list.message}
           </Alert>
         )}
@@ -414,7 +414,7 @@ function NewDevice({
           noValidate
         >
           {serverError && (
-            <Alert tone="bad" title="Could not create the device.">
+            <Alert tone="bad" title="Could not create the device">
               {serverError}
             </Alert>
           )}

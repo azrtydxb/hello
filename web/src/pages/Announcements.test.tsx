@@ -94,7 +94,7 @@ describe("Announcements", () => {
     // The toast and the new row land in one render; the toast goes first
     // because it hides after 3 s.
     expect(
-      await screen.findByText("Announcement holding uploaded"),
+      await screen.findByText("Announcement holding uploaded."),
     ).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /holding/ })).toBeInTheDocument();
     expect(screen.getByLabelText("Name")).toHaveValue("");
@@ -211,7 +211,7 @@ describe("Announcements", () => {
     expect((form.get("file") as File).name).toBe("new.wav");
     expect(form.get("name")).toBeNull();
     expect(
-      await screen.findByText("Audio of closing replaced"),
+      await screen.findByText("Audio of closing replaced."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).toBeNull();
     const updated = screen.getByRole("row", { name: /closing/ });
@@ -273,7 +273,7 @@ describe("Announcements", () => {
       within(dialog).getByRole("button", { name: "Delete announcement" }),
     );
     expect(
-      await screen.findByText("Announcement closing deleted"),
+      await screen.findByText("Announcement closing deleted."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("row", { name: /closing/ })).toBeNull();
     expect(calls).toContainEqual({

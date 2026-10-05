@@ -41,6 +41,7 @@ import {
   type Property,
   PropertyList,
   Select,
+  Spinner,
   Table,
   Tabs,
   useToast,
@@ -257,13 +258,9 @@ function TraceTab({
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        {recent.status === "loading" && (
-          <p role="status" aria-live="polite" className="pf-muted">
-            Loading calls…
-          </p>
-        )}
+        {recent.status === "loading" && <Spinner label="Loading calls…" />}
         {recent.status === "error" && !recent.data && (
-          <Alert tone="bad" title="Could not load calls.">
+          <Alert tone="bad" title="Could not load calls">
             {recent.message}
           </Alert>
         )}
@@ -353,15 +350,13 @@ function CallTrace({ id }: { id: string }) {
   if (state.status === "loading") {
     return (
       <div className="az-card pf-card">
-        <p role="status" aria-live="polite" className="pf-muted">
-          Loading call {id}…
-        </p>
+        <Spinner label={`Loading call ${id}…`} />
       </div>
     );
   }
   if (state.status === "error") {
     return (
-      <Alert tone="bad" title={`Could not load call ${id}.`}>
+      <Alert tone="bad" title={`Could not load call ${id}`}>
         {state.message}
       </Alert>
     );
@@ -481,7 +476,7 @@ function RegistrationsTab({
   return (
     <>
       {devices === undefined ? (
-        <Alert tone="bad" title="Could not load devices.">
+        <Alert tone="bad" title="Could not load devices">
           The device list is unavailable; try again shortly.
         </Alert>
       ) : devices.length === 0 ? (
@@ -656,13 +651,9 @@ function DeviceReg({
           value={deviceId}
           onChange={(e) => onDevice(e.target.value)}
         />
-        {diag.status === "loading" && (
-          <p role="status" aria-live="polite" className="pf-muted">
-            Loading diagnostics…
-          </p>
-        )}
+        {diag.status === "loading" && <Spinner label="Loading diagnostics…" />}
         {diag.status === "error" && (
-          <Alert tone="bad" title="Could not load diagnostics.">
+          <Alert tone="bad" title="Could not load diagnostics">
             {diag.message}
           </Alert>
         )}
@@ -762,7 +753,7 @@ interface ProbeRow {
 function ProbesTab({ live }: { live: Live }) {
   if (live.trunkStatus === undefined) {
     return (
-      <Alert tone="bad" title="Could not load trunk status.">
+      <Alert tone="bad" title="Could not load trunk status">
         Live state (Valkey) is unavailable; try again shortly.
       </Alert>
     );
@@ -872,11 +863,7 @@ function HealthTab({
   onTab: (tab: string) => void;
 }) {
   if (loading) {
-    return (
-      <p role="status" aria-live="polite" className="pf-muted">
-        Running checks…
-      </p>
-    );
+    return <Spinner label="Running checks…" />;
   }
   return (
     <>

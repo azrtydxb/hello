@@ -117,7 +117,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (state.status === "error") {
     return (
       <div className="app-centered">
-        <Alert tone="bad" title="Could not reach the control plane.">
+        <Alert tone="bad" title="Could not reach the control plane">
           {state.message}
         </Alert>
         <Button

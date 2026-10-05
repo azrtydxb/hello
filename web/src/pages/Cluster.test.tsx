@@ -381,7 +381,7 @@ describe("Cluster", () => {
 
     expect(
       (await screen.findAllByRole("alert")).some((a) =>
-        a.textContent?.includes("No SIP node is READY."),
+        a.textContent?.includes("No SIP node is READY"),
       ),
     ).toBe(true);
     const dialog = await openBox("hello-sip-1");
@@ -404,7 +404,7 @@ describe("Cluster", () => {
     await waitFor(() =>
       expect(box("hello-sip-1")).toHaveAccessibleName("hello-sip-1: Ready"),
     );
-    expect(screen.queryByText("No SIP node is READY.")).toBeNull();
+    expect(screen.queryByText("No SIP node is READY")).toBeNull();
   });
 
   it("lays out any number of SIP nodes without overlap", () => {

@@ -171,20 +171,20 @@ export function RingGroups() {
       />
       <div className="cf-stack">
         {extError && (
-          <Alert tone="warn" title="Could not load the extension list.">
+          <Alert tone="warn" title="Could not load the extension list">
             {extError} Members show by id, and the member picker needs it.
           </Alert>
         )}
         {list.status === "loading" && <Spinner label="Loading ring groups…" />}
         {list.status === "error" && (
-          <Alert tone="bad" title="Could not load the groups.">
+          <Alert tone="bad" title="Could not load the groups">
             {list.message}
           </Alert>
         )}
         {list.status === "ready" && list.items.length === 0 && (
           <EmptyState
             icon="users-round"
-            title="No ring groups yet."
+            title="No ring groups yet"
             description="A ring group rings several extensions for one number, all at once or in turn."
             action={newGroup}
           />

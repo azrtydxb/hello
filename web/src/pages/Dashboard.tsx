@@ -74,8 +74,8 @@ export function trunkState(
   trunk: Trunk,
   status: TrunkStatus | undefined,
 ): { label: string; tone: BadgeTone } {
-  if (!trunk.enabled) return { label: "Disabled", tone: "neutral" };
-  if (!status) return { label: "Unknown", tone: "neutral" };
+  if (!trunk.enabled) return { label: "Disabled", tone: "outline" };
+  if (!status) return { label: "Status unknown", tone: "outline" };
   const total = status.destinations.length;
   const down = status.destinations.filter((d) => !d.up).length;
   if (trunk.mode === "registration") {

@@ -228,7 +228,7 @@ export function RoutesPage() {
       {trunkLoad.status === "error" && (
         <Alert
           tone="bad"
-          title="Could not load the trunk list."
+          title="Could not load the trunk list"
           style={{ marginBottom: 20 }}
           action={
             <Button
@@ -506,7 +506,7 @@ function RouteList<
         <Spinner label={`Loading ${what}…`} />
       )}
       {list.state.status === "error" && (
-        <Alert tone="bad" title={`Could not load ${what}.`}>
+        <Alert tone="bad" title={`Could not load ${what}`}>
           {list.state.message}
         </Alert>
       )}

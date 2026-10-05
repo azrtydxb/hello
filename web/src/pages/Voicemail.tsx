@@ -224,6 +224,9 @@ function BoxPanel({
           : prev,
       );
       if (msg.heard !== heard) onUnheard(heard ? -1 : 1);
+      onToast(
+        `Message from ${msg.caller} marked ${heard ? "heard" : "unheard"}.`,
+      );
     } catch (err: unknown) {
       setActionError(
         `Could not mark the message from ${msg.caller}: ${errorMessage(err)}`,
@@ -241,7 +244,7 @@ function BoxPanel({
     onUnheard(msg.heard ? 0 : -1, -1);
     if (String(playback.playing) === String(msg.id)) playback.stop();
     setDeleting(null);
-    onToast(`Message from ${msg.caller} deleted`);
+    onToast(`Message from ${msg.caller} deleted.`);
   }
 
   const items = messages.status === "ready" ? messages.value : [];
@@ -422,7 +425,7 @@ function BoxPanel({
           onSaved={(value) => {
             setDetail({ status: "ready", value });
             setSettingsOpen(false);
-            onToast(`Box ${box.number} saved`);
+            onToast(`Box ${box.number} saved.`);
           }}
         />
       )}

@@ -109,7 +109,7 @@ export function Recordings() {
     );
     if (String(playback.playing) === String(rec.id)) playback.stop();
     setDeleting(null);
-    showToast(`Recording ${rec.correlationId} deleted`);
+    showToast(`Recording ${rec.correlationId} deleted.`);
   }
 
   const page = state.status === "ready" ? state.page : undefined;
