@@ -348,14 +348,25 @@ func TestKillSIPNodeDuringCall(t *testing.T) {
 	node := callNode(t, lc, callee.Extension)
 	other := otherNode(node)
 	t.Cleanup(func() { restore(t, lc, node) })
-	// The owner replicates the call before anything can take it over.
+	// The owner replicates the call before anything can take it over: the
+	// record exists, names the owner, and the counter moved.
+	var callID string
 	eventually(t, 10*time.Second, "the call's dialog is replicated", func() error {
-		if keys := strings.Fields(valkeyCLI(t, "--scan", "--pattern", "hello:dialog:*")); len(keys) >= 1 {
+		for _, c := range lc.calls() {
+			if c.To == callee.Extension && c.SIPCallID != "" {
+				callID = c.SIPCallID
+			}
+		}
+		if callID == "" {
+			return errors.New("no live call")
+		}
+		rec := valkeyCLI(t, "GET", "hello:dialog:"+callID)
+		if strings.Contains(rec, `"ownerNode":"`+node+`"`) {
 			return nil
 		}
-		return errors.New("no dialog records in Valkey")
+		return fmt.Errorf("dialog record = %q", strings.TrimSpace(rec))
 	})
-	if m := nodeMetrics(t, node); m["hello_dialog_replicated_total"] < 1 {
+	if m := nodeMetrics(t, node); !replicatedOK(m) {
 		t.Fatalf("the owner has not replicated: %v", m)
 	}
 	killed := kill(t, node)
@@ -376,16 +387,23 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	// OFFLINE 15s after its last heartbeat, so the jittered 1-3s poll, the
 	// claim and the re-INVITEs land well inside 30s of the kill.
 	var rehomed time.Time
-	eventuallyBy(t, killed.Add(30*time.Second), "call taken over by "+taker, func(context.Context) error {
+	deadline := killed.Add(30 * time.Second)
+	for rehomed.IsZero() && time.Now().Before(deadline) {
 		for _, c := range lc.calls() {
 			if c.To == ext && c.Node == taker {
 				rehomed = time.Now()
-				return nil
 			}
 		}
-		return errors.New("not re-homed; orphaned dialogs: " +
-			strings.TrimSpace(valkeyCLI(t, "--scan", "--pattern", "hello:dialog:*")))
-	})
+		time.Sleep(250 * time.Millisecond)
+	}
+	if rehomed.IsZero() {
+		t.Logf("orphaned dialogs: %q", strings.TrimSpace(valkeyCLI(t, "--scan", "--pattern", "hello:dialog:*")))
+		t.Logf("taker metrics: %v", nodeMetrics(t, taker))
+		if out, err := compose("logs", "--tail", "60", taker).CombinedOutput(); err == nil {
+			t.Logf("%s logs:\n%s", taker, string(out))
+		}
+		t.Fatalf("the call was not taken over by %s within 30s of the kill", taker)
+	}
 	t.Logf("takeover completed %s after the kill", rehomed.Sub(killed).Round(time.Millisecond))
 	// Both endpoints saw the takeover re-INVITE (the phone answered it).
 	for _, p := range []*sipua.Phone{a, b} {
@@ -434,6 +452,17 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 }
 
 // nodeMetrics scrapes a node's Prometheus endpoint into a name->value map.
+// replicatedOK reports whether a node's metrics show a successful dialog
+// replication write (the series is labelled by result).
+func replicatedOK(m map[string]float64) bool {
+	for name, v := range m {
+		if strings.HasPrefix(name, "hello_dialog_replicated_total") && v >= 1 {
+			return true
+		}
+	}
+	return false
+}
+
 func nodeMetrics(t *testing.T, node string) map[string]float64 {
 	t.Helper()
 	url := map[string]string{"hello-sip-1": "http://localhost:8082/metrics", "hello-sip-2": "http://localhost:8083/metrics"}[node]
