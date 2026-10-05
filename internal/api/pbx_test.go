@@ -68,14 +68,28 @@ func (m *memObjects) Remove(_ context.Context, object string) error {
 
 func (m *memObjects) EnsureBucket(context.Context) error { return nil }
 
-func (m *memObjects) PresignRecording(_ context.Context, object string) (string, error) {
+func (m *memObjects) PresignRecording(_ context.Context, object, download string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.objs["rec:"+object]; !ok {
 		return "", fmt.Errorf("memObjects: %s: not found", object)
 	}
 	m.presigns++
-	return "http://objects.test/rec/" + object + "?sig=1", nil
+	u := "http://objects.test/rec/" + object + "?sig=1"
+	if download != "" {
+		u += "&download=" + download
+	}
+	return u, nil
+}
+
+func (m *memObjects) PresignAnnouncement(_ context.Context, object string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.objs["ann:"+object]; !ok {
+		return "", fmt.Errorf("memObjects: %s: not found", object)
+	}
+	m.presigns++
+	return "http://objects.test/ann/" + object + "?sig=1", nil
 }
 
 func (m *memObjects) PutRecording(_ context.Context, object string, r io.Reader, _ int64) error {

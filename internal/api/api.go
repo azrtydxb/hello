@@ -49,6 +49,7 @@ type Store interface {
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
 
 	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
+	ListVoicemailBoxes(ctx context.Context) ([]store.VoicemailBoxSummary, error)
 	UpdateVoicemailBox(ctx context.Context, actor string, extensionID int64, c store.VoicemailBoxChange, check store.Check) (store.VoicemailBox, error)
 	ListVoicemailMessages(ctx context.Context, boxID int64, unheardOnly bool) ([]store.VoicemailMessage, error)
 	GetVoicemailMessage(ctx context.Context, id int64) (store.VoicemailMessage, error)
@@ -82,6 +83,7 @@ type Store interface {
 	GetAnnouncement(ctx context.Context, id int64) (store.Announcement, error)
 	AnnouncementByName(ctx context.Context, name string) (store.Announcement, bool, error)
 	CreateAnnouncement(ctx context.Context, actor, name, object string, check store.Check) (store.Announcement, error)
+	ReplaceAnnouncement(ctx context.Context, actor string, id int64) (store.Announcement, error)
 	DeleteAnnouncement(ctx context.Context, actor string, id int64, check store.Check) (string, error)
 
 	ListTrunks(ctx context.Context) ([]store.Trunk, error)
@@ -184,6 +186,7 @@ func Handler(c Config) http.Handler {
 	private("GET /api/v1/extensions/{id}/voicemail", s.getVoicemailBox)
 	private("PUT /api/v1/extensions/{id}/voicemail", s.putVoicemailBox)
 
+	private("GET /api/v1/voicemail/boxes", s.listVoicemailBoxes)
 	private("GET /api/v1/voicemail/messages", s.listVoicemailMessages)
 	private("POST /api/v1/voicemail/messages/{id}/heard", s.markMessageHeard)
 	private("DELETE /api/v1/voicemail/messages/{id}", s.deleteMessage)
@@ -195,7 +198,9 @@ func Handler(c Config) http.Handler {
 
 	private("GET /api/v1/announcements", s.listAnnouncements)
 	private("POST /api/v1/announcements", s.createAnnouncement)
+	private("PUT /api/v1/announcements/{id}", s.replaceAnnouncement)
 	private("DELETE /api/v1/announcements/{id}", s.deleteAnnouncement)
+	private("GET /api/v1/announcements/{id}/audio", s.announcementAudio)
 
 	private("GET /api/v1/ring-groups", s.listRingGroups)
 	private("POST /api/v1/ring-groups", s.createRingGroup)

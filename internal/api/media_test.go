@@ -138,6 +138,15 @@ func TestRecordingAudioAndDelete(t *testing.T) {
 	if !strings.Contains(loc, object) || !strings.Contains(loc, "X-Amz-Signature") {
 		t.Fatalf("Location %q is not a presigned URL for %s", loc, object)
 	}
+	if strings.Contains(loc, "response-content-disposition") {
+		t.Fatalf("Location %q plays as a download", loc)
+	}
+	// ?download=1 presigns the same object as an attachment.
+	dl := c.do("GET", "/api/v1/recordings/1/audio?download=1", nil)
+	if dl.code != http.StatusFound ||
+		!strings.Contains(dl.header.Get("Location"), "response-content-disposition=attachment") {
+		t.Fatalf("download = %d Location %q, want a presigned attachment", dl.code, dl.header.Get("Location"))
+	}
 
 	// Delete removes the row and the object; the mutation was audited.
 	rev0, err := e.st.ConfigRevision(ctx)
@@ -291,5 +300,176 @@ func TestExtensionRecordDefault(t *testing.T) {
 	// No field at all stays 400.
 	if r := c.do("PATCH", path, map[string]any{}); r.code != http.StatusBadRequest {
 		t.Errorf("empty patch = %d, want 400", r.code)
+	}
+}
+
+// annMultipart is a multipart body with an optional name part and a file
+// part holding data.
+func annMultipart(name string, data []byte) string {
+	body := ""
+	if name != "" {
+		body += "--BND\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\n" + name + "\r\n"
+	}
+	return body + "--BND\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\n" +
+		"Content-Type: audio/wav\r\n\r\n" + string(data) + "\r\n--BND--\r\n"
+}
+
+// TestAnnouncementReplace: PUT overwrites the audio at ann/<name>.wav with
+// the upload's validation, moves updatedAt, audits and bumps the revision;
+// refused replacements leave the stored audio alone. The audio route
+// presigns the announcement bucket. It fails if a bad upload overwrites the
+// audio, if the name can be changed, or if the replacement is not audited.
+func TestAnnouncementReplace(t *testing.T) {
+	objs := newMemObjects()
+	e := newPBXEnv(t, objs)
+	ctx := context.Background()
+	c := e.login()
+
+	c.header.Set("Content-Type", "multipart/form-data; boundary=BND")
+	created := c.must(http.StatusCreated, "POST", "/api/v1/announcements", annMultipart("closing", wav)).json(t)
+	c.header.Del("Content-Type")
+	path := fmt.Sprintf("/api/v1/announcements/%v", created["id"])
+	rev0, err := e.st.ConfigRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Refused: not multipart, non-WAV bytes, no file, another name, unknown id.
+	c.must(http.StatusBadRequest, "PUT", path, map[string]string{"name": "closing"})
+	c.header.Set("Content-Type", "multipart/form-data; boundary=BND")
+	c.must(http.StatusBadRequest, "PUT", path, annMultipart("", []byte("not audio")))
+	c.must(http.StatusBadRequest, "PUT", path,
+		"--BND\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nclosing\r\n--BND--\r\n")
+	c.must(http.StatusBadRequest, "PUT", path, annMultipart("other", wav))
+	c.must(http.StatusNotFound, "PUT", "/api/v1/announcements/999999", annMultipart("", wav))
+	if got := string(objs.objs["ann:ann/closing.wav"]); got != string(wav) {
+		t.Fatalf("a refused replacement changed the audio")
+	}
+	if rev, _ := e.st.ConfigRevision(ctx); rev != rev0 {
+		t.Fatalf("refused replacements moved the revision %d -> %d", rev0, rev)
+	}
+
+	// Accepted: the same key holds the new bytes; the name may be repeated.
+	replacement := append(append([]byte{}, wav...), []byte("data-new")...)
+	got := c.must(http.StatusOK, "PUT", path, annMultipart("closing", replacement)).json(t)
+	c.header.Del("Content-Type")
+	if got["name"] != "closing" || got["id"] != created["id"] {
+		t.Fatalf("replaced = %v", got)
+	}
+	if got["updatedAt"] == created["updatedAt"] {
+		t.Fatalf("updatedAt did not move: %v", got)
+	}
+	if string(objs.objs["ann:ann/closing.wav"]) != string(replacement) {
+		t.Fatalf("audio not replaced")
+	}
+	if len(objs.objs) != 1 {
+		t.Fatalf("replacement stored another object: %v", objs.objs)
+	}
+	if rev, _ := e.st.ConfigRevision(ctx); rev <= rev0 {
+		t.Fatalf("revision %d did not move past %d", rev, rev0)
+	}
+	var audits int
+	if err := e.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM audit_events WHERE resource = 'announcement' AND action = 'update'`).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if audits != 1 {
+		t.Fatalf("replace audits = %d, want 1", audits)
+	}
+
+	// Playback: a 302 to the announcement bucket; 404 for an unknown id.
+	c.hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	defer func() { c.hc.CheckRedirect = nil }()
+	audio := c.must(http.StatusFound, "GET", path+"/audio", nil)
+	if loc := audio.header.Get("Location"); !strings.Contains(loc, "/ann/ann/closing.wav") {
+		t.Fatalf("Location %q is not the announcement audio", loc)
+	}
+	c.must(http.StatusNotFound, "GET", "/api/v1/announcements/999999/audio", nil)
+}
+
+// TestRecordingPartiesAndDownload: the list carries the call's parties and
+// CDR id from the first CDR of the correlation id (nothing when no CDR
+// exists), and ?download=1 presigns an attachment. It fails if a recording
+// without a CDR is dropped, or if download is ignored or accepts garbage.
+func TestRecordingPartiesAndDownload(t *testing.T) {
+	objs := newMemObjects()
+	e := newPBXEnv(t, objs)
+	ctx := context.Background()
+	c := e.login()
+	if err := objs.PutRecording(ctx, "rec/1.wav", strings.NewReader(string(wav)), int64(len(wav))); err != nil {
+		t.Fatal(err)
+	}
+	seedRecording(t, e, "corr-a", "rec/1.wav", 5000)
+	seedRecording(t, e, "corr-b", "rec/2.wav", 7000)
+	seedCDR(t, e, "corr-a", "101", "102")
+	seedCDR(t, e, "corr-a", "102", "103") // a later leg of the same call
+
+	var page struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(c.must(http.StatusOK, "GET", "/api/v1/recordings", nil).body, &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("list = %v", page.Items)
+	}
+	noCDR, withCDR := page.Items[0], page.Items[1]
+	if _, ok := noCDR["cdrId"]; ok || noCDR["source"] != "" || noCDR["destination"] != "" {
+		t.Fatalf("recording without a CDR = %v", noCDR)
+	}
+	var firstCDR int64
+	if err := e.db.QueryRowContext(ctx,
+		`SELECT min(id) FROM cdrs WHERE correlation_id = 'corr-a'`).Scan(&firstCDR); err != nil {
+		t.Fatal(err)
+	}
+	if withCDR["source"] != "101" || withCDR["destination"] != "102" || withCDR["cdrId"] != float64(firstCDR) {
+		t.Fatalf("recording with CDRs = %v, want the first CDR %d", withCDR, firstCDR)
+	}
+
+	c.hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	defer func() { c.hc.CheckRedirect = nil }()
+	id := fmt.Sprint(withCDR["id"])
+	plain := c.must(http.StatusFound, "GET", "/api/v1/recordings/"+id+"/audio", nil)
+	if strings.Contains(plain.header.Get("Location"), "download=") {
+		t.Fatalf("plain audio presigned as a download: %s", plain.header.Get("Location"))
+	}
+	dl := c.must(http.StatusFound, "GET", "/api/v1/recordings/"+id+"/audio?download=1", nil)
+	if want := "download=recording-" + id + ".wav"; !strings.Contains(dl.header.Get("Location"), want) {
+		t.Fatalf("download Location %q lacks %q", dl.header.Get("Location"), want)
+	}
+	c.must(http.StatusBadRequest, "GET", "/api/v1/recordings/"+id+"/audio?download=maybe", nil)
+}
+
+// TestVoicemailBoxesList: every box with its extension and its unheard and
+// total counts, in number order. It fails if a box without messages is
+// dropped or if heard messages count as unheard.
+func TestVoicemailBoxesList(t *testing.T) {
+	e := newPBXEnv(t, newMemObjects())
+	ctx := context.Background()
+	c := e.login()
+	box101 := c.must(http.StatusOK, "GET", fmt.Sprintf("/api/v1/extensions/%v/voicemail", e.ext101["id"]), nil).json(t)
+	for i, heard := range []bool{false, false, true} {
+		if _, err := e.db.ExecContext(ctx,
+			`INSERT INTO voicemail_messages (box_id, minio_object, caller, duration_ms, heard) VALUES ($1, $2, '102', 1000, $3)`,
+			box101["id"], fmt.Sprintf("box/x/%d.wav", i), heard); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var list struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(c.must(http.StatusOK, "GET", "/api/v1/voicemail/boxes", nil).body, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 2 {
+		t.Fatalf("boxes = %v", list.Items)
+	}
+	a, b := list.Items[0], list.Items[1]
+	if a["number"] != "101" || a["name"] != "Sales" || a["id"] != box101["id"] ||
+		a["extensionId"] != e.ext101["id"] || a["unheard"] != float64(2) || a["total"] != float64(3) {
+		t.Fatalf("box 101 = %v", a)
+	}
+	if b["number"] != "102" || b["unheard"] != float64(0) || b["total"] != float64(0) {
+		t.Fatalf("box 102 = %v", b)
 	}
 }
