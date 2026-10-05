@@ -65,7 +65,7 @@ describe("RingGroups", () => {
     });
     renderApp("/ring-groups");
     fireEvent.click(
-      await screen.findByRole("button", { name: "New ring group" }),
+      (await screen.findAllByRole("button", { name: "New ring group" }))[0]!,
     );
 
     fireEvent.change(screen.getByLabelText("Name"), {
@@ -90,7 +90,12 @@ describe("RingGroups", () => {
 
     // CI's runners are slow enough that the refresh after the create can
     // outlast the default one-second wait.
-    await screen.findByRole("row", { name: /Support/ }, { timeout: 10000 });
+    await screen.findByRole(
+      "listitem",
+      { name: "Support" },
+      { timeout: 10000 },
+    );
+    expect(screen.getByText("Ring group Support created.")).toBeVisible();
     expect(calls).toContainEqual({
       method: "POST",
       url: "/api/v1/ring-groups",
@@ -124,7 +129,7 @@ describe("RingGroups", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save group" }));
 
-    await screen.findByRole("row", { name: /Sales/ });
+    await screen.findByText("Ring group Sales saved.");
     const patch = calls.find((c) => c.method === "PATCH");
     expect(patch?.body).toMatchObject({ strategy: "weighted" });
   });
@@ -142,7 +147,7 @@ describe("RingGroups", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ring 100 later" }));
     fireEvent.click(screen.getByRole("button", { name: "Save group" }));
 
-    await screen.findByRole("row", { name: /Sales/ });
+    await screen.findByText("Ring group Sales saved.");
     expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
       members: [
         { extensionId: 2, position: 1 },
@@ -183,17 +188,63 @@ describe("RingGroups", () => {
       "DELETE /api/v1/ring-groups/5": noContent,
     });
     renderApp("/ring-groups");
-    const row = await screen.findByRole("row", { name: /Sales/ });
+    const card = await screen.findByRole("listitem", { name: "Sales" });
 
     fireEvent.click(
-      within(row).getByRole("button", { name: "Delete ring group Sales" }),
+      within(card).getByRole("button", { name: "Delete ring group Sales" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Delete group" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "Delete ring group Sales?",
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Delete group" }),
+    );
     await screen.findByText("No ring groups yet.");
     expect(calls).toContainEqual({
       method: "DELETE",
       url: "/api/v1/ring-groups/5",
       body: undefined,
     });
+  });
+
+  it("shows each group as a card: strategy, timing, members in order, failure", async () => {
+    setup({
+      "GET /api/v1/ring-groups": () =>
+        json({
+          items: [
+            {
+              ...GROUP,
+              strategy: "sequential",
+              hunt: true,
+              ringTimeout: 60,
+              failureKind: "voicemail",
+              failureTarget: "100",
+              members: [
+                { extensionId: 2, position: 2, weight: 1, delay: 15 },
+                { extensionId: 1, position: 1, weight: 1, delay: 0 },
+                { extensionId: 9, position: 3, weight: 1, delay: 0 },
+              ],
+            },
+          ],
+        }),
+    });
+    renderApp("/ring-groups");
+
+    const card = await screen.findByRole("listitem", { name: "Sales" });
+    expect(within(card).getByText("Sequential")).toBeVisible();
+    expect(
+      within(card).getByText("Hunt · rings 60 s · respects DND"),
+    ).toBeVisible();
+    const members = within(card).getByRole("list", {
+      name: "Members of Sales, in ring order",
+    });
+    await waitFor(() =>
+      expect(
+        within(members)
+          .getAllByRole("listitem")
+          .map((li) => li.textContent),
+      ).toEqual(["1R100 Reception—", "2S200 Support15 s", "3?#9 —"]),
+    );
+    expect(card).toHaveTextContent("If nobody answers: Voicemail box 100");
   });
 });

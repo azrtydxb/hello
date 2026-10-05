@@ -4723,6 +4723,7 @@
           "callerId",
           "route",
           "trunks",
+          "emergency",
           "rejectCode",
           "reason"
         ],
@@ -4752,6 +4753,10 @@
               "type": "string"
             },
             "description": "Trunk names in try order"
+          },
+          "emergency": {
+            "type": "boolean",
+            "description": "True when the matched outbound route is an emergency route"
           },
           "rejectCode": {
             "type": "integer"
