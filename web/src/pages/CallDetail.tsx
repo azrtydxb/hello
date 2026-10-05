@@ -5,9 +5,11 @@ import { getCallRecord, type CallRecord } from "../api/calls";
 import {
   Alert,
   Badge,
+  LinkButton,
+  PageHeader,
+  type Property,
   PropertyList,
   Spinner,
-  type Property,
 } from "../design/azrty/components";
 import { formatDuration } from "../format";
 import {
@@ -15,8 +17,6 @@ import {
   day,
   directionOf,
   isFailed,
-  LinkButton,
-  PageHeader,
   RoutingTrace,
   statusTone,
 } from "./calls/common";
@@ -70,7 +70,7 @@ export function CallDetail() {
             )}
           </>
         }
-        subtitle={cdr && <Subtitle cdr={cdr} />}
+        description={cdr && <Subtitle cdr={cdr} />}
         actions={cdr && <Actions cdr={cdr} />}
       />
       {state.status === "loading" && <Spinner label="Loading call" />}

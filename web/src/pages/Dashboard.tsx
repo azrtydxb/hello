@@ -30,7 +30,10 @@ import {
   type BadgeTone,
   EmptyState,
   LineChart,
+  LinkButton,
+  LiveTag,
   Meter,
+  PageHeader,
   SegmentedControl,
   Spinner,
   StatCard,
@@ -42,9 +45,6 @@ import {
   callDuration,
   callState,
   clock,
-  LinkButton,
-  LiveMarker,
-  PageHeader,
   Party,
   useExtensionNames,
   useNow,
@@ -181,7 +181,7 @@ export function Dashboard() {
       <PageHeader
         eyebrow="Overview"
         title="Dashboard"
-        subtitle={
+        description={
           info ? (
             <>
               hello-control {/^\d/.test(info.version) ? "v" : ""}
@@ -277,7 +277,7 @@ export function Dashboard() {
               Active calls
               <Badge tone="neutral">{calls ? calls.length : "—"}</Badge>
             </h2>
-            <LiveMarker live={callsState.status === "ready"} />
+            <LiveTag every="5 s" live={callsState.status === "ready"} />
           </div>
           {callsState.status === "loading" && (
             <Spinner label="Loading active calls" />

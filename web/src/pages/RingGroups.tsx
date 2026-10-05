@@ -24,24 +24,22 @@ import {
   Avatar,
   Badge,
   Button,
+  ConfirmDialog,
   Drawer,
   EmptyState,
   Icon,
   IconButton,
   Input,
+  PageHeader,
   Select,
+  Spinner,
   Switch,
+  useRestoreFocus,
+  useToast,
 } from "../design/azrty/components";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { UNKNOWN } from "./callflow/format";
-import {
-  ConfirmDialog,
-  FormAlert,
-  Loading,
-  PageHeader,
-  useRestoreFocus,
-  useToast,
-} from "./callflow/ui";
+import { FormAlert } from "./callflow/ui";
 
 const FORM_ID = "group-form";
 
@@ -162,6 +160,7 @@ export function RingGroups() {
   return (
     <section aria-labelledby="page-title">
       <PageHeader
+        eyebrow="Call flow"
         title="Ring groups"
         description="Ring several extensions for one call, then fall through to a failure destination."
         actions={newGroup}
@@ -172,7 +171,7 @@ export function RingGroups() {
             {extError} Members show by id, and the member picker needs it.
           </Alert>
         )}
-        {list.status === "loading" && <Loading what="ring groups" />}
+        {list.status === "loading" && <Spinner label="Loading ring groups…" />}
         {list.status === "error" && (
           <Alert tone="bad" title="Could not load the groups.">
             {list.message}

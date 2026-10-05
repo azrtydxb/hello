@@ -1,100 +1,19 @@
 /**
  * Pieces shared by the calls pages (Dashboard, Active calls, Call history,
- * Call detail): the page header, the LIVE marker, a ticking clock, and how
- * call states, directions and statuses are labelled.
+ * Call detail): a ticking clock, and how call states, directions and
+ * statuses are labelled.
  */
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router";
+import { useEffect, useMemo, useState } from "react";
 import {
   listExtensions,
   type ActiveCall,
   type Cdr,
   type TraceStep,
 } from "../../api";
+import { sortedSteps } from "../../format";
 import { usePolling } from "../../usePolling";
 import { type BadgeTone, Icon } from "../../design/azrty/components";
 import "./calls.css";
-
-/** A page's eyebrow, title, subtitle and actions, as in the console design. */
-export function PageHeader({
-  eyebrow,
-  title,
-  subtitle,
-  actions,
-  back,
-}: {
-  eyebrow?: string;
-  title: ReactNode;
-  subtitle?: ReactNode;
-  actions?: ReactNode;
-  back?: ReactNode;
-}) {
-  return (
-    <header className="calls-head">
-      <div>
-        {back}
-        {eyebrow && (
-          <span className="az-eyebrow calls-head__eyebrow">{eyebrow}</span>
-        )}
-        <h1 id="page-title" className="calls-head__title">
-          {title}
-        </h1>
-        {subtitle && <p className="calls-head__sub">{subtitle}</p>}
-      </div>
-      {actions && <div className="calls-head__actions">{actions}</div>}
-    </header>
-  );
-}
-
-/** A router link drawn as a design-system button (navigation, not an action). */
-export function LinkButton({
-  to,
-  variant = "secondary",
-  size = "md",
-  icon,
-  iconRight,
-  className,
-  children,
-}: {
-  to: string;
-  variant?: "primary" | "secondary" | "ghost";
-  size?: "sm" | "md";
-  icon?: string;
-  iconRight?: string;
-  className?: string;
-  children: ReactNode;
-}) {
-  const is = size === "sm" ? 13 : 15;
-  return (
-    <Link
-      to={to}
-      className={[
-        "az-btn",
-        `az-btn--${variant}`,
-        size === "sm" ? "az-btn--sm" : "",
-        className ?? "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      {icon && <Icon name={icon} size={is} />}
-      {children}
-      {iconRight && <Icon name={iconRight} size={is} />}
-    </Link>
-  );
-}
-
-/** The LIVE · 5 S marker of a view refreshed every five seconds. */
-export function LiveMarker({ live }: { live: boolean }) {
-  return (
-    <span className="az-live">
-      <span
-        className={live ? "az-dot az-dot--pulse" : "az-dot calls-dot--off"}
-      />
-      {live ? "LIVE · 5 S" : "PAUSED"}
-    </span>
-  );
-}
 
 /** The current time, updated every `ms` (for running call durations). */
 export function useNow(ms = 1000): number {
@@ -267,7 +186,7 @@ export function RoutingTrace({
   if (trace.length === 0) {
     return <p className="calls-muted">No trace was recorded.</p>;
   }
-  const steps = [...trace].sort((a, b) => a.n - b.n);
+  const steps = sortedSteps(trace);
   return (
     <ol className="calls-trace" aria-labelledby={labelledBy}>
       {steps.map((s, i) => {

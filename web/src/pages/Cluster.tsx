@@ -29,9 +29,11 @@ import {
   Badge,
   Button,
   Icon,
+  LiveTag,
   Modal,
-  PropertyList,
+  PageHeader,
   type Property,
+  PropertyList,
 } from "../design/azrty/components";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import {
@@ -42,7 +44,7 @@ import {
   stateLabel,
   type Tone,
 } from "./platform/health";
-import { LiveTag, PageHeader } from "./platform/ui";
+import "./platform/platform.css";
 
 /** The live views around the cluster; each is absent when it cannot be read. */
 interface Around {
@@ -130,6 +132,7 @@ export function Cluster() {
   return (
     <section aria-labelledby="page-title">
       <PageHeader
+        eyebrow="Platform"
         title="Cluster"
         description={
           <>
@@ -138,9 +141,12 @@ export function Cluster() {
             {data ? (data.configRevision ?? "—") : "—"}.
           </>
         }
-      >
-        <LiveTag every="5 s" live={state.status === "ready"} />
-      </PageHeader>
+        actions={
+          <>
+            <LiveTag every="5 s" live={state.status === "ready"} />
+          </>
+        }
+      />
       <p className="pf-notice" role="status" aria-live="polite">
         {notice}
       </p>

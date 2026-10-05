@@ -13,3 +13,8 @@ export function formatDuration(ms: number): string {
   const s = String(total % 60).padStart(2, "0");
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
+
+/** Trace steps in step order (by `n`, not by array position). */
+export function sortedSteps<T extends { n: number }>(trace: readonly T[]): T[] {
+  return [...trace].sort((a, b) => a.n - b.n);
+}

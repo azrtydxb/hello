@@ -21,27 +21,24 @@ import {
 import {
   Alert,
   Badge,
+  type BadgeTone,
   Button,
+  ConfirmDialog,
   EmptyState,
   Icon,
   IconButton,
   Input,
   Modal,
   navItemClassName,
+  PageHeader,
   Spinner,
   Table,
-  type BadgeTone,
   type TableColumn,
+  useToast,
 } from "../design/azrty/components";
 import { formatDuration, formatTime } from "../format";
 import { mapFieldErrors } from "../forms";
-import {
-  ConfirmDelete,
-  MediaHeader,
-  NowPlaying,
-  usePlayback,
-  useToast,
-} from "./media/MediaParts";
+import { NowPlaying, usePlayback } from "./media/MediaParts";
 
 type Load<T> =
   | { status: "loading" }
@@ -64,7 +61,8 @@ export function Voicemail() {
     status: "loading",
   });
   const [selectedId, setSelectedId] = useState<string>("");
-  const [toast, showToast] = useToast();
+  const toast = useToast();
+  const showToast = toast.show;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -108,7 +106,8 @@ export function Voicemail() {
 
   return (
     <section aria-labelledby="page-title">
-      <MediaHeader
+      <PageHeader
+        eyebrow="Media"
         title="Voicemail"
         description="One box per extension. Messages are stored in object storage and can be emailed."
       />
@@ -163,7 +162,7 @@ export function Voicemail() {
           )}
         </div>
       )}
-      {toast}
+      {toast.node}
     </section>
   );
 }
@@ -407,7 +406,7 @@ function BoxPanel({
         />
       )}
       {deleting && (
-        <ConfirmDelete
+        <ConfirmDialog
           title="Delete message?"
           description={`The message from ${deleting.caller} and its audio are removed. This cannot be undone.`}
           confirmLabel="Delete message"

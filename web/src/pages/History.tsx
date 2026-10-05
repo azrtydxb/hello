@@ -14,20 +14,15 @@ import {
   Button,
   EmptyState,
   Icon,
+  PageHeader,
   Spinner,
-  Table,
-  Tabs,
   type TabItem,
+  Table,
   type TableColumn,
+  Tabs,
 } from "../design/azrty/components";
 import { formatDuration } from "../format";
-import {
-  clock,
-  day,
-  directionOf,
-  PageHeader,
-  statusTone,
-} from "./calls/common";
+import { clock, day, directionOf, statusTone } from "./calls/common";
 
 export const PAGE_SIZE = 50;
 
@@ -205,7 +200,7 @@ export function History() {
       <PageHeader
         eyebrow="Activity"
         title="Call history"
-        subtitle="Every call record carries its routing trace. Open one to see why it went where it did."
+        description="Every call record carries its routing trace. Open one to see why it went where it did."
         actions={
           <a
             className="az-btn az-btn--secondary"

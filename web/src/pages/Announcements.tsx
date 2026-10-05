@@ -17,25 +17,20 @@ import {
 import {
   Alert,
   Button,
+  ConfirmDialog,
   EmptyState,
   IconButton,
   Input,
   Modal,
+  PageHeader,
   Spinner,
   Table,
   type TableColumn,
+  useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
 import { mapFieldErrors } from "../forms";
-import {
-  checkWav,
-  ConfirmDelete,
-  MediaHeader,
-  NowPlaying,
-  usePlayback,
-  useToast,
-  WavDrop,
-} from "./media/MediaParts";
+import { checkWav, NowPlaying, usePlayback, WavDrop } from "./media/MediaParts";
 
 const NAME_HINT =
   "Letters, digits, . _ - · up to 64; destinations use this name.";
@@ -56,7 +51,8 @@ export function Announcements() {
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [replacing, setReplacing] = useState<Announcement | null>(null);
   const [deleting, setDeleting] = useState<Announcement | null>(null);
-  const [toast, showToast] = useToast();
+  const toast = useToast();
+  const showToast = toast.show;
   const playback = usePlayback((name) => `Could not play ${name}`);
 
   useEffect(() => {
@@ -163,7 +159,8 @@ export function Announcements() {
 
   return (
     <section aria-labelledby="page-title">
-      <MediaHeader
+      <PageHeader
+        eyebrow="Media"
         title="Announcements"
         description="Named prompts that ring groups and routes can play. WAV, up to 10 MB."
       />
@@ -223,7 +220,7 @@ export function Announcements() {
         />
       )}
       {deleting && (
-        <ConfirmDelete
+        <ConfirmDialog
           title="Delete announcement?"
           description={`${deleting.name} and its audio are removed; destinations that name it skip the step at call time.`}
           confirmLabel="Delete announcement"
@@ -231,7 +228,7 @@ export function Announcements() {
           onClose={() => setDeleting(null)}
         />
       )}
-      {toast}
+      {toast.node}
     </section>
   );
 }

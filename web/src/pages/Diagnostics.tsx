@@ -31,18 +31,21 @@ import {
 import {
   Alert,
   Badge,
+  type BadgeTone,
   Button,
   EmptyState,
   Icon,
   Input,
+  LinkButton,
+  PageHeader,
+  type Property,
   PropertyList,
   Select,
   Table,
   Tabs,
-  type BadgeTone,
-  type Property,
+  useToast,
 } from "../design/azrty/components";
-import { sortedSteps } from "../components/TraceList";
+import { sortedSteps } from "../format";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import {
   ago,
@@ -51,7 +54,7 @@ import {
   until,
   type HealthCheck,
 } from "./platform/health";
-import { PageHeader, useToast } from "./platform/ui";
+import "./platform/platform.css";
 
 type TabId = "trace" | "reg" | "probes" | "health";
 const TABS: readonly TabId[] = ["trace", "reg", "probes", "health"];
@@ -111,7 +114,8 @@ export function Diagnostics() {
   const tab: TabId = tabParam && TABS.includes(tabParam) ? tabParam : "trace";
   const live = usePolling(loadLive, LIVE_REFRESH_MS);
   const data: Live = live.status === "loading" ? {} : (live.data ?? {});
-  const [toast, showToast] = useToast();
+  const toast = useToast();
+  const showToast = toast.show;
 
   const checks = healthChecks({
     cluster: data.cluster,
@@ -133,20 +137,15 @@ export function Diagnostics() {
   return (
     <section aria-labelledby="page-title">
       <PageHeader
+        eyebrow="Platform"
         title="Diagnostics"
         description="Call traces, registration attempts, trunk probes and cluster checks. Secrets and digest responses are never shown."
-      >
-        <div className="pf-head__actions">
-          <Link
-            to="/routes/test"
-            className="az-btn az-btn--secondary"
-            style={{ textDecoration: "none" }}
-          >
-            <Icon name="flask-conical" size={15} />
+        actions={
+          <LinkButton to="/routes/test" icon="flask-conical">
             Route tester
-          </Link>
-        </div>
-      </PageHeader>
+          </LinkButton>
+        }
+      />
       <Tabs<TabId>
         className="pf-tabs"
         aria-label="Diagnostics"
@@ -189,7 +188,7 @@ export function Diagnostics() {
           />
         )}
       </div>
-      {toast}
+      {toast.node}
     </section>
   );
 }

@@ -1,8 +1,13 @@
 import { useId } from "react";
 import type { Schedule, ScheduleWindow, Transform } from "../api";
-import { Button, IconButton, Input, Switch } from "../design/azrty/components";
+import {
+  Button,
+  Checkbox,
+  IconButton,
+  Input,
+  Switch,
+} from "../design/azrty/components";
 import { fieldId, type ErrorMap } from "../forms";
-import { Checkbox } from "../pages/callflow/ui";
 
 /** The form's view of a Transform: every field as typed. */
 export interface TransformDraft {

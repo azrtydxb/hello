@@ -1,39 +1,8 @@
 /* Layout for the Media pages (Voicemail, Recordings, Announcements), from
    the Kuvryn Hello console design. Tokens only: no colours of our own. */
 
-.media-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: var(--az-space-5);
-  margin-bottom: var(--az-space-6);
-  flex-wrap: wrap;
-}
-
-.media-head__eyebrow {
-  color: var(--az-accent-text);
-}
-
-.media-head__title {
-  margin: 6px 0 0;
-  font-size: var(--az-text-2xl);
-  font-weight: 600;
-  letter-spacing: var(--az-tracking-heading);
-  line-height: 1.3;
-}
-
-.media-head__desc {
-  margin: var(--az-space-1) 0 0;
-  font-size: var(--az-text-md);
-  color: var(--az-muted);
-}
-
 .media-mono {
   font-family: var(--az-font-mono);
-}
-
-.media-muted {
-  color: var(--az-muted);
 }
 
 .media-stack {
@@ -251,24 +220,6 @@
 }
 
 /* The design's toast: bottom right, over the page. */
-.media-toast {
-  position: fixed;
-  right: var(--az-space-6);
-  bottom: var(--az-space-6);
-  z-index: 60;
-  padding: 14px 18px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--az-raised);
-  border-color: var(--az-border-strong);
-  box-shadow: var(--az-shadow-overlay);
-  font-size: 13px;
-}
-
-.media-toast .az-icon {
-  color: var(--az-good-strong);
-}
 
 .media-modal-form {
   display: flex;

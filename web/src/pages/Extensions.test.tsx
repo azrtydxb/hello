@@ -426,15 +426,15 @@ describe("Extensions", () => {
     const drawer = await openDrawer();
 
     fireEvent.click(within(drawer).getByRole("button", { name: "Delete" }));
+    const confirm = screen.getByRole("dialog", {
+      name: "Delete extension 100?",
+    });
     expect(
-      within(drawer).getByText("Delete 100 and its devices?"),
-    ).toBeVisible();
-    expect(
-      within(drawer).getByRole("button", { name: "Delete extension" }),
+      within(confirm).getByRole("button", { name: "Cancel" }),
     ).toHaveFocus();
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
     fireEvent.click(
-      within(drawer).getByRole("button", { name: "Delete extension" }),
+      within(confirm).getByRole("button", { name: "Delete extension" }),
     );
 
     expect(

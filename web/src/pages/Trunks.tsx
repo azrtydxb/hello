@@ -16,18 +16,23 @@ import {
 import {
   Alert,
   Badge,
+  type BadgeTone,
   Button,
+  ConfirmDialog,
   Drawer,
   EmptyState,
   Icon,
   IconButton,
   Input,
   Meter,
+  PageHeader,
+  type Property,
   PropertyList,
   Select,
+  Spinner,
   Switch,
-  type BadgeTone,
-  type Property,
+  useRestoreFocus,
+  useToast,
 } from "../design/azrty/components";
 import { mapFieldErrors, splitList, type ErrorMap } from "../forms";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
@@ -37,14 +42,7 @@ import {
   orUnknown,
   UNKNOWN,
 } from "./callflow/format";
-import {
-  ConfirmDialog,
-  FormAlert,
-  Loading,
-  PageHeader,
-  useRestoreFocus,
-  useToast,
-} from "./callflow/ui";
+import { FormAlert } from "./callflow/ui";
 
 const TRUNK_NAME_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const FORM_ID = "trunk-form";
@@ -272,6 +270,7 @@ export function Trunks() {
   return (
     <section aria-labelledby="page-title">
       <PageHeader
+        eyebrow="Call flow"
         title="Trunks"
         description="Carrier accounts and IP peers. Destinations are health-checked with OPTIONS; status refreshes every 5 s."
         actions={newTrunk}
@@ -283,7 +282,7 @@ export function Trunks() {
             it returns.
           </Alert>
         )}
-        {list.status === "loading" && <Loading what="trunks" />}
+        {list.status === "loading" && <Spinner label="Loading trunks…" />}
         {list.status === "error" && (
           <Alert tone="bad" title="Could not load trunks.">
             {list.message}

@@ -15,6 +15,7 @@ import {
   logout as apiLogout,
   setUnauthorizedHandler,
 } from "./api";
+import { Alert, Button, Spinner } from "./design/azrty/components";
 
 /** The session as the UI knows it. */
 export type AuthState =
@@ -108,23 +109,24 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 
   if (state.status === "loading") {
     return (
-      <p className="centered muted" role="status" aria-live="polite">
-        Loading…
-      </p>
+      <div className="app-centered">
+        <Spinner label="Loading…" />
+      </div>
     );
   }
   if (state.status === "error") {
     return (
-      <div className="centered">
-        <div role="alert" className="error">
-          <strong>Could not reach the control plane.</strong>
-          <p>{state.message}</p>
-        </div>
-        <p>
-          <button type="button" onClick={() => void refresh()}>
-            Retry
-          </button>
-        </p>
+      <div className="app-centered">
+        <Alert tone="bad" title="Could not reach the control plane.">
+          {state.message}
+        </Alert>
+        <Button
+          variant="secondary"
+          icon="rotate-cw"
+          onClick={() => void refresh()}
+        >
+          Retry
+        </Button>
       </div>
     );
   }

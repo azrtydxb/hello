@@ -1,0 +1,51 @@
+/*
+ * Hello's additions to the design system: console patterns the vendored
+ * bundle has no class for, measured from the Kuvryn Hello console design
+ * (Kuvryn Hello Console.dc.html). Tokens only, no raw colours. Imported by
+ * the components that use them.
+ */
+
+/* Page header: eyebrow, title, one-line description, actions. */
+.az-pagehead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 20px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.az-pagehead__eyebrow {
+  color: var(--az-accent-text);
+}
+.az-pagehead__title {
+  margin: 6px 0 0;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: var(--az-space-3);
+  flex-wrap: wrap;
+}
+.az-pagehead__desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--az-muted);
+}
+.az-pagehead__actions {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* The LIVE tag's dot while paused. */
+.az-dot--idle {
+  background: var(--az-faint);
+}
+
+/* A router link drawn as a button keeps the button's look. */
+a.az-btn {
+  text-decoration: none;
+}

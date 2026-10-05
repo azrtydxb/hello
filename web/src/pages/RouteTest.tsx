@@ -19,19 +19,22 @@ import {
 import {
   Alert,
   Badge,
+  type BadgeTone,
   Button,
   EmptyState,
   Icon,
   Input,
+  PageHeader,
+  type Property,
   PropertyList,
   SegmentedControl,
   Select,
-  type BadgeTone,
-  type Property,
+  Spinner,
 } from "../design/azrty/components";
+import { sortedSteps } from "../format";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { orUnknown, sipStatus, UNKNOWN } from "./callflow/format";
-import { FormAlert, Loading, PageHeader } from "./callflow/ui";
+import { FormAlert } from "./callflow/ui";
 
 type FromKind = "extension" | "trunk";
 
@@ -329,6 +332,7 @@ export function RouteTest() {
   return (
     <section aria-labelledby="page-title">
       <PageHeader
+        eyebrow="Call flow"
         title="Route tester"
         description="Shows how a call would be routed now, or at a chosen time, against the live configuration. No call is placed."
         back={
@@ -452,7 +456,7 @@ export function RouteTest() {
         <div className="cf-tester__result">
           {!view && busy && (
             <div className="az-card cf-card">
-              <Loading what="the decision" />
+              <Spinner label="Loading the decision…" />
             </div>
           )}
           {!view && !busy && (
@@ -537,7 +541,7 @@ function Trace({
   if (trace.length === 0) {
     return <p className="cf-form__note">No trace was recorded.</p>;
   }
-  const steps = [...trace].sort((a, b) => a.n - b.n);
+  const steps = sortedSteps(trace);
   return (
     <ol className="cf-trace" aria-labelledby="rt-trace">
       {steps.map((s, i) => {

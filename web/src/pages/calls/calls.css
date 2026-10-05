@@ -4,39 +4,6 @@
  * our own.
  */
 
-.calls-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: var(--az-space-5);
-  margin-bottom: var(--az-space-6);
-  flex-wrap: wrap;
-}
-.calls-head__eyebrow {
-  color: var(--az-accent-text);
-}
-.calls-head__title {
-  margin: 6px 0 0;
-  font-size: var(--az-text-2xl);
-  font-weight: 600;
-  letter-spacing: -0.03em;
-  line-height: 1.3;
-  display: flex;
-  align-items: center;
-  gap: var(--az-space-3);
-  flex-wrap: wrap;
-}
-.calls-head__sub {
-  margin: var(--az-space-1) 0 0;
-  font-size: var(--az-text-md);
-  color: var(--az-muted);
-}
-.calls-head__actions {
-  display: flex;
-  gap: 9px;
-  flex-wrap: wrap;
-  align-items: center;
-}
 .calls-back {
   margin-left: -11px;
 }

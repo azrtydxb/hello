@@ -20,26 +20,31 @@ import {
 import {
   Alert,
   Badge,
+  type BadgeTone,
   Button,
   EmptyState,
   Icon,
   IconButton,
   Input,
+  LiveTag,
   Modal,
+  PageHeader,
   Select,
-  type BadgeTone,
+  useToast,
 } from "../design/azrty/components";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import { ago } from "./platform/health";
-import { LiveTag, PageHeader, useToast } from "./platform/ui";
+import "./platform/platform.css";
 
 /** System: feature codes, live presence and API tokens. */
 export function System() {
-  const [toast, showToast] = useToast();
+  const toast = useToast();
+  const showToast = toast.show;
   return (
     <section aria-labelledby="page-title">
       <PageHeader
+        eyebrow="Platform"
         title="System"
         description="Feature codes, live presence and API tokens."
       />
@@ -50,7 +55,7 @@ export function System() {
           <Tokens showToast={showToast} />
         </div>
       </div>
-      {toast}
+      {toast.node}
     </section>
   );
 }

@@ -47,26 +47,24 @@ import {
   Alert,
   Badge,
   Button,
+  ConfirmDialog,
   Drawer,
   EmptyState,
   Icon,
   IconButton,
   Input,
+  PageHeader,
   Select,
+  Spinner,
   Switch,
   Tabs,
+  useRestoreFocus,
+  useToast,
 } from "../design/azrty/components";
 import { fieldId, mapFieldErrors, splitList, type ErrorMap } from "../forms";
 import { useOrderedList } from "../useOrderedList";
 import { formatSchedule, formatTransform } from "./callflow/format";
-import {
-  ConfirmDialog,
-  FormAlert,
-  Loading,
-  PageHeader,
-  useRestoreFocus,
-  useToast,
-} from "./callflow/ui";
+import { FormAlert } from "./callflow/ui";
 
 const DEFAULT_FAILOVER = "408, 480, 500, 502, 503, 504";
 const FORM_ID = "route-form";
@@ -209,6 +207,7 @@ export function RoutesPage() {
   return (
     <section aria-labelledby="page-title">
       <PageHeader
+        eyebrow="Call flow"
         title="Routes"
         description="Matched top to bottom; the first enabled match wins. Drag to reorder."
         actions={
@@ -503,7 +502,9 @@ function RouteList<
           {list.error}
         </Alert>
       )}
-      {list.state.status === "loading" && <Loading what={what} />}
+      {list.state.status === "loading" && (
+        <Spinner label={`Loading ${what}…`} />
+      )}
       {list.state.status === "error" && (
         <Alert tone="bad" title={`Could not load ${what}.`}>
           {list.state.message}
