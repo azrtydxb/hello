@@ -185,3 +185,10 @@
 - In-call HA for anchored calls only; NAT'd direct-media calls stay best-effort (documented limitation)
 - Always-on anchoring for every call so all calls get in-call HA (reverses the Phase 5 conditional decision)
 - Defer Phase 7; stop at Phase 6 scope
+
+## Phase 7 in-call HA scope (after the anchored-vs-direct explanation)
+
+- In-call HA for anchored calls only; NAT'd direct-media calls stay best-effort
+- Always-on anchoring: every call anchored so all calls get in-call HA
+- In-call HA for anchored calls + policy change: LAN-to-LAN calls also anchor (cheap on a LAN, makes every call survivable)
+- Defer Phase 7; stop at the current scope
