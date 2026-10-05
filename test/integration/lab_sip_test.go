@@ -55,6 +55,7 @@ func (lc *labClient) calls() []livestate.Call {
 }
 
 type labCDR struct {
+	ID              int64     `json:"id"`
 	SIPCallID       string    `json:"sipCallId"`
 	Source          string    `json:"source"`
 	Destination     string    `json:"destination"`
@@ -63,6 +64,22 @@ type labCDR struct {
 	FinalStatus     int       `json:"finalStatus"`
 	TerminationSide string    `json:"terminationSide"`
 	SIPNode         string    `json:"sipNode"`
+}
+
+// cdrTrace is one CDR's routing trace, step texts in order.
+func (lc *labClient) cdrTrace(id int64) []string {
+	lc.t.Helper()
+	var out struct {
+		Trace []struct {
+			Text string `json:"text"`
+		} `json:"trace"`
+	}
+	lc.must("GET", fmt.Sprintf("/api/v1/cdrs/%d", id), nil, &out, 200)
+	var texts []string
+	for _, s := range out.Trace {
+		texts = append(texts, s.Text)
+	}
+	return texts
 }
 
 func (lc *labClient) cdrsTo(dest string) []labCDR {

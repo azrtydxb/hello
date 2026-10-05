@@ -8,21 +8,23 @@ Every row of the failure table is proven by an automated test in
 
 ## What Hello guarantees
 
-| Level | Guarantee                                                                  | Status       |
-| ----- | -------------------------------------------------------------------------- | ------------ |
-| 1     | Losing hello-control or the UI does not interrupt telephony                | Guaranteed   |
-| 2     | When a SIP node fails, phones register through another node                | Guaranteed   |
-| 3     | When a SIP node fails, new internal, inbound and outbound calls still work | Guaranteed   |
+| Level | Guarantee                                                                  | Status     |
+| ----- | -------------------------------------------------------------------------- | ---------- |
+| 1     | Losing hello-control or the UI does not interrupt telephony                | Guaranteed |
+| 2     | When a SIP node fails, phones register through another node                | Guaranteed |
+| 3     | When a SIP node fails, new internal, inbound and outbound calls still work | Guaranteed |
 | 4     | An established call survives loss of the node controlling it               | Guaranteed |
 
 Level 4 (Phase 7, in-call HA): **a live call survives the death of its SIP
 node with ≤3 s audio gap, when the cluster retains Valkey and at least one
 Kamailio.** The call is taken over by a surviving node from its replicated
 dialog state, both endpoints are re-INVITEd to the taker's media relay, and
-the call can be held, transferred, recorded and hung up as before. The CDR
-and live view mark such a call `ha: taken-over`; a call no survivor could
-save (see the two limitations below) is counted in `hello_zombie_calls_total`
-and never silently dropped.
+the call can be held, recorded and hung up as before (a transfer requested
+after the takeover is refused; see below). The CDR trace and the live view
+(`GET /api/v1/calls` field `ha`, a "Taken over" badge on the Active Calls
+page) mark such a call `taken-over`; a call no survivor could save (see the
+two limitations below) is counted in `hello_zombie_calls_total` and never
+silently dropped.
 
 ## Architecture
 
@@ -137,11 +139,15 @@ carry no calls.
 Every call anchors through the owning node's media relay, and the node
 continuously writes each connected call's recovery state to Valkey — both
 legs' full dialog data (Call-IDs, tags, CSeq counters, route sets, contacts,
-remote targets, negotiated SDP), the relay ports, the endpoints' latched
-media addresses, the call's phase (talking, hold, transferring, recording,
-announcement) and the CDR correlation. Writes happen off the SIP transaction
-path: on every state change and on a 5 s heartbeat. A record expires 30 s
-after its last heartbeat.
+remote targets, both sides' negotiated SDP), the relay ports, the call's
+phase (talking, hold, transferring, recording, announcement, voicemail) with
+what a taker needs to resume it, the caller and destination numbers and the
+CDR correlation. The CSeq a taker continues from is past every request the
+owner sent on the dialog, including the NOTIFYs of a transfer. Writes happen
+off the SIP transaction path: on every state change and on a 5 s heartbeat.
+A record expires 30 s after its last heartbeat. Calls that come out of a
+transfer (the blind transfer's new call, the attended transfer's bridge)
+keep the original call's relay and replicate like any call.
 
 When membership marks a node OFFLINE (15 s), each surviving node scans for
 that node's unclaimed dialogs on a jittered 1–3 s poll and claims them
@@ -151,12 +157,26 @@ and tags, and the CSeq continues the old owner's counter — allocates fresh
 relay ports, and re-INVITEs both endpoints. Kamailio's failure route sends
 in-dialog requests that reach a dead node (408/503, or a 1.5 s timeout) to
 another hello-sip node, which answers from the replicated state. The claim
-is released once both legs are re-homed; the restarted owner cannot retake
+is released once both legs are re-homed and the record names the taker (so
+no survivor takes the call twice); the restarted owner cannot retake
 its old calls (its heartbeat finds the taker's record and yields). A slow
 owner that reappears mid-takeover yields the same way. Either re-INVITE
 failing (an endpoint that died too, or rejects with 488/603) closes the call
 one-sidedly — the surviving leg gets a normal BYE and CDR — and the zombie
 is counted.
+
+Calls Hello answered itself — a caller in voicemail, or an announcement
+destination — have one dialog, the caller's. The taker re-INVITEs the
+caller onto media of its own (a fresh voicemail anchor, or a relay) and
+restarts the application from its beginning: voicemail replays the greeting
+and beep and records afresh (what the caller had said on the dead node is
+lost), an announcement plays from the top and then hangs up as before.
+
+Each claim is counted against the dead node in Valkey. Past the dialog TTL,
+exactly one survivor counts the dead node's calls that nobody claimed (its
+live calls at death less the claims) in `hello_zombie_calls_total`: a call
+that was taken over is never counted, a takeover that failed is counted
+once by its taker.
 
 ### Scenario matrix
 
@@ -164,13 +184,31 @@ Each row is proven by a test (`TestKillSIPNodeDuringCall` in
 `test/integration/failure_test.go`, `TestTakeoverScenarioMatrix` and friends
 in `internal/sip`):
 
-| The node dies during          | What the users see                                            |
-| ----------------------------- | ------------------------------------------------------------- |
-| A connected call              | ≤3 s audio gap, call continues, hang up normally              |
-| A held call                   | The hold direction survives the takeover                      |
-| A recording call              | The recording continues on the taker (second MinIO object, same correlation) |
-| An announcement               | The announcement restarts from its beginning                  |
-| Ringing                       | Phase 3 behaviour: the caller gets a final response, nothing hangs |
+| The node dies during                   | What the users see                                                                                                                    |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| A connected call                       | ≤3 s audio gap, call continues, hang up normally                                                                                      |
+| A held call                            | The hold direction survives the takeover                                                                                              |
+| A blind transfer, target still ringing | The original call continues untransferred; the transferor gets a final NOTIFY (503); Kamailio's INVITE timer stops the target ringing |
+| A blind transfer, target answered      | The transferred call (caller and target) continues                                                                                    |
+| An attended transfer's consultation    | Both calls (the held original and the consultation) continue                                                                          |
+| An attended transfer, bridged          | The bridged call continues                                                                                                            |
+| A recording call                       | The recording continues on the taker (second MinIO object, same correlation)                                                          |
+| An announcement                        | The announcement restarts from its beginning                                                                                          |
+| An announcement destination            | The announcement restarts from its beginning, then the call ends as before                                                            |
+| A voicemail recording or prompt        | The caller stays connected; the greeting restarts and the message is recorded on the taker                                            |
+| Ringing                                | Phase 3 behaviour: the caller gets a final response, nothing hangs                                                                    |
+
+`TestTakeoverScenarioMatrix` runs every row in-process; the lab suite kills
+real nodes under a connected call (`TestKillSIPNodeDuringCall`,
+`TestTakeoverMediaGap`, `TestHonestyFlags`), a voicemail call
+(`TestKillSIPNodeDuringVoicemail`) and a ringing call. `TestDoubleFailure`
+kills a second node while a survivor is mid-takeover of a different call
+(in-process: the lab runs two SIP nodes).
+
+Not recovered after a takeover: a REFER (transfer) on a taken-over call is
+answered 481, and a SIP INFO DTMF digit is not matched (in-band RFC 2833
+DTMF, including `*1` recording, works). A transfer still in progress when
+the node dies is abandoned, as in the table.
 
 ### The two named limitations
 
@@ -184,11 +222,6 @@ in `internal/sip`):
   silent. A call whose replication was failing when its node died (see
   `hello_dialog_replicated_total{result="failed"}`) is unrecoverable the
   same way.
-
-One-legged calls — an announcement destination or a voicemail greeting
-answering a caller with nobody on the second leg — have no second endpoint
-to re-INVITE and are **not** taken over; when their node dies they are
-counted as zombies.
 
 ## Production guidance
 

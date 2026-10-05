@@ -9,12 +9,14 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/test/sipua"
 )
 
@@ -387,11 +389,12 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	// OFFLINE 15s after its last heartbeat, so the jittered 1-3s poll, the
 	// claim and the re-INVITEs land well inside 30s of the kill.
 	var rehomed time.Time
+	var ha string
 	deadline := killed.Add(30 * time.Second)
 	for rehomed.IsZero() && time.Now().Before(deadline) {
 		for _, c := range lc.calls() {
 			if c.To == ext && c.Node == taker {
-				rehomed = time.Now()
+				rehomed, ha = time.Now(), c.HA
 			}
 		}
 		time.Sleep(250 * time.Millisecond)
@@ -424,11 +427,18 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 		t.Fatalf("the call was not taken over by %s within 30s of the kill", taker)
 	}
 	t.Logf("takeover completed %s after the kill", rehomed.Sub(killed).Round(time.Millisecond))
+	// The live view marks the call taken over (spec S-6).
+	if ha != livestate.HATakenOver {
+		t.Fatalf("live view ha = %q on the taker, want %q", ha, livestate.HATakenOver)
+	}
 	// Both endpoints saw the takeover re-INVITE (the phone answered it).
 	if rehomed.Sub(killed) > 6*time.Second {
 		t.Logf("the re-home took %s; the endpoints' answers were the slow part", rehomed.Sub(killed))
 	}
 	for _, p := range []*sipua.Phone{a, b} {
+		if p == nil {
+			continue // a one-legged call (voicemail) has no second phone
+		}
 		select {
 		case <-p.Reinvites():
 		case <-time.After(5 * time.Second):
@@ -456,14 +466,27 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	// The CDR closed answered, and the taker counted the takeover without
 	// zombies (the honesty flags, spec S-6; the taken-over mark itself is
 	// asserted on the trace in internal/sip's takeover tests).
+	var closed labCDR
 	eventually(t, 30*time.Second, "the takeover call's CDR closed answered", func() error {
 		for _, c := range lc.cdrsTo(ext) {
-			if c.FinalStatus == 200 && c.BillableMs > 0 {
+			if c.FinalStatus == 200 && c.BillableMs > 0 && c.SIPNode == taker {
+				closed = c
 				return nil
 			}
 		}
 		return errors.New("no answered CDR yet")
 	})
+	// The CDR carries the takeover mark, with the media gap the taker
+	// measured from its claim to both endpoints re-homed: at most 3s (spec
+	// S-4, S-6).
+	gap, ok := takeoverGap(lc.cdrTrace(closed.ID))
+	if !ok {
+		t.Fatalf("CDR %d trace lacks the takeover mark: %v", closed.ID, lc.cdrTrace(closed.ID))
+	}
+	t.Logf("media gap from the claim: %s", gap)
+	if gap > 3*time.Second {
+		t.Fatalf("media gap %s > 3s", gap)
+	}
 	m := nodeMetrics(t, taker)
 	if m["hello_dialog_takeovers_total"] < 1 {
 		t.Fatalf("hello_dialog_takeovers_total = %v on %s", m["hello_dialog_takeovers_total"], taker)
@@ -471,6 +494,21 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	if z := m["hello_zombie_calls_total"]; z != 0 {
 		t.Fatalf("hello_zombie_calls_total = %v, want 0", z)
 	}
+}
+
+// takeoverGapRe reads the taker's trace step: "ha: taken over from <node>
+// in <d> (media gap <d>)".
+var takeoverGapRe = regexp.MustCompile(`^ha: taken over from \S+ in \S+ \(media gap ([^)]+)\)$`)
+
+// takeoverGap finds the takeover step in a CDR trace and its media gap.
+func takeoverGap(trace []string) (time.Duration, bool) {
+	for _, s := range trace {
+		if m := takeoverGapRe.FindStringSubmatch(s); m != nil {
+			d, err := time.ParseDuration(m[1])
+			return d, err == nil
+		}
+	}
+	return 0, false
 }
 
 // nodeMetrics scrapes a node's Prometheus endpoint into a name->value map.
@@ -629,6 +667,54 @@ func TestHonestyFlags(t *testing.T) {
 	killed := kill(t, node)
 	takeoverAssertions(t, lc, a, b, nil, out, callee.Extension, other, killed, "")
 	_ = b
+}
+
+// TestKillSIPNodeDuringVoicemail fails if a caller in voicemail is lost
+// with its node (spec S-5, edge case "mid-voicemail-prompt"): the survivor
+// must take the one-legged call over end to end — re-INVITE the caller
+// through Kamailio onto its own media anchor, list the call taken over,
+// restart the application, accept the caller's hangup through Kamailio's
+// in-dialog reroute, close the CDR answered with the takeover mark, and
+// count no zombie.
+func TestKillSIPNodeDuringVoicemail(t *testing.T) {
+	lc := newLabClient(t)
+	caller := lc.devices("desk")[0]
+	a := kamPhone(t, caller)
+	// An extension with no device: its fresh voicemail box answers.
+	box := "7" + randDigits(7)
+	lc.must("POST", "/api/v1/extensions", map[string]string{"number": box, "name": "vm-ha"}, nil, 201)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	var out *sipua.Outgoing
+	eventually(t, 15*time.Second, "voicemail answers", func() error {
+		o, err := a.Dial(ctx, box, sdpOffer)
+		if err != nil {
+			return err
+		}
+		if o.Status != 200 {
+			return fmt.Errorf("dial %s = %d, want 200 from voicemail", box, o.Status)
+		}
+		out = o
+		return nil
+	})
+	node := callNode(t, lc, box)
+	other := otherNode(node)
+	t.Cleanup(func() { restore(t, lc, node) })
+	var callID string
+	eventually(t, 10*time.Second, "the voicemail call is replicated", func() error {
+		for _, c := range lc.calls() {
+			if c.To == box {
+				callID = c.SIPCallID
+			}
+		}
+		rec := valkeyCLI(t, "GET", "hello:dialog:"+callID)
+		if strings.Contains(rec, `"ownerNode":"`+node+`"`) && strings.Contains(rec, `"state":"voicemail"`) {
+			return nil
+		}
+		return fmt.Errorf("dialog record = %q", strings.TrimSpace(rec))
+	})
+	killed := kill(t, node)
+	takeoverAssertions(t, lc, a, nil, nil, out, box, other, killed, callID)
 }
 
 func TestDrainKeepsCallsAndExits(t *testing.T) {
