@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import {
   createExtension,
@@ -108,6 +108,9 @@ export function Extensions() {
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Extension["id"] | null>(null);
   const [creating, setCreating] = useState(false);
+  // Extensions created from the header while the list was still loading: the
+  // list response may predate them, so they are merged in when it lands.
+  const createdEarly = useRef<Extension[]>([]);
   const toast = useToast();
   const liveState = usePolling(loadLiveDirectory, LIVE_REFRESH_MS);
   const live: LiveDirectory =
@@ -119,9 +122,16 @@ export function Extensions() {
       listExtensions(controller.signal),
       listDevices(controller.signal),
     ])
-      .then(([extensions, devices]) =>
-        setList({ status: "ready", extensions, devices }),
-      )
+      .then(([extensions, devices]) => {
+        const early = createdEarly.current.filter(
+          (c) => !extensions.some((e) => e.id === c.id),
+        );
+        setList({
+          status: "ready",
+          extensions: [...extensions, ...early],
+          devices,
+        });
+      })
       .catch((err: unknown) => {
         if (!controller.signal.aborted) {
           setList({ status: "error", message: errorMessage(err) });
@@ -315,6 +325,7 @@ export function Extensions() {
         <NewExtension
           onClose={() => setCreating(false)}
           onCreated={(ext) => {
+            if (list.status !== "ready") createdEarly.current.push(ext);
             setExtensions((items) => [...items, ext]);
             setCreating(false);
             toast.show(`Extension ${ext.number} created.`);

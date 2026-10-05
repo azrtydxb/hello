@@ -167,6 +167,35 @@ describe("Extensions", () => {
     });
   });
 
+  it("keeps an extension created before the list finished loading", async () => {
+    // The header's "New extension" is usable while the list is still
+    // loading; a list response that predates the create must not drop it.
+    let releaseList!: () => void;
+    const listed = new Promise<void>((resolve) => {
+      releaseList = resolve;
+    });
+    api([], {
+      "GET /api/v1/extensions": async () => {
+        await listed;
+        return json({ items: [] });
+      },
+      "POST /api/v1/extensions": () =>
+        json({ ...EXT, id: 2, number: "200", name: "Early" }, 201),
+    });
+    renderApp("/extensions");
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "New extension" }))[0]!,
+    );
+    fill(screen.getByRole("dialog", { name: "New extension" }), "200", "Early");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    releaseList();
+
+    expect(await screen.findByRole("row", { name: /200/ })).toHaveTextContent(
+      "Early",
+    );
+  });
+
   it("validates the external number and shows server errors in the modal", async () => {
     const calls = api([EXT], {
       "POST /api/v1/extensions": () =>
