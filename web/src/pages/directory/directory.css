@@ -1,0 +1,161 @@
+/* Directory pages (Extensions, Devices, Registrations): layout around the
+   Azrty components, tokens only. Taken from Kuvryn Hello Console.dc.html. */
+.dir-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 20px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.dir-head__eyebrow {
+  color: var(--az-accent-text);
+}
+.dir-head__title {
+  margin: 6px 0 0;
+  font-size: 30px;
+  font-weight: var(--az-weight-semibold);
+  letter-spacing: -0.03em;
+  line-height: 1.3;
+}
+.dir-head__desc {
+  margin: 4px 0 0;
+  font-size: var(--az-text-md);
+  color: var(--az-muted);
+}
+.dir-head__actions {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.dir-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.dir-toolbar__search {
+  width: 280px;
+  max-width: 100%;
+}
+.dir-count {
+  font-size: var(--az-text-md);
+  color: var(--az-muted);
+}
+.dir-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* The row's keyboard control: the primary cell as a button. */
+.dir-rowlink {
+  all: unset;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  border-radius: var(--az-radius-xs);
+}
+.dir-rowlink:focus-visible {
+  outline: 2px solid var(--az-focus-ring);
+  outline-offset: 2px;
+}
+.dir-number {
+  font-size: var(--az-text-base);
+}
+.dir-muted {
+  color: var(--az-muted);
+}
+.dir-cell-sm {
+  font-size: 13px;
+}
+.dir-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.dir-form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.dir-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-top: 1px solid var(--az-border);
+  padding-top: 18px;
+}
+.dir-section--tight {
+  gap: 4px;
+}
+.dir-device {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.dir-device__name {
+  font-family: var(--az-font-mono);
+}
+.dir-device__ua {
+  margin-left: auto;
+  color: var(--az-muted);
+  font-size: var(--az-text-md);
+}
+.dir-dot--good {
+  background: var(--az-good);
+}
+.dir-dot--faint {
+  background: var(--az-faint);
+}
+.dir-manage {
+  align-self: flex-start;
+  margin-left: -11px;
+}
+.dir-danger {
+  margin-right: auto;
+  color: var(--az-bad-strong);
+}
+.dir-foot-text {
+  margin-right: auto;
+  font-size: 13px;
+  color: var(--az-text-2);
+}
+.dir-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.dir-secret {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.dir-secret__box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--az-radius-sm);
+  background: var(--az-code-bg);
+  border: 1px solid var(--az-border-strong);
+}
+.dir-secret__value {
+  font-family: var(--az-font-mono);
+  font-size: var(--az-text-base);
+  color: var(--az-text);
+  flex: 1;
+  word-break: break-all;
+}
+@media (max-width: 640px) {
+  .dir-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+.dir-device-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}

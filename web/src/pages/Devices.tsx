@@ -1,19 +1,41 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router";
 import {
-  createDevice,
   deleteDevice,
   errorMessage,
   listDevices,
   listExtensions,
-  rotateDeviceSecret,
   SIP_USERNAME_PATTERN,
   updateDevice,
   type Device,
-  type DeviceWithSecret,
   type Extension,
 } from "../api";
-import { ConfirmButton } from "../components/ConfirmButton";
-import { SecretDialog } from "../components/SecretDialog";
+import {
+  bindingsOf,
+  createDevice,
+  loadLiveDirectory,
+  rotateDeviceSecret,
+  type IssuedDevice,
+  type LiveDirectory,
+} from "../api/directory";
+import {
+  Alert,
+  Badge,
+  Button,
+  EmptyState,
+  IconButton,
+  Input,
+  Modal,
+  Select,
+  Spinner,
+  Switch,
+  Table,
+  type TableColumn,
+} from "../design/azrty/components";
+import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
+import { PageHeader } from "./directory/PageHeader";
+import { Toast, useToast } from "./directory/Toast";
+import "./directory/directory.css";
 
 type ListState =
   | { status: "loading" }
@@ -21,28 +43,39 @@ type ListState =
   | { status: "ready"; devices: Device[]; extensions: Extension[] };
 
 /** A secret that has just been issued; held only while its dialog is open. */
-interface IssuedSecret {
+interface Issued {
   title: string;
+  description: string;
   sipUsername: string;
   secret: string;
 }
 
+/** A destructive action waiting for confirmation. */
+type Pending = { kind: "rotate" | "delete"; device: Device } | null;
+
 /** Drop the secret from a create/rotate response before keeping the device. */
-function withoutSecret({
-  secret: _secret,
-  ...device
-}: DeviceWithSecret): Device {
-  void _secret;
-  return device;
+function withoutSecret(issued: IssuedDevice): Device {
+  const { id, extensionId, sipUsername, enabled, createdAt, updatedAt } =
+    issued;
+  return { id, extensionId, sipUsername, enabled, createdAt, updatedAt };
 }
 
-/** Devices: list, create, enable/disable, rotate secret and delete. */
+const plural = (n: number, one: string, many: string) =>
+  `${n} ${n === 1 ? one : many}`;
+
+/** Devices: SIP credentials, their registration, and the one-time secret. */
 export function Devices() {
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [actionError, setActionError] = useState<string | null>(null);
-  // Component state only: it is gone when the dialog closes or the page
-  // unmounts, and is never written anywhere else.
-  const [issued, setIssued] = useState<IssuedSecret | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [pending, setPending] = useState<Pending>(null);
+  const [busy, setBusy] = useState(false);
+  // Component state only: gone when the dialog closes or the page unmounts.
+  const [issued, setIssued] = useState<Issued | null>(null);
+  const toast = useToast();
+  const liveState = usePolling(loadLiveDirectory, LIVE_REFRESH_MS);
+  const live: LiveDirectory =
+    liveState.status === "loading" ? {} : (liveState.data ?? {});
 
   useEffect(() => {
     const controller = new AbortController();
@@ -73,29 +106,203 @@ export function Devices() {
     );
   }
 
-  async function run(what: string, action: () => Promise<void>) {
+  const extensions = list.status === "ready" ? list.extensions : [];
+  const extensionOf = (d: Device) =>
+    extensions.find((e) => String(e.id) === String(d.extensionId));
+
+  async function onToggle(device: Device, enabled: boolean) {
     setActionError(null);
     try {
-      await action();
+      replaceDevice(await updateDevice(device.id, { enabled }));
+      toast.show(`${device.sipUsername} ${enabled ? "enabled" : "disabled"}.`);
     } catch (err) {
-      setActionError(`Could not ${what}: ${errorMessage(err)}`);
+      setActionError(
+        `Could not update ${device.sipUsername}: ${errorMessage(err)}`,
+      );
     }
   }
 
-  const extensions = list.status === "ready" ? list.extensions : [];
-  const numberOf = (id: Device["extensionId"]) =>
-    extensions.find((e) => e.id === id)?.number ?? "—";
+  async function onConfirm() {
+    if (!pending) return;
+    const { kind, device } = pending;
+    setActionError(null);
+    setBusy(true);
+    try {
+      if (kind === "rotate") {
+        const rotated = await rotateDeviceSecret(device.id);
+        replaceDevice(withoutSecret(rotated));
+        setIssued({
+          title: "Secret rotated",
+          description: `${rotated.sipUsername} stops registering until it has the new secret.`,
+          sipUsername: rotated.sipUsername,
+          secret: rotated.secret,
+        });
+      } else {
+        await deleteDevice(device.id);
+        updateDevices((devices) => devices.filter((d) => d.id !== device.id));
+        toast.show(`Device ${device.sipUsername} deleted.`);
+      }
+    } catch (err) {
+      setActionError(
+        `Could not ${kind === "rotate" ? "rotate the secret of" : "delete"} ${device.sipUsername}: ${errorMessage(err)}`,
+      );
+    } finally {
+      setPending(null);
+      setBusy(false);
+    }
+  }
+
+  const columns: TableColumn<Device>[] = [
+    { key: "sipUsername", label: "SIP username", mono: true },
+    {
+      key: "extension",
+      label: "Extension",
+      render: (d) => {
+        const ext = extensionOf(d);
+        return ext ? (
+          <>
+            <span className="az-table__mono">{ext.number}</span>
+            <small>{ext.name}</small>
+          </>
+        ) : (
+          "—"
+        );
+      },
+    },
+    {
+      key: "registration",
+      label: "Registration",
+      render: (d) => {
+        if (!live.bindings) return "—";
+        const n = bindingsOf(live.bindings, d.sipUsername).length;
+        return n > 0 ? (
+          <Badge tone="good" dot>
+            {plural(n, "contact", "contacts")}
+          </Badge>
+        ) : (
+          <Badge tone="outline" dot>
+            No contact
+          </Badge>
+        );
+      },
+    },
+    {
+      key: "userAgent",
+      label: "User agent",
+      render: (d) => (
+        <span className="dir-cell-sm">
+          {(live.bindings &&
+            bindingsOf(live.bindings, d.sipUsername)[0]?.userAgent) ||
+            "—"}
+        </span>
+      ),
+    },
+    {
+      key: "enabled",
+      label: "Enabled",
+      render: (d) => (
+        <Switch
+          aria-label={`Enabled: ${d.sipUsername}`}
+          checked={d.enabled}
+          onChange={(e) => void onToggle(d, e.target.checked)}
+        />
+      ),
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      align: "right",
+      render: (d) => (
+        <div className="dir-actions">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="key-round"
+            aria-label={`Rotate secret for ${d.sipUsername}`}
+            onClick={() => setPending({ kind: "rotate", device: d })}
+          >
+            Rotate secret
+          </Button>
+          <IconButton
+            icon="trash-2"
+            label={`Delete device ${d.sipUsername}`}
+            size={15}
+            onClick={() => setPending({ kind: "delete", device: d })}
+          />
+        </div>
+      ),
+    },
+  ];
 
   return (
     <section aria-labelledby="page-title">
-      <h1 id="page-title">Devices</h1>
-      {list.status === "ready" && (
-        <CreateDevice
-          extensions={list.extensions}
+      <PageHeader
+        eyebrow="Directory"
+        title="Devices"
+        description="SIP credentials. Every device belongs to one extension; secrets are shown once."
+        actions={
+          <Button
+            icon="plus"
+            disabled={list.status !== "ready"}
+            onClick={() => setCreating(true)}
+          >
+            New device
+          </Button>
+        }
+      />
+
+      <div className="dir-stack">
+        {actionError && <Alert tone="bad">{actionError}</Alert>}
+        {list.status === "loading" && <Spinner label="Loading devices…" />}
+        {list.status === "error" && (
+          <Alert tone="bad" title="Could not load devices.">
+            {list.message}
+          </Alert>
+        )}
+        {list.status === "ready" && list.devices.length === 0 && (
+          <EmptyState
+            icon="smartphone"
+            title="No devices yet"
+            description={
+              list.extensions.length === 0
+                ? "Every device belongs to an extension. Add an extension first."
+                : "A device is a SIP username and secret a phone registers with."
+            }
+            action={
+              list.extensions.length === 0 ? (
+                <Link to="/extensions" className="az-btn az-btn--secondary">
+                  Open extensions
+                </Link>
+              ) : (
+                <Button icon="plus" onClick={() => setCreating(true)}>
+                  New device
+                </Button>
+              )
+            }
+          />
+        )}
+        {list.status === "ready" && list.devices.length > 0 && (
+          <Table
+            caption="Devices"
+            columns={columns}
+            rows={list.devices}
+            rowKey={(d) => String(d.id)}
+          />
+        )}
+      </div>
+
+      {creating && (
+        <NewDevice
+          extensions={extensions}
+          onClose={() => setCreating(false)}
           onCreated={(created) => {
             updateDevices((devices) => [...devices, withoutSecret(created)]);
+            setCreating(false);
             setIssued({
               title: "Device created",
+              description: created.sipDomain
+                ? `Enter the username and secret in the phone, with ${created.sipDomain} as the domain.`
+                : "Enter the username and secret in the phone.",
               sipUsername: created.sipUsername,
               secret: created.secret,
             });
@@ -103,118 +310,62 @@ export function Devices() {
         />
       )}
 
-      <h2 id="devices-list">All devices</h2>
-      {actionError && (
-        <p role="alert" className="error">
-          {actionError}
-        </p>
-      )}
-      {list.status === "loading" && (
-        <p role="status" aria-live="polite">
-          Loading devices…
-        </p>
-      )}
-      {list.status === "error" && (
-        <div role="alert" className="error">
-          <strong>Could not load devices.</strong>
-          <p>{list.message}</p>
-        </div>
-      )}
-      {list.status === "ready" && list.devices.length === 0 && (
-        <p className="muted">No devices yet.</p>
-      )}
-      {list.status === "ready" && list.devices.length > 0 && (
-        <table aria-labelledby="devices-list">
-          <thead>
-            <tr>
-              <th scope="col">SIP username</th>
-              <th scope="col">Extension</th>
-              <th scope="col">Status</th>
-              <th scope="col">
-                <span className="visually-hidden">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.devices.map((device) => (
-              <tr key={device.id}>
-                <th scope="row">
-                  <code>{device.sipUsername}</code>
-                </th>
-                <td>{numberOf(device.extensionId)}</td>
-                <td>{device.enabled ? "Enabled" : "Disabled"}</td>
-                <td className="row-actions">
-                  <button
-                    type="button"
-                    aria-label={`${device.enabled ? "Disable" : "Enable"} ${device.sipUsername}`}
-                    onClick={() =>
-                      void run("update the device", async () => {
-                        replaceDevice(
-                          await updateDevice(device.id, {
-                            enabled: !device.enabled,
-                          }),
-                        );
-                      })
-                    }
-                  >
-                    {device.enabled ? "Disable" : "Enable"}
-                  </button>
-                  <ConfirmButton
-                    label="Rotate secret"
-                    accessibleLabel={`Rotate secret for ${device.sipUsername}`}
-                    prompt={`Replace the secret of ${device.sipUsername}? The phone stops registering until it gets the new one.`}
-                    confirmLabel="Rotate"
-                    onConfirm={() =>
-                      run("rotate the secret", async () => {
-                        const rotated = await rotateDeviceSecret(device.id);
-                        replaceDevice(withoutSecret(rotated));
-                        setIssued({
-                          title: "Secret rotated",
-                          sipUsername: rotated.sipUsername,
-                          secret: rotated.secret,
-                        });
-                      })
-                    }
-                  />
-                  <ConfirmButton
-                    label="Delete"
-                    accessibleLabel={`Delete ${device.sipUsername}`}
-                    prompt={`Delete ${device.sipUsername}?`}
-                    confirmLabel="Delete device"
-                    onConfirm={() =>
-                      run("delete the device", async () => {
-                        await deleteDevice(device.id);
-                        updateDevices((devices) =>
-                          devices.filter((d) => d.id !== device.id),
-                        );
-                      })
-                    }
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {pending && (
+        <Modal
+          title={
+            pending.kind === "rotate"
+              ? `Rotate the secret of ${pending.device.sipUsername}?`
+              : `Delete ${pending.device.sipUsername}?`
+          }
+          description={
+            pending.kind === "rotate"
+              ? "The phone stops registering until it has the new secret."
+              : "The phone can no longer register. This cannot be undone."
+          }
+          onClose={() => setPending(null)}
+          actions={
+            <>
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => setPending(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant={pending.kind === "rotate" ? "primary" : "danger"}
+                disabled={busy}
+                autoFocus
+                onClick={() => void onConfirm()}
+              >
+                {pending.kind === "rotate" ? "Rotate secret" : "Delete device"}
+              </Button>
+            </>
+          }
+        />
       )}
 
       {issued && (
-        <SecretDialog
-          title={issued.title}
-          subject={issued.sipUsername}
-          secret={issued.secret}
+        <SecretModal
+          issued={issued}
+          onCopied={toast.show}
           onClose={() => setIssued(null)}
         />
       )}
+
+      <Toast message={toast.message} />
     </section>
   );
 }
 
-function CreateDevice({
+function NewDevice({
   extensions,
+  onClose,
   onCreated,
 }: {
   extensions: Extension[];
-  onCreated: (device: DeviceWithSecret) => void;
+  onClose: () => void;
+  onCreated: (device: IssuedDevice) => void;
 }) {
   const [extensionId, setExtensionId] = useState("");
   const [sipUsername, setSipUsername] = useState("");
@@ -225,14 +376,6 @@ function CreateDevice({
   }>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  if (extensions.length === 0) {
-    return (
-      <p className="muted">
-        Create an extension first: every device belongs to one.
-      </p>
-    );
-  }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -248,95 +391,145 @@ function CreateDevice({
     if (!ext || found.sipUsername) return;
     setBusy(true);
     try {
-      const created = await createDevice({
-        extensionId: ext.id,
-        sipUsername,
-        enabled,
-      });
-      setSipUsername("");
-      onCreated(created);
+      onCreated(
+        await createDevice({ extensionId: ext.id, sipUsername, enabled }),
+      );
     } catch (err) {
       setServerError(errorMessage(err));
-    } finally {
       setBusy(false);
     }
   }
 
   return (
-    <form
-      className="inline-form"
-      aria-labelledby="new-device"
-      onSubmit={(e) => void onSubmit(e)}
-      noValidate
-    >
-      <h2 id="new-device">New device</h2>
-      <div className="fields">
-        <div className="field">
-          <label htmlFor="dev-extension">Extension</label>
-          <select
-            id="dev-extension"
-            value={extensionId}
-            onChange={(e) => setExtensionId(e.target.value)}
-            aria-invalid={errors.extension ? true : undefined}
-            aria-describedby={
-              errors.extension ? "dev-extension-error" : undefined
-            }
-          >
-            <option value="">Choose…</option>
-            {extensions.map((ext) => (
-              <option key={ext.id} value={String(ext.id)}>
-                {ext.number} — {ext.name}
-              </option>
-            ))}
-          </select>
-          {errors.extension && (
-            <p id="dev-extension-error" className="field-error">
-              {errors.extension}
-            </p>
+    <Modal
+      title="New device"
+      description="The secret is generated and shown once, after the device is created."
+      onClose={onClose}
+      actions={
+        <>
+          <Button variant="secondary" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          {extensions.length > 0 && (
+            <Button type="submit" form="new-device-form" disabled={busy}>
+              Create device
+            </Button>
           )}
-        </div>
-        <div className="field">
-          <label htmlFor="dev-username">SIP username</label>
-          <input
+        </>
+      }
+    >
+      {extensions.length === 0 ? (
+        <Alert tone="info" title="Add an extension first">
+          Every device belongs to one extension.{" "}
+          <Link to="/extensions">Open extensions</Link>
+        </Alert>
+      ) : (
+        <form
+          id="new-device-form"
+          className="dir-stack"
+          aria-label="New device"
+          onSubmit={(e) => void onSubmit(e)}
+          noValidate
+        >
+          {serverError && (
+            <Alert tone="bad" title="Could not create the device.">
+              {serverError}
+            </Alert>
+          )}
+          <Select
+            id="dev-extension"
+            label="Extension"
+            value={extensionId}
+            error={errors.extension}
+            autoFocus
+            onChange={(e) => setExtensionId(e.target.value)}
+            options={[
+              { value: "", label: "Choose…" },
+              ...extensions.map((x) => ({
+                value: String(x.id),
+                label: `${x.number} — ${x.name}`,
+              })),
+            ]}
+          />
+          <Input
             id="dev-username"
-            value={sipUsername}
+            label="SIP username"
+            mono
             autoComplete="off"
             spellCheck={false}
+            placeholder="front-desk-3"
+            hint="Letters, digits, dots, underscores or hyphens; up to 64."
+            error={errors.sipUsername}
+            value={sipUsername}
             onChange={(e) => setSipUsername(e.target.value)}
-            aria-invalid={errors.sipUsername ? true : undefined}
-            aria-describedby={
-              errors.sipUsername ? "dev-username-error" : "dev-username-hint"
-            }
           />
-          {errors.sipUsername ? (
-            <p id="dev-username-error" className="field-error">
-              {errors.sipUsername}
-            </p>
-          ) : (
-            <p id="dev-username-hint" className="hint">
-              Letters, digits, <code>.</code> <code>_</code> <code>-</code>; up
-              to 64.
-            </p>
-          )}
-        </div>
-        <div className="field checkbox">
-          <input
-            id="dev-enabled"
-            type="checkbox"
+          <Switch
+            label="Enabled"
+            hint="A disabled device gets 403 Forbidden to its REGISTER"
+            labelPosition="end"
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
           />
-          <label htmlFor="dev-enabled">Enabled</label>
+        </form>
+      )}
+    </Modal>
+  );
+}
+
+function SecretModal({
+  issued,
+  onCopied,
+  onClose,
+}: {
+  issued: Issued;
+  onCopied: (message: string) => void;
+  onClose: () => void;
+}) {
+  async function onCopy() {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("no clipboard");
+      await navigator.clipboard.writeText(issued.secret);
+      onCopied("Secret copied.");
+    } catch {
+      onCopied("Copying is not available here; select the secret and copy it.");
+    }
+  }
+
+  return (
+    <Modal
+      title={issued.title}
+      description={issued.description}
+      onClose={onClose}
+      actions={<Button onClick={onClose}>Done</Button>}
+    >
+      <Alert tone="warn" title="Shown once">
+        Copy it into the phone now. It is stored hashed and cannot be shown
+        again; rotate it if it is lost.
+      </Alert>
+      <div className="dir-secret">
+        <span className="az-field__label" id="dev-secret-label">
+          SIP secret for {issued.sipUsername}
+        </span>
+        <div className="dir-secret__box">
+          <span
+            className="dir-secret__value"
+            aria-labelledby="dev-secret-label"
+            role="textbox"
+            aria-readonly="true"
+          >
+            {issued.secret}
+          </span>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="copy"
+            autoFocus
+            onClick={() => void onCopy()}
+          >
+            Copy
+          </Button>
         </div>
       </div>
-      {serverError && (
-        <p role="alert" className="error">
-          Could not create the device: {serverError}
-        </p>
-      )}
-      <button type="submit" className="primary" disabled={busy}>
-        Create device
-      </button>
-    </form>
+    </Modal>
   );
 }
