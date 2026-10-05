@@ -1,4 +1,7 @@
-/** Primary navigation, per spec §21. `phase` is when the page gets content. */
+/**
+ * Primary navigation, from the Kuvryn Hello console design (groups, labels,
+ * order and icons). `phase` is when the page gets content (spec §21).
+ */
 export interface NavItem {
   label: string;
   path: string;
@@ -7,7 +10,7 @@ export interface NavItem {
   icon: string;
 }
 
-/** A labelled section of the sidebar. */
+/** A section of the sidebar; the first one has no heading. */
 export interface NavGroup {
   label: string;
   items: readonly NavItem[];
@@ -18,7 +21,7 @@ export const CURRENT_PHASE = 5;
 
 export const NAV_GROUPS: readonly NavGroup[] = [
   {
-    label: "Overview",
+    label: "",
     items: [
       { label: "Dashboard", path: "/", phase: 0, icon: "layout-dashboard" },
     ],
@@ -26,7 +29,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     label: "Directory",
     items: [
-      { label: "Extensions", path: "/extensions", phase: 1, icon: "users" },
+      {
+        label: "Extensions",
+        path: "/extensions",
+        phase: 1,
+        icon: "user-round",
+      },
       { label: "Devices", path: "/devices", phase: 1, icon: "smartphone" },
       {
         label: "Registrations",
@@ -34,26 +42,32 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         phase: 1,
         icon: "radio-tower",
       },
+    ],
+  },
+  {
+    label: "Call flow",
+    items: [
+      { label: "Trunks", path: "/trunks", phase: 2, icon: "cable" },
+      { label: "Routes", path: "/routes", phase: 2, icon: "route" },
       {
-        label: "Ring Groups",
+        label: "Route tester",
+        path: "/routes/test",
+        phase: 2,
+        icon: "flask-conical",
+      },
+      {
+        label: "Ring groups",
         path: "/ring-groups",
         phase: 4,
         icon: "users-round",
       },
-      { label: "Voicemail", path: "/voicemail", phase: 4, icon: "voicemail" },
-    ],
-  },
-  {
-    label: "Routing",
-    items: [
-      { label: "Trunks", path: "/trunks", phase: 2, icon: "cable" },
-      { label: "Routes", path: "/routes", phase: 2, icon: "route" },
     ],
   },
   {
     label: "Media",
     items: [
-      { label: "Recordings", path: "/recordings", phase: 5, icon: "disc-3" },
+      { label: "Voicemail", path: "/voicemail", phase: 4, icon: "voicemail" },
+      { label: "Recordings", path: "/recordings", phase: 5, icon: "mic" },
       {
         label: "Announcements",
         path: "/announcements",
@@ -63,10 +77,10 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
-    label: "Calls",
+    label: "Activity",
     items: [
-      { label: "Active Calls", path: "/calls", phase: 1, icon: "phone-call" },
-      { label: "Call History", path: "/history", phase: 1, icon: "history" },
+      { label: "Active calls", path: "/calls", phase: 1, icon: "phone-call" },
+      { label: "Call history", path: "/history", phase: 1, icon: "history" },
     ],
   },
   {
@@ -87,21 +101,22 @@ export const NAV_GROUPS: readonly NavGroup[] = [
 /** Every nav item, in sidebar order. */
 export const NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap((g) => g.items);
 
-/** The nav item and group for a location, for the breadcrumb. */
-export function navFor(
-  pathname: string,
-): { group: NavGroup; item: NavItem } | null {
-  let best: { group: NavGroup; item: NavItem } | null = null;
-  for (const group of NAV_GROUPS) {
-    for (const item of group.items) {
-      const match =
-        item.path === "/"
-          ? pathname === "/"
-          : pathname === item.path || pathname.startsWith(item.path + "/");
-      if (match && (!best || item.path.length > best.item.path.length)) {
-        best = { group, item };
-      }
-    }
-  }
-  return best;
+/** Nav items whose link is active only on their exact path. */
+export const EXACT_PATHS: ReadonlySet<string> = new Set(
+  NAV_ITEMS.filter((a) =>
+    NAV_ITEMS.some((b) => b !== a && b.path.startsWith(a.path + "/")),
+  )
+    .map((i) => i.path)
+    .concat("/"),
+);
+
+/** The breadcrumb title for a location (the design's page titles). */
+export function pageTitle(pathname: string): string | null {
+  const exact = NAV_ITEMS.find((i) => i.path === pathname);
+  if (exact) return exact.label;
+  if (/^\/history\/[^/]+$/.test(pathname)) return "Call detail";
+  const parent = NAV_ITEMS.filter(
+    (i) => i.path !== "/" && pathname.startsWith(i.path + "/"),
+  ).sort((a, b) => b.path.length - a.path.length)[0];
+  return parent ? parent.label : null;
 }

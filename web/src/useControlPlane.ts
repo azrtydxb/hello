@@ -4,7 +4,7 @@ import { fetchVersion } from "./api";
 /** Whether the control plane answers, and its version when it does. */
 export type ControlPlane =
   | { status: "checking" }
-  | { status: "reachable"; version: string }
+  | { status: "reachable"; version: string; configRevision: number }
   | { status: "unreachable" };
 
 /** How often the reachability check repeats. */
@@ -25,7 +25,11 @@ export function useControlPlane(): ControlPlane {
       const { signal } = controller;
       fetchVersion(signal)
         .then((info) =>
-          setState({ status: "reachable", version: info.version }),
+          setState({
+            status: "reachable",
+            version: info.version,
+            configRevision: info.configRevision,
+          }),
         )
         .catch(() => {
           if (!signal.aborted) setState({ status: "unreachable" });

@@ -59,7 +59,7 @@ export function Login() {
       setPassword("");
       setError(
         err instanceof ApiError && err.status === 401
-          ? "Incorrect username or password."
+          ? "The username or password is incorrect."
           : errorMessage(err),
       );
       setBusy(false);
@@ -75,7 +75,7 @@ export function Login() {
     <div className="signin" data-pillar="operate">
       <main id="main" className="signin__main">
         <div className="signin__head">
-          <HelloLogo layout="horizontal" size={44} />
+          <HelloLogo layout="horizontal" size={40} />
           <ThemeToggle />
         </div>
 
@@ -86,8 +86,7 @@ export function Login() {
               Welcome back
             </h1>
             <p className="signin__subtitle">
-              Sign in to manage extensions, devices, trunks, routes and calls on
-              this Hello cluster.
+              Sign in to manage extensions, trunks, routes and the cluster.
             </p>
           </div>
 
@@ -123,7 +122,7 @@ export function Login() {
               type="password"
               autoComplete="current-password"
               required
-              hint="Case-sensitive."
+              hint="Forgot it? An administrator can reset it."
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               aria-invalid={error ? true : undefined}
@@ -133,18 +132,11 @@ export function Login() {
             />
             <Button
               type="submit"
-              variant="primary"
               size="lg"
               block
               disabled={busy}
-              iconRight={busy ? undefined : "arrow-right"}
+              iconRight={busy ? "loader" : "arrow-right"}
             >
-              {busy && (
-                <span
-                  className="az-spinner signin__spinner"
-                  aria-hidden="true"
-                />
-              )}
               {busy ? "Signing in…" : "Sign in"}
             </Button>
           </form>
@@ -166,7 +158,7 @@ export function Login() {
       </main>
 
       <aside className="signin__panel" aria-label="Kuvryn Hello">
-        <HelloLogo layout="stacked" size={200} />
+        <HelloLogo layout="stacked" size={220} />
         <p className="signin__line">
           Every call explained, every node disposable.
         </p>

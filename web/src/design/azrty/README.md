@@ -87,6 +87,15 @@ control. Never read `prefers-color-scheme` in a page.
 
 ## Layout
 
-The shell (`App.tsx`, styles in `web/src/app.css`) is the 240px `Sidebar` +
-65px `Topbar`; pages render inside a container with the design's 36px padding
-and 1650px max width. A page renders its own `<h1>` and content only.
+The shell (`App.tsx`, styles in `web/src/app.css`) follows the Kuvryn Hello
+console design (`Kuvryn Hello Console.dc.html`): a sticky 240px `Sidebar`
+(product lockup, grouped nav from `web/src/nav.ts`, host and config revision,
+user block with log out) and a 65px `Topbar` (breadcrumb "Kuvryn Hello ›
+page", LIVE while the control plane answers, "Test a number", the theme
+control). Pages render inside a container with the design's 32px 36px 60px
+padding and 1650px max width. A page renders its own header and content only;
+take its layout from the same console design file.
+
+The product emblems load from `assets/kh-emblem-dark.png` and
+`assets/kh-emblem-light.png` (see `web/src/brand.tsx`). Until those files are
+added, `ProductLogo` shows the dashed placeholder; nothing else changes.

@@ -1,35 +1,43 @@
 import type { CSSProperties, ReactNode } from "react";
-import { Avatar } from "./Avatar";
 import { cx } from "./cx";
-import { IconButton } from "./IconButton";
 import { Icon } from "./Icon";
 
 /** Props for <Sidebar>. */
 export interface SidebarProps {
   /** Usually a horizontal ProductLogo. */
   brand: ReactNode;
-  /** The nav: SidebarNav with SidebarNavGroup / nav items inside. */
+  /** The nav: SidebarNav with SidebarNavGroup and nav items inside. */
   children: ReactNode;
-  /** Control-plane status line; `live` pulses the dot, otherwise it is muted. */
+  /** The status line; `live` pulses the dot, otherwise it is muted. */
   status?: { label: ReactNode; live: boolean };
   user?: { name: string; role: string };
   onSignOut?: () => void;
   signOutLabel?: string;
-  /** Extra footer content (e.g. a theme toggle), above the status line. */
-  footer?: ReactNode;
   className?: string;
   style?: CSSProperties;
 }
 
-/** The fixed 240px app sidebar: brand, nav, status, user. */
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+/**
+ * The console sidebar as the Kuvryn Hello console design draws it: brand,
+ * grouped nav, then the status line and the user block with log out.
+ */
 export function Sidebar({
   brand,
   children,
   status,
   user,
   onSignOut,
-  signOutLabel = "Sign out",
-  footer,
+  signOutLabel = "Log out",
   className,
   style,
 }: SidebarProps) {
@@ -38,7 +46,6 @@ export function Sidebar({
       <div className="az-sidebar__brand">{brand}</div>
       {children}
       <div className="az-sidebar__foot">
-        {footer}
         {status && (
           <div className="az-connected">
             <span
@@ -46,24 +53,30 @@ export function Sidebar({
               style={
                 status.live ? undefined : { background: "var(--az-faint)" }
               }
+              aria-hidden="true"
             />
             {status.label}
           </div>
         )}
         {user && (
           <div className="az-profile">
-            <Avatar name={user.name} size={32} />
+            <span className="az-avatar" aria-hidden="true">
+              {initials(user.name)}
+            </span>
             <span className="az-profile__meta">
               <b>{user.name}</b>
               <small>{user.role}</small>
             </span>
             {onSignOut && (
-              <IconButton
-                icon="log-out"
-                label={signOutLabel}
-                size={15}
+              <button
+                type="button"
+                className="az-iconbtn"
+                title={signOutLabel}
+                aria-label={signOutLabel}
                 onClick={onSignOut}
-              />
+              >
+                <Icon name="log-out" size={15} />
+              </button>
             )}
           </div>
         )}
@@ -81,27 +94,31 @@ export function SidebarNav({
   children: ReactNode;
 }) {
   return (
-    <nav className="az-nav" aria-label={label}>
+    <nav className="az-sidebar__nav" aria-label={label}>
       {children}
     </nav>
   );
 }
 
-/** A labelled group of nav items (az-eyebrow heading). */
+/** A group of nav items under an eyebrow heading (none when `label` is empty). */
 export function SidebarNavGroup({
   label,
   children,
-  className,
 }: {
   label: string;
   children: ReactNode;
-  className?: string;
 }) {
   return (
-    <div className={cx("az-nav", className)} role="group" aria-label={label}>
-      <span className="az-eyebrow" aria-hidden="true">
-        {label}
-      </span>
+    <div
+      className="az-sidebar__group"
+      role="group"
+      aria-label={label || undefined}
+    >
+      {label && (
+        <span className="az-eyebrow" aria-hidden="true">
+          {label}
+        </span>
+      )}
       {children}
     </div>
   );
@@ -124,7 +141,7 @@ export function NavItemContent({
 }) {
   return (
     <>
-      <Icon name={icon} size={17} />
+      <Icon name={icon} size={16} />
       <span>{label}</span>
       {badge != null && <span className="az-nav__badge">{badge}</span>}
     </>

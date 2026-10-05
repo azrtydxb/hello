@@ -67,8 +67,8 @@ describe("Login", () => {
       body: { username: "admin", password: "s3cret-pass" },
     });
     // The sidebar's user block names the signed-in user.
-    expect(screen.getByRole("img", { name: "admin" })).toBeInTheDocument();
-    expect(screen.getByText("Administrator")).toBeInTheDocument();
+    const profile = screen.getByText("Administrator").closest(".az-profile");
+    expect(profile).toHaveTextContent("admin");
   });
 
   it("shows the failure Alert and stays on the page on a 401", async () => {
@@ -85,7 +85,7 @@ describe("Login", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveClass("az-alert", "az-alert--bad");
     expect(alert).toHaveTextContent("Sign-in failed");
-    expect(alert).toHaveTextContent("Incorrect username or password.");
+    expect(alert).toHaveTextContent("The username or password is incorrect.");
     const password = screen.getByLabelText("Password");
     expect(password.getAttribute("aria-describedby")?.split(" ")).toContain(
       alert.id,
@@ -152,8 +152,14 @@ describe("Login", () => {
     await signInScreen();
     await screen.findByText("Control plane reachable");
     const page = document.body.textContent ?? "";
-    expect(page).not.toMatch(/admin/i);
+    // The design's mock printed "Lab sign-in: admin / hello-lab-admin".
+    expect(page).not.toMatch(/sign-in:/i);
+    expect(page).not.toMatch(/\badmin\s*\//i);
     expect(page).not.toMatch(/hello-lab/i);
+    expect(screen.queryByText("admin")).toBeNull();
+    expect(screen.getByLabelText("Username")).not.toHaveAttribute(
+      "placeholder",
+    );
     expect(screen.getByLabelText("Username")).toHaveValue("");
     expect(screen.getByLabelText("Password")).toHaveValue("");
   });

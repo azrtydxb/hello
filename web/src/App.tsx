@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import {
+  Link,
   Navigate,
   NavLink,
   Outlet,
@@ -11,6 +12,7 @@ import {
 import { AuthProvider, RequireAuth, useAuth } from "./auth";
 import { HelloLogo } from "./brand";
 import {
+  Icon,
   NavItemContent,
   navItemClassName,
   Sidebar,
@@ -20,7 +22,13 @@ import {
   ThemeToggle,
   Topbar,
 } from "./design/azrty/components";
-import { CURRENT_PHASE, NAV_GROUPS, NAV_ITEMS, navFor } from "./nav";
+import {
+  CURRENT_PHASE,
+  EXACT_PATHS,
+  NAV_GROUPS,
+  NAV_ITEMS,
+  pageTitle,
+} from "./nav";
 import { CallDetail } from "./pages/CallDetail";
 import { Cluster } from "./pages/Cluster";
 import { Calls } from "./pages/Calls";
@@ -57,6 +65,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/recordings": Recordings,
   "/announcements": Announcements,
   "/system": System,
+  "/routes/test": RouteTest,
 };
 
 function Shell() {
@@ -65,7 +74,9 @@ function Shell() {
   const location = useLocation();
   const controlPlane = useControlPlane();
   const reachable = controlPlane.status === "reachable";
-  const here = navFor(location.pathname);
+  const title = pageTitle(location.pathname);
+  // Call detail belongs to Call history in the nav.
+  const historyDetail = /^\/history\/[^/]+$/.test(location.pathname);
 
   function onLogout() {
     // Leave first, so the sign-in page carries no ?next= back into the app.
@@ -83,7 +94,7 @@ function Shell() {
         status={{
           live: reachable,
           label: reachable
-            ? "Connected to control plane"
+            ? `${window.location.host} · rev ${controlPlane.configRevision}`
             : controlPlane.status === "checking"
               ? "Checking control plane…"
               : "Control plane unreachable",
@@ -94,28 +105,20 @@ function Shell() {
             : undefined
         }
         onSignOut={onLogout}
-        signOutLabel="Log out"
-        footer={
-          <div className="app-shell__theme">
-            <ThemeToggle block />
-          </div>
-        }
       >
         <SidebarNav label="Primary">
           {NAV_GROUPS.map((group) => (
-            <SidebarNavGroup
-              key={group.label}
-              label={group.label}
-              className="app-nav-group"
-            >
+            <SidebarNavGroup key={group.label} label={group.label}>
               {group.items.map((item) => (
                 // NavLink sets aria-current="page" on the active link.
                 <NavLink
                   key={item.path}
                   to={item.path}
-                  end={item.path === "/"}
+                  end={EXACT_PATHS.has(item.path)}
                   className={({ isActive }) =>
-                    `${navItemClassName(isActive)} app-nav-item`
+                    navItemClassName(
+                      isActive || (historyDetail && item.path === "/history"),
+                    )
                   }
                 >
                   <NavItemContent icon={item.icon} label={item.label} />
@@ -127,12 +130,17 @@ function Shell() {
       </Sidebar>
       <div className="app-shell__main-col">
         <Topbar
-          crumbs={here ? [here.group.label, here.item.label] : ["Hello"]}
+          crumbs={title ? ["Kuvryn Hello", title] : ["Kuvryn Hello"]}
           live={reachable}
         >
-          {reachable && (
-            <span className="app-shell__version">{controlPlane.version}</span>
-          )}
+          <Link
+            to="/routes/test"
+            className="az-btn az-btn--secondary az-btn--sm"
+          >
+            <Icon name="flask-conical" size={14} />
+            Test a number
+          </Link>
+          <ThemeToggle />
         </Topbar>
         <main id="main" className="app-shell__main" tabIndex={-1}>
           <div className="app-page">
@@ -171,7 +179,6 @@ export function App() {
                 <Route key={item.path} path={item.path} element={element} />
               );
             })}
-            <Route path="/routes/test" element={<RouteTest />} />
             {/* Dial plans are the structured routes (spec §11). */}
             <Route
               path="/dial-plans"

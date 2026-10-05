@@ -21,40 +21,51 @@
 }
 
 /* --- console shell ------------------------------------------------------ */
+/* Measurements are the Kuvryn Hello console design's inline styles. */
 
 .app-shell {
   display: flex;
-  height: 100vh;
+  min-height: 100vh;
   background: var(--az-bg);
   color: var(--az-text);
 }
 
 .app-shell .az-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
   overflow-y: auto;
+  padding: 24px 14px 20px;
 }
 
-.app-shell .az-sidebar__brand + .az-nav {
-  margin-top: 32px;
+.app-shell .az-sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.app-nav-group + .app-nav-group {
-  margin-top: 18px;
+.az-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 28px;
 }
 
-.app-nav-group > .az-eyebrow {
-  padding: 0 14px 6px;
+.az-sidebar__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.app-nav-item {
+.az-sidebar__group > .az-eyebrow {
+  padding: 0 12px 6px;
+  font-size: var(--az-text-xs);
+}
+
+.az-sidebar__group > .az-nav__item {
+  padding: 8px 12px;
+  gap: 11px;
   text-decoration: none;
-}
-
-.app-nav-item:hover {
-  text-decoration: none;
-}
-
-.app-shell__theme {
-  margin: 18px 10px 0;
 }
 
 .app-shell__main-col {
@@ -64,15 +75,12 @@
   flex-direction: column;
 }
 
-.app-shell__version {
-  font-family: var(--az-font-mono);
-  font-size: var(--az-text-sm);
-  color: var(--az-muted);
+.app-shell .az-topbar a.az-btn {
+  text-decoration: none;
 }
 
 .app-shell__main {
   flex: 1;
-  overflow: auto;
 }
 
 .app-shell__main:focus-visible {
@@ -80,8 +88,10 @@
 }
 
 .app-page {
+  width: 100%;
   max-width: var(--az-content-max);
-  padding: var(--az-content-pad);
+  margin: 0 auto;
+  padding: 32px var(--az-content-pad) 60px;
 }
 
 .skip-link {
@@ -102,23 +112,25 @@
 @media (max-width: 760px) {
   .app-shell {
     flex-direction: column;
-    height: auto;
-    min-height: 100vh;
   }
 
   .app-shell .az-sidebar {
+    position: static;
     width: 100%;
     height: auto;
     border-right: 0;
     border-bottom: 1px solid var(--az-border);
   }
 
-  .app-shell__main {
-    overflow: visible;
+  .app-shell .az-topbar {
+    height: auto;
+    min-height: var(--az-topbar-h);
+    flex-wrap: wrap;
+    padding: 12px 16px;
   }
 
   .app-page {
-    padding: 20px 16px;
+    padding: 20px 16px 40px;
   }
 }
 
@@ -137,7 +149,6 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 32px;
   padding: clamp(32px, 5vw, 64px) clamp(24px, 8vw, 120px);
 }
 
@@ -155,6 +166,7 @@
   display: flex;
   flex-direction: column;
   gap: 24px;
+  padding: 48px 0;
 }
 
 .signin__intro {
@@ -195,12 +207,15 @@
   gap: 18px;
 }
 
-/* The in-button spinner takes the button's text colour, not the indicator. */
-.signin__spinner {
-  width: 16px;
-  height: 16px;
-  border-color: color-mix(in oklch, currentColor 30%, transparent);
-  border-top-color: currentColor;
+/* The button's "loader" icon turns while signing in (slowly under reduced motion). */
+.signin__form .icon-loader {
+  animation: az-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .signin__form .icon-loader {
+    animation-duration: 2.4s !important;
+  }
 }
 
 .signin__foot {
@@ -237,7 +252,7 @@
 .signin__status {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .signin__status--down .az-dot {
@@ -258,7 +273,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 56px;
+  gap: 48px;
   padding: 64px;
   background: color-mix(in oklch, var(--az-pillar) 7%, var(--az-bg));
   border-left: 1px solid var(--az-border);
@@ -267,12 +282,10 @@
 
 .signin__line {
   margin: 0;
-  max-width: 560px;
-  font-family: var(--az-font-display);
-  font-size: clamp(28px, 2.8vw, 44px);
-  font-weight: 600;
-  letter-spacing: var(--az-tracking-display);
-  line-height: 1.1;
+  max-width: 460px;
+  font-size: var(--az-text-lg);
+  line-height: 1.5;
+  color: var(--az-text-2);
   text-wrap: balance;
 }
 
