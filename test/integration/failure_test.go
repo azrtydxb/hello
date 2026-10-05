@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -342,12 +344,229 @@ func TestKillSIPNodeDuringCall(t *testing.T) {
 	if err != nil || out.Status != 200 {
 		t.Fatalf("dial = %+v, %v", out, err)
 	}
-	<-got
+	in := <-got
 	node := callNode(t, lc, callee.Extension)
+	other := otherNode(node)
 	t.Cleanup(func() { restore(t, lc, node) })
 	killed := kill(t, node)
 	rec.by(killed.Add(20 * time.Second))
 	goneBy(t, lc, node, killed.Add(40*time.Second))
+	takeoverAssertions(t, lc, a, b, in, out, callee.Extension, other, killed)
+}
+
+// takeoverAssertions is the Phase 7 (in-call HA) assertion set for a node
+// killed under a live call (spec S-8): the survivor takes the call over
+// (metric, live view re-homes within 3s of its claim), both endpoints see
+// the takeover re-INVITE, the call is still hangup-able afterwards (the
+// caller's BYE exercises Kamailio's in-dialog reroute to the taker), and
+// no zombie was counted.
+func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipua.Incoming, out *sipua.Outgoing, ext, taker string, killed time.Time) {
+	t.Helper()
+	// The live call re-homes to the taker. Membership marks the dead node
+	// OFFLINE 15s after its last heartbeat, so 3s of claim plus the
+	// re-INVITEs land well inside 25s of the kill.
+	var rehomed time.Time
+	eventuallyBy(t, killed.Add(25*time.Second), "call taken over by "+taker, func(context.Context) error {
+		for _, c := range lc.calls() {
+			if c.To == ext && c.Node == taker {
+				rehomed = time.Now()
+				return nil
+			}
+		}
+		return errors.New("not re-homed")
+	})
+	t.Logf("takeover completed %s after the kill", rehomed.Sub(killed).Round(time.Millisecond))
+	// Both endpoints saw the takeover re-INVITE (the phone answered it).
+	for _, p := range []*sipua.Phone{a, b} {
+		select {
+		case <-p.Reinvites():
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the taker never re-INVITEd a phone (audio would stay on the dead relay)")
+		}
+	}
+	// The call still ends normally: the caller hangs up through Kamailio,
+	// whose in-dialog failure route retries the dead node's BYE on the
+	// taker (the reroute is what answers from replicated state).
+	hctx, hcancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer hcancel()
+	if err := out.Hangup(hctx); err != nil {
+		t.Fatalf("hangup after takeover: %v", err)
+	}
+	if in != nil {
+		eventually(t, 20*time.Second, "the callee's dialog ended", func() error {
+			select {
+			case <-in.Ended():
+				return nil
+			default:
+				return errors.New("still up")
+			}
+		})
+	}
+	// The CDR closed answered, and the taker counted the takeover without
+	// zombies (the honesty flags, spec S-6; the taken-over mark itself is
+	// asserted on the trace in internal/sip's takeover tests).
+	eventually(t, 30*time.Second, "the takeover call's CDR closed answered", func() error {
+		for _, c := range lc.cdrsTo(ext) {
+			if c.FinalStatus == 200 && c.BillableMs > 0 {
+				return nil
+			}
+		}
+		return errors.New("no answered CDR yet")
+	})
+	m := nodeMetrics(t, taker)
+	if m["hello_dialog_takeovers_total"] < 1 {
+		t.Fatalf("hello_dialog_takeovers_total = %v on %s", m["hello_dialog_takeovers_total"], taker)
+	}
+	if z := m["hello_zombie_calls_total"]; z != 0 {
+		t.Fatalf("hello_zombie_calls_total = %v, want 0", z)
+	}
+}
+
+// nodeMetrics scrapes a node's Prometheus endpoint into a name->value map.
+func nodeMetrics(t *testing.T, node string) map[string]float64 {
+	t.Helper()
+	url := map[string]string{"hello-sip-1": "http://localhost:8082/metrics", "hello-sip-2": "http://localhost:8083/metrics"}[node]
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	res, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("metrics of %s: %v", node, err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]float64{}
+	for _, line := range strings.Split(string(body), "\n") {
+		name, val, ok := strings.Cut(line, " ")
+		if !ok || !strings.HasPrefix(name, "hello_dialog_") && !strings.HasPrefix(name, "hello_zombie_") {
+			continue
+		}
+		if v, err := strconv.ParseFloat(strings.TrimSpace(val), 64); err == nil {
+			out[name] = v
+		}
+	}
+	return out
+}
+
+// TestKamailioInDialogReroute fails if an in-dialog request that reaches a
+// dead Hello node is not retried against the taker and answered from
+// replicated state (spec S-3): the callee hangs up after the takeover, and
+// its BYE - routed by Kamailio straight at the dead node - must still get
+// its 200 and end the caller's dialog.
+func TestKamailioInDialogReroute(t *testing.T) {
+	lc := newLabClient(t)
+	caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
+	a, b := kamPhone(t, caller), kamPhone(t, callee)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	got := answerNext(ctx, b)
+	out, err := a.Dial(ctx, callee.Extension, sdpOffer)
+	if err != nil || out.Status != 200 {
+		t.Fatalf("dial = %+v, %v", out, err)
+	}
+	in := <-got
+	node := callNode(t, lc, callee.Extension)
+	other := otherNode(node)
+	t.Cleanup(func() { restore(t, lc, node) })
+	killed := kill(t, node)
+	// Wait for the takeover, then hang up from the callee side: its BYE is
+	// the in-dialog request that must be rerouted.
+	eventuallyBy(t, killed.Add(25*time.Second), "call taken over by "+other, func(context.Context) error {
+		for _, c := range lc.calls() {
+			if c.To == callee.Extension && c.Node == other {
+				return nil
+			}
+		}
+		return errors.New("not re-homed")
+	})
+	if err := in.Hangup(ctx); err != nil {
+		t.Fatalf("the callee's BYE was not rerouted to the taker: %v", err)
+	}
+	eventually(t, 20*time.Second, "the caller's dialog ended", func() error {
+		select {
+		case <-out.Ended():
+			return nil
+		default:
+			return errors.New("still up")
+		}
+	})
+	if m := nodeMetrics(t, other); m["hello_dialog_takeovers_total"] < 1 {
+		t.Fatalf("hello_dialog_takeovers_total = %v on %s", m["hello_dialog_takeovers_total"], other)
+	}
+}
+
+// TestTakeoverMediaGap fails if the audio gap is not bounded: once
+// membership marks the owner OFFLINE, the call must be re-homed (both
+// re-INVITEs answered, media on the taker's relay) within 6s - the jittered
+// 1-3s poll, the atomic claim, and the 3s re-INVITE target (spec S-4).
+func TestTakeoverMediaGap(t *testing.T) {
+	lc := newLabClient(t)
+	caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
+	a, b := kamPhone(t, caller), kamPhone(t, callee)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	got := answerNext(ctx, b)
+	out, err := a.Dial(ctx, callee.Extension, sdpOffer)
+	if err != nil || out.Status != 200 {
+		t.Fatalf("dial = %+v, %v", out, err)
+	}
+	<-got
+	node := callNode(t, lc, callee.Extension)
+	other := otherNode(node)
+	t.Cleanup(func() { restore(t, lc, node) })
+	kill(t, node)
+	var offline time.Time
+	eventuallyBy(t, time.Now().Add(25*time.Second), node+" OFFLINE", func(context.Context) error {
+		if lc.memberState(node) != "OFFLINE" {
+			return errors.New("still listed")
+		}
+		offline = time.Now()
+		return nil
+	})
+	eventuallyBy(t, offline.Add(6*time.Second), "call re-homed within 6s of OFFLINE", func(context.Context) error {
+		for _, c := range lc.calls() {
+			if c.To == callee.Extension && c.Node == other {
+				return nil
+			}
+		}
+		return errors.New("not re-homed")
+	})
+	t.Logf("re-home completed %s after OFFLINE", time.Since(offline).Round(time.Millisecond))
+	// Audio follows: the endpoints answer the re-INVITEs.
+	for _, p := range []*sipua.Phone{a, b} {
+		select {
+		case <-p.Reinvites():
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the taker never re-INVITEd a phone")
+		}
+	}
+	if err := out.Hangup(ctx); err != nil {
+		t.Fatalf("hangup after takeover: %v", err)
+	}
+}
+
+// TestHonestyFlags fails if a taken-over call is not accounted honestly
+// (spec S-6): the taker counts the takeover, counts no zombie, and the CDR
+// closes answered with the billable time kept.
+func TestHonestyFlags(t *testing.T) {
+	lc := newLabClient(t)
+	caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
+	a, b := kamPhone(t, caller), kamPhone(t, callee)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	got := answerNext(ctx, b)
+	out, err := a.Dial(ctx, callee.Extension, sdpOffer)
+	if err != nil || out.Status != 200 {
+		t.Fatalf("dial = %+v, %v", out, err)
+	}
+	<-got
+	node := callNode(t, lc, callee.Extension)
+	other := otherNode(node)
+	t.Cleanup(func() { restore(t, lc, node) })
+	killed := kill(t, node)
+	takeoverAssertions(t, lc, a, b, nil, out, callee.Extension, other, killed)
+	_ = b
 }
 
 func TestDrainKeepsCallsAndExits(t *testing.T) {
