@@ -7,8 +7,8 @@ package sip
 
 import (
 	"context"
+	crand "crypto/rand"
 	"fmt"
-	"math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -127,25 +127,6 @@ func (l *haLeg) request(s *Server, method sip.RequestMethod, body []byte, conten
 	return req, nil
 }
 
-// destination is where the leg's requests go: the route set's first hop, or
-// the remote target when the dialog has no route set.
-func (l *haLeg) destination() string {
-	l.mu.Lock()
-	routes, target := l.routes, l.remoteTarget
-	l.mu.Unlock()
-	if len(routes) > 0 {
-		var first sip.Uri
-		if err := sip.ParseUri(strings.Trim(routes[0], "<> "), &first); err == nil {
-			return hostPort(first)
-		}
-	}
-	var u sip.Uri
-	if err := sip.ParseUri(strings.TrimSuffix(strings.TrimPrefix(target, "<"), ">"), &u); err == nil {
-		return hostPort(u)
-	}
-	return ""
-}
-
 // parseOr parses a URI string, falling back to fallback.
 func parseOr(raw string, fallback sip.Uri) sip.Uri {
 	var u sip.Uri
@@ -245,7 +226,12 @@ func (s *Server) takeoverLoop(ctx context.Context) {
 		s.takeoverPass(ctx)
 		wait := s.cfg.HATakeoverPoll
 		if s.cfg.HATakeoverJitter > 0 {
-			wait += time.Duration(rand.Int64N(int64(s.cfg.HATakeoverJitter) + 1))
+			// crypto/rand: the jitter only needs randomness, and gosec
+			// rightly flags math/rand's global source.
+			var b [1]byte
+			_, _ = crand.Read(b[:])
+			ms := s.cfg.HATakeoverJitter/time.Millisecond + 1
+			wait += time.Duration(int(b[0])%int(ms)) * time.Millisecond
 		}
 		select {
 		case <-ctx.Done():
