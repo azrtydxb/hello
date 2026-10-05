@@ -99,14 +99,14 @@ describe("live pages", () => {
     });
     const { unmount } = render(<Calls />);
     await flush();
-    expect(screen.getByText("ringing")).toBeVisible();
+    expect(screen.getByText("Ringing")).toBeVisible();
 
     await flush(5000);
-    expect(screen.getByText("No calls in progress.")).toBeVisible();
+    expect(screen.getByText("No calls in progress")).toBeVisible();
 
     unmount();
     await flush(15000);
-    expect(calls).toHaveLength(2);
+    expect(calls.filter((c) => c.url === "/api/v1/calls")).toHaveLength(2);
   });
 
   it("Active Calls badges a taken-over call and marks the others owned", async () => {
@@ -129,7 +129,7 @@ describe("live pages", () => {
     await flush();
     expect(screen.getByRole("columnheader", { name: "HA" })).toBeVisible();
     const taken = screen.getByRole("row", { name: /103/ });
-    expect(within(taken).getByText("Taken over")).toHaveClass("badge");
+    expect(within(taken).getByText("Taken over")).toHaveClass("az-badge");
     const owned = screen.getByRole("row", { name: /101/ });
     expect(within(owned).getByText("Owned")).toBeVisible();
     expect(within(owned).queryByText("Taken over")).toBeNull();

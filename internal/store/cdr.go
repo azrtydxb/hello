@@ -53,11 +53,24 @@ func scanCDR(r interface{ Scan(...any) error }, extra ...any) (CDR, error) {
 	return c, nil
 }
 
-// ListCDRs returns up to limit CDRs with id below before (0 means from the
-// newest), newest first, and the cursor for the next page ("" at the end).
-func (s *Store) ListCDRs(ctx context.Context, before int64, limit int) ([]CDR, string, error) {
+// CDRFilter narrows a CDR listing; the zero value matches every call.
+type CDRFilter struct {
+	// Direction keeps one direction ("internal", "inbound", "outbound");
+	// empty keeps all.
+	Direction string
+	// Failed keeps only calls whose final status is outside 2xx, the same
+	// rule the CDR detail's explanation uses.
+	Failed bool
+}
+
+// ListCDRs returns up to limit CDRs matching f with id below before (0
+// means from the newest), newest first, and the cursor for the next page
+// ("" at the end).
+func (s *Store) ListCDRs(ctx context.Context, f CDRFilter, before int64, limit int) ([]CDR, string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+cdrCols+`
-		FROM cdrs WHERE $1 = 0 OR id < $1 ORDER BY id DESC LIMIT $2`, before, limit+1)
+		FROM cdrs WHERE ($1 = 0 OR id < $1) AND ($3::text = '' OR direction = $3::text)
+			AND (NOT $4::boolean OR final_status NOT BETWEEN 200 AND 299)
+		ORDER BY id DESC LIMIT $2`, before, limit+1, f.Direction, f.Failed)
 	if err != nil {
 		return nil, "", err
 	}
@@ -79,6 +92,59 @@ func (s *Store) ListCDRs(ctx context.Context, before int64, limit int) ([]CDR, s
 		next = strconv.FormatInt(out[limit-1].ID, 10)
 	}
 	return out, next, nil
+}
+
+// CDRCounts is how many call records exist, and how many of them failed.
+type CDRCounts struct {
+	All    int64 `json:"all"`
+	Failed int64 `json:"failed"`
+}
+
+// CountCDRs counts every CDR and the failed ones (final status outside 2xx).
+func (s *Store) CountCDRs(ctx context.Context) (CDRCounts, error) {
+	var c CDRCounts
+	err := s.db.QueryRowContext(ctx, `SELECT count(*), count(*) FILTER (WHERE final_status NOT BETWEEN 200 AND 299)
+		FROM cdrs`).Scan(&c.All, &c.Failed)
+	return c, err
+}
+
+// ConcurrencyPoint is how many recorded calls were in progress at one
+// instant, by direction.
+type ConcurrencyPoint struct {
+	At       time.Time `json:"at"`
+	Inbound  int64     `json:"inbound"`
+	Outbound int64     `json:"outbound"`
+	Internal int64     `json:"internal"`
+}
+
+// CDRConcurrency samples, every step from from to to (inclusive), how many
+// CDRs were in progress (start <= t < end), by direction. Calls still in
+// progress have no CDR yet and are not counted.
+func (s *Store) CDRConcurrency(ctx context.Context, from, to time.Time, step time.Duration) ([]ConcurrencyPoint, error) {
+	rows, err := s.db.QueryContext(ctx, `WITH c AS (
+			SELECT start_time, end_time, direction FROM cdrs WHERE end_time > $1 AND start_time <= $2
+		)
+		SELECT g.t,
+			count(c.direction) FILTER (WHERE c.direction = 'inbound'),
+			count(c.direction) FILTER (WHERE c.direction = 'outbound'),
+			count(c.direction) FILTER (WHERE c.direction = 'internal')
+		FROM generate_series($1::timestamptz, $2::timestamptz, $3::bigint * interval '1 millisecond') AS g(t)
+		LEFT JOIN c ON c.start_time <= g.t AND c.end_time > g.t
+		GROUP BY g.t ORDER BY g.t`, from, to, step.Milliseconds())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []ConcurrencyPoint{}
+	for rows.Next() {
+		var p ConcurrencyPoint
+		if err := rows.Scan(&p.At, &p.Inbound, &p.Outbound, &p.Internal); err != nil {
+			return nil, err
+		}
+		p.At = p.At.UTC()
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // GetCDR returns one CDR and its routing trace.

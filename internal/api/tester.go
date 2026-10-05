@@ -216,10 +216,12 @@ type cdrDetail struct {
 	store.CDR
 	Trace       routing.Trace `json:"trace"`
 	Explanation string        `json:"explanation"`
+	Note        string        `json:"note"`
 }
 
 // getCDR is GET /api/v1/cdrs/{id}: the CDR, its routing trace, and for a
-// failed call a one-line explanation (the last trace step).
+// failed call a one-line explanation (the last trace step), for an
+// answered call that failed over a note saying so.
 func (s *server) getCDR(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -230,7 +232,7 @@ func (s *server) getCDR(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "cdr", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, cdrDetail{CDR: c, Trace: trace, Explanation: explain(c, trace)})
+	writeJSON(w, http.StatusOK, cdrDetail{CDR: c, Trace: trace, Explanation: explain(c, trace), Note: note(c, trace)})
 }
 
 func explain(c store.CDR, trace routing.Trace) string {
