@@ -34,7 +34,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         phase: 1,
         icon: "radio-tower",
       },
-      { label: "Ring Groups", path: "/ring-groups", phase: 4, icon: "users-round" },
+      {
+        label: "Ring Groups",
+        path: "/ring-groups",
+        phase: 4,
+        icon: "users-round",
+      },
       { label: "Voicemail", path: "/voicemail", phase: 4, icon: "voicemail" },
     ],
   },

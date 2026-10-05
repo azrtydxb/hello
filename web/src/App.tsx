@@ -127,11 +127,7 @@ function Shell() {
       </Sidebar>
       <div className="app-shell__main-col">
         <Topbar
-          crumbs={
-            here
-              ? [here.group.label, here.item.label]
-              : ["Hello"]
-          }
+          crumbs={here ? [here.group.label, here.item.label] : ["Hello"]}
           live={reachable}
         >
           {reachable && (
@@ -154,34 +150,36 @@ export function App() {
     <ThemeProvider>
       <AuthProvider>
         <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route
-          element={
-            <RequireAuth>
-              <Shell />
-            </RequireAuth>
-          }
-        >
-          <Route index element={<Dashboard />} />
-          {NAV_ITEMS.filter((item) => item.path !== "/").map((item) => {
-            const Page = PAGES[item.path];
-            const element =
-              Page && item.phase <= CURRENT_PHASE ? (
-                <Page />
-              ) : (
-                <Placeholder title={item.label} phase={item.phase} />
-              );
-            return <Route key={item.path} path={item.path} element={element} />;
-          })}
-          <Route path="/routes/test" element={<RouteTest />} />
-          {/* Dial plans are the structured routes (spec §11). */}
+          <Route path="/login" element={<Login />} />
           <Route
-            path="/dial-plans"
-            element={<Navigate to="/routes" replace />}
-          />
-          <Route path="/history/:id" element={<CallDetail />} />
-          <Route path="*" element={<NotFound />} />
-        </Route>
+            element={
+              <RequireAuth>
+                <Shell />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<Dashboard />} />
+            {NAV_ITEMS.filter((item) => item.path !== "/").map((item) => {
+              const Page = PAGES[item.path];
+              const element =
+                Page && item.phase <= CURRENT_PHASE ? (
+                  <Page />
+                ) : (
+                  <Placeholder title={item.label} phase={item.phase} />
+                );
+              return (
+                <Route key={item.path} path={item.path} element={element} />
+              );
+            })}
+            <Route path="/routes/test" element={<RouteTest />} />
+            {/* Dial plans are the structured routes (spec §11). */}
+            <Route
+              path="/dial-plans"
+              element={<Navigate to="/routes" replace />}
+            />
+            <Route path="/history/:id" element={<CallDetail />} />
+            <Route path="*" element={<NotFound />} />
+          </Route>
         </Routes>
       </AuthProvider>
     </ThemeProvider>

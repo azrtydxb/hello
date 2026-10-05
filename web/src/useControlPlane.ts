@@ -24,7 +24,9 @@ export function useControlPlane(): ControlPlane {
       controller = new AbortController();
       const { signal } = controller;
       fetchVersion(signal)
-        .then((info) => setState({ status: "reachable", version: info.version }))
+        .then((info) =>
+          setState({ status: "reachable", version: info.version }),
+        )
         .catch(() => {
           if (!signal.aborted) setState({ status: "unreachable" });
         });

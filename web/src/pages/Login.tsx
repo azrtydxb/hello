@@ -3,7 +3,13 @@ import { useNavigate, useSearchParams } from "react-router";
 import { ApiError, errorMessage, login, safeNext } from "../api";
 import { useAuth } from "../auth";
 import { HelloLogo } from "../brand";
-import { Alert, Button, Input, Logo, ThemeToggle } from "../design/azrty/components";
+import {
+  Alert,
+  Button,
+  Input,
+  Logo,
+  ThemeToggle,
+} from "../design/azrty/components";
 import { useControlPlane, type ControlPlane } from "../useControlPlane";
 
 /** Where the API serves its OpenAPI document (public, no session needed). */
@@ -134,7 +140,10 @@ export function Login() {
               iconRight={busy ? undefined : "arrow-right"}
             >
               {busy && (
-                <span className="az-spinner signin__spinner" aria-hidden="true" />
+                <span
+                  className="az-spinner signin__spinner"
+                  aria-hidden="true"
+                />
               )}
               {busy ? "Signing in…" : "Sign in"}
             </Button>
