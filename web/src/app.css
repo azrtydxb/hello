@@ -1,0 +1,293 @@
+/*
+ * Hello's app layout on the Azrty design system: the console shell (sidebar,
+ * top bar, page container) and the sign-in screen. Tokens only, no raw
+ * colours. Loaded after design/azrty/styles.css.
+ */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Live dots stop pulsing for viewers who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .az-dot--pulse {
+    animation: none;
+  }
+}
+
+/* --- console shell ------------------------------------------------------ */
+
+.app-shell {
+  display: flex;
+  height: 100vh;
+  background: var(--az-bg);
+  color: var(--az-text);
+}
+
+.app-shell .az-sidebar {
+  overflow-y: auto;
+}
+
+.app-shell .az-sidebar__brand + .az-nav {
+  margin-top: 32px;
+}
+
+.app-nav-group + .app-nav-group {
+  margin-top: 18px;
+}
+
+.app-nav-group > .az-eyebrow {
+  padding: 0 14px 6px;
+}
+
+.app-nav-item {
+  text-decoration: none;
+}
+
+.app-nav-item:hover {
+  text-decoration: none;
+}
+
+.app-shell__theme {
+  margin: 18px 10px 0;
+}
+
+.app-shell__main-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell__version {
+  font-family: var(--az-font-mono);
+  font-size: var(--az-text-sm);
+  color: var(--az-muted);
+}
+
+.app-shell__main {
+  flex: 1;
+  overflow: auto;
+}
+
+.app-shell__main:focus-visible {
+  outline-offset: -2px;
+}
+
+.app-page {
+  max-width: var(--az-content-max);
+  padding: var(--az-content-pad);
+}
+
+.skip-link {
+  position: absolute;
+  left: -999px;
+}
+
+.skip-link:focus {
+  left: 16px;
+  top: 16px;
+  z-index: 10;
+  padding: 8px 14px;
+  border-radius: var(--az-radius-md);
+  background: var(--az-primary-bg);
+  color: var(--az-primary-fg);
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .app-shell .az-sidebar {
+    width: 100%;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--az-border);
+  }
+
+  .app-shell__main {
+    overflow: visible;
+  }
+
+  .app-page {
+    padding: 20px 16px;
+  }
+}
+
+/* --- sign-in ------------------------------------------------------------ */
+
+.signin {
+  display: flex;
+  min-height: 100vh;
+  background: var(--az-bg);
+  color: var(--az-text);
+}
+
+.signin__main {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 32px;
+  padding: clamp(32px, 5vw, 64px) clamp(24px, 8vw, 120px);
+}
+
+.signin__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.signin__body {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.signin__intro {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.signin__eyebrow {
+  font-family: var(--az-font-mono);
+  font-size: var(--az-text-sm);
+  font-weight: 500;
+  letter-spacing: var(--az-tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--az-muted);
+  overflow-wrap: anywhere;
+}
+
+.signin__title {
+  margin: 0;
+  font-family: var(--az-font-display);
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: var(--az-tracking-display);
+  line-height: var(--az-leading-tight);
+}
+
+.signin__subtitle {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--az-text-2);
+}
+
+.signin__form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* The in-button spinner takes the button's text colour, not the indicator. */
+.signin__spinner {
+  width: 16px;
+  height: 16px;
+  border-color: color-mix(in oklch, currentColor 30%, transparent);
+  border-top-color: currentColor;
+}
+
+.signin__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: var(--az-text-md);
+  color: var(--az-muted);
+}
+
+.signin__foot-group {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.signin__maker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.signin__foot a {
+  color: var(--az-muted);
+}
+
+.signin__foot a:hover {
+  color: var(--az-text);
+}
+
+.signin__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.signin__status--down .az-dot {
+  background: var(--az-faint);
+}
+
+.signin__version {
+  font-family: var(--az-font-mono);
+  font-size: var(--az-text-sm);
+}
+
+.signin__panel {
+  flex: 1 1 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 56px;
+  padding: 64px;
+  background: color-mix(in oklch, var(--az-pillar) 7%, var(--az-bg));
+  border-left: 1px solid var(--az-border);
+  text-align: center;
+}
+
+.signin__line {
+  margin: 0;
+  max-width: 560px;
+  font-family: var(--az-font-display);
+  font-size: clamp(28px, 2.8vw, 44px);
+  font-weight: 600;
+  letter-spacing: var(--az-tracking-display);
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+/* Under 900px the brand panel goes and the form centres. */
+@media (max-width: 899px) {
+  .signin__panel {
+    display: none;
+  }
+
+  .signin__main {
+    align-items: center;
+  }
+
+  .signin__head,
+  .signin__foot {
+    align-self: stretch;
+  }
+}

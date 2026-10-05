@@ -5,10 +5,22 @@ import {
   Outlet,
   Route,
   Routes,
+  useLocation,
   useNavigate,
 } from "react-router";
 import { AuthProvider, RequireAuth, useAuth } from "./auth";
-import { CURRENT_PHASE, NAV_ITEMS } from "./nav";
+import { HelloLogo } from "./brand";
+import {
+  NavItemContent,
+  navItemClassName,
+  Sidebar,
+  SidebarNav,
+  SidebarNavGroup,
+  ThemeProvider,
+  ThemeToggle,
+  Topbar,
+} from "./design/azrty/components";
+import { CURRENT_PHASE, NAV_GROUPS, NAV_ITEMS, navFor } from "./nav";
 import { CallDetail } from "./pages/CallDetail";
 import { Cluster } from "./pages/Cluster";
 import { Calls } from "./pages/Calls";
@@ -28,6 +40,7 @@ import { RingGroups } from "./pages/RingGroups";
 import { System } from "./pages/System";
 import { Trunks } from "./pages/Trunks";
 import { Voicemail } from "./pages/Voicemail";
+import { useControlPlane } from "./useControlPlane";
 
 /** Pages that have content; any other nav item renders a placeholder. */
 const PAGES: Readonly<Record<string, ComponentType>> = {
@@ -49,6 +62,10 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
 function Shell() {
   const { state, signOut } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const controlPlane = useControlPlane();
+  const reachable = controlPlane.status === "reachable";
+  const here = navFor(location.pathname);
 
   function onLogout() {
     // Leave first, so the sign-in page carries no ?next= back into the app.
@@ -57,34 +74,76 @@ function Shell() {
   }
 
   return (
-    <div className="shell">
+    <div className="app-shell" data-pillar="operate">
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <header className="brand">Hello</header>
-      <nav className="sidebar" aria-label="Primary">
-        <ul>
-          {NAV_ITEMS.map((item) => (
-            <li key={item.path}>
-              {/* NavLink sets aria-current="page" on the active link. */}
-              <NavLink to={item.path} end={item.path === "/"}>
-                {item.label}
-              </NavLink>
-            </li>
+      <Sidebar
+        brand={<HelloLogo layout="horizontal" size={40} />}
+        status={{
+          live: reachable,
+          label: reachable
+            ? "Connected to control plane"
+            : controlPlane.status === "checking"
+              ? "Checking control plane…"
+              : "Control plane unreachable",
+        }}
+        user={
+          state.status === "signedIn"
+            ? { name: state.username, role: "Administrator" }
+            : undefined
+        }
+        onSignOut={onLogout}
+        signOutLabel="Log out"
+        footer={
+          <div className="app-shell__theme">
+            <ThemeToggle block />
+          </div>
+        }
+      >
+        <SidebarNav label="Primary">
+          {NAV_GROUPS.map((group) => (
+            <SidebarNavGroup
+              key={group.label}
+              label={group.label}
+              className="app-nav-group"
+            >
+              {group.items.map((item) => (
+                // NavLink sets aria-current="page" on the active link.
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  end={item.path === "/"}
+                  className={({ isActive }) =>
+                    `${navItemClassName(isActive)} app-nav-item`
+                  }
+                >
+                  <NavItemContent icon={item.icon} label={item.label} />
+                </NavLink>
+              ))}
+            </SidebarNavGroup>
           ))}
-        </ul>
-        <div className="session">
-          {state.status === "signedIn" && (
-            <p className="muted">Signed in as {state.username}</p>
+        </SidebarNav>
+      </Sidebar>
+      <div className="app-shell__main-col">
+        <Topbar
+          crumbs={
+            here
+              ? [here.group.label, here.item.label]
+              : ["Hello"]
+          }
+          live={reachable}
+        >
+          {reachable && (
+            <span className="app-shell__version">{controlPlane.version}</span>
           )}
-          <button type="button" onClick={onLogout}>
-            Log out
-          </button>
-        </div>
-      </nav>
-      <main id="main" className="content" tabIndex={-1}>
-        <Outlet />
-      </main>
+        </Topbar>
+        <main id="main" className="app-shell__main" tabIndex={-1}>
+          <div className="app-page">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
@@ -92,8 +151,9 @@ function Shell() {
 /** The app: sign-in route plus the authenticated shell and its pages. */
 export function App() {
   return (
-    <AuthProvider>
-      <Routes>
+    <ThemeProvider>
+      <AuthProvider>
+        <Routes>
         <Route path="/login" element={<Login />} />
         <Route
           element={
@@ -122,7 +182,8 @@ export function App() {
           <Route path="/history/:id" element={<CallDetail />} />
           <Route path="*" element={<NotFound />} />
         </Route>
-      </Routes>
-    </AuthProvider>
+        </Routes>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

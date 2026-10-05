@@ -1,9 +1,27 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { safeNext } from "../api";
 import { apiError, json, ME, mockApi, noContent, renderApp } from "../test/api";
 
 const UNAUTHORIZED = () => apiError(401, "unauthorized", "not signed in");
+const VERSION = {
+  "GET /api/v1/version": () =>
+    json({ version: "v0.9.0-test", commit: "abc1234", configRevision: 3 }),
+};
+
+function fillAndSubmit(username: string, password: string) {
+  fireEvent.change(screen.getByLabelText("Username"), {
+    target: { value: username },
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: password },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+}
+
+async function signInScreen() {
+  return screen.findByRole("heading", { level: 1, name: "Welcome back" });
+}
 
 describe("Login", () => {
   it("redirects to /login with next when an API call answers 401", async () => {
@@ -11,9 +29,7 @@ describe("Login", () => {
     mockApi({ ...ME, "GET /api/v1/extensions": UNAUTHORIZED });
     renderApp("/extensions");
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Sign in" }),
-    ).toBeInTheDocument();
+    expect(await signInScreen()).toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/login?next=%2Fextensions",
     );
@@ -24,9 +40,7 @@ describe("Login", () => {
     mockApi({ "GET /api/v1/auth/me": UNAUTHORIZED });
     renderApp("/devices");
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Sign in" }),
-    ).toBeInTheDocument();
+    expect(await signInScreen()).toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/login?next=%2Fdevices",
     );
@@ -40,13 +54,8 @@ describe("Login", () => {
     });
     renderApp("/login?next=%2Fhistory");
 
-    fireEvent.change(await screen.findByLabelText("Username"), {
-      target: { value: "admin" },
-    });
-    fireEvent.change(screen.getByLabelText("Password"), {
-      target: { value: "s3cret-pass" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await signInScreen();
+    fillAndSubmit("admin", "s3cret-pass");
 
     expect(
       await screen.findByRole("heading", { level: 1, name: "Call History" }),
@@ -57,10 +66,12 @@ describe("Login", () => {
       url: "/api/v1/auth/login",
       body: { username: "admin", password: "s3cret-pass" },
     });
-    expect(screen.getByText("Signed in as admin")).toBeInTheDocument();
+    // The sidebar's user block names the signed-in user.
+    expect(screen.getByRole("img", { name: "admin" })).toBeInTheDocument();
+    expect(screen.getByText("Administrator")).toBeInTheDocument();
   });
 
-  it("shows an error and stays on the page when the credentials are wrong", async () => {
+  it("shows the failure Alert and stays on the page on a 401", async () => {
     mockApi({
       "GET /api/v1/auth/me": UNAUTHORIZED,
       "POST /api/v1/auth/login": () =>
@@ -68,24 +79,143 @@ describe("Login", () => {
     });
     renderApp("/login?next=%2Fdevices");
 
-    fireEvent.change(await screen.findByLabelText("Username"), {
-      target: { value: "admin" },
-    });
-    fireEvent.change(screen.getByLabelText("Password"), {
-      target: { value: "wrong" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await signInScreen();
+    fillAndSubmit("admin", "wrong");
 
     const alert = await screen.findByRole("alert");
+    expect(alert).toHaveClass("az-alert", "az-alert--bad");
+    expect(alert).toHaveTextContent("Sign-in failed");
     expect(alert).toHaveTextContent("Incorrect username or password.");
-    expect(screen.getByLabelText("Password")).toHaveAttribute(
-      "aria-describedby",
+    const password = screen.getByLabelText("Password");
+    expect(password.getAttribute("aria-describedby")?.split(" ")).toContain(
       alert.id,
     );
-    expect(screen.getByLabelText("Password")).toHaveValue("");
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/login?next=%2Fdevices",
     );
+  });
+
+  it("disables the button and shows progress while the request is in flight", async () => {
+    let release: (r: Response) => void = () => {};
+    mockApi({
+      "GET /api/v1/auth/me": UNAUTHORIZED,
+      "POST /api/v1/auth/login": () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+    });
+    renderApp("/login");
+
+    await signInScreen();
+    fillAndSubmit("admin", "s3cret-pass");
+
+    const busy = await screen.findByRole("button", { name: "Signing in…" });
+    expect(busy).toBeDisabled();
+    expect(busy.closest("form")).toHaveAttribute("aria-busy", "true");
+
+    release(apiError(401, "unauthorized", "invalid credentials"));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
+  });
+
+  it("submits on Enter from the password field", async () => {
+    const calls = mockApi({
+      "GET /api/v1/auth/me": UNAUTHORIZED,
+      "POST /api/v1/auth/login": () =>
+        apiError(401, "unauthorized", "invalid credentials"),
+    });
+    renderApp("/login");
+
+    await signInScreen();
+    fireEvent.change(screen.getByLabelText("Username"), {
+      target: { value: "admin" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "x" },
+    });
+    // Enter in a field submits its form; jsdom models that as a submit event.
+    fireEvent.submit(screen.getByLabelText("Password").closest("form")!);
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(calls.map((c) => `${c.method} ${c.url}`)).toContain(
+      "POST /api/v1/auth/login",
+    );
+  });
+
+  it("never prints credentials on the sign-in screen", async () => {
+    mockApi({ "GET /api/v1/auth/me": UNAUTHORIZED, ...VERSION });
+    renderApp("/login");
+
+    await signInScreen();
+    await screen.findByText("Control plane reachable");
+    const page = document.body.textContent ?? "";
+    expect(page).not.toMatch(/admin/i);
+    expect(page).not.toMatch(/hello-lab/i);
+    expect(screen.getByLabelText("Username")).toHaveValue("");
+    expect(screen.getByLabelText("Password")).toHaveValue("");
+  });
+
+  it("shows the host, the real version and a reachable control plane", async () => {
+    mockApi({ "GET /api/v1/auth/me": UNAUTHORIZED, ...VERSION });
+    renderApp("/login");
+
+    await signInScreen();
+    expect(screen.getByText(window.location.host)).toBeInTheDocument();
+    const status = await screen.findByText("Control plane reachable");
+    expect(status.querySelector(".az-dot")).toHaveClass("az-dot--pulse");
+    expect(screen.getByText("v0.9.0-test")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "API docs" })).toHaveAttribute(
+      "href",
+      "/api/v1/openapi.json",
+    );
+  });
+
+  it("shows an unreachable control plane without a pulse or version", async () => {
+    mockApi({
+      "GET /api/v1/auth/me": UNAUTHORIZED,
+      "GET /api/v1/version": () => new Response("down", { status: 503 }),
+    });
+    renderApp("/login");
+
+    const status = await screen.findByText("Control plane unreachable");
+    expect(status.querySelector(".az-dot")).not.toHaveClass("az-dot--pulse");
+    expect(screen.queryByText("Control plane reachable")).toBeNull();
+    expect(screen.queryByText(/^v\d/)).toBeNull();
+  });
+
+  it("switches the theme and remembers it", async () => {
+    mockApi({ "GET /api/v1/auth/me": UNAUTHORIZED });
+    renderApp("/login");
+
+    await signInScreen();
+    const html = document.documentElement;
+    expect(html).toHaveAttribute("data-theme", "dark");
+    const theme = screen.getByRole("radiogroup", { name: "Theme" });
+    expect(within(theme).getByRole("radio", { name: "Dark" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+
+    fireEvent.click(within(theme).getByRole("radio", { name: "Light" }));
+
+    expect(html).toHaveAttribute("data-theme", "light");
+    expect(window.localStorage.getItem("hello.theme")).toBe("light");
+    expect(within(theme).getByRole("radio", { name: "Light" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("starts from the stored theme", async () => {
+    window.localStorage.setItem("hello.theme", "light");
+    mockApi({ "GET /api/v1/auth/me": UNAUTHORIZED });
+    renderApp("/login");
+
+    await signInScreen();
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
   });
 
   it("logs out from the nav", async () => {
@@ -94,9 +224,7 @@ describe("Login", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Log out" }));
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Sign in" }),
-    ).toBeInTheDocument();
+    expect(await signInScreen()).toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent(/^\/login$/);
     expect(calls.map((c) => `${c.method} ${c.url}`)).toContain(
       "POST /api/v1/auth/logout",
