@@ -20,6 +20,7 @@ import (
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/lifecycle"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/ops"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/sip"
@@ -145,12 +146,15 @@ func run(args []string) error {
 		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
+		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax,
+		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
 	}, sip.Deps{
 		Snapshots: watcher, State: live, Trunks: live,
 		Throttle: sip.ValkeyThrottle{Client: vk, Window: cfg.AuthFailWindow},
 		CDRs:     cdrs, Metrics: sipMetrics, Log: log.With("component", "sip"),
 		Presence:   sip.ValkeyPresence{Client: vk},
 		Voicemails: voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings,
+		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
 	})
 	if err != nil {
 		return err

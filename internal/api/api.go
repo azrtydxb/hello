@@ -74,6 +74,16 @@ type Store interface {
 	ListCDRs(ctx context.Context, before int64, limit int) ([]store.CDR, string, error)
 	GetCDR(ctx context.Context, id int64) (store.CDR, routing.Trace, error)
 
+	ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]store.Recording, string, error)
+	GetRecording(ctx context.Context, id int64) (store.Recording, error)
+	DeleteRecording(ctx context.Context, actor string, id int64) (string, error)
+
+	ListAnnouncements(ctx context.Context) ([]store.Announcement, error)
+	GetAnnouncement(ctx context.Context, id int64) (store.Announcement, error)
+	AnnouncementByName(ctx context.Context, name string) (store.Announcement, bool, error)
+	CreateAnnouncement(ctx context.Context, actor, name, object string, check store.Check) (store.Announcement, error)
+	DeleteAnnouncement(ctx context.Context, actor string, id int64, check store.Check) (string, error)
+
 	ListTrunks(ctx context.Context) ([]store.Trunk, error)
 	GetTrunk(ctx context.Context, id int64) (store.Trunk, error)
 	CreateTrunk(ctx context.Context, actor string, in store.TrunkInput, password string, check store.Check) (store.Trunk, error)
@@ -178,6 +188,14 @@ func Handler(c Config) http.Handler {
 	private("POST /api/v1/voicemail/messages/{id}/heard", s.markMessageHeard)
 	private("DELETE /api/v1/voicemail/messages/{id}", s.deleteMessage)
 	private("GET /api/v1/voicemail/messages/{id}/audio", s.messageAudio)
+
+	private("GET /api/v1/recordings", s.listRecordings)
+	private("DELETE /api/v1/recordings/{id}", s.deleteRecording)
+	private("GET /api/v1/recordings/{id}/audio", s.recordingAudio)
+
+	private("GET /api/v1/announcements", s.listAnnouncements)
+	private("POST /api/v1/announcements", s.createAnnouncement)
+	private("DELETE /api/v1/announcements/{id}", s.deleteAnnouncement)
 
 	private("GET /api/v1/ring-groups", s.listRingGroups)
 	private("POST /api/v1/ring-groups", s.createRingGroup)

@@ -34,6 +34,9 @@ func NewAnchor(host string, log *slog.Logger) *Anchor {
 	return &Anchor{host: host, log: log}
 }
 
+// AdvertisedHost is the IPv4 the anchor writes into SDP answers.
+func (a *Anchor) AdvertisedHost() string { return a.host }
+
 // Answer parses the caller's SDP offer, binds a UDP socket for the
 // anchored leg, starts the receive loop and returns the local answer SDP
 // plus the Session. The socket binds to port 0 so the kernel picks a free

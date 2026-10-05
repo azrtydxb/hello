@@ -195,3 +195,19 @@ func (l *lazyObjects) Get(ctx context.Context, key string) ([]byte, error) {
 	}
 	return o.Get(ctx, key)
 }
+
+func (l *lazyObjects) PutRecording(ctx context.Context, key string, data []byte) error {
+	o, err := l.store()
+	if err != nil {
+		return err
+	}
+	return o.PutRecording(ctx, key, data)
+}
+
+func (l *lazyObjects) GetAnnouncement(ctx context.Context, key string) ([]byte, error) {
+	o, err := l.store()
+	if err != nil {
+		return nil, err
+	}
+	return o.GetAnnouncement(ctx, key)
+}

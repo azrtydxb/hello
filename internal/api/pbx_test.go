@@ -68,6 +68,54 @@ func (m *memObjects) Remove(_ context.Context, object string) error {
 
 func (m *memObjects) EnsureBucket(context.Context) error { return nil }
 
+func (m *memObjects) PresignRecording(_ context.Context, object string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.objs["rec:"+object]; !ok {
+		return "", fmt.Errorf("memObjects: %s: not found", object)
+	}
+	m.presigns++
+	return "http://objects.test/rec/" + object + "?sig=1", nil
+}
+
+func (m *memObjects) PutRecording(_ context.Context, object string, r io.Reader, _ int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	m.objs["rec:"+object] = b
+	return nil
+}
+
+func (m *memObjects) RemoveRecording(_ context.Context, object string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.objs, "rec:"+object)
+	return nil
+}
+
+func (m *memObjects) PutAnnouncement(_ context.Context, object string, r io.Reader, _ int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	m.objs["ann:"+object] = b
+	return nil
+}
+
+func (m *memObjects) RemoveAnnouncement(_ context.Context, object string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.objs, "ann:"+object)
+	return nil
+}
+
+func (m *memObjects) EnsureMediaBuckets(context.Context) error { return nil }
+
 func (m *memObjects) has(object string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -138,15 +186,18 @@ func startMinio(t *testing.T) *MinioObjects {
 	return o
 }
 
-// waitBucket blocks until EnsureBucket succeeds, so a just-started server
-// (the throwaway container, the CI service) is up and holds the bucket
-// before the test's first upload.
+// waitBucket blocks until every audio bucket is ensured, so a just-started
+// server (the throwaway container, the CI service) is up and holds the
+// buckets before the test's first upload.
 func waitBucket(t *testing.T, o *MinioObjects) {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err := o.EnsureBucket(ctx)
+		if err == nil {
+			err = o.EnsureMediaBuckets(ctx)
+		}
 		cancel()
 		if err == nil {
 			return

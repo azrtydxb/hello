@@ -142,6 +142,7 @@ func (f *fakeVMStore) MarkHeard(_ context.Context, id int64) error {
 type fakeObjects struct {
 	mu       sync.Mutex
 	objs     map[string][]byte
+	gets     []string
 	down     bool
 	failPuts int
 }
@@ -166,11 +167,27 @@ func (f *fakeObjects) Put(_ context.Context, key string, data []byte) error {
 func (f *fakeObjects) Get(_ context.Context, key string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.gets = append(f.gets, key)
 	d, ok := f.objs[key]
 	if !ok {
 		return nil, fmt.Errorf("no such object %s", key)
 	}
 	return d, nil
+}
+
+func (f *fakeObjects) PutRecording(ctx context.Context, key string, data []byte) error {
+	return f.Put(ctx, key, data)
+}
+
+func (f *fakeObjects) GetAnnouncement(ctx context.Context, key string) ([]byte, error) {
+	return f.Get(ctx, key)
+}
+
+// snapshotGets copies the fetched keys (tests).
+func (f *fakeObjects) snapshotGets() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.gets...)
 }
 
 // withFeatures mutates the test snapshot: extension rows, ring groups and

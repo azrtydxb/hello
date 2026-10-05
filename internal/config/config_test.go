@@ -291,3 +291,44 @@ func TestLoadMinioSmtp(t *testing.T) {
 		t.Fatalf("smtp config = %+v %v", c, err)
 	}
 }
+
+// TestLoadMediaSettings fails if the RTP port range does not default to
+// 20000-21000, parse, or reject an inverted or single-port range, if the
+// force switch does not default to off, or if the recording notice switch
+// does not default to on (spec interfaces).
+func TestLoadMediaSettings(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.RTPPortMin != 20000 || c.RTPPortMax != 21000 {
+		t.Fatalf("default RTP range = %d-%d, want 20000-21000", c.RTPPortMin, c.RTPPortMax)
+	}
+	if c.MediaForceAnchor {
+		t.Fatal("HELLO_MEDIA_FORCE_ANCHOR should default to false")
+	}
+	if !c.MediaRecordingNotice {
+		t.Fatal("HELLO_MEDIA_RECORDING_NOTICE should default to true")
+	}
+	c, err = LoadSIP(env(map[string]string{
+		"HELLO_RTP_PORT_MIN": "30000", "HELLO_RTP_PORT_MAX": "30100",
+		"HELLO_MEDIA_FORCE_ANCHOR": "true", "HELLO_MEDIA_RECORDING_NOTICE": "false",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.RTPPortMin != 30000 || c.RTPPortMax != 30100 || !c.MediaForceAnchor || c.MediaRecordingNotice {
+		t.Fatalf("media settings = %+v", c)
+	}
+	for _, bad := range []map[string]string{
+		{"HELLO_RTP_PORT_MIN": "40000", "HELLO_RTP_PORT_MAX": "39000"},
+		{"HELLO_RTP_PORT_MIN": "50000", "HELLO_RTP_PORT_MAX": "50000"},
+		{"HELLO_RTP_PORT_MIN": "0", "HELLO_RTP_PORT_MAX": "60000"},
+		{"HELLO_RTP_PORT_MAX": "70000"},
+		{"HELLO_RTP_PORT_MIN": "junk"},
+	} {
+		if _, err := LoadSIP(env(bad)); err == nil || !strings.Contains(err.Error(), "HELLO_RTP_PORT") {
+			t.Fatalf("%v accepted: %v", bad, err)
+		}
+	}
+}

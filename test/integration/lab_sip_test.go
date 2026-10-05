@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -220,12 +219,17 @@ func TestCallRingAllAndHangup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Status != 200 || !bytes.Equal(out.Response.Body(), sdpAnswer) {
-		t.Fatalf("dial = %d %q, want 200 with the callee's SDP unchanged", out.Status, out.Response.Body())
+	if out.Status != 200 {
+		t.Fatalf("dial = %d %q, want 200", out.Status, out.Response.Body())
+	}
+	// The bodies: pass-through (direct) or the anchor's SDP (anchored) —
+	// see sdpDirectOrAnchored in lab_test.go for why these calls anchor.
+	if err := sdpDirectOrAnchored(sdpAnswer, out.Response.Body()); err != nil {
+		t.Fatalf("dial media: %v", err)
 	}
 	in1 := <-b1got
-	if !bytes.Equal(in1.Request.Body(), sdpOffer) {
-		t.Fatalf("callee got SDP %q, want the offer unchanged", in1.Request.Body())
+	if err := sdpDirectOrAnchored(sdpOffer, in1.Request.Body()); err != nil {
+		t.Fatalf("callee media: %v", err)
 	}
 	in2 := <-b2rang
 	select {

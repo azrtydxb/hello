@@ -56,12 +56,14 @@ type VoicemailMessage struct {
 	CreatedAt   time.Time
 }
 
-// ObjectStore is the voicemail audio store (MinIO, bucket hello-voicemail,
-// contract 6; implemented by internal/media). Called from the media
-// goroutine only.
+// ObjectStore is the call-plane audio store (MinIO, buckets hello-voicemail,
+// hello-recordings and hello-announcements, contracts 4 and 6; implemented
+// by internal/media). Called from the media goroutine only.
 type ObjectStore interface {
 	Put(ctx context.Context, key string, data []byte) error
 	Get(ctx context.Context, key string) ([]byte, error)
+	PutRecording(ctx context.Context, key string, data []byte) error
+	GetAnnouncement(ctx context.Context, key string) ([]byte, error)
 }
 
 // Voicemail application modes.
@@ -104,10 +106,11 @@ func (c *call) startVoicemail(mode int, reason string) {
 // answerAnchored binds the media anchor for this call and builds the answer
 // SDP from the caller's offer.
 func (s *Server) answerAnchored(offer []byte) ([]byte, media.Session, error) {
-	if s.deps.Objects == nil || s.anchor == nil {
+	anchor := s.anchor.Load()
+	if s.deps.Objects == nil || anchor == nil {
 		return nil, nil, errors.New("voicemail media disabled")
 	}
-	return s.anchor.Answer(offer)
+	return anchor.Answer(offer)
 }
 
 // answerSelf connects a call with no B leg (voicemail, feature codes):

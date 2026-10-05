@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/test/sipua"
 )
 
@@ -270,6 +271,32 @@ var (
 	sdpAnswer = []byte("v=0\r\no=b 1 1 IN IP4 192.0.2.20\r\ns=-\r\nc=IN IP4 192.0.2.20\r\nt=0 0\r\nm=audio 40002 RTP/AVP 8\r\na=rtpmap:8 PCMA/8000\r\n")
 )
 
+// sdpDirectOrAnchored accepts either the pass-through SDP (direct media) or
+// the anchor's SDP for the call. Phase 5 anchors these lab calls: the phones
+// run on the runner and reach the nodes through Docker's published ports, so
+// a binding's contact host:port never equals the packet source (the
+// masquerade rewrites the port), which is a true NAT under the anchoring
+// contract — the media anchors even though both phones share the host. The
+// anchor's SDP keeps the caller offer's c= address (the lab nodes advertise
+// no anchor host) and its audio payload type, on a relay port.
+func sdpDirectOrAnchored(want, got []byte) error {
+	if bytes.Equal(want, got) {
+		return nil
+	}
+	off, err := media.ParseAudioSDP(sdpOffer)
+	if err != nil {
+		return err
+	}
+	ans, err := media.ParseAudioSDP(got)
+	if err != nil {
+		return fmt.Errorf("SDP %q is neither the expected %q nor audio SDP: %w", got, want, err)
+	}
+	if ans.Address != off.Address || ans.PayloadType != off.PayloadType {
+		return fmt.Errorf("SDP %q is neither the expected %q nor the anchor's SDP for the offer", got, want)
+	}
+	return nil
+}
+
 func TestCallAcrossNodes(t *testing.T) {
 	lc := newLabClient(t)
 	caller, callee := lc.extension("desk")[0], lc.extension("desk")[0]
@@ -279,6 +306,16 @@ func TestCallAcrossNodes(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	// What the nodes actually observe for these phones decides direct vs
+	// anchored media (contract 2); log it so failures explain themselves.
+	var regs struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := lc.do("GET", "/api/v1/registrations", nil, &regs, 200); err != nil {
+		t.Logf("registrations unavailable: %v", err)
+	} else {
+		t.Logf("registrations: %v", regs.Items)
+	}
 	answered := make(chan error, 1)
 	go func() {
 		in, err := b.Next(ctx)
@@ -286,8 +323,8 @@ func TestCallAcrossNodes(t *testing.T) {
 			answered <- err
 			return
 		}
-		if !bytes.Equal(in.Request.Body(), sdpOffer) {
-			answered <- fmt.Errorf("callee got SDP %q, want the caller's offer unchanged", in.Request.Body())
+		if err := sdpDirectOrAnchored(sdpOffer, in.Request.Body()); err != nil {
+			answered <- fmt.Errorf("callee media: %w", err)
 			return
 		}
 		_ = in.Ring()
@@ -300,8 +337,13 @@ func TestCallAcrossNodes(t *testing.T) {
 	if err := <-answered; err != nil {
 		t.Fatal(err)
 	}
-	if out.Status != 200 || !bytes.Equal(out.Response.Body(), sdpAnswer) {
-		t.Fatalf("dial = %d %q, want 200 with the callee's answer unchanged", out.Status, out.Response.Body())
+	if out.Status != 200 {
+		t.Fatalf("dial = %d %q, want 200", out.Status, out.Response.Body())
+	}
+	// The caller's 200 body: the callee's answer (direct) or the anchor's
+	// SDP (anchored; it carries the offer's address and audio payload type).
+	if err := sdpDirectOrAnchored(sdpAnswer, out.Response.Body()); err != nil {
+		t.Fatalf("dial media: %v", err)
 	}
 	if err := out.Hangup(ctx); err != nil {
 		t.Fatal(err)
