@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-05 06:07 UTC. procoder reads this
+Written 2026-10-05 16:39 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -338,6 +338,16 @@ Question: Phase 3 delivery
 - Hold for your review first
 
 Answer: Push phase-3-ha and open a PR to main
+
+## [decision] decisions.md
+
+Key: ccf3f94c9462
+Question: Merge Phase 7 (PR #8) and roll out to kw
+
+- Merge PR #8, wire the live-view ha flag, publish images, pin digests, Sync rollout, then kill a node mid-call on kw to prove takeover live
+- Hold PR #8 for review; kw stays on current behavior
+
+Answer: Merge + prove on kw (answered by the user 2026-10-05; PR #8 merged as 1c3fe03)
 
 ## [decision] decisions.md
 
