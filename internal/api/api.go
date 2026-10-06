@@ -145,6 +145,10 @@ type Config struct {
 	// HELLO_SIP_AUTH_FAIL_LIMIT (0 means its default, 10).
 	Diagnostics   DiagnosticsLive
 	AuthFailLimit int
+	// EmailDelivery is whether voicemail-to-email can send (SMTP_HOST is
+	// set); the voicemail box responses carry it so the console can say
+	// email is not configured instead of showing messages stuck pending.
+	EmailDelivery bool
 }
 
 type server struct{ Config }

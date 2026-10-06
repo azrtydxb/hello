@@ -122,6 +122,7 @@ control). Pages render inside a container with the design's 32px 36px 60px
 padding and 1650px max width. A page renders its own header and content only;
 take its layout from the same console design file.
 
-The product emblems load from `assets/kh-emblem-dark.png` and
-`assets/kh-emblem-light.png` (see `web/src/brand.tsx`). Until those files are
-added, `ProductLogo` shows the dashed placeholder; nothing else changes.
+The product emblems are `assets/kh-emblem-dark.webp` (dark theme) and
+`assets/kh-emblem-light.webp` (light theme), wired in `web/src/brand.tsx`.
+They are 440px squares: the largest use is the 220px stacked lockup on the
+sign-in panel, so that is its 2x size.

@@ -1,18 +1,9 @@
 import { ProductLogo } from "./design/azrty/components";
 
-/**
- * The Kuvryn Hello emblems, when they are in the tree. The glob resolves to
- * nothing until design/azrty/assets/kh-emblem-{dark,light}.png exist, and
- * ProductLogo then shows the design system's dashed emblem placeholder, so
- * the build never depends on the artwork being there.
- */
-const EMBLEMS = import.meta.glob<string>(
-  "./design/azrty/assets/kh-emblem-*.png",
-  { eager: true, query: "?url", import: "default" },
-);
-const EMBLEM_DARK = EMBLEMS["./design/azrty/assets/kh-emblem-dark.png"];
-const EMBLEM_LIGHT =
-  EMBLEMS["./design/azrty/assets/kh-emblem-light.png"] ?? EMBLEM_DARK;
+// The Kuvryn Hello emblems, downscaled to 440px (the 220px stacked lockup
+// at 2x) from the Claude Design export.
+import EMBLEM_DARK from "./design/azrty/assets/kh-emblem-dark.webp";
+import EMBLEM_LIGHT from "./design/azrty/assets/kh-emblem-light.webp";
 
 /** Kuvryn Hello's product identity (Operate pillar). */
 export const PRODUCT = {

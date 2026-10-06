@@ -31,6 +31,7 @@ const DETAIL = {
   unreachableObject: "",
   createdAt: CREATED,
   updatedAt: CREATED,
+  emailDelivery: true,
 };
 
 const UNHEARD = {
@@ -119,6 +120,30 @@ describe("Voicemail", () => {
     expect(calls.map((c) => c.url)).toContain(
       "/api/v1/voicemail/messages?box=12",
     );
+  });
+
+  // Catches the console showing "pending" on every message (and the box's
+  // address as if mail went out) on a deployment without SMTP.
+  it("says email is not configured when the server cannot send it", async () => {
+    setup({
+      "GET /api/v1/extensions/1/voicemail": () =>
+        json({ ...DETAIL, emailDelivery: false }),
+      "GET /api/v1/voicemail/messages?box=11": () =>
+        json({ items: [{ ...UNHEARD, emailStatus: "pending" }] }),
+    });
+    renderApp("/voicemail");
+    const summary = await screen.findByRole("list", {
+      name: "Box settings summary",
+    });
+    expect(
+      await within(summary).findByText("Email not configured"),
+    ).toBeVisible();
+    const row = await screen.findByRole("row", { name: /201/ });
+    expect(within(row).queryByText("pending")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Box settings" }));
+    expect(
+      await screen.findByText(/Email delivery is not configured/),
+    ).toBeVisible();
   });
 
   it("shows an empty state when there are no boxes", async () => {
