@@ -60,6 +60,17 @@ func validateForwardTarget(f *fieldErrs, path, v string) {
 
 // Voicemail box.
 
+// voicemailBoxView is a box as the API sends it: the stored settings plus
+// whether this deployment can email messages at all.
+type voicemailBoxView struct {
+	store.VoicemailBox
+	EmailDelivery bool `json:"emailDelivery"`
+}
+
+func (s *server) boxView(b store.VoicemailBox) voicemailBoxView {
+	return voicemailBoxView{VoicemailBox: b, EmailDelivery: s.EmailDelivery}
+}
+
 func (s *server) getVoicemailBox(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -70,7 +81,7 @@ func (s *server) getVoicemailBox(w http.ResponseWriter, r *http.Request) {
 		s.configError(w, "voicemail box", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, b)
+	writeJSON(w, http.StatusOK, s.boxView(b))
 }
 
 // putVoicemailBox is PUT /api/v1/extensions/{id}/voicemail: JSON with
@@ -171,7 +182,7 @@ func (s *server) putVoicemailBox(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, b)
+	writeJSON(w, http.StatusOK, s.boxView(b))
 }
 
 // isWAV checks the RIFF/WAVE container header; the caller decides about the

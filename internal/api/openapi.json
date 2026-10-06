@@ -2630,7 +2630,8 @@
           "greetingObject",
           "unreachableObject",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "emailDelivery"
         ],
         "properties": {
           "id": {
@@ -2664,6 +2665,10 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "emailDelivery": {
+            "type": "boolean",
+            "description": "Whether this deployment can email voicemail (SMTP is configured). When false, messages are not emailed whatever the box's address."
           }
         }
       },
