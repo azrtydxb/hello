@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/snapshot"
@@ -45,7 +46,12 @@ func TestRegisterAttemptsRecorded(t *testing.T) {
 	}
 	p.register(t)
 
+	// The registrar records an attempt after sending its response, so the
+	// last record can land just after the phone has its 200.
 	got := st.recorded()
+	for deadline := time.Now().Add(2 * time.Second); len(got) < 4 && time.Now().Before(deadline); got = st.recorded() {
+		time.Sleep(5 * time.Millisecond)
+	}
 	// unauthenticated 401, credentials 401 (wrong password), unauthenticated 401, credentials 200
 	want := []struct {
 		code  int
