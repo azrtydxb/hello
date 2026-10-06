@@ -350,12 +350,23 @@ func TestKillSIPNodeDuringCall(t *testing.T) {
 	node := callNode(t, lc, callee.Extension)
 	other := otherNode(node)
 	t.Cleanup(func() { restore(t, lc, node) })
-	// The owner replicates the call before anything can take it over: the
-	// record exists, names the owner, and the counter moved.
+	callID := waitReplicated(t, lc, callee.Extension, node)
+	killed := kill(t, node)
+	rec.by(killed.Add(20 * time.Second))
+	takeoverAssertions(t, lc, a, b, in, out, callee.Extension, other, killed, callID)
+	goneBy(t, lc, node, killed.Add(40*time.Second))
+}
+
+// waitReplicated waits until the owner replicated ext's live call - the
+// record exists and names the owner, and the counter moved - so a kill
+// that follows tests a takeover, not a call that died unreplicated
+// (honestly a zombie). It returns the call's SIP Call-ID.
+func waitReplicated(t *testing.T, lc *labClient, ext, node string) string {
+	t.Helper()
 	var callID string
 	eventually(t, 10*time.Second, "the call's dialog is replicated", func() error {
 		for _, c := range lc.calls() {
-			if c.To == callee.Extension && c.SIPCallID != "" {
+			if c.To == ext && c.SIPCallID != "" {
 				callID = c.SIPCallID
 			}
 		}
@@ -371,10 +382,7 @@ func TestKillSIPNodeDuringCall(t *testing.T) {
 	if m := nodeMetrics(t, node); !replicatedOK(m) {
 		t.Fatalf("the owner has not replicated: %v", m)
 	}
-	killed := kill(t, node)
-	rec.by(killed.Add(20 * time.Second))
-	takeoverAssertions(t, lc, a, b, in, out, callee.Extension, other, killed, callID)
-	goneBy(t, lc, node, killed.Add(40*time.Second))
+	return callID
 }
 
 // takeoverAssertions is the Phase 7 (in-call HA) assertion set for a node
@@ -569,6 +577,7 @@ func TestKamailioInDialogReroute(t *testing.T) {
 	node := callNode(t, lc, callee.Extension)
 	other := otherNode(node)
 	t.Cleanup(func() { restore(t, lc, node) })
+	waitReplicated(t, lc, callee.Extension, node)
 	killed := kill(t, node)
 	// Wait for the takeover, then hang up from the callee side: its BYE is
 	// the in-dialog request that must be rerouted.
@@ -618,6 +627,7 @@ func TestKamailioInDialogRerouteDeadName(t *testing.T) {
 	node := callNode(t, lc, callee.Extension)
 	other := otherNode(node)
 	t.Cleanup(func() { restore(t, lc, node) })
+	waitReplicated(t, lc, callee.Extension, node)
 	killed := kill(t, node)
 	eventuallyBy(t, killed.Add(25*time.Second), "call taken over by "+other, func(context.Context) error {
 		for _, c := range lc.calls() {
@@ -682,6 +692,7 @@ func TestTakeoverMediaGap(t *testing.T) {
 	node := callNode(t, lc, callee.Extension)
 	other := otherNode(node)
 	t.Cleanup(func() { restore(t, lc, node) })
+	waitReplicated(t, lc, callee.Extension, node)
 	kill(t, node)
 	var offline time.Time
 	eventuallyBy(t, time.Now().Add(25*time.Second), node+" OFFLINE", func(context.Context) error {
@@ -731,8 +742,9 @@ func TestHonestyFlags(t *testing.T) {
 	node := callNode(t, lc, callee.Extension)
 	other := otherNode(node)
 	t.Cleanup(func() { restore(t, lc, node) })
+	callID := waitReplicated(t, lc, callee.Extension, node)
 	killed := kill(t, node)
-	takeoverAssertions(t, lc, a, b, nil, out, callee.Extension, other, killed, "")
+	takeoverAssertions(t, lc, a, b, nil, out, callee.Extension, other, killed, callID)
 	_ = b
 }
 

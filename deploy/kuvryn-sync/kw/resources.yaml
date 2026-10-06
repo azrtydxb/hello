@@ -618,8 +618,11 @@ data:
     	if (!t_check_status("408|503") && !(t_branch_timeout() && !t_branch_replied())) {
     		exit;
     	}
-    	$var(dead) = $du;
-    	if ($var(dead) == $null) {
+    	# The dead hop as a string: assigning a null $du to a $var stores the
+    	# integer 0, which no URI compares equal to.
+    	if ($du != $null && $du != "") {
+    		$var(dead) = $du;
+    	} else {
     		$var(dead) = $ru;
     	}
     	if (!ds_select_dst("1", "4")) {
@@ -786,7 +789,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: 2635eaf45310eee51488e5165020d9476daf0c666829f22c2764ddbd1d33c08c
+        hello.watteel.com/kamailio-config-sha256: f0bcfc6de8d6022105f5f80c39279376fc1842d8485acf6f01d120aa54800817
     spec:
       securityContext:
         # /run/kamailio is an emptyDir the kamailio user (102) must write its
