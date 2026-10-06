@@ -65,7 +65,11 @@ Confirmed against the cluster during the first-sync bootstrap:
 
 - `HELLO_SIP_TRUSTED_PROXIES` (hello-sip-1/2): kw's pod CIDR is
   `10.42.0.0/16` (the nodes' `spec.podCIDR` values).
-- `HELLO_DNS_RESOLVER` (hello-ui): kube-dns is `10.43.0.10`.
+- `HELLO_DNS_RESOLVER` (hello-ui): kube-dns is `10.43.0.10`. nginx's
+  resolver applies no search domains, so `HELLO_CONTROL_UPSTREAM` is the
+  Service FQDN `hello-control.hello.svc.cluster.local` (guarded by
+  `test/deploy/ui_upstream_test.go`); the UI container exits at startup if it
+  does not resolve.
 - `KAMAILIO_PUBLIC_HOST` (kamailio): `192.168.10.101` (node master-11;
   NodePort 30508/udp is reachable on every node address).
 - Images pull from `192.168.10.131:5000/...` with no imagePullSecret: the
