@@ -56,7 +56,9 @@ func documentedOps(t *testing.T) []string {
 }
 
 // concrete fills path parameters.
-func concrete(path string) string { return strings.ReplaceAll(path, "{id}", "1") }
+func concrete(path string) string {
+	return strings.NewReplacer("{id}", "1", "{vendor}", "snom").Replace(path)
+}
 
 func TestVersionAndOpenAPI(t *testing.T) {
 	h := Handler(Config{Store: stubStore{}})

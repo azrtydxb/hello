@@ -2531,6 +2531,1191 @@
           }
         }
       }
+    },
+    "/api/v1/phones": {
+      "get": {
+        "operationId": "listPhones",
+        "summary": "Every provisioned phone, ordered by MAC",
+        "tags": ["phones"],
+        "responses": {
+          "200": {
+            "description": "Phones",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Phone"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createPhone",
+        "summary": "Add a phone; binding an existing device rotates its secret. The provisioning URL with the token is returned only here",
+        "tags": ["phones"],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneWithURL"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/phones/import": {
+      "post": {
+        "operationId": "importPhones",
+        "summary": "Import phones from CSV (mac,vendor,model,extension[,label][,blf]); dryRun=true only checks. An apply creates every row in one transaction or none (400 with the rows)",
+        "tags": ["phones"],
+        "responses": {
+          "200": {
+            "description": "Rows checked or created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneImportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/csv": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "dryRun",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/phones/{id}": {
+      "get": {
+        "operationId": "getPhone",
+        "summary": "One phone",
+        "tags": ["phones"],
+        "responses": {
+          "200": {
+            "description": "Phone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Phone"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "updatePhone",
+        "summary": "Change a phone; deviceId null unbinds (and disables) it, a new deviceId or extensionId rebinds it and rotates that device's secret",
+        "tags": ["phones"],
+        "responses": {
+          "200": {
+            "description": "Phone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Phone"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneUpdate"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deletePhone",
+        "summary": "Delete a phone; its device stays without the sealed secret",
+        "tags": ["phones"],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ]
+      }
+    },
+    "/api/v1/phones/{id}/rotate-token": {
+      "post": {
+        "operationId": "rotatePhoneToken",
+        "summary": "New provisioning token; the old one stays valid for the grace period unless immediate=true. The URL is returned only here",
+        "tags": ["phones"],
+        "responses": {
+          "200": {
+            "description": "Phone with its new URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneWithURL"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "immediate",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/phones/{id}/rearm": {
+      "post": {
+        "operationId": "rearmPhone",
+        "summary": "Rotate the token at once and arm the phone for one more DHCP boot hand-off",
+        "tags": ["phones"],
+        "responses": {
+          "200": {
+            "description": "Phone with its new URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneWithURL"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ]
+      }
+    },
+    "/api/v1/phones/{id}/admin-password/reveal": {
+      "post": {
+        "operationId": "revealPhoneAdminPassword",
+        "summary": "Return the phone's web UI admin password; audited",
+        "tags": ["phones"],
+        "responses": {
+          "200": {
+            "description": "Admin password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["adminPassword"],
+                  "properties": {
+                    "adminPassword": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ]
+      }
+    },
+    "/api/v1/phones/{id}/admin-password/rotate": {
+      "post": {
+        "operationId": "rotatePhoneAdminPassword",
+        "summary": "Set a new random admin password; the phone takes it at its next fetch",
+        "tags": ["phones"],
+        "responses": {
+          "204": {
+            "description": "Rotated"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ]
+      }
+    },
+    "/api/v1/phones/{id}/fetches": {
+      "get": {
+        "operationId": "listPhoneFetches",
+        "summary": "The phone's provisioning fetches, newest first",
+        "tags": ["phones"],
+        "responses": {
+          "200": {
+            "description": "A page of fetches",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items", "next"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Fetch"
+                      }
+                    },
+                    "next": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/phones/{id}/preview": {
+      "get": {
+        "operationId": "previewPhoneFile",
+        "summary": "Render a file as the phone would get it, with the SIP secret, admin password and token masked; not a fetch",
+        "tags": ["phones"],
+        "responses": {
+          "200": {
+            "description": "The rendered file",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "file",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/prov/templates": {
+      "get": {
+        "operationId": "listProvTemplates",
+        "summary": "Built-in and stored provisioning templates",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "Templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ProvTemplate"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createProvTemplate",
+        "summary": "Create a template",
+        "tags": ["provisioning"],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvTemplate"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProvTemplateInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prov/templates/validate": {
+      "post": {
+        "operationId": "validateProvTemplate",
+        "summary": "Validate a template without saving it",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "Valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProvTemplateInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prov/templates/{id}": {
+      "get": {
+        "operationId": "getProvTemplate",
+        "summary": "One template",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "Template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvTemplate"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "A stored template's id, or a built-in's builtinRef",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "updateProvTemplate",
+        "summary": "Change a stored template; the previous version is kept",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "Template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvTemplate"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProvTemplateInput"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "A stored template's id, or a built-in's builtinRef",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteProvTemplate",
+        "summary": "Delete a stored template; refused while a phone overrides with it",
+        "tags": ["provisioning"],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "A stored template's id, or a built-in's builtinRef",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/prov/templates/{id}/copy": {
+      "post": {
+        "operationId": "copyProvTemplate",
+        "summary": "Copy a template (built-in or stored) to edit, one priority higher",
+        "tags": ["provisioning"],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvTemplate"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "A stored template's id, or a built-in's builtinRef",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/prov/firmware": {
+      "get": {
+        "operationId": "listFirmware",
+        "summary": "Uploaded firmware files",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "Firmware",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Firmware"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "uploadFirmware",
+        "summary": "Upload a firmware file (up to 512 MiB); the fields vendor, modelGlob, version (and optional filename) precede the file part",
+        "tags": ["provisioning"],
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Firmware"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["vendor", "modelGlob", "version", "file"],
+                "properties": {
+                  "vendor": {
+                    "type": "string"
+                  },
+                  "modelGlob": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prov/firmware/pins": {
+      "put": {
+        "operationId": "putFirmwarePins",
+        "summary": "Replace every firmware pin",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "The pins",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirmwarePin"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FirmwarePin"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prov/firmware/{id}": {
+      "delete": {
+        "operationId": "deleteFirmware",
+        "summary": "Delete a firmware file; refused while pinned",
+        "tags": ["provisioning"],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ]
+      }
+    },
+    "/api/v1/prov/redirect": {
+      "get": {
+        "operationId": "listRedirectAccounts",
+        "summary": "The vendor redirect-service accounts",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "Accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RedirectAccount"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/prov/redirect/{vendor}": {
+      "put": {
+        "operationId": "putRedirectAccount",
+        "summary": "Set a vendor's account; credentials are checked with the vendor, sealed and never returned. Accounts set by the deployment are read-only",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "Account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedirectAccountInput"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "vendor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["yealink", "poly", "grandstream", "snom", "fanvil"]
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteRedirectAccount",
+        "summary": "Remove a vendor's stored account",
+        "tags": ["provisioning"],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "vendor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["yealink", "poly", "grandstream", "snom", "fanvil"]
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/prov/redirect/{vendor}/check": {
+      "post": {
+        "operationId": "checkRedirectAccount",
+        "summary": "Test the vendor's effective credentials",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "Account with the check result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RedirectAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "vendor",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["yealink", "poly", "grandstream", "snom", "fanvil"]
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/prov/settings": {
+      "get": {
+        "operationId": "getProvSettings",
+        "summary": "Computed provisioning URLs, CA fingerprint and DHCP option values",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2620,6 +3805,490 @@
       }
     },
     "schemas": {
+      "RedirectStatus": {
+        "type": "object",
+        "required": ["state"],
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "not_configured",
+              "manual",
+              "pending",
+              "registered",
+              "failed"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Phone": {
+        "type": "object",
+        "properties": {
+          "mac": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "extensionNumber": {
+            "type": "string"
+          },
+          "lastFetchIp": {
+            "type": "string"
+          },
+          "lastFetchUa": {
+            "type": "string"
+          },
+          "lastFetchFile": {
+            "type": "string"
+          },
+          "firmwareSeen": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "deviceId": {
+            "type": ["integer", "null"]
+          },
+          "extensionId": {
+            "type": ["integer", "null"]
+          },
+          "templateId": {
+            "type": ["integer", "null"]
+          },
+          "blf": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "redirectStatus": {
+            "$ref": "#/components/schemas/RedirectStatus"
+          },
+          "firstFetchAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastFetchAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "tokenExposed": {
+            "type": "boolean"
+          },
+          "uaMismatch": {
+            "type": "boolean"
+          },
+          "bootArmed": {
+            "type": "boolean"
+          },
+          "bootReclaimed": {
+            "type": "boolean"
+          },
+          "renderError": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PhoneWithURL": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Phone"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provisioningUrl": {
+                "type": "string"
+              },
+              "secretRotated": {
+                "type": "boolean"
+              }
+            }
+          }
+        ]
+      },
+      "PhoneCreate": {
+        "type": "object",
+        "required": ["mac", "vendor", "model", "extensionId"],
+        "properties": {
+          "mac": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "extensionId": {
+            "type": "integer"
+          },
+          "deviceId": {
+            "type": "integer"
+          },
+          "templateId": {
+            "type": "integer"
+          },
+          "blf": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PhoneUpdate": {
+        "type": "object",
+        "properties": {
+          "serial": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "extensionId": {
+            "type": "integer"
+          },
+          "deviceId": {
+            "type": ["integer", "null"]
+          },
+          "templateId": {
+            "type": ["integer", "null"]
+          },
+          "blf": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "PhoneImportResult": {
+        "type": "object",
+        "required": ["rows", "ok"],
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "line": {
+                  "type": "integer"
+                },
+                "mac": {
+                  "type": "string"
+                },
+                "errors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "created": {
+            "type": "integer"
+          }
+        }
+      },
+      "Fetch": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "userAgent": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "bytes": {
+            "type": "integer"
+          }
+        }
+      },
+      "ProvTemplate": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "modelGlob": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pattern": {
+                  "type": "string"
+                },
+                "contentType": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "builtin": {
+            "type": "boolean"
+          },
+          "builtinRef": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "ProvTemplateInput": {
+        "type": "object",
+        "properties": {
+          "vendor": {
+            "type": "string"
+          },
+          "modelGlob": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "pattern": {
+                  "type": "string"
+                },
+                "contentType": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Firmware": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "modelGlob": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "uploadedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pinned": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FirmwarePin": {
+        "type": "object",
+        "required": ["vendor", "modelGlob", "firmwareId"],
+        "properties": {
+          "vendor": {
+            "type": "string"
+          },
+          "modelGlob": {
+            "type": "string"
+          },
+          "firmwareId": {
+            "type": "integer"
+          }
+        }
+      },
+      "RedirectAccount": {
+        "type": "object",
+        "properties": {
+          "vendor": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "hasCredentials": {
+            "type": "boolean"
+          },
+          "fromDeployment": {
+            "type": "boolean"
+          },
+          "settings": {
+            "type": "object"
+          },
+          "lastCheckAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastCheckResult": {
+            "type": "string"
+          },
+          "supported": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RedirectAccountInput": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "credentials": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Write-only; keyed by the hello-prov-redirect secret's key names"
+          },
+          "settings": {
+            "type": "object"
+          }
+        }
+      },
+      "ProvSettings": {
+        "type": "object",
+        "properties": {
+          "publicUrl": {
+            "type": "string"
+          },
+          "bootUrl": {
+            "type": "string"
+          },
+          "caUrl": {
+            "type": "string"
+          },
+          "caSha256": {
+            "type": "string"
+          },
+          "sipServer": {
+            "type": "string"
+          },
+          "dhcp": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "vendor": {
+                  "type": "string"
+                },
+                "option": {
+                  "type": "integer"
+                },
+                "value": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
       "VoicemailBox": {
         "type": "object",
         "required": [
