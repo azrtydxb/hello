@@ -49,6 +49,7 @@ type Store interface {
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
 
 	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
+	ListVoicemailBoxes(ctx context.Context) ([]store.VoicemailBoxSummary, error)
 	UpdateVoicemailBox(ctx context.Context, actor string, extensionID int64, c store.VoicemailBoxChange, check store.Check) (store.VoicemailBox, error)
 	ListVoicemailMessages(ctx context.Context, boxID int64, unheardOnly bool) ([]store.VoicemailMessage, error)
 	GetVoicemailMessage(ctx context.Context, id int64) (store.VoicemailMessage, error)
@@ -71,7 +72,9 @@ type Store interface {
 	RotateDeviceSecret(ctx context.Context, actor string, id int64, realm, secret string) (store.Device, error)
 	DeleteDevice(ctx context.Context, actor string, id int64) error
 
-	ListCDRs(ctx context.Context, before int64, limit int) ([]store.CDR, string, error)
+	ListCDRs(ctx context.Context, f store.CDRFilter, before int64, limit int) ([]store.CDR, string, error)
+	CountCDRs(ctx context.Context) (store.CDRCounts, error)
+	CDRConcurrency(ctx context.Context, from, to time.Time, step time.Duration) ([]store.ConcurrencyPoint, error)
 	GetCDR(ctx context.Context, id int64) (store.CDR, routing.Trace, error)
 
 	ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]store.Recording, string, error)
@@ -82,6 +85,7 @@ type Store interface {
 	GetAnnouncement(ctx context.Context, id int64) (store.Announcement, error)
 	AnnouncementByName(ctx context.Context, name string) (store.Announcement, bool, error)
 	CreateAnnouncement(ctx context.Context, actor, name, object string, check store.Check) (store.Announcement, error)
+	ReplaceAnnouncement(ctx context.Context, actor string, id int64) (store.Announcement, error)
 	DeleteAnnouncement(ctx context.Context, actor string, id int64, check store.Check) (string, error)
 
 	ListTrunks(ctx context.Context) ([]store.Trunk, error)
@@ -136,6 +140,11 @@ type Config struct {
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects
+	// Diagnostics reads REGISTER attempts and the failed-auth throttle for
+	// the Diagnostics view; nil answers 503. AuthFailLimit is hello-sip's
+	// HELLO_SIP_AUTH_FAIL_LIMIT (0 means its default, 10).
+	Diagnostics   DiagnosticsLive
+	AuthFailLimit int
 }
 
 type server struct{ Config }
@@ -184,6 +193,7 @@ func Handler(c Config) http.Handler {
 	private("GET /api/v1/extensions/{id}/voicemail", s.getVoicemailBox)
 	private("PUT /api/v1/extensions/{id}/voicemail", s.putVoicemailBox)
 
+	private("GET /api/v1/voicemail/boxes", s.listVoicemailBoxes)
 	private("GET /api/v1/voicemail/messages", s.listVoicemailMessages)
 	private("POST /api/v1/voicemail/messages/{id}/heard", s.markMessageHeard)
 	private("DELETE /api/v1/voicemail/messages/{id}", s.deleteMessage)
@@ -195,7 +205,9 @@ func Handler(c Config) http.Handler {
 
 	private("GET /api/v1/announcements", s.listAnnouncements)
 	private("POST /api/v1/announcements", s.createAnnouncement)
+	private("PUT /api/v1/announcements/{id}", s.replaceAnnouncement)
 	private("DELETE /api/v1/announcements/{id}", s.deleteAnnouncement)
+	private("GET /api/v1/announcements/{id}/audio", s.announcementAudio)
 
 	private("GET /api/v1/ring-groups", s.listRingGroups)
 	private("POST /api/v1/ring-groups", s.createRingGroup)
@@ -211,6 +223,9 @@ func Handler(c Config) http.Handler {
 	private("GET /api/v1/registrations", s.registrations)
 	private("GET /api/v1/calls", s.calls)
 	private("GET /api/v1/cdrs", s.cdrs)
+	private("GET /api/v1/cdrs/counts", s.cdrCounts)
+	private("GET /api/v1/cdrs/concurrency", s.cdrConcurrency)
+	private("GET /api/v1/cdrs/export", s.cdrExport)
 	private("GET /api/v1/cdrs/{id}", s.getCDR)
 
 	private("GET /api/v1/trunks", s.listTrunks)
@@ -240,6 +255,10 @@ func Handler(c Config) http.Handler {
 	private("GET /api/v1/cluster/nodes", s.clusterNodes)
 	private("POST /api/v1/cluster/nodes/{id}/drain", s.requestDrain)
 	private("DELETE /api/v1/cluster/nodes/{id}/drain", s.cancelDrain)
+
+	private("GET /api/v1/diagnostics/devices/{id}", s.deviceDiagnostics)
+	private("GET /api/v1/diagnostics/auth-failures", s.listAuthFailures)
+	private("DELETE /api/v1/diagnostics/auth-failures/{ip}", s.clearAuthFailures)
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.

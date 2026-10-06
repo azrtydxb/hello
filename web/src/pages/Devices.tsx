@@ -22,19 +22,21 @@ import {
   Alert,
   Badge,
   Button,
+  ConfirmDialog,
   EmptyState,
   IconButton,
   Input,
+  LinkButton,
   Modal,
+  PageHeader,
   Select,
   Spinner,
   Switch,
   Table,
   type TableColumn,
+  useToast,
 } from "../design/azrty/components";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
-import { PageHeader } from "./directory/PageHeader";
-import { Toast, useToast } from "./directory/Toast";
 import "./directory/directory.css";
 
 type ListState =
@@ -69,7 +71,6 @@ export function Devices() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [pending, setPending] = useState<Pending>(null);
-  const [busy, setBusy] = useState(false);
   // Component state only: gone when the dialog closes or the page unmounts.
   const [issued, setIssued] = useState<Issued | null>(null);
   const toast = useToast();
@@ -122,33 +123,24 @@ export function Devices() {
     }
   }
 
-  async function onConfirm() {
-    if (!pending) return;
-    const { kind, device } = pending;
+  /** Runs a confirmed rotation or delete; a failure stays in the dialog. */
+  async function onConfirm({ kind, device }: NonNullable<Pending>) {
     setActionError(null);
-    setBusy(true);
-    try {
-      if (kind === "rotate") {
-        const rotated = await rotateDeviceSecret(device.id);
-        replaceDevice(withoutSecret(rotated));
-        setIssued({
-          title: "Secret rotated",
-          description: `${rotated.sipUsername} stops registering until it has the new secret.`,
-          sipUsername: rotated.sipUsername,
-          secret: rotated.secret,
-        });
-      } else {
-        await deleteDevice(device.id);
-        updateDevices((devices) => devices.filter((d) => d.id !== device.id));
-        toast.show(`Device ${device.sipUsername} deleted.`);
-      }
-    } catch (err) {
-      setActionError(
-        `Could not ${kind === "rotate" ? "rotate the secret of" : "delete"} ${device.sipUsername}: ${errorMessage(err)}`,
-      );
-    } finally {
+    if (kind === "rotate") {
+      const rotated = await rotateDeviceSecret(device.id);
+      replaceDevice(withoutSecret(rotated));
       setPending(null);
-      setBusy(false);
+      setIssued({
+        title: "Secret rotated",
+        description: `${rotated.sipUsername} stops registering until it has the new secret.`,
+        sipUsername: rotated.sipUsername,
+        secret: rotated.secret,
+      });
+    } else {
+      await deleteDevice(device.id);
+      updateDevices((devices) => devices.filter((d) => d.id !== device.id));
+      setPending(null);
+      toast.show(`Device ${device.sipUsername} deleted.`);
     }
   }
 
@@ -255,7 +247,7 @@ export function Devices() {
         {actionError && <Alert tone="bad">{actionError}</Alert>}
         {list.status === "loading" && <Spinner label="Loading devices…" />}
         {list.status === "error" && (
-          <Alert tone="bad" title="Could not load devices.">
+          <Alert tone="bad" title="Could not load devices">
             {list.message}
           </Alert>
         )}
@@ -270,9 +262,7 @@ export function Devices() {
             }
             action={
               list.extensions.length === 0 ? (
-                <Link to="/extensions" className="az-btn az-btn--secondary">
-                  Open extensions
-                </Link>
+                <LinkButton to="/extensions">Open extensions</LinkButton>
               ) : (
                 <Button icon="plus" onClick={() => setCreating(true)}>
                   New device
@@ -311,7 +301,7 @@ export function Devices() {
       )}
 
       {pending && (
-        <Modal
+        <ConfirmDialog
           title={
             pending.kind === "rotate"
               ? `Rotate the secret of ${pending.device.sipUsername}?`
@@ -322,26 +312,18 @@ export function Devices() {
               ? "The phone stops registering until it has the new secret."
               : "The phone can no longer register. This cannot be undone."
           }
-          onClose={() => setPending(null)}
-          actions={
-            <>
-              <Button
-                variant="secondary"
-                disabled={busy}
-                onClick={() => setPending(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant={pending.kind === "rotate" ? "primary" : "danger"}
-                disabled={busy}
-                autoFocus
-                onClick={() => void onConfirm()}
-              >
-                {pending.kind === "rotate" ? "Rotate secret" : "Delete device"}
-              </Button>
-            </>
+          confirmLabel={
+            pending.kind === "rotate" ? "Rotate secret" : "Delete device"
           }
+          confirmIcon={pending.kind === "rotate" ? "key-round" : "trash-2"}
+          confirmVariant={pending.kind === "rotate" ? "primary" : "danger"}
+          errorTitle={
+            pending.kind === "rotate"
+              ? "Could not rotate the secret"
+              : "Could not delete"
+          }
+          onConfirm={() => onConfirm(pending)}
+          onClose={() => setPending(null)}
         />
       )}
 
@@ -353,7 +335,7 @@ export function Devices() {
         />
       )}
 
-      <Toast message={toast.message} />
+      {toast.node}
     </section>
   );
 }
@@ -432,7 +414,7 @@ function NewDevice({
           noValidate
         >
           {serverError && (
-            <Alert tone="bad" title="Could not create the device.">
+            <Alert tone="bad" title="Could not create the device">
               {serverError}
             </Alert>
           )}

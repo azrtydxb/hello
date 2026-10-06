@@ -52,9 +52,10 @@ function api(extensions: unknown[], more: Routes = {}) {
 }
 
 async function openNew() {
-  fireEvent.click(
-    (await screen.findAllByRole("button", { name: "New extension" }))[0]!,
-  );
+  const [button] = await screen.findAllByRole("button", {
+    name: "New extension",
+  });
+  fireEvent.click(button!);
   return screen.getByRole("dialog", { name: "New extension" });
 }
 
@@ -145,11 +146,14 @@ describe("Extensions", () => {
     });
     fill(dialog, "0123456789", "Desk");
 
+    // The toast says the create landed; the list then holds the new row.
     expect(
-      await screen.findByRole("row", { name: /0123456789/ }),
-    ).toHaveTextContent("Desk");
+      await screen.findByText("Extension 0123456789 created."),
+    ).toBeVisible();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByText("Extension 0123456789 created.")).toBeVisible();
+    expect(screen.getByRole("row", { name: /0123456789/ })).toHaveTextContent(
+      "Desk",
+    );
     expect(calls).toContainEqual({
       method: "POST",
       url: "/api/v1/extensions",
@@ -159,6 +163,35 @@ describe("Extensions", () => {
         externalNumber: "+97142000102",
       },
     });
+  });
+
+  it("keeps an extension created before the list finished loading", async () => {
+    // The header's "New extension" is usable while the list is still
+    // loading; a list response that predates the create must not drop it.
+    let releaseList!: () => void;
+    const listed = new Promise<void>((resolve) => {
+      releaseList = resolve;
+    });
+    api([], {
+      "GET /api/v1/extensions": async () => {
+        await listed;
+        return json({ items: [] });
+      },
+      "POST /api/v1/extensions": () =>
+        json({ ...EXT, id: 2, number: "200", name: "Early" }, 201),
+    });
+    renderApp("/extensions");
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "New extension" }))[0]!,
+    );
+    fill(screen.getByRole("dialog", { name: "New extension" }), "200", "Early");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    releaseList();
+
+    expect(await screen.findByRole("row", { name: /200/ })).toHaveTextContent(
+      "Early",
+    );
   });
 
   it("validates the external number and shows server errors in the modal", async () => {
@@ -420,15 +453,15 @@ describe("Extensions", () => {
     const drawer = await openDrawer();
 
     fireEvent.click(within(drawer).getByRole("button", { name: "Delete" }));
+    const confirm = screen.getByRole("dialog", {
+      name: "Delete extension 100?",
+    });
     expect(
-      within(drawer).getByText("Delete 100 and its devices?"),
-    ).toBeVisible();
-    expect(
-      within(drawer).getByRole("button", { name: "Delete extension" }),
+      within(confirm).getByRole("button", { name: "Cancel" }),
     ).toHaveFocus();
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
     fireEvent.click(
-      within(drawer).getByRole("button", { name: "Delete extension" }),
+      within(confirm).getByRole("button", { name: "Delete extension" }),
     );
 
     expect(
@@ -452,5 +485,21 @@ describe("Extensions", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
+  });
+
+  it("opens the New extension modal from ?new=1 and drops the flag", async () => {
+    api([EXT]);
+    renderApp("/extensions?new=1");
+
+    expect(
+      await screen.findByRole("dialog", { name: "New extension" }),
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        /^\/extensions$/,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "New extension" })).toBeNull();
   });
 });

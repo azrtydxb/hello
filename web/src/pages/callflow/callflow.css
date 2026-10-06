@@ -1,0 +1,624 @@
+/*
+ * Layout for the call-flow pages (Trunks, Routes, Route tester, Ring
+ * groups), measured from the Kuvryn Hello console design's inline styles.
+ * Tokens only, no raw colours.
+ */
+
+.cf-back {
+  margin-left: -11px;
+  text-decoration: none;
+}
+
+.cf-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cf-plain {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.cf-mono {
+  font-family: var(--az-font-mono);
+}
+
+/* --- cards ---------------------------------------------------------------- */
+
+.cf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr));
+  gap: 16px;
+}
+
+.cf-grid--groups {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr));
+}
+
+.cf-card {
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.cf-card--form {
+  gap: 16px;
+}
+
+.cf-card__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cf-card__head--top {
+  align-items: flex-start;
+}
+
+.cf-card__head > .az-badge {
+  margin-left: auto;
+  flex: none;
+}
+
+.cf-card__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cf-card__name {
+  margin: 0;
+  font-family: var(--az-font-mono);
+  font-weight: 500;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.cf-card__group-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cf-card__sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--az-muted);
+  overflow-wrap: anywhere;
+}
+
+.cf-card__foot {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--az-border);
+  padding-top: 16px;
+}
+
+.cf-card__foot > a.az-btn {
+  text-decoration: none;
+}
+
+.cf-danger.az-btn {
+  margin-left: auto;
+  color: var(--az-bad-strong);
+}
+
+.cf-tile {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: var(--az-selected-bg);
+  color: var(--az-selected-text);
+}
+
+.cf-tile--good {
+  background: var(--az-good-tint);
+  color: var(--az-good-strong);
+}
+
+.cf-tile--bad {
+  background: var(--az-bad-tint);
+  color: var(--az-bad-strong);
+}
+
+.cf-tile--warn {
+  background: var(--az-warn-tint);
+  color: var(--az-warn-strong);
+}
+
+.cf-tile--info {
+  background: var(--az-info-tint);
+  color: var(--az-info-strong);
+}
+
+/* --- trunk destinations ------------------------------------------------- */
+
+.cf-dests {
+  display: block;
+  width: 100%;
+  border-top: 1px solid var(--az-border);
+  margin: 0;
+}
+
+.cf-dests thead,
+.cf-dests tbody {
+  display: block;
+}
+
+.cf-dests th,
+.cf-dests td {
+  display: block;
+  padding: 0;
+  text-align: left;
+  font-weight: inherit;
+  min-width: 0;
+}
+
+.cf-dests__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 60px 60px 110px;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 0;
+  border-top: 1px solid var(--az-border);
+  font-size: 13px;
+}
+
+.cf-dests__row--head {
+  padding: 12px 0 8px;
+  border-top: 0;
+}
+
+.cf-dests__host {
+  font-family: var(--az-font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cf-dests__num {
+  font-family: var(--az-font-mono);
+}
+
+.cf-dests .cf-dests__right {
+  text-align: right;
+}
+
+.cf-dests .cf-health {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.cf-health--good {
+  color: var(--az-good-strong);
+}
+
+.cf-health--good .az-dot {
+  background: var(--az-good);
+}
+
+.cf-health--bad {
+  color: var(--az-bad-strong);
+}
+
+.cf-health--bad .az-dot {
+  background: var(--az-bad);
+}
+
+.cf-health--unknown {
+  color: var(--az-faint);
+}
+
+.cf-health--unknown .az-dot {
+  background: var(--az-faint);
+}
+
+/* --- routes ------------------------------------------------------------- */
+
+.cf-tabs {
+  margin-bottom: 20px;
+}
+
+.cf-tabpanel:focus-visible {
+  outline: 2px solid var(--az-indicator);
+  outline-offset: 2px;
+}
+
+.cf-pos {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--az-faint);
+}
+
+.cf-grip {
+  cursor: grab;
+}
+
+.cf-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cf-chips .az-icon {
+  color: var(--az-faint);
+}
+
+.cf-chip {
+  font-family: var(--az-font-mono);
+  font-size: 12px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--az-raised);
+  border: 1px solid var(--az-border);
+}
+
+.cf-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cf-match {
+  font-family: var(--az-font-mono);
+  color: var(--az-text);
+}
+
+.cf-dest small {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--az-muted);
+}
+
+.cf-dest .az-icon {
+  color: var(--az-muted);
+}
+
+.cf-row-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.cf-name-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cf-name-btn:hover {
+  text-decoration: underline;
+}
+
+.cf-dragging {
+  opacity: 0.5;
+}
+
+.cf-drop-target td,
+.cf-drop-target th {
+  box-shadow: inset 0 2px 0 var(--az-indicator);
+}
+
+/* --- route tester ------------------------------------------------------- */
+
+.cf-tester {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.cf-tester__result {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+@media (min-width: 1100px) {
+  .cf-tester {
+    grid-template-columns: minmax(360px, 1fr) minmax(0, 2fr);
+  }
+}
+
+.cf-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cf-two {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 12px;
+}
+
+.cf-decision__title {
+  margin-top: 2px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.cf-chain {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--az-raised);
+  border: 1px solid var(--az-border);
+  font-family: var(--az-font-mono);
+  font-size: 13px;
+}
+
+.cf-chain > .az-icon {
+  color: var(--az-faint);
+}
+
+.cf-chain__step {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cf-chain__k {
+  font-family: var(--az-font-sans);
+  font-size: 10px;
+  color: var(--az-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.cf-chain__v {
+  color: var(--az-text);
+  overflow-wrap: anywhere;
+}
+
+.cf-trace {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.cf-trace__step {
+  display: grid;
+  grid-template-columns: 28px 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 10px 0;
+  border-top: 1px solid var(--az-border);
+}
+
+.cf-trace__n {
+  font-family: var(--az-font-mono);
+  font-size: 11px;
+  color: var(--az-faint);
+}
+
+.cf-trace__step > .az-icon {
+  color: var(--az-muted);
+}
+
+.cf-trace__step--good > .az-icon {
+  color: var(--az-good);
+}
+
+.cf-trace__step--bad > .az-icon {
+  color: var(--az-bad);
+}
+
+.cf-trace__text {
+  font-size: 13px;
+  color: var(--az-text-2);
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+
+/* --- ring groups -------------------------------------------------------- */
+
+.cf-members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--az-border);
+}
+
+.cf-member {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--az-border);
+}
+
+.cf-member__pos {
+  font-family: var(--az-font-mono);
+  font-size: 11px;
+  color: var(--az-faint);
+}
+
+.cf-member__who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.cf-member__extra {
+  font-family: var(--az-font-mono);
+  font-size: 12px;
+  color: var(--az-muted);
+}
+
+.cf-failure {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--az-text-2);
+}
+
+.cf-failure > .az-icon {
+  color: var(--az-muted);
+}
+
+.cf-failure strong {
+  color: var(--az-text);
+  font-weight: 500;
+}
+
+/* --- drawer forms ------------------------------------------------------- */
+
+.cf-form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.cf-form__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 18px 0 0;
+  border: 0;
+  border-top: 1px solid var(--az-border);
+  min-width: 0;
+}
+
+.cf-form__section > legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.cf-form__section > legend + * {
+  clear: both;
+}
+
+.cf-form__note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--az-muted);
+}
+
+.cf-form__error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--az-bad-strong);
+}
+
+.cf-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cf-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--az-border);
+}
+
+.cf-row__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 90px), 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.cf-row__fields--dest {
+  grid-template-columns: minmax(min(100%, 160px), 2fr) repeat(
+      3,
+      minmax(70px, 1fr)
+    );
+}
+
+.cf-row__label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.cf-row__actions {
+  display: flex;
+  gap: 2px;
+}
+
+.cf-add {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.cf-add > .az-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.cf-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.cf-window {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--az-border);
+  border-radius: var(--az-radius-md);
+  min-width: 0;
+}
+
+.cf-window > legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--az-muted);
+}
+
+@media (max-width: 760px) {
+  .cf-row__fields--dest {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 90px), 1fr));
+  }
+
+  .cf-dests__row {
+    grid-template-columns: minmax(0, 1fr) 40px 50px 90px;
+  }
+}

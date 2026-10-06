@@ -1,61 +1,85 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import {
   deleteRecording,
   errorMessage,
-  isPlayableAudio,
   listExtensions,
-  listRecordings,
   recordingAudioPath,
   type Extension,
-  type Id,
-  type Recording,
+  type RecordingOrigin,
 } from "../api";
-import { ConfirmButton } from "../components/ConfirmButton";
+import {
+  listCallRecordings,
+  recordingDownloadPath,
+  type CallRecording,
+  type CallRecordingPage,
+} from "../api/media";
+import {
+  Alert,
+  Badge,
+  Button,
+  ConfirmDialog,
+  EmptyState,
+  Icon,
+  IconButton,
+  PageHeader,
+  Select,
+  Spinner,
+  Table,
+  type TableColumn,
+  useToast,
+} from "../design/azrty/components";
 import { formatDuration, formatTime } from "../format";
+import { NowPlaying, usePlayback } from "./media/MediaParts";
 
 export const PAGE_SIZE = 50;
-
-/** One page of recordings, as listRecordings returns it. */
-type Page = { items: Recording[]; next: string };
 
 type ListState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; page: Page };
+  | { status: "ready"; page: CallRecordingPage };
 
-/** Recordings: paged list, extension filter, playback, delete. */
+/** How each origin reads in the "Started by" badge. */
+const ORIGIN_LABEL: Record<RecordingOrigin, string> = {
+  default: "default",
+  dtmf: "dtmf (*1)",
+  api: "api",
+};
+
+/** The parties of the recording's call, or "—" before its CDR exists. */
+function callLabel(r: CallRecording): string {
+  if (!r.source && !r.destination) return "—";
+  return `${r.source || "—"} → ${r.destination || "—"}`;
+}
+
+/** Recordings: paged list, extension filter, playback, download, delete. */
 export function Recordings() {
   const [extensions, setExtensions] = useState<Extension[]>([]);
+  const [extensionsError, setExtensionsError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
-  const [applied, setApplied] = useState("");
   const [cursors, setCursors] = useState<string[]>([""]);
   const [state, setState] = useState<ListState>({ status: "loading" });
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [checking, setChecking] = useState<Id | null>(null);
-  const [playing, setPlaying] = useState<Id | null>(null);
-  const [playError, setPlayError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<CallRecording | null>(null);
+  const toast = useToast();
+  const showToast = toast.show;
+  const playback = usePlayback(() => "Could not play the recording");
   const before = cursors[cursors.length - 1] ?? "";
 
-  // The extension picker doubles as the filter: an empty value lists all.
   useEffect(() => {
     const controller = new AbortController();
     listExtensions(controller.signal)
-      .then((items) => {
-        if (!controller.signal.aborted) setExtensions(items);
-      })
+      .then((items) => setExtensions(items))
       .catch((err: unknown) => {
-        if (!controller.signal.aborted) {
-          setActionError(errorMessage(err));
-        }
+        if (!controller.signal.aborted) setExtensionsError(errorMessage(err));
       });
     return () => controller.abort();
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    listRecordings(
+    listCallRecordings(
       {
-        extension: applied || undefined,
+        extension: filter || undefined,
         before: before || undefined,
         limit: PAGE_SIZE,
       },
@@ -68,182 +92,242 @@ export function Recordings() {
         }
       });
     return () => controller.abort();
-  }, [applied, before]);
+  }, [filter, before]);
 
-  async function onPlay(rec: Recording) {
-    setPlayError(null);
-    setChecking(rec.id);
-    try {
-      const res = await fetch(recordingAudioPath(rec.id), {
-        credentials: "same-origin",
-      });
-      if (isPlayableAudio(res)) {
-        setPlaying(rec.id);
-      } else {
-        setPlaying(null);
-        setPlayError(
-          "Could not play the recording: the audio is not available " +
-            `(HTTP ${res.status}).`,
-        );
-      }
-    } catch (err: unknown) {
-      setPlaying(null);
-      setPlayError(`Could not play the recording: ${errorMessage(err)}`);
-    } finally {
-      setChecking(null);
-    }
-  }
-
-  async function onDelete(rec: Recording) {
-    setActionError(null);
-    try {
-      await deleteRecording(rec.id);
-      setState((prev) =>
-        prev.status === "ready"
-          ? {
-              status: "ready",
-              page: {
-                items: prev.page.items.filter((r) => r.id !== rec.id),
-                next: prev.page.next,
-              },
-            }
-          : prev,
-      );
-      if (playing === rec.id) setPlaying(null);
-    } catch (err: unknown) {
-      setActionError(`Could not delete the recording: ${errorMessage(err)}`);
-    }
+  async function onDelete(rec: CallRecording) {
+    await deleteRecording(rec.id);
+    setState((prev) =>
+      prev.status === "ready"
+        ? {
+            status: "ready",
+            page: {
+              items: prev.page.items.filter((r) => r.id !== rec.id),
+              next: prev.page.next,
+            },
+          }
+        : prev,
+    );
+    if (String(playback.playing) === String(rec.id)) playback.stop();
+    setDeleting(null);
+    showToast(`Recording ${rec.correlationId} deleted.`);
   }
 
   const page = state.status === "ready" ? state.page : undefined;
   const playingRec =
-    page?.items.find((r) => String(r.id) === String(playing)) ?? null;
+    page?.items.find((r) => String(r.id) === String(playback.playing)) ?? null;
+
+  const columns: TableColumn<CallRecording>[] = [
+    {
+      key: "play",
+      label: <span className="visually-hidden">Play</span>,
+      width: 44,
+      primary: false,
+      render: (r) => {
+        const isPlaying = String(playback.playing) === String(r.id);
+        return (
+          <IconButton
+            icon={isPlaying ? "pause" : "play"}
+            label={
+              isPlaying
+                ? `Stop the recording ${r.correlationId}`
+                : `Play the recording ${r.correlationId}`
+            }
+            disabled={playback.checking !== null}
+            onClick={() =>
+              isPlaying
+                ? playback.stop()
+                : void playback.play(
+                    r.id,
+                    recordingAudioPath(r.id),
+                    r.correlationId,
+                  )
+            }
+          />
+        );
+      },
+    },
+    {
+      key: "recorded",
+      label: "Recorded",
+      render: (r) => formatTime(r.createdAt),
+    },
+    {
+      key: "call",
+      label: "Call",
+      render: (r) =>
+        r.source || r.destination ? (
+          <span>
+            <span className="rec-call">{r.source || "—"}</span> →{" "}
+            <span className="rec-call">{r.destination || "—"}</span>
+          </span>
+        ) : (
+          "—"
+        ),
+    },
+    {
+      key: "correlation",
+      label: "Correlation ID",
+      mono: true,
+      render: (r) =>
+        r.cdrId !== undefined && r.cdrId !== null ? (
+          <Link to={`/history/${encodeURIComponent(String(r.cdrId))}`}>
+            {r.correlationId}
+          </Link>
+        ) : (
+          r.correlationId
+        ),
+    },
+    {
+      key: "origin",
+      label: "Started by",
+      render: (r) => (
+        <Badge tone="outline">
+          {ORIGIN_LABEL[r.initiatedBy] ?? r.initiatedBy}
+        </Badge>
+      ),
+    },
+    {
+      key: "length",
+      label: "Length",
+      align: "right",
+      mono: true,
+      render: (r) => formatDuration(r.durationMs),
+    },
+    {
+      key: "actions",
+      label: <span className="visually-hidden">Actions</span>,
+      align: "right",
+      render: (r) => (
+        <div className="media-actions">
+          <a
+            className="az-iconbtn"
+            href={recordingDownloadPath(r.id)}
+            download={`recording-${String(r.id)}.wav`}
+            aria-label={`Download the recording ${r.correlationId}`}
+            title="Download"
+          >
+            <Icon name="download" size={16} />
+          </a>
+          <IconButton
+            icon="trash-2"
+            label={`Delete the recording ${r.correlationId}`}
+            onClick={() => setDeleting(r)}
+          />
+        </div>
+      ),
+    },
+  ];
+
+  const options = [
+    { value: "", label: "All extensions" },
+    ...extensions.map((e) => ({
+      value: e.number,
+      label: `${e.number} ${e.name}`,
+    })),
+  ];
 
   return (
     <section aria-labelledby="page-title">
-      <h1 id="page-title">Recordings</h1>
-      {actionError && (
-        <p role="alert" className="error">
-          {actionError}
-        </p>
-      )}
-      <div className="fields">
-        <div className="field">
-          <label htmlFor="rec-filter">Filter by extension</label>
-          <select
-            id="rec-filter"
-            value={filter}
-            onChange={(e) => {
-              setFilter(e.target.value);
-              setApplied(e.target.value);
-              setCursors([""]);
-            }}
-          >
-            <option value="">All extensions</option>
-            {extensions.map((ext) => (
-              <option key={String(ext.id)} value={ext.number}>
-                {ext.number} — {ext.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-      {state.status === "loading" && (
-        <p role="status" aria-live="polite">
-          Loading recordings…
-        </p>
-      )}
-      {state.status === "error" && (
-        <div role="alert" className="error">
-          <strong>Could not load recordings.</strong>
-          <p>{state.message}</p>
-        </div>
-      )}
-      {playError && (
-        <p role="alert" className="error">
-          {playError}
-        </p>
-      )}
-      {page && page.items.length === 0 && (
-        <p className="muted">
-          No recordings{applied ? " for this extension" : ""}.
-        </p>
-      )}
-      {playingRec && (
-        <div className="playbar">
-          <p className="muted">
-            Playing the recording of {playingRec.correlationId}, recorded{" "}
-            {formatTime(playingRec.createdAt)}.
-          </p>
-          <audio
-            controls
+      <PageHeader
+        eyebrow="Media"
+        title="Recordings"
+        description={
+          <>
+            Anchored calls recorded by default, by{" "}
+            <span className="media-mono">*1</span> mid-call, or through the API.
+          </>
+        }
+        actions={
+          <>
+            <Select
+              size="sm"
+              className="rec-filter"
+              aria-label="Filter by extension"
+              options={options}
+              value={filter}
+              onChange={(e) => {
+                setFilter(e.target.value);
+                setCursors([""]);
+              }}
+            />
+          </>
+        }
+      />
+      <div className="media-stack">
+        {extensionsError && (
+          <Alert tone="warn" title="Could not load the extension filter">
+            {extensionsError}
+          </Alert>
+        )}
+        {playback.error && <Alert tone="bad">{playback.error}</Alert>}
+        {playingRec && (
+          <NowPlaying
+            key={String(playingRec.id)}
             src={recordingAudioPath(playingRec.id)}
-            aria-label={`Playback of the recording ${playingRec.correlationId}`}
+            title={callLabel(playingRec)}
+            label={`Playback of the recording ${playingRec.correlationId}`}
+            durationMs={playingRec.durationMs}
+            onStop={playback.stop}
           />
-        </div>
-      )}
-      {page && page.items.length > 0 && (
-        <table aria-labelledby="page-title">
-          <thead>
-            <tr>
-              <th scope="col">Call</th>
-              <th scope="col">Recorded</th>
-              <th scope="col">Started by</th>
-              <th scope="col">Duration</th>
-              <th scope="col">
-                <span className="visually-hidden">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {page.items.map((rec) => (
-              <tr key={String(rec.id)}>
-                <th scope="row">{rec.correlationId}</th>
-                <td>{formatTime(rec.createdAt)}</td>
-                <td>{rec.initiatedBy}</td>
-                <td>{formatDuration(rec.durationMs)}</td>
-                <td className="row-actions">
-                  <button
-                    type="button"
-                    disabled={checking !== null}
-                    aria-label={`Play the recording ${rec.correlationId}`}
-                    onClick={() =>
-                      playing === rec.id ? setPlaying(null) : void onPlay(rec)
-                    }
-                  >
-                    {playing === rec.id ? "Stop" : "Play"}
-                  </button>
-                  <ConfirmButton
-                    label="Delete"
-                    accessibleLabel={`Delete the recording ${rec.correlationId}`}
-                    prompt={`Delete the recording ${rec.correlationId}?`}
-                    confirmLabel="Delete recording"
-                    onConfirm={() => onDelete(rec)}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <nav className="pager" aria-label="Recording pages">
-        <button
-          type="button"
-          disabled={cursors.length === 1 || state.status === "loading"}
-          onClick={() => setCursors(cursors.slice(0, -1))}
-        >
-          Newer
-        </button>
-        <button
-          type="button"
+        )}
+        {state.status === "loading" && <Spinner label="Loading recordings…" />}
+        {state.status === "error" && (
+          <Alert tone="bad" title="Could not load recordings">
+            {state.message}
+          </Alert>
+        )}
+        {page && page.items.length === 0 && (
+          <EmptyState
+            icon="mic"
+            title={
+              filter ? "No recordings for this extension" : "No recordings yet"
+            }
+            description="Anchored calls are recorded by default; *1 toggles recording mid-call."
+          />
+        )}
+        {page && page.items.length > 0 && (
+          <Table
+            caption="Recordings"
+            columns={columns}
+            rows={page.items}
+            rowKey={(r) => String(r.id)}
+          />
+        )}
+      </div>
+      <nav className="media-pager" aria-label="Recording pages">
+        {cursors.length > 1 && (
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="chevron-left"
+            disabled={state.status === "loading"}
+            onClick={() => setCursors(cursors.slice(0, -1))}
+          >
+            Newer
+          </Button>
+        )}
+        <Button
+          variant="secondary"
+          size="sm"
+          iconRight="chevron-right"
           disabled={!page?.next || state.status === "loading"}
           onClick={() => {
             if (page?.next) setCursors([...cursors, page.next]);
           }}
         >
           Older
-        </button>
+        </Button>
       </nav>
+      {deleting && (
+        <ConfirmDialog
+          title="Delete recording?"
+          description={`The recording of ${deleting.correlationId} and its audio are removed. This cannot be undone.`}
+          confirmLabel="Delete recording"
+          onConfirm={() => onDelete(deleting)}
+          onClose={() => setDeleting(null)}
+        />
+      )}
+      {toast.node}
     </section>
   );
 }

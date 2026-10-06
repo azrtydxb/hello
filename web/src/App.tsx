@@ -1,6 +1,5 @@
 import type { ComponentType } from "react";
 import {
-  Link,
   Navigate,
   NavLink,
   Outlet,
@@ -12,7 +11,7 @@ import {
 import { AuthProvider, RequireAuth, useAuth } from "./auth";
 import { HelloLogo } from "./brand";
 import {
-  Icon,
+  LinkButton,
   NavItemContent,
   navItemClassName,
   Sidebar,
@@ -34,11 +33,13 @@ import { Cluster } from "./pages/Cluster";
 import { Calls } from "./pages/Calls";
 import { Dashboard } from "./pages/Dashboard";
 import { Devices } from "./pages/Devices";
+import { Diagnostics } from "./pages/Diagnostics";
 import { Extensions } from "./pages/Extensions";
 import { History } from "./pages/History";
 import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
 import { Placeholder } from "./pages/Placeholder";
+import { usePlatformBadges } from "./pages/platform/ui";
 import { Recordings } from "./pages/Recordings";
 import { Announcements } from "./pages/Announcements";
 import { Registrations } from "./pages/Registrations";
@@ -60,6 +61,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/trunks": Trunks,
   "/routes": RoutesPage,
   "/cluster": Cluster,
+  "/diagnostics": Diagnostics,
   "/voicemail": Voicemail,
   "/ring-groups": RingGroups,
   "/recordings": Recordings,
@@ -73,6 +75,7 @@ function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
   const controlPlane = useControlPlane();
+  const badges = usePlatformBadges();
   const reachable = controlPlane.status === "reachable";
   const title = pageTitle(location.pathname);
   // Call detail belongs to Call history in the nav.
@@ -121,7 +124,11 @@ function Shell() {
                     )
                   }
                 >
-                  <NavItemContent icon={item.icon} label={item.label} />
+                  <NavItemContent
+                    icon={item.icon}
+                    label={item.label}
+                    badge={badges[item.path]}
+                  />
                 </NavLink>
               ))}
             </SidebarNavGroup>
@@ -133,13 +140,9 @@ function Shell() {
           crumbs={title ? ["Kuvryn Hello", title] : ["Kuvryn Hello"]}
           live={reachable}
         >
-          <Link
-            to="/routes/test"
-            className="az-btn az-btn--secondary az-btn--sm"
-          >
-            <Icon name="flask-conical" size={14} />
+          <LinkButton to="/routes/test" size="sm" icon="flask-conical">
             Test a number
-          </Link>
+          </LinkButton>
           <ThemeToggle />
         </Topbar>
         <main id="main" className="app-shell__main" tabIndex={-1}>

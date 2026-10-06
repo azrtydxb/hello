@@ -23,16 +23,29 @@ type Recording struct {
 	InitiatedBy   string    `json:"initiatedBy"`
 	DurationMs    int64     `json:"durationMs"`
 	CreatedAt     time.Time `json:"createdAt"`
+	// CDRID, Source and Destination come from the call's CDR (one per
+	// correlation id); a recording whose CDR is not written yet has no CDRID
+	// and empty parties.
+	CDRID       *int64 `json:"cdrId,omitempty"`
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
 	// Object is the MinIO key; it stays internal (clients play audio through
 	// the audio route).
 	Object string `json:"-"`
 }
 
-const recordingCols = `id, correlation_id, initiated_by, duration_ms, created_at, minio_object`
+// recordingFrom selects recordingCols: the recording joined to its call's
+// CDR, so a list shows who called whom.
+const (
+	recordingCols = `r.id, r.correlation_id, r.initiated_by, r.duration_ms, r.created_at, r.minio_object,
+		c.id, COALESCE(c.source, ''), COALESCE(c.destination, '')`
+	recordingFrom = ` FROM recordings r LEFT JOIN cdrs c ON c.correlation_id = r.correlation_id`
+)
 
 func scanRecording(r interface{ Scan(...any) error }) (Recording, error) {
 	var rec Recording
-	err := r.Scan(&rec.ID, &rec.CorrelationID, &rec.InitiatedBy, &rec.DurationMs, &rec.CreatedAt, &rec.Object)
+	err := r.Scan(&rec.ID, &rec.CorrelationID, &rec.InitiatedBy, &rec.DurationMs, &rec.CreatedAt, &rec.Object,
+		&rec.CDRID, &rec.Source, &rec.Destination)
 	return rec, err
 }
 
@@ -43,7 +56,7 @@ func scanRecording(r interface{ Scan(...any) error }) (Recording, error) {
 func (s *Store) ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]Recording, string, error) {
 	// One static query (as in ListCDRs): an empty extension keeps everything
 	// and a zero before starts at the newest.
-	rows, err := s.db.QueryContext(ctx, `SELECT `+recordingCols+` FROM recordings r
+	rows, err := s.db.QueryContext(ctx, `SELECT `+recordingCols+recordingFrom+`
 		WHERE ($1 = '' OR EXISTS (SELECT 1 FROM cdrs c
 			WHERE c.correlation_id = r.correlation_id AND (c.source = $1 OR c.destination = $1)))
 		AND ($2 = 0 OR r.id < $2)
@@ -88,7 +101,7 @@ func (s *Store) InsertRecording(ctx context.Context, correlationID, object, init
 // GetRecording returns one recording.
 func (s *Store) GetRecording(ctx context.Context, id int64) (Recording, error) {
 	rec, err := scanRecording(s.db.QueryRowContext(ctx,
-		`SELECT `+recordingCols+` FROM recordings WHERE id = $1`, id))
+		`SELECT `+recordingCols+recordingFrom+` WHERE r.id = $1`, id))
 	return rec, mapErr(err)
 }
 
@@ -179,6 +192,21 @@ func (s *Store) CreateAnnouncement(ctx context.Context, actor, name, object stri
 			INSERT INTO announcements (name, minio_object) VALUES ($1, $2) RETURNING `+announcementCols,
 			name, object))
 		return a.ID, err
+	})
+	return a, err
+}
+
+// ReplaceAnnouncement records that an announcement's audio was replaced:
+// the object at the same key was overwritten by the caller, so only
+// updated_at moves. It runs through configChange like every announcement
+// change (audit, revision bump, NOTIFY), so hello-sip reloads the audio.
+func (s *Store) ReplaceAnnouncement(ctx context.Context, actor string, id int64) (Announcement, error) {
+	var a Announcement
+	err := s.configChange(ctx, actor, "update", "announcement", nil, func(tx *sql.Tx) (int64, error) {
+		var err error
+		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
+			UPDATE announcements SET updated_at = now() WHERE id = $1 RETURNING `+announcementCols, id))
+		return id, err
 	})
 	return a, err
 }

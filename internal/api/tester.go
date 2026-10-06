@@ -25,6 +25,7 @@ type testDecision struct {
 	CallerID   string       `json:"callerId"`
 	Route      string       `json:"route"`
 	Trunks     []string     `json:"trunks"`
+	Emergency  bool         `json:"emergency"`
 	RejectCode int          `json:"rejectCode"`
 	Reason     string       `json:"reason"`
 }
@@ -130,7 +131,7 @@ func (s *server) routingTest(w http.ResponseWriter, r *http.Request) {
 	}
 	out := testDecision{
 		Kind: d.Kind, Extension: d.Extension, SIPURI: d.SIPURI, Number: d.Number, CallerID: d.CallerID,
-		Route: d.Route, Trunks: []string{}, RejectCode: d.RejectCode, Reason: d.Reason,
+		Route: d.Route, Trunks: []string{}, Emergency: d.Emergency, RejectCode: d.RejectCode, Reason: d.Reason,
 	}
 	for _, c := range d.Candidates {
 		if c.Trunk != nil {
@@ -216,10 +217,12 @@ type cdrDetail struct {
 	store.CDR
 	Trace       routing.Trace `json:"trace"`
 	Explanation string        `json:"explanation"`
+	Note        string        `json:"note"`
 }
 
 // getCDR is GET /api/v1/cdrs/{id}: the CDR, its routing trace, and for a
-// failed call a one-line explanation (the last trace step).
+// failed call a one-line explanation (the last trace step), for an
+// answered call that failed over a note saying so.
 func (s *server) getCDR(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -230,7 +233,7 @@ func (s *server) getCDR(w http.ResponseWriter, r *http.Request) {
 		s.storeError(w, "cdr", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, cdrDetail{CDR: c, Trace: trace, Explanation: explain(c, trace)})
+	writeJSON(w, http.StatusOK, cdrDetail{CDR: c, Trace: trace, Explanation: explain(c, trace), Note: note(c, trace)})
 }
 
 func explain(c store.CDR, trace routing.Trace) string {

@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -41,13 +42,18 @@ type Objects interface {
 	EnsureBucket(ctx context.Context) error
 
 	// PresignRecording returns a GET URL for a recording, valid 15 minutes.
-	PresignRecording(ctx context.Context, object string) (string, error)
+	// A non-empty download names the file the browser saves it as
+	// (Content-Disposition: attachment); empty plays it inline.
+	PresignRecording(ctx context.Context, object, download string) (string, error)
 	// PutRecording uploads r (size known) as recording audio.
 	PutRecording(ctx context.Context, object string, r io.Reader, size int64) error
 	// RemoveRecording deletes a recording object.
 	RemoveRecording(ctx context.Context, object string) error
 	// PutAnnouncement uploads r (size known) as announcement audio.
 	PutAnnouncement(ctx context.Context, object string, r io.Reader, size int64) error
+	// PresignAnnouncement returns a GET URL for announcement audio, valid 15
+	// minutes.
+	PresignAnnouncement(ctx context.Context, object string) (string, error)
 	// RemoveAnnouncement deletes announcement audio.
 	RemoveAnnouncement(ctx context.Context, object string) error
 	// EnsureMediaBuckets creates hello-recordings and hello-announcements when
@@ -112,8 +118,12 @@ func (m *MinioObjects) EnsureBucket(ctx context.Context) error {
 	return m.ensure(ctx, VoicemailBucket)
 }
 
-func (m *MinioObjects) PresignRecording(ctx context.Context, object string) (string, error) {
-	u, err := m.cli.PresignedGetObject(ctx, RecordingsBucket, object, presignTTL, nil)
+func (m *MinioObjects) PresignRecording(ctx context.Context, object, download string) (string, error) {
+	var params url.Values
+	if download != "" {
+		params = url.Values{"response-content-disposition": {fmt.Sprintf("attachment; filename=%q", download)}}
+	}
+	u, err := m.cli.PresignedGetObject(ctx, RecordingsBucket, object, presignTTL, params)
 	if err != nil {
 		return "", fmt.Errorf("api: presign recording %s: %w", object, err)
 	}
@@ -141,6 +151,14 @@ func (m *MinioObjects) PutAnnouncement(ctx context.Context, object string, r io.
 		return fmt.Errorf("api: put announcement %s: %w", object, err)
 	}
 	return nil
+}
+
+func (m *MinioObjects) PresignAnnouncement(ctx context.Context, object string) (string, error) {
+	u, err := m.cli.PresignedGetObject(ctx, AnnouncementsBucket, object, presignTTL, nil)
+	if err != nil {
+		return "", fmt.Errorf("api: presign announcement %s: %w", object, err)
+	}
+	return u.String(), nil
 }
 
 func (m *MinioObjects) RemoveAnnouncement(ctx context.Context, object string) error {

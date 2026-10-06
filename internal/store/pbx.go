@@ -183,6 +183,43 @@ func (s *Store) VoicemailCounts(ctx context.Context, boxID int64) (unheard, tota
 	return unheard, total, err
 }
 
+// VoicemailBoxSummary is one box in the box list: its extension and its
+// message counts.
+type VoicemailBoxSummary struct {
+	ID          int64  `json:"id"`
+	ExtensionID int64  `json:"extensionId"`
+	Number      string `json:"number"`
+	Name        string `json:"name"`
+	Unheard     int64  `json:"unheard"`
+	Total       int64  `json:"total"`
+}
+
+// ListVoicemailBoxes returns every box with its extension and message
+// counts, ordered by extension number.
+func (s *Store) ListVoicemailBoxes(ctx context.Context) ([]VoicemailBoxSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT b.id, b.extension_id, e.number, e.name,
+			count(m.id) FILTER (WHERE NOT m.heard), count(m.id)
+		FROM voicemail_boxes b
+		JOIN extensions e ON e.id = b.extension_id
+		LEFT JOIN voicemail_messages m ON m.box_id = b.id
+		GROUP BY b.id, e.number, e.name
+		ORDER BY e.number`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []VoicemailBoxSummary{}
+	for rows.Next() {
+		var b VoicemailBoxSummary
+		if err := rows.Scan(&b.ID, &b.ExtensionID, &b.Number, &b.Name, &b.Unheard, &b.Total); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 // EmailJob is one message waiting for voicemail-to-email delivery.
 type EmailJob struct {
 	MessageID  int64

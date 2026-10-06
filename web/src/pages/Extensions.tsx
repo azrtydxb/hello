@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router";
 import {
   createExtension,
   deleteExtension,
@@ -25,19 +25,21 @@ import {
   Alert,
   Badge,
   Button,
+  ConfirmDialog,
   Drawer,
   EmptyState,
   Input,
+  LinkButton,
   Modal,
+  PageHeader,
   Spinner,
   Switch,
   Table,
   type TableColumn,
+  useToast,
 } from "../design/azrty/components";
 import { mapFieldErrors } from "../forms";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
-import { PageHeader } from "./directory/PageHeader";
-import { Toast, useToast } from "./directory/Toast";
 import "./directory/directory.css";
 
 const NUMBER_HINT = "2 to 10 digits.";
@@ -107,8 +109,22 @@ export function Extensions() {
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<Extension["id"] | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [params, setParams] = useSearchParams();
+  // ?new=1 (the Dashboard's "New extension") opens the New extension modal.
+  const [creating, setCreating] = useState(params.get("new") === "1");
+  // Extensions created while the list was still loading (from the header or
+  // ?new=1): the list response may predate them, so they are merged in when
+  // it lands.
+  const createdEarly = useRef<Extension[]>([]);
   const toast = useToast();
+
+  useEffect(() => {
+    if (params.get("new") !== "1") return;
+    // Drop the flag so closing the modal or reloading does not reopen it.
+    const next = new URLSearchParams(params);
+    next.delete("new");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
   const liveState = usePolling(loadLiveDirectory, LIVE_REFRESH_MS);
   const live: LiveDirectory =
     liveState.status === "loading" ? {} : (liveState.data ?? {});
@@ -119,9 +135,16 @@ export function Extensions() {
       listExtensions(controller.signal),
       listDevices(controller.signal),
     ])
-      .then(([extensions, devices]) =>
-        setList({ status: "ready", extensions, devices }),
-      )
+      .then(([extensions, devices]) => {
+        const early = createdEarly.current.filter(
+          (c) => !extensions.some((e) => e.id === c.id),
+        );
+        setList({
+          status: "ready",
+          extensions: [...extensions, ...early],
+          devices,
+        });
+      })
       .catch((err: unknown) => {
         if (!controller.signal.aborted) {
           setList({ status: "error", message: errorMessage(err) });
@@ -227,7 +250,7 @@ export function Extensions() {
 
       {list.status === "loading" && <Spinner label="Loading extensions…" />}
       {list.status === "error" && (
-        <Alert tone="bad" title="Could not load extensions.">
+        <Alert tone="bad" title="Could not load extensions">
           {list.message}
         </Alert>
       )}
@@ -315,6 +338,7 @@ export function Extensions() {
         <NewExtension
           onClose={() => setCreating(false)}
           onCreated={(ext) => {
+            if (list.status !== "ready") createdEarly.current.push(ext);
             setExtensions((items) => [...items, ext]);
             setCreating(false);
             toast.show(`Extension ${ext.number} created.`);
@@ -322,7 +346,7 @@ export function Extensions() {
         />
       )}
 
-      <Toast message={toast.message} />
+      {toast.node}
     </section>
   );
 }
@@ -395,7 +419,7 @@ function NewExtension({
         noValidate
       >
         {serverError && (
-          <Alert tone="bad" title="Could not create the extension.">
+          <Alert tone="bad" title="Could not create the extension">
             {serverError}
           </Alert>
         )}
@@ -452,7 +476,6 @@ function ExtensionDrawer({
   onSaved: (ext: Extension) => void;
   onDeleted: () => void;
 }) {
-  const navigate = useNavigate();
   const [draft, setDraft] = useState<Draft>({
     number: ext.number,
     name: ext.name,
@@ -509,41 +532,11 @@ function ExtensionDrawer({
   }
 
   async function onDelete() {
-    setServerError(null);
-    setBusy(true);
-    try {
-      await deleteExtension(ext.id);
-      onDeleted();
-    } catch (err) {
-      setServerError(`Could not delete ${ext.number}: ${errorMessage(err)}`);
-      setConfirmDelete(false);
-      setBusy(false);
-    }
+    await deleteExtension(ext.id);
+    onDeleted();
   }
 
-  const footer = confirmDelete ? (
-    <>
-      <span className="dir-foot-text">
-        Delete {ext.number} and its devices?
-      </span>
-      <Button
-        variant="secondary"
-        disabled={busy}
-        onClick={() => setConfirmDelete(false)}
-      >
-        Keep
-      </Button>
-      <Button
-        key="confirm-delete"
-        variant="danger"
-        disabled={busy}
-        autoFocus
-        onClick={() => void onDelete()}
-      >
-        Delete extension
-      </Button>
-    </>
-  ) : (
+  const footer = (
     <>
       <Button
         variant="ghost"
@@ -564,178 +557,189 @@ function ExtensionDrawer({
   );
 
   return (
-    <Drawer
-      title={`Extension ${ext.number}`}
-      description={ext.name}
-      onClose={onClose}
-      width={480}
-      footer={footer}
-    >
-      <form
-        id="extension-form"
-        className="dir-form"
-        aria-label={`Edit extension ${ext.number}`}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void onSave();
-        }}
-        noValidate
+    <>
+      <Drawer
+        title={`Extension ${ext.number}`}
+        description={ext.name}
+        onClose={confirmDelete ? undefined : onClose}
+        width={480}
+        footer={footer}
       >
-        {serverError && <Alert tone="bad">{serverError}</Alert>}
-        <div className="dir-grid-2">
+        <form
+          id="extension-form"
+          className="dir-form"
+          aria-label={`Edit extension ${ext.number}`}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void onSave();
+          }}
+          noValidate
+        >
+          {serverError && <Alert tone="bad">{serverError}</Alert>}
+          <div className="dir-grid-2">
+            <Input
+              id="ext-number"
+              label="Number"
+              mono
+              inputMode="numeric"
+              hint={NUMBER_HINT}
+              error={errors.number}
+              value={draft.number}
+              autoFocus
+              onChange={set("number")}
+            />
+            <Input
+              id="ext-name"
+              label="Name"
+              error={errors.name}
+              value={draft.name}
+              onChange={set("name")}
+            />
+          </div>
           <Input
-            id="ext-number"
-            label="Number"
+            id="ext-external"
+            label="External number"
             mono
-            inputMode="numeric"
-            hint={NUMBER_HINT}
-            error={errors.number}
-            value={draft.number}
-            autoFocus
-            onChange={set("number")}
+            inputMode="tel"
+            hint="Optional; presented to carriers, e.g. +97142000101."
+            error={errors.externalNumber}
+            value={draft.externalNumber}
+            onChange={set("externalNumber")}
           />
-          <Input
-            id="ext-name"
-            label="Name"
-            error={errors.name}
-            value={draft.name}
-            onChange={set("name")}
-          />
-        </div>
-        <Input
-          id="ext-external"
-          label="External number"
-          mono
-          inputMode="tel"
-          hint="Optional; presented to carriers, e.g. +97142000101."
-          error={errors.externalNumber}
-          value={draft.externalNumber}
-          onChange={set("externalNumber")}
+
+          <div
+            className="dir-section"
+            role="group"
+            aria-labelledby="ext-features-label"
+          >
+            <span id="ext-features-label" className="az-eyebrow">
+              Call features
+            </span>
+            <Switch
+              label="Do not disturb"
+              hint="Calls go straight to forward-busy or voicemail"
+              labelPosition="end"
+              checked={dnd}
+              onChange={(e) => setDnd(e.target.checked)}
+            />
+            <Switch
+              label="Voicemail"
+              hint="Unanswered and busy calls go to this box"
+              labelPosition="end"
+              checked={voicemail}
+              onChange={(e) => setVoicemail(e.target.checked)}
+            />
+            <Switch
+              label="Record calls by default"
+              hint="*1 toggles recording mid-call either way"
+              labelPosition="end"
+              checked={record}
+              onChange={(e) => setRecord(e.target.checked)}
+            />
+          </div>
+
+          <div
+            className="dir-section"
+            role="group"
+            aria-labelledby="ext-forwarding-label"
+          >
+            <span id="ext-forwarding-label" className="az-eyebrow">
+              Forwarding
+            </span>
+            <Input
+              id="ext-forward-always"
+              label="Always"
+              mono
+              size="sm"
+              inputMode="tel"
+              placeholder="Off"
+              error={errors.forwardAlways}
+              value={draft.forwardAlways}
+              onChange={set("forwardAlways")}
+            />
+            <Input
+              id="ext-forward-busy"
+              label="When busy"
+              mono
+              size="sm"
+              inputMode="tel"
+              placeholder="Off"
+              error={errors.forwardBusy}
+              value={draft.forwardBusy}
+              onChange={set("forwardBusy")}
+            />
+            <Input
+              id="ext-forward-no-answer"
+              label="No answer"
+              mono
+              size="sm"
+              inputMode="tel"
+              placeholder="Off"
+              hint={FORWARD_HINT}
+              error={errors.forwardNoAnswer}
+              value={draft.forwardNoAnswer}
+              onChange={set("forwardNoAnswer")}
+            />
+          </div>
+
+          <section
+            className="dir-section dir-section--tight"
+            aria-label="Devices"
+          >
+            <span className="az-eyebrow" aria-hidden="true">
+              Devices
+            </span>
+            {devices.length === 0 && (
+              <p className="dir-device dir-muted">No devices yet.</p>
+            )}
+            <ul
+              className="dir-device-list"
+              aria-label={`Devices of ${ext.number}`}
+            >
+              {devices.map((d) => {
+                const contacts = live.bindings
+                  ? bindingsOf(live.bindings, d.sipUsername)
+                  : undefined;
+                const registered = Boolean(contacts && contacts.length > 0);
+                return (
+                  <li key={String(d.id)} className="dir-device">
+                    <span
+                      className={`az-dot ${registered ? "dir-dot--good" : "dir-dot--faint"}`}
+                      aria-hidden="true"
+                    />
+                    <span className="dir-device__name">{d.sipUsername}</span>
+                    <span className="dir-device__ua">
+                      {!contacts
+                        ? "—"
+                        : registered
+                          ? contacts[0]?.userAgent || "Registered"
+                          : "Not registered"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+            <LinkButton
+              to="/devices"
+              variant="ghost"
+              size="sm"
+              iconRight="arrow-right"
+              className="dir-manage"
+            >
+              Manage devices
+            </LinkButton>
+          </section>
+        </form>
+      </Drawer>
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete extension ${ext.number}?`}
+          description="Its devices are deleted with it and stop registering. This cannot be undone."
+          confirmLabel="Delete extension"
+          onConfirm={onDelete}
+          onClose={() => setConfirmDelete(false)}
         />
-
-        <div
-          className="dir-section"
-          role="group"
-          aria-labelledby="ext-features-label"
-        >
-          <span id="ext-features-label" className="az-eyebrow">
-            Call features
-          </span>
-          <Switch
-            label="Do not disturb"
-            hint="Calls go straight to forward-busy or voicemail"
-            labelPosition="end"
-            checked={dnd}
-            onChange={(e) => setDnd(e.target.checked)}
-          />
-          <Switch
-            label="Voicemail"
-            hint="Unanswered and busy calls go to this box"
-            labelPosition="end"
-            checked={voicemail}
-            onChange={(e) => setVoicemail(e.target.checked)}
-          />
-          <Switch
-            label="Record calls by default"
-            hint="*1 toggles recording mid-call either way"
-            labelPosition="end"
-            checked={record}
-            onChange={(e) => setRecord(e.target.checked)}
-          />
-        </div>
-
-        <div
-          className="dir-section"
-          role="group"
-          aria-labelledby="ext-forwarding-label"
-        >
-          <span id="ext-forwarding-label" className="az-eyebrow">
-            Forwarding
-          </span>
-          <Input
-            id="ext-forward-always"
-            label="Always"
-            mono
-            size="sm"
-            inputMode="tel"
-            placeholder="Off"
-            error={errors.forwardAlways}
-            value={draft.forwardAlways}
-            onChange={set("forwardAlways")}
-          />
-          <Input
-            id="ext-forward-busy"
-            label="When busy"
-            mono
-            size="sm"
-            inputMode="tel"
-            placeholder="Off"
-            error={errors.forwardBusy}
-            value={draft.forwardBusy}
-            onChange={set("forwardBusy")}
-          />
-          <Input
-            id="ext-forward-no-answer"
-            label="No answer"
-            mono
-            size="sm"
-            inputMode="tel"
-            placeholder="Off"
-            hint={FORWARD_HINT}
-            error={errors.forwardNoAnswer}
-            value={draft.forwardNoAnswer}
-            onChange={set("forwardNoAnswer")}
-          />
-        </div>
-
-        <section
-          className="dir-section dir-section--tight"
-          aria-label="Devices"
-        >
-          <span className="az-eyebrow" aria-hidden="true">
-            Devices
-          </span>
-          {devices.length === 0 && (
-            <p className="dir-device dir-muted">No devices yet.</p>
-          )}
-          <ul
-            className="dir-device-list"
-            aria-label={`Devices of ${ext.number}`}
-          >
-            {devices.map((d) => {
-              const contacts = live.bindings
-                ? bindingsOf(live.bindings, d.sipUsername)
-                : undefined;
-              const registered = Boolean(contacts && contacts.length > 0);
-              return (
-                <li key={String(d.id)} className="dir-device">
-                  <span
-                    className={`az-dot ${registered ? "dir-dot--good" : "dir-dot--faint"}`}
-                    aria-hidden="true"
-                  />
-                  <span className="dir-device__name">{d.sipUsername}</span>
-                  <span className="dir-device__ua">
-                    {!contacts
-                      ? "—"
-                      : registered
-                        ? contacts[0]?.userAgent || "Registered"
-                        : "Not registered"}
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-          <Button
-            variant="ghost"
-            size="sm"
-            iconRight="arrow-right"
-            className="dir-manage"
-            onClick={() => navigate("/devices")}
-          >
-            Manage devices
-          </Button>
-        </section>
-      </form>
-    </Drawer>
+      )}
+    </>
   );
 }

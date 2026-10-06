@@ -2,11 +2,12 @@ import {
   useEffect,
   useRef,
   useState,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import {
   createInboundRoute,
   createOutboundRoute,
@@ -14,11 +15,13 @@ import {
   deleteOutboundRoute,
   errorMessage,
   fieldErrors,
+  listExtensions,
   listInboundRoutes,
   listOutboundRoutes,
   listTrunks,
   updateInboundRoute,
   updateOutboundRoute,
+  type Extension,
   type FieldError,
   type Id,
   type InboundRoute,
@@ -29,7 +32,6 @@ import {
   type Schedule,
   type Trunk,
 } from "../api";
-import { ConfirmButton } from "../components/ConfirmButton";
 import {
   ScheduleEditor,
   scheduleKeys,
@@ -42,21 +44,58 @@ import {
   type TransformDraft,
 } from "../components/RouteEditors";
 import {
-  Field,
-  fieldId,
-  FormError,
-  mapFieldErrors,
-  splitList,
-  type ErrorMap,
-} from "../forms";
+  Alert,
+  Badge,
+  Button,
+  ConfirmDialog,
+  Drawer,
+  EmptyState,
+  Icon,
+  IconButton,
+  Input,
+  LinkButton,
+  PageHeader,
+  Select,
+  Spinner,
+  Switch,
+  Tabs,
+  useRestoreFocus,
+  useToast,
+} from "../design/azrty/components";
+import { fieldId, mapFieldErrors, splitList, type ErrorMap } from "../forms";
 import { useOrderedList } from "../useOrderedList";
+import { formatSchedule, formatTransform } from "./callflow/format";
+import { FormAlert } from "./callflow/ui";
 
 const DEFAULT_FAILOVER = "408, 480, 500, 502, 503, 504";
+const FORM_ID = "route-form";
+const TAB_PREFIX = "routes";
 
-const TABS: readonly { id: RouteDirection; label: string }[] = [
-  { id: "outbound", label: "Outbound" },
-  { id: "inbound", label: "Inbound" },
-];
+type OrderedList<T extends { id: Id; position: number }> = ReturnType<
+  typeof useOrderedList<T>
+>;
+
+type TrunkLoad =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready" };
+
+/** The trunk list as the forms see it; `ready` is false until it has loaded. */
+interface TrunkOptions {
+  items: Trunk[];
+  ready: boolean;
+}
+
+type Editing =
+  | { kind: "new"; direction: RouteDirection }
+  | { kind: "edit"; route: OutboundRoute; direction: "outbound" }
+  | { kind: "edit"; route: InboundRoute; direction: "inbound" }
+  | null;
+
+type Deleting =
+  | { direction: "outbound"; route: OutboundRoute }
+  | { direction: "inbound"; route: InboundRoute }
+  | null;
 
 /** Routes: ordered outbound and inbound routes, on two tabs. */
 export function RoutesPage() {
@@ -66,7 +105,12 @@ export function RoutesPage() {
   const [trunks, setTrunks] = useState<Trunk[]>([]);
   const [trunkLoad, setTrunkLoad] = useState<TrunkLoad>({ status: "loading" });
   const [trunkAttempt, setTrunkAttempt] = useState(0);
-  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [extensions, setExtensions] = useState<Extension[]>([]);
+  const [editing, setEditing] = useState<Editing>(null);
+  const [deleting, setDeleting] = useState<Deleting>(null);
+  const outbound = useOrderedList("outbound", listOutboundRoutes);
+  const inbound = useOrderedList("inbound", listInboundRoutes);
+  const toast = useToast();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -83,113 +127,306 @@ export function RoutesPage() {
     return () => controller.abort();
   }, [trunkAttempt]);
 
+  // Only for the destination's name on the Inbound tab; optional.
+  useEffect(() => {
+    const controller = new AbortController();
+    listExtensions(controller.signal)
+      .then(setExtensions)
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
+
   const trunkOptions: TrunkOptions = {
     items: trunks,
     ready: trunkLoad.status === "ready",
   };
+  const trunkName = (tid: Id) =>
+    trunks.find((t) => String(t.id) === String(tid))?.name ?? `#${String(tid)}`;
 
   function select(id: RouteDirection, focus = false) {
     setParams(id === "outbound" ? {} : { tab: id }, { replace: true });
-    if (focus) tabRefs.current[id]?.focus();
+    if (focus) document.getElementById(`${TAB_PREFIX}-tab-${id}`)?.focus();
   }
 
-  function onTabKey(e: KeyboardEvent<HTMLButtonElement>) {
-    const i = TABS.findIndex((t) => t.id === tab);
+  // The design system's Tabs leaves arrow keys to the page.
+  function onTabKey(e: KeyboardEvent<HTMLDivElement>) {
+    if ((e.target as HTMLElement).getAttribute("role") !== "tab") return;
+    const order: RouteDirection[] = ["outbound", "inbound"];
+    const i = order.indexOf(tab);
     let next: number | null = null;
-    if (e.key === "ArrowRight") next = (i + 1) % TABS.length;
-    if (e.key === "ArrowLeft") next = (i - 1 + TABS.length) % TABS.length;
+    if (e.key === "ArrowRight") next = (i + 1) % order.length;
+    if (e.key === "ArrowLeft") next = (i - 1 + order.length) % order.length;
     if (e.key === "Home") next = 0;
-    if (e.key === "End") next = TABS.length - 1;
-    const t = next === null ? undefined : TABS[next];
+    if (e.key === "End") next = order.length - 1;
+    const t = next === null ? undefined : order[next];
     if (t) {
       e.preventDefault();
-      select(t.id, true);
+      select(t, true);
     }
   }
 
+  /** Flip a route's Enabled switch at once; put it back if the save fails. */
+  async function toggle<R extends OutboundRoute | InboundRoute>(
+    list: OrderedList<R>,
+    save: (id: Id, patch: { enabled: boolean }) => Promise<R>,
+    route: R,
+    enabled: boolean,
+  ) {
+    list.setError(null);
+    list.upsert({ ...route, enabled });
+    try {
+      list.upsert(await save(route.id, { enabled }));
+      toast.show(`Route ${route.name} ${enabled ? "enabled" : "disabled"}.`);
+    } catch (err) {
+      list.upsert(route);
+      list.setError(
+        `Could not ${enabled ? "enable" : "disable"} ${route.name}: ${errorMessage(err)}`,
+      );
+    }
+  }
+
+  async function onDelete(d: NonNullable<Deleting>) {
+    try {
+      if (d.direction === "outbound") await deleteOutboundRoute(d.route.id);
+      else await deleteInboundRoute(d.route.id);
+    } catch (err) {
+      throw new Error(
+        `Could not delete ${d.route.name}: ${errorMessage(err)}`,
+        {
+          cause: err,
+        },
+      );
+    }
+    (d.direction === "outbound" ? outbound : inbound).remove(d.route.id);
+    setDeleting(null);
+    toast.show(`Route ${d.route.name} deleted.`);
+  }
+
+  const count = (l: { state: { status: string }; items: unknown[] }) =>
+    l.state.status === "ready" ? l.items.length : undefined;
+
   return (
     <section aria-labelledby="page-title">
-      <h1 id="page-title">Routes</h1>
-      <p>
-        <Link to="/routes/test">Test a number against these routes</Link>
-      </p>
+      <PageHeader
+        eyebrow="Call flow"
+        title="Routes"
+        description="Matched top to bottom; the first enabled match wins. Drag to reorder."
+        actions={
+          <>
+            <LinkButton to="/routes/test" icon="flask-conical">
+              Route tester
+            </LinkButton>
+            <Button
+              icon="plus"
+              onClick={() => setEditing({ kind: "new", direction: tab })}
+            >
+              New route
+            </Button>
+          </>
+        }
+      />
       {trunkLoad.status === "error" && (
-        <div role="alert" className="error">
-          <strong>Could not load the trunk list.</strong>
-          <p>
-            {trunkLoad.message} Routes that pick a trunk cannot be saved until
-            it loads.
-          </p>
-          <p>
-            <button
-              type="button"
+        <Alert
+          tone="bad"
+          title="Could not load the trunk list"
+          style={{ marginBottom: 20 }}
+          action={
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 setTrunkLoad({ status: "loading" });
                 setTrunkAttempt((n) => n + 1);
               }}
             >
               Retry loading trunks
-            </button>
-          </p>
-        </div>
+            </Button>
+          }
+        >
+          {trunkLoad.message} Routes that pick a trunk cannot be saved until it
+          loads.
+        </Alert>
       )}
-      <div role="tablist" aria-label="Route direction" className="tabs">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            ref={(el) => {
-              tabRefs.current[t.id] = el;
-            }}
-            type="button"
-            role="tab"
-            id={`tab-${t.id}`}
-            aria-selected={tab === t.id}
-            aria-controls={`panel-${t.id}`}
-            tabIndex={tab === t.id ? 0 : -1}
-            onClick={() => select(t.id)}
-            onKeyDown={onTabKey}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div onKeyDown={onTabKey}>
+        <Tabs<RouteDirection>
+          className="cf-tabs"
+          aria-label="Route direction"
+          idPrefix={TAB_PREFIX}
+          value={tab}
+          onChange={(id) => select(id)}
+          items={[
+            { id: "outbound", label: "Outbound", count: count(outbound) },
+            { id: "inbound", label: "Inbound", count: count(inbound) },
+          ]}
+        />
       </div>
       <div
         role="tabpanel"
-        id={`panel-${tab}`}
-        aria-labelledby={`tab-${tab}`}
+        id={`${TAB_PREFIX}-panel-${tab}`}
+        aria-labelledby={`${TAB_PREFIX}-tab-${tab}`}
         tabIndex={0}
-        className="tabpanel"
+        className="cf-tabpanel cf-stack"
       >
         {tab === "outbound" ? (
-          <OutboundPanel trunks={trunkOptions} />
+          <RouteList
+            what="outbound routes"
+            caption="Outbound routes, in match order"
+            list={outbound}
+            onNew={() => setEditing({ kind: "new", direction: "outbound" })}
+            onEdit={(route) =>
+              setEditing({ kind: "edit", route, direction: "outbound" })
+            }
+            onDelete={(route) => setDeleting({ direction: "outbound", route })}
+            onToggle={(r, on) =>
+              void toggle(outbound, updateOutboundRoute, r, on)
+            }
+            columns={[
+              {
+                header: "Match",
+                cell: (r) => (
+                  <span className="cf-inline">
+                    <Badge tone="outline">{r.matchKind}</Badge>
+                    <span className="cf-match">{r.match}</span>
+                  </span>
+                ),
+              },
+              {
+                header: "Number rewrite",
+                mono: true,
+                cell: (r) => formatTransform(r.numberTransform),
+              },
+              {
+                header: "Trunks, in try order",
+                cell: (r) => (
+                  <ol className="cf-chips cf-plain">
+                    {(r.trunks ?? []).map((tid, i) => (
+                      <li key={String(tid)} className="cf-inline">
+                        {i > 0 && <Icon name="chevron-right" size={12} />}
+                        <span className="cf-chip">{trunkName(tid)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                ),
+              },
+              { header: "Schedule", cell: (r) => formatSchedule(r.schedule) },
+            ]}
+            badge={(r) =>
+              r.emergency ? <Badge tone="bad">Emergency</Badge> : null
+            }
+          />
         ) : (
-          <InboundPanel trunks={trunkOptions} />
+          <RouteList
+            what="inbound routes"
+            caption="Inbound routes, in match order"
+            list={inbound}
+            onNew={() => setEditing({ kind: "new", direction: "inbound" })}
+            onEdit={(route) =>
+              setEditing({ kind: "edit", route, direction: "inbound" })
+            }
+            onDelete={(route) => setDeleting({ direction: "inbound", route })}
+            onToggle={(r, on) =>
+              void toggle(inbound, updateInboundRoute, r, on)
+            }
+            columns={[
+              {
+                header: "DID",
+                cell: (r) => (
+                  <span className="cf-inline">
+                    <Badge tone="outline">{r.didKind}</Badge>
+                    <span className="cf-match">
+                      {r.didKind === "any" ? "*" : r.did}
+                    </span>
+                  </span>
+                ),
+              },
+              {
+                header: "Trunk",
+                mono: true,
+                cell: (r) =>
+                  r.trunkId === null ? "any" : trunkName(r.trunkId),
+              },
+              { header: "Schedule", cell: (r) => formatSchedule(r.schedule) },
+              {
+                header: "Destination",
+                cell: (r) => <Destination route={r} extensions={extensions} />,
+              },
+            ]}
+          />
         )}
       </div>
+
+      {editing?.direction === "outbound" && (
+        <OutboundDrawer
+          key={editing.kind === "edit" ? String(editing.route.id) : "new"}
+          route={editing.kind === "edit" ? editing.route : null}
+          trunks={trunkOptions}
+          onClose={() => setEditing(null)}
+          onSaved={(r, created) => {
+            outbound.upsert(r);
+            setEditing(null);
+            toast.show(`Route ${r.name} ${created ? "created" : "saved"}.`);
+          }}
+        />
+      )}
+      {editing?.direction === "inbound" && (
+        <InboundDrawer
+          key={editing.kind === "edit" ? String(editing.route.id) : "new"}
+          route={editing.kind === "edit" ? editing.route : null}
+          trunks={trunkOptions}
+          onClose={() => setEditing(null)}
+          onSaved={(r, created) => {
+            inbound.upsert(r);
+            setEditing(null);
+            toast.show(`Route ${r.name} ${created ? "created" : "saved"}.`);
+          }}
+        />
+      )}
+      {deleting && (
+        <ConfirmDialog
+          title={`Delete route ${deleting.route.name}?`}
+          description="Calls stop matching it at once; the routes below it move up."
+          confirmLabel="Delete route"
+          onConfirm={() => onDelete(deleting)}
+          onClose={() => setDeleting(null)}
+        />
+      )}
+      {toast.node}
     </section>
   );
 }
 
-type TrunkLoad =
-  | { status: "loading" }
-  | { status: "error"; message: string }
-  | { status: "ready" };
+const DESTINATION_KIND: Record<
+  InboundRouteFields["destinationKind"],
+  { label: string; icon: string }
+> = {
+  extension: { label: "Extension", icon: "user-round" },
+  external: { label: "External", icon: "phone-forwarded" },
+  sip_uri: { label: "SIP URI", icon: "at-sign" },
+};
 
-/** The trunk list as the forms see it; `ready` is false until it has loaded. */
-interface TrunkOptions {
-  items: Trunk[];
-  ready: boolean;
-}
-
-const TRUNKS_PENDING_ID = "trunks-pending";
-
-/** Why saving waits: the trunk list is still loading or failed to load. */
-function TrunksPending({ ready }: { ready: boolean }) {
-  if (ready) return null;
+function Destination({
+  route: r,
+  extensions,
+}: {
+  route: InboundRoute;
+  extensions: readonly Extension[];
+}) {
+  const kind = DESTINATION_KIND[r.destinationKind] ?? {
+    label: r.destinationKind,
+    icon: "arrow-right",
+  };
+  const name =
+    r.destinationKind === "extension"
+      ? extensions.find((e) => e.number === r.destination)?.name
+      : undefined;
   return (
-    <p id={TRUNKS_PENDING_ID} className="hint">
-      Saving is available once the trunk list has loaded.
-    </p>
+    <span className="cf-dest">
+      <span className="cf-inline">
+        <Icon name={kind.icon} size={14} />
+        <span className="cf-match">{r.destination}</span>
+      </span>
+      <small>{name ? `${kind.label} · ${name}` : kind.label}</small>
+    </span>
   );
 }
 
@@ -197,30 +434,39 @@ function TrunksPending({ ready }: { ready: boolean }) {
 
 interface Column<T> {
   header: string;
+  mono?: boolean;
   cell: (item: T) => ReactNode;
 }
 
-function OrderedTable<T extends { id: Id; name: string; enabled: boolean }>({
+function RouteList<
+  T extends { id: Id; name: string; enabled: boolean; position: number },
+>({
+  what,
   caption,
-  items,
+  list,
   columns,
-  busy,
-  onMove,
+  badge,
+  onNew,
   onEdit,
   onDelete,
+  onToggle,
 }: {
+  what: string;
   caption: string;
-  items: T[];
+  list: OrderedList<T>;
   columns: Column<T>[];
-  busy: boolean;
-  onMove: (index: number, delta: number) => Promise<boolean>;
+  badge?: (item: T) => ReactNode;
+  onNew: () => void;
   onEdit: (item: T) => void;
-  onDelete: (item: T) => Promise<void>;
+  onDelete: (item: T) => void;
+  onToggle: (item: T, enabled: boolean) => void;
 }) {
   const tableRef = useRef<HTMLTableElement>(null);
   const [focusAfter, setFocusAfter] = useState<{ id: Id; dir: string } | null>(
     null,
   );
+  const [drag, setDrag] = useState<{ from: number; over: number } | null>(null);
+  const items = list.items;
 
   // Keep focus on the moved route's control (or its other arrow at an edge).
   useEffect(() => {
@@ -236,118 +482,250 @@ function OrderedTable<T extends { id: Id; name: string; enabled: boolean }>({
   }, [focusAfter, items]);
 
   async function move(item: T, index: number, delta: number) {
-    if (await onMove(index, delta)) {
+    if (await list.move(index, delta)) {
       setFocusAfter({ id: item.id, dir: delta < 0 ? "up" : "down" });
     }
   }
 
+  function onDrop(e: DragEvent<HTMLTableRowElement>, to: number) {
+    e.preventDefault();
+    const from = drag?.from;
+    setDrag(null);
+    if (from === undefined || from === to) return;
+    void list.move(from, to - from);
+  }
+
   return (
-    <table ref={tableRef}>
-      <caption className="visually-hidden">{caption}</caption>
-      <thead>
-        <tr>
-          <th scope="col">Order</th>
-          <th scope="col">Name</th>
-          {columns.map((c) => (
-            <th scope="col" key={c.header}>
-              {c.header}
-            </th>
-          ))}
-          <th scope="col">Enabled</th>
-          <th scope="col">
-            <span className="visually-hidden">Actions</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {items.map((item, i) => (
-          <tr key={item.id}>
-            <td>{i + 1}</td>
-            <th scope="row">{item.name}</th>
-            {columns.map((c) => (
-              <td key={c.header}>{c.cell(item)}</td>
-            ))}
-            <td>{item.enabled ? "Yes" : "No"}</td>
-            <td className="row-actions">
-              <button
-                type="button"
-                data-move={`${String(item.id)}:up`}
-                aria-label={`Move ${item.name} up`}
-                disabled={busy || i === 0}
-                onClick={() => void move(item, i, -1)}
-              >
-                <span aria-hidden="true">↑</span> Up
-              </button>
-              <button
-                type="button"
-                data-move={`${String(item.id)}:down`}
-                aria-label={`Move ${item.name} down`}
-                disabled={busy || i === items.length - 1}
-                onClick={() => void move(item, i, 1)}
-              >
-                <span aria-hidden="true">↓</span> Down
-              </button>
-              <button
-                type="button"
-                aria-label={`Edit ${item.name}`}
-                onClick={() => onEdit(item)}
-              >
-                Edit
-              </button>
-              <ConfirmButton
-                label="Delete"
-                accessibleLabel={`Delete ${item.name}`}
-                prompt={`Delete route ${item.name}?`}
-                confirmLabel="Delete route"
-                onConfirm={() => onDelete(item)}
-              />
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <>
+      {list.error && (
+        <Alert tone="bad" title="Routes not updated">
+          {list.error}
+        </Alert>
+      )}
+      {list.state.status === "loading" && (
+        <Spinner label={`Loading ${what}…`} />
+      )}
+      {list.state.status === "error" && (
+        <Alert tone="bad" title={`Could not load ${what}`}>
+          {list.state.message}
+        </Alert>
+      )}
+      {list.state.status === "ready" && items.length === 0 && (
+        <EmptyState
+          icon="route"
+          title={`No ${what} yet.`}
+          description="Routes are matched top to bottom; the first enabled match wins."
+          action={
+            <Button icon="plus" onClick={onNew}>
+              New route
+            </Button>
+          }
+        />
+      )}
+      {items.length > 0 && (
+        <div className="az-table-wrap">
+          <table className="az-table" ref={tableRef}>
+            <caption className="visually-hidden">{caption}</caption>
+            <thead>
+              <tr>
+                <th scope="col" style={{ width: 56 }}>
+                  #
+                </th>
+                <th scope="col">Name</th>
+                {columns.map((c) => (
+                  <th scope="col" key={c.header}>
+                    {c.header}
+                  </th>
+                ))}
+                <th scope="col">Enabled</th>
+                <th scope="col" className="az-table--right">
+                  <span className="visually-hidden">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item, i) => (
+                <tr
+                  key={String(item.id)}
+                  draggable={!list.busy}
+                  className={
+                    drag?.from === i
+                      ? "cf-dragging"
+                      : drag && drag.over === i
+                        ? "cf-drop-target"
+                        : undefined
+                  }
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", String(item.id));
+                    setDrag({ from: i, over: i });
+                  }}
+                  onDragOver={(e) => {
+                    if (!drag) return;
+                    e.preventDefault();
+                    if (drag.over !== i) setDrag({ ...drag, over: i });
+                  }}
+                  onDrop={(e) => onDrop(e, i)}
+                  onDragEnd={() => setDrag(null)}
+                >
+                  <td>
+                    <span className="cf-pos">
+                      <Icon
+                        name="grip-vertical"
+                        size={14}
+                        className="cf-grip"
+                      />
+                      <span className="az-table__mono">{i + 1}</span>
+                    </span>
+                  </td>
+                  <th scope="row" className="az-table__primary">
+                    <span className="cf-inline">
+                      <button
+                        type="button"
+                        className="cf-name-btn"
+                        onClick={() => onEdit(item)}
+                      >
+                        {item.name}
+                      </button>
+                      {badge?.(item)}
+                    </span>
+                  </th>
+                  {columns.map((c) => (
+                    <td
+                      key={c.header}
+                      className={c.mono ? "az-table__mono" : undefined}
+                    >
+                      {c.cell(item)}
+                    </td>
+                  ))}
+                  <td>
+                    <Switch
+                      aria-label={`${item.name} enabled`}
+                      checked={item.enabled}
+                      onChange={(e) => onToggle(item, e.target.checked)}
+                    />
+                  </td>
+                  <td className="az-table--right">
+                    <span className="cf-row-actions">
+                      <IconButton
+                        icon="arrow-up"
+                        data-move={`${String(item.id)}:up`}
+                        label={`Move ${item.name} up`}
+                        disabled={list.busy || i === 0}
+                        onClick={() => void move(item, i, -1)}
+                      />
+                      <IconButton
+                        icon="arrow-down"
+                        data-move={`${String(item.id)}:down`}
+                        label={`Move ${item.name} down`}
+                        disabled={list.busy || i === items.length - 1}
+                        onClick={() => void move(item, i, 1)}
+                      />
+                      <IconButton
+                        icon="pencil"
+                        label={`Edit ${item.name}`}
+                        onClick={() => onEdit(item)}
+                      />
+                      <IconButton
+                        icon="trash-2"
+                        label={`Delete ${item.name}`}
+                        onClick={() => onDelete(item)}
+                      />
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 }
 
-function ListStatus({
-  state,
-  what,
+// --- shared form plumbing -----------------------------------------------------
+
+const TRUNKS_PENDING_ID = "trunks-pending";
+
+/** Why saving waits: the trunk list is still loading or failed to load. */
+function TrunksPending({ ready }: { ready: boolean }) {
+  if (ready) return null;
+  return (
+    <p id={TRUNKS_PENDING_ID} className="cf-form__note">
+      Saving is available once the trunk list has loaded.
+    </p>
+  );
+}
+
+function useServerErrors() {
+  const [errors, setErrors] = useState<ErrorMap>({});
+  const [unmatched, setUnmatched] = useState<FieldError[]>([]);
+  const [formError, setFormError] = useState<string | null>(null);
+  return {
+    errors,
+    unmatched,
+    formError,
+    clientErrors(found: Record<string, string>) {
+      setErrors(found);
+      setUnmatched([]);
+      const bad = Object.keys(found).length > 0;
+      setFormError(bad ? "Fix the highlighted fields." : null);
+      return bad;
+    },
+    serverError(err: unknown, known: string[]) {
+      const mapped = mapFieldErrors(fieldErrors(err), known);
+      setErrors(mapped.byKey);
+      setUnmatched(mapped.unmatched);
+      setFormError(errorMessage(err));
+    },
+  };
+}
+
+/** The drawer around a route form, with Cancel and the submit button. */
+function RouteDrawer({
+  title,
+  description,
+  busy,
+  trunksReady,
+  submitLabel,
+  onClose,
+  children,
 }: {
-  state: { status: string; message?: string };
-  what: string;
+  title: string;
+  description: string;
+  busy: boolean;
+  trunksReady: boolean;
+  submitLabel: string;
+  onClose: () => void;
+  children: ReactNode;
 }) {
-  if (state.status === "loading") {
-    return (
-      <p role="status" aria-live="polite">
-        Loading {what}…
-      </p>
-    );
-  }
-  if (state.status === "error") {
-    return (
-      <div role="alert" className="error">
-        <strong>Could not load {what}.</strong>
-        <p>{state.message}</p>
-      </div>
-    );
-  }
-  return null;
+  useRestoreFocus();
+  return (
+    <Drawer
+      title={title}
+      description={description}
+      onClose={busy ? undefined : onClose}
+      width={600}
+      footer={
+        <>
+          <Button variant="secondary" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            form={FORM_ID}
+            disabled={busy || !trunksReady}
+            aria-describedby={trunksReady ? undefined : TRUNKS_PENDING_ID}
+          >
+            {submitLabel}
+          </Button>
+        </>
+      }
+    >
+      {children}
+    </Drawer>
+  );
 }
-
-function summarizeTransform(t: {
-  strip?: number;
-  prefix?: string;
-  regex?: string;
-  template?: string;
-}): string {
-  const parts: string[] = [];
-  if (t.strip) parts.push(`strip ${t.strip}`);
-  if (t.prefix) parts.push(`prefix ${t.prefix}`);
-  if (t.regex) parts.push(`${t.regex} → ${t.template ?? ""}`);
-  return parts.length ? parts.join(", ") : "unchanged";
-}
-
-type Editing<T> = { kind: "new" } | { kind: "edit"; route: T } | null;
 
 // --- outbound -----------------------------------------------------------------
 
@@ -431,136 +809,16 @@ function outboundKeys(d: OutboundDraft): string[] {
   ];
 }
 
-function OutboundPanel({ trunks: options }: { trunks: TrunkOptions }) {
-  const trunks = options.items;
-  const list = useOrderedList("outbound", listOutboundRoutes);
-  const [editing, setEditing] = useState<Editing<OutboundRoute>>(null);
-  const trunkName = (tid: Id) =>
-    trunks.find((t) => String(t.id) === String(tid))?.name ?? `#${String(tid)}`;
-
-  return (
-    <>
-      {editing ? (
-        <OutboundForm
-          key={editing.kind === "edit" ? String(editing.route.id) : "new"}
-          route={editing.kind === "edit" ? editing.route : null}
-          trunks={options}
-          onCancel={() => setEditing(null)}
-          onSaved={(r) => {
-            list.upsert(r);
-            setEditing(null);
-          }}
-        />
-      ) : (
-        <p>
-          <button
-            type="button"
-            className="primary"
-            onClick={() => setEditing({ kind: "new" })}
-          >
-            New outbound route
-          </button>
-        </p>
-      )}
-      <h2>Outbound routes</h2>
-      <p className="muted">
-        Calls from extensions to external numbers take the first route that
-        matches, top to bottom.
-      </p>
-      {list.error && (
-        <p role="alert" className="error">
-          {list.error}
-        </p>
-      )}
-      <ListStatus state={list.state} what="outbound routes" />
-      {list.state.status === "ready" && list.items.length === 0 && (
-        <p className="muted">No outbound routes yet.</p>
-      )}
-      {list.items.length > 0 && (
-        <div className="table-wrap">
-          <OrderedTable
-            caption="Outbound routes, in match order"
-            items={list.items}
-            busy={list.busy}
-            onMove={list.move}
-            onEdit={(route) => setEditing({ kind: "edit", route })}
-            onDelete={async (r) => {
-              try {
-                await deleteOutboundRoute(r.id);
-                list.remove(r.id);
-              } catch (err) {
-                list.setError(
-                  `Could not delete ${r.name}: ${errorMessage(err)}`,
-                );
-              }
-            }}
-            columns={[
-              {
-                header: "Match",
-                cell: (r) => (
-                  <>
-                    {r.matchKind} <code>{r.match}</code>
-                  </>
-                ),
-              },
-              {
-                header: "Number",
-                cell: (r) => summarizeTransform(r.numberTransform ?? {}),
-              },
-              {
-                header: "Trunks",
-                cell: (r) => (r.trunks ?? []).map(trunkName).join(" → "),
-              },
-              {
-                header: "Schedule",
-                cell: (r) => (r.schedule ? r.schedule.timeZone : "always"),
-              },
-              {
-                header: "Emergency",
-                cell: (r) => (r.emergency ? "Yes" : ""),
-              },
-            ]}
-          />
-        </div>
-      )}
-    </>
-  );
-}
-
-function useServerErrors() {
-  const [errors, setErrors] = useState<ErrorMap>({});
-  const [unmatched, setUnmatched] = useState<FieldError[]>([]);
-  const [formError, setFormError] = useState<string | null>(null);
-  return {
-    errors,
-    unmatched,
-    formError,
-    clientErrors(found: Record<string, string>) {
-      setErrors(found);
-      setUnmatched([]);
-      const bad = Object.keys(found).length > 0;
-      setFormError(bad ? "Fix the highlighted fields." : null);
-      return bad;
-    },
-    serverError(err: unknown, known: string[]) {
-      const mapped = mapFieldErrors(fieldErrors(err), known);
-      setErrors(mapped.byKey);
-      setUnmatched(mapped.unmatched);
-      setFormError(errorMessage(err));
-    },
-  };
-}
-
-function OutboundForm({
+function OutboundDrawer({
   route,
   trunks,
-  onCancel,
+  onClose,
   onSaved,
 }: {
   route: OutboundRoute | null;
   trunks: TrunkOptions;
-  onCancel: () => void;
-  onSaved: (r: OutboundRoute) => void;
+  onClose: () => void;
+  onSaved: (r: OutboundRoute, created: boolean) => void;
 }) {
   const form = "out";
   const [d, setD] = useState(() => outboundDraft(route));
@@ -580,6 +838,7 @@ function OutboundForm({
         route
           ? await updateOutboundRoute(route.id, body)
           : await createOutboundRoute(body),
+        route === null,
       );
     } catch (err) {
       v.serverError(err, outboundKeys(d));
@@ -588,149 +847,122 @@ function OutboundForm({
   }
 
   return (
-    <form
-      className="inline-form"
-      aria-labelledby="out-form-title"
-      onSubmit={(e) => void onSubmit(e)}
-      noValidate
+    <RouteDrawer
+      title={route ? `Outbound route ${route.name}` : "New outbound route"}
+      description="Calls from extensions to numbers outside Hello."
+      busy={busy}
+      trunksReady={trunks.ready}
+      submitLabel={route ? "Save route" : "Create route"}
+      onClose={onClose}
     >
-      <h2 id="out-form-title">
-        {route ? `Edit outbound route ${route.name}` : "New outbound route"}
-      </h2>
-      <div className="fields">
-        <Field id={id("name")} label="Name" error={v.errors.name}>
-          {(p) => (
-            <input
-              {...p}
-              value={d.name}
-              onChange={(e) => set("name", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field id={id("matchKind")} label="Match by" error={v.errors.matchKind}>
-          {(p) => (
-            <select
-              {...p}
-              value={d.matchKind}
-              onChange={(e) =>
-                set("matchKind", e.target.value as OutboundDraft["matchKind"])
-              }
-            >
-              <option value="prefix">Prefix</option>
-              <option value="regex">Regex (RE2)</option>
-            </select>
-          )}
-        </Field>
-        <Field
-          id={id("match")}
-          label={d.matchKind === "regex" ? "Match regex" : "Match prefix"}
-          error={v.errors.match}
-          hint={d.matchKind === "regex" ? "e.g. ^05[0-9]{8}$" : "e.g. 00"}
-        >
-          {(p) => (
-            <input
-              {...p}
-              className="mono"
-              spellCheck={false}
-              value={d.match}
-              onChange={(e) => set("match", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field
+      <form
+        id={FORM_ID}
+        className="cf-form"
+        aria-label={
+          route ? `Edit outbound route ${route.name}` : "New outbound route"
+        }
+        onSubmit={(e) => void onSubmit(e)}
+        noValidate
+      >
+        <Input
+          id={id("name")}
+          label="Name"
+          autoFocus
+          value={d.name}
+          error={v.errors.name}
+          onChange={(e) => set("name", e.target.value)}
+        />
+        <div className="cf-two">
+          <Select
+            id={id("matchKind")}
+            label="Match by"
+            value={d.matchKind}
+            error={v.errors.matchKind}
+            options={[
+              { value: "prefix", label: "Prefix" },
+              { value: "regex", label: "Regex (RE2)" },
+            ]}
+            onChange={(e) =>
+              set("matchKind", e.target.value as OutboundDraft["matchKind"])
+            }
+          />
+          <Input
+            id={id("match")}
+            label={d.matchKind === "regex" ? "Match regex" : "Match prefix"}
+            mono
+            spellCheck={false}
+            value={d.match}
+            error={v.errors.match}
+            hint={d.matchKind === "regex" ? "e.g. ^05[0-9]{8}$" : "e.g. 00"}
+            onChange={(e) => set("match", e.target.value)}
+          />
+        </div>
+        <Input
           id={id("sourceExtensions")}
           label="From extensions"
+          mono
+          value={d.sourceExtensions}
           error={v.errors.sourceExtensions}
           hint="Comma-separated; empty means every extension."
-        >
-          {(p) => (
-            <input
-              {...p}
-              value={d.sourceExtensions}
-              onChange={(e) => set("sourceExtensions", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field
+          onChange={(e) => set("sourceExtensions", e.target.value)}
+        />
+        <TrunkPicker
+          form={form}
+          trunks={trunks.items}
+          value={d.trunks}
+          errors={v.errors}
+          onChange={(t) => set("trunks", t)}
+        />
+        <Input
           id={id("failoverCodes")}
           label="Fail over on"
+          mono
+          value={d.failoverCodes}
           error={v.errors.failoverCodes}
           hint="SIP codes that move on to the next trunk."
-        >
-          {(p) => (
-            <input
-              {...p}
-              value={d.failoverCodes}
-              onChange={(e) => set("failoverCodes", e.target.value)}
-            />
-          )}
-        </Field>
-        <div className="field checkbox">
-          <input
-            id={id("emergency")}
-            type="checkbox"
+          onChange={(e) => set("failoverCodes", e.target.value)}
+        />
+        <div className="cf-field-group">
+          <Switch
+            label="Emergency route"
+            hint="Tried even when a trunk is full or unhealthy"
+            labelPosition="end"
             checked={d.emergency}
             onChange={(e) => set("emergency", e.target.checked)}
           />
-          <label htmlFor={id("emergency")}>Emergency route</label>
-        </div>
-        <div className="field checkbox">
-          <input
-            id={id("enabled")}
-            type="checkbox"
+          <Switch
+            label="Enabled"
+            labelPosition="end"
             checked={d.enabled}
             onChange={(e) => set("enabled", e.target.checked)}
           />
-          <label htmlFor={id("enabled")}>Enabled</label>
         </div>
-      </div>
-
-      <TrunkPicker
-        form={form}
-        trunks={trunks.items}
-        value={d.trunks}
-        errors={v.errors}
-        onChange={(t) => set("trunks", t)}
-      />
-      <TransformEditor
-        form={form}
-        base="numberTransform"
-        legend="Number rewrite"
-        value={d.numberTransform}
-        errors={v.errors}
-        onChange={(t) => set("numberTransform", t)}
-      />
-      <TransformEditor
-        form={form}
-        base="callerIdTransform"
-        legend="Caller ID rewrite"
-        value={d.callerIdTransform}
-        errors={v.errors}
-        onChange={(t) => set("callerIdTransform", t)}
-      />
-      <ScheduleEditor
-        form={form}
-        value={d.schedule}
-        errors={v.errors}
-        onChange={(s) => set("schedule", s)}
-      />
-
-      <FormError message={v.formError} unmatched={v.unmatched} />
-      <TrunksPending ready={trunks.ready} />
-      <div className="actions start">
-        <button
-          type="submit"
-          className="primary"
-          disabled={busy || !trunks.ready}
-          aria-describedby={trunks.ready ? undefined : TRUNKS_PENDING_ID}
-        >
-          {route ? "Save route" : "Create route"}
-        </button>
-        <button type="button" disabled={busy} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </form>
+        <TransformEditor
+          form={form}
+          base="numberTransform"
+          legend="Number rewrite"
+          value={d.numberTransform}
+          errors={v.errors}
+          onChange={(t) => set("numberTransform", t)}
+        />
+        <TransformEditor
+          form={form}
+          base="callerIdTransform"
+          legend="Caller ID rewrite"
+          value={d.callerIdTransform}
+          errors={v.errors}
+          onChange={(t) => set("callerIdTransform", t)}
+        />
+        <ScheduleEditor
+          form={form}
+          value={d.schedule}
+          errors={v.errors}
+          onChange={(s) => set("schedule", s)}
+        />
+        <FormAlert message={v.formError} unmatched={v.unmatched} />
+        <TrunksPending ready={trunks.ready} />
+      </form>
+    </RouteDrawer>
   );
 }
 
@@ -773,81 +1005,82 @@ function TrunkPicker({
   };
 
   return (
-    <fieldset className="group" aria-describedby={error ? errorId : undefined}>
-      <legend>Trunks, in try order</legend>
+    <fieldset
+      className="cf-form__section"
+      aria-describedby={error ? errorId : undefined}
+    >
+      <legend className="az-eyebrow">Trunks, in try order</legend>
       {error && (
-        <p id={errorId} className="field-error">
+        <p id={errorId} className="cf-form__error">
           {error}
         </p>
       )}
       {chosen.length === 0 ? (
-        <p className="hint">No trunks chosen.</p>
+        <p className="cf-form__note">No trunks chosen.</p>
       ) : (
-        <ol className="picked">
+        <ol className="cf-rows">
           {chosen.map((t, i) => {
             const itemError = errors[`trunks[${i}]`];
             const itemErrorId = `${selectId}-${i}-error`;
             const describedBy = itemError ? itemErrorId : undefined;
             return (
-              <li key={String(t.id)}>
-                <span>{t.name}</span>
-                <button
-                  type="button"
-                  aria-label={`Try ${t.name} earlier`}
-                  aria-describedby={describedBy}
-                  disabled={i === 0}
-                  onClick={() => swap(i, i - 1)}
-                >
-                  <span aria-hidden="true">↑</span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Try ${t.name} later`}
-                  aria-describedby={describedBy}
-                  disabled={i === chosen.length - 1}
-                  onClick={() => swap(i, i + 1)}
-                >
-                  <span aria-hidden="true">↓</span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Remove ${t.name}`}
-                  aria-describedby={describedBy}
-                  onClick={() => onChange(value.filter((_, j) => j !== i))}
-                >
-                  Remove
-                </button>
-                {itemError && (
-                  <p id={itemErrorId} className="field-error">
-                    {itemError}
-                  </p>
-                )}
+              <li className="cf-row" key={String(t.id)}>
+                <div className="cf-stack" style={{ gap: 4, minWidth: 0 }}>
+                  <span className="cf-row__label">
+                    <span className="cf-member__pos">{i + 1}</span>
+                    <span className="cf-chip">{t.name}</span>
+                  </span>
+                  {itemError && (
+                    <p id={itemErrorId} className="cf-form__error">
+                      {itemError}
+                    </p>
+                  )}
+                </div>
+                <span className="cf-row__actions">
+                  <IconButton
+                    icon="arrow-up"
+                    label={`Try ${t.name} earlier`}
+                    aria-describedby={describedBy}
+                    disabled={i === 0}
+                    onClick={() => swap(i, i - 1)}
+                  />
+                  <IconButton
+                    icon="arrow-down"
+                    label={`Try ${t.name} later`}
+                    aria-describedby={describedBy}
+                    disabled={i === chosen.length - 1}
+                    onClick={() => swap(i, i + 1)}
+                  />
+                  <IconButton
+                    icon="trash-2"
+                    label={`Remove ${t.name}`}
+                    aria-describedby={describedBy}
+                    onClick={() => onChange(value.filter((_, j) => j !== i))}
+                  />
+                </span>
               </li>
             );
           })}
         </ol>
       )}
-      <div className="fields">
-        <div className="field">
-          <label htmlFor={selectId}>Add trunk</label>
-          <select
-            id={selectId}
-            value={pick}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? errorId : undefined}
-            onChange={(e) => setPick(e.target.value)}
-          >
-            <option value="">Choose…</option>
-            {available.map((t) => (
-              <option key={String(t.id)} value={String(t.id)}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button
-          type="button"
-          className="align-end"
+      <div className="cf-add">
+        <Select
+          id={selectId}
+          label="Add trunk"
+          size="sm"
+          value={pick}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
+          options={[
+            { value: "", label: "Choose…" },
+            ...available.map((t) => ({ value: String(t.id), label: t.name })),
+          ]}
+          onChange={(e) => setPick(e.target.value)}
+        />
+        <Button
+          variant="secondary"
+          size="sm"
+          icon="plus"
           disabled={pick === ""}
           onClick={() => {
             const t = trunks.find((x) => String(x.id) === pick);
@@ -856,7 +1089,7 @@ function TrunkPicker({
           }}
         >
           Add
-        </button>
+        </Button>
       </div>
     </fieldset>
   );
@@ -951,116 +1184,16 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   sip_uri: "SIP URI",
 };
 
-function InboundPanel({ trunks: options }: { trunks: TrunkOptions }) {
-  const trunks = options.items;
-  const list = useOrderedList("inbound", listInboundRoutes);
-  const [editing, setEditing] = useState<Editing<InboundRoute>>(null);
-  const trunkName = (tid: Id | null) =>
-    tid === null
-      ? "any"
-      : (trunks.find((t) => String(t.id) === String(tid))?.name ??
-        `#${String(tid)}`);
-
-  return (
-    <>
-      {editing ? (
-        <InboundForm
-          key={editing.kind === "edit" ? String(editing.route.id) : "new"}
-          route={editing.kind === "edit" ? editing.route : null}
-          trunks={options}
-          onCancel={() => setEditing(null)}
-          onSaved={(r) => {
-            list.upsert(r);
-            setEditing(null);
-          }}
-        />
-      ) : (
-        <p>
-          <button
-            type="button"
-            className="primary"
-            onClick={() => setEditing({ kind: "new" })}
-          >
-            New inbound route
-          </button>
-        </p>
-      )}
-      <h2>Inbound routes</h2>
-      <p className="muted">
-        Calls arriving from trunks take the first route that matches, top to
-        bottom.
-      </p>
-      {list.error && (
-        <p role="alert" className="error">
-          {list.error}
-        </p>
-      )}
-      <ListStatus state={list.state} what="inbound routes" />
-      {list.state.status === "ready" && list.items.length === 0 && (
-        <p className="muted">No inbound routes yet.</p>
-      )}
-      {list.items.length > 0 && (
-        <div className="table-wrap">
-          <OrderedTable
-            caption="Inbound routes, in match order"
-            items={list.items}
-            busy={list.busy}
-            onMove={list.move}
-            onEdit={(route) => setEditing({ kind: "edit", route })}
-            onDelete={async (r) => {
-              try {
-                await deleteInboundRoute(r.id);
-                list.remove(r.id);
-              } catch (err) {
-                list.setError(
-                  `Could not delete ${r.name}: ${errorMessage(err)}`,
-                );
-              }
-            }}
-            columns={[
-              {
-                header: "DID",
-                cell: (r) =>
-                  r.didKind === "any" ? (
-                    "any"
-                  ) : (
-                    <>
-                      {r.didKind} <code>{r.did}</code>
-                    </>
-                  ),
-              },
-              { header: "Trunk", cell: (r) => trunkName(r.trunkId) },
-              {
-                header: "Destination",
-                cell: (r) => (
-                  <>
-                    {DESTINATION_LABEL[r.destinationKind] ?? r.destinationKind}{" "}
-                    <code>{r.destination}</code>
-                  </>
-                ),
-              },
-              {
-                header: "Schedule",
-                cell: (r) => (r.schedule ? r.schedule.timeZone : "always"),
-              },
-            ]}
-          />
-        </div>
-      )}
-    </>
-  );
-}
-
-function InboundForm({
+function InboundDrawer({
   route,
   trunks,
-  onCancel,
+  onClose,
   onSaved,
 }: {
   route: InboundRoute | null;
   trunks: TrunkOptions;
-  onCancel: () => void;
-  onSaved: (r: InboundRoute) => void;
+  onClose: () => void;
+  onSaved: (r: InboundRoute, created: boolean) => void;
 }) {
   const form = "in";
   const [d, setD] = useState(() => inboundDraft(route));
@@ -1080,6 +1213,7 @@ function InboundForm({
         route
           ? await updateInboundRoute(route.id, body)
           : await createInboundRoute(body),
+        route === null,
       );
     } catch (err) {
       v.serverError(err, inboundKeys(d));
@@ -1087,201 +1221,173 @@ function InboundForm({
     }
   }
 
+  const storedTrunkMissing =
+    d.trunkId !== null &&
+    !trunks.items.some((t) => String(t.id) === String(d.trunkId));
+
   return (
-    <form
-      className="inline-form"
-      aria-labelledby="in-form-title"
-      onSubmit={(e) => void onSubmit(e)}
-      noValidate
+    <RouteDrawer
+      title={route ? `Inbound route ${route.name}` : "New inbound route"}
+      description="Calls arriving from trunks."
+      busy={busy}
+      trunksReady={trunks.ready}
+      submitLabel={route ? "Save route" : "Create route"}
+      onClose={onClose}
     >
-      <h2 id="in-form-title">
-        {route ? `Edit inbound route ${route.name}` : "New inbound route"}
-      </h2>
-      <div className="fields">
-        <Field id={id("name")} label="Name" error={v.errors.name}>
-          {(p) => (
-            <input
-              {...p}
-              value={d.name}
-              onChange={(e) => set("name", e.target.value)}
+      <form
+        id={FORM_ID}
+        className="cf-form"
+        aria-label={
+          route ? `Edit inbound route ${route.name}` : "New inbound route"
+        }
+        onSubmit={(e) => void onSubmit(e)}
+        noValidate
+      >
+        <Input
+          id={id("name")}
+          label="Name"
+          autoFocus
+          value={d.name}
+          error={v.errors.name}
+          onChange={(e) => set("name", e.target.value)}
+        />
+        <div className="cf-two">
+          <Select
+            id={id("didKind")}
+            label="Match DID"
+            value={d.didKind}
+            error={v.errors.didKind}
+            options={[
+              { value: "exact", label: "Exactly" },
+              { value: "prefix", label: "By prefix" },
+              { value: "regex", label: "By regex (RE2)" },
+              { value: "any", label: "Any DID" },
+            ]}
+            onChange={(e) =>
+              set("didKind", e.target.value as InboundDraft["didKind"])
+            }
+          />
+          {d.didKind !== "any" && (
+            <Input
+              id={id("did")}
+              label="DID"
+              mono
+              spellCheck={false}
+              value={d.did}
+              error={v.errors.did}
+              onChange={(e) => set("did", e.target.value)}
             />
           )}
-        </Field>
-        <Field id={id("didKind")} label="Match DID" error={v.errors.didKind}>
-          {(p) => (
-            <select
-              {...p}
-              value={d.didKind}
-              onChange={(e) =>
-                set("didKind", e.target.value as InboundDraft["didKind"])
-              }
-            >
-              <option value="exact">Exactly</option>
-              <option value="prefix">By prefix</option>
-              <option value="regex">By regex (RE2)</option>
-              <option value="any">Any DID</option>
-            </select>
-          )}
-        </Field>
-        {d.didKind !== "any" && (
-          <Field id={id("did")} label="DID" error={v.errors.did}>
-            {(p) => (
-              <input
-                {...p}
-                className="mono"
-                spellCheck={false}
-                value={d.did}
-                onChange={(e) => set("did", e.target.value)}
-              />
-            )}
-          </Field>
-        )}
-        <Field id={id("trunkId")} label="From trunk" error={v.errors.trunkId}>
-          {(p) => (
-            <select
-              {...p}
-              value={d.trunkId === null ? "" : String(d.trunkId)}
-              disabled={!trunks.ready}
-              onChange={(e) => {
-                const v = e.target.value;
-                const t = trunks.items.find((x) => String(x.id) === v);
-                set("trunkId", v === "" ? null : (t?.id ?? d.trunkId));
-              }}
-            >
-              <option value="">Any trunk</option>
-              {trunks.items.map((t) => (
-                <option key={String(t.id)} value={String(t.id)}>
-                  {t.name}
-                </option>
-              ))}
-              {d.trunkId !== null &&
-                !trunks.items.some(
-                  (t) => String(t.id) === String(d.trunkId),
-                ) && (
-                  <option value={String(d.trunkId)}>
-                    Trunk #{String(d.trunkId)}
-                  </option>
-                )}
-            </select>
-          )}
-        </Field>
-        <Field
-          id={id("sipDomain")}
-          label="SIP domain"
-          error={v.errors.sipDomain}
-          hint="Optional: match the Request-URI host."
-        >
-          {(p) => (
-            <input
-              {...p}
-              value={d.sipDomain}
-              onChange={(e) => set("sipDomain", e.target.value)}
-            />
-          )}
-        </Field>
-        <Field
-          id={id("headerName")}
-          label="Header name"
-          error={v.errors.headerName}
-          hint="Optional."
-        >
-          {(p) => (
-            <input
-              {...p}
+        </div>
+        <Select
+          id={id("trunkId")}
+          label="From trunk"
+          value={d.trunkId === null ? "" : String(d.trunkId)}
+          disabled={!trunks.ready}
+          error={v.errors.trunkId}
+          options={[
+            { value: "", label: "Any trunk" },
+            ...trunks.items.map((t) => ({
+              value: String(t.id),
+              label: t.name,
+            })),
+            ...(storedTrunkMissing
+              ? [
+                  {
+                    value: String(d.trunkId),
+                    label: `Trunk #${String(d.trunkId)}`,
+                  },
+                ]
+              : []),
+          ]}
+          onChange={(e) => {
+            const value = e.target.value;
+            const t = trunks.items.find((x) => String(x.id) === value);
+            set("trunkId", value === "" ? null : (t?.id ?? d.trunkId));
+          }}
+        />
+        <div className="cf-two">
+          <Select
+            id={id("destinationKind")}
+            label="Send to"
+            value={d.destinationKind}
+            error={v.errors.destinationKind}
+            options={[
+              { value: "extension", label: "Extension" },
+              { value: "external", label: "External number" },
+              { value: "sip_uri", label: "SIP URI" },
+            ]}
+            onChange={(e) =>
+              set(
+                "destinationKind",
+                e.target.value as InboundDraft["destinationKind"],
+              )
+            }
+          />
+          <Input
+            id={id("destination")}
+            label={DESTINATION_LABEL[d.destinationKind]}
+            mono
+            value={d.destination}
+            error={v.errors.destination}
+            onChange={(e) => set("destination", e.target.value)}
+          />
+        </div>
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">More conditions</legend>
+          <Input
+            id={id("sipDomain")}
+            label="SIP domain"
+            mono
+            value={d.sipDomain}
+            error={v.errors.sipDomain}
+            hint="Optional: match the Request-URI host."
+            onChange={(e) => set("sipDomain", e.target.value)}
+          />
+          <div className="cf-two">
+            <Input
+              id={id("headerName")}
+              label="Header name"
+              mono
               value={d.headerName}
+              error={v.errors.headerName}
+              hint="Optional."
               onChange={(e) => set("headerName", e.target.value)}
             />
-          )}
-        </Field>
-        <Field
-          id={id("headerRegex")}
-          label="Header regex"
-          error={v.errors.headerRegex}
-        >
-          {(p) => (
-            <input
-              {...p}
-              className="mono"
+            <Input
+              id={id("headerRegex")}
+              label="Header regex"
+              mono
               spellCheck={false}
               value={d.headerRegex}
+              error={v.errors.headerRegex}
               onChange={(e) => set("headerRegex", e.target.value)}
             />
-          )}
-        </Field>
-        <Field
-          id={id("destinationKind")}
-          label="Send to"
-          error={v.errors.destinationKind}
-        >
-          {(p) => (
-            <select
-              {...p}
-              value={d.destinationKind}
-              onChange={(e) =>
-                set(
-                  "destinationKind",
-                  e.target.value as InboundDraft["destinationKind"],
-                )
-              }
-            >
-              <option value="extension">Extension</option>
-              <option value="external">External number</option>
-              <option value="sip_uri">SIP URI</option>
-            </select>
-          )}
-        </Field>
-        <Field
-          id={id("destination")}
-          label={DESTINATION_LABEL[d.destinationKind]}
-          error={v.errors.destination}
-        >
-          {(p) => (
-            <input
-              {...p}
-              value={d.destination}
-              onChange={(e) => set("destination", e.target.value)}
-            />
-          )}
-        </Field>
-        <div className="field checkbox">
-          <input
-            id={id("enabled")}
-            type="checkbox"
+          </div>
+          <Switch
+            label="Enabled"
+            labelPosition="end"
             checked={d.enabled}
             onChange={(e) => set("enabled", e.target.checked)}
           />
-          <label htmlFor={id("enabled")}>Enabled</label>
-        </div>
-      </div>
-      <TransformEditor
-        form={form}
-        base="callerIdTransform"
-        legend="Caller ID rewrite"
-        value={d.callerIdTransform}
-        errors={v.errors}
-        onChange={(t) => set("callerIdTransform", t)}
-      />
-      <ScheduleEditor
-        form={form}
-        value={d.schedule}
-        errors={v.errors}
-        onChange={(s) => set("schedule", s)}
-      />
-      <FormError message={v.formError} unmatched={v.unmatched} />
-      <TrunksPending ready={trunks.ready} />
-      <div className="actions start">
-        <button
-          type="submit"
-          className="primary"
-          disabled={busy || !trunks.ready}
-          aria-describedby={trunks.ready ? undefined : TRUNKS_PENDING_ID}
-        >
-          {route ? "Save route" : "Create route"}
-        </button>
-        <button type="button" disabled={busy} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </form>
+        </fieldset>
+        <TransformEditor
+          form={form}
+          base="callerIdTransform"
+          legend="Caller ID rewrite"
+          value={d.callerIdTransform}
+          errors={v.errors}
+          onChange={(t) => set("callerIdTransform", t)}
+        />
+        <ScheduleEditor
+          form={form}
+          value={d.schedule}
+          errors={v.errors}
+          onChange={(s) => set("schedule", s)}
+        />
+        <FormAlert message={v.formError} unmatched={v.unmatched} />
+        <TrunksPending ready={trunks.ready} />
+      </form>
+    </RouteDrawer>
   );
 }

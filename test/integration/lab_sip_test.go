@@ -442,24 +442,49 @@ func TestCDRWritten(t *testing.T) {
 	})
 }
 
+// TestSnapshotReloadOnNotify fails if a new device cannot register within 2s
+// of its creation (spec S-5). It watches the node's served revision rather
+// than probing with REGISTERs: each early 403 would count toward the
+// runner's failed-authentication throttle.
 func TestSnapshotReloadOnNotify(t *testing.T) {
 	lc := newLabClient(t)
 	start := time.Now()
-	d := lc.devices("desk")[0]
-	p := phone(t, d, labSIP2)
-	eventually(t, 2*time.Second, "new device registers within 2s of creation", func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		res, err := p.Register(ctx, time.Hour)
-		if err != nil {
-			return err
-		}
-		if res.StatusCode != 200 {
-			return fmt.Errorf("REGISTER = %d", res.StatusCode)
-		}
-		return nil
-	})
-	t.Logf("create to registered: %s", time.Since(start))
+	d := lc.createExtension("desk")[0]
+	remember(d.Secret)
+	waitSnapshot(t, "hello-sip-2", lc.configRevision(), start.Add(2*time.Second))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	res, err := phone(t, d, labSIP2).Register(ctx, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("REGISTER = %d %s once the node serves the device's revision", res.StatusCode, res.Reason)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("create to registered: %s, want within 2s", took)
+	} else {
+		t.Logf("create to registered: %s", took)
+	}
+}
+
+// TestFreshDevicesCountNoAuthFailures fails if registering devices the
+// moment they are created records failed authentications: the lab's phones
+// all share the runner's address, so such failures add up across tests to
+// the throttle limit and then every REGISTER in the lab gets 403.
+func TestFreshDevicesCountNoAuthFailures(t *testing.T) {
+	lc := newLabClient(t)
+	t.Cleanup(func() { clearThrottle(t) })
+	clearThrottle(t)
+	for range 3 {
+		d := lc.devices("desk")[0]
+		register(t, phone(t, d, labSIP1))
+		register(t, phone(t, d, labSIP2))
+		kamPhone(t, d)
+	}
+	if keys := strings.Fields(valkeyCLI(t, "--scan", "--pattern", "hello:authfail:*")); len(keys) != 0 {
+		t.Fatalf("registering fresh devices counted failed authentications: %v", keys)
+	}
 }
 
 func TestSnapshotSurvivesDatabaseLoss(t *testing.T) {

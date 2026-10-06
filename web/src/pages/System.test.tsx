@@ -1,5 +1,6 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { LIVE_REFRESH_MS } from "../usePolling";
 import { apiError, json, ME, mockApi, noContent, renderApp } from "../test/api";
 
 const CODES = [
@@ -27,11 +28,16 @@ function setup(extra: Parameters<typeof mockApi>[0] = {}) {
     ...ME,
     "GET /api/v1/feature-codes": () => json({ items: CODES }),
     "GET /api/v1/presence": () => json({ items: PRESENCE }),
+    "GET /api/v1/tokens": () => json({ items: [] }),
     ...extra,
   });
 }
 
 describe("System", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("lists feature codes and saves the edited list", async () => {
     const calls = setup({
       "PUT /api/v1/feature-codes": noContent,
@@ -102,18 +108,95 @@ describe("System", () => {
 
   it("lists presence and refreshes it", async () => {
     const calls = setup();
+    // The poll's timer is driven by the test, not by the wall clock.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     renderApp("/system");
-    const table = await screen.findByRole("table", { name: "Presence" });
-    const row = within(table).getByRole("row", { name: /desk-100/ });
+    const list = await screen.findByRole("list", { name: "Presence" });
+    const row = within(list).getByText("desk-100").closest("li")!;
     expect(row).toHaveTextContent("100");
-    expect(row).toHaveTextContent("ringing");
-
-    await waitFor(
-      () =>
-        expect(
-          calls.filter((c) => c.url === "/api/v1/presence").length,
-        ).toBeGreaterThanOrEqual(2),
-      { timeout: 7000 },
+    expect(row).toHaveTextContent("Ringing");
+    expect(within(list).getByText("lobby-200").closest("li")).toHaveTextContent(
+      "Idle",
     );
+
+    const reads = () => calls.filter((c) => c.url === "/api/v1/presence");
+    const before = reads().length;
+    await act(() => vi.advanceTimersByTimeAsync(LIVE_REFRESH_MS));
+    expect(reads()).toHaveLength(before + 1);
+  });
+
+  it("creates an API token, shows it once, and revokes one after confirming", async () => {
+    const TOKEN = {
+      id: 7,
+      name: "grafana-read",
+      createdAt: "2026-09-12T10:00:00Z",
+      lastUsedAt: null,
+    };
+    const calls = setup({
+      "GET /api/v1/tokens": [
+        () => json({ items: [TOKEN] }),
+        () =>
+          json({
+            items: [TOKEN, { ...TOKEN, id: 8, name: "provisioning-ci" }],
+          }),
+        () => json({ items: [{ ...TOKEN, id: 8, name: "provisioning-ci" }] }),
+      ],
+      "POST /api/v1/tokens": () =>
+        json(
+          { ...TOKEN, id: 8, name: "provisioning-ci", token: "hlo_secret" },
+          201,
+        ),
+      "DELETE /api/v1/tokens/7": noContent,
+    });
+    renderApp("/system");
+    const list = await screen.findByRole("list", { name: "API tokens" });
+    expect(list).toHaveTextContent("grafana-read");
+    expect(list).toHaveTextContent("last used never");
+
+    fireEvent.click(screen.getByRole("button", { name: "New token" }));
+    const create = await screen.findByRole("dialog", { name: "New API token" });
+    fireEvent.click(
+      within(create).getByRole("button", { name: "Create token" }),
+    );
+    expect(within(create).getByLabelText("Name")).toHaveAccessibleDescription(
+      "Enter a name.",
+    );
+    fireEvent.change(within(create).getByLabelText("Name"), {
+      target: { value: "provisioning-ci" },
+    });
+    fireEvent.click(
+      within(create).getByRole("button", { name: "Create token" }),
+    );
+
+    const shown = await screen.findByRole("dialog", { name: "Token created" });
+    expect(within(shown).getByLabelText(/API token/)).toHaveValue("hlo_secret");
+    expect(within(shown).getByText("Shown once")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "POST",
+      url: "/api/v1/tokens",
+      body: { name: "provisioning-ci" },
+    });
+    fireEvent.click(within(shown).getByRole("button", { name: "Done" }));
+    expect(screen.queryByText("hlo_secret")).toBeNull();
+    await screen.findByText("provisioning-ci");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Revoke grafana-read" }),
+    );
+    const confirm = await screen.findByRole("dialog", {
+      name: "Revoke grafana-read?",
+    });
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    fireEvent.click(
+      within(confirm).getByRole("button", { name: "Revoke token" }),
+    );
+    expect(
+      await screen.findByText("Token grafana-read revoked."),
+    ).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "DELETE",
+      url: "/api/v1/tokens/7",
+      body: undefined,
+    });
   });
 });

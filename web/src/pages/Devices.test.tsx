@@ -305,7 +305,7 @@ describe("Devices", () => {
     );
     const confirm = screen.getByRole("dialog", { name: "Delete desk-phone?" });
     expect(
-      within(confirm).getByRole("button", { name: "Delete device" }),
+      within(confirm).getByRole("button", { name: "Cancel" }),
     ).toHaveFocus();
     fireEvent.click(
       within(confirm).getByRole("button", { name: "Delete device" }),

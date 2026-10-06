@@ -728,6 +728,21 @@
               "maximum": 200,
               "default": 50
             }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "description": "Keep only calls of this direction",
+            "schema": {
+              "type": "string",
+              "enum": ["internal", "inbound", "outbound"]
+            }
+          },
+          {
+            "name": "failed",
+            "in": "query",
+            "description": "true keeps only failed calls (final status outside 2xx)",
+            "schema": { "type": "boolean", "default": false }
           }
         ],
         "responses": {
@@ -750,6 +765,96 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
+        }
+      }
+    },
+    "/api/v1/cdrs/counts": {
+      "get": {
+        "operationId": "countCDRs",
+        "summary": "How many call records exist, and how many failed",
+        "tags": ["history"],
+        "responses": {
+          "200": {
+            "description": "CDR counts",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CDRCounts" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        }
+      }
+    },
+    "/api/v1/cdrs/concurrency": {
+      "get": {
+        "operationId": "cdrConcurrency",
+        "summary": "Recorded calls in progress over a time window, by direction",
+        "description": "Samples, at every step of the window, how many CDRs were in progress (start <= t < end). Calls still in progress have no CDR yet and are not counted; GET /api/v1/calls lists those.",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "name": "range",
+            "in": "query",
+            "description": "Window ending at the last whole step: 1h in 5 min steps, 6h in 15 min steps, 24h in 1 h steps",
+            "schema": {
+              "type": "string",
+              "enum": ["1h", "6h", "24h"],
+              "default": "6h"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Concurrency samples",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CDRConcurrency" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        }
+      }
+    },
+    "/api/v1/cdrs/export": {
+      "get": {
+        "operationId": "exportCDRs",
+        "summary": "Call detail records as CSV, newest first",
+        "description": "The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
+        "tags": ["history"],
+        "parameters": [
+          {
+            "name": "direction",
+            "in": "query",
+            "description": "Keep only calls of this direction",
+            "schema": {
+              "type": "string",
+              "enum": ["internal", "inbound", "outbound"]
+            }
+          },
+          {
+            "name": "failed",
+            "in": "query",
+            "description": "true keeps only failed calls (final status outside 2xx)",
+            "schema": { "type": "boolean", "default": false }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CSV with a header row",
+            "content": {
+              "text/csv": {
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
         }
       }
     },
@@ -1683,6 +1788,28 @@
         "description": "JSON with password and/or email, or multipart/form-data with the same fields plus optional `greeting` and `unreachable` WAV files (PCM, 5 MiB max); greetings land in the hello-voicemail bucket and the previous object is removed. At least one field is required. The password is stored as a hash and never returned."
       }
     },
+    "/api/v1/voicemail/boxes": {
+      "get": {
+        "operationId": "listVoicemailBoxes",
+        "summary": "List voicemail boxes",
+        "tags": ["voicemail"],
+        "responses": {
+          "200": {
+            "description": "Every box with its extension and message counts, by extension number",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailBoxSummaryList"
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        },
+        "description": "One row per box: the extension's number and name and its unheard and total messages, so a box list needs one request."
+      }
+    },
     "/api/v1/voicemail/messages": {
       "get": {
         "operationId": "listVoicemailMessages",
@@ -1830,7 +1957,12 @@
             "name": "limit",
             "in": "query",
             "required": false,
-            "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 }
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
           }
         ],
         "responses": {
@@ -1866,11 +1998,23 @@
     "/api/v1/recordings/{id}/audio": {
       "get": {
         "operationId": "getRecordingAudio",
-        "summary": "Play a recording",
+        "summary": "Play or download a recording",
         "tags": ["media"],
-        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "parameters": [
+          { "$ref": "#/components/parameters/id" },
+          {
+            "name": "download",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["true", "false", "1", "0"] },
+            "description": "true or 1 presigns the audio as an attachment named recording-<id>.wav, so the browser saves it instead of playing it."
+          }
+        ],
         "responses": {
-          "302": { "description": "Redirect to a presigned object-store URL, valid 15 minutes" },
+          "302": {
+            "description": "Redirect to a presigned object-store URL, valid 15 minutes"
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "503": { "$ref": "#/components/responses/Unavailable" },
@@ -1943,6 +2087,51 @@
       }
     },
     "/api/v1/announcements/{id}": {
+      "put": {
+        "operationId": "replaceAnnouncement",
+        "summary": "Replace an announcement's audio",
+        "tags": ["media"],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                    "description": "Optional; must equal the announcement's name, which cannot change."
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "WAV bytes, at most 10 MiB; the bytes are checked, not the declared content type."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Announcement" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        },
+        "description": "Overwrites the audio at ann/<name>.wav in the hello-announcements bucket, validated like the upload, then moves updatedAt; audited, bumps the configuration revision and notifies hello-sip."
+      },
       "delete": {
         "operationId": "deleteAnnouncement",
         "summary": "Delete an announcement",
@@ -1955,6 +2144,24 @@
           "500": { "$ref": "#/components/responses/Internal" }
         },
         "description": "Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time."
+      }
+    },
+    "/api/v1/announcements/{id}/audio": {
+      "get": {
+        "operationId": "getAnnouncementAudio",
+        "summary": "Play an announcement",
+        "tags": ["media"],
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "302": {
+            "description": "Redirect to a presigned object-store URL, valid 15 minutes"
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "503": { "$ref": "#/components/responses/Unavailable" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        },
+        "description": "302 to a presigned GET URL (15 minutes) for the announcement audio; the client follows it. A missing announcement is 404."
       }
     },
     "/api/v1/ring-groups": {
@@ -2215,6 +2422,115 @@
         },
         "description": "The dialog state hello-sip publishes per device: idle, ringing, on-call or dnd."
       }
+    },
+    "/api/v1/diagnostics/devices/{id}": {
+      "get": {
+        "operationId": "getDeviceDiagnostics",
+        "summary": "Why a device is or is not registered",
+        "tags": ["diagnostics"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Device id"
+          }
+        ],
+        "description": "The device's current bindings, its recent REGISTER attempts (newest first; hello-sip keeps the last 20 per enabled device for 1 h after the latest) and the failed-auth counter of the last attempt's source IP. verdict explains a missing registration from those facts only, and is null while the device is registered. 503 while live state (Valkey) is unavailable.",
+        "responses": {
+          "200": {
+            "description": "Diagnostics for the device",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceDiagnostics"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/diagnostics/auth-failures": {
+      "get": {
+        "operationId": "listAuthFailures",
+        "summary": "Source IPs with failed authentications",
+        "tags": ["diagnostics"],
+        "description": "Every source IP with a failed-auth counter in its current window (HELLO_SIP_AUTH_FAIL_WINDOW). blocked is true at or above limit (HELLO_SIP_AUTH_FAIL_LIMIT as hello-control reads it): hello-sip then answers that IP 403 until the window ends.",
+        "responses": {
+          "200": {
+            "description": "The counters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthFailureList"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/diagnostics/auth-failures/{ip}": {
+      "delete": {
+        "operationId": "clearAuthFailures",
+        "summary": "Unblock a source IP",
+        "tags": ["diagnostics"],
+        "parameters": [
+          {
+            "name": "ip",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "IPv4 or IPv6 address"
+          }
+        ],
+        "description": "Deletes the source's failed-auth counter, so it is no longer throttled. 404 when ip is not an IP address.",
+        "responses": {
+          "204": {
+            "description": "Counter cleared"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2364,6 +2680,36 @@
           "email": {
             "type": "string",
             "description": "Empty disables voicemail email."
+          }
+        }
+      },
+      "VoicemailBoxSummary": {
+        "type": "object",
+        "required": ["id", "extensionId", "number", "name", "unheard", "total"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The box id (the messages list's box parameter)."
+          },
+          "extensionId": { "type": "integer", "format": "int64" },
+          "number": { "type": "string" },
+          "name": { "type": "string" },
+          "unheard": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Messages not played yet."
+          },
+          "total": { "type": "integer", "format": "int64" }
+        }
+      },
+      "VoicemailBoxSummaryList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/VoicemailBoxSummary" }
           }
         }
       },
@@ -3106,16 +3452,40 @@
       },
       "Recording": {
         "type": "object",
-        "required": ["id", "correlationId", "initiatedBy", "durationMs", "createdAt"],
+        "required": [
+          "id",
+          "correlationId",
+          "initiatedBy",
+          "durationMs",
+          "createdAt",
+          "source",
+          "destination"
+        ],
         "properties": {
           "id": { "type": "integer", "format": "int64" },
           "correlationId": {
             "type": "string",
             "description": "The call the recording belongs to; matches the CDR's correlationId."
           },
-          "initiatedBy": { "type": "string", "enum": ["dtmf", "default", "api"] },
+          "initiatedBy": {
+            "type": "string",
+            "enum": ["dtmf", "default", "api"]
+          },
           "durationMs": { "type": "integer", "format": "int64" },
-          "createdAt": { "type": "string", "format": "date-time" }
+          "createdAt": { "type": "string", "format": "date-time" },
+          "cdrId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The call's CDR (same correlationId); absent until the CDR is written."
+          },
+          "source": {
+            "type": "string",
+            "description": "The CDR's source; empty until the CDR is written."
+          },
+          "destination": {
+            "type": "string",
+            "description": "The CDR's destination; empty until the CDR is written."
+          }
         }
       },
       "RecordingPage": {
@@ -3126,7 +3496,10 @@
             "type": "array",
             "items": { "$ref": "#/components/schemas/Recording" }
           },
-          "next": { "type": "string", "description": "Cursor for the next (older) page; empty at the end." }
+          "next": {
+            "type": "string",
+            "description": "Cursor for the next (older) page; empty at the end."
+          }
         }
       },
       "Announcement": {
@@ -4490,6 +4863,7 @@
           "callerId",
           "route",
           "trunks",
+          "emergency",
           "rejectCode",
           "reason"
         ],
@@ -4520,6 +4894,10 @@
             },
             "description": "Trunk names in try order"
           },
+          "emergency": {
+            "type": "boolean",
+            "description": "True when the matched outbound route is an emergency route"
+          },
           "rejectCode": {
             "type": "integer"
           },
@@ -4543,6 +4921,54 @@
           }
         }
       },
+      "CDRCounts": {
+        "type": "object",
+        "required": ["all", "failed"],
+        "properties": {
+          "all": { "type": "integer", "format": "int64" },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Final status outside 2xx"
+          }
+        }
+      },
+      "ConcurrencyPoint": {
+        "type": "object",
+        "required": ["at", "inbound", "outbound", "internal"],
+        "properties": {
+          "at": { "type": "string", "format": "date-time" },
+          "inbound": { "type": "integer", "format": "int64" },
+          "outbound": { "type": "integer", "format": "int64" },
+          "internal": { "type": "integer", "format": "int64" }
+        }
+      },
+      "CDRConcurrency": {
+        "type": "object",
+        "required": ["range", "stepSeconds", "points", "peak"],
+        "properties": {
+          "range": { "type": "string", "enum": ["1h", "6h", "24h"] },
+          "stepSeconds": { "type": "integer" },
+          "points": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ConcurrencyPoint" }
+          },
+          "peak": {
+            "description": "The sample with the most calls in progress; null when no call was in progress",
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "required": ["calls", "at"],
+                "properties": {
+                  "calls": { "type": "integer", "format": "int64" },
+                  "at": { "type": "string", "format": "date-time" }
+                }
+              }
+            ]
+          }
+        }
+      },
       "CDRDetail": {
         "allOf": [
           {
@@ -4550,7 +4976,7 @@
           },
           {
             "type": "object",
-            "required": ["trace", "explanation"],
+            "required": ["trace", "explanation", "note"],
             "properties": {
               "trace": {
                 "type": "array",
@@ -4561,6 +4987,10 @@
               "explanation": {
                 "type": "string",
                 "description": "For a failed call, the reason from the last trace step; empty otherwise"
+              },
+              "note": {
+                "type": "string",
+                "description": "For an answered call that failed over, the trunk response that caused it and the trunk that answered; empty otherwise"
               }
             }
           }
@@ -4692,6 +5122,198 @@
               }
             ],
             "description": "null while PostgreSQL is unavailable"
+          }
+        }
+      },
+      "RegisterAttempt": {
+        "type": "object",
+        "required": [
+          "at",
+          "device",
+          "source",
+          "ip",
+          "node",
+          "credentials",
+          "code",
+          "reason"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "device": {
+            "type": "string",
+            "description": "SIP username of the AOR"
+          },
+          "source": {
+            "type": "string",
+            "description": "ip:port the REGISTER came from"
+          },
+          "ip": {
+            "type": "string",
+            "description": "Client IP the failed-auth throttle counts"
+          },
+          "node": {
+            "type": "string",
+            "description": "SIP node that answered"
+          },
+          "userAgent": {
+            "type": "string",
+            "description": "The request's User-Agent; absent when it had none"
+          },
+          "credentials": {
+            "type": "boolean",
+            "description": "The request carried an Authorization header"
+          },
+          "code": {
+            "type": "integer",
+            "description": "Final response status"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "A 401 whose challenge carried stale=true"
+          }
+        }
+      },
+      "AuthFailure": {
+        "type": "object",
+        "required": ["ip", "failures", "windowEndsAt", "blocked"],
+        "properties": {
+          "ip": {
+            "type": "string"
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "windowEndsAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the counter expires"
+          },
+          "blocked": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AuthFailureList": {
+        "type": "object",
+        "required": ["items", "limit"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuthFailure"
+            }
+          },
+          "limit": {
+            "type": "integer"
+          }
+        }
+      },
+      "DeviceDiagnostics": {
+        "type": "object",
+        "required": [
+          "deviceId",
+          "device",
+          "extensionId",
+          "enabled",
+          "aor",
+          "registered",
+          "bindings",
+          "attempts",
+          "attemptsRetentionSeconds",
+          "source",
+          "authFailLimit",
+          "verdict"
+        ],
+        "properties": {
+          "deviceId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "device": {
+            "type": "string"
+          },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "aor": {
+            "type": "string",
+            "example": "sip:101-desk@hello.test"
+          },
+          "registered": {
+            "type": "boolean"
+          },
+          "bindings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binding"
+            }
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegisterAttempt"
+            }
+          },
+          "attemptsRetentionSeconds": {
+            "type": "integer"
+          },
+          "source": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AuthFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Failed-auth counter of the last attempt's IP"
+          },
+          "authFailLimit": {
+            "type": "integer"
+          },
+          "verdict": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["code", "message"],
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "enum": [
+                      "disabled",
+                      "throttled",
+                      "no_register",
+                      "expired",
+                      "stale_nonce",
+                      "auth_failed",
+                      "challenge_unanswered",
+                      "forbidden",
+                      "interval_too_brief",
+                      "unavailable",
+                      "rejected"
+                    ]
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it is not registered; null while registered"
           }
         }
       }
