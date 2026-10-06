@@ -36,6 +36,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "user-round",
       },
       { label: "Devices", path: "/devices", phase: 1, icon: "smartphone" },
+      { label: "Phones", path: "/phones", phase: 5, icon: "phone" },
       {
         label: "Registrations",
         path: "/registrations",
