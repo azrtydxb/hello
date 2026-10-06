@@ -808,7 +808,7 @@ spec:
           # kamailio/Dockerfile), pinned to the tag it published for
           # commit 1c3fe03 (the full sha tag; the registry keeps no short
           # tags). Later: an immutable repository@sha256:... digest.
-          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-4123469783f334468c65a0be22b325fc10a67ce9
+          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-95a58688c854dbf92df8857340e142987b66f954
           imagePullPolicy: IfNotPresent
           securityContext:
             # uid/gid of the image's kamailio user (read from the image).
@@ -960,7 +960,7 @@ spec:
       terminationGracePeriodSeconds: 120 # a drain must finish (lab: 2h, capped here)
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-4123469783f334468c65a0be22b325fc10a67ce9
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-95a58688c854dbf92df8857340e142987b66f954
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1171,7 +1171,7 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-4123469783f334468c65a0be22b325fc10a67ce9
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-95a58688c854dbf92df8857340e142987b66f954
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1355,7 +1355,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-4123469783f334468c65a0be22b325fc10a67ce9
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-95a58688c854dbf92df8857340e142987b66f954
           command:
             - sh
             - -c
@@ -1427,7 +1427,7 @@ spec:
                   key: smtpFrom
       containers:
         - name: hello-control
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-4123469783f334468c65a0be22b325fc10a67ce9
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-95a58688c854dbf92df8857340e142987b66f954
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1580,7 +1580,7 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-4123469783f334468c65a0be22b325fc10a67ce9
+          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-95a58688c854dbf92df8857340e142987b66f954
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
