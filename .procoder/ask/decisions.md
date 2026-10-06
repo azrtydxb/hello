@@ -202,3 +202,13 @@
 
 - Faster detection: membership heartbeat 1 s / TTL 4 s, so a crashed node's calls re-home in about 5 s; update docs to the measured numbers
 - Keep 15 s detection; correct docs to the honest numbers (crash ~15–18 s gap, restart ~4 s, graceful <1 s)
+
+## Remaining items after Phase 7 (2026-10-06)
+
+- Phone auto-provisioning vendors: Yealink, Poly, Grandstream, Snom/Fanvil, and any brand (generic per-model templates)
+- Provisioning discovery: DHCP option 66, vendor cloud redirect, and manual URL entry — all three
+- Provisioning auth: MAC + per-device token URL over HTTPS
+- Load tests (§27): later, when the user gives a window
+- SMTP relay on kw: leave voicemail email off
+- Real carrier trunk check: not yet, stays pending
+- Emblem: the user dropped the full design export in the repo root; use its assets, then delete the folder
