@@ -65,7 +65,7 @@ Files: `migrations/00006_provisioning.sql`, `internal/prov/types.go`, `internal/
 Configuration as committed (`config.Control.Prov`): the listener is enabled when `HELLO_PROV_PUBLIC_URL` is set (an `https://` scheme-and-host URL), not when `HELLO_PROV_ADDR` is non-empty: an environment cannot tell an empty variable from an unset one, and with the spec's rule every existing deployment would stop starting until Task 6 sets the URL. `HELLO_PROV_ADDR` without a public URL is refused. Durations also take whole days (`7d`). `RegisterExpiry` is `HELLO_SIP_REGISTER_MAX_EXPIRES` (default 1h). The redirect credentials of spec S-11 are read into `Prov.Redirect`, each vendor's group all set or all empty.
 Interfaces: everything listed in Shared contracts.
 
-- [ ] Write the migration and confirm it applies and rolls back with `HELLO_TEST_DATABASE_URL=… go test -run Migrate ./test/integration/` → ok.
+- [x] Write the migration and confirm it applies and rolls back with `HELLO_TEST_DATABASE_URL=… go test -run Migrate ./test/integration/` → ok (`TestMigrateProvisioningRollback`, CI go job on PR #26).
 - [x] Write `types.go`, `store.go` and `redirect.go` with doc comments; `go build ./...` → ok.
 - [x] Add the config fields with defaults and validation (`HELLO_PROV_PUBLIC_URL` required when the listener is enabled; durations and CIDRs parse) and run `go test ./internal/config/` → `TestLoadProv*` pass.
 - [ ] Commit to `prov-contracts`, then branch `prov-core`, `prov-control`, `prov-redirect` and `prov-ui`, each in its own worktree.
