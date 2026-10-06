@@ -196,6 +196,10 @@ jobs:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.file }}
           target: ${{ matrix.image.target }}
+          # Stamps internal/version.Commit (GET /api/v1/version) in the Go
+          # images; the other Dockerfiles declare no COMMIT arg.
+          build-args: |
+            COMMIT=${{ github.sha }}
           push: true
           tags: |
             ${{ env.REGISTRY }}/azrtydxb/${{ matrix.image.name }}:sha-${{ github.sha }}
