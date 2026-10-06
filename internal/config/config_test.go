@@ -211,7 +211,7 @@ func TestLoadTrustedProxies(t *testing.T) {
 	if err != nil || len(c.TrustedProxies) != 2 || c.TrustedProxies[1].String() != "10.1.0.0/16" {
 		t.Fatalf("trusted proxies = %v, %v", c.TrustedProxies, err)
 	}
-	if c.DrainTimeout != 2*time.Hour || c.MemberHeartbeat != 5*time.Second {
+	if c.DrainTimeout != 2*time.Hour || c.MemberHeartbeat != time.Second {
 		t.Fatalf("defaults = %s %s", c.DrainTimeout, c.MemberHeartbeat)
 	}
 }
@@ -229,8 +229,8 @@ func TestLoadHAValues(t *testing.T) {
 		{"HELLO_MEMBER_HEARTBEAT", "0"},
 		{"HELLO_MEMBER_HEARTBEAT", "-5s"},
 		{"HELLO_MEMBER_HEARTBEAT", "often"},
-		{"HELLO_MEMBER_HEARTBEAT", "5001ms"},
-		{"HELLO_MEMBER_HEARTBEAT", "10s"},
+		{"HELLO_MEMBER_HEARTBEAT", "1334ms"},
+		{"HELLO_MEMBER_HEARTBEAT", "5s"},
 		{"HELLO_SIP_TRUSTED_PROXIES", "0.0.0.0/0"},
 		{"HELLO_SIP_TRUSTED_PROXIES", "10.0.0.0/8,::/0"},
 		{"HELLO_SIP_TRUSTED_PROXIES", "10.0.0.0/8,"},
@@ -251,8 +251,8 @@ func TestLoadHAValues(t *testing.T) {
 			t.Errorf("control sentinels %q: want error, got %v", v, err)
 		}
 	}
-	c, err := LoadSIP(env(map[string]string{"HELLO_MEMBER_HEARTBEAT": "5s", "HELLO_DRAIN_TIMEOUT": "1s"}))
-	if err != nil || c.MemberHeartbeat != 5*time.Second || c.DrainTimeout != time.Second {
+	c, err := LoadSIP(env(map[string]string{"HELLO_MEMBER_HEARTBEAT": "1333ms", "HELLO_DRAIN_TIMEOUT": "1s"}))
+	if err != nil || c.MemberHeartbeat != 1333*time.Millisecond || c.DrainTimeout != time.Second {
 		t.Fatalf("boundary values = %s %s, %v", c.MemberHeartbeat, c.DrainTimeout, err)
 	}
 }
@@ -262,7 +262,7 @@ func TestLoadHAValues(t *testing.T) {
 // is not parsed.
 func TestLoadHATakeover(t *testing.T) {
 	c, err := LoadSIP(env(nil))
-	if err != nil || !c.HATakeoverEnabled || c.HATakeoverPoll != time.Second || c.HATakeoverJitter != 2*time.Second {
+	if err != nil || !c.HATakeoverEnabled || c.HATakeoverPoll != time.Second || c.HATakeoverJitter != 500*time.Millisecond {
 		t.Fatalf("takeover defaults = %+v, %v", c, err)
 	}
 	c, err = LoadSIP(env(map[string]string{

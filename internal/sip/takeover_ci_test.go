@@ -44,7 +44,7 @@ func TestTakeoverLoopOnValkey(t *testing.T) {
 	}
 	st := orphanState("ci-orphan-1", dead.ID, "sip:x@127.0.0.1:1") // the callee endpoint is gone: one-sided close
 	// Shrink the owner-freshness window (2x the heartbeat) so the just
-	// saved state is claimable, as it would be 15s into a real outage.
+	// saved state is claimable, as it would be 4s into a real outage.
 	oldHB := livestate.HAHeartbeat
 	livestate.HAHeartbeat = 40 * time.Millisecond
 	t.Cleanup(func() { livestate.HAHeartbeat = oldHB })

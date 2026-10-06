@@ -924,6 +924,19 @@ func (c *call) end(status int, side, reason, result string) {
 			c.release()
 		}
 		c.s.m.ActiveCalls.Dec()
+		c.mu.Lock()
+		yielded := c.haYielded
+		c.mu.Unlock()
+		if yielded {
+			// A call handed to (or taken over by) another node is not
+			// over: the live record (same correlation id) and the one CDR
+			// of the logical call are the taker's. Deleting the record
+			// here would hide the call the taker just published, and a
+			// CDR here would take the correlation id the taker's final
+			// CDR needs (one CDR per call).
+			c.releaseSlots()
+			return
+		}
 		c.unpublish()
 		c.record(status, side, reason, result)
 	})
@@ -945,10 +958,19 @@ func (c *call) unpublish() {
 func (c *call) release() {
 	c.mu.Lock()
 	legs := c.legs
+	hom := c.homedCall
 	c.mu.Unlock()
 	c.s.unbind(c.callID, c)
 	for _, l := range legs {
 		c.s.unbind(l.callID, c)
+	}
+	if hom != nil {
+		// A taken-over call's callee dialog is bound outside c.legs.
+		for _, l := range hom.legs {
+			if l != nil {
+				c.s.unbind(l.callID, c)
+			}
+		}
 	}
 }
 
@@ -1014,10 +1036,18 @@ func (c *call) publish() {
 	c.pubMu.Lock()
 	defer c.pubMu.Unlock()
 	c.mu.Lock()
-	ended := c.ended
+	ended, handoff := c.ended, c.haHandoff && c.haHandoffWritten
 	c.mu.Unlock()
 	if ended {
 		return
+	}
+	if handoff {
+		// A call handed off for takeover: once a survivor has claimed it,
+		// the live record (same correlation id) is the taker's, and this
+		// node's copy must not overwrite it before the yield.
+		if taker := c.s.haClaimedBy(c.callID); taker != "" && taker != c.s.cfg.NodeID {
+			return
+		}
 	}
 	ctx, cancel := c.s.stateCtx()
 	defer cancel()
@@ -1439,9 +1469,10 @@ func (s *Server) haByeRequest(c *call, hom *homedCall, fromCallee bool, req *sip
 	c.hungUp = true
 	c.mu.Unlock()
 	s.respond(tx, req, sip.StatusOK, "OK")
-	side := cdr.SideCallee
+	// The side that sent the BYE ended the call (as handleBye records it).
+	side := cdr.SideCaller
 	if fromCallee {
-		side = cdr.SideCaller
+		side = cdr.SideCallee
 	}
 	c.end(sip.StatusOK, side, "", ResultAnswered)
 	go func() {

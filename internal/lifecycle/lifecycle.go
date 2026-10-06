@@ -38,7 +38,10 @@ type Publisher interface {
 
 // Load is the node's current load, for its membership record.
 type Load struct {
-	ActiveCalls    int
+	ActiveCalls int
+	// ConnectedCalls is the answered subset of ActiveCalls; nil when the
+	// node does not report it.
+	ConnectedCalls *int
 	Registrations  int
 	ConfigRevision int64
 }
@@ -310,6 +313,7 @@ func (m *Machine) member() cluster.Member {
 	mem.State, mem.Reason = m.State()
 	l := m.load()
 	mem.ActiveCalls, mem.Registrations, mem.ConfigRevision = l.ActiveCalls, l.Registrations, l.ConfigRevision
+	mem.ConnectedCalls = l.ConnectedCalls
 	mem.Heartbeat = m.o.Now().UTC()
 	return mem
 }

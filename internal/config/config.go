@@ -132,7 +132,7 @@ type SIP struct {
 	// HATakeoverPoll (HELLO_HA_TAKEOVER_POLL, default 1s) is the base
 	// interval between orphan scans.
 	HATakeoverPoll time.Duration
-	// HATakeoverJitter (HELLO_HA_TAKEOVER_JITTER, default 2s) is the
+	// HATakeoverJitter (HELLO_HA_TAKEOVER_JITTER, default 500ms) is the
 	// random extra delay (0..jitter) added to each poll, so two survivors
 	// do not scan in lockstep (thundering herd).
 	HATakeoverJitter time.Duration
@@ -232,10 +232,10 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	if c.DrainTimeout == 0 {
 		r.fail("HELLO_DRAIN_TIMEOUT", errors.New("must be positive"))
 	}
-	c.MemberHeartbeat = r.duration("HELLO_MEMBER_HEARTBEAT", 5*time.Second)
+	c.MemberHeartbeat = r.duration("HELLO_MEMBER_HEARTBEAT", time.Second)
 	c.HATakeoverEnabled = r.getenv("HELLO_HA_TAKEOVER_ENABLED") != "false"
 	c.HATakeoverPoll = r.duration("HELLO_HA_TAKEOVER_POLL", time.Second)
-	c.HATakeoverJitter = r.duration("HELLO_HA_TAKEOVER_JITTER", 2*time.Second)
+	c.HATakeoverJitter = r.duration("HELLO_HA_TAKEOVER_JITTER", 500*time.Millisecond)
 	switch {
 	case c.MemberHeartbeat == 0:
 		r.fail("HELLO_MEMBER_HEARTBEAT", errors.New("must be positive"))

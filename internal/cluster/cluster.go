@@ -8,9 +8,12 @@ package cluster
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,25 +41,50 @@ const (
 
 // Member is one node's membership record.
 type Member struct {
-	ID             string    `json:"id"`
-	Kind           Kind      `json:"kind"`
-	State          State     `json:"state"`
-	Reason         string    `json:"reason,omitempty"` // why it is not READY
-	SIPAddr        string    `json:"sipAddr,omitempty"`
-	HTTPAddr       string    `json:"httpAddr,omitempty"`
-	Transports     []string  `json:"transports,omitempty"`
-	ActiveCalls    int       `json:"activeCalls"`
+	ID          string   `json:"id"`
+	Kind        Kind     `json:"kind"`
+	State       State    `json:"state"`
+	Reason      string   `json:"reason,omitempty"` // why it is not READY
+	SIPAddr     string   `json:"sipAddr,omitempty"`
+	HTTPAddr    string   `json:"httpAddr,omitempty"`
+	Transports  []string `json:"transports,omitempty"`
+	ActiveCalls int      `json:"activeCalls"`
+	// ConnectedCalls is how many of the active calls were answered (a
+	// ringing call is not one): what the zombie reaper counts when the
+	// node dies, since a ringing call gets its final response from the
+	// edge. Nil from older nodes (ActiveCalls then stands in).
+	ConnectedCalls *int      `json:"connectedCalls,omitempty"`
 	Registrations  int       `json:"registrations"`
 	Version        string    `json:"version"`
 	ConfigRevision int64     `json:"configRevision"`
 	StartedAt      time.Time `json:"startedAt"`
 	Heartbeat      time.Time `json:"heartbeat"`
+	// Incarnation identifies one process of the node: a fresh random id
+	// per start, so a node restarted in place under the same ID (a crash
+	// and a container restart inside the OFFLINE window) is told apart
+	// from the process that owned its calls before. Empty from older
+	// nodes.
+	Incarnation string `json:"incarnation,omitempty"`
+}
+
+// NewIncarnation returns a fresh random process incarnation id.
+func NewIncarnation() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand never fails on supported platforms; fall back to
+		// the clock, which still differs between two starts.
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // Timings of the membership protocol.
 const (
-	// TTL is how long a record lives without a heartbeat (3 heartbeats).
-	TTL = 15 * time.Second
+	// TTL is how long a record lives without a heartbeat: four of the
+	// default 1s heartbeats (a heartbeat may be at most TTL/3), so a dead
+	// node is listed OFFLINE within 4s - the crash detection behind in-call
+	// HA's takeover (docs/ha.md).
+	TTL = 4 * time.Second
 	// TombstoneTTL is how long an expired node is still listed OFFLINE.
 	TombstoneTTL = 10 * time.Minute
 )
@@ -120,6 +148,7 @@ func (s *Store) Members(ctx context.Context) ([]Member, error) {
 	for _, m := range tombs {
 		if !seen[m.ID] {
 			m.State, m.Reason, m.ActiveCalls, m.Registrations = Offline, "no heartbeat", 0, 0
+			m.ConnectedCalls = nil
 			out = append(out, m)
 		}
 	}

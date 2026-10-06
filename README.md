@@ -110,7 +110,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_SIP_STATE_TIMEOUT`                         | sip     | `200ms`; Valkey calls while handling SIP                                                                                      |
 | `HELLO_SIP_TRUSTED_PROXIES`                       | sip     | unset (trust none); CIDRs of the SIP balancers (Kamailio) whose `Path` and client address are believed                        |
 | `HELLO_DRAIN_TIMEOUT`                             | sip     | `2h`; a draining node hangs up remaining calls after this                                                                     |
-| `HELLO_MEMBER_HEARTBEAT`                          | sip     | `5s`; how often the node refreshes its cluster membership in Valkey                                                           |
+| `HELLO_MEMBER_HEARTBEAT`                          | sip     | `1s`; how often the node refreshes its cluster membership in Valkey (at most 1.33s: a third of the 4s membership TTL)         |
 
 The UI container proxies `/api` to `HELLO_CONTROL_UPSTREAM` and re-resolves it through `HELLO_DNS_RESOLVER` (default `127.0.0.11`, Docker's DNS; use your cluster DNS elsewhere).
 

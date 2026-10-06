@@ -12,8 +12,11 @@ import (
 // a record outlives its TTL. Runs only against a real Valkey (CI).
 func TestDialogStateLifecycle(t *testing.T) {
 	s, ctx := store(t), context.Background()
+	// The freshness window (2x HAHeartbeat) is set per phase, so neither
+	// phase depends on how fast the runner is: an hour while the record
+	// must count as fresh, a millisecond once it must count as aged.
 	oldHB := HAHeartbeat
-	HAHeartbeat = 40 * time.Millisecond // the freshness window is 2x this
+	HAHeartbeat = time.Hour
 	t.Cleanup(func() { HAHeartbeat = oldHB })
 
 	st := DialogState{
@@ -49,13 +52,14 @@ func TestDialogStateLifecycle(t *testing.T) {
 	}
 
 	// Fresh heartbeat: a claim is refused while the owner looks alive.
-	if ok, _, err := s.ClaimDialog(ctx, "c1", "sip-2"); ok || err != nil {
+	if ok, _, err := s.ClaimDialog(ctx, "c1", "sip-2", ""); ok || err != nil {
 		t.Fatalf("fresh claim = %v, %v; want refused", ok, err)
 	}
 
 	// After the freshness window the claim succeeds exactly once.
+	HAHeartbeat = time.Millisecond
 	time.Sleep(2*HAHeartbeat + 20*time.Millisecond)
-	ok, state, err := s.ClaimDialog(ctx, "c1", "sip-2")
+	ok, state, err := s.ClaimDialog(ctx, "c1", "sip-2", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +76,7 @@ func TestDialogStateLifecycle(t *testing.T) {
 	if got, _ := s.OrphanedDialogs(ctx, "sip-1"); len(got) != 0 {
 		t.Fatalf("claimed dialog still orphaned: %v", got)
 	}
-	if ok, _, _ := s.ClaimDialog(ctx, "c1", "sip-3"); ok {
+	if ok, _, _ := s.ClaimDialog(ctx, "c1", "sip-3", ""); ok {
 		t.Fatal("second claimant won")
 	}
 
@@ -99,10 +103,74 @@ func TestDialogStateLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(400 * time.Millisecond)
-	if ok, _, _ := s.ClaimDialog(ctx, "c1", "sip-2"); ok {
+	if ok, _, _ := s.ClaimDialog(ctx, "c1", "sip-2", ""); ok {
 		t.Fatal("claimed a dialog whose state expired")
 	}
 	if got, _ := s.OrphanedDialogs(ctx, "sip-1"); len(got) != 0 {
 		t.Fatalf("expired dialog still listed: %v", got)
+	}
+}
+
+// TestDialogClaimStaleIncarnation fails if the record of a dead process of
+// a node restarted in place under the same ID cannot be claimed at once
+// (its last write is fresh: the freshness window must not apply when the
+// owner incarnation is known dead), if a claim naming another incarnation
+// than the record's succeeds (the live process's own calls), if a record
+// rewritten between the read and the claim is claimed (compare-and-set),
+// or if the callee leg's Call-ID does not find the record. Runs only
+// against a real Valkey (CI).
+func TestDialogClaimStaleIncarnation(t *testing.T) {
+	s, ctx := store(t), context.Background()
+	st := DialogState{
+		CallID: "c2", OwnerNode: "sip-1", OwnerIncarnation: "old", Correlation: "corr-2", State: "talking",
+		StartedAt: time.Now().Add(-time.Minute).UTC(),
+		Legs: [2]DialogLeg{
+			{CallID: "c2", LocalTag: "ta", RemoteTag: "ra", RemoteTarget: "sip:101@10.0.0.9"},
+			{CallID: "c2-b", LocalTag: "tb", RemoteTag: "rb", RemoteTarget: "sip:102@10.0.0.10"},
+		},
+	}
+	if err := s.SaveDialogState(ctx, st, 0); err != nil {
+		t.Fatal(err)
+	}
+	// Either leg's Call-ID finds the record.
+	for _, id := range []string{"c2", "c2-b"} {
+		got, ok, err := s.DialogByLeg(ctx, id)
+		if err != nil || !ok || got.CallID != "c2" || got.OwnerIncarnation != "old" || got.StartedAt.IsZero() {
+			t.Fatalf("DialogByLeg(%s) = %+v, %v, %v", id, got, ok, err)
+		}
+	}
+	if _, ok, err := s.DialogByLeg(ctx, "nope"); ok || err != nil {
+		t.Fatalf("DialogByLeg(unknown) = %v, %v", ok, err)
+	}
+	// Fresh, and no incarnation named: refused as before.
+	if ok, _, err := s.ClaimDialog(ctx, "c2", "sip-1", ""); ok || err != nil {
+		t.Fatalf("fresh claim = %v, %v; want refused", ok, err)
+	}
+	// Another incarnation than the record's: refused (a live process).
+	if ok, _, err := s.ClaimDialog(ctx, "c2", "sip-1", "other"); ok || err != nil {
+		t.Fatalf("claim naming the wrong incarnation = %v, %v; want refused", ok, err)
+	}
+	// The dead incarnation named: claimed at once, fresh or not, counted
+	// apart from the node's own (OFFLINE) takeovers.
+	ok, got, err := s.ClaimDialog(ctx, "c2", "sip-1", "old")
+	if err != nil || !ok || got.CallID != "c2" {
+		t.Fatalf("stale-incarnation claim = %v, %+v, %v; want claimed", ok, got, err)
+	}
+	if n, _ := s.TakenOver(ctx, "sip-1"); n != 0 {
+		t.Fatalf("TakenOver(sip-1) = %d: a restart's claims must not offset the node's OFFLINE reap", n)
+	}
+	if owner, _ := s.ClaimOwner(ctx, "c2"); owner != "sip-1" {
+		t.Fatalf("ClaimOwner = %q", owner)
+	}
+
+	// Compare-and-set: the script refuses a record that changed since it
+	// was read.
+	if err := s.ReleaseDialogClaim(ctx, "c2"); err != nil {
+		t.Fatal(err)
+	}
+	n, err := claimOrphan.Exec(ctx, s.c, []string{dialogClaimKey("c2"), dialogKey("c2"), dialogTakenKey("x")},
+		[]string{"sip-2", "30000", "60000", `{"callId":"c2","ownerNode":"sip-9"}`}).AsInt64()
+	if err != nil || n != 0 {
+		t.Fatalf("claim on a rewritten record = %d, %v; want refused", n, err)
 	}
 }

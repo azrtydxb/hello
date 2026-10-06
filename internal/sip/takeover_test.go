@@ -79,19 +79,39 @@ func (f *fakeHA) DeleteDialogState(_ context.Context, id string) error {
 	return nil
 }
 
-func (f *fakeHA) ClaimDialog(_ context.Context, id, node string) (bool, livestate.DialogState, error) {
+func (f *fakeHA) ClaimDialog(_ context.Context, id, node, stale string) (bool, livestate.DialogState, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	st, ok := f.dialogs[id]
 	if !ok {
 		return false, livestate.DialogState{}, nil
 	}
+	if stale != "" && st.OwnerIncarnation != stale {
+		return false, st, nil
+	}
 	if _, taken := f.claims[id]; taken {
 		return false, st, nil
 	}
 	f.claims[id] = node
-	f.taken[st.OwnerNode]++
+	if stale != "" {
+		f.taken[st.OwnerNode+"@"+stale]++
+	} else {
+		f.taken[st.OwnerNode]++
+	}
 	return true, st, nil
+}
+
+func (f *fakeHA) DialogByLeg(_ context.Context, id string) (livestate.DialogState, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, st := range f.dialogs {
+		for _, leg := range st.LegCallIDs() {
+			if leg == id {
+				return st, true, nil
+			}
+		}
+	}
+	return livestate.DialogState{}, false, nil
 }
 
 func (f *fakeHA) ReleaseDialogClaim(_ context.Context, id string) error {
@@ -352,8 +372,9 @@ func TestTakeoverReINVITEs(t *testing.T) {
 }
 
 // TestTakeoverYield fails if the owner of a call that another node claimed
-// does not yield: it must stop replicating, close its copy with a CDR, and
-// leave the replicated record for its taker (spec edge case, S-6).
+// does not yield: it must stop replicating and close its copy, leaving the
+// replicated record, the live record and the call's one CDR to its taker
+// (spec edge case, S-6).
 func TestTakeoverYield(t *testing.T) {
 	ha := newFakeHA()
 	mem := &fakeMembership{}
@@ -390,11 +411,15 @@ func TestTakeoverYield(t *testing.T) {
 	ha.mu.Lock()
 	ha.claims[callID] = "sip-2"
 	ha.mu.Unlock()
-	cd := owner.nextCDR(t)
-	if !strings.Contains(cd.FailureReason, "taken over by sip-2") {
-		t.Fatalf("yield CDR = %+v", cd)
+	// The yield closes the owner's copy but not the logical call: no CDR
+	// here (the taker writes the call's one CDR under the same correlation
+	// id) and the live record, which the taker overwrites under the same
+	// id, is not deleted (deleting it hid the taker's call on kw).
+	eventually(t, "the owner holds no call after the yield", func() bool { return owner.srv.ActiveCalls() == 0 })
+	owner.noCDR(t, 100*time.Millisecond)
+	if n := len(liveCalls(t, owner)); n != 1 {
+		t.Fatalf("live records after the yield = %d, want the call still listed (the taker's to replace)", n)
 	}
-	eventually(t, "live call removed after the yield", func() bool { return len(liveCalls(t, owner)) == 0 })
 	time.Sleep(60 * time.Millisecond) // a few heartbeats' worth
 	if ha.ownerOf(callID) == "" {
 		t.Fatal("the yielded owner deleted the replicated record its taker needs")

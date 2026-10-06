@@ -17,20 +17,20 @@ Per spec §17.4: "Do not claim seamless in-call HA until specific failure scenar
 
 ## In scope
 
-- [S-1] **Dialog replication:** the node owning a call continuously writes the call's recovery state to Valkey (`hello:dialog:{callId}`, heartbeat ≤5s, TTL 30s): both legs' full dialog data (Call-ID, local/remote tags, local/remote CSeq, route sets, contacts, remote target URIs, negotiated SDP per leg), the media relay state (allocated ports, per-leg latched addresses), recording/announcement state, and CDR correlation. Written off the SIP transaction path (state-change + heartbeat driven, like Phase 3 membership).
+- [S-1] **Dialog replication:** the node owning a call continuously writes the call's recovery state to Valkey (`hello:dialog:{callId}`, heartbeat 1s, TTL 10s — amended 2026-10-06 from ≤5s/30s): both legs' full dialog data (Call-ID, local/remote tags, local/remote CSeq, route sets, contacts, remote target URIs, negotiated SDP per leg), the media relay state (allocated ports, per-leg latched addresses), recording/announcement state, and CDR correlation. Written off the SIP transaction path (state-change + heartbeat driven, like Phase 3 membership).
 - [S-2] **Ownership and takeover:** each dialog records its owning node. Surviving nodes watch for owned dialogs whose owner went OFFLINE (Phase 3 membership expiry); the first survivor claims the dialog atomically (Valkey claim, `conflictPolicy: fail` semantics), and re-homes it: the new owner re-creates both dialog legs FROM THE REPLICATED STATE on its own node — new relay ports, new local tag/CSeq continuity from the replicated counters — and re-INVITEs each endpoint so both dialogs continue with the endpoints' tags preserved but the B2BUA side taken over by the survivor. Endpoints route these via Kamailio (alive); Kamailio forwards in-dialog requests to the new owner because the owner re-registers its claim onto the dialog's route path (see S-3).
 - [S-3] **Kamailio in-dialog rerouting:** phones' dialogs route through Kamailio (their Record-Route). When Hello's node dies, Kamailio's forwarding to the dead node fails (408/503). Kamailio's failure route is extended: on a failed in-dialog forward to a dead Hello node, query the cluster API (or dispatcher state) for the dialog's new owner and retry there — the new owner answers with replicated dialog state, so the endpoint never sees the node change. Kamailio config ships this (dispatcher → hello nodes with the Phase 3 `ds_*` failover extended by an in-dialog retry to the surviving set).
-- [S-4] **Media re-homing:** on takeover the new owner allocates fresh relay ports and re-INVITEs both endpoints to them; each endpoint's ACK completes the new media path. Audio gap target: ≤3 seconds from node death to restored audio (measured by the failure tests). Recording (if active) continues on the new owner under the same correlation id; announcements in progress restart from their beginning.
+- [S-4] **Media re-homing:** on takeover the new owner allocates fresh relay ports and re-INVITEs both endpoints to them; each endpoint's ACK completes the new media path. Audio gap: the takeover itself (claim to both endpoints re-homed) within 3 seconds; from node death to restored audio, the detection time plus that — a graceful handoff milliseconds, a crash with the node down about 3.5–4.5 s with the 1 s/4 s membership timing (lab: re-homed 2.8–4.6 s after the kill, media gap 3.4–4.6 s, asserted ≤6 s), a crash restarted in place about 3–4 s plus the restart (lab: 2.7–3.8 s) (measured by the failure tests, amended 2026-10-06). Recording (if active) continues on the new owner under the same correlation id; announcements in progress restart from their beginning.
 - [S-5] **Scenario matrix — all automatic tests (spec §17.4 list):** node death during connected call; during hold; during a blind transfer; during an attended transfer (either the transfer half or the bridged half); during recording; during an announcement; during a voicemail recording; node death during ringing (already Phase 3, re-verified under always-anchor); simultaneous death of both the call's node and Kamailio is explicitly **out of scope** (Kamailio redundancy is documented, not tested).
-- [S-6] **Honesty in the product:** the CDR and live view mark each call `ha: taken-over` when it survived a takeover; a zombie (no recovery possible — e.g. Valkey also lost) is counted in `hello_zombie_calls_total`; docs state the guarantee exactly: "a live call survives the death of its SIP node with ≤3s audio gap, when the cluster retains Valkey and at least one Kamailio."
+- [S-6] **Honesty in the product:** the CDR and live view mark each call `ha: taken-over` when it survived a takeover; a zombie (no recovery possible — e.g. Valkey also lost) is counted in `hello_zombie_calls_total`; docs state the guarantee exactly: "a live call survives the death of its SIP node, when the cluster retains Valkey and at least one Kamailio", with the measured audio gap per failure type (graceful handoff, crash restarted in place, crash with the node down) and the CDR trace recording each call's takeover time and media gap.
 - [S-7] **Always-anchor policy:** the anchoring decision (Phase 5) defaults to anchor-for-all-calls (the conditional logic remains for traces: the reason becomes `policy`); `HELLO_MEDIA_FORCE_ANCHOR` stays as a no-op-with-trace for compatibility. The bandwidth/latency trade-off was accepted explicitly (decisions.md 2026-10-05).
-- [S-8] **Failure-injection suite extension:** the Phase 3 suite's kill-during-call test is upgraded from "audio continues, signaling lost" to the full takeover assertion: both endpoints re-INVITEd to the survivor within 3s of ownership claim, call completable and hangup-able afterwards, CDR closed with `ha: taken-over`, zero zombies. Plus kill-during-hold, kill-during-transfer, kill-during-recording, and a double-failure (node dies while another node is mid-takeover of a different call).
+- [S-8] **Failure-injection suite extension:** the Phase 3 suite's kill-during-call test is upgraded from "audio continues, signaling lost" to the full takeover assertion: both endpoints re-INVITEd to the survivor within 3s of ownership claim and within 6s of the kill, call completable and hangup-able afterwards, CDR closed with `ha: taken-over`, zero zombies. Plus kill-during-hold, kill-during-transfer, kill-during-recording, and a double-failure (node dies while another node is mid-takeover of a different call).
 
 ## Out of scope
 
 - Kamailio redundancy/HA (documented in `docs/ha.md`; a dead Kamailio still breaks in-dialog signaling of calls it record-routed — stated).
 - Surviving the loss of Valkey AND the node simultaneously (replicated state is gone; zombies counted, per S-6).
-- Zero-gap audio (a ≤3s gap is the guarantee; no seamless splice).
+- Zero-gap audio (the measured gaps of S-4 are the guarantee; no seamless splice).
 - Stateful recording splice across takeover (the recording pauses at node death and continues on the new owner as a second MinIO object linked to the same correlation id).
 - Transcoding, SRTP, conferencing (unchanged).
 
@@ -44,14 +44,14 @@ Per spec §17.4: "Do not claim seamless in-call HA until specific failure scenar
 
 ## Interfaces
 
-- **Valkey:** `hello:dialog:{callId}` (replicated state JSON, TTL 30s, heartbeat 5s), `hello:dialog-claim:{callId}` (takeover claim, atomic Lua), owner id inside the state; SCAN pattern for orphan detection.
-- **Env:** `HELLO_HA_TAKEOVER_ENABLED` (default true), `HELLO_HA_TAKEOVER_POLL` (default 1s), `HELLO_HA_TAKEOVER_JITTER` (random 0–2s to avoid thundering herd).
+- **Valkey:** `hello:dialog:{callId}` (replicated state JSON, TTL 10s, heartbeat 1s; 30s/5s before the 2026-10-06 amendment), `hello:dialog-claim:{callId}` (takeover claim, atomic Lua), owner id inside the state; SCAN pattern for orphan detection.
+- **Env:** `HELLO_HA_TAKEOVER_ENABLED` (default true), `HELLO_HA_TAKEOVER_POLL` (default 1s), `HELLO_HA_TAKEOVER_JITTER` (random 0–500ms to avoid thundering herd; was 0–2s before the 2026-10-06 amendment).
 - **HTTP:** `GET /api/v1/calls` gains `ha` state per call (`owned | taken-over`); `hello_dialog_replicated_total`, `hello_dialog_takeovers_total`, `hello_zombie_calls_total` metrics.
 - **Kamailio:** failure-route extension shipped in `deploy/kamailio/kamailio.cfg` (S-3).
 
 ## Data
 
-- **Valkey:** dialog replication keys per S-1 (TTL 30s), claim keys, tombstones unchanged from Phase 3.
+- **Valkey:** dialog replication keys per S-1 (TTL 10s), claim keys, tombstones unchanged from Phase 3.
 - **PostgreSQL:** none new — CDRs gain nothing schema-wise (`ha` flag lives in the trace JSON).
 - **MinIO:** unchanged (recordings continue under the same correlation id, second object on takeover).
 
@@ -84,6 +84,11 @@ Per spec §17.4: "Do not claim seamless in-call HA until specific failure scenar
 - [ ] [S-8] The Phase 3 `TestKillSIPNodeDuringCall` suite is upgraded: the old "audio continues, signaling lost" assertion is replaced by full takeover assertions.
 - [ ] Metrics/UI: `hello_dialog_takeovers_total`, `hello_zombie_calls_total`, per-call `ha` flag — `TestHAMetrics` extension fails if they do not move.
 - [ ] Docs: `docs/ha.md` gains the in-call HA guarantee, stated exactly per S-6, with the scenario matrix and the two named limitations (Kamailio, Valkey+node double loss) — fails if a later `procoder docs` check finds the docs guarantee diverging from the S-5 matrix or missing either limitation.
+
+## Amendments
+
+- 2026-10-06 (kw live evidence): a crashed node restarted in place under the same node ID within the (then 15 s) OFFLINE window never went OFFLINE, so S-2's OFFLINE trigger alone lost its calls. Every process now has an incarnation id (membership `incarnation`, dialog record `ownerIncarnation`); records of a dead incarnation are claimed at once by any READY node, the restarted one included, and an in-dialog request that misses on a node is checked against the replicated record and takes the call over on demand instead of 481 (`docs/ha.md` "Restart in place"). S-4's gap is reported honestly: the CDR trace gives the takeover time from the claim (the ≤3 s target) and the media gap from the owner's last replication write, which includes detection time. S-6's CDR is one per logical call, written by the node that ends it, with the original start, routing and the side that hung up; a yielding node writes none and leaves the live record to the taker.
+- 2026-10-06 (user decision, faster crash detection): membership heartbeat 1 s and TTL 4 s (heartbeat at most TTL/3); dialog replication scaled with it (1 s heartbeat, 2 s owner-freshness window, 10 s record TTL) and the takeover jitter cut to 0–500 ms. The false "≤3 s from node death" claim is replaced by the measured gaps per failure type in S-4; the zombie reaper counts a dead node's connected calls, not its ringing ones.
 
 ## Open questions
 

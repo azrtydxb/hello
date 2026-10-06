@@ -42,7 +42,7 @@ Spec §17 makes HA Levels 1–3 mandatory for the first production-ready release
   - configuration revision
   - start time and last heartbeat
 
-  The record is refreshed every 5s and expires after 15s. A record that expires is reported `OFFLINE`, as a tombstone, for 10 minutes.
+  The record is refreshed every 1s and expires after 4s (amended 2026-10-06 from 5s/15s for faster crash detection; see incall-ha). A record that expires is reported `OFFLINE`, as a tombstone, for 10 minutes.
 
 - [S-2] **Lifecycle states** (`JOINING`, `READY`, `DRAINING`, `UNHEALTHY`, `OFFLINE`), with these transitions:
   - JOINING until the snapshot is loaded, Valkey is reachable and the SIP listener is serving.
@@ -145,7 +145,7 @@ Spec §17 makes HA Levels 1–3 mandatory for the first production-ready release
 ## Data
 
 - **Valkey:**
-  - `hello:member:{nodeId}`: membership record (TTL 15s)
+  - `hello:member:{nodeId}`: membership record (TTL 4s)
   - `hello:member:tomb:{nodeId}`: OFFLINE tombstone (10 minutes)
   - `hello:drain:{nodeId}`: drain request
 - **PostgreSQL:** none new. Drain requests are audited in `audit_events`.

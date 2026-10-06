@@ -59,6 +59,7 @@ type labCDR struct {
 	SIPCallID       string    `json:"sipCallId"`
 	Source          string    `json:"source"`
 	Destination     string    `json:"destination"`
+	StartTime       time.Time `json:"startTime"`
 	AnswerTime      time.Time `json:"answerTime"`
 	BillableMs      int64     `json:"billableMs"`
 	FinalStatus     int       `json:"finalStatus"`
