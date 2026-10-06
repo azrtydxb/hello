@@ -168,6 +168,12 @@ data:
     dns_try_ipv6=no
     use_dns_failover=no
     use_dns_cache=on
+    # No negative caching: a hello-sip node that comes back (a restarted
+    # container, a rescheduled pod) must resolve at once, not stay "no such
+    # host" for the default 60s - its in-dialog requests would be taken for a
+    # dead node's and rerouted to a node that does not own the call. Only a
+    # dead node's name is looked up again per request (route HELLO_NODE_NAME).
+    dns_cache_negative_ttl=0
     dst_blocklist_init=off
 
     ####### Modules #######
@@ -789,7 +795,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: f0bcfc6de8d6022105f5f80c39279376fc1842d8485acf6f01d120aa54800817
+        hello.watteel.com/kamailio-config-sha256: 0b51ea9e7131f0f50ff8303768092b6102436f1e6a4dccc72984c94f6ed7038a
     spec:
       securityContext:
         # /run/kamailio is an emptyDir the kamailio user (102) must write its
