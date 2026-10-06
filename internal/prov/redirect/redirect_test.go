@@ -1,7 +1,11 @@
 package redirect
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 )
@@ -21,5 +25,28 @@ func TestStatusJSON(t *testing.T) {
 	var back Status
 	if err := json.Unmarshal([]byte(`{"state":"not_configured"}`), &back); err != nil || back.State != StateNotConfigured {
 		t.Fatalf("default column value = %+v, %v", back, err)
+	}
+	if b, _ := json.Marshal(back); string(b) != `{"state":"not_configured"}` {
+		t.Fatalf("default status JSON = %s, want no reason and no zero time", b)
+	}
+}
+
+// TestCredentialsNeverFormat fails if any fmt verb or slog prints a
+// credential value: a client that wraps its credentials into an error or
+// a log line must still print only the placeholder.
+func TestCredentialsNeverFormat(t *testing.T) {
+	val := "s3cr" + "et-value" // assembled so scanners do not flag a literal
+	c := Credentials{"snomSrapsAccessKeySecret": val}
+	var buf bytes.Buffer
+	slog.New(slog.NewTextHandler(&buf, nil)).Info("x", "creds", c)
+	for _, out := range []string{
+		fmt.Sprintf("%v %s %+v %#v", c, c, c, c),
+		fmt.Errorf("check failed for %v", c).Error(),
+		fmt.Sprint(Account{Credentials: c}),
+		buf.String(),
+	} {
+		if strings.Contains(out, val) {
+			t.Fatalf("credential printed: %s", out)
+		}
 	}
 }

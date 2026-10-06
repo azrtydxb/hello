@@ -109,7 +109,9 @@ CREATE TABLE prov_redirect_accounts (
     last_check_result TEXT
 );
 
--- The redirect worker's queue (plan Task 4). One pending operation per
+-- The redirect worker's queue (plan Task 4); hello-control's store adds a
+-- job in the same transaction as the phone create, token rotation,
+-- re-arm or delete that needs it. One pending operation per
 -- vendor and MAC: a newer one replaces an older one (an unregister after a
 -- register wins). It holds no URL and no token: a register reads the
 -- phone's current URL when it runs, and an unregister needs only the MAC,
@@ -145,7 +147,8 @@ CREATE TABLE prov_fetches (
                                                          'render_error','boot_served','boot_handoff','boot_reclaim',
                                                          'boot_denied','upload_discarded','not_found','unavailable')),
     status        INTEGER     NOT NULL,
-    bytes         BIGINT      NOT NULL DEFAULT 0 CHECK (bytes >= 0)
+    bytes         BIGINT      NOT NULL DEFAULT 0 CHECK (bytes >= 0),
+    ua_mismatch   BOOLEAN     NOT NULL DEFAULT FALSE
 );
 CREATE INDEX prov_fetches_phone_at ON prov_fetches (phone_id, at DESC);
 CREATE INDEX prov_fetches_at ON prov_fetches (at);

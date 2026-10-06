@@ -50,7 +50,6 @@ func TestMigrateProvisioningRollback(t *testing.T) {
 	}
 
 	// Constraints the parallel streams rely on.
-	mustExec(t, db, `INSERT INTO extensions (number, name) VALUES ('201', 'Desk')`)
 	phone := `INSERT INTO phones (mac, vendor, model, device_id, enabled, token_hash, token_enc, admin_password_enc)
 		VALUES ($1, 'yealink', 'T54W', NULL, $2, $3, '\x00', '\x00')`
 	hash := strings.Repeat("a", 32)
@@ -90,12 +89,5 @@ func TestMigrateProvisioningRollback(t *testing.T) {
 	}
 	if n := present(); n != len(tables)+1 {
 		t.Fatalf("after re-apply: %d of %d provisioning objects present", n, len(tables)+1)
-	}
-}
-
-func mustExec(t *testing.T, db *sql.DB, q string, args ...any) {
-	t.Helper()
-	if _, err := db.ExecContext(context.Background(), q, args...); err != nil {
-		t.Fatalf("%s: %v", q, err)
 	}
 }

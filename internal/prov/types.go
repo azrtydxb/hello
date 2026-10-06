@@ -117,6 +117,9 @@ type Line struct {
 	DisplayName string // the extension's name
 	Label       string // the extension number
 	Domain      string // HELLO_SIP_DOMAIN
+	// VoicemailCode is the feature code the message key dials (spec S-5);
+	// empty when no voicemail feature code is configured.
+	VoicemailCode string
 }
 
 // Server is the registrar the phone registers with.
@@ -217,6 +220,9 @@ type FetchRecord struct {
 	Result       Result
 	Status       int
 	Bytes        int64
+	// UAMismatch: the User-Agent named a MAC other than the phone's
+	// (evidence only, spec S-6).
+	UAMismatch bool
 }
 
 // Sealing contexts (additional data) for internal/secret. hello-control
@@ -227,6 +233,8 @@ type FetchRecord struct {
 func DeviceSecretAAD(deviceID int64) string { return "device:" + strconv.FormatInt(deviceID, 10) }
 
 // PhoneTokenAAD is the context of a phone's sealed provisioning token.
+// It and PhoneAdminAAD need the row's ID before the insert that stores the
+// sealed values: reserve it with nextval('phones_id_seq').
 func PhoneTokenAAD(phoneID int64) string { return "phone-token:" + strconv.FormatInt(phoneID, 10) }
 
 // PhoneAdminAAD is the context of a phone's sealed admin password.
@@ -256,3 +264,6 @@ func RedirectAAD(v Vendor) string { return "redirect:" + string(v) }
 //	    32 random bytes, base32 lowercase without padding, and its SHA-256
 //	RedactPath(p string) string
 //	    /p/<token>/… becomes /p/****/…
+//	Builtins() []Template
+//	    the embedded built-in templates (ID 0, BuiltinRef their name), for
+//	    resolution and for the templates API to list and copy

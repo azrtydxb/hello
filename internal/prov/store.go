@@ -62,7 +62,9 @@ type Store interface {
 	// ErrNotFound when none does.
 	PhoneByToken(ctx context.Context, hash []byte) (PhoneRecord, error)
 
-	// MarkFetched records a served per-device fetch: first_fetch_at when
+	// MarkFetched records a per-device fetch answered served or
+	// not_modified (a 304 re-check is a fetch too, or a phone re-checking
+	// by ETag would look stale): first_fetch_at when
 	// unset, the last_fetch_* fields, firmware_seen and ua_mismatch as
 	// FetchState says. It also disarms the boot hand-off (boot_armed =
 	// false), because a phone that fetched over HTTPS with its token never
@@ -70,28 +72,42 @@ type Store interface {
 	MarkFetched(ctx context.Context, phoneID int64, st FetchState) error
 
 	// PromoteToken ends the previous token's grace at once; called on the
-	// first fetch with the current token while HasPrevious.
+	// first served or not_modified fetch with the current token while
+	// HasPrevious.
 	PromoteToken(ctx context.Context, phoneID int64) error
 
 	// FlagTokenExposed sets token_exposed after a per-device request
 	// arrived over plain HTTP.
 	FlagTokenExposed(ctx context.Context, phoneID int64) error
 
+	// PhoneByMAC finds the phone with this MAC without changing it, so the
+	// boot path can check the requested name against the phone's vendor
+	// and record a denial against it before anything is claimed.
+	// ErrNotFound when none has it.
+	PhoneByMAC(ctx context.Context, mac string) (PhoneRecord, error)
+
 	// ClaimBoot is the trust-on-first-use hand-off for the phone with this
-	// MAC (spec S-10), atomic under concurrent callers:
-	//   - armed and allowlisted: disarms it in one conditional update and
-	//     returns claimed = true; exactly one concurrent caller wins
-	//   - disarmed: sets boot_reclaimed and returns claimed = false
-	//   - armed but not allowlisted: changes nothing, claimed = false
-	// ErrNotFound when no phone has the MAC. The handler checks
-	// HELLO_PROV_BOOT_CIDRS before calling, so a denied source never
-	// disarms.
-	ClaimBoot(ctx context.Context, mac string) (rec PhoneRecord, claimed bool, err error)
+	// MAC (spec S-10), in one transaction, atomic under concurrent callers:
+	//   - armed and allowlisted: disarms it with a conditional update and
+	//     returns the hand-off (the phone's own URL with its current
+	//     token, the CA URL and the re-check interval, opened inside the
+	//     same transaction); exactly one concurrent caller gets it. When
+	//     the token does not open, the disarm rolls back and the error is
+	//     ErrSealed, so a phone is never disarmed without its token.
+	//   - disarmed: sets boot_reclaimed; nil hand-off
+	//   - armed but not allowlisted: changes nothing; nil hand-off
+	// ErrNotFound when no phone has the MAC. The handler checks the
+	// vendor's file set and HELLO_PROV_BOOT_CIDRS before calling, so a
+	// wrong-vendor name or a denied source never disarms.
+	ClaimBoot(ctx context.Context, mac string) (rec PhoneRecord, handoff *ProvInfo, err error)
 
 	// RenderInputs returns the render data with every secret opened, the
 	// current token in Prov.URL (also for a previous-token fetch, so the
-	// phone moves itself over) and the resolved template. ErrNoTemplate,
-	// ErrSealed or ErrNotFound as above.
+	// phone moves itself over) and the template Resolve picks from the
+	// phone's override, the stored templates and Builtins(). When several
+	// firmware pins match the model, the same order picks one: the more
+	// specific glob, then the lower firmware ID. ErrNoTemplate, ErrSealed
+	// or ErrNotFound as above.
 	RenderInputs(ctx context.Context, phoneID int64) (RenderData, Template, error)
 
 	// FirmwareByName finds a vendor's uploaded firmware by file name.
