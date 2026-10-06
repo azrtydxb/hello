@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -218,6 +220,107 @@ func kill(t *testing.T, node string) time.Time {
 	return time.Now()
 }
 
+// TestMembershipStableUnderLoad fails if the fast crash detection (1s
+// membership heartbeat, 4s TTL) lists a live SIP node as anything but
+// READY while the lab carries call load, or if any takeover or zombie is
+// counted without a failure: a false OFFLINE would take live calls over.
+// It runs before the failure tests kill anything.
+func TestMembershipStableUnderLoad(t *testing.T) {
+	lc := newLabClient(t)
+	for _, n := range []string{"hello-sip-1", "hello-sip-2"} {
+		lc.waitState(n, "READY", 30*time.Second)
+	}
+	counters := func() map[string]float64 {
+		out := map[string]float64{}
+		for _, n := range []string{"hello-sip-1", "hello-sip-2"} {
+			m := nodeMetrics(t, n)
+			out[n+" takeovers"] = m["hello_dialog_takeovers_total"]
+			out[n+" zombies"] = m["hello_zombie_calls_total"]
+		}
+		return out
+	}
+	before := counters()
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	// Calls held for the whole run keep their replication heartbeats going.
+	for range 2 {
+		caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
+		a, b := kamPhone(t, caller), kamPhone(t, callee)
+		got := answerNext(ctx, b)
+		out, err := a.Dial(ctx, callee.Extension, sdpOffer)
+		if err != nil || out.Status != 200 {
+			t.Fatalf("held call = %+v, %v", out, err)
+		}
+		<-got
+		t.Cleanup(func() {
+			hctx, hcancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer hcancel()
+			_ = out.Hangup(hctx)
+		})
+	}
+	var (
+		mu       sync.Mutex
+		notReady []string
+		calls    int
+		failed   []string
+	)
+	stop := make(chan struct{})
+	sampled := make(chan struct{})
+	go func() {
+		defer close(sampled)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-time.After(200 * time.Millisecond):
+			}
+			v, err := lc.cluster()
+			if err != nil {
+				continue // the API under load; membership is what is checked
+			}
+			for _, m := range v.Members {
+				if m.Kind == "sip" && m.State != "READY" {
+					mu.Lock()
+					notReady = append(notReady, fmt.Sprintf("%s %s %s (%s)", time.Now().Format("15:04:05.000"), m.ID, m.State, m.Reason))
+					mu.Unlock()
+				}
+			}
+		}
+	}()
+	var wg sync.WaitGroup
+	end := time.Now().Add(20 * time.Second)
+	for range 4 {
+		caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
+		a, b := kamPhone(t, caller), kamPhone(t, callee)
+		wg.Go(func() {
+			for time.Now().Before(end) {
+				cctx, ccancel := context.WithTimeout(ctx, 10*time.Second)
+				err := callCtx(cctx, a, b, callee.Extension)
+				ccancel()
+				mu.Lock()
+				calls++
+				if err != nil {
+					failed = append(failed, err.Error())
+				}
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+	close(stop)
+	<-sampled
+	t.Logf("%d calls under load, %d failed %v", calls, len(failed), failed)
+	if len(notReady) > 0 {
+		t.Fatalf("a live SIP node left READY under load (false OFFLINE risk): %v", notReady)
+	}
+	if after := counters(); !maps.Equal(before, after) {
+		t.Fatalf("takeovers or zombies counted with no failure: before %v, after %v", before, after)
+	}
+	if calls == 0 || len(failed) > calls/10 {
+		t.Fatalf("%d of %d calls failed under load", len(failed), calls)
+	}
+}
+
 func TestKamailioBalancesAndPaths(t *testing.T) {
 	lc := newLabClient(t)
 	nodes := map[string]bool{}
@@ -352,8 +455,9 @@ func TestKillSIPNodeDuringCall(t *testing.T) {
 	t.Cleanup(func() { restore(t, lc, node) })
 	callID := waitReplicated(t, lc, callee.Extension, node)
 	killed := kill(t, node)
-	rec.by(killed.Add(20 * time.Second))
+	// The takeover first: its re-home is timed from the kill (6s).
 	takeoverAssertions(t, lc, a, b, in, out, callee.Extension, other, killed, callID)
+	rec.by(killed.Add(20 * time.Second))
 	goneBy(t, lc, node, killed.Add(40*time.Second))
 }
 
@@ -481,8 +585,9 @@ func waitReplicated(t *testing.T, lc *labClient, ext, node string) string {
 func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipua.Incoming, out *sipua.Outgoing, ext, taker string, killed time.Time, callID string) {
 	t.Helper()
 	// The live call re-homes to the taker. Membership marks the dead node
-	// OFFLINE 15s after its last heartbeat, so the jittered 1-3s poll, the
-	// claim and the re-INVITEs land well inside 30s of the kill.
+	// OFFLINE 4s after its last heartbeat; the jittered 1-1.5s poll, the
+	// claim and the re-INVITEs follow (the bound is asserted below; the
+	// loop waits longer only to report what went wrong).
 	var rehomed time.Time
 	var ha string
 	deadline := killed.Add(30 * time.Second)
@@ -522,14 +627,17 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 		t.Fatalf("the call was not taken over by %s within 30s of the kill", taker)
 	}
 	t.Logf("takeover completed %s after the kill", rehomed.Sub(killed).Round(time.Millisecond))
+	// Crash detection is membership's 4s TTL (1s heartbeat), then the
+	// 1-1.5s takeover poll and the re-INVITEs: re-homed within 6s of the
+	// kill (docs/ha.md).
+	if rehomed.Sub(killed) > 6*time.Second {
+		t.Fatalf("the call was re-homed %s after the kill, want within 6s", rehomed.Sub(killed).Round(time.Millisecond))
+	}
 	// The live view marks the call taken over (spec S-6).
 	if ha != livestate.HATakenOver {
 		t.Fatalf("live view ha = %q on the taker, want %q", ha, livestate.HATakenOver)
 	}
 	// Both endpoints saw the takeover re-INVITE (the phone answered it).
-	if rehomed.Sub(killed) > 6*time.Second {
-		t.Logf("the re-home took %s; the endpoints' answers were the slow part", rehomed.Sub(killed))
-	}
 	for _, p := range []*sipua.Phone{a, b} {
 		if p == nil {
 			continue // a one-legged call (voicemail) has no second phone
@@ -576,7 +684,7 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	// measured honestly from the dead owner's last heartbeat - which
 	// includes the time until its death was noticed, so it is at least
 	// the takeover and at most the kill-to-re-home time plus one
-	// replication heartbeat (5s) (spec S-6, docs/ha.md).
+	// replication heartbeat (1s) and slack (spec S-6, docs/ha.md).
 	took, gap, ok := takeoverGap(lc.cdrTrace(closed.ID))
 	if !ok {
 		t.Fatalf("CDR %d trace lacks the takeover mark: %v", closed.ID, lc.cdrTrace(closed.ID))
@@ -585,7 +693,7 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	if took > 3*time.Second {
 		t.Fatalf("takeover %s > 3s", took)
 	}
-	if gap < took || gap > rehomed.Sub(killed)+6*time.Second {
+	if gap < took || gap > rehomed.Sub(killed)+2*time.Second {
 		t.Fatalf("media gap %s is not the outage: takeover %s, kill to re-home %s", gap, took, rehomed.Sub(killed))
 	}
 	m := nodeMetrics(t, taker)
@@ -769,10 +877,11 @@ func TestKamailioInDialogRerouteDeadName(t *testing.T) {
 	}
 }
 
-// TestTakeoverMediaGap fails if the audio gap is not bounded: once
-// membership marks the owner OFFLINE, the call must be re-homed (both
-// re-INVITEs answered, media on the taker's relay) within 6s - the jittered
-// 1-3s poll, the atomic claim, and the 3s re-INVITE target (spec S-4).
+// TestTakeoverMediaGap fails if the audio gap is not bounded: membership
+// must mark the killed owner OFFLINE within 5s (4s TTL, 1s heartbeat), and
+// the call must then be re-homed (both re-INVITEs answered, media on the
+// taker's relay) within 3s - the jittered 1-1.5s poll, the atomic claim and
+// the re-INVITEs (spec S-4).
 func TestTakeoverMediaGap(t *testing.T) {
 	lc := newLabClient(t)
 	caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
@@ -789,16 +898,17 @@ func TestTakeoverMediaGap(t *testing.T) {
 	other := otherNode(node)
 	t.Cleanup(func() { restore(t, lc, node) })
 	waitReplicated(t, lc, callee.Extension, node)
-	kill(t, node)
+	killed := kill(t, node)
 	var offline time.Time
-	eventuallyBy(t, time.Now().Add(25*time.Second), node+" OFFLINE", func(context.Context) error {
+	eventuallyBy(t, killed.Add(5*time.Second), node+" OFFLINE within 5s", func(context.Context) error {
 		if lc.memberState(node) != "OFFLINE" {
 			return errors.New("still listed")
 		}
 		offline = time.Now()
 		return nil
 	})
-	eventuallyBy(t, offline.Add(6*time.Second), "call re-homed within 6s of OFFLINE", func(context.Context) error {
+	t.Logf("%s OFFLINE %s after the kill", node, offline.Sub(killed).Round(time.Millisecond))
+	eventuallyBy(t, offline.Add(3*time.Second), "call re-homed within 3s of OFFLINE", func(context.Context) error {
 		for _, c := range lc.calls() {
 			if c.To == callee.Extension && c.Node == other {
 				return nil
@@ -806,7 +916,8 @@ func TestTakeoverMediaGap(t *testing.T) {
 		}
 		return errors.New("not re-homed")
 	})
-	t.Logf("re-home completed %s after OFFLINE", time.Since(offline).Round(time.Millisecond))
+	t.Logf("re-home completed %s after OFFLINE, %s after the kill", time.Since(offline).Round(time.Millisecond),
+		time.Since(killed).Round(time.Millisecond))
 	// Audio follows: the endpoints answer the re-INVITEs.
 	for _, p := range []*sipua.Phone{a, b} {
 		select {

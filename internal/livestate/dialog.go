@@ -94,11 +94,17 @@ func (d DialogState) LegCallIDs() []string {
 	return out
 }
 
-// HA timing: the owner refreshes its records every heartbeat and they expire
-// 30s after the last one (three missed heartbeats plus margin).
+// HA timing, scaled to membership (1s heartbeat, 4s TTL): the owner
+// refreshes its records every heartbeat (1s, the member heartbeat), a
+// record younger than two heartbeats (2s) belongs to a live owner and is
+// never claimed on OFFLINE grounds (membership needs 4s without a
+// heartbeat to say OFFLINE), and records expire 10s after the last write:
+// past detection (4s), the takeover poll (≤1.5s) and both re-INVITEs (≤3s
+// each run in sequence only on a failing leg), so a dead owner's call is
+// still claimable when it is found.
 const (
-	haTTL       = 30 * time.Second
-	haHeartbeat = 5 * time.Second
+	haTTL       = 10 * time.Second
+	haHeartbeat = time.Second
 )
 
 // HAHeartbeat is the replication heartbeat interval. A var so tests can

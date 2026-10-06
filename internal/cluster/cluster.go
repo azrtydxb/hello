@@ -75,8 +75,11 @@ func NewIncarnation() string {
 
 // Timings of the membership protocol.
 const (
-	// TTL is how long a record lives without a heartbeat (3 heartbeats).
-	TTL = 15 * time.Second
+	// TTL is how long a record lives without a heartbeat: four of the
+	// default 1s heartbeats (a heartbeat may be at most TTL/3), so a dead
+	// node is listed OFFLINE within 4s - the crash detection behind in-call
+	// HA's takeover (docs/ha.md).
+	TTL = 4 * time.Second
 	// TombstoneTTL is how long an expired node is still listed OFFLINE.
 	TombstoneTTL = 10 * time.Minute
 )

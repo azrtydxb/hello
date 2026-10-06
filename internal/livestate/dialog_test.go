@@ -12,8 +12,11 @@ import (
 // a record outlives its TTL. Runs only against a real Valkey (CI).
 func TestDialogStateLifecycle(t *testing.T) {
 	s, ctx := store(t), context.Background()
+	// The freshness window (2x HAHeartbeat) is set per phase, so neither
+	// phase depends on how fast the runner is: an hour while the record
+	// must count as fresh, a millisecond once it must count as aged.
 	oldHB := HAHeartbeat
-	HAHeartbeat = 40 * time.Millisecond // the freshness window is 2x this
+	HAHeartbeat = time.Hour
 	t.Cleanup(func() { HAHeartbeat = oldHB })
 
 	st := DialogState{
@@ -54,6 +57,7 @@ func TestDialogStateLifecycle(t *testing.T) {
 	}
 
 	// After the freshness window the claim succeeds exactly once.
+	HAHeartbeat = time.Millisecond
 	time.Sleep(2*HAHeartbeat + 20*time.Millisecond)
 	ok, state, err := s.ClaimDialog(ctx, "c1", "sip-2", "")
 	if err != nil {
