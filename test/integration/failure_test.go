@@ -631,7 +631,7 @@ func TestKamailioInDialogRerouteDeadName(t *testing.T) {
 	// stopped container, and Kamailio forgets what it cached.
 	eventually(t, 10*time.Second, node+" no longer resolves in Kamailio", func() error {
 		if out, err := compose("exec", "-T", "kamailio", "kamcmd", "dns.delete_all").CombinedOutput(); err != nil {
-			return fmt.Errorf("kamcmd dns.delete_all: %v: %s", err, out)
+			return fmt.Errorf("kamcmd dns.delete_all: %w: %s", err, out)
 		}
 		out, _ := compose("exec", "-T", "kamailio", "kamcmd", "dns.lookup", "A", node).CombinedOutput()
 		if strings.Contains(string(out), nodeIP[node]) {
