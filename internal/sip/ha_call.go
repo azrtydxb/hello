@@ -274,6 +274,7 @@ func (c *call) haState() (livestate.DialogState, bool) {
 		Caller:      caller,
 		Destination: dest,
 		Handoff:     handoff,
+		AnsweredAt:  c.maxClockStart(),
 	}
 	if relay != nil {
 		st.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
@@ -327,6 +328,7 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 		Caller:      caller,
 		Destination: dest,
 		Handoff:     c.handingOff(),
+		AnsweredAt:  c.maxClockStart(),
 	}
 	if relay != nil {
 		state.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
@@ -357,32 +359,54 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 // replicate writes the call's recovery state (contract 1). A failure is
 // logged and counted, never fatal: an unreplicated call that loses its node
 // becomes a counted zombie, honestly (spec S-6).
-func (c *call) replicate() {
+func (c *call) replicate() bool {
 	if c.s.deps.HAState == nil || !c.s.serving.Load() {
-		return // a node shutting down leaves its records to the takers
+		return false // a node shutting down leaves its records to the takers
 	}
 	c.mu.Lock()
 	written := c.haHandoff && c.haHandoffWritten
 	c.mu.Unlock()
 	if written {
-		return // handed off: the record is the taker's to write
+		return false // handed off: the record is the taker's to write
 	}
 	st, ok := c.haState()
 	if !ok {
-		return
+		return false
+	}
+	c.haWriteMu.Lock()
+	defer c.haWriteMu.Unlock()
+	if c.haDeleted {
+		return false // the call ended: its record is gone for good
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*c.s.cfg.StateTimeout)
 	defer cancel()
 	if err := c.s.deps.HAState.SaveDialogState(ctx, st, livestate.DialogTTL); err != nil {
 		c.s.m.DialogReplicated.WithLabelValues("failed").Inc()
 		c.s.log.Warn("dialog replication failed", "correlation_id", c.id, "error", err)
-		return
+		return false
 	}
 	c.s.m.DialogReplicated.WithLabelValues("ok").Inc()
 	if st.Handoff {
 		c.mu.Lock()
 		c.haHandoffWritten = c.haHandoff
 		c.mu.Unlock()
+	}
+	return true
+}
+
+// haSettleClaim releases a taker's takeover claim once a replication write
+// (written) names this node as the record's owner; until then the claim
+// stays, so no survivor can take the call a second time.
+func (c *call) haSettleClaim(written bool) {
+	if !written {
+		return
+	}
+	c.mu.Lock()
+	id := c.haClaim
+	c.haClaim = ""
+	c.mu.Unlock()
+	if id != "" {
+		c.s.releaseClaim(id)
 	}
 }
 
@@ -398,7 +422,7 @@ func (c *call) handingOff() bool {
 // call when another node has claimed it — a slow owner reappearing after a
 // membership blip must not fight its taker (spec edge case).
 func (c *call) haLoop() {
-	c.replicate()
+	c.haSettleClaim(c.replicate())
 	t := time.NewTicker(c.s.cfg.HADialogHeartbeat)
 	defer t.Stop()
 	for {
@@ -415,7 +439,7 @@ func (c *call) haLoop() {
 				c.haYield(taker)
 				return
 			}
-			c.replicate()
+			c.haSettleClaim(c.replicate())
 		}
 	}
 }
@@ -424,7 +448,14 @@ func (c *call) haLoop() {
 // its claim, or, once the taker released the claim, the node its record
 // names. "" while the call is still this node's (or the store is down).
 func (s *Server) haTakenBy(callID string) string {
-	if taker := s.haClaimedBy(callID); taker != "" && taker != s.cfg.NodeID {
+	switch taker := s.haClaimedBy(callID); taker {
+	case "":
+	case s.cfg.NodeID:
+		// This node's own claim: it took the call over and has not yet
+		// written a record naming itself, which still names the dead
+		// owner. The call is this node's; it must not yield to the dead.
+		return ""
+	default:
 		return taker
 	}
 	if s.deps.HAState == nil {
@@ -495,11 +526,14 @@ func (c *call) haYield(taker string) {
 // never offered to takers. A yielded call's record belongs to its taker.
 func (c *call) haDelete() {
 	c.mu.Lock()
-	yielded := c.haYielded
+	yielded, shared := c.haYielded, c.haShared
 	c.mu.Unlock()
-	if yielded || c.s.deps.HAState == nil {
+	if yielded || shared || c.s.deps.HAState == nil {
 		return
 	}
+	c.haWriteMu.Lock()
+	defer c.haWriteMu.Unlock()
+	c.haDeleted = true
 	ctx, cancel := context.WithTimeout(context.Background(), 2*c.s.cfg.StateTimeout)
 	defer cancel()
 	if err := c.s.deps.HAState.DeleteDialogState(ctx, c.callID); err != nil {
@@ -681,4 +715,32 @@ func (s *Server) handedOff(req *sip.Request, tx sip.ServerTransaction) bool {
 	}
 	s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable", sip.NewHeader("Retry-After", "0"))
 	return true
+}
+
+// maxClockStart is when the call's maximum-duration clock started: the
+// original answer of a taken-over call, else this node's answer.
+func (c *call) maxClockStart() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.maxFrom.IsZero() {
+		return c.maxFrom
+	}
+	return c.answerTime
+}
+
+// haArmMaxDuration arms a taken-over call's maximum-duration timer for
+// what remains of it since the call was first answered (answeredAt; zero
+// from an older owner, then from start): a taken-over call still clears
+// at MaxCallDuration, and a second takeover does not extend it.
+func (c *call) haArmMaxDuration(answeredAt, start time.Time) {
+	if answeredAt.IsZero() || answeredAt.After(start) {
+		answeredAt = start
+	}
+	left := max(c.s.cfg.MaxCallDuration-start.Sub(answeredAt), 0)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.maxFrom = answeredAt
+	if !c.ended && c.maxTimer == nil {
+		c.maxTimer = time.AfterFunc(left, c.expire)
+	}
 }

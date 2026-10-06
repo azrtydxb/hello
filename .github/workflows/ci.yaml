@@ -72,6 +72,11 @@ jobs:
         with:
           version: v2.13.2
       - run: go test -race ./...
+      # The in-call HA races (a WaitGroup grown during shutdown, a transfer
+      # writing the caller dialog under the original call) surfaced only
+      # intermittently in one pass: soak the takeover matrix a few times.
+      - name: In-call HA race soak
+        run: go test -race -count=3 -run 'TestTakeoverScenarioMatrix|TestBackgroundWorkDuringShutdown|TestTakeoverKeepsClaimUntilRecorded' ./internal/sip/
 
   web:
     runs-on: arc-azrtydxb

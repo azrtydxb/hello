@@ -456,12 +456,19 @@ func TestClusterMetrics(t *testing.T) {
 		cluster.Member{ID: "hello-control-1", Kind: cluster.KindControl, State: cluster.Ready, ConfigRevision: 7},
 	)
 	var mu sync.Mutex
-	rev, revErr := int64(7), error(nil)
+	rev, revErr, failedReads := int64(7), error(nil), 0
 	reg := prometheus.NewRegistry()
 	m := NewClusterMetrics(reg)
 	p := &ClusterPoller{
 		Every: 5 * time.Millisecond, Members: fc.Members, Metrics: m,
-		Revision: func(context.Context) (int64, error) { mu.Lock(); defer mu.Unlock(); return rev, revErr },
+		Revision: func(context.Context) (int64, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if revErr != nil {
+				failedReads++
+			}
+			return rev, revErr
+		},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -501,6 +508,10 @@ func TestClusterMetrics(t *testing.T) {
 	mu.Lock()
 	revErr = errors.New("down")
 	mu.Unlock()
+	// Polls run one after another: once a revision read has failed, the
+	// poll that read revision 7 is over, so none can pair it with the
+	// members below (which would be a real lag change, not a reset).
+	eventually("a failed revision read", func() bool { mu.Lock(); defer mu.Unlock(); return failedReads > 0 })
 	fc.setMembers(cluster.Member{ID: "hello-sip-1", Kind: cluster.KindSIP, State: cluster.Ready, ConfigRevision: 6})
 	eventually("members refresh", func() bool { return series(m.Members) == 1 })
 	if gauge(m.RevisionLag, "hello-sip-1") != 2 {

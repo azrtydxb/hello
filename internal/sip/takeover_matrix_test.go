@@ -466,7 +466,11 @@ func TestDoubleFailure(t *testing.T) {
 	devs := threeDevices()
 	n1 := startPBX(t, devs, withNodeID("sip-1"), withHA(ha, mem))
 	n2 := startPBX(t, devs, withNodeID("sip-2"), withHA(ha, mem))
-	n3 := startPBX(t, devs, withNodeID("sip-3"), withHA(ha, mem))
+	// sip-3 is a survivor too until it dies: its own poller must not race
+	// sip-2 for X (claiming it, then dying mid-takeover), so only sip-2
+	// polls - the scenario is sip-2 mid-takeover when sip-3 dies.
+	n3 := startPBX(t, devs, withNodeID("sip-3"), withHA(ha, mem),
+		func(c *Config, _ *Deps) { c.HATakeoverEnabled = false })
 	a, b := newPhone(t, n1, "a1", "pa"), newPhone(t, n1, "b1", "pb1")
 	c, d := newPhone(t, n3, "c1", "pc"), newPhone(t, n3, "d1", "pd")
 	for _, p := range []*phone{a, b, c, d} {
@@ -925,7 +929,14 @@ func matrixVoicemail(t *testing.T) {
 	}
 	eventually(t, "the voicemail call lives on the taker", func() bool { return connectedOn(taker, "200", livestate.HATakenOver) })
 	// The caller leaves the message on the taker: the record loop runs
-	// there, past the restarted greeting and beep.
+	// there, past the restarted greeting and beep. The taker's application
+	// starts with its box lookup (the owner's was the first); its recording
+	// clock starts right after, so the caller speaks only from then on.
+	eventually(t, "the taker restarts the voicemail application", func() bool {
+		vm.mu.Lock()
+		defer vm.mu.Unlock()
+		return vm.lookups >= 2
+	})
 	feed := startRTPFeed(t, ra.Body())
 	feed.silence(2.5)
 	feed.digit('#')

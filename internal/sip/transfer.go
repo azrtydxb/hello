@@ -181,6 +181,7 @@ func (c *call) originateFor(target string, snap *snapshot.Snapshot) (*call, []*l
 	c2.dialled = target
 	c2.callerNum, c2.callerName, c2.callerDevice = c.callerNum, c.callerName, c.callerDevice
 	c2.direction, c2.dss = c.direction, c.dss
+	c2.callerDialogUp, c2.haShared = true, true
 	c2.events = make(chan legEvent, 16)
 	c2.setupDone = make(chan struct{})
 	c2.ringTime = c.ringTime
@@ -545,6 +546,7 @@ func (c *call) bridge(other *call) bool {
 	c3.dialled = c.dialled
 	c3.callerNum, c3.callerName, c3.callerDevice = other.callerNum, other.callerName, other.callerDevice
 	c3.direction, c3.dss = other.direction, other.dss
+	c3.callerDialogUp = true
 	c3.start = other.start
 	c3.ringTime = other.ringTime
 	wB.c = c3 // the leg now reports to the bridged call
@@ -808,6 +810,9 @@ func (c *call) haStart() {
 	if c.s.deps.HAState == nil || !c.isAnchored() {
 		return
 	}
+	c.mu.Lock()
+	c.haShared = false // the record is this call's from here on
+	c.mu.Unlock()
 	c.haRefresh()
 	go c.haLoop()
 }

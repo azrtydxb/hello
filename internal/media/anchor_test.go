@@ -378,3 +378,36 @@ func TestPlayFollowsLockedPeer(t *testing.T) {
 	}
 	t.Error("no RTP arrived on the real peer socket; the session kept sending to the offer's address")
 }
+
+// TestAnchorPortNotShadowed fails if an anchor session's port is one that
+// another socket already holds on a specific address: datagrams to that
+// address would reach the other socket and never the session (on macOS a
+// wildcard bind to port 0 can be handed such a port; this flaked the
+// in-process voicemail takeover test, whose phones bind 127.0.0.1).
+func TestAnchorPortNotShadowed(t *testing.T) {
+	held := map[int]bool{}
+	for range 1000 {
+		c, err := net.ListenPacket("udp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = c.Close() })
+		held[c.LocalAddr().(*net.UDPAddr).Port] = true
+	}
+	a := NewAnchor("127.0.0.1", nil)
+	offer := BuildAudioSDP("127.0.0.1", 40000, 0, 101, 8000)
+	for range 300 {
+		ans, sess, err := a.Answer(offer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = sess.Close() })
+		got, err := ParseAudioSDP(ans)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if held[got.Port] {
+			t.Fatalf("anchor port %d is already held on 127.0.0.1: its RTP would go elsewhere", got.Port)
+		}
+	}
+}

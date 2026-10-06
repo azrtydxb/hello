@@ -30,6 +30,9 @@ type fakeHA struct {
 	staleReleases int
 	saves         map[string]int // replication writes per Call-ID
 	ttls          map[string]time.Duration
+	// saveHook, when set, runs at the start of every write, outside mu (a
+	// test holds a write in flight with it).
+	saveHook func()
 }
 
 func newFakeHA() *fakeHA {
@@ -38,6 +41,12 @@ func newFakeHA() *fakeHA {
 }
 
 func (f *fakeHA) SaveDialogState(_ context.Context, sds livestate.DialogState, ttl time.Duration) error {
+	f.mu.Lock()
+	hook := f.saveHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failSave {
@@ -597,7 +606,10 @@ func TestTakeoverScenarioMatrix(t *testing.T) {
 		// The call is recording when the node dies.
 		c := ownedCall(t, owner.srv)
 		c.noteHAState(haPhaseRecording, "")
-		if !c.rec.start("dtmf") {
+		c.mu.Lock()
+		orec := c.rec
+		c.mu.Unlock()
+		if orec == nil || !orec.start("dtmf") {
 			t.Fatal("recording did not start")
 		}
 		eventually(t, "recording replicated", func() bool {
@@ -623,6 +635,7 @@ func TestTakeoverScenarioMatrix(t *testing.T) {
 		waitReq(t, b.acks, "ACK to the callee's 200")
 		eventually(t, "claim released", func() bool { return ha.claimOf(ra.CallID().Value()) == "" })
 		// The taker's call is recording again under the same correlation.
+		// The taker restarts it after releasing the claim, so wait for it.
 		hc := ownedCall(t, taker.srv)
 		hc.mu.Lock()
 		rec := hc.rec
@@ -630,12 +643,7 @@ func TestTakeoverScenarioMatrix(t *testing.T) {
 		if rec == nil {
 			t.Fatal("the taken-over call has no recording state")
 		}
-		rec.mu.Lock()
-		active := rec.active
-		rec.mu.Unlock()
-		if !active {
-			t.Fatal("the recording did not continue on the taker")
-		}
+		eventually(t, "the recording continues on the taker", rec.isActive)
 		hangupHomed(t, a, taker, ra, st.Legs[0])
 		waitReq(t, b.byes, "BYE to the callee after the caller hung up")
 	})
