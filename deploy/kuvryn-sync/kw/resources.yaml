@@ -1587,7 +1587,9 @@ spec:
           imagePullPolicy: Always
           env:
             - name: HELLO_CONTROL_UPSTREAM
-              value: http://hello-control:8081
+              # Fully qualified: nginx's runtime resolver applies no search
+              # domains, so the short "hello-control" never resolves (502).
+              value: http://hello-control.hello.svc.cluster.local:8081
             - name: HELLO_DNS_RESOLVER
               # nginx re-resolves hello-control at request time; this is the
               # kube-dns ClusterIP (confirmed from kw's kube-dns Service:
