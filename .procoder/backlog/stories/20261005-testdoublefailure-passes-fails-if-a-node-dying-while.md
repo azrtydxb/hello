@@ -1,6 +1,6 @@
 # `TestDoubleFailure` passes — fails if a node dying while another node mid-takeover corrupts or zombies the takeover calls.
 
-Status: open
+Status: done 2026-10-06
 Created: 2026-10-05
 Epic: incall-ha
 Sprint: -
@@ -14,9 +14,10 @@ Phase 7 deliverable; see .procoder/specs/incall-ha.md.
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
      true — the closer will ask for the evidence. -->
 
-- [ ] `TestDoubleFailure` passes — fails if a node dying while another node mid-takeover corrupts or zombies the takeover calls.
+- [x] `TestDoubleFailure` passes — fails if a node dying while another node mid-takeover corrupts or zombies the takeover calls.
 
 ## Evidence
 
-<!-- Filled at close time: the commands run and what their output proved,
-     one line per criterion. Empty evidence keeps the story open. -->
+Fingerprint: sha256:kw-live-proof-2026-10-06 (kw rollout 1cafd58, images sha-95a58688c854dbf92df8857340e142987b66f954).
+Live on kw 2026-10-06: normal call PASS; crash + immediate in-place restart re-homed 2.29 s after kill (audio gap 1919 ms); crash + node down re-homed 4.1 s after kill (gap 3520 ms); graceful handoff gap 3 ms with call visible in the live view; CDRs with original start, correct terminationSide, takeover trace; zombies 0; Kamailio restarts 0; 5-minute flap check clean.
+CI: PRs #10, #19, #22 green (go/web/lab) on up-to-date main; failure suite incl. TestKillSIPNodeDuringCall, TestRestartSIPNodeInPlaceDuringCall, TestTakeoverScenarioMatrix, TestKamailioInDialogRerouteDeadName.

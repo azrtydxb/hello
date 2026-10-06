@@ -1,6 +1,6 @@
 # Phase 7 — Advanced HA
 
-Status: open
+Status: done 2026-10-06
 Created: 2026-10-02
 
 ## Goal

@@ -1,6 +1,6 @@
 # incall-ha
 
-Status: open
+Status: done 2026-10-06
 Created: 2026-10-05
 Milestone: phase-7-advanced-ha
 Spec: incall-ha @ 6ca0639a897c
