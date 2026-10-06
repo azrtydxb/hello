@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-05 16:39 UTC. procoder reads this
+Written 2026-10-06 04:02 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -307,6 +307,16 @@ Question: Phase 3 production SIP load balancer
 - Envoy UDP proxy (L4) with active health checks
 
 Answer: Kamailio dispatcher as the SIP-aware balancer, shipped and configured in deploy/ (the user requires a production-grade balancer, not lab tooling)
+
+## [decision] decisions.md
+
+Key: add7750575a3
+Question: In-call HA crash detection time
+
+- Faster detection: membership heartbeat 1 s / TTL 4 s, so a crashed node's calls re-home in about 5 s; update docs to the measured numbers
+- Keep 15 s detection; correct docs to the honest numbers (crash ~15–18 s gap, restart ~4 s, graceful <1 s)
+
+Answer: Faster detection: membership heartbeat 1 s / TTL 4 s (re-home in ~5 s); docs updated to measured numbers
 
 ## [decision] decisions.md
 

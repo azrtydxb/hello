@@ -1,6 +1,6 @@
 # Questions procoder cannot answer for you
 
-Written 2026-10-05 16:39 UTC.
+Written 2026-10-06 04:02 UTC.
 
 Answer each one by writing a line beginning `Answer: ` under it, then
 hand the file back with `procoder ask --file .procoder/ask/QA.md`.
@@ -8,10 +8,10 @@ Leave the `Key:` lines alone — they are what ties an answer to its question.
 
 ## Q1: [decision] decisions.md
 
-Key: ccf3f94c9462
-Question: Merge Phase 7 (PR #8) and roll out to kw
+Key: add7750575a3
+Question: In-call HA crash detection time
 
-- Merge PR #8, wire the live-view ha flag, publish images, pin digests, Sync rollout, then kill a node mid-call on kw to prove takeover live
-- Hold PR #8 for review; kw stays on current behavior
+- Faster detection: membership heartbeat 1 s / TTL 4 s, so a crashed node's calls re-home in about 5 s; update docs to the measured numbers
+- Keep 15 s detection; correct docs to the honest numbers (crash ~15–18 s gap, restart ~4 s, graceful <1 s)
 
-Answer: Merge + prove on kw (answered by the user 2026-10-05; PR #8 merged as 1c3fe03)
+Answer: Faster detection: membership heartbeat 1 s / TTL 4 s (re-home in ~5 s); docs updated to measured numbers
