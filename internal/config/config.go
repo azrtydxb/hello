@@ -3,12 +3,17 @@
 package config
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
+	"net/url"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -67,6 +72,76 @@ type Control struct {
 	// SecretKey (HELLO_SECRET_KEY) seals trunk passwords; identical on every
 	// hello-control and hello-sip.
 	SecretKey string
+	// Prov is the phone provisioning listener (HELLO_PROV_*).
+	Prov Prov
+}
+
+// Prov is hello-control's phone provisioning configuration (spec
+// phone-auto-provisioning-service, Interfaces). The listener is enabled
+// when HELLO_PROV_PUBLIC_URL is set; every other key is still checked for
+// syntax when it is not.
+type Prov struct {
+	// Addr (HELLO_PROV_ADDR, default :8083) is the provisioning listener.
+	Addr string
+	// PublicURL (HELLO_PROV_PUBLIC_URL) is the https:// base phones reach
+	// the listener at, without a path; the plain-HTTP boot and CA URLs use
+	// the same host.
+	PublicURL *url.URL
+	// SIPServer (HELLO_PROV_SIP_SERVER, default HELLO_SIP_ADVERTISED_ADDR)
+	// is the host:port rendered configs register with.
+	SIPServer string
+	// RegisterExpiry is the registration expiry rendered configs carry:
+	// HELLO_SIP_REGISTER_MAX_EXPIRES (default 1h), the same value hello-sip
+	// caps registrations at, so it is always inside its window.
+	RegisterExpiry time.Duration
+	// TrustedProxies (HELLO_PROV_TRUSTED_PROXIES) may set X-Forwarded-Proto
+	// and X-Forwarded-For.
+	TrustedProxies []netip.Prefix
+	// TokenGrace (HELLO_PROV_TOKEN_GRACE, default 7d) keeps a rotated
+	// token valid until the phone first fetches with the new one.
+	TokenGrace time.Duration
+	// Resync (HELLO_PROV_RESYNC, default 24h, at least 1m) is the phones'
+	// re-check interval.
+	Resync time.Duration
+	// Timezone (HELLO_PROV_TIMEZONE, default UTC) and NTP
+	// (HELLO_PROV_NTP, default pool.ntp.org) set the phones' clocks.
+	Timezone string
+	NTP      string
+	// AuditRetention (HELLO_PROV_AUDIT_RETENTION, default 90d) is how long
+	// fetch audit rows are kept.
+	AuditRetention time.Duration
+	// Rate limits (HELLO_PROV_RATE_IP_PER_MIN 60,
+	// HELLO_PROV_RATE_DENIED_PER_10MIN 10, HELLO_PROV_RATE_PHONE_PER_HOUR
+	// 30).
+	RateIPPerMin       int
+	RateDeniedPer10Min int
+	RatePhonePerHour   int
+	// CACert (HELLO_PROV_CA_CERT) is the PEM file served at /p/ca.crt.
+	CACert string
+	// TLSCert and TLSKey (HELLO_PROV_TLS_CERT, HELLO_PROV_TLS_KEY) put TLS
+	// on the listener itself (the compose lab); both or neither.
+	TLSCert, TLSKey string
+	// BootCIDRs (HELLO_PROV_BOOT_CIDRS) limits the trust-on-first-use
+	// hand-off to these sources; empty allows any.
+	BootCIDRs []netip.Prefix
+	// Redirect holds vendor redirect credentials set by the deployment.
+	Redirect ProvRedirect
+}
+
+// Enabled reports whether hello-control serves provisioning.
+func (p Prov) Enabled() bool { return p.PublicURL != nil }
+
+// ProvRedirect holds the vendor redirect-service credentials from the
+// deployment (spec S-11); each vendor's group is all set or all empty, and
+// a set group takes precedence over credentials stored through the UI.
+type ProvRedirect struct {
+	SnomKeyID, SnomKeySecret       string // HELLO_PROV_SNOM_KEY_ID, _KEY_SECRET
+	YealinkKey, YealinkSecret      string // HELLO_PROV_YEALINK_KEY, _SECRET
+	YMCSClientID, YMCSClientSecret string // HELLO_PROV_YMCS_CLIENT_ID, _CLIENT_SECRET
+	YMCSRegion                     string // HELLO_PROV_YMCS_REGION
+	GDMSClientID, GDMSClientSecret string // HELLO_PROV_GDMS_CLIENT_ID, _CLIENT_SECRET
+	GDMSUsername, GDMSPassword     string // HELLO_PROV_GDMS_USERNAME, _PASSWORD
+	GDMSRegion, GDMSSiteID         string // HELLO_PROV_GDMS_REGION, _SITE_ID
 }
 
 // SIP is hello-sip's configuration. The bind address is where the node
@@ -146,6 +221,7 @@ func (c Control) LogValue() slog.Value {
 		slog.String("database_url", telemetry.RedactURL(c.DatabaseURL)),
 		slog.String("valkey_addr", c.ValkeyAddr),
 		slog.String("sip_domain", c.SIPDomain),
+		slog.Bool("prov_enabled", c.Prov.Enabled()),
 	)
 }
 
@@ -188,7 +264,165 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	if c.SessionTTL == 0 {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
+	c.Prov = r.prov()
 	return c, r.err()
+}
+
+// ntpRe is the shape of an NTP server name or address.
+var ntpRe = regexp.MustCompile(`^[A-Za-z0-9.:-]{1,253}$`)
+
+// tzRe is the shape of a time zone name (IANA, e.g. Europe/Brussels). The
+// phones interpret it, so it is not loaded here.
+var tzRe = regexp.MustCompile(`^[A-Za-z0-9_+./-]{1,64}$`)
+
+// prov reads the HELLO_PROV_* settings.
+func (r *reader) prov() Prov {
+	p := Prov{
+		Addr:               r.optional("HELLO_PROV_ADDR", ":8083"),
+		SIPServer:          r.optional("HELLO_PROV_SIP_SERVER", r.getenv("HELLO_SIP_ADVERTISED_ADDR")),
+		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
+		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
+		Resync:             r.days("HELLO_PROV_RESYNC", 24*time.Hour),
+		Timezone:           r.optional("HELLO_PROV_TIMEZONE", "UTC"),
+		NTP:                r.optional("HELLO_PROV_NTP", "pool.ntp.org"),
+		AuditRetention:     r.days("HELLO_PROV_AUDIT_RETENTION", 90*24*time.Hour),
+		RateIPPerMin:       r.positiveInt("HELLO_PROV_RATE_IP_PER_MIN", 60),
+		RateDeniedPer10Min: r.positiveInt("HELLO_PROV_RATE_DENIED_PER_10MIN", 10),
+		RatePhonePerHour:   r.positiveInt("HELLO_PROV_RATE_PHONE_PER_HOUR", 30),
+		CACert:             r.getenv("HELLO_PROV_CA_CERT"),
+		TLSCert:            r.getenv("HELLO_PROV_TLS_CERT"),
+		TLSKey:             r.getenv("HELLO_PROV_TLS_KEY"),
+		BootCIDRs:          r.prefixes("HELLO_PROV_BOOT_CIDRS"),
+	}
+	minExp := r.duration("HELLO_SIP_REGISTER_MIN_EXPIRES", 60*time.Second)
+	p.RegisterExpiry = r.duration("HELLO_SIP_REGISTER_MAX_EXPIRES", time.Hour)
+	if p.RegisterExpiry < time.Second {
+		r.fail("HELLO_SIP_REGISTER_MAX_EXPIRES", errors.New("must be at least 1s"))
+	} else if minExp > p.RegisterExpiry {
+		r.fail("HELLO_SIP_REGISTER_MIN_EXPIRES", errors.New("must not exceed HELLO_SIP_REGISTER_MAX_EXPIRES"))
+	}
+	r.hostPort("HELLO_PROV_ADDR", p.Addr)
+	p.PublicURL = r.provPublicURL()
+	if p.SIPServer == "" {
+		if p.Enabled() {
+			r.fail("HELLO_PROV_SIP_SERVER", errors.New("required (or HELLO_SIP_ADVERTISED_ADDR) when provisioning is enabled"))
+		}
+	} else if host, port, err := net.SplitHostPort(p.SIPServer); err != nil {
+		r.fail("HELLO_PROV_SIP_SERVER", err)
+	} else if unspecified(host) {
+		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must be an address phones can reach, not unspecified"))
+	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must end in a port number"))
+	}
+	for key, d := range map[string]time.Duration{"HELLO_PROV_TOKEN_GRACE": p.TokenGrace, "HELLO_PROV_AUDIT_RETENTION": p.AuditRetention} {
+		if d == 0 {
+			r.fail(key, errors.New("must be positive"))
+		}
+	}
+	if p.Resync < time.Minute {
+		r.fail("HELLO_PROV_RESYNC", errors.New("must be at least 1m"))
+	}
+	if !tzRe.MatchString(p.Timezone) || strings.Contains(p.Timezone, "..") {
+		r.fail("HELLO_PROV_TIMEZONE", errors.New("must be a time zone name such as Europe/Brussels"))
+	}
+	if !ntpRe.MatchString(p.NTP) {
+		r.fail("HELLO_PROV_NTP", errors.New("must be a host name or address"))
+	}
+	r.provCertificates(p)
+	p.Redirect = r.provRedirect()
+	return p
+}
+
+// provPublicURL reads HELLO_PROV_PUBLIC_URL; nil leaves provisioning off.
+func (r *reader) provPublicURL() *url.URL {
+	v := r.getenv("HELLO_PROV_PUBLIC_URL")
+	if v == "" {
+		if r.getenv("HELLO_PROV_ADDR") != "" {
+			r.fail("HELLO_PROV_PUBLIC_URL", errors.New("required when HELLO_PROV_ADDR is set"))
+		}
+		return nil
+	}
+	u, err := url.Parse(v)
+	switch {
+	case err != nil || u.Host == "" || u.Hostname() == "":
+		r.fail("HELLO_PROV_PUBLIC_URL", errors.New("must be an absolute URL such as https://prov.example.com"))
+	case u.Scheme != "https":
+		r.fail("HELLO_PROV_PUBLIC_URL", errors.New("must be https: per-device paths refuse plain HTTP"))
+	case u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "":
+		r.fail("HELLO_PROV_PUBLIC_URL", errors.New("must be scheme and host only, with no path, query or credentials"))
+	default:
+		u.Path = ""
+		return u
+	}
+	return nil
+}
+
+// provCertificates checks the CA file and the listener's TLS pair load.
+// No error carries file content.
+func (r *reader) provCertificates(p Prov) {
+	if p.CACert != "" {
+		if b, err := os.ReadFile(p.CACert); err != nil {
+			r.fail("HELLO_PROV_CA_CERT", errors.New("cannot read the file"))
+		} else if blk, _ := pem.Decode(b); blk == nil {
+			r.fail("HELLO_PROV_CA_CERT", errors.New("must be a PEM certificate"))
+		} else if _, err := x509.ParseCertificate(blk.Bytes); err != nil {
+			r.fail("HELLO_PROV_CA_CERT", errors.New("must be a PEM certificate"))
+		}
+	}
+	switch {
+	case (p.TLSCert == "") != (p.TLSKey == ""):
+		r.fail("HELLO_PROV_TLS_CERT", errors.New("HELLO_PROV_TLS_CERT and HELLO_PROV_TLS_KEY are set together"))
+	case p.TLSCert != "":
+		if _, err := tls.LoadX509KeyPair(p.TLSCert, p.TLSKey); err != nil {
+			r.fail("HELLO_PROV_TLS_CERT", errors.New("HELLO_PROV_TLS_CERT and HELLO_PROV_TLS_KEY must be a readable PEM certificate and its key"))
+		}
+	}
+}
+
+// provRedirect reads the deployment's redirect credentials; a vendor group
+// is all set or all empty. Errors name keys, never values.
+func (r *reader) provRedirect() ProvRedirect {
+	var c ProvRedirect
+	groups := []map[string]*string{
+		{"HELLO_PROV_SNOM_KEY_ID": &c.SnomKeyID, "HELLO_PROV_SNOM_KEY_SECRET": &c.SnomKeySecret},
+		{"HELLO_PROV_YEALINK_KEY": &c.YealinkKey, "HELLO_PROV_YEALINK_SECRET": &c.YealinkSecret},
+		{"HELLO_PROV_YMCS_CLIENT_ID": &c.YMCSClientID, "HELLO_PROV_YMCS_CLIENT_SECRET": &c.YMCSClientSecret, "HELLO_PROV_YMCS_REGION": &c.YMCSRegion},
+		{
+			"HELLO_PROV_GDMS_CLIENT_ID": &c.GDMSClientID, "HELLO_PROV_GDMS_CLIENT_SECRET": &c.GDMSClientSecret,
+			"HELLO_PROV_GDMS_USERNAME": &c.GDMSUsername, "HELLO_PROV_GDMS_PASSWORD": &c.GDMSPassword,
+			"HELLO_PROV_GDMS_REGION": &c.GDMSRegion, "HELLO_PROV_GDMS_SITE_ID": &c.GDMSSiteID,
+		},
+	}
+	for _, g := range groups {
+		var missing []string
+		for key, dst := range g {
+			*dst = strings.TrimSpace(r.getenv(key))
+			if *dst == "" {
+				missing = append(missing, key)
+			}
+		}
+		if len(missing) > 0 && len(missing) < len(g) {
+			slices.Sort(missing)
+			for _, key := range missing {
+				r.fail(key, errors.New("required with the other keys of its vendor"))
+			}
+		}
+	}
+	return c
+}
+
+// days reads a duration that also accepts whole days ("7d", "90d").
+func (r *reader) days(key string, def time.Duration) time.Duration {
+	v := r.getenv(key)
+	if n, ok := strings.CutSuffix(v, "d"); ok && v != "d" {
+		d, err := strconv.Atoi(n)
+		if err != nil || d < 0 || d > 3650 {
+			r.fail(key, errors.New("must be a duration such as 24h or a whole number of days such as 7d"))
+			return def
+		}
+		return time.Duration(d) * 24 * time.Hour
+	}
+	return r.duration(key, def)
 }
 
 // LoadSIP reads hello-sip's configuration through getenv.
