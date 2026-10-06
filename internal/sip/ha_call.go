@@ -5,6 +5,7 @@ package sip
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
@@ -19,7 +20,11 @@ import (
 type HAState interface {
 	SaveDialogState(ctx context.Context, sds livestate.DialogState, ttl time.Duration) error
 	DeleteDialogState(ctx context.Context, callId string) error
-	ClaimDialog(ctx context.Context, callId, newNode string) (bool, livestate.DialogState, error)
+	// ClaimDialog claims an orphaned dialog; staleIncarnation, when set,
+	// names the dead owner process whose record may be claimed at once.
+	ClaimDialog(ctx context.Context, callId, newNode, staleIncarnation string) (bool, livestate.DialogState, error)
+	// DialogByLeg finds the record carrying either leg's dialog.
+	DialogByLeg(ctx context.Context, callId string) (livestate.DialogState, bool, error)
 	ReleaseDialogClaim(ctx context.Context, callId string) error
 	ClaimOwner(ctx context.Context, callId string) (string, error)
 	OrphanedDialogs(ctx context.Context, offlineNode string) ([]livestate.DialogState, error)
@@ -276,6 +281,7 @@ func (c *call) haState() (livestate.DialogState, bool) {
 		Handoff:     handoff,
 		AnsweredAt:  c.maxClockStart(),
 	}
+	c.haContinuity(&st)
 	if relay != nil {
 		st.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
 	}
@@ -319,7 +325,7 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 	if !ok {
 		return livestate.DialogState{}, false
 	}
-	state := livestate.DialogState{
+	st := livestate.DialogState{
 		CallID:      hom.legs[0].callID,
 		OwnerNode:   c.s.cfg.NodeID,
 		Correlation: c.id,
@@ -330,8 +336,9 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 		Handoff:     c.handingOff(),
 		AnsweredAt:  c.maxClockStart(),
 	}
+	c.haContinuity(&st)
 	if relay != nil {
-		state.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
+		st.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
 	}
 	for i, l := range hom.legs {
 		if l == nil {
@@ -351,9 +358,25 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 			LocalIdentity: l.localID, RemoteIdentity: l.remoteID,
 		}
 		l.mu.Unlock()
-		state.Legs[i] = leg
+		st.Legs[i] = leg
 	}
-	return state, true
+	return st, true
+}
+
+// haContinuity stamps the owner process and the call's CDR continuity on
+// its replicated state: the incarnation tells a restarted node's calls from
+// its live ones, and the start, ring and routing data let a taker close the
+// one logical call with one CDR that starts where the call started.
+func (c *call) haContinuity(st *livestate.DialogState) {
+	st.OwnerIncarnation = c.s.cfg.Incarnation
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	st.StartedAt, st.RingAt = c.start, c.ringTime
+	st.Direction, st.Route, st.Trunk, st.Rewritten = c.direction, c.route, c.trunkName, c.rewritten
+	st.Trace = make([]string, 0, len(c.trace))
+	for _, step := range c.trace {
+		st.Trace = append(st.Trace, step.Text)
+	}
 }
 
 // replicate writes the call's recovery state (contract 1). A failure is
@@ -377,6 +400,15 @@ func (c *call) replicate() bool {
 	defer c.haWriteMu.Unlock()
 	if c.haDeleted {
 		return false // the call ended: its record is gone for good
+	}
+	c.mu.Lock()
+	written = c.haHandoff && c.haHandoffWritten
+	c.mu.Unlock()
+	if written && !st.Handoff {
+		// A heartbeat that built its state before the handoff mark must
+		// not land after the handoff write: nothing writes the record
+		// again, so survivors would never see the handoff.
+		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*c.s.cfg.StateTimeout)
 	defer cancel()
@@ -715,6 +747,116 @@ func (s *Server) handedOff(req *sip.Request, tx sip.ServerTransaction) bool {
 	}
 	s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable", sip.NewHeader("Retry-After", "0"))
 	return true
+}
+
+// haOnDemand takes a call over when an in-dialog request for it reaches
+// this node and the node holds no such dialog, but a replicated record
+// does, and its owner process is gone (incall-ha: an in-dialog request is
+// never 481-ed while the call is recoverable). The decisive case is a node
+// restarted in place under the same ID: Kamailio keeps routing the call's
+// requests to it, and its new process must answer them from the record
+// instead of 481 (the old process's calls never go OFFLINE). A BYE ends
+// the call right here - 200, the other leg's BYE, the CDR - without
+// re-INVITEs; a re-INVITE or UPDATE starts the full takeover and is
+// answered 491 (the endpoint retries once the takeover re-INVITEd it);
+// anything else starts it and gets 503. With the owner alive (or another
+// node's claim in flight) the request gets 503 + Retry-After, never 481,
+// so it is retried once the call is re-homed. true when it answered.
+func (s *Server) haOnDemand(req *sip.Request, tx sip.ServerTransaction) bool {
+	if s.deps.HAState == nil || !s.cfg.HATakeoverEnabled || req.IsAck() || tx == nil {
+		return false
+	}
+	switch req.Method {
+	case sip.BYE, sip.INVITE, sip.UPDATE, sip.INFO, sip.REFER:
+	default:
+		return false
+	}
+	if _, ok := req.To().Params.Get("tag"); !ok {
+		return false // not in-dialog
+	}
+	id := req.CallID().Value()
+	if _, bound := s.lookup(id); bound {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout)
+	st, ok, err := s.deps.HAState.DialogByLeg(ctx, id)
+	cancel()
+	if err != nil || !ok {
+		return false
+	}
+	// The request must belong to the replicated dialog, from the
+	// endpoint's side: its tags, from its source or a trusted edge.
+	fromCallee := id != st.CallID
+	l := st.Legs[0]
+	if fromCallee {
+		l = st.Legs[1]
+	}
+	if l.CallID != id || tagParam(req.From()) != l.RemoteTag || tagParam(req.To()) != l.LocalTag ||
+		(req.Source() != l.Source && !s.fromTrustedProxy(req)) {
+		return false
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 2*s.cfg.StateTimeout)
+	stale, dead := s.haOwnerDead(ctx, st)
+	cancel()
+	if !dead {
+		if st.OwnerNode == s.cfg.NodeID && st.OwnerIncarnation == s.cfg.Incarnation {
+			return false // this process's own record of a call it no longer holds
+		}
+		s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable", sip.NewHeader("Retry-After", "1"))
+		return true
+	}
+	claimed, won := s.haClaim(context.Background(), st.CallID, stale)
+	if !won {
+		// Another node's takeover is in flight: retried, it lands there.
+		s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable", sip.NewHeader("Retry-After", "1"))
+		return true
+	}
+	s.log.Info("taking over a call on demand", "call_id", st.CallID, "from", st.OwnerNode,
+		"method", req.Method.String(), "dead_incarnation", stale)
+	switch req.Method {
+	case sip.BYE:
+		s.haByeOnDemand(claimed, req, tx, fromCallee)
+	case sip.INVITE, sip.UPDATE:
+		go s.takeOverCall(claimed, claimed.OwnerNode)
+		s.respond(tx, req, sip.StatusRequestPending, "Request Pending")
+	default:
+		go s.takeOverCall(claimed, claimed.OwnerNode)
+		s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable", sip.NewHeader("Retry-After", "1"))
+	}
+	return true
+}
+
+// haByeOnDemand ends a claimed call whose endpoint hung up before any
+// takeover re-homed it: the call is rebuilt from the record without media
+// (nothing is left to relay), the BYE is answered 200, the other leg gets
+// its BYE, and the one CDR of the logical call closes answered with the
+// side that hung up.
+func (s *Server) haByeOnDemand(st livestate.DialogState, req *sip.Request, tx sip.ServerTransaction, fromCallee bool) {
+	defer s.releaseClaim(st.CallID)
+	a := haLegFrom(st.Legs[0], true)
+	var b *haLeg
+	if st.Legs[1].CallID != "" {
+		b = haLegFrom(st.Legs[1], false)
+	}
+	if a == nil || (st.Legs[1].CallID != "" && b == nil) {
+		s.haAbandon(st, st.OwnerNode, "incomplete replicated state")
+		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
+		return
+	}
+	now := time.Now()
+	c := s.haNewCall(st, st.OwnerNode, a, b, now)
+	c.haSolo = b == nil
+	c.mediaMode = "anchored"
+	c.addTrace(fmt.Sprintf("ha: taken over from %s on demand: the %s hung up before any re-INVITE", st.OwnerNode,
+		map[bool]string{false: "caller", true: "callee"}[fromCallee]))
+	s.m.DialogTakeovers.Inc()
+	s.m.ActiveCalls.Inc()
+	hom := c.homed()
+	s.bind(a.callID, dialogRef{c: c})
+	if b != nil {
+		s.bind(b.callID, dialogRef{c: c, leg: c.winner})
+	}
+	s.haByeRequest(c, hom, fromCallee, req, tx)
 }
 
 // maxClockStart is when the call's maximum-duration clock started: the

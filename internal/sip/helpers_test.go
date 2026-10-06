@@ -501,6 +501,10 @@ type phone struct {
 	byeAt          time.Time
 	servers        map[string]*sipgo.DialogServerSession
 	clients        map[string]*sipgo.DialogClientSession
+	// pending holds a dialing INVITE's Call-ID until its answer is
+	// confirmed (closed then), so onBye never reads a session WaitAnswer
+	// is still writing.
+	pending map[string]chan struct{}
 
 	invites    chan *sip.Request
 	reinvites  chan *sip.Request
@@ -569,7 +573,7 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 		sdp: "v=0\r\no=" + user + " 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n" +
 			"m=audio " + strconv.Itoa(port+1000) + " RTP/AVP 0 101\r\na=rtpmap:101 telephone-event/8000\r\n",
 		contact: sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: user, Host: host, Port: port}},
-		servers: map[string]*sipgo.DialogServerSession{}, clients: map[string]*sipgo.DialogClientSession{},
+		servers: map[string]*sipgo.DialogServerSession{}, clients: map[string]*sipgo.DialogClientSession{}, pending: map[string]chan struct{}{},
 		invites: make(chan *sip.Request, 16), reinvites: make(chan *sip.Request, 16), cancels: make(chan *sip.Request, 16),
 		acks: make(chan *sip.Request, 16), byes: make(chan *sip.Request, 16), rings: make(chan int, 16),
 		infos: make(chan *sip.Request, 16), messages: make(chan *sip.Request, 16),
@@ -685,6 +689,15 @@ func (p *phone) onBye(req *sip.Request, tx sip.ServerTransaction) {
 	p.byeAt = time.Now()
 	p.mu.Unlock()
 	push(p.byes, req)
+	p.mu.Lock()
+	wait := p.pending[req.CallID().Value()]
+	p.mu.Unlock()
+	if wait != nil {
+		select {
+		case <-wait: // our INVITE's answer is still being confirmed
+		case <-time.After(5 * time.Second):
+		}
+	}
 	p.mu.Lock()
 	dss := p.servers[req.CallID().Value()]
 	dcs := p.clients[req.CallID().Value()]
@@ -838,9 +851,23 @@ func (p *phone) call(ctx context.Context, ext string) (dcs *sipgo.DialogClientSe
 	if err != nil {
 		return nil, err
 	}
+	// The session is handed to onBye only once WaitAnswer has finished
+	// writing it (its InviteResponse): a BYE that races the answer (an
+	// announcement destination hanging up at once) waits for confirmed.
+	id := req.CallID().Value()
+	confirmed := make(chan struct{})
 	p.mu.Lock()
-	p.clients[req.CallID().Value()] = dcs
+	p.pending[id] = confirmed
 	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		if err == nil {
+			p.clients[id] = dcs
+		}
+		delete(p.pending, id)
+		p.mu.Unlock()
+		close(confirmed)
+	}()
 	heard := func(r *sip.Response) error {
 		if r.IsProvisional() {
 			select {

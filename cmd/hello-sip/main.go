@@ -146,8 +146,12 @@ func run(args []string) error {
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
 		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev, Revision: configRevision,
 		DNSFailures: dnsFailures}
+	// One incarnation per process: membership and every replicated dialog
+	// carry it, so a crash restarted in place under the same node ID is
+	// recognised and its calls are taken over at once (docs/ha.md).
+	incarnation := cluster.NewIncarnation()
 	srv, err := sip.New(sip.Config{
-		NodeID: cfg.NodeID, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
+		NodeID: cfg.NodeID, Incarnation: incarnation, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
 		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
@@ -178,7 +182,7 @@ func run(args []string) error {
 
 	machine := lifecycle.New(lifecycle.Options{
 		Member: cluster.Member{ID: cfg.NodeID, Kind: cluster.KindSIP, SIPAddr: cfg.SIPAdvertisedAddr, HTTPAddr: cfg.HTTPAddr,
-			Transports: []string{"udp"}, Version: version.Version},
+			Transports: []string{"udp"}, Version: version.Version, Incarnation: incarnation},
 		Checks: map[string]lifecycle.Check{
 			"valkey": valkeyReady,
 			"sip": func(context.Context) error {

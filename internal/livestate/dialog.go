@@ -67,6 +67,31 @@ type DialogState struct {
 	// maximum-duration clock, which a taker continues instead of
 	// restarting (zero from older nodes: the taker starts it afresh).
 	AnsweredAt time.Time `json:"answeredAt,omitzero"`
+	// OwnerIncarnation is the owning process's incarnation (cluster
+	// membership's Incarnation): a record whose owner node is alive under
+	// another incarnation belongs to a process that died — a crash
+	// restarted in place under the same node ID — and is taken over at
+	// once. Empty from older nodes (never treated as stale).
+	OwnerIncarnation string `json:"ownerIncarnation,omitempty"`
+	// The CDR continuity a taker needs to close the one logical call with
+	// one correct CDR: when the call started and first rang, how it was
+	// routed, and the routing trace so far.
+	StartedAt time.Time `json:"startedAt,omitzero"`
+	RingAt    time.Time `json:"ringAt,omitzero"`
+	Direction string    `json:"direction,omitempty"`
+	Route     string    `json:"route,omitempty"`
+	Trunk     string    `json:"trunk,omitempty"`
+	Rewritten string    `json:"rewritten,omitempty"`
+	Trace     []string  `json:"trace,omitempty"`
+}
+
+// LegCallIDs are the Call-IDs of the dialogs the record carries.
+func (d DialogState) LegCallIDs() []string {
+	out := []string{d.CallID}
+	if id := d.Legs[1].CallID; id != "" && id != d.CallID {
+		out = append(out, id)
+	}
+	return out
 }
 
 // HA timing: the owner refreshes its records every heartbeat and they expire
@@ -86,6 +111,18 @@ const DialogTTL = haTTL
 func dialogKey(callId string) string      { return "hello:dialog:" + callId }
 func dialogClaimKey(callId string) string { return "hello:dialog-claim:" + callId }
 func dialogTakenKey(node string) string   { return "hello:dialog-taken:" + node }
+func dialogLegKey(callId string) string   { return "hello:dialog-leg:" + callId }
+
+// takenNode is the key the zombie reaper counts a claim under: the owner
+// node, or for a claim on a dead incarnation of a node that is alive again
+// (restarted in place), that incarnation - the reaper of the node's later
+// death must not subtract claims on calls of an earlier process.
+func takenNode(owner, staleIncarnation string) string {
+	if staleIncarnation == "" {
+		return owner
+	}
+	return owner + "@" + staleIncarnation
+}
 
 // dialogTakenTTL bounds the per-node claim counter: long past any reap.
 const dialogTakenTTL = 10 * time.Minute
@@ -101,17 +138,62 @@ func (s *Store) SaveDialogState(ctx context.Context, sds DialogState, ttl time.D
 	if err != nil {
 		return err
 	}
-	return s.c.Do(ctx, s.c.B().Set().Key(dialogKey(sds.CallID)).Value(string(b)).Px(ttl).Build()).Error()
+	cmds := []valkey.Completed{s.c.B().Set().Key(dialogKey(sds.CallID)).Value(string(b)).Px(ttl).Build()}
+	// The callee leg's Call-ID points at the record too, so a node that
+	// gets an in-dialog request on either dialog finds the call.
+	if id := sds.Legs[1].CallID; id != "" && id != sds.CallID {
+		cmds = append(cmds, s.c.B().Set().Key(dialogLegKey(id)).Value(sds.CallID).Px(ttl).Build())
+	}
+	for _, r := range s.c.DoMulti(ctx, cmds...) {
+		if err := r.Error(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DialogByLeg finds the replicated record carrying the dialog callId (the
+// caller's or the callee's leg); ok is false when there is none.
+func (s *Store) DialogByLeg(ctx context.Context, callId string) (DialogState, bool, error) {
+	var out DialogState
+	raw, err := s.c.Do(ctx, s.c.B().Get().Key(dialogKey(callId)).Build()).ToString()
+	if valkey.IsValkeyNil(err) {
+		key, lerr := s.c.Do(ctx, s.c.B().Get().Key(dialogLegKey(callId)).Build()).ToString()
+		if valkey.IsValkeyNil(lerr) {
+			return out, false, nil
+		}
+		if lerr != nil {
+			return out, false, fmt.Errorf("livestate: dialog leg get: %w", lerr)
+		}
+		raw, err = s.c.Do(ctx, s.c.B().Get().Key(dialogKey(key)).Build()).ToString()
+	}
+	if valkey.IsValkeyNil(err) {
+		return out, false, nil
+	}
+	if err != nil {
+		return out, false, fmt.Errorf("livestate: dialog get: %w", err)
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return out, false, fmt.Errorf("livestate: dialog decode: %w", err)
+	}
+	return out, true, nil
 }
 
 // ClaimDialog atomically claims an orphaned dialog for newNode: it succeeds
 // only while the dialog has no live owner heartbeat and no other claim, and
 // returns the replicated state on success. A dialog whose state was written
 // within two heartbeats is refused: that owner is very likely alive (Phase 3
-// membership marks a node OFFLINE long after that). The claim expires, so a
-// taker that dies mid-takeover cannot block the dialog forever, and is
-// dropped by ReleaseDialogClaim after a successful takeover.
-func (s *Store) ClaimDialog(ctx context.Context, callId, newNode string) (bool, DialogState, error) {
+// membership marks a node OFFLINE long after that) - unless the record is
+// marked for handoff, or staleIncarnation names the record's owner
+// incarnation: that process is known dead (its node is alive under another
+// incarnation), however fresh its last write. A non-empty staleIncarnation
+// that does not match the record refuses the claim. The claim is a
+// compare-and-set on the record as read: a record rewritten in between (the
+// owner alive after all, or another taker that already re-homed the call
+// and released its claim) is never claimed. The claim expires, so a taker
+// that dies mid-takeover cannot block the dialog forever, and is dropped by
+// ReleaseDialogClaim after a successful takeover.
+func (s *Store) ClaimDialog(ctx context.Context, callId, newNode, staleIncarnation string) (bool, DialogState, error) {
 	var out DialogState
 	raw, err := s.c.Do(ctx, s.c.B().Get().Key(dialogKey(callId)).Build()).ToString()
 	if valkey.IsValkeyNil(err) {
@@ -123,11 +205,15 @@ func (s *Store) ClaimDialog(ctx context.Context, callId, newNode string) (bool, 
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return false, out, fmt.Errorf("livestate: dialog decode: %w", err)
 	}
-	if !out.Handoff && !out.UpdatedAt.IsZero() && time.Since(out.UpdatedAt) < 2*HAHeartbeat {
+	if staleIncarnation != "" && out.OwnerIncarnation != staleIncarnation {
+		return false, out, nil // not the dead process's record (any more)
+	}
+	if staleIncarnation == "" && !out.Handoff && !out.UpdatedAt.IsZero() && time.Since(out.UpdatedAt) < 2*HAHeartbeat {
 		return false, out, nil // the owner's heartbeat is still fresh
 	}
-	claim := claimOrphan.Exec(ctx, s.c, []string{dialogClaimKey(callId), dialogKey(callId), dialogTakenKey(out.OwnerNode)},
-		[]string{newNode, strconv.FormatInt(haTTL.Milliseconds(), 10), strconv.FormatInt(dialogTakenTTL.Milliseconds(), 10)})
+	claim := claimOrphan.Exec(ctx, s.c,
+		[]string{dialogClaimKey(callId), dialogKey(callId), dialogTakenKey(takenNode(out.OwnerNode, staleIncarnation))},
+		[]string{newNode, strconv.FormatInt(haTTL.Milliseconds(), 10), strconv.FormatInt(dialogTakenTTL.Milliseconds(), 10), raw})
 	n, err := claim.AsInt64()
 	if err != nil {
 		return false, out, fmt.Errorf("livestate: dialog claim: %w", err)
@@ -135,13 +221,15 @@ func (s *Store) ClaimDialog(ctx context.Context, callId, newNode string) (bool, 
 	return n == 1, out, nil
 }
 
-// claimOrphan sets the claim key only while the dialog state still exists and
-// no other claim does, in one atomic step (two survivors can never both win),
-// and counts the claim against the dead owner (KEYS[3]), so the zombie
-// reaper knows how many of its calls a survivor took on.
+// claimOrphan sets the claim key only while the dialog state is still
+// exactly the one the claimant read (ARGV[4]) and no other claim exists, in
+// one atomic step (two survivors can never both win, and a record rewritten
+// since the read is never claimed on stale information), and counts the
+// claim against the dead owner (KEYS[3]), so the zombie reaper knows how
+// many of its calls a survivor took on.
 var claimOrphan = valkey.NewLuaScript(`
 local state = redis.call('GET', KEYS[2])
-if not state then return 0 end
+if not state or state ~= ARGV[4] then return 0 end
 if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
 redis.call('SET', KEYS[1], ARGV[1], 'PX', tonumber(ARGV[2]))
 redis.call('INCR', KEYS[3])
@@ -151,6 +239,8 @@ return 1`)
 // TakenOver is how many of node's dialogs survivors have claimed (each
 // claim counted once, atomically with it). The zombie reaper subtracts it
 // from the node's live calls at death: the rest had no replicated state.
+// A claim on a dead incarnation of a node restarted in place is counted
+// apart (takenNode): that node never goes OFFLINE for it.
 func (s *Store) TakenOver(ctx context.Context, node string) (int, error) {
 	n, err := s.c.Do(ctx, s.c.B().Get().Key(dialogTakenKey(node)).Build()).AsInt64()
 	if valkey.IsValkeyNil(err) {

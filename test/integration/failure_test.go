@@ -357,6 +357,93 @@ func TestKillSIPNodeDuringCall(t *testing.T) {
 	goneBy(t, lc, node, killed.Add(40*time.Second))
 }
 
+// TestRestartSIPNodeInPlaceDuringCall fails if a SIP node that crashes and
+// is restarted at once under the same node ID loses its call (kw
+// 2026-10-06: SIGABRT, the container restarted in place in ~2s, inside the
+// 15s OFFLINE window, so no survivor took over; the new process answered
+// the caller's BYE 481, the callee never got one, and no CDR was written).
+// The new process (or a survivor) must recognise the dialogs of the dead
+// incarnation and take the call over: both phones re-INVITEd, the live
+// view marks it taken over, the caller's hangup through Kamailio reaches
+// the callee, and one CDR closes answered from the caller's side with the
+// call's original start and the takeover mark, with no zombie counted.
+func TestRestartSIPNodeInPlaceDuringCall(t *testing.T) {
+	lc := newLabClient(t)
+	caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
+	a, b := kamPhone(t, caller), kamPhone(t, callee)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	got := answerNext(ctx, b)
+	dialled := time.Now()
+	out, err := a.Dial(ctx, callee.Extension, sdpOffer)
+	if err != nil || out.Status != 200 {
+		t.Fatalf("dial = %+v, %v", out, err)
+	}
+	in := <-got
+	node := callNode(t, lc, callee.Extension)
+	t.Cleanup(func() { restore(t, lc, node) })
+	waitReplicated(t, lc, callee.Extension, node)
+	// docker restart semantics after a crash: the same container (same
+	// node ID, same name in Kamailio's dispatcher) comes straight back.
+	killed := kill(t, node)
+	labCompose(t, "start", node)
+	var taker string
+	eventuallyBy(t, killed.Add(30*time.Second), "the call taken over after the in-place restart", func(context.Context) error {
+		for _, c := range lc.calls() {
+			if c.To == callee.Extension && c.HA == livestate.HATakenOver {
+				taker = c.Node
+				return nil
+			}
+		}
+		return errors.New("not taken over")
+	})
+	t.Logf("taken over by %s %s after the kill (%s is %s)", taker, time.Since(killed).Round(time.Millisecond),
+		node, lc.memberState(node))
+	for _, p := range []*sipua.Phone{a, b} {
+		select {
+		case <-p.Reinvites():
+		case <-time.After(10 * time.Second):
+			t.Fatalf("a phone was never re-INVITEd onto the taker's relay")
+		}
+	}
+	hctx, hcancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer hcancel()
+	if err := out.Hangup(hctx); err != nil {
+		t.Fatalf("hangup after the restart: %v", err)
+	}
+	eventually(t, 20*time.Second, "the callee's dialog ended", func() error {
+		select {
+		case <-in.Ended():
+			return nil
+		default:
+			return errors.New("still up")
+		}
+	})
+	var closed labCDR
+	eventually(t, 30*time.Second, "the call's CDR closed answered", func() error {
+		for _, c := range lc.cdrsTo(callee.Extension) {
+			if c.FinalStatus == 200 && c.BillableMs > 0 && c.SIPNode == taker && c.StartTime.After(dialled.Add(-5*time.Second)) {
+				closed = c
+				return nil
+			}
+		}
+		return errors.New("no answered CDR yet")
+	})
+	if closed.TerminationSide != "caller" {
+		t.Fatalf("termination side = %q, want caller", closed.TerminationSide)
+	}
+	if !closed.StartTime.Before(killed) {
+		t.Fatalf("CDR start %s is not the call's original start (killed %s)", closed.StartTime, killed)
+	}
+	trace := lc.cdrTrace(closed.ID)
+	if _, _, ok := takeoverGap(trace); !ok {
+		t.Fatalf("CDR %d trace lacks the takeover mark: %v", closed.ID, trace)
+	}
+	if z := nodeMetrics(t, taker)["hello_zombie_calls_total"]; z != 0 {
+		t.Fatalf("hello_zombie_calls_total = %v on %s, want 0", z, taker)
+	}
+}
+
 // waitReplicated waits until the owner replicated ext's live call - the
 // record exists and names the owner, and the counter moved - so a kill
 // that follows tests a takeover, not a call that died unreplicated
@@ -484,16 +571,22 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 		}
 		return errors.New("no answered CDR yet")
 	})
-	// The CDR carries the takeover mark, with the media gap the taker
-	// measured from its claim to both endpoints re-homed: at most 3s (spec
-	// S-4, S-6).
-	gap, ok := takeoverGap(lc.cdrTrace(closed.ID))
+	// The CDR carries the takeover mark: the takeover itself (claim to
+	// both endpoints re-homed) within 3s (spec S-4), and the media gap
+	// measured honestly from the dead owner's last heartbeat - which
+	// includes the time until its death was noticed, so it is at least
+	// the takeover and at most the kill-to-re-home time plus one
+	// replication heartbeat (5s) (spec S-6, docs/ha.md).
+	took, gap, ok := takeoverGap(lc.cdrTrace(closed.ID))
 	if !ok {
 		t.Fatalf("CDR %d trace lacks the takeover mark: %v", closed.ID, lc.cdrTrace(closed.ID))
 	}
-	t.Logf("media gap from the claim: %s", gap)
-	if gap > 3*time.Second {
-		t.Fatalf("media gap %s > 3s", gap)
+	t.Logf("takeover %s from the claim; media gap %s from the owner's last heartbeat", took, gap)
+	if took > 3*time.Second {
+		t.Fatalf("takeover %s > 3s", took)
+	}
+	if gap < took || gap > rehomed.Sub(killed)+6*time.Second {
+		t.Fatalf("media gap %s is not the outage: takeover %s, kill to re-home %s", gap, took, rehomed.Sub(killed))
 	}
 	m := nodeMetrics(t, taker)
 	if m["hello_dialog_takeovers_total"] < 1 {
@@ -505,18 +598,21 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 }
 
 // takeoverGapRe reads the taker's trace step: "ha: taken over from <node>
-// in <d> (media gap <d>)".
-var takeoverGapRe = regexp.MustCompile(`^ha: taken over from \S+ in \S+ \(media gap ([^)]+)\)$`)
+// in <takeover> (media gap <gap>)".
+var takeoverGapRe = regexp.MustCompile(`^ha: taken over from \S+ in (\S+) \(media gap ([^)]+)\)$`)
 
-// takeoverGap finds the takeover step in a CDR trace and its media gap.
-func takeoverGap(trace []string) (time.Duration, bool) {
+// takeoverGap finds the takeover step in a CDR trace: the takeover's
+// duration from its claim, and the media gap from the owner's last sign
+// of life.
+func takeoverGap(trace []string) (took, gap time.Duration, ok bool) {
 	for _, s := range trace {
 		if m := takeoverGapRe.FindStringSubmatch(s); m != nil {
-			d, err := time.ParseDuration(m[1])
-			return d, err == nil
+			d1, err1 := time.ParseDuration(m[1])
+			d2, err2 := time.ParseDuration(m[2])
+			return d1, d2, err1 == nil && err2 == nil
 		}
 	}
-	return 0, false
+	return 0, 0, false
 }
 
 // nodeMetrics scrapes a node's Prometheus endpoint into a name->value map.

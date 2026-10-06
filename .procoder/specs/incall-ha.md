@@ -85,6 +85,10 @@ Per spec §17.4: "Do not claim seamless in-call HA until specific failure scenar
 - [ ] Metrics/UI: `hello_dialog_takeovers_total`, `hello_zombie_calls_total`, per-call `ha` flag — `TestHAMetrics` extension fails if they do not move.
 - [ ] Docs: `docs/ha.md` gains the in-call HA guarantee, stated exactly per S-6, with the scenario matrix and the two named limitations (Kamailio, Valkey+node double loss) — fails if a later `procoder docs` check finds the docs guarantee diverging from the S-5 matrix or missing either limitation.
 
+## Amendments
+
+- 2026-10-06 (kw live evidence): a crashed node restarted in place under the same node ID within the 15 s OFFLINE window never went OFFLINE, so S-2's OFFLINE trigger alone lost its calls. Every process now has an incarnation id (membership `incarnation`, dialog record `ownerIncarnation`); records of a dead incarnation are claimed at once by any READY node, the restarted one included, and an in-dialog request that misses on a node is checked against the replicated record and takes the call over on demand instead of 481 (`docs/ha.md` "Restart in place"). S-4's gap is reported honestly: the CDR trace gives the takeover time from the claim (the ≤3 s target) and the media gap from the owner's last replication write, which includes detection time. S-6's CDR is one per logical call, written by the node that ends it, with the original start, routing and the side that hung up; a yielding node writes none and leaves the live record to the taker.
+
 ## Open questions
 
 <!-- The recovery model (Kamailio in-dialog rerouting + replicated-state continuation) is the design this spec commits to; alternatives (endpoint re-establishment with new dialogs) were rejected for a visible call drop. Remaining detail — exact Valkey state schema — is the plan's Task 1. -->

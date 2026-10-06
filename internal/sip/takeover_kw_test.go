@@ -139,13 +139,11 @@ func TestHandoffOnDrain(t *testing.T) {
 	waitReq(t, b.reinvites, "handoff re-INVITE to the callee")
 	eventually(t, "the call talks on the survivor", func() bool { return connectedOn(taker, "200", livestate.HATakenOver) })
 
-	// The drainer yields: its CDR says so, it holds no call, and the
-	// endpoints got no BYE from it.
-	cd := owner.nextCDR(t)
-	if !strings.Contains(cd.FailureReason, "taken over by sip-2") {
-		t.Fatalf("drainer CDR = %+v", cd)
-	}
+	// The drainer yields: it holds no call, writes no CDR (the logical
+	// call goes on; its one CDR is the survivor's), and the endpoints got
+	// no BYE from it.
 	eventually(t, "the drainer holds no call", func() bool { return owner.srv.ActiveCalls() == 0 })
+	owner.noCDR(t, 100*time.Millisecond)
 	noReq(t, b.byes, 100*time.Millisecond, "BYE from the drainer")
 
 	// A BYE that still reaches the drainer gets 503 (the edge retries it

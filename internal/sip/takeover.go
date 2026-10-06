@@ -285,7 +285,12 @@ func (s *Server) takeoverLoop(ctx context.Context) {
 
 // takeoverPass scans once: every OFFLINE SIP node's unclaimed replicated
 // dialogs are claimed and taken over; the unrecoverable remainder (calls
-// that were never fully replicated) is reaped into the zombie counter.
+// that were never fully replicated) is reaped into the zombie counter. The
+// dialogs a DRAINING node marked for handoff are claimed at once. And the
+// dialogs of a dead process of a node that is alive again under another
+// incarnation - a crash restarted in place under the same node ID, which
+// never goes OFFLINE - are claimed at once too, including this node's own
+// previous incarnation's (the restarted node reclaims its calls).
 func (s *Server) takeoverPass(ctx context.Context) {
 	if s.deps.HAState == nil || s.deps.Membership == nil || !s.cfg.HATakeoverEnabled {
 		return
@@ -304,46 +309,154 @@ func (s *Server) takeoverPass(ctx context.Context) {
 		if m.Kind != cluster.KindSIP || m.ID == self {
 			continue
 		}
-		handoffOnly := false
+		var scan haScan
 		switch m.State {
 		case cluster.Offline:
 			s.haReap(members, m, self)
+			scan.offline = true
 		case cluster.Draining:
 			// A draining node hands its calls over while still alive:
 			// only the dialogs it marked for handoff are claimed.
 			s.haOfflineForget(m.ID)
 			s.haNoteActive(m.ID, m.ActiveCalls)
-			handoffOnly = true
+			scan.handoff = true
 		default:
 			s.haOfflineForget(m.ID)
 			s.haNoteActive(m.ID, m.ActiveCalls)
-			continue
 		}
-		cctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
-		orphans, err := s.deps.HAState.OrphanedDialogs(cctx, m.ID)
-		cancel()
-		if err != nil {
-			s.log.Warn("orphan scan failed", "node", m.ID, "error", err)
-			continue
+		if !scan.offline && s.haWatchIncarnation(m.ID, m.Incarnation) {
+			scan.live = m.Incarnation
 		}
-		for _, o := range orphans {
-			if o.CallID == "" || o.OwnerNode != m.ID || (handoffOnly && !o.Handoff) {
-				continue
-			}
-			cctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
-			ok, st, err := s.deps.HAState.ClaimDialog(cctx, o.CallID, self)
-			cancel()
-			if err != nil {
-				s.log.Warn("claim failed", "call_id", o.CallID, "error", err)
-				continue
-			}
-			if !ok {
-				continue // another survivor won, or the owner came back
-			}
-			s.log.Info("taking over a call", "call_id", o.CallID, "from", m.ID)
-			go s.takeOverCall(st, m.ID)
+		if scan.offline || scan.handoff || scan.live != "" {
+			s.haScanNode(ctx, m.ID, scan)
 		}
 	}
+	// This node's own previous incarnation: its calls are orphans here.
+	if s.haWatchIncarnation(self, s.cfg.Incarnation) {
+		s.haScanNode(ctx, self, haScan{live: s.cfg.Incarnation})
+	}
+}
+
+// haScan is what a scan of one node's dialogs may claim: everything of an
+// OFFLINE node, the handoff-marked dialogs of a DRAINING one, and those of
+// any incarnation but live (the node's current one, "" when unknown).
+type haScan struct {
+	offline, handoff bool
+	live             string
+}
+
+// claimable reports whether the scan may claim the dialog, and the dead
+// incarnation to claim it under ("" for a claim on a node that is OFFLINE
+// or handing off, which keeps the freshness rule).
+func (sc haScan) claimable(o livestate.DialogState) (stale string, ok bool) {
+	if sc.live != "" && o.OwnerIncarnation != "" && o.OwnerIncarnation != sc.live {
+		return o.OwnerIncarnation, true
+	}
+	return "", sc.offline || (sc.handoff && o.Handoff)
+}
+
+// haScanNode claims and takes over the dialogs of node the scan allows.
+func (s *Server) haScanNode(ctx context.Context, node string, scan haScan) {
+	cctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
+	orphans, err := s.deps.HAState.OrphanedDialogs(cctx, node)
+	cancel()
+	if err != nil {
+		s.log.Warn("orphan scan failed", "node", node, "error", err)
+		return
+	}
+	for _, o := range orphans {
+		if o.CallID == "" || o.OwnerNode != node {
+			continue
+		}
+		stale, ok := scan.claimable(o)
+		if !ok {
+			continue
+		}
+		if st, won := s.haClaim(ctx, o.CallID, stale); won {
+			s.log.Info("taking over a call", "call_id", o.CallID, "from", node, "dead_incarnation", stale)
+			go s.takeOverCall(st, node)
+		}
+	}
+}
+
+// haClaim claims one dialog for this node (stale: the dead owner
+// incarnation, or "").
+func (s *Server) haClaim(ctx context.Context, callID, stale string) (livestate.DialogState, bool) {
+	cctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
+	defer cancel()
+	ok, st, err := s.deps.HAState.ClaimDialog(cctx, callID, s.cfg.NodeID, stale)
+	if err != nil {
+		s.log.Warn("claim failed", "call_id", callID, "error", err)
+		return st, false
+	}
+	return st, ok // !ok: another survivor won, or the owner came back
+}
+
+// haIncWindow is how long after a node's incarnation is first seen (or
+// changes) its dialogs are scanned for a dead incarnation's: past it, every
+// record the dead process wrote has expired (it cannot refresh them).
+var haIncWindow = livestate.DialogTTL + 5*time.Second
+
+// haWatchIncarnation reports whether node's dialogs should be scanned for a
+// dead incarnation's: within haIncWindow of its incarnation being first
+// seen here or changing. An unknown incarnation (older node) is never
+// watched.
+func (s *Server) haWatchIncarnation(node, inc string) bool {
+	if inc == "" {
+		return false
+	}
+	now := time.Now()
+	s.haOfflineMu.Lock()
+	defer s.haOfflineMu.Unlock()
+	w, ok := s.haIncSeen[node]
+	if !ok || w.inc != inc {
+		w = haIncWatch{inc: inc, until: now.Add(haIncWindow)}
+		s.haIncSeen[node] = w
+	}
+	return now.Before(w.until)
+}
+
+type haIncWatch struct {
+	inc   string
+	until time.Time
+}
+
+// haOwnerDead reports whether a replicated dialog's owner process is gone
+// (and the dead incarnation to claim it under, "" when the owner is OFFLINE
+// or handing the call off): this node's own previous incarnation, a node
+// alive under another incarnation, a node OFFLINE or no longer listed, or a
+// DRAINING owner that marked the dialog for handoff.
+func (s *Server) haOwnerDead(ctx context.Context, st livestate.DialogState) (string, bool) {
+	if st.OwnerNode == s.cfg.NodeID {
+		if st.OwnerIncarnation != "" && st.OwnerIncarnation != s.cfg.Incarnation {
+			return st.OwnerIncarnation, true
+		}
+		return "", false
+	}
+	if s.deps.Membership == nil {
+		return "", false
+	}
+	cctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
+	members, err := s.deps.Membership.Members(cctx)
+	cancel()
+	if err != nil {
+		return "", false
+	}
+	for _, m := range members {
+		if m.ID != st.OwnerNode || m.Kind != cluster.KindSIP {
+			continue
+		}
+		switch {
+		case m.State == cluster.Offline:
+			return "", true
+		case m.Incarnation != "" && st.OwnerIncarnation != "" && m.Incarnation != st.OwnerIncarnation:
+			return st.OwnerIncarnation, true
+		case m.State == cluster.Draining && st.Handoff:
+			return "", true
+		}
+		return "", false
+	}
+	return "", true // not even a tombstone: long gone
 }
 
 // haReap counts, once and by exactly one survivor (the smallest READY node
@@ -511,25 +624,13 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	relay.SetPayloadTypes(legCallee, off.PayloadType, off.DTMFPayloadType)
 	host := s.anchorHostOr(off.Address)
 	s.log.Info("takeover claimed", "call_id", st.CallID, "from", from)
-	c := &call{
-		s: s, id: st.Correlation, callID: a.callID,
-		callerNum: orDefault(st.Caller, userOf(a.remoteID)), dialled: orDefault(st.Destination, userOf(a.localID)),
-		start: start, direction: cdr.DirectionInternal, mediaMode: "anchored",
-		canceled: make(chan struct{}), stopHB: make(chan struct{}),
-		setupDone: make(chan struct{}), aborted: make(chan struct{}),
-		anchorHost: host,
-	}
-	c.haStop = make(chan struct{})
-	w := &leg{c: c, callID: b.callID, binding: livestate.Binding{AOR: b.endpoint}}
+	c := s.haNewCall(st, from, a, b, start)
+	c.anchorHost = host
 	c.mu.Lock()
-	c.winner = w
-	c.homedCall = &homedCall{takenFrom: from, takenAt: start, legs: [2]*haLeg{a, b}}
 	c.anchored = true
 	c.anchorReason = AnchorPolicy
 	c.relay = relay
 	c.rec = &recording{}
-	c.connected = true
-	c.answerTime = start
 	c.mu.Unlock()
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
@@ -555,12 +656,12 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 		b.failed = true
 		s.log.Warn("takeover leg failed", "call_id", st.CallID, "leg", legCallee, "res", resStatus(res))
 	}
-	gap := time.Since(start)
 	if !a.failed && !b.failed {
-		if gap > haMediaGap {
-			s.log.Warn("takeover media gap exceeded", "correlation_id", c.id, "gap", gap.String())
+		restored := time.Now()
+		if took := restored.Sub(start); took > haMediaGap {
+			s.log.Warn("takeover media gap exceeded", "correlation_id", c.id, "took", took.String())
 		}
-		s.haHome(c, st, from, gap)
+		s.haHome(c, st, from, restored)
 		return
 	}
 	// One-sided close (spec edge cases): the endpoint that answered gets a
@@ -569,14 +670,16 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	s.haOneSidedClose(c, a, b, from)
 }
 
-// haHome finishes a successful takeover: bind the dialogs, start the live
+// haHome finishes a successful takeover (both endpoints re-homed at
+// restored): bind the dialogs, start the live
 // and replication heartbeats, release the claim, restart recording or the
 // announcement if the call was mid-way through one.
-func (s *Server) haHome(c *call, st livestate.DialogState, from string, gap time.Duration) {
-	s.log.Info("takeover re-homed", "call_id", st.CallID, "from", from, "gap", gap.String())
+func (s *Server) haHome(c *call, st livestate.DialogState, from string, restored time.Time) {
 	hom := c.homed()
-	c.addTrace(fmt.Sprintf("ha: taken over from %s in %s (media gap %s)", from,
-		gap.Round(time.Millisecond), gap.Round(time.Millisecond)))
+	took := restored.Sub(hom.takenAt)
+	gap, since := haGap(st, hom.takenAt, restored)
+	s.log.Info("takeover re-homed", "call_id", st.CallID, "from", from, "took", took.String(), "gap", gap.String())
+	c.addHATrace(from, took, gap, since)
 	s.m.DialogTakeovers.Inc()
 	s.bind(hom.legs[0].callID, dialogRef{c: c})
 	s.bind(hom.legs[1].callID, dialogRef{c: c, leg: c.winner})
@@ -779,14 +882,8 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		s.haAbandon(st, from, "incomplete replicated state")
 		return
 	}
-	c := &call{
-		s: s, id: st.Correlation, callID: a.callID,
-		callerNum: orDefault(st.Caller, userOf(a.remoteID)), dialled: orDefault(st.Destination, userOf(a.localID)),
-		start: start, direction: cdr.DirectionInternal, mediaMode: "anchored",
-		canceled: make(chan struct{}), stopHB: make(chan struct{}),
-		setupDone: make(chan struct{}), aborted: make(chan struct{}),
-		haStop: make(chan struct{}), haSolo: true,
-	}
+	c := s.haNewCall(st, from, a, nil, start)
+	c.haSolo = true
 	var (
 		body []byte
 		sess media.Session
@@ -842,9 +939,6 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 			_ = sess.Close()
 		}
 		c.addTrace(fmt.Sprintf("Takeover from %s failed: the caller did not answer the re-INVITE", from))
-		c.mu.Lock()
-		c.connected, c.answerTime = true, start
-		c.mu.Unlock()
 		c.end(sip.StatusServiceUnavailable, cdr.SideSystem, "takeover failed: the caller did not answer the re-INVITE", ResultFailed)
 		s.m.ZombieCalls.Inc()
 		return
@@ -855,15 +949,14 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 	a.mu.Lock()
 	a.sdp = string(body)
 	a.mu.Unlock()
-	gap := time.Since(start)
+	now := time.Now()
+	took := now.Sub(start)
+	gap, since := haGap(st, start, now)
 	c.mu.Lock()
-	c.homedCall = &homedCall{takenFrom: from, takenAt: start, legs: [2]*haLeg{a, nil}}
-	c.connected, c.answerTime = true, start
 	c.haPhase, c.haDetail = st.State, st.StateDetail
 	c.mu.Unlock()
-	s.log.Info("takeover re-homed", "call_id", st.CallID, "from", from, "gap", gap.String(), "app", st.State)
-	c.addTrace(fmt.Sprintf("ha: taken over from %s in %s (media gap %s)", from,
-		gap.Round(time.Millisecond), gap.Round(time.Millisecond)))
+	s.log.Info("takeover re-homed", "call_id", st.CallID, "from", from, "took", took.String(), "gap", gap.String(), "app", st.State)
+	c.addHATrace(from, took, gap, since)
 	s.m.DialogTakeovers.Inc()
 	s.bind(a.callID, dialogRef{c: c})
 	s.m.ActiveCalls.Inc()
@@ -895,6 +988,69 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		}
 		c.announcementEnd()
 	}()
+}
+
+// haNewCall builds the call a taker carries from a claimed dialog's
+// replicated state: one logical call continuing, so its CDR starts when the
+// call started on its first node, rang and was answered when it was there,
+// keeps its routing and the trace so far, and its live record (same
+// correlation id) answers when it really did. b is nil for a solo call.
+func (s *Server) haNewCall(st livestate.DialogState, from string, a, b *haLeg, takenAt time.Time) *call {
+	c := &call{
+		s: s, id: st.Correlation, callID: a.callID,
+		callerNum: orDefault(st.Caller, userOf(a.remoteID)), dialled: orDefault(st.Destination, userOf(a.localID)),
+		start: orTime(st.StartedAt, orTime(st.AnsweredAt, takenAt)), ringTime: st.RingAt,
+		direction: orDefault(st.Direction, cdr.DirectionInternal), mediaMode: "anchored",
+		route: st.Route, trunkName: st.Trunk, rewritten: st.Rewritten,
+		canceled: make(chan struct{}), stopHB: make(chan struct{}),
+		setupDone: make(chan struct{}), aborted: make(chan struct{}),
+		haStop: make(chan struct{}),
+	}
+	for _, text := range st.Trace {
+		c.trace.Add(text)
+	}
+	if st.OwnerNode == s.cfg.NodeID {
+		c.trace.Add(fmt.Sprintf("ha: %s restarted in place: its new process reclaims the call", from))
+	}
+	c.connected = true
+	c.answerTime = orTime(st.AnsweredAt, takenAt)
+	c.homedCall = &homedCall{takenFrom: from, takenAt: takenAt, legs: [2]*haLeg{a, b}}
+	if b != nil {
+		c.winner = &leg{c: c, callID: b.callID, binding: livestate.Binding{AOR: b.endpoint}}
+	}
+	return c
+}
+
+// haGap is a takeover's media gap, measured honestly: from the owner's
+// last sign of life - its last replication write, which a crashed owner
+// made at most one heartbeat (5s) before it died - to both endpoints
+// re-homed (restored). It is an upper bound of the audio the call lost,
+// at most a heartbeat over it, and includes the time it took to notice
+// the owner was gone (membership's OFFLINE, or the restarted process).
+// A handoff has no gap before its claim: the drainer relays until the
+// endpoints move, so the gap runs from the claim (claimed). since names
+// where the gap was measured from.
+func haGap(st livestate.DialogState, claimed, restored time.Time) (gap time.Duration, since string) {
+	if st.Handoff || st.UpdatedAt.IsZero() || st.UpdatedAt.After(claimed) {
+		return restored.Sub(claimed), "the claim"
+	}
+	return restored.Sub(st.UpdatedAt), "the owner's last heartbeat at " + st.UpdatedAt.UTC().Format("15:04:05.000")
+}
+
+// addHATrace records a takeover on the call's trace: who it was taken
+// from, how long the takeover took from the claim, and the media gap.
+func (c *call) addHATrace(from string, took, gap time.Duration, since string) {
+	c.addTrace(fmt.Sprintf("ha: taken over from %s in %s (media gap %s)", from,
+		took.Round(time.Millisecond), gap.Round(time.Millisecond)))
+	c.addTrace("ha: the media gap runs from " + since + " to both endpoints re-homed")
+}
+
+// orTime is t, or def when t is zero.
+func orTime(t, def time.Time) time.Time {
+	if t.IsZero() {
+		return def
+	}
+	return t
 }
 
 // voicemailDetail encodes the voicemail application's restart data into a

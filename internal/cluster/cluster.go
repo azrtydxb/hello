@@ -8,9 +8,12 @@ package cluster
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,6 +54,23 @@ type Member struct {
 	ConfigRevision int64     `json:"configRevision"`
 	StartedAt      time.Time `json:"startedAt"`
 	Heartbeat      time.Time `json:"heartbeat"`
+	// Incarnation identifies one process of the node: a fresh random id
+	// per start, so a node restarted in place under the same ID (a crash
+	// and a container restart inside the OFFLINE window) is told apart
+	// from the process that owned its calls before. Empty from older
+	// nodes.
+	Incarnation string `json:"incarnation,omitempty"`
+}
+
+// NewIncarnation returns a fresh random process incarnation id.
+func NewIncarnation() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand never fails on supported platforms; fall back to
+		// the clock, which still differs between two starts.
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // Timings of the membership protocol.

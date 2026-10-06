@@ -16,15 +16,21 @@ Every row of the failure table is proven by an automated test in
 | 4     | An established call survives loss of the node controlling it               | Guaranteed |
 
 Level 4 (Phase 7, in-call HA): **a live call survives the death of its SIP
-node with ≤3 s audio gap, when the cluster retains Valkey and at least one
-Kamailio.** The call is taken over by a surviving node from its replicated
-dialog state, both endpoints are re-INVITEd to the taker's media relay, and
-the call can be held, recorded and hung up as before (a transfer requested
+node, when the cluster retains Valkey and at least one Kamailio; once the
+death is noticed, the call is re-homed with ≤3 s of further audio gap.** A
+node that crashes is noticed when membership marks it OFFLINE (≤15 s), or,
+when it is restarted in place under the same node ID before that, as soon
+as its new process is up (a few seconds) — see
+[Restart in place](#restart-in-place). The call is taken over by a
+surviving node (or the restarted node itself) from its replicated dialog
+state, both endpoints are re-INVITEd to the taker's media relay, and the
+call can be held, recorded and hung up as before (a transfer requested
 after the takeover is refused; see below). The CDR trace and the live view
 (`GET /api/v1/calls` field `ha`, a "Taken over" badge on the Active Calls
-page) mark such a call `taken-over`; a call no survivor could save (see the
-two limitations below) is counted in `hello_zombie_calls_total` and never
-silently dropped.
+page) mark such a call `taken-over`, and the trace records the real media
+gap (see [What the CDR says](#what-the-cdr-says)); a call no survivor could
+save (see the two limitations below) is counted in
+`hello_zombie_calls_total` and never silently dropped.
 
 ## Architecture
 
@@ -85,22 +91,22 @@ Every node publishes its state in Valkey every 5 seconds. The Cluster page and
 
 This table is normative: it is what Hello does. The Test column names the test that checks each row (`test/integration/failure_test.go` unless noted); rows marked "documented, not automated" describe behaviour no test proves yet.
 
-| Failure                                      | Detected by                                               | Node reports                                                                                                                                   | Still works                                                                                                                                                                                            | Recovery                                                                                                                    | Test                                                                                         |
-| -------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| **SIP node dies**                            | Kamailio OPTIONS probe (≤15 s); membership expires (15 s) | Other nodes: the dead node goes OFFLINE (`hello_node_state`)                                                                                   | New registrations and calls through the survivor. Phones registered through the dead node stay reachable: their binding is in Valkey and their Path points through Kamailio                            | Restart the node; it joins and Kamailio adds it back after a 200 probe                                                      | `TestKillSIPNodeDuringRegister`, `TestKillSIPNodeDuringRinging`, `TestKillSIPNodeDuringCall` |
-| **Call in progress on the dying node**       | Membership expires (15 s)                                 | `hello_dialog_takeovers_total` on the taker; the call re-homes with `ha: taken-over` in its CDR trace                                          | The call continues: both endpoints re-INVITEd to the taker's relay within 3 s of the claim, and hangup, hold and recording work there                                                                  | Automatic; a call that cannot be saved is counted in `hello_zombie_calls_total`                                             | `TestKillSIPNodeDuringCall` (full takeover), `TestTakeoverScenarioMatrix`                    |
-| **SIP node drained (maintenance)**           | Operator action or SIGTERM                                | DRAINING (`hello_node_state`); calls left to hand off (`hello_drain_active_calls`)                                                             | Its established calls, handed to a READY node (in-call HA handoff), and its trunk registrations, which move to another node; new INVITEs to it get 503 and Kamailio stops sending it work within 15 s  | The node exits once its calls are handed off or ended, or at `HELLO_DRAIN_TIMEOUT`                                          | `TestDrainKeepsCallsAndExits`, `TestRollingUpgrade`                                          |
-| **Valkey primary dies**                      | Sentinels (5 s down-after) promote the replica            | UNHEALTHY with 503 + `Retry-After` until Hello reconnects; READY within 15 s of promotion (`hello_node_state`, `hello_valkey_failovers_total`) | Established calls; after promotion, everything                                                                                                                                                         | Automatic; the old primary rejoins as a replica when restarted                                                              | `TestValkeyFailover`                                                                         |
-| **Writes lost in a Valkey failover**         | —                                                         | —                                                                                                                                              | Replication is asynchronous, so registrations written in the last moment before the failure can be lost                                                                                                | Phones restore them on their next refresh                                                                                   | Documented, not automated                                                                    |
-| **All of Valkey unavailable**                | Every node's readiness check                              | UNHEALTHY (`hello_node_state`); new REGISTER/INVITE get 503 + `Retry-After`                                                                    | Established calls                                                                                                                                                                                      | Automatic when Valkey returns                                                                                               | `TestPartitionFromValkey` (one node), Phase 1 `TestStateUnavailable`                         |
-| **SIP node cut off from Valkey (partition)** | Its readiness check                                       | UNHEALTHY within 15 s (`hello_node_state`); Kamailio stops sending it new work                                                                 | Everything on the other node. Its own established calls are documented, not automated                                                                                                                  | READY within 15 s of reconnecting                                                                                           | `TestPartitionFromValkey` (readiness and Kamailio removal)                                   |
-| **PostgreSQL unavailable or restarting**     | hello-control readiness; hello-sip snapshot reload errors | hello-control UNHEALTHY; hello-sip stays READY and counts reload failures (`hello_snapshot_reload_failures_total`)                             | Registration and calling from the last snapshot; CDRs buffer in memory (up to 1000 per node, then counted drops: `hello_cdr_dropped_total`)                                                            | Snapshots resume and buffered CDRs flush when PostgreSQL returns                                                            | `TestPostgresOutage`                                                                         |
-| **hello-control (all replicas) down**        | Load balancer / your monitoring                           | —                                                                                                                                              | All telephony                                                                                                                                                                                          | Restart; management resumes                                                                                                 | `TestControlPlaneRestart`                                                                    |
-| **Stale configuration**                      | `hello_config_revision_lag` and the Cluster page          | Revision lag per node                                                                                                                          | Calls route by the node's last valid configuration                                                                                                                                                     | The node reloads on the next NOTIFY or 30 s poll                                                                            | Phase 1 `TestSnapshotReloadOnNotify`                                                         |
-| **Invalid configuration revision**           | Compile failure on the node                               | `hello_routing_config_invalid` = 1                                                                                                             | Routing from the last valid revision; new extensions are still found                                                                                                                                   | Fix the configuration through the API                                                                                       | Phase 2 `TestKeepLastGoodRouter`, `TestFrozenMarkerSurvivesDNSRebuild`                       |
-| **Duplicate registration updates**           | —                                                         | —                                                                                                                                              | The same contact through two nodes overwrites one binding, never duplicates                                                                                                                            | —                                                                                                                           | Phase 1 `TestRegisterBindings`                                                               |
-| **Delayed or out-of-order NOTIFY**           | —                                                         | —                                                                                                                                              | Each reload reads the database's current revision, so a late NOTIFY never applies an older one; a reload that finds the revision already loaded is skipped. A missed NOTIFY is caught by the 30 s poll | Automatic                                                                                                                   | Phase 1 `TestWatcherNotifyPollAndRetention`                                                  |
-| **Kamailio dies**                            | Your monitoring                                           | —                                                                                                                                              | Nothing new reaches the cluster through it                                                                                                                                                             | In production, a second Kamailio takes over the VIP or SRV target (below). In the lab Kamailio is a single point of failure | Manual: [Kamailio loss](#kamailio-loss)                                                      |
+| Failure                                      | Detected by                                               | Node reports                                                                                                                                   | Still works                                                                                                                                                                                            | Recovery                                                                                                                    | Test                                                                                                             |
+| -------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **SIP node dies**                            | Kamailio OPTIONS probe (≤15 s); membership expires (15 s) | Other nodes: the dead node goes OFFLINE (`hello_node_state`)                                                                                   | New registrations and calls through the survivor. Phones registered through the dead node stay reachable: their binding is in Valkey and their Path points through Kamailio                            | Restart the node; it joins and Kamailio adds it back after a 200 probe                                                      | `TestKillSIPNodeDuringRegister`, `TestKillSIPNodeDuringRinging`, `TestKillSIPNodeDuringCall`                     |
+| **Call in progress on the dying node**       | Membership expires (15 s), or the node's restart in place | `hello_dialog_takeovers_total` on the taker; the call re-homes with `ha: taken-over` in its CDR trace                                          | The call continues: both endpoints re-INVITEd to the taker's relay within 3 s of the claim, and hangup, hold and recording work there                                                                  | Automatic; a call that cannot be saved is counted in `hello_zombie_calls_total`                                             | `TestKillSIPNodeDuringCall` (full takeover), `TestRestartSIPNodeInPlaceDuringCall`, `TestTakeoverScenarioMatrix` |
+| **SIP node drained (maintenance)**           | Operator action or SIGTERM                                | DRAINING (`hello_node_state`); calls left to hand off (`hello_drain_active_calls`)                                                             | Its established calls, handed to a READY node (in-call HA handoff), and its trunk registrations, which move to another node; new INVITEs to it get 503 and Kamailio stops sending it work within 15 s  | The node exits once its calls are handed off or ended, or at `HELLO_DRAIN_TIMEOUT`                                          | `TestDrainKeepsCallsAndExits`, `TestRollingUpgrade`                                                              |
+| **Valkey primary dies**                      | Sentinels (5 s down-after) promote the replica            | UNHEALTHY with 503 + `Retry-After` until Hello reconnects; READY within 15 s of promotion (`hello_node_state`, `hello_valkey_failovers_total`) | Established calls; after promotion, everything                                                                                                                                                         | Automatic; the old primary rejoins as a replica when restarted                                                              | `TestValkeyFailover`                                                                                             |
+| **Writes lost in a Valkey failover**         | —                                                         | —                                                                                                                                              | Replication is asynchronous, so registrations written in the last moment before the failure can be lost                                                                                                | Phones restore them on their next refresh                                                                                   | Documented, not automated                                                                                        |
+| **All of Valkey unavailable**                | Every node's readiness check                              | UNHEALTHY (`hello_node_state`); new REGISTER/INVITE get 503 + `Retry-After`                                                                    | Established calls                                                                                                                                                                                      | Automatic when Valkey returns                                                                                               | `TestPartitionFromValkey` (one node), Phase 1 `TestStateUnavailable`                                             |
+| **SIP node cut off from Valkey (partition)** | Its readiness check                                       | UNHEALTHY within 15 s (`hello_node_state`); Kamailio stops sending it new work                                                                 | Everything on the other node. Its own established calls are documented, not automated                                                                                                                  | READY within 15 s of reconnecting                                                                                           | `TestPartitionFromValkey` (readiness and Kamailio removal)                                                       |
+| **PostgreSQL unavailable or restarting**     | hello-control readiness; hello-sip snapshot reload errors | hello-control UNHEALTHY; hello-sip stays READY and counts reload failures (`hello_snapshot_reload_failures_total`)                             | Registration and calling from the last snapshot; CDRs buffer in memory (up to 1000 per node, then counted drops: `hello_cdr_dropped_total`)                                                            | Snapshots resume and buffered CDRs flush when PostgreSQL returns                                                            | `TestPostgresOutage`                                                                                             |
+| **hello-control (all replicas) down**        | Load balancer / your monitoring                           | —                                                                                                                                              | All telephony                                                                                                                                                                                          | Restart; management resumes                                                                                                 | `TestControlPlaneRestart`                                                                                        |
+| **Stale configuration**                      | `hello_config_revision_lag` and the Cluster page          | Revision lag per node                                                                                                                          | Calls route by the node's last valid configuration                                                                                                                                                     | The node reloads on the next NOTIFY or 30 s poll                                                                            | Phase 1 `TestSnapshotReloadOnNotify`                                                                             |
+| **Invalid configuration revision**           | Compile failure on the node                               | `hello_routing_config_invalid` = 1                                                                                                             | Routing from the last valid revision; new extensions are still found                                                                                                                                   | Fix the configuration through the API                                                                                       | Phase 2 `TestKeepLastGoodRouter`, `TestFrozenMarkerSurvivesDNSRebuild`                                           |
+| **Duplicate registration updates**           | —                                                         | —                                                                                                                                              | The same contact through two nodes overwrites one binding, never duplicates                                                                                                                            | —                                                                                                                           | Phase 1 `TestRegisterBindings`                                                                                   |
+| **Delayed or out-of-order NOTIFY**           | —                                                         | —                                                                                                                                              | Each reload reads the database's current revision, so a late NOTIFY never applies an older one; a reload that finds the revision already loaded is skipped. A missed NOTIFY is caught by the 30 s poll | Automatic                                                                                                                   | Phase 1 `TestWatcherNotifyPollAndRetention`                                                                      |
+| **Kamailio dies**                            | Your monitoring                                           | —                                                                                                                                              | Nothing new reaches the cluster through it                                                                                                                                                             | In production, a second Kamailio takes over the VIP or SRV target (below). In the lab Kamailio is a single point of failure | Manual: [Kamailio loss](#kamailio-loss)                                                                          |
 
 ## Drain a node for maintenance
 
@@ -162,9 +168,11 @@ relay ports, and re-INVITEs both endpoints. Kamailio's failure route sends
 in-dialog requests that reach a dead node (408/503, or a 1.5 s timeout) to
 another hello-sip node, which answers from the replicated state. The claim
 is released once both legs are re-homed and the record names the taker (so
-no survivor takes the call twice); the restarted owner cannot retake
-its old calls (its heartbeat finds the taker's record and yields). A slow
-owner that reappears mid-takeover yields the same way. Either re-INVITE
+no survivor takes the call twice); a claim is a compare-and-set on the
+record as the claimant read it, so a record rewritten in between (the
+owner alive after all, or a taker that already finished) is never claimed.
+A slow owner that reappears mid-takeover finds the taker's claim or record
+on its next heartbeat and yields. Either re-INVITE
 failing (an endpoint that died too, or rejects with 488/603) closes the call
 one-sidedly — the surviving leg gets a normal BYE and CDR — and the zombie
 is counted.
@@ -182,6 +190,68 @@ live calls at death less the claims) in `hello_zombie_calls_total`: a call
 that was taken over is never counted, a takeover that failed is counted
 once by its taker.
 
+### Restart in place
+
+Kubernetes restarts a crashed container in place, under the same pod name,
+within seconds — inside membership's 15 s OFFLINE window, so the node never
+goes OFFLINE and the takeover above would never start, while its new
+process knows nothing of the old one's calls. Every hello-sip process
+therefore has a random **incarnation** id: membership publishes it
+(`incarnation` on `GET /api/v1/cluster` members) and every replicated
+dialog record carries its owner's (`ownerIncarnation`). A record whose
+owner node is alive under another incarnation belongs to a dead process:
+
+- Every READY node — the restarted one included, which is the fastest —
+  scans the dialogs of a node for 35 s (the dialog TTL plus margin) after
+  first seeing its incarnation or seeing it change, and claims those of a
+  dead incarnation at once, without the freshness wait an OFFLINE takeover
+  has. The restarted node reclaims its own calls this way.
+- An in-dialog request (BYE, re-INVITE, UPDATE, INFO, REFER) that reaches a
+  node holding no such dialog is checked against the replicated records of
+  both legs before it could be answered 481. When the record's owner
+  process is gone (a dead incarnation, OFFLINE, or a handoff), the node
+  claims the call on the spot: a BYE is answered 200, the other endpoint
+  gets its BYE and the call its CDR, with no re-INVITE; a re-INVITE or
+  UPDATE starts the full takeover and is answered 491 (the endpoint retries
+  after the takeover's re-INVITE); anything else starts it and gets 503.
+  While the owner is alive or another node's takeover is in flight the
+  request gets 503 with `Retry-After`, never 481. The request must carry
+  the dialog's tags from the endpoint's source or a trusted proxy.
+
+Claims on a dead incarnation are counted apart from the node's OFFLINE
+takeovers, so they never offset the zombie count of a later death of the
+same node. Proven by `TestTakeoverRestartInPlace`,
+`TestTakeoverOnDemandBye` and `TestTakeoverIncarnationWatch`
+(`internal/sip`), `TestDialogClaimStaleIncarnation` (`internal/livestate`,
+real Valkey) and the lab's `TestRestartSIPNodeInPlaceDuringCall`, which
+kills a hello-sip container and starts it again at once under a live call.
+
+### What the CDR says
+
+A taken-over call is one logical call with one CDR, written by the node
+that ends it. The replicated record carries what that CDR needs from the
+call's first node: its start, ring and answer times, direction, route,
+trunk and routing trace. So the CDR starts when the call started (not at
+the takeover), its billable time runs from the original answer, and its
+trace holds the whole call. A node that yields a call (after a handoff, or
+a slow owner that finds its call taken) writes no CDR and leaves the live
+call record alone: both are the taker's, under the same correlation id.
+`terminationSide` is the side that sent the BYE.
+
+The trace's takeover step reads `ha: taken over from <node> in <t>
+(media gap <g>)`, followed by where the gap was measured from:
+
+- `<t>` is the takeover itself, from the claim to both endpoints answering
+  the re-INVITEs (the ≤3 s target).
+- `<g>` is the media gap, from the dead owner's last sign of life — its
+  last replication write, at most one heartbeat (5 s) before it died — to
+  both endpoints re-homed. It includes the time until the death was
+  noticed, so it is an upper bound of the audio the call lost, at most 5 s
+  over it (and subject to clock skew between the two nodes). After a
+  handoff the draining node relays until the claim, so the gap runs from
+  the claim and equals `<t>`. A call hung up before any re-INVITE (the BYE
+  case above) has no takeover step: it never had media restored.
+
 ### Handoff on drain
 
 A draining node (an operator drain or SIGTERM) does not keep its calls to
@@ -190,11 +260,13 @@ survivor claims such a dialog of a DRAINING node at once — without waiting
 for the node to go OFFLINE — and takes it over exactly as after a crash
 (re-INVITEs, ≤3 s gap, CDR and live view `taken-over`). The draining node
 yields its copy as soon as the survivor holds the call: it closes its media
-and CDR without a BYE to the endpoints, and answers any in-dialog request
+without a BYE to the endpoints and without a CDR or touching the live call
+record (both are the survivor's), stops refreshing the live record once the
+call is claimed, and answers any in-dialog request
 that still reaches it for the call with 503, which Kamailio's in-dialog
 failure route retries on a survivor. With no READY survivor nothing is
 claimed and the drain timeout applies as before; a cancelled drain takes
-back the calls nobody claimed yet. Proven by `TestHandoffOnDrain` and
+back the calls nobody claimed yet. Proven by `TestHandoffOnDrain`, `TestHandoffKeepsLiveCallAndCDR` and
 `TestHandoffCancelledDrain` (`internal/sip`) and the lab's
 `TestDrainKeepsCallsAndExits` and `TestRollingUpgrade`.
 

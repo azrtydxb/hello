@@ -28,7 +28,12 @@ import (
 
 // Config is the SIP node's behaviour; see config.SIP for the meaning of each.
 type Config struct {
-	NodeID         string
+	NodeID string
+	// Incarnation is this process's id (cluster.NewIncarnation; generated
+	// when empty): the replicated dialogs it owns carry it, so a node
+	// restarted in place under the same NodeID recognises the calls of its
+	// previous process as orphans and takes them over at once.
+	Incarnation    string
 	Domain         string // digest realm and AOR host
 	AdvertisedAddr string // host:port written into Via and Contact
 	NonceSecret    []byte
@@ -180,6 +185,10 @@ type Server struct {
 	// haLastActive is each live SIP node's last published call count
 	// (guarded by haOfflineMu).
 	haLastActive map[string]int
+	// haIncSeen is each SIP node's last seen incarnation and until when
+	// its dialogs are scanned for a dead incarnation's (guarded by
+	// haOfflineMu).
+	haIncSeen map[string]haIncWatch
 	// haSent is the highest raw (outside sipgo's dialog sessions) CSeq
 	// this node sent per dialog Call-ID, so replicated CSeqs continue past
 	// it; entries go with the dialog's binding.
@@ -265,6 +274,9 @@ func New(cfg Config, deps Deps) (*Server, error) {
 	if deps.Log == nil {
 		deps.Log = slog.New(slog.DiscardHandler)
 	}
+	if cfg.Incarnation == "" {
+		cfg.Incarnation = cluster.NewIncarnation()
+	}
 	setDefault(&cfg.CallHeartbeat, 10*time.Second)
 	setDefault(&cfg.CallTTL, 30*time.Second)
 	setDefault(&cfg.RetryAfter, 5*time.Second)
@@ -302,7 +314,7 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		rrPos:     map[int64]*atomic.Uint64{},
 		lastEnd:   map[string]time.Time{},
 		digits:    map[*call]*digitBuffer{},
-		haOffline: map[string]*haOfflineNode{}, haLastActive: map[string]int{},
+		haOffline: map[string]*haOfflineNode{}, haLastActive: map[string]int{}, haIncSeen: map[string]haIncWatch{},
 	}
 	setDefault(&cfg.HADialogHeartbeat, 5*time.Second)
 	setDefault(&cfg.HATakeoverPoll, time.Second)
@@ -379,7 +391,15 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.peerLoop(rctx) })
 	s.bg.Go(func() { s.subExpireLoop(rctx) })
 	if s.deps.HAState != nil && s.deps.Membership != nil && s.cfg.HATakeoverEnabled {
-		s.bg.Go(func() { s.takeoverLoop(rctx) })
+		// A takeover re-INVITEs from the listening socket, which sipgo
+		// only knows once ServeUDP registered it: a restarted node's first
+		// pass reclaims its own calls at once, and must not send before.
+		laddr := conn.LocalAddr().String()
+		s.bg.Go(func() {
+			if waitListening(rctx, ua, laddr) {
+				s.takeoverLoop(rctx)
+			}
+		})
 	}
 
 	// Trunk holders stop before the socket closes, so they can unregister
@@ -482,7 +502,7 @@ func (s *Server) wrap(h sipgo.RequestHandler) sipgo.RequestHandler {
 				return
 			}
 		}
-		if s.handedOff(req, tx) {
+		if s.handedOff(req, tx) || s.haOnDemand(req, tx) {
 			return
 		}
 		h(req, tx)
@@ -749,6 +769,10 @@ func (s *Server) recountRegistrations(ctx context.Context) {
 	s.m.Registrations.Set(float64(n))
 	s.registrations.Store(int64(n))
 }
+
+// Incarnation is this process's incarnation id (Config.Incarnation), which
+// the node's membership record must carry.
+func (s *Server) Incarnation() string { return s.cfg.Incarnation }
 
 // Serving reports whether the SIP listener is running; it turns false when
 // Serve returns, including when the socket fails.
