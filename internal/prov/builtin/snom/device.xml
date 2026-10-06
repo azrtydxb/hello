@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kuvryn Hello: {{xml .Phone.Model}} {{.Phone.MAC}}. Hello CA certificate: {{xml .Prov.CAURL}} -->
+<settings>
+  <phone-settings e="2">
+    <user_active idx="1" perm="R">on</user_active>
+    <user_name idx="1" perm="R">{{xml .Line.Username}}</user_name>
+    <user_pname idx="1" perm="R">{{xml .Line.AuthName}}</user_pname>
+    <user_pass idx="1" perm="R">{{xml .Line.Password}}</user_pass>
+    <user_host idx="1" perm="R">{{xml .Server.Host}}:{{.Server.Port}}</user_host>
+    <user_realname idx="1" perm="R">{{xml .Line.DisplayName}}</user_realname>
+    <user_idle_text idx="1" perm="R">{{xml .Line.Label}}</user_idle_text>
+    <user_expiry idx="1" perm="R">{{.Server.Expiry}}</user_expiry>
+{{- with .Line.VoicemailCode}}
+    <user_mailbox idx="1" perm="R">{{xml .}}</user_mailbox>
+{{- end}}
+    <admin_mode_password perm="R">{{xml .Phone.AdminPassword}}</admin_mode_password>
+    <setting_server perm="R">{{xml .Prov.URL}}{mac}</setting_server>
+    <prov_polling_enabled perm="R">on</prov_polling_enabled>
+    <prov_polling_mode perm="R">rel</prov_polling_mode>
+    <prov_polling_period perm="R">{{.Prov.ResyncSeconds}}</prov_polling_period>
+    <ntp_server perm="R">{{xml .Time.NTP}}</ntp_server>
+{{- with .Firmware}}
+    <update_policy perm="R">auto_update</update_policy>
+    <firmware perm="R">{{xml .URL}}</firmware>
+{{- end}}
+  </phone-settings>
+  <functionKeys e="2">
+{{- range $i, $k := .BLF}}
+    <fkey idx="{{$i}}" context="active" label="{{xml $k.Label}}" perm="R">blf {{xml $k.URI}}</fkey>
+{{- end}}
+  </functionKeys>
+</settings>

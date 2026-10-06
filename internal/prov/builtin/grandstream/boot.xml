@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Kuvryn Hello bootstrap: no account here. Hello CA certificate: {{xml .Prov.CAURL}} -->
+<gs_provision version="1">
+{{- with .Phone.MAC}}
+  <mac>{{.}}</mac>
+{{- end}}
+  <config version="1">
+    <P212>2</P212>
+    <P237>{{xml .Prov.URL}}</P237>
+    <P194>1</P194>
+    <P193>{{div .Prov.ResyncSeconds 60}}</P193>
+  </config>
+</gs_provision>
