@@ -596,6 +596,73 @@ func TestKamailioInDialogReroute(t *testing.T) {
 	}
 }
 
+// TestKamailioInDialogRerouteDeadName fails if an in-dialog request aimed
+// at a dead Hello node by a name that no longer resolves is refused (403
+// "non-Hello target") instead of rerouted to the taker (spec S-3). On kw a
+// deleted pod's DNS record disappears; here the node's container is stopped
+// (Docker's DNS drops its name) and Kamailio's DNS cache is flushed, so the
+// callee's BYE - whose R-URI is the dead node's Contact, hello-sip-N - can
+// only be recognised as a Hello node by its configured name.
+func TestKamailioInDialogRerouteDeadName(t *testing.T) {
+	lc := newLabClient(t)
+	caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
+	a, b := kamPhone(t, caller), kamPhone(t, callee)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	got := answerNext(ctx, b)
+	out, err := a.Dial(ctx, callee.Extension, sdpOffer)
+	if err != nil || out.Status != 200 {
+		t.Fatalf("dial = %+v, %v", out, err)
+	}
+	in := <-got
+	node := callNode(t, lc, callee.Extension)
+	other := otherNode(node)
+	t.Cleanup(func() { restore(t, lc, node) })
+	killed := kill(t, node)
+	eventuallyBy(t, killed.Add(25*time.Second), "call taken over by "+other, func(context.Context) error {
+		for _, c := range lc.calls() {
+			if c.To == callee.Extension && c.Node == other {
+				return nil
+			}
+		}
+		return errors.New("not re-homed")
+	})
+	// The dead node's name is gone: Docker's DNS has no record for a
+	// stopped container, and Kamailio forgets what it cached.
+	eventually(t, 10*time.Second, node+" no longer resolves in Kamailio", func() error {
+		if out, err := compose("exec", "-T", "kamailio", "kamcmd", "dns.delete_all").CombinedOutput(); err != nil {
+			return fmt.Errorf("kamcmd dns.delete_all: %v: %s", err, out)
+		}
+		out, _ := compose("exec", "-T", "kamailio", "kamcmd", "dns.lookup", "A", node).CombinedOutput()
+		if strings.Contains(string(out), nodeIP[node]) {
+			return fmt.Errorf("%s still resolves: %s", node, strings.TrimSpace(string(out)))
+		}
+		return nil
+	})
+	since := time.Now()
+	if err := in.Hangup(ctx); err != nil {
+		t.Fatalf("the callee's BYE to the dead node's name was not rerouted to the taker: %v", err)
+	}
+	eventually(t, 20*time.Second, "the caller's dialog ended", func() error {
+		select {
+		case <-out.Ended():
+			return nil
+		default:
+			return errors.New("still up")
+		}
+	})
+	logs, err := exec.Command("docker", "logs", "--since", since.Add(-time.Second).Format(time.RFC3339Nano), container(t, "kamailio")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("kamailio logs: %v", err)
+	}
+	if !strings.Contains(string(logs), "to dead Hello node") {
+		t.Fatalf("Kamailio did not take the dead-name reroute path:\n%s", logs)
+	}
+	if strings.Contains(string(logs), "non-Hello target") {
+		t.Fatalf("Kamailio refused an in-dialog request to a Hello node:\n%s", logs)
+	}
+}
+
 // TestTakeoverMediaGap fails if the audio gap is not bounded: once
 // membership marks the owner OFFLINE, the call must be re-homed (both
 // re-INVITEs answered, media on the taker's relay) within 6s - the jittered

@@ -246,11 +246,10 @@ data:
     # (the 403 non-Hello-target check in PHONE_IN_DIALOG). Lookups go through
     # the core DNS cache, which keeps each answer for its record's TTL (kw's
     # cluster DNS: 5s), so a moved pod's new address is seen within seconds.
-    # The cache is not capped below that: in the lab (Docker DNS) a stopped
-    # node's name must keep resolving from the cache, so a phone's in-dialog
-    # request to it passes the check and fails over (HELLO_IN_DIALOG). A failed
-    # refresh keeps the last address. The lab's list holds IP addresses, which
-    # resolve to themselves.
+    # A failed refresh keeps the last address. A name that no longer resolves
+    # at all (a dead node's) is still recognised as a Hello node by name
+    # (route HELLO_NODE_NAME) and its in-dialog requests rerouted. The lab's
+    # list holds IP addresses, which resolve to themselves.
     modparam("dispatcher", "ds_dns_mode", 5)
     modparam("dispatcher", "ds_dns_interval", 5)
     # A Hello OPTIONS answer of 503 (draining, unhealthy) or none counts as a
@@ -448,19 +447,61 @@ data:
     	} else {
     		$var(next) = $ru;
     	}
-    	if (!ds_is_from_list("1", "3", "$var(next)")) {
+    	if (is_method("INVITE|UPDATE")) {
+    		set_contact_alias(); # a re-INVITE may move the phone
+    	}
+    	if (ds_is_from_list("1", "3", "$var(next)")) {
+    		# A Hello node: its address matches a dispatcher destination. Sent
+    		# there even when probed inactive (a draining node still owns its
+    		# calls until it hands them over). In-call HA (Phase 7): if it is
+    		# dead (408/503 or a branch timeout), the request is retried
+    		# against another hello-sip node, which answers from the
+    		# replicated dialog state.
+    		t_on_failure("HELLO_IN_DIALOG");
+    		route(TO_HELLO);
+    	}
+    	# No destination address matches: a dead Hello node (its name no
+    	# longer resolves - a stopped container, a deleted pod's DNS record -
+    	# or resolves to an address no destination has), or not a Hello node
+    	# at all. Only membership by configured name tells them apart, never
+    	# the resolved address, which is gone with the node.
+    	route(HELLO_NODE_NAME);
+    	if ($var(hello_node) != 1) {
     		xlog("L_WARN", "refused in-dialog $rm from $si:$sp to a non-Hello target\n");
     		sl_send_reply("403", "Forbidden");
     		exit;
     	}
-    	if (is_method("INVITE|UPDATE")) {
-    		set_contact_alias(); # a re-INVITE may move the phone
+    	# Spec S-3: an in-dialog request aimed at a dead Hello node goes to a
+    	# surviving one, which answers from the replicated dialog state. The
+    	# R-URI (the dead node's Contact) stays; only the next hop changes.
+    	if (!ds_select_dst("1", "4")) {
+    		route(NO_NODE);
     	}
-    	# In-call HA (Phase 7): if the owning node is dead (408/503 or a branch
-    	# timeout), the request is retried against another hello-sip node, which
-    	# answers from the replicated dialog state.
-    	t_on_failure("HELLO_IN_DIALOG");
+    	xlog("L_INFO", "in-dialog $rm to dead Hello node $var(next): rerouted to $du\n");
+    	t_on_failure("HELLO_FAILOVER");
     	route(TO_HELLO);
+    }
+
+    # Sets $var(hello_node) to 1 when $var(next)'s host is one of the
+    # configured hello-sip names: a destination's duid (the node name its
+    # Contact carries, e.g. hello-sip-1) or the host of its dispatcher URI. The
+    # configured list is read from the dispatcher itself (dispatcher.list), so
+    # a node whose DNS record is gone is still recognised by name. Hostname
+    # characters only; a '.' in the host matches any character in the check,
+    # which can only widen a match to another configured name.
+    route[HELLO_NODE_NAME] {
+    	$var(hello_node) = 0;
+    	$var(host) = $(var(next){uri.host});
+    	if (!($var(host) =~ "^[A-Za-z0-9-]+([.][A-Za-z0-9-]+)*$")) {
+    		return;
+    	}
+    	if (!jsonrpc_exec('{"jsonrpc": "2.0", "method": "dispatcher.list", "id": 1}')) {
+    		return;
+    	}
+    	$var(re) = "\"(DUID\":[[:space:]]*\"|URI\":[[:space:]]*\"sip:)" + $var(host) + "[\":;]";
+    	if ($jsonrpl(body) =~ $var(re)) {
+    		$var(hello_node) = 1;
+    	}
     }
 
     # Forward to the Hello node in $du with the client's address.
@@ -745,7 +786,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: 6f4dc42b9b42e558cd0e76a1481ebb16efad1e39e2bcbace73deb70ddd5abbbe
+        hello.watteel.com/kamailio-config-sha256: 2635eaf45310eee51488e5165020d9476daf0c666829f22c2764ddbd1d33c08c
     spec:
       securityContext:
         # /run/kamailio is an emptyDir the kamailio user (102) must write its
