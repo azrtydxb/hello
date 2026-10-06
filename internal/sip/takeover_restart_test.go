@@ -409,3 +409,38 @@ func TestHandoffKeepsLiveCallAndCDR(t *testing.T) {
 		t.Fatalf("live record left after the end: %+v", liveOn(taker))
 	}
 }
+
+// TestReapCountsConnectedCallsOnly fails if the zombie reaper counts a dead
+// node's ringing calls (lab: a node killed under a ringing call counted a
+// zombie once the 10s dialog TTL brought the reap inside the test), or
+// stops counting its unreplicated connected ones.
+func TestReapCountsConnectedCallsOnly(t *testing.T) {
+	old := haReapDelay
+	t.Cleanup(func() { haReapDelay = old })
+	haReapDelay = 0
+	for _, tc := range []struct {
+		name      string
+		connected int
+		want      float64
+	}{{"ringing only", 0, 0}, {"one answered", 1, 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			ha, mem := newFakeHA(), &fakeMembership{}
+			survivor := startPBX(t, nil, withNodeID("sip-2"), withHA(ha, mem))
+			n := tc.connected
+			mem.set(
+				cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Ready, ActiveCalls: 1, ConnectedCalls: &n},
+				cluster.Member{ID: "sip-2", Kind: cluster.KindSIP, State: cluster.Ready},
+			)
+			survivor.srv.takeoverPass(t.Context())
+			mem.set(
+				cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Offline},
+				cluster.Member{ID: "sip-2", Kind: cluster.KindSIP, State: cluster.Ready},
+			)
+			survivor.srv.takeoverPass(t.Context())
+			survivor.srv.takeoverPass(t.Context())
+			if z := survivor.metric(t, "hello_zombie_calls_total", nil); z != tc.want {
+				t.Fatalf("zombies = %v, want %v", z, tc.want)
+			}
+		})
+	}
+}

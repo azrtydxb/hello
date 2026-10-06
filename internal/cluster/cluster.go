@@ -41,14 +41,19 @@ const (
 
 // Member is one node's membership record.
 type Member struct {
-	ID             string    `json:"id"`
-	Kind           Kind      `json:"kind"`
-	State          State     `json:"state"`
-	Reason         string    `json:"reason,omitempty"` // why it is not READY
-	SIPAddr        string    `json:"sipAddr,omitempty"`
-	HTTPAddr       string    `json:"httpAddr,omitempty"`
-	Transports     []string  `json:"transports,omitempty"`
-	ActiveCalls    int       `json:"activeCalls"`
+	ID          string   `json:"id"`
+	Kind        Kind     `json:"kind"`
+	State       State    `json:"state"`
+	Reason      string   `json:"reason,omitempty"` // why it is not READY
+	SIPAddr     string   `json:"sipAddr,omitempty"`
+	HTTPAddr    string   `json:"httpAddr,omitempty"`
+	Transports  []string `json:"transports,omitempty"`
+	ActiveCalls int      `json:"activeCalls"`
+	// ConnectedCalls is how many of the active calls were answered (a
+	// ringing call is not one): what the zombie reaper counts when the
+	// node dies, since a ringing call gets its final response from the
+	// edge. Nil from older nodes (ActiveCalls then stands in).
+	ConnectedCalls *int      `json:"connectedCalls,omitempty"`
 	Registrations  int       `json:"registrations"`
 	Version        string    `json:"version"`
 	ConfigRevision int64     `json:"configRevision"`
@@ -143,6 +148,7 @@ func (s *Store) Members(ctx context.Context) ([]Member, error) {
 	for _, m := range tombs {
 		if !seen[m.ID] {
 			m.State, m.Reason, m.ActiveCalls, m.Registrations = Offline, "no heartbeat", 0, 0
+			m.ConnectedCalls = nil
 			out = append(out, m)
 		}
 	}

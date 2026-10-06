@@ -793,6 +793,26 @@ func (s *Server) ActiveCalls() int {
 	return len(s.calls)
 }
 
+// ConnectedCalls is how many of the node's calls are answered and not yet
+// ended: the calls a crash of this node could leave as zombies.
+func (s *Server) ConnectedCalls() int {
+	s.mu.Lock()
+	calls := make([]*call, 0, len(s.calls))
+	for c := range s.calls {
+		calls = append(calls, c)
+	}
+	s.mu.Unlock()
+	n := 0
+	for _, c := range calls {
+		c.mu.Lock()
+		if c.connected && !c.ended {
+			n++
+		}
+		c.mu.Unlock()
+	}
+	return n
+}
+
 func (s *Server) lookup(callID string) (dialogRef, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

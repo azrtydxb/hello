@@ -16,12 +16,20 @@ Every row of the failure table is proven by an automated test in
 | 4     | An established call survives loss of the node controlling it               | Guaranteed |
 
 Level 4 (Phase 7, in-call HA): **a live call survives the death of its SIP
-node, when the cluster retains Valkey and at least one Kamailio; once the
-death is noticed, the call is re-homed with ≤3 s of further audio gap.** A
-node that crashes is noticed when membership marks it OFFLINE (≤15 s), or,
-when it is restarted in place under the same node ID before that, as soon
-as its new process is up (a few seconds) — see
-[Restart in place](#restart-in-place). The call is taken over by a
+node, when the cluster retains Valkey and at least one Kamailio.** The audio
+gap depends on how the node goes (lab measurements, `test/integration`):
+
+| How the node goes                        | Noticed by                                        | Audio gap                                                                                                    |
+| ---------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Graceful handoff (drain, SIGTERM)        | The handoff mark, at once                         | The re-INVITE round trip: milliseconds (the node relays until then)                                          |
+| Crash, restarted in place (same node ID) | The new process's incarnation                     | About 4 s (lab: re-homed 3.8 s after the kill), plus however long the restart takes                          |
+| Crash, node stays down                   | Membership OFFLINE (≤4 s: 1 s heartbeat, 4 s TTL) | About 4–4.5 s (lab: OFFLINE 3.3 s and re-homed 3.5–4.1 s after the kill; media gap 4.0–4.5 s); asserted ≤6 s |
+
+A crash is noticed when membership marks the node OFFLINE, or, when it is
+restarted in place under the same node ID before that, as soon as its new
+process is up — see [Restart in place](#restart-in-place). The takeover
+itself, from the claim to both endpoints re-homed, takes milliseconds in
+the lab (the ≤3 s target bounds it). The call is taken over by a
 surviving node (or the restarted node itself) from its replicated dialog
 state, both endpoints are re-INVITEd to the taker's media relay, and the
 call can be held, recorded and hung up as before (a transfer requested
@@ -76,7 +84,8 @@ save (see the two limitations below) is counted in
 
 ## Node states
 
-Every node publishes its state in Valkey every 5 seconds. The Cluster page and
+Every node publishes its state in Valkey every second (`HELLO_MEMBER_HEARTBEAT`,
+at most a third of the 4 s record TTL). The Cluster page and
 `GET /api/v1/cluster` show them.
 
 | State     | Meaning                                                                | Readiness | Takes new calls |
@@ -85,7 +94,7 @@ Every node publishes its state in Valkey every 5 seconds. The Cluster page and
 | READY     | Serving                                                                | 200       | Yes             |
 | DRAINING  | Finishing its calls before stopping                                    | 503       | No              |
 | UNHEALTHY | A required dependency (Valkey; PostgreSQL for hello-control) fails     | 503       | No              |
-| OFFLINE   | No heartbeat for 15 seconds; listed for 10 minutes                     | —         | No              |
+| OFFLINE   | No heartbeat for 4 seconds; listed for 10 minutes                      | —         | No              |
 
 ## Failure table
 
@@ -93,8 +102,8 @@ This table is normative: it is what Hello does. The Test column names the test t
 
 | Failure                                      | Detected by                                               | Node reports                                                                                                                                   | Still works                                                                                                                                                                                            | Recovery                                                                                                                    | Test                                                                                                             |
 | -------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| **SIP node dies**                            | Kamailio OPTIONS probe (≤15 s); membership expires (15 s) | Other nodes: the dead node goes OFFLINE (`hello_node_state`)                                                                                   | New registrations and calls through the survivor. Phones registered through the dead node stay reachable: their binding is in Valkey and their Path points through Kamailio                            | Restart the node; it joins and Kamailio adds it back after a 200 probe                                                      | `TestKillSIPNodeDuringRegister`, `TestKillSIPNodeDuringRinging`, `TestKillSIPNodeDuringCall`                     |
-| **Call in progress on the dying node**       | Membership expires (15 s), or the node's restart in place | `hello_dialog_takeovers_total` on the taker; the call re-homes with `ha: taken-over` in its CDR trace                                          | The call continues: both endpoints re-INVITEd to the taker's relay within 3 s of the claim, and hangup, hold and recording work there                                                                  | Automatic; a call that cannot be saved is counted in `hello_zombie_calls_total`                                             | `TestKillSIPNodeDuringCall` (full takeover), `TestRestartSIPNodeInPlaceDuringCall`, `TestTakeoverScenarioMatrix` |
+| **SIP node dies**                            | Kamailio OPTIONS probe (≤15 s); membership expires (4 s)  | Other nodes: the dead node goes OFFLINE (`hello_node_state`)                                                                                   | New registrations and calls through the survivor. Phones registered through the dead node stay reachable: their binding is in Valkey and their Path points through Kamailio                            | Restart the node; it joins and Kamailio adds it back after a 200 probe                                                      | `TestKillSIPNodeDuringRegister`, `TestKillSIPNodeDuringRinging`, `TestKillSIPNodeDuringCall`                     |
+| **Call in progress on the dying node**       | Membership expires (4 s), or the node's restart in place  | `hello_dialog_takeovers_total` on the taker; the call re-homes with `ha: taken-over` in its CDR trace                                          | The call continues: both endpoints re-INVITEd to the taker's relay (lab: within 4.1 s of the kill), and hangup, hold and recording work there                                                          | Automatic; a call that cannot be saved is counted in `hello_zombie_calls_total`                                             | `TestKillSIPNodeDuringCall` (full takeover), `TestRestartSIPNodeInPlaceDuringCall`, `TestTakeoverScenarioMatrix` |
 | **SIP node drained (maintenance)**           | Operator action or SIGTERM                                | DRAINING (`hello_node_state`); calls left to hand off (`hello_drain_active_calls`)                                                             | Its established calls, handed to a READY node (in-call HA handoff), and its trunk registrations, which move to another node; new INVITEs to it get 503 and Kamailio stops sending it work within 15 s  | The node exits once its calls are handed off or ended, or at `HELLO_DRAIN_TIMEOUT`                                          | `TestDrainKeepsCallsAndExits`, `TestRollingUpgrade`                                                              |
 | **Valkey primary dies**                      | Sentinels (5 s down-after) promote the replica            | UNHEALTHY with 503 + `Retry-After` until Hello reconnects; READY within 15 s of promotion (`hello_node_state`, `hello_valkey_failovers_total`) | Established calls; after promotion, everything                                                                                                                                                         | Automatic; the old primary rejoins as a replica when restarted                                                              | `TestValkeyFailover`                                                                                             |
 | **Writes lost in a Valkey failover**         | —                                                         | —                                                                                                                                              | Replication is asynchronous, so registrations written in the last moment before the failure can be lost                                                                                                | Phones restore them on their next refresh                                                                                   | Documented, not automated                                                                                        |
@@ -154,13 +163,18 @@ phase (talking, hold, transferring, recording, announcement, voicemail) with
 what a taker needs to resume it, the caller and destination numbers and the
 CDR correlation. The CSeq a taker continues from is past every request the
 owner sent on the dialog, including the NOTIFYs of a transfer. Writes happen
-off the SIP transaction path: on every state change and on a 5 s heartbeat.
-A record expires 30 s after its last heartbeat. Calls that come out of a
+off the SIP transaction path: on every state change and on a 1 s heartbeat
+(the membership heartbeat). A record expires 10 s after its last write —
+past detection (4 s), the takeover poll and both re-INVITEs — and a record
+written within the last 2 s (two heartbeats) is never claimed on OFFLINE
+grounds: its owner is alive. Calls that come out of a
 transfer (the blind transfer's new call, the attended transfer's bridge)
 keep the original call's relay and replicate like any call.
 
-When membership marks a node OFFLINE (15 s), each surviving node scans for
-that node's unclaimed dialogs on a jittered 1–3 s poll and claims them
+When membership marks a node OFFLINE (4 s without a heartbeat), each
+surviving node scans for that node's unclaimed dialogs on a jittered
+1–1.5 s poll (`HELLO_HA_TAKEOVER_POLL` 1 s, `HELLO_HA_TAKEOVER_JITTER`
+500 ms) and claims them
 atomically (a Valkey Lua script: no claim wins twice). The taker rebuilds
 both legs from the replicated state — the endpoints see the same Call-IDs
 and tags, and the CSeq continues the old owner's counter — allocates fresh
@@ -193,7 +207,7 @@ once by its taker.
 ### Restart in place
 
 Kubernetes restarts a crashed container in place, under the same pod name,
-within seconds — inside membership's 15 s OFFLINE window, so the node never
+within seconds — possibly inside membership's 4 s OFFLINE window, so the node never
 goes OFFLINE and the takeover above would never start, while its new
 process knows nothing of the old one's calls. Every hello-sip process
 therefore has a random **incarnation** id: membership publishes it
@@ -202,7 +216,7 @@ dialog record carries its owner's (`ownerIncarnation`). A record whose
 owner node is alive under another incarnation belongs to a dead process:
 
 - Every READY node — the restarted one included, which is the fastest —
-  scans the dialogs of a node for 35 s (the dialog TTL plus margin) after
+  scans the dialogs of a node for 15 s (the dialog TTL plus margin) after
   first seeing its incarnation or seeing it change, and claims those of a
   dead incarnation at once, without the freshness wait an OFFLINE takeover
   has. The restarted node reclaims its own calls this way.
@@ -244,9 +258,9 @@ The trace's takeover step reads `ha: taken over from <node> in <t>
 - `<t>` is the takeover itself, from the claim to both endpoints answering
   the re-INVITEs (the ≤3 s target).
 - `<g>` is the media gap, from the dead owner's last sign of life — its
-  last replication write, at most one heartbeat (5 s) before it died — to
+  last replication write, at most one heartbeat (1 s) before it died — to
   both endpoints re-homed. It includes the time until the death was
-  noticed, so it is an upper bound of the audio the call lost, at most 5 s
+  noticed, so it is an upper bound of the audio the call lost, at most 1 s
   over it (and subject to clock skew between the two nodes). After a
   handoff the draining node relays until the claim, so the gap runs from
   the claim and equals `<t>`. A call hung up before any re-INVITE (the BYE
@@ -258,7 +272,7 @@ A draining node (an operator drain or SIGTERM) does not keep its calls to
 the end: it marks each recoverable call's record for handoff, and a READY
 survivor claims such a dialog of a DRAINING node at once — without waiting
 for the node to go OFFLINE — and takes it over exactly as after a crash
-(re-INVITEs, ≤3 s gap, CDR and live view `taken-over`). The draining node
+(re-INVITEs, a gap of the re-INVITE round trip, CDR and live view `taken-over`). The draining node
 yields its copy as soon as the survivor holds the call: it closes its media
 without a BYE to the endpoints and without a CDR or touching the live call
 record (both are the survivor's), stops refreshing the live record once the
@@ -278,7 +292,7 @@ in `internal/sip`):
 
 | The node dies during                   | What the users see                                                                                                                    |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| A connected call                       | ≤3 s audio gap, call continues, hang up normally                                                                                      |
+| A connected call                       | An audio gap per the table at the top (about 4 s after a crash), call continues, hang up normally                                     |
 | A held call                            | The hold direction survives the takeover                                                                                              |
 | A blind transfer, target still ringing | The original call continues untransferred; the transferor gets a final NOTIFY (503); Kamailio's INVITE timer stops the target ringing |
 | A blind transfer, target answered      | The transferred call (caller and target) continues                                                                                    |

@@ -200,7 +200,8 @@ func run(args []string) error {
 		},
 		Publisher: members,
 		Load: func() lifecycle.Load {
-			l := lifecycle.Load{ActiveCalls: srv.ActiveCalls(), Registrations: srv.Registrations()}
+			connected := srv.ConnectedCalls()
+			l := lifecycle.Load{ActiveCalls: srv.ActiveCalls(), ConnectedCalls: &connected, Registrations: srv.Registrations()}
 			if s := watcher.Current(); s != nil {
 				l.ConfigRevision = s.Revision
 			}

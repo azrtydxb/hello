@@ -318,11 +318,11 @@ func (s *Server) takeoverPass(ctx context.Context) {
 			// A draining node hands its calls over while still alive:
 			// only the dialogs it marked for handoff are claimed.
 			s.haOfflineForget(m.ID)
-			s.haNoteActive(m.ID, m.ActiveCalls)
+			s.haNoteActive(m.ID, reapable(m))
 			scan.handoff = true
 		default:
 			s.haOfflineForget(m.ID)
-			s.haNoteActive(m.ID, m.ActiveCalls)
+			s.haNoteActive(m.ID, reapable(m))
 		}
 		if !scan.offline && s.haWatchIncarnation(m.ID, m.Incarnation) {
 			scan.live = m.Incarnation
@@ -468,7 +468,7 @@ func (s *Server) haOwnerDead(ctx context.Context, st livestate.DialogState) (str
 // It runs only after the takers had their chance, haReapDelay after the
 // node was first seen OFFLINE.
 func (s *Server) haReap(members []cluster.Member, m cluster.Member, self string) {
-	e := s.haOfflineSee(m.ID, m.ActiveCalls)
+	e := s.haOfflineSee(m.ID, reapable(m))
 	if e.counted || time.Now().Before(e.deadline) || !s.haAmReaper(members, self) {
 		return
 	}
@@ -481,12 +481,22 @@ func (s *Server) haReap(members []cluster.Member, m cluster.Member, self string)
 	s.haOfflineCount(m.ID)
 	// OFFLINE members are listed with no load: the node's live calls are
 	// the last count seen while it was still alive.
-	lost := max(m.ActiveCalls, e.active) - taken
+	lost := max(reapable(m), e.active) - taken
 	if lost <= 0 {
 		return
 	}
 	s.m.ZombieCalls.Add(float64(lost))
 	s.log.Warn("counted unrecoverable calls of an offline node", "node", m.ID, "zombies", lost)
+}
+
+// reapable is a member's calls that its death could leave as zombies: its
+// connected calls (a ringing call gets its final response from the edge),
+// or all its active calls when an older node does not report them.
+func reapable(m cluster.Member) int {
+	if m.ConnectedCalls != nil {
+		return *m.ConnectedCalls
+	}
+	return m.ActiveCalls
 }
 
 // haAmReaper reports whether this node is the one survivor that counts
