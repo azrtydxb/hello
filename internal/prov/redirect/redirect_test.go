@@ -37,13 +37,17 @@ func TestStatusJSON(t *testing.T) {
 func TestCredentialsNeverFormat(t *testing.T) {
 	val := "s3cr" + "et-value" // assembled so scanners do not flag a literal
 	c := Credentials{"snomSrapsAccessKeySecret": val}
-	var buf bytes.Buffer
-	slog.New(slog.NewTextHandler(&buf, nil)).Info("x", "creds", c)
+	acct := Account{Vendor: "snom", Credentials: c}
+	var text, js bytes.Buffer
+	for _, l := range []*slog.Logger{slog.New(slog.NewTextHandler(&text, nil)), slog.New(slog.NewJSONHandler(&js, nil))} {
+		l.Info("x", "creds", c, "account", acct)
+	}
 	for _, out := range []string{
 		fmt.Sprintf("%v %s %+v %#v", c, c, c, c),
 		fmt.Errorf("check failed for %v", c).Error(),
-		fmt.Sprint(Account{Credentials: c}),
-		buf.String(),
+		fmt.Sprint(acct),
+		text.String(),
+		js.String(),
 	} {
 		if strings.Contains(out, val) {
 			t.Fatalf("credential printed: %s", out)

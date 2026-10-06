@@ -8,6 +8,7 @@ package redirect
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/prov"
@@ -53,8 +54,11 @@ type Client interface {
 
 // Credentials are one vendor's redirect credentials, keyed by the names of
 // the hello-prov-redirect secret (spec S-11), e.g. snomSrapsAccessKeyId,
-// yealinkRpsAccessSecret, gdmsSiteId. Stored sealed as JSON with
-// prov.RedirectAAD. Every formatting of the value prints a placeholder.
+// yealinkRpsAccessSecret, gdmsSiteId. Stored as json.Marshal(c) sealed
+// with prov.RedirectAAD; that is the only encoding that shows the values.
+// fmt and slog (text and JSON handlers) print a placeholder, also for an
+// Account logged as a whole; a struct of your own holding them is not
+// covered, so never log one.
 type Credentials map[string]string
 
 // String keeps credentials out of %v and %s.
@@ -62,6 +66,10 @@ func (Credentials) String() string { return "[redacted]" }
 
 // GoString keeps credentials out of %#v.
 func (Credentials) GoString() string { return "[redacted]" }
+
+// LogValue keeps credentials out of slog, whose JSON handler marshals
+// values instead of calling String.
+func (Credentials) LogValue() slog.Value { return slog.StringValue("[redacted]") }
 
 // State is a phone's redirect registration state.
 type State string
@@ -95,6 +103,10 @@ const (
 
 // Job is one prov_redirect_jobs row.
 type Job struct {
+	// Seq identifies this queued operation; a replacement of the same
+	// vendor and MAC takes a new one, so FinishJob and RetryJob match on
+	// it and never touch a job queued after this one was read.
+	Seq           int64
 	Vendor        prov.Vendor
 	MAC           string
 	Op            Op
@@ -118,22 +130,32 @@ type Account struct {
 	Settings    []byte      // the settings JSON object, vendor-specific
 }
 
+// LogValue logs an account without its credentials (slog does not consult
+// a nested field's LogValue).
+func (a Account) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("vendor", string(a.Vendor)), slog.Bool("enabled", a.Enabled),
+		slog.Bool("hasCredentials", a.Credentials != nil))
+}
+
 // Store is the worker's view of hello-control's database. internal/store
 // implements it; tests use an in-memory fake.
 type Store interface {
 	// DueJobs returns up to limit jobs whose next attempt is due.
 	DueJobs(ctx context.Context, limit int) ([]Job, error)
-	// Target returns the phone with this MAC; prov.ErrNotFound when it
-	// is gone (its unregister job is then the only thing left).
-	Target(ctx context.Context, mac string) (Target, error)
+	// Target returns the phone with this vendor and MAC; prov.ErrNotFound
+	// when it is gone or now has another vendor (a stale job for the old
+	// vendor must not register it there).
+	Target(ctx context.Context, v prov.Vendor, mac string) (Target, error)
 	// Account returns the vendor's stored account; prov.ErrNotFound when
 	// there is none.
 	Account(ctx context.Context, v prov.Vendor) (Account, error)
-	// FinishJob removes j unless a newer operation replaced it since it
-	// was read, and sets the phone's status (when the phone exists).
+	// FinishJob removes j and sets the phone's status (when the phone
+	// exists), only while the row still has j.Seq: a replacement queued
+	// since j was read (a rotation's new URL) stays queued and its status
+	// stands.
 	FinishJob(ctx context.Context, j Job, st Status) error
 	// RetryJob counts an attempt, schedules the next one at next and sets
-	// the phone's status, unless a newer operation replaced j.
+	// the phone's status, only while the row still has j.Seq.
 	RetryJob(ctx context.Context, j Job, next time.Time, st Status) error
 	// Registered returns the vendor's phones whose status is registered,
 	// for the daily drift check.

@@ -117,7 +117,11 @@ CREATE TABLE prov_redirect_accounts (
 -- phone's current URL when it runs, and an unregister needs only the MAC,
 -- so a job outlives the phone it was for. first_queued_at bounds the
 -- 24-hour give-up across replacements of the same operation.
+-- seq identifies one queued operation: every replace takes a new value,
+-- so the worker finishes or retries only the job it read.
+CREATE SEQUENCE prov_redirect_jobs_seq;
 CREATE TABLE prov_redirect_jobs (
+    seq             BIGINT      NOT NULL DEFAULT nextval('prov_redirect_jobs_seq'),
     vendor          TEXT        NOT NULL CHECK (vendor IN ('yealink','poly','grandstream','snom','fanvil')),
     mac             TEXT        NOT NULL CHECK (mac ~ '^[0-9a-f]{12}$'),
     op              TEXT        NOT NULL CHECK (op IN ('register','unregister')),
@@ -156,6 +160,7 @@ CREATE INDEX prov_fetches_at ON prov_fetches (at);
 -- +goose Down
 DROP TABLE prov_fetches;
 DROP TABLE prov_redirect_jobs;
+DROP SEQUENCE prov_redirect_jobs_seq;
 DROP TABLE prov_redirect_accounts;
 DROP TABLE prov_firmware_pins;
 DROP TABLE prov_firmware;
