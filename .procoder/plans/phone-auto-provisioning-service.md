@@ -31,7 +31,7 @@ Why hello-control and not a separate service: provisioning needs the store, `int
   - leaves `procoder check` with 0 blocking findings
   - gives every security-relevant or non-trivial behaviour a test that fails without it, mutation-checked (snapshot immediately before, restore immediately after, `cmp`)
 - The REVIEW.md rubric applies. CI runs on the Arc runners; deployment is Kuvryn Sync; no workloads on the user's Mac.
-- The spec's open questions 1 and 2 change S-10 and S-12 only, question 3 changes which redirect clients are live-tested, and question 4 adds or drops one template variable (the phone admin password). Tasks 1–5 build the answer-independent parts first; the bootstrap and certificate details in Task 2 and Task 6 wait for the answers.
+- The spec's questions were answered on 2026-10-06 (`.procoder/ask/answers.md`): `cluster-ca`, trust on first use for DHCP phones, Snom/Yealink/GDMS redirect clients live-tested when their sops secrets exist, and a random per-phone admin password. Tasks 1–5 build the answer-independent parts first; the bootstrap and certificate details in Task 2 and Task 6 wait for the answers.
 
 ### Shared contracts (fixed; a stream that needs a change asks the lead and never edits another stream's files)
 
@@ -49,12 +49,12 @@ Why hello-control and not a separate service: provisioning needs the store, `int
 5. **Redirect client interface** (`internal/prov/redirect/redirect.go`, as committed): `Client{Vendor() prov.Vendor; Capabilities() Caps; Check(ctx) error; Register(ctx, mac, serial, url string) error; Unregister(ctx, mac string) error}`, `Caps{RegistersURL, NeedsSerial, Supported bool}` and `ErrUnsupported`.
 6. **Valkey keys:** spec Data section; the limiter lives in `internal/prov/ratelimit.go`.
 7. **HTTP JSON** (camelCase, Phase 1 error envelope and list shape; validation 400s carry `fields`):
-   - **Phone:** `{"id","mac","vendor","model","label","deviceId","extensionId","extensionNumber","templateId","blf":[number...],"enabled","tokenExposed","uaMismatch","bootPending","redirectStatus":{"state","reason","at"},"firstFetchAt","lastFetchAt","lastFetchIp","lastFetchUa","lastFetchFile","firmwareSeen","createdAt","updatedAt"}`. Create and rotate responses add `"provisioningUrl"` once.
+   - **Phone:** `{"id","mac","vendor","model","label","deviceId","extensionId","extensionNumber","templateId","blf":[number...],"enabled","tokenExposed","uaMismatch","bootArmed","bootReclaimed","redirectStatus":{"state","reason","at"},"firstFetchAt","lastFetchAt","lastFetchIp","lastFetchUa","lastFetchFile","firmwareSeen","createdAt","updatedAt"}`. Create, rotate and re-arm responses add `"provisioningUrl"` once. `POST …/admin-password/reveal` returns `{"adminPassword"}` and writes an audit row; `POST …/admin-password/rotate` returns 204.
    - **Create:** `{"mac","vendor","model","label","extensionId","deviceId"?,"blf","enabled"}`; with no `deviceId` a device is created; with one, the response includes `"secretRotated": true`.
    - **Fetch:** `{"at","ip","userAgent","path","kind","result","status","bytes"}`.
    - **Template:** `{"id","vendor","modelGlob","priority","name","files":[{"pattern","contentType","body"}],"builtin","builtinRef","version","updatedAt"}`.
    - **Firmware:** `{"id","vendor","modelGlob","version","filename","size","sha256","uploadedAt","pinned"}`.
-   - **Redirect account:** `{"vendor","enabled","hasCredentials","settings",…,"lastCheckAt","lastCheckResult","supported"}`; credentials accepted on PUT, never returned.
+   - **Redirect account:** `{"vendor","enabled","hasCredentials","fromDeployment","settings",…,"lastCheckAt","lastCheckResult","supported"}`; credentials accepted on PUT, never returned; `fromDeployment` accounts (env from the `hello-prov-redirect` secret) are read-only.
    - **Settings:** `{"publicUrl","bootUrl","caUrl","caSha256","dhcp":[{"vendor","option","value"}],"sipServer"}`.
    - **CSV import:** dry run → `{"rows":[{"line","mac","errors":[...]}],"ok":bool}`; apply → the same, plus `"created"`.
 8. **Configuration revision and audit:** every phone, template, firmware, pin and redirect-account change writes an `audit_events` row in the same transaction. These changes do not bump `config_revision` (hello-sip does not read them), except device binding, which changes HA1 values and so bumps it as Phase 1 device changes do.
@@ -79,7 +79,7 @@ Interfaces: produces contract 2's functions and `NewHandler(Store, Limiter, Open
 - [ ] Resolution and validation: override, then priority, then glob specificity, then id; parse, variable whitelist, 100 ms deadline, 256 KiB cap; `TestTemplateResolutionAndValidation` includes a template that tries `{{.}}` method calls, `call` and range over huge input.
 - [ ] Tokens: `NewToken` (32 bytes, base32 lowercase, no padding), current/previous lookup, promotion on first new-token fetch, grace expiry, `immediate` revocation; `TestTokenRollingRotation`.
 - [ ] Handler: the routes of spec S-4; HTTPS detection (TLS or `X-Forwarded-Proto` from `HELLO_PROV_TRUSTED_PROXIES`), client IP from the trusted last hop, allowlist checks, MAC-in-name check, UA evidence (`ua_mismatch`), ETag/304, empty `404` for every denial, discarded capped uploads, `503 Retry-After` on store outage; `TestProvEndpointAuth`.
-- [ ] Boot path: the non-secret bootstrap bodies per vendor (CA install, re-check, re-fetch) and `boot_pending` recording; `TestBootPathServesNoSecrets`. The per-MAC token hand-off waits for open question 2.
+- [ ] Boot path: the non-secret common bodies per vendor (CA install, re-check, boot URL) and the trust-on-first-use hand-off of spec S-10: a per-vendor bootstrap body carrying only the CA and the per-device HTTPS URL; disarm by a conditional update (`UPDATE … WHERE boot_armed` returning the row) so two racing requests cannot both win; `boot_reclaim`, `boot_denied` (outside `HELLO_PROV_BOOT_CIDRS`) and disarm on the first HTTPS fetch. `TestBootTrustOnFirstUse`, including the concurrent-claim case. The store interface gains `ClaimBoot(ctx, mac) (PhoneRecord, bool, error)`.
 - [ ] Rate limiter: Valkey sliding windows per IP, per denied IP and per phone, the 10-minute block, the in-memory fallback; `TestProvRateLimit` with two handler instances on one Valkey, then with Valkey stopped.
 - [ ] Audit writer: buffered channel, batch insert every second or 200 rows, redacted paths, drop-and-count when full or the store fails; `TestFetchAudit`.
 - [ ] Metrics of spec S-17; `TestProvMetrics`. Benchmark (`HELLO_BENCH=1`): ETag re-check under 5 ms p99, render under 20 ms p99.
@@ -92,6 +92,7 @@ Interfaces: produces the HTTP JSON of contract 7 and the contract 4 store; consu
 
 - [ ] Store: every mutation in one transaction with its audit row. Phone create with a new device (username `<ext>-<last 6 MAC hex>`), or binding an existing device: new secret, sealed with AAD `device:<id>`, HA1 updated, `config_revision` bumped with NOTIFY. Unbinding clears `secret_enc`. Token create and rotation store hash plus sealed token; `immediate` clears the previous token.
 - [ ] Device rotate-secret: when the device is bound to a phone, re-seal. `TestPhoneDeviceSecretSealed`.
+- [ ] Re-arm (immediate token rotation plus `boot_armed`), admin password generated and sealed on create (AAD `phone-admin:<id>`), reveal with audit and rotate. `TestPhoneAdminPassword`.
 - [ ] Handlers for every route of contract 7 and spec Interfaces, OpenAPI entries; `TestVersionAndOpenAPI` still routes every documented operation. `TestPhoneCRUD`.
 - [ ] Preview: render through `prov.Render` with the secret and token replaced by `********` before rendering, so masking cannot miss a template that transforms them; no fetch record; `TestPreviewMasksSecrets`.
 - [ ] CSV import: parse, validate every row (MAC, vendor, extension, duplicates within the file and against the store), dry run, then apply in one transaction; table test with a 500-row file.
@@ -108,7 +109,9 @@ Interfaces: implements contract 5; the worker consumes a small queue table or th
 - [ ] Snom: SRAPS REST with Hawk HMAC-SHA256 (look up the `setting_server` setting id, then create or update the endpoint with the phone's URL), XML-RPC `redirect.registerPhone` as the fallback.
 - [ ] Yealink: RPS JSON API v3.6 (HMAC-signed headers; create Hello's server entry once, then `device/add` with `uniqueServerUrl`, `device/delete`); YMCS v2 (OAuth2 client credentials) only when the account settings select it, with the serial number when MAC-only registration is not enabled.
 - [ ] Grandstream: GDMS OAuth token and signed calls; `device/add` with MAC and serial into the configured site; `Caps.RegistersURL` false, and the UI states the one-time site setting.
-- [ ] Poly and Fanvil: `Supported` false and `ErrUnsupported` from every call, so the UI shows the manual step; open question 3 may change this.
+- [ ] Poly and Fanvil: `Supported` false and `ErrUnsupported` from every call, with no network call, so the UI shows the manual step.
+- [ ] Credentials from env (spec S-11 names) take precedence over stored ones and mark the account `fromDeployment`.
+- [ ] `TestRedirectLive` (`HELLO_PROV_LIVE_REDIRECT=1`): per vendor, skip with the missing key named unless its credential and live-test keys exist; otherwise register the live-test device with a test URL, read it back, and restore the previous registration.
 - [ ] Worker: on phone create, rotate and delete, enqueue; process with exponential back-off to one hour, give up after 24 hours as `failed`; daily reconcile compares the vendor's stored URL with the phone's current one and reports drift. Runs under a Valkey lease (one replica).
 - [ ] Credentials are opened only inside the client call and never formatted into errors; `TestRedirectClients` greps every log and error string for the test credentials.
 - [ ] Run the full gate.
@@ -127,16 +130,16 @@ Interfaces: consumes contract 7 only.
 
 ## Task 6: Lab, kw and docs (lead, branch prov-contracts)
 
-Files: `test/provclient/` (request sequences and User-Agents per vendor; the parsers are Task 2's), `test/integration/lab_prov_test.go`, `deploy/docker-compose/compose.yaml` (the provisioning listener with a lab CA and certificate generated at test start), `deploy/kuvryn-sync/kw/resources.yaml` (`hello-prov` Service, Ingress, Certificate, the `HELLO_PROV_*` env on hello-control), `test/deploy/` (`TestKwProvisioningIngress`, `TestDocsProvisioningLinks`), `docs/provisioning.md`, `docs/phones.md`, `README.md`.
+Files: `test/provclient/` (request sequences and User-Agents per vendor; the parsers are Task 2's), `test/integration/lab_prov_test.go`, `deploy/docker-compose/compose.yaml` (the provisioning listener with a lab CA and certificate generated at test start), `deploy/kuvryn-sync/kw/resources.yaml` (`hello-prov` Service, Ingress, Certificate, the `HELLO_PROV_*` env on hello-control, the optional `hello-prov-redirect` secret env), `deploy/kuvryn-sync/kw/` (a comment-only skeleton for the redirect sops secret, like the existing ones, until the user supplies it), `deploy/kuvryn-sync/README.md` (the secrets table gains `hello-prov-redirect` and its keys), `test/deploy/` (`TestKwProvisioningIngress`, `TestDocsProvisioningLinks`), `docs/provisioning.md`, `docs/phones.md`, `README.md`.
 Interfaces: consumes everything above.
 
 - [ ] Merge the core, control, redirect and ui branches, resolving conflicts hunk by hunk. Run the full gate.
 - [ ] `test/provclient`: each vendor's sequence for its representative model (spec S-18), with fallbacks (Poly `<mac>.cfg` then `000000000000.cfg`; Grandstream `cfg<mac>.xml`, `cfg<mac>`, …) and the vendor User-Agent format.
 - [ ] `TestProvisioningAsVendors`: create an extension and a phone per vendor through the API, fetch over HTTPS with `provclient`, parse, register a `test/sipua` phone through Kamailio with the parsed credentials, expect `200 OK`. Extend `TestNoSecretsInLogs`.
-- [ ] kw manifest and `TestKwProvisioningIngress`; apply the open-question-1 answer to the certificate choice.
+- [ ] kw manifest and `TestKwProvisioningIngress` (`cluster-ca` certificate, the optional redirect-secret env).
 - [ ] `docs/provisioning.md` per spec S-19 and `TestDocsProvisioningLinks`; link from `docs/phones.md`; README configuration table.
 - [ ] Run `HELLO_DOCKER=1 go test -timeout 25m ./test/integration/` on CI (pass), then the full gate.
-- [ ] After merge: pin images, Sync to kw, and check live from the LAN: one real or emulated phone per available vendor fetches through `prov.hello.kw.watteel.lab` and registers; record the evidence in the stories.
+- [ ] After merge: pin images, Sync to kw, and check live from the LAN: one real or emulated phone per available vendor fetches through `prov.hello.kw.watteel.lab` (DHCP boot hand-off included) and registers. Once the user has supplied the `hello-prov-redirect` secret, run `TestRedirectLive` on kw for Snom, Yealink and GDMS; record the evidence, or the named missing keys, in the stories.
 
 ## Acceptance criteria
 

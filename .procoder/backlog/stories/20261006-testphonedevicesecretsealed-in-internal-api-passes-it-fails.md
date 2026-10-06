@@ -7,7 +7,7 @@ Sprint: -
 
 ## Description
 
-Phone auto-provisioning deliverable (S-2); see .procoder/specs/phone-auto-provisioning-service.md and the plan .procoder/plans/phone-auto-provisioning-service.md.
+Phone auto-provisioning deliverable; see .procoder/specs/phone-auto-provisioning-service.md and .procoder/plans/phone-auto-provisioning-service.md.
 
 ## Acceptance criteria
 

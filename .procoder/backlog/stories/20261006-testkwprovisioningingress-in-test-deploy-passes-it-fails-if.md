@@ -7,7 +7,7 @@ Sprint: -
 
 ## Description
 
-Phone auto-provisioning deliverable (S-12); see .procoder/specs/phone-auto-provisioning-service.md and the plan .procoder/plans/phone-auto-provisioning-service.md. Depends on the spec's open question 1 (provisioning host certificate): build the answer-independent part first.
+Phone auto-provisioning deliverable; see .procoder/specs/phone-auto-provisioning-service.md and .procoder/plans/phone-auto-provisioning-service.md.
 
 ## Acceptance criteria
 
