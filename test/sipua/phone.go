@@ -292,9 +292,13 @@ func (p *Phone) Dial(ctx context.Context, number string, sdp []byte) (*Outgoing,
 	// Loose-routed outbound proxy (RFC 3261 §8.1.2): the INVITE and its
 	// transaction ACK/CANCEL go to the proxy, not to the request URI host.
 	req.AppendHeader(sip.NewHeader("Route", "<sip:"+p.opts.Proxy+";lr>"))
+	// The Call-ID is set here, not by sipgo, so a call that fails before
+	// any response can still be named (and found in the CDRs and logs).
+	callID := sip.CallIDHeader(sip.GenerateTagN(32))
+	req.AppendHeader(&callID)
 	sess, err := p.dua.WriteInvite(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("INVITE %s: %w", callID, err)
 	}
 	p.mu.Lock()
 	p.cliDlg[sess.InviteRequest.CallID().Value()] = sess
@@ -309,7 +313,7 @@ func (p *Phone) Dial(ctx context.Context, number string, sdp []byte) (*Outgoing,
 		return out, nil
 	case err != nil:
 		_ = sess.Close()
-		return nil, err
+		return nil, fmt.Errorf("INVITE %s: %w", callID, err)
 	}
 	out.Status, out.Response = sess.InviteResponse.StatusCode, sess.InviteResponse
 	if err := sess.Ack(ctx); err != nil {
@@ -317,6 +321,9 @@ func (p *Phone) Dial(ctx context.Context, number string, sdp []byte) (*Outgoing,
 	}
 	return out, nil
 }
+
+// CallID is the call's SIP Call-ID.
+func (o *Outgoing) CallID() string { return o.sess.InviteRequest.CallID().Value() }
 
 // Hangup sends BYE on an answered call.
 func (o *Outgoing) Hangup(ctx context.Context) error {
