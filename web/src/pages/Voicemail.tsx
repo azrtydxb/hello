@@ -303,8 +303,10 @@ function BoxPanel({
     {
       key: "email",
       label: "Email",
+      // Without SMTP every message stays "pending" forever; say so once in
+      // the box summary instead of on each row.
       render: (m) =>
-        m.emailStatus ? (
+        m.emailStatus && d?.emailDelivery !== false ? (
           <Badge tone={emailTone(m.emailStatus)}>{m.emailStatus}</Badge>
         ) : (
           "—"
@@ -348,7 +350,11 @@ function BoxPanel({
         <ul className="vm-box__facts" aria-label="Box settings summary">
           <li>
             <Icon name="mail" size={14} />
-            {d ? d.email || "No email" : "—"}
+            {d
+              ? d.emailDelivery === false
+                ? "Email not configured"
+                : d.email || "No email"
+              : "—"}
           </li>
           <li>
             <Icon name="lock" size={14} />
@@ -533,7 +539,11 @@ function BoxSettings({
           value={email}
           autoFocus
           error={errors.email}
-          hint="Where messages are emailed; leave empty for none."
+          hint={
+            detail.emailDelivery === false
+              ? "Email delivery is not configured on this server; the address is kept for when it is."
+              : "Where messages are emailed; leave empty for none."
+          }
           onChange={(e) => setEmail(e.target.value)}
         />
         <Input

@@ -41,6 +41,8 @@ export interface VoicemailBoxDetail {
   unreachableObject?: string;
   createdAt: string;
   updatedAt: string;
+  /** Whether this deployment can email voicemail (SMTP is configured). */
+  emailDelivery?: boolean;
 }
 
 /** GET /api/v1/extensions/{id}/voicemail. */

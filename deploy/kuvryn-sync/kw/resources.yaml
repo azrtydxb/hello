@@ -1400,31 +1400,6 @@ spec:
             - name: MINIO_SECURE
               # In-cluster traffic to the Service, no TLS.
               value: "false"
-            - name: SMTP_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: hello-smtp
-                  key: smtpHost
-            - name: SMTP_PORT
-              valueFrom:
-                secretKeyRef:
-                  name: hello-smtp
-                  key: smtpPort
-            - name: SMTP_USER
-              valueFrom:
-                secretKeyRef:
-                  name: hello-smtp
-                  key: smtpUser
-            - name: SMTP_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: hello-smtp
-                  key: smtpPass
-            - name: SMTP_FROM
-              valueFrom:
-                secretKeyRef:
-                  name: hello-smtp
-                  key: smtpFrom
       containers:
         - name: hello-control
           image: 192.168.10.131:5000/azrtydxb/hello-control:sha-95a58688c854dbf92df8857340e142987b66f954
@@ -1475,31 +1450,6 @@ spec:
             - name: MINIO_SECURE
               # In-cluster traffic to the Service, no TLS.
               value: "false"
-            - name: SMTP_HOST
-              valueFrom:
-                secretKeyRef:
-                  name: hello-smtp
-                  key: smtpHost
-            - name: SMTP_PORT
-              valueFrom:
-                secretKeyRef:
-                  name: hello-smtp
-                  key: smtpPort
-            - name: SMTP_USER
-              valueFrom:
-                secretKeyRef:
-                  name: hello-smtp
-                  key: smtpUser
-            - name: SMTP_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: hello-smtp
-                  key: smtpPass
-            - name: SMTP_FROM
-              valueFrom:
-                secretKeyRef:
-                  name: hello-smtp
-                  key: smtpFrom
           ports:
             - name: http
               containerPort: 8081

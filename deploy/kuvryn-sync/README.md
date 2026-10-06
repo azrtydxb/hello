@@ -85,6 +85,12 @@ Confirmed against the cluster during the first-sync bootstrap:
 | `kw/secret-hello-nonce.sops.yaml`     | `hello-nonce`     | `nonceSecret`                 | hello-sip-1/2 (`HELLO_SIP_NONCE_SECRET`)                          |
 | `kw/secret-hello-bootstrap.sops.yaml` | `hello-bootstrap` | `password`                    | hello-control (`HELLO_BOOTSTRAP_ADMIN_PASSWORD`)                  |
 
+Voicemail-to-email is off on kw: hello-control gets no `SMTP_*`
+environment, so its mailer stays disabled (no send attempts, no failure
+metrics) and the console shows email as not configured. To turn it on, add
+a `hello-smtp` secret and `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/
+`SMTP_FROM` to hello-control; messages left pending meanwhile are then sent.
+
 Until encrypted, each file is a comment-only skeleton; `render-private.py`
 fails on it (SOPS decryption failed) rather than rendering plaintext. Never
 commit a decrypted file or put credentials in shell arguments.

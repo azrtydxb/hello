@@ -131,6 +131,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			Objects:       objs,
 			Diagnostics:   vk,
 			AuthFailLimit: cfg.AuthFailLimit,
+			EmailDelivery: cfg.SmtpHost != "",
 			SIPDomain:     cfg.SIPDomain,
 			SessionTTL:    cfg.SessionTTL,
 			Log:           log,

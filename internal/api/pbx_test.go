@@ -260,6 +260,23 @@ func newPBXEnv(t *testing.T, objects Objects) *env {
 // wav is a minimal RIFF/WAVE payload; the API checks the container header.
 var wav = append([]byte("RIFF"), append([]byte{36, 0, 0, 0}, []byte("WAVEfmt ")...)...)
 
+// TestVoicemailBoxEmailDelivery: with SMTP configured, GET and PUT both
+// report emailDelivery, so the console's settings form keeps it after a save.
+func TestVoicemailBoxEmailDelivery(t *testing.T) {
+	e := newEnvConfig(t, Config{EmailDelivery: true}, nil)
+	c := e.login()
+	ext := c.must(http.StatusCreated, "POST", "/api/v1/extensions",
+		map[string]string{"number": "101", "name": "Sales"}).json(t)
+	path := fmt.Sprintf("/api/v1/extensions/%v/voicemail", ext["id"])
+	if box := c.must(http.StatusOK, "GET", path, nil).json(t); box["emailDelivery"] != true {
+		t.Fatalf("GET emailDelivery = %v", box["emailDelivery"])
+	}
+	box := c.must(http.StatusOK, "PUT", path, map[string]string{"email": "sales@hello.test"}).json(t)
+	if box["emailDelivery"] != true || box["email"] != "sales@hello.test" {
+		t.Fatalf("PUT box = %v", box)
+	}
+}
+
 // TestVoicemailBoxSettings: box created with the extension, email and
 // password changes, greeting upload, validation and the audit trail.
 func TestVoicemailBoxSettings(t *testing.T) {
@@ -273,6 +290,11 @@ func TestVoicemailBoxSettings(t *testing.T) {
 	box := c.must(http.StatusOK, "GET", path, nil).json(t)
 	if box["hasPassword"] != false || box["email"] != "" || box["greetingObject"] != "" {
 		t.Fatalf("fresh box = %v", box)
+	}
+	// Without SMTP the box says email delivery is off (the console shows
+	// "not configured" rather than messages stuck pending).
+	if box["emailDelivery"] != false {
+		t.Fatalf("emailDelivery without SMTP = %v", box["emailDelivery"])
 	}
 
 	rev0, err := e.st.ConfigRevision(ctx)
