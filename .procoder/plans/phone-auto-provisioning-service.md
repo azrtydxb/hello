@@ -107,14 +107,14 @@ Interfaces: produces the HTTP JSON of contract 7 and the contract 4 store; consu
 Files: `internal/prov/redirect/` (`yealink.go`, `poly.go`, `grandstream.go`, `snom.go`, `fanvil.go`, `worker.go`, tests with `httptest` servers per vendor).
 Interfaces: implements contract 5; the worker consumes the `prov_redirect_jobs` queue of Task 1's migration, writes the phones' `redirect_status`, and uses the store.
 
-- [ ] Snom: SRAPS REST with Hawk HMAC-SHA256 (look up the `setting_server` setting id, then create or update the endpoint with the phone's URL), XML-RPC `redirect.registerPhone` as the fallback.
-- [ ] Yealink: RPS JSON API v3.6 (HMAC-signed headers; create Hello's server entry once, then `device/add` with `uniqueServerUrl`, `device/delete`); YMCS v2 (OAuth2 client credentials) only when the account settings select it, with the serial number when MAC-only registration is not enabled.
-- [ ] Grandstream: GDMS OAuth token and signed calls; `device/add` with MAC and serial into the configured site; `Caps.RegistersURL` false, and the UI states the one-time site setting.
-- [ ] Poly and Fanvil: `Supported` false and `ErrUnsupported` from every call, with no network call, so the UI shows the manual step.
-- [ ] Credentials from env (spec S-11 names) take precedence over stored ones and mark the account `fromDeployment`.
-- [ ] `TestRedirectLive` (`HELLO_PROV_LIVE_REDIRECT=1`): per vendor, skip with the missing key named unless its credential and live-test keys exist; otherwise register the live-test device with a test URL, read it back, and restore the previous registration.
-- [ ] Worker: on phone create, rotate and delete, enqueue; process with exponential back-off to one hour, give up after 24 hours as `failed`; daily reconcile compares the vendor's stored URL with the phone's current one and reports drift. Runs under a Valkey lease (one replica).
-- [ ] Credentials are opened only inside the client call and never formatted into errors; `TestRedirectClients` greps every log and error string for the test credentials.
+- [x] Snom: SRAPS REST with Hawk HMAC-SHA256 (look up the `setting_server` setting id, then create or update the endpoint with the phone's URL), XML-RPC `redirect.registerPhone` as the fallback (settings `{"api":"xmlrpc"}`, the same key ID and secret as basic auth). `TestHawkVectors` pins Hawk to the spec's examples.
+- [x] Yealink: RPS JSON API v3.6 (HMAC-signed headers; create Hello's server entry once, then `device/add` with `uniqueServerUrl`, `device/delete`); YMCS v2 (OAuth2 client credentials) only when the account settings select it, with the serial number when MAC-only registration is not enabled.
+- [x] Grandstream: GDMS OAuth token and signed calls; `device/add` with MAC and serial into the configured site; `Caps.RegistersURL` false, and the UI states the one-time site setting.
+- [x] Poly and Fanvil: `Supported` false and `ErrUnsupported` from every call, with no network call, so the UI shows the manual step.
+- [x] Credentials from env (spec S-11 names) take precedence over stored ones and mark the account `fromDeployment` (`Deployment`, used by the worker; the API's `fromDeployment` flag is Task 3's).
+- [x] `TestRedirectLive` (`HELLO_PROV_LIVE_REDIRECT=1`): per vendor, skip with the missing key named unless its credential and live-test keys exist; otherwise register the live-test device with a test URL, read it back, and restore the previous registration.
+- [x] Worker: on phone create, rotate and delete, enqueue; process with exponential back-off to one hour, give up after 24 hours as `failed`; daily reconcile compares the vendor's stored URL with the phone's current one and reports drift. Runs under a Valkey lease (one replica). (Enqueueing and the lease are Task 3's store and hello-control wiring; `OpsTotal` is registered by hello-control.)
+- [x] Credentials are opened only inside the client call and never formatted into errors; `TestRedirectClients` greps every log and error string for the test credentials.
 - [ ] Run the full gate.
 
 ## Task 5: UI (branch prov-ui)
