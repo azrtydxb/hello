@@ -371,6 +371,18 @@ func (s *server) uploadFirmware(w http.ResponseWriter, r *http.Request) {
 			writeFields(w, fe)
 			return
 		}
+		// A taken name is refused before anything is uploaded: the same
+		// file uploaded again has the same object key, and storing it
+		// would overwrite (and its failure remove) the live object.
+		switch existing, err := s.ProvStore.FirmwareByName(r.Context(), f.Vendor, f.Filename); {
+		case err == nil:
+			writeError(w, http.StatusConflict, "conflict",
+				fmt.Sprintf("%s firmware %s already exists (id %d); delete it first", f.Vendor, f.Filename, existing.ID))
+			return
+		case !errors.Is(err, prov.ErrNotFound):
+			s.internal(w, "firmware: look up name", err)
+			return
+		}
 		tmp, err = s.streamFirmware(r.Context(), part, &f)
 		if err != nil {
 			var tooBig *http.MaxBytesError
@@ -396,7 +408,12 @@ func (s *server) uploadFirmware(w http.ResponseWriter, r *http.Request) {
 	}
 	created, err := s.ProvStore.CreateFirmware(r.Context(), actor(r).String(), f)
 	if err != nil {
-		s.removeFirmware(f.ObjectKey)
+		// A concurrent upload of the same name won: its row names this
+		// very key, so the object stays.
+		var taken *store.InUseError
+		if !errors.As(err, &taken) {
+			s.removeFirmware(f.ObjectKey)
+		}
 		s.provError(w, "firmware", err)
 		return
 	}

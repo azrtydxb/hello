@@ -604,10 +604,12 @@ func TestFirmwareHosting(t *testing.T) {
 	upload := func(name string) response {
 		var buf bytes.Buffer
 		mw := multipart.NewWriter(&buf)
-		for k, v := range map[string]string{"vendor": "yealink", "modelGlob": "T5*", "version": "96.86.0.70"} {
+		// The filename field, unlike the part's name, is not reduced to
+		// its base by the multipart reader.
+		for k, v := range map[string]string{"vendor": "yealink", "modelGlob": "T5*", "version": "96.86.0.70", "filename": name} {
 			_ = mw.WriteField(k, v)
 		}
-		fw, _ := mw.CreateFormFile("file", name)
+		fw, _ := mw.CreateFormFile("file", "upload.bin")
 		_, _ = fw.Write(payload)
 		_ = mw.Close()
 		p.c.header.Set("Content-Type", mw.FormDataContentType())
@@ -626,6 +628,8 @@ func TestFirmwareHosting(t *testing.T) {
 	if r := upload("T54W-96.86.0.70.rom"); r.code != http.StatusConflict {
 		t.Fatalf("second upload of the name = %d", r.code)
 	}
+	// The refused duplicate left the live object in place (checked by the
+	// read below).
 	if r := upload("../evil.rom"); r.code != http.StatusBadRequest {
 		t.Fatalf("path-like name = %d", r.code)
 	}

@@ -46,6 +46,7 @@ type ProvStore interface {
 	ListFirmware(ctx context.Context) ([]store.FirmwareFile, error)
 	CreateFirmware(ctx context.Context, actor string, f prov.Firmware) (store.FirmwareFile, error)
 	DeleteFirmware(ctx context.Context, actor string, id int64) (string, error)
+	FirmwareByName(ctx context.Context, v prov.Vendor, filename string) (prov.Firmware, error)
 	ListFirmwarePins(ctx context.Context) ([]store.FirmwarePin, error)
 	PutFirmwarePins(ctx context.Context, actor string, pins []store.FirmwarePin) ([]store.FirmwarePin, error)
 
