@@ -1,0 +1,22 @@
+# `TestRenderedConfigContents` in `internal/prov` passes. It fails if a built-in rendering for any first-class vendor lacks the server, port, username, auth name, secret, display name, BLF keys, re-check URL with the current token, CA URL, or a pinned firmware URL, or if two renders of the same input differ by a byte.
+
+Status: open
+Created: 2026-10-06
+Epic: phone-auto-provisioning-service
+Sprint: -
+
+## Description
+
+Phone auto-provisioning deliverable; see .procoder/specs/phone-auto-provisioning-service.md and .procoder/plans/phone-auto-provisioning-service.md.
+
+## Acceptance criteria
+
+<!-- Each criterion is testable. Check a box ONLY when it is verifiably
+     true — the closer will ask for the evidence. -->
+
+- [ ] `TestRenderedConfigContents` in `internal/prov` passes. It fails if a built-in rendering for any first-class vendor lacks the server, port, username, auth name, secret, display name, BLF keys, re-check URL with the current token, CA URL, or a pinned firmware URL, or if two renders of the same input differ by a byte.
+
+## Evidence
+
+<!-- Filled at close time: the commands run and what their output proved,
+     one line per criterion. Empty evidence keeps the story open. -->

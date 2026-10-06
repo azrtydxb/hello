@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-06 04:02 UTC. procoder reads this
+Written 2026-10-06 10:24 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -78,6 +78,17 @@ Answer: Go test user agents built on sipgo, run in CI
 
 ## [decision] decisions.md
 
+Key: 18471647d238
+Question: Phone auto-provisioning: token hand-off for DHCP-discovered phones
+
+- Trust on first use: an allowlisted, never-fetched MAC gets its token URL once via the boot path (optionally only from configured CIDRs), then the boot path closes for that MAC until re-armed; a second claim is flagged
+- DHCP bootstraps only (CA, re-check, "not provisioned"); credentials only via redirect service or typed URL
+- MAC-only on the boot path from trusted CIDRs, no token (weakest; not recommended)
+
+Answer: Trust on first use: the first fetch from a pre-registered MAC hands out its token once; an administrator can re-arm
+
+## [decision] decisions.md
+
 Key: 1a17adfb2c72
 Question: hello-control readiness during a Valkey outage
 
@@ -126,6 +137,21 @@ Answer: Direct media (phone to carrier) as the roadmap says; anchoring waits for
 
 ## [decision] decisions.md
 
+Key: 3322f2afa6d0
+Question: Remaining items after Phase 7 (2026-10-06)
+
+- Phone auto-provisioning vendors: Yealink, Poly, Grandstream, Snom/Fanvil, and any brand (generic per-model templates)
+- Provisioning discovery: DHCP option 66, vendor cloud redirect, and manual URL entry — all three
+- Provisioning auth: MAC + per-device token URL over HTTPS
+- Load tests (§27): later, when the user gives a window
+- SMTP relay on kw: leave voicemail email off
+- Real carrier trunk check: not yet, stays pending
+- Emblem: the user dropped the full design export in the repo root; use its assets, then delete the folder
+
+Answer: Vendors: Yealink, Poly, Grandstream, Snom, Fanvil plus any brand via generic per-model templates; discovery: DHCP option 66 + vendor redirect + manual URL; auth: MAC + per-device token URL over HTTPS; load tests: later; SMTP on kw: voicemail email off; real trunk check: not yet; emblem: use the dropped design assets (done in PR #24)
+
+## [decision] decisions.md
+
 Key: 34cff7a7f99a
 Question: Merge PR #1
 
@@ -146,6 +172,17 @@ Answer: Squash-merge now and start the Phase 3 (HA) spec
 
 ## [decision] decisions.md
 
+Key: 38da7c550e31
+Question: Phone auto-provisioning: phone admin (web UI) password
+
+- Random per phone, sealed, revealable to administrators (audited)
+- One site-wide password the user sets
+- Leave the phones' admin password untouched
+
+Answer: Random per phone, stored encrypted (sealed), revealable to administrators (audited)
+
+## [decision] decisions.md
+
 Key: 406a5e21d741
 Question: Phase 2 trunk registration ownership
 
@@ -153,6 +190,17 @@ Question: Phase 2 trunk registration ownership
 - Every node registers the trunk (several contacts at the carrier)
 
 Answer: One node registers each trunk at a time (Valkey lease, another node takes over on expiry)
+
+## [decision] decisions.md
+
+Key: 451638dd32f2
+Question: Phone auto-provisioning: vendor redirect accounts
+
+- Automate Snom SRAPS and Yealink RPS (the user supplies API credentials); Grandstream GDMS add-device with serials; Poly and Fanvil stay a documented manual step
+- Also use the by-request Poly ZTP XML API and Fanvil's undocumented FDPS XML-RPC
+- No redirect accounts for now; DHCP and manual entry only, clients built and tested against fakes
+
+Answer: Wire and live-test Snom SRAPS, Yealink RPS/YMCS and Grandstream GDMS on kw (credentials arrive later as sops secrets; live tests gated on them existing); Poly and Fanvil stay a manual step
 
 ## [decision] decisions.md
 
@@ -317,6 +365,17 @@ Question: In-call HA crash detection time
 - Keep 15 s detection; correct docs to the honest numbers (crash ~15–18 s gap, restart ~4 s, graceful <1 s)
 
 Answer: Faster detection: membership heartbeat 1 s / TTL 4 s (re-home in ~5 s); docs updated to measured numbers
+
+## [decision] decisions.md
+
+Key: b0654a149c2f
+Question: Phone auto-provisioning: provisioning host certificate
+
+- cluster-ca (private), with Hello's CA pushed over plain HTTP via the DHCP boot path or uploaded by hand (default the spec builds; redirect/manual phones fail until the CA is installed)
+- Publicly trusted certificate (e.g. Let's Encrypt DNS-01) for a public DNS name the user owns, resolved to the kw ingress on the LAN (works on every vendor out of the box)
+- Both: public certificate for phones, cluster-ca kept for the lab
+
+Answer: cluster-ca (kw private CA), with Hello's CA pushed over plain HTTP via the DHCP boot path or uploaded by hand
 
 ## [decision] decisions.md
 
