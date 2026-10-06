@@ -212,3 +212,27 @@
 - SMTP relay on kw: leave voicemail email off
 - Real carrier trunk check: not yet, stays pending
 - Emblem: the user dropped the full design export in the repo root; use its assets, then delete the folder
+
+## Phone auto-provisioning: provisioning host certificate
+
+- cluster-ca (private), with Hello's CA pushed over plain HTTP via the DHCP boot path or uploaded by hand (default the spec builds; redirect/manual phones fail until the CA is installed)
+- Publicly trusted certificate (e.g. Let's Encrypt DNS-01) for a public DNS name the user owns, resolved to the kw ingress on the LAN (works on every vendor out of the box)
+- Both: public certificate for phones, cluster-ca kept for the lab
+
+## Phone auto-provisioning: token hand-off for DHCP-discovered phones
+
+- Trust on first use: an allowlisted, never-fetched MAC gets its token URL once via the boot path (optionally only from configured CIDRs), then the boot path closes for that MAC until re-armed; a second claim is flagged
+- DHCP bootstraps only (CA, re-check, "not provisioned"); credentials only via redirect service or typed URL
+- MAC-only on the boot path from trusted CIDRs, no token (weakest; not recommended)
+
+## Phone auto-provisioning: vendor redirect accounts
+
+- Automate Snom SRAPS and Yealink RPS (the user supplies API credentials); Grandstream GDMS add-device with serials; Poly and Fanvil stay a documented manual step
+- Also use the by-request Poly ZTP XML API and Fanvil's undocumented FDPS XML-RPC
+- No redirect accounts for now; DHCP and manual entry only, clients built and tested against fakes
+
+## Phone auto-provisioning: phone admin (web UI) password
+
+- Random per phone, sealed, revealable to administrators (audited)
+- One site-wide password the user sets
+- Leave the phones' admin password untouched
