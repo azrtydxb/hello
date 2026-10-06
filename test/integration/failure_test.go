@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -225,7 +226,29 @@ func kill(t *testing.T, node string) time.Time {
 // READY while the lab carries call load, or if any takeover or zombie is
 // counted without a failure: a false OFFLINE would take live calls over.
 // It runs before the failure tests kill anything.
+//
+// Setup and measurement are separate: every device is provisioned, every
+// phone registered and the held calls answered before the load starts,
+// each step on its own budget, so a slow setup (the lab is cold here, and
+// on main the image builds share the runner's host) neither eats the
+// measured window nor competes with it.
 func TestMembershipStableUnderLoad(t *testing.T) {
+	const (
+		heldCalls = 2
+		workers   = 4
+		window    = 20 * time.Second
+		perCall   = 10 * time.Second
+		// Each worker starts a call every pace, so the load is 20 calls/s.
+		// Unpaced, the four workers place ~500 calls/s (a lab call takes
+		// ~7 ms), which exhausts Kamailio's 64 MB of shared memory in
+		// transactions within a second; at the production pike density
+		// (200 requests per IP per 2 s) the lab phones' single source IP
+		// gets blocked first instead, which is what throttled the old
+		// unpaced loop and cost it ~3 timed-out calls per run. 20 calls/s
+		// is 80 INVITEs per 2 s (each is challenged once), well inside
+		// pike, and about what the old loop managed while throttled.
+		pace = 200 * time.Millisecond
+	)
 	lc := newLabClient(t)
 	for _, n := range []string{"hello-sip-1", "hello-sip-2"} {
 		lc.waitState(n, "READY", 30*time.Second)
@@ -239,30 +262,50 @@ func TestMembershipStableUnderLoad(t *testing.T) {
 		}
 		return out
 	}
-	before := counters()
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer cancel()
+
+	// Setup. One extension per callee and per caller, then one wait for
+	// both nodes to serve the resulting configuration revision (the
+	// hello_config_revision gauge), so no REGISTER races the snapshot.
+	type pair struct {
+		caller, callee labDevice
+		a, b           *sipua.Phone
+	}
+	pairs := make([]pair, heldCalls+workers)
+	for i := range pairs {
+		pairs[i].caller = lc.createExtension("desk")[0]
+		pairs[i].callee = lc.createExtension("desk")[0]
+		remember(pairs[i].caller.Secret, pairs[i].callee.Secret)
+	}
+	lc.waitSnapshots(30 * time.Second)
+	for i := range pairs {
+		pairs[i].a, pairs[i].b = kamPhone(t, pairs[i].caller), kamPhone(t, pairs[i].callee)
+	}
 	// Calls held for the whole run keep their replication heartbeats going.
-	for range 2 {
-		caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
-		a, b := kamPhone(t, caller), kamPhone(t, callee)
-		got := answerNext(ctx, b)
-		out, err := a.Dial(ctx, callee.Extension, sdpOffer)
+	for _, p := range pairs[:heldCalls] {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		got := answerNext(ctx, p.b)
+		out, err := p.a.Dial(ctx, p.callee.Extension, sdpOffer)
 		if err != nil || out.Status != 200 {
+			cancel()
 			t.Fatalf("held call = %+v, %v", out, err)
 		}
 		<-got
+		cancel()
 		t.Cleanup(func() {
 			hctx, hcancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer hcancel()
 			_ = out.Hangup(hctx)
 		})
 	}
+	before := counters()
+	pikeBefore := kamailioMetric(t, "kamailio_pike_blocked_total")
+
+	// Measurement: the membership sampler and the load share one window,
+	// which starts only now.
 	var (
 		mu       sync.Mutex
 		notReady []string
-		calls    int
-		failed   []string
+		results  []loadCall
 	)
 	stop := make(chan struct{})
 	sampled := make(chan struct{})
@@ -288,20 +331,14 @@ func TestMembershipStableUnderLoad(t *testing.T) {
 		}
 	}()
 	var wg sync.WaitGroup
-	end := time.Now().Add(20 * time.Second)
-	for range 4 {
-		caller, callee := lc.devices("desk")[0], lc.devices("desk")[0]
-		a, b := kamPhone(t, caller), kamPhone(t, callee)
+	end := time.Now().Add(window)
+	for _, p := range pairs[heldCalls:] {
 		wg.Go(func() {
-			for time.Now().Before(end) {
-				cctx, ccancel := context.WithTimeout(ctx, 10*time.Second)
-				err := callCtx(cctx, a, b, callee.Extension)
-				ccancel()
+			for next := time.Now(); next.Before(end); next = next.Add(pace) {
+				time.Sleep(time.Until(next))
+				r := placeLoadCall(p.a, p.b, p.callee.Extension, perCall)
 				mu.Lock()
-				calls++
-				if err != nil {
-					failed = append(failed, err.Error())
-				}
+				results = append(results, r)
 				mu.Unlock()
 			}
 		})
@@ -309,16 +346,192 @@ func TestMembershipStableUnderLoad(t *testing.T) {
 	wg.Wait()
 	close(stop)
 	<-sampled
-	t.Logf("%d calls under load, %d failed %v", calls, len(failed), failed)
+
+	var failed []loadCall
+	for _, r := range results {
+		if r.err != nil {
+			failed = append(failed, r)
+		}
+	}
+	t.Logf("%d calls under load in %s, %d failed", len(results), window, len(failed))
+	if len(failed) > 0 {
+		reportFailedCalls(t, lc, failed)
+	}
 	if len(notReady) > 0 {
 		t.Fatalf("a live SIP node left READY under load (false OFFLINE risk): %v", notReady)
 	}
 	if after := counters(); !maps.Equal(before, after) {
 		t.Fatalf("takeovers or zombies counted with no failure: before %v, after %v", before, after)
 	}
-	if calls == 0 || len(failed) > calls/10 {
-		t.Fatalf("%d of %d calls failed under load", len(failed), calls)
+	// Every lab phone shares the runner's source IP. Kamailio's pike
+	// drops a blocked IP's INVITEs and REGISTERs silently, so a call whose
+	// INVITE and every retransmission fall in a block times out with no
+	// CDR: the test would be measuring the flood guard, not membership.
+	if blocked := kamailioMetric(t, "kamailio_pike_blocked_total") - pikeBefore; blocked > 0 {
+		t.Fatalf("Kamailio's pike blocked the lab phones' IP %v times during the load: the load is above pike's density, lower it (pace)", blocked)
 	}
+	// A call that still fails had its INVITE (retransmitted at 0.5, 1, 2,
+	// 4 and 4 s) unanswered for 10 s, or got an error. Each one is
+	// reported above with its CDR and the lab's log lines. On a 2-vCPU
+	// runner, where Kamailio has a quarter of the CPU weight of the
+	// stateful services, one in a hundred (4 of ~400) is allowed for
+	// starvation; more is a real loss of calls, not noise.
+	if len(results) == 0 || len(failed) > len(results)/100 {
+		t.Fatalf("%d of %d calls failed under load", len(failed), len(results))
+	}
+}
+
+// loadCall is one call of a load run and how far it got.
+type loadCall struct {
+	start     time.Time
+	took      time.Duration
+	callID    string
+	calleeGot bool // the callee's phone received the INVITE
+	err       error
+}
+
+// placeLoadCall places one call from a to b, answers it on b and hangs it
+// up, all within budget, and reports how far it got.
+func placeLoadCall(a, b *sipua.Phone, to string, budget time.Duration) loadCall {
+	r := loadCall{start: time.Now()}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	var got atomic.Bool
+	answered := make(chan struct{})
+	go func() {
+		defer close(answered)
+		in, err := b.Next(ctx)
+		if err != nil {
+			return
+		}
+		got.Store(true)
+		_ = in.Ring()
+		_ = in.Answer(sdpAnswer)
+	}()
+	r.err = func() error {
+		out, err := a.Dial(ctx, to, sdpOffer)
+		if err != nil {
+			return err
+		}
+		r.callID = out.CallID()
+		if out.Status != 200 {
+			return fmt.Errorf("INVITE %s = %d", r.callID, out.Status)
+		}
+		<-answered
+		if err := out.Hangup(ctx); err != nil {
+			return fmt.Errorf("BYE %s: %w", r.callID, err)
+		}
+		return nil
+	}()
+	r.calleeGot = got.Load()
+	r.took = time.Since(r.start)
+	return r
+}
+
+var reCallID = regexp.MustCompile(`(?:INVITE|BYE) (\S+?):? `)
+
+// reportFailedCalls logs how the failed calls failed (counted by error)
+// and the first few in detail, with what the platform recorded for each:
+// its CDR (status, side, node, routing trace) and the lines the edge and
+// the SIP nodes logged with its Call-ID.
+func reportFailedCalls(t *testing.T, lc *labClient, failed []loadCall) {
+	t.Helper()
+	byKind := map[string]int{}
+	for _, f := range failed {
+		byKind[reCallIDValue.ReplaceAllString(f.err.Error(), "${1}<call-id>${2}")]++
+	}
+	t.Logf("failed calls by error: %v", byKind)
+	const detailed = 10
+	shown := failed[:min(len(failed), detailed)]
+	want := map[string]bool{}
+	for _, f := range shown {
+		if m := reCallID.FindStringSubmatch(f.err.Error()); m != nil {
+			want[m[1]] = true
+		}
+	}
+	cdrs := map[string]labCDR{}
+	before := ""
+	for page := 0; page < 10 && len(cdrs) < len(want); page++ {
+		var out struct {
+			Items []labCDR
+			Next  string
+		}
+		path := "/api/v1/cdrs?limit=200"
+		if before != "" {
+			path += "&before=" + before
+		}
+		if err := lc.do("GET", path, nil, &out, 200); err != nil {
+			t.Logf("listing CDRs: %v", err)
+			break
+		}
+		for _, c := range out.Items {
+			if want[c.SIPCallID] {
+				cdrs[c.SIPCallID] = c
+			}
+		}
+		if out.Next == "" {
+			break
+		}
+		before = out.Next
+	}
+	logs := labLogs(failed[0].start)
+	for _, f := range shown {
+		line := fmt.Sprintf("failed call at %s after %s (callee got INVITE: %v): %v",
+			f.start.Format("15:04:05.000"), f.took.Round(time.Millisecond), f.calleeGot, f.err)
+		var id string
+		if m := reCallID.FindStringSubmatch(f.err.Error()); m != nil {
+			id = m[1]
+		}
+		if c, ok := cdrs[id]; ok {
+			line += fmt.Sprintf("; CDR %d: status %d, side %s, node %s, trace %q",
+				c.ID, c.FinalStatus, c.TerminationSide, c.SIPNode, lc.cdrTrace(c.ID))
+		} else {
+			line += "; no CDR"
+		}
+		t.Log(line)
+		if id != "" {
+			for _, l := range grepLines(logs, 20, id) {
+				t.Log("    " + l)
+			}
+		}
+	}
+	if len(failed) > detailed {
+		t.Logf("(%d more failed calls not shown)", len(failed)-detailed)
+	}
+	// What the edge and the nodes complained about during the window,
+	// besides sipgo's per-transaction ACK warnings.
+	for _, l := range grepLines(logs, 40, "ERROR", "WARNING", `"level":"ERROR"`) {
+		t.Log("  lab: " + l)
+	}
+}
+
+var reCallIDValue = regexp.MustCompile(`((?:INVITE|BYE) )\S+?(:? )`)
+
+// labLogs returns what the edge and the SIP nodes logged since since.
+func labLogs(since time.Time) []string {
+	out, err := compose("logs", "--no-color", "--since", since.Add(-time.Second).UTC().Format(time.RFC3339Nano),
+		"kamailio", "hello-sip-1", "hello-sip-2").CombinedOutput()
+	if err != nil {
+		return []string{"compose logs: " + err.Error()}
+	}
+	return strings.Split(string(out), "\n")
+}
+
+// grepLines returns up to max of lines that contain any of needles.
+func grepLines(lines []string, max int, needles ...string) []string {
+	var out []string
+	for _, l := range lines {
+		for _, n := range needles {
+			if strings.Contains(l, n) {
+				out = append(out, l)
+				break
+			}
+		}
+		if len(out) == max {
+			break
+		}
+	}
+	return out
 }
 
 func TestKamailioBalancesAndPaths(t *testing.T) {
@@ -1770,4 +1983,25 @@ func TestParseDispatcherFlags(t *testing.T) {
 	if _, err := parseDispatcherFlags(list, "10.89.53.1"); err == nil {
 		t.Error("an IP that is only a prefix of a destination matched")
 	}
+}
+
+// kamailioMetric reads one of Kamailio's Prometheus counters, summed over
+// its label sets (0 while the counter has never been incremented).
+func kamailioMetric(t *testing.T, name string) float64 {
+	t.Helper()
+	out, err := compose("exec", "-T", "kamailio", "wget", "-qO-", "http://10.89.53.10:9090/metrics").Output()
+	if err != nil {
+		t.Fatalf("kamailio metrics: %v", err)
+	}
+	var sum float64
+	for l := range strings.SplitSeq(string(out), "\n") {
+		f := strings.Fields(l)
+		if len(f) < 2 || (f[0] != name && !strings.HasPrefix(f[0], name+"{")) {
+			continue
+		}
+		if v, err := strconv.ParseFloat(f[1], 64); err == nil {
+			sum += v
+		}
+	}
+	return sum
 }
