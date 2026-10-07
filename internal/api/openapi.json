@@ -18,6 +18,7 @@
       "get": {
         "operationId": "getVersion",
         "summary": "Build and configuration revision of this control-plane node",
+        "description": "Returns the build version, commit and current configuration revision of the hello-control node that answered. Use it to check which release is running or whether the configuration changed.",
         "tags": ["system"],
         "responses": {
           "200": {
@@ -34,13 +35,15 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "security": []
+        "security": [],
+        "x-hello-mcp": true
       }
     },
     "/api/v1/openapi.json": {
       "get": {
         "operationId": "getOpenAPI",
         "summary": "This OpenAPI document",
+        "description": "Returns this OpenAPI document, which describes every /api/v1 operation.",
         "tags": ["system"],
         "responses": {
           "200": {
@@ -54,13 +57,17 @@
             }
           }
         },
-        "security": []
+        "security": [],
+        "x-hello-mcp": {
+          "exclude": "the document itself; tools are generated from it"
+        }
       }
     },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "login",
         "summary": "Start a session; sets the hello_session cookie",
+        "description": "Starts a browser session for a username and password and sets the hello_session cookie. Used by the console; API clients use bearer tokens instead.",
         "tags": ["auth"],
         "requestBody": {
           "required": true,
@@ -92,15 +99,22 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "403": {
+            "description": "A cross-origin browser request, refused before the credentials are read (plain text)"
           }
         },
-        "security": []
+        "security": [],
+        "x-hello-mcp": {
+          "exclude": "starts a browser session"
+        }
       }
     },
     "/api/v1/auth/logout": {
       "post": {
         "operationId": "logout",
         "summary": "End the current session and clear the cookie",
+        "description": "Ends the current session and clears the hello_session cookie.",
         "tags": ["auth"],
         "responses": {
           "204": {
@@ -112,6 +126,11 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "ends a browser session"
         }
       }
     },
@@ -119,6 +138,7 @@
       "get": {
         "operationId": "getMe",
         "summary": "The authenticated user",
+        "description": "Returns the authenticated user. Use it to check who the credentials belong to.",
         "tags": ["auth"],
         "responses": {
           "200": {
@@ -137,13 +157,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/tokens": {
       "get": {
         "operationId": "listTokens",
         "summary": "The current user's API tokens",
+        "description": "Lists the current user's API tokens (names, creation and last use; never the token values).",
         "tags": ["tokens"],
         "responses": {
           "200": {
@@ -171,11 +195,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "credential management stays in the console"
         }
       },
       "post": {
         "operationId": "createToken",
         "summary": "Create an API token; the token is returned only in this response",
+        "description": "Creates an API token for the current user. The token value is returned only in this response and only its SHA-256 is stored.",
         "tags": ["tokens"],
         "requestBody": {
           "required": true,
@@ -207,6 +237,11 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "credential management stays in the console"
         }
       }
     },
@@ -214,6 +249,7 @@
       "delete": {
         "operationId": "deleteToken",
         "summary": "Revoke an API token",
+        "description": "Revokes one of the current user's API tokens; requests with it fail from then on.",
         "tags": ["tokens"],
         "parameters": [
           {
@@ -233,6 +269,11 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "credential management stays in the console"
         }
       }
     },
@@ -240,6 +281,7 @@
       "get": {
         "operationId": "listExtensions",
         "summary": "Every extension, ordered by number",
+        "description": "Lists every extension, ordered by number. Use it to find an extension's id from its number before reading or changing it.",
         "tags": ["extensions"],
         "responses": {
           "200": {
@@ -267,11 +309,15 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "post": {
         "operationId": "createExtension",
         "summary": "Create an extension",
+        "description": "Creates an extension (a dialable number with a name). Devices, voicemail and routes then refer to it by id. A 400 lists each failing field (number, name, externalNumber) in error.fields.",
         "tags": ["extensions"],
         "requestBody": {
           "required": true,
@@ -307,13 +353,16 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "A 400 lists each failing field (number, name, externalNumber) in error.fields."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/extensions/{id}": {
       "get": {
         "operationId": "getExtension",
         "summary": "One extension",
+        "description": "Returns one extension by id.",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -340,11 +389,15 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "patch": {
         "operationId": "updateExtension",
         "summary": "Change an extension's number or name",
+        "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields.",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -388,11 +441,14 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       },
       "delete": {
         "operationId": "deleteExtension",
         "summary": "Delete an extension and its devices",
+        "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes.",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -416,13 +472,16 @@
             "$ref": "#/components/responses/Conflict"
           }
         },
-        "description": "409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/devices": {
       "get": {
         "operationId": "listDevices",
         "summary": "Every device, ordered by SIP username",
+        "description": "Lists every device (SIP account), ordered by SIP username; secrets are never included.",
         "tags": ["devices"],
         "responses": {
           "200": {
@@ -450,11 +509,15 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "post": {
         "operationId": "createDevice",
         "summary": "Create a device; its SIP secret is returned only in this response",
+        "description": "Creates a device (a SIP account) on an extension. Its SIP secret is generated and returned only in this response.",
         "tags": ["devices"],
         "requestBody": {
           "required": true,
@@ -492,13 +555,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/devices/{id}": {
       "get": {
         "operationId": "getDevice",
         "summary": "One device (never its secret)",
+        "description": "Returns one device by id, without its secret.",
         "tags": ["devices"],
         "parameters": [
           {
@@ -525,11 +592,15 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "patch": {
         "operationId": "updateDevice",
         "summary": "Enable, disable or move a device",
+        "description": "Enables, disables or moves a device to another extension.",
         "tags": ["devices"],
         "parameters": [
           {
@@ -569,11 +640,15 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       },
       "delete": {
         "operationId": "deleteDevice",
         "summary": "Delete a device",
+        "description": "Deletes a device; phones registered with it can no longer register.",
         "tags": ["devices"],
         "parameters": [
           {
@@ -592,14 +667,21 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/devices/{id}/rotate-secret": {
       "post": {
         "operationId": "rotateDeviceSecret",
         "summary": "Replace a device's SIP secret; the new secret is returned only in this response",
+        "description": "Replaces a device's SIP secret. The new secret is returned only in this response, and the phone must be reconfigured with it.",
         "tags": ["devices"],
         "parameters": [
           {
@@ -626,6 +708,11 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
+        },
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "secrets-scoped: the new secret is shown only in the console"
         }
       }
     },
@@ -633,6 +720,7 @@
       "get": {
         "operationId": "listRegistrations",
         "summary": "Every registered contact binding in the cluster (from Valkey)",
+        "description": "Lists every registered SIP contact binding in the cluster, from the live state. Use it to see which devices are online and where.",
         "tags": ["live"],
         "responses": {
           "200": {
@@ -663,13 +751,17 @@
           "503": {
             "$ref": "#/components/responses/Unavailable"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/calls": {
       "get": {
         "operationId": "listCalls",
         "summary": "Every active call in the cluster (from Valkey)",
+        "description": "Lists every call in progress in the cluster, from the live state.",
         "tags": ["live"],
         "responses": {
           "200": {
@@ -700,13 +792,17 @@
           "503": {
             "$ref": "#/components/responses/Unavailable"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/cdrs": {
       "get": {
         "operationId": "listCDRs",
         "summary": "Call detail records, newest first",
+        "description": "Lists call detail records, newest first, one page at a time, with optional filters. Use it to look at call history.",
         "tags": ["history"],
         "parameters": [
           {
@@ -727,7 +823,8 @@
               "minimum": 1,
               "maximum": 200,
               "default": 50
-            }
+            },
+            "description": "Page size, 1-200."
           },
           {
             "name": "direction",
@@ -765,13 +862,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/cdrs/counts": {
       "get": {
         "operationId": "countCDRs",
         "summary": "How many call records exist, and how many failed",
+        "description": "Counts call records, in total and failed, for the same filters as the list. Use it for summaries without paging.",
         "tags": ["history"],
         "responses": {
           "200": {
@@ -784,14 +885,17 @@
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "500": { "$ref": "#/components/responses/Internal" }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/cdrs/concurrency": {
       "get": {
         "operationId": "cdrConcurrency",
         "summary": "Recorded calls in progress over a time window, by direction",
-        "description": "Samples, at every step of the window, how many CDRs were in progress (start <= t < end). Calls still in progress have no CDR yet and are not counted; GET /api/v1/calls lists those.",
+        "description": "Returns how many calls were up at once over a time window, in buckets. Use it to size trunks or spot busy hours. Samples, at every step of the window, how many CDRs were in progress (start <= t < end). Calls still in progress have no CDR yet and are not counted; GET /api/v1/calls lists those.",
         "tags": ["history"],
         "parameters": [
           {
@@ -817,14 +921,17 @@
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "500": { "$ref": "#/components/responses/Internal" }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/cdrs/export": {
       "get": {
         "operationId": "exportCDRs",
         "summary": "Call detail records as CSV, newest first",
-        "description": "The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
+        "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
         "tags": ["history"],
         "parameters": [
           {
@@ -855,6 +962,11 @@
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "500": { "$ref": "#/components/responses/Internal" }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "CSV download"
         }
       }
     },
@@ -862,6 +974,7 @@
       "get": {
         "operationId": "getCDR",
         "summary": "One CDR with its routing trace and failure explanation",
+        "description": "Returns one call record with its routing trace and, for a failed call, an explanation. Use it to troubleshoot why a call went where it did.",
         "tags": ["history"],
         "parameters": [
           {
@@ -888,13 +1001,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/trunks": {
       "get": {
         "operationId": "listTrunks",
         "summary": "Every trunk (never its password)",
+        "description": "Lists every SIP trunk; passwords are never included.",
         "tags": ["trunks"],
         "responses": {
           "200": {
@@ -922,13 +1039,16 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "post": {
         "operationId": "createTrunk",
         "summary": "Create a trunk",
+        "description": "Creates a SIP trunk to a carrier, by registration or by IP. The password is sealed and never returned. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "tags": ["trunks"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "requestBody": {
           "required": true,
           "content": {
@@ -962,15 +1082,18 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/trunks/status": {
       "get": {
         "operationId": "listTrunkStatus",
         "summary": "Live registration, destination health and active calls of every trunk",
+        "description": "Returns each trunk's live health. Use it to troubleshoot calls over trunks. 503 while Valkey is unreachable.",
         "tags": ["trunks"],
-        "description": "503 while Valkey is unreachable.",
         "responses": {
           "200": {
             "description": "Statuses",
@@ -1000,13 +1123,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/trunks/{id}": {
       "get": {
         "operationId": "getTrunk",
         "summary": "One trunk (never its password)",
+        "description": "Returns one trunk by id; its password is never included.",
         "tags": ["trunks"],
         "parameters": [
           {
@@ -1033,13 +1160,16 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "patch": {
         "operationId": "updateTrunk",
         "summary": "Change a trunk",
+        "description": "Changes a trunk; only the fields sent change. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. Destinations and sourceCidrs, when given, replace the lists.",
         "tags": ["trunks"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. Destinations and sourceCidrs, when given, replace the lists.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1081,13 +1211,16 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       },
       "delete": {
         "operationId": "deleteTrunk",
         "summary": "Delete a trunk",
+        "description": "Deletes a trunk. 409 while an inbound or outbound route names the trunk; the message names the routes.",
         "tags": ["trunks"],
-        "description": "409 while an inbound or outbound route names the trunk; the message names the routes.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1109,13 +1242,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/routes/outbound": {
       "get": {
         "operationId": "listOutboundRoutes",
         "summary": "Every outbound route in position order",
+        "description": "Lists every outbound route in the order they are tried. Use it before adding or reordering routes.",
         "tags": ["routes"],
         "responses": {
           "200": {
@@ -1143,13 +1280,16 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "post": {
         "operationId": "createOutboundRoute",
         "summary": "Append an outbound route",
+        "description": "Creates an outbound route that sends matching dialled numbers to trunks. It is added last in the order. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "tags": ["routes"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1180,15 +1320,18 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/routes/outbound/order": {
       "put": {
         "operationId": "reorderOutboundRoutes",
         "summary": "Reorder every outbound route at once",
+        "description": "Sets the order outbound routes are tried in; the body lists every route id once. ids must be a full permutation; the order changes atomically.",
         "tags": ["routes"],
-        "description": "ids must be a full permutation; the order changes atomically.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1212,13 +1355,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/routes/outbound/{id}": {
       "get": {
         "operationId": "getOutboundRoute",
         "summary": "One outbound route",
+        "description": "Returns one outbound route by id.",
         "tags": ["routes"],
         "parameters": [
           {
@@ -1245,13 +1392,16 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "patch": {
         "operationId": "updateOutboundRoute",
         "summary": "Change an outbound route",
+        "description": "Changes an outbound route; only the fields sent change. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "tags": ["routes"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1290,13 +1440,16 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       },
       "delete": {
         "operationId": "deleteOutboundRoute",
         "summary": "Delete an outbound route",
+        "description": "Deletes an outbound route; numbers it matched fall through to the next route.",
         "tags": ["routes"],
-        "description": "",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1315,13 +1468,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/routes/inbound": {
       "get": {
         "operationId": "listInboundRoutes",
         "summary": "Every inbound route in position order",
+        "description": "Lists every inbound route in the order they are tried. Use it before adding or reordering routes.",
         "tags": ["routes"],
         "responses": {
           "200": {
@@ -1349,13 +1506,16 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "post": {
         "operationId": "createInboundRoute",
         "summary": "Append an inbound route",
+        "description": "Creates an inbound route that sends calls arriving from trunks (by DID, trunk, domain or header) to an extension, external number or SIP URI. It is added last in the order. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "tags": ["routes"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1386,15 +1546,18 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/routes/inbound/order": {
       "put": {
         "operationId": "reorderInboundRoutes",
         "summary": "Reorder every inbound route at once",
+        "description": "Sets the order inbound routes are tried in; the body lists every route id once. ids must be a full permutation; the order changes atomically.",
         "tags": ["routes"],
-        "description": "ids must be a full permutation; the order changes atomically.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1418,13 +1581,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/routes/inbound/{id}": {
       "get": {
         "operationId": "getInboundRoute",
         "summary": "One inbound route",
+        "description": "Returns one inbound route by id.",
         "tags": ["routes"],
         "parameters": [
           {
@@ -1451,13 +1618,16 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "patch": {
         "operationId": "updateInboundRoute",
         "summary": "Change an inbound route",
+        "description": "Changes an inbound route; only the fields sent change. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "tags": ["routes"],
-        "description": "Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1496,13 +1666,16 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       },
       "delete": {
         "operationId": "deleteInboundRoute",
         "summary": "Delete an inbound route",
+        "description": "Deletes an inbound route; calls it matched fall through to the next route.",
         "tags": ["routes"],
-        "description": "",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1521,15 +1694,18 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/routing/test": {
       "post": {
         "operationId": "testRouting",
         "summary": "Decide a call against the saved configuration without placing it",
+        "description": "Simulates routing a call through the current configuration without placing it, and returns the decision and its trace. Use it to check a route change before relying on it. Writes nothing. Trunk usability comes from live state; when Valkey is unreachable every enabled trunk counts as usable and the trace says so. Trunk capacity (maxCalls) is not judged from cached counts: hello-sip decides it when the call is placed, and the trace says so for every candidate trunk with a limit.",
         "tags": ["routing"],
-        "description": "Writes nothing. Trunk usability comes from live state; when Valkey is unreachable every enabled trunk counts as usable and the trace says so. Trunk capacity (maxCalls) is not judged from cached counts: hello-sip decides it when the call is placed, and the trace says so for every candidate trunk with a limit.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1560,15 +1736,18 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/cluster": {
       "get": {
         "operationId": "getCluster",
         "summary": "Cluster members, dependency health and configuration revision",
+        "description": "Returns the cluster overview. Answers 200 with a dependency down, reporting it: members are empty while Valkey is unreachable, and the revision and lags are absent while PostgreSQL is.",
         "tags": ["cluster"],
-        "description": "Answers 200 with a dependency down, reporting it: members are empty while Valkey is unreachable, and the revision and lags are absent while PostgreSQL is.",
         "responses": {
           "200": {
             "description": "Cluster view",
@@ -1586,13 +1765,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/cluster/nodes": {
       "get": {
         "operationId": "listClusterNodes",
         "summary": "Every member, live and OFFLINE",
+        "description": "Lists every cluster member, live and offline, with its state.",
         "tags": ["cluster"],
         "responses": {
           "200": {
@@ -1623,13 +1806,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/cluster/nodes/{id}/drain": {
       "post": {
         "operationId": "drainNode",
         "summary": "Ask a node to drain",
+        "description": "Asks a cluster member to drain. Use it before maintenance. Writes a drain request the node acts on within 5s, and audits it (actor and node; action drain, or drain-force when forced). 409 when draining would leave no READY SIP node, counting nodes with a pending drain request as not READY (repeat with ?force=true), or when the node is OFFLINE.",
         "tags": ["cluster"],
         "parameters": [
           {
@@ -1652,7 +1839,6 @@
             "description": "Drain even if no READY SIP node would remain"
           }
         ],
-        "description": "Writes a drain request the node acts on within 5s, and audits it (actor and node; action drain, or drain-force when forced). 409 when draining would leave no READY SIP node, counting nodes with a pending drain request as not READY (repeat with ?force=true), or when the node is OFFLINE.",
         "responses": {
           "204": {
             "description": "Drain requested"
@@ -1675,11 +1861,15 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
       },
       "delete": {
         "operationId": "undrainNode",
         "summary": "Cancel a drain request",
+        "description": "Cancels a drain so the member takes new calls again. Withdraws the drain request and audits it (action undrain). The node is not looked up, so a request for a node whose record has expired can still be withdrawn. 409 when no drain request exists (e.g. a node draining from SIGTERM). A node that has started exiting still exits.",
         "tags": ["cluster"],
         "parameters": [
           {
@@ -1693,7 +1883,6 @@
             "description": "The node's HELLO_NODE_ID"
           }
         ],
-        "description": "Withdraws the drain request and audits it (action undrain). The node is not looked up, so a request for a node whose record has expired can still be withdrawn. 409 when no drain request exists (e.g. a node draining from SIGTERM). A node that has started exiting still exits.",
         "responses": {
           "204": {
             "description": "Drain cancelled"
@@ -1713,13 +1902,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/extensions/{id}/voicemail": {
       "get": {
         "operationId": "getExtensionVoicemail",
         "summary": "One extension's voicemail box",
+        "description": "Returns an extension's voicemail box settings; the PIN is never returned. The box is created with the extension; a missing box (an extension that predates it) is 404.",
         "tags": ["voicemail"],
         "parameters": [
           {
@@ -1747,17 +1940,59 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "The box is created with the extension; a missing box (an extension that predates it) is 404."
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "put": {
         "operationId": "updateExtensionVoicemail",
         "summary": "Change a voicemail box",
+        "description": "Changes an extension's voicemail box: PIN, notification email and, through the multipart form, greetings. JSON with password and/or email, or multipart/form-data with the same fields plus optional `greeting` and `unreachable` WAV files (PCM, 5 MiB max); greetings land in the hello-voicemail bucket and the previous object is removed. At least one field is required. The password is stored as a hash and never returned.",
         "tags": ["voicemail"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
           }
         ],
+        "requestBody": {
+          "required": true,
+          "description": "Either form changes the box; at least one field is required.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoicemailBoxUpdate"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 72,
+                    "description": "New voicemail PIN; stored as a hash."
+                  },
+                  "email": {
+                    "type": "string",
+                    "description": "Address new messages are mailed to; empty disables voicemail email."
+                  },
+                  "greeting": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The busy/no-answer greeting, a PCM WAV of at most 5 MiB."
+                  },
+                  "unreachable": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The greeting played when the extension is unreachable, a PCM WAV of at most 5 MiB."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Updated",
@@ -1783,15 +2018,21 @@
           },
           "500": {
             "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
           }
         },
-        "description": "JSON with password and/or email, or multipart/form-data with the same fields plus optional `greeting` and `unreachable` WAV files (PCM, 5 MiB max); greetings land in the hello-voicemail bucket and the previous object is removed. At least one field is required. The password is stored as a hash and never returned."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/voicemail/boxes": {
       "get": {
         "operationId": "listVoicemailBoxes",
         "summary": "List voicemail boxes",
+        "description": "Lists every voicemail box with its message counts. One row per box: the extension's number and name and its unheard and total messages, so a box list needs one request.",
         "tags": ["voicemail"],
         "responses": {
           "200": {
@@ -1807,13 +2048,16 @@
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
-        "description": "One row per box: the extension's number and name and its unheard and total messages, so a box list needs one request."
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/voicemail/messages": {
       "get": {
         "operationId": "listVoicemailMessages",
         "summary": "List a box's voicemail messages",
+        "description": "Lists voicemail messages, newest first, optionally for one extension. `box` is a voicemail box id (required); `unheard=true` keeps the messages not played yet.",
         "tags": ["voicemail"],
         "responses": {
           "200": {
@@ -1836,19 +2080,32 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "`box` is a voicemail box id (required); `unheard=true` keeps the messages not played yet."
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/voicemail/messages/{id}/heard": {
       "post": {
         "operationId": "markVoicemailMessageHeard",
         "summary": "Mark a voicemail message heard",
+        "description": "Marks a voicemail message heard, or unheard again. An empty body marks heard; a body of `{\"heard\": false}` marks it unheard again.",
         "tags": ["voicemail"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoicemailMarkHeard"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "The message's new heard flag",
@@ -1873,13 +2130,16 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "An empty body marks heard; a body of `{\"heard\": false}` marks it unheard again."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/voicemail/messages/{id}/audio": {
       "get": {
         "operationId": "getVoicemailMessageAudio",
         "summary": "Play a voicemail message",
+        "description": "Streams a voicemail message's audio (WAV, Range supported). The message audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. The message must exist before the store is touched: a missing message is 404.",
         "tags": ["voicemail"],
         "parameters": [
           {
@@ -1910,7 +2170,7 @@
             }
           },
           "502": {
-            "description": "The object store failed"
+            "$ref": "#/components/responses/Upstream"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -1925,13 +2185,18 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "The message audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. The message must exist before the store is touched: a missing message is 404."
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "binary audio response"
+        }
       }
     },
     "/api/v1/voicemail/messages/{id}": {
       "delete": {
         "operationId": "deleteVoicemailMessage",
         "summary": "Delete a voicemail message",
+        "description": "Deletes a voicemail message and its audio. Removes the row and the audio object in the hello-voicemail bucket.",
         "tags": ["voicemail"],
         "parameters": [
           {
@@ -1952,13 +2217,16 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "Removes the row and the audio object in the hello-voicemail bucket."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/recordings": {
       "get": {
         "operationId": "listRecordings",
         "summary": "List call recordings",
+        "description": "Lists call recordings, newest first, one page at a time.",
         "tags": ["media"],
         "parameters": [
           {
@@ -1984,7 +2252,8 @@
               "minimum": 1,
               "maximum": 200,
               "default": 50
-            }
+            },
+            "description": "Page size, 1-200."
           }
         ],
         "responses": {
@@ -1999,13 +2268,17 @@
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "500": { "$ref": "#/components/responses/Internal" }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/recordings/{id}": {
       "delete": {
         "operationId": "deleteRecording",
         "summary": "Delete a recording",
+        "description": "Deletes a call recording and its audio. Removes the row and the audio object in the hello-recordings bucket.",
         "tags": ["media"],
         "parameters": [{ "$ref": "#/components/parameters/id" }],
         "responses": {
@@ -2014,13 +2287,16 @@
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
-        "description": "Removes the row and the audio object in the hello-recordings bucket."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/recordings/{id}/audio": {
       "get": {
         "operationId": "getRecordingAudio",
         "summary": "Play or download a recording",
+        "description": "Streams a call recording's audio (WAV, Range supported). The recording audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. The recording must exist before the store is touched: a missing recording is 404.",
         "tags": ["media"],
         "parameters": [
           { "$ref": "#/components/parameters/id" },
@@ -2056,7 +2332,7 @@
             }
           },
           "502": {
-            "description": "The object store failed"
+            "$ref": "#/components/responses/Upstream"
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "404": { "$ref": "#/components/responses/NotFound" },
@@ -2064,13 +2340,18 @@
           "503": { "$ref": "#/components/responses/Unavailable" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
-        "description": "The recording audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. The recording must exist before the store is touched: a missing recording is 404."
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "binary audio response"
+        }
       }
     },
     "/api/v1/announcements": {
       "get": {
         "operationId": "listAnnouncements",
         "summary": "List announcements",
+        "description": "Lists the uploaded announcements that ring groups and routes can play.",
         "tags": ["media"],
         "responses": {
           "200": {
@@ -2083,11 +2364,15 @@
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "500": { "$ref": "#/components/responses/Internal" }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "post": {
         "operationId": "createAnnouncement",
         "summary": "Upload an announcement",
+        "description": "Uploads an announcement (a WAV file and a name). Stores the WAV in the hello-announcements bucket under ann/<name>.wav.",
         "tags": ["media"],
         "requestBody": {
           "required": true,
@@ -2125,15 +2410,23 @@
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "409": { "$ref": "#/components/responses/Conflict" },
           "503": { "$ref": "#/components/responses/Unavailable" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "500": { "$ref": "#/components/responses/Internal" },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          }
         },
-        "description": "Stores the WAV in the hello-announcements bucket under ann/<name>.wav."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "multipart file upload"
+        }
       }
     },
     "/api/v1/announcements/{id}": {
       "put": {
         "operationId": "replaceAnnouncement",
         "summary": "Replace an announcement's audio",
+        "description": "Replaces an announcement's name or audio. Overwrites the audio at ann/<name>.wav in the hello-announcements bucket, validated like the upload, then moves updatedAt; audited, bumps the configuration revision and notifies hello-sip.",
         "tags": ["media"],
         "parameters": [{ "$ref": "#/components/parameters/id" }],
         "requestBody": {
@@ -2172,13 +2465,21 @@
           "404": { "$ref": "#/components/responses/NotFound" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "503": { "$ref": "#/components/responses/Unavailable" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "500": { "$ref": "#/components/responses/Internal" },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          }
         },
-        "description": "Overwrites the audio at ann/<name>.wav in the hello-announcements bucket, validated like the upload, then moves updatedAt; audited, bumps the configuration revision and notifies hello-sip."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "multipart file upload"
+        }
       },
       "delete": {
         "operationId": "deleteAnnouncement",
         "summary": "Delete an announcement",
+        "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time.",
         "tags": ["media"],
         "parameters": [{ "$ref": "#/components/parameters/id" }],
         "responses": {
@@ -2187,13 +2488,16 @@
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
-        "description": "Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/announcements/{id}/audio": {
       "get": {
         "operationId": "getAnnouncementAudio",
         "summary": "Play an announcement",
+        "description": "Streams an announcement's audio (WAV, Range supported). The announcement audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. A missing announcement is 404.",
         "tags": ["media"],
         "parameters": [{ "$ref": "#/components/parameters/id" }],
         "responses": {
@@ -2220,20 +2524,25 @@
             }
           },
           "502": {
-            "description": "The object store failed"
+            "$ref": "#/components/responses/Upstream"
           },
           "404": { "$ref": "#/components/responses/NotFound" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "503": { "$ref": "#/components/responses/Unavailable" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
-        "description": "The announcement audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. A missing announcement is 404."
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "binary audio response"
+        }
       }
     },
     "/api/v1/ring-groups": {
       "get": {
         "operationId": "listRingGroups",
         "summary": "List ring/hunt groups",
+        "description": "Lists every ring or hunt group with its members.",
         "tags": ["ring-groups"],
         "responses": {
           "200": {
@@ -2252,11 +2561,15 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "post": {
         "operationId": "createRingGroup",
         "summary": "Create a ring/hunt group",
+        "description": "Creates a ring or hunt group: a number of extensions rung together or in turn, with what happens when nobody answers. Validation failures list each failing field (strategy, failureKind, members' positions, weights) in error.fields.",
         "tags": ["ring-groups"],
         "requestBody": {
           "required": true,
@@ -2292,13 +2605,16 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "Validation failures list each failing field (strategy, failureKind, members' positions, weights) in error.fields."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/ring-groups/{id}": {
       "get": {
         "operationId": "getRingGroup",
         "summary": "One ring/hunt group",
+        "description": "Returns one ring or hunt group by id.",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -2325,11 +2641,15 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "patch": {
         "operationId": "updateRingGroup",
         "summary": "Change a ring/hunt group",
+        "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored.",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -2370,11 +2690,14 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       },
       "delete": {
         "operationId": "deleteRingGroup",
         "summary": "Delete a ring/hunt group",
+        "description": "Deletes a ring or hunt group. The members go with it.",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -2395,13 +2718,16 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "The members go with it."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/feature-codes": {
       "get": {
         "operationId": "listFeatureCodes",
         "summary": "List DTMF feature codes",
+        "description": "Lists the DTMF feature codes (star codes) and the actions they trigger.",
         "tags": ["feature-codes"],
         "responses": {
           "200": {
@@ -2420,11 +2746,15 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -2457,13 +2787,16 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer."
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/presence": {
       "get": {
         "operationId": "listPresence",
         "summary": "Device presence (BLF states)",
+        "description": "Lists every device's live presence state. The dialog state hello-sip publishes per device: idle, ringing, on-call or dnd.",
         "tags": ["presence"],
         "responses": {
           "200": {
@@ -2486,13 +2819,16 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "The dialog state hello-sip publishes per device: idle, ringing, on-call or dnd."
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/diagnostics/devices/{id}": {
       "get": {
         "operationId": "getDeviceDiagnostics",
         "summary": "Why a device is or is not registered",
+        "description": "Returns one device's registration diagnostics. Use it to troubleshoot a phone that does not register. The device's current bindings, its recent REGISTER attempts (newest first; hello-sip keeps the last 20 per enabled device for 1 h after the latest) and the failed-auth counter of the last attempt's source IP. verdict explains a missing registration from those facts only, and is null while the device is registered. 503 while live state (Valkey) is unavailable.",
         "tags": ["diagnostics"],
         "parameters": [
           {
@@ -2506,7 +2842,6 @@
             "description": "Device id"
           }
         ],
-        "description": "The device's current bindings, its recent REGISTER attempts (newest first; hello-sip keeps the last 20 per enabled device for 1 h after the latest) and the failed-auth counter of the last attempt's source IP. verdict explains a missing registration from those facts only, and is null while the device is registered. 503 while live state (Valkey) is unavailable.",
         "responses": {
           "200": {
             "description": "Diagnostics for the device",
@@ -2530,15 +2865,18 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/diagnostics/auth-failures": {
       "get": {
         "operationId": "listAuthFailures",
         "summary": "Source IPs with failed authentications",
+        "description": "Lists source addresses with recent SIP authentication failures. Every source IP with a failed-auth counter in its current window (HELLO_SIP_AUTH_FAIL_WINDOW). blocked is true at or above limit (HELLO_SIP_AUTH_FAIL_LIMIT as hello-control reads it): hello-sip then answers that IP 403 until the window ends.",
         "tags": ["diagnostics"],
-        "description": "Every source IP with a failed-auth counter in its current window (HELLO_SIP_AUTH_FAIL_WINDOW). blocked is true at or above limit (HELLO_SIP_AUTH_FAIL_LIMIT as hello-control reads it): hello-sip then answers that IP 403 until the window ends.",
         "responses": {
           "200": {
             "description": "The counters",
@@ -2559,13 +2897,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/diagnostics/auth-failures/{ip}": {
       "delete": {
         "operationId": "clearAuthFailures",
         "summary": "Unblock a source IP",
+        "description": "Clears the authentication failures recorded for one source address. Deletes the source's failed-auth counter, so it is no longer throttled. 404 when ip is not an IP address.",
         "tags": ["diagnostics"],
         "parameters": [
           {
@@ -2578,7 +2920,6 @@
             "description": "IPv4 or IPv6 address"
           }
         ],
-        "description": "Deletes the source's failed-auth counter, so it is no longer throttled. 404 when ip is not an IP address.",
         "responses": {
           "204": {
             "description": "Counter cleared"
@@ -2595,13 +2936,17 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/phones": {
       "get": {
         "operationId": "listPhones",
         "summary": "Every provisioned phone, ordered by MAC",
+        "description": "Lists every provisioned phone, ordered by MAC address.",
         "tags": ["phones"],
         "responses": {
           "200": {
@@ -2632,11 +2977,15 @@
           "503": {
             "$ref": "#/components/responses/Unavailable"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "post": {
         "operationId": "createPhone",
         "summary": "Add a phone; binding an existing device rotates its secret. The provisioning URL with the token is returned only here",
+        "description": "Adds a phone for auto-provisioning, bound to an extension. The provisioning URL with its token is returned only in this response.",
         "tags": ["phones"],
         "responses": {
           "201": {
@@ -2674,13 +3023,17 @@
               }
             }
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/phones/import": {
       "post": {
         "operationId": "importPhones",
         "summary": "Import phones from CSV (mac,vendor,model,extension[,label][,blf]); dryRun=true only checks. An apply creates every row in one transaction or none (400 with the rows)",
+        "description": "Checks or creates phones from a CSV body.",
         "tags": ["phones"],
         "responses": {
           "200": {
@@ -2694,7 +3047,21 @@
             }
           },
           "400": {
-            "$ref": "#/components/responses/BadRequest"
+            "description": "A malformed request (an error), or an apply with failing rows (the result, ok false, nothing created)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PhoneImportResult"
+                    }
+                  ]
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -2722,15 +3089,22 @@
             "in": "query",
             "schema": {
               "type": "boolean"
-            }
+            },
+            "description": "true only checks the rows; false (the default) creates them all or none."
           }
-        ]
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "text/csv request body; tools send JSON"
+        }
       }
     },
     "/api/v1/phones/{id}": {
       "get": {
         "operationId": "getPhone",
         "summary": "One phone",
+        "description": "Returns one provisioned phone by id.",
         "tags": ["phones"],
         "responses": {
           "200": {
@@ -2760,11 +3134,15 @@
           {
             "$ref": "#/components/parameters/id"
           }
-        ]
+        ],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "patch": {
         "operationId": "updatePhone",
         "summary": "Change a phone; deviceId null unbinds (and disables) it, a new deviceId or extensionId rebinds it and rotates that device's secret",
+        "description": "Changes a provisioned phone; only the fields sent change.",
         "tags": ["phones"],
         "responses": {
           "200": {
@@ -2810,11 +3188,15 @@
           {
             "$ref": "#/components/parameters/id"
           }
-        ]
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       },
       "delete": {
         "operationId": "deletePhone",
         "summary": "Delete a phone; its device stays without the sealed secret",
+        "description": "Deletes a provisioned phone; its device stays.",
         "tags": ["phones"],
         "responses": {
           "204": {
@@ -2837,13 +3219,17 @@
           {
             "$ref": "#/components/parameters/id"
           }
-        ]
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/phones/{id}/rotate-token": {
       "post": {
         "operationId": "rotatePhoneToken",
         "summary": "New provisioning token; the old one stays valid for the grace period unless immediate=true. The URL is returned only here",
+        "description": "Issues a new provisioning token for a phone. The URL with the token is returned only in this response.",
         "tags": ["phones"],
         "responses": {
           "200": {
@@ -2881,15 +3267,22 @@
             "in": "query",
             "schema": {
               "type": "boolean"
-            }
+            },
+            "description": "true invalidates the old token at once instead of after the grace period."
           }
-        ]
+        ],
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "secrets-scoped: the provisioning URL is shown only in the console"
+        }
       }
     },
     "/api/v1/phones/{id}/rearm": {
       "post": {
         "operationId": "rearmPhone",
         "summary": "Rotate the token at once and arm the phone for one more DHCP boot hand-off",
+        "description": "Rotates a phone's provisioning token at once and arms it for one more boot hand-off. The URL is returned only in this response.",
         "tags": ["phones"],
         "responses": {
           "200": {
@@ -2919,13 +3312,19 @@
           {
             "$ref": "#/components/parameters/id"
           }
-        ]
+        ],
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "secrets-scoped: the provisioning URL is shown only in the console"
+        }
       }
     },
     "/api/v1/phones/{id}/admin-password/reveal": {
       "post": {
         "operationId": "revealPhoneAdminPassword",
         "summary": "Return the phone's web UI admin password; audited",
+        "description": "Returns a phone's web UI admin password. Every reveal is audited.",
         "tags": ["phones"],
         "responses": {
           "200": {
@@ -2937,7 +3336,9 @@
                   "required": ["adminPassword"],
                   "properties": {
                     "adminPassword": {
-                      "type": "string"
+                      "type": "string",
+                      "x-hello-secret": true,
+                      "description": "The phone's web UI admin password."
                     }
                   }
                 }
@@ -2961,13 +3362,19 @@
           {
             "$ref": "#/components/parameters/id"
           }
-        ]
+        ],
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "secrets-scoped: the password is shown only in the console"
+        }
       }
     },
     "/api/v1/phones/{id}/admin-password/rotate": {
       "post": {
         "operationId": "rotatePhoneAdminPassword",
         "summary": "Set a new random admin password; the phone takes it at its next fetch",
+        "description": "Sets a new random web UI admin password for a phone; the phone takes it at its next fetch.",
         "tags": ["phones"],
         "responses": {
           "204": {
@@ -2990,13 +3397,19 @@
           {
             "$ref": "#/components/parameters/id"
           }
-        ]
+        ],
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "secrets-scoped"
+        }
       }
     },
     "/api/v1/phones/{id}/fetches": {
       "get": {
         "operationId": "listPhoneFetches",
         "summary": "The phone's provisioning fetches, newest first",
+        "description": "Lists a phone's provisioning fetches, newest first, one page at a time. Use it to see whether and when a phone picked up its configuration.",
         "tags": ["phones"],
         "responses": {
           "200": {
@@ -3046,7 +3459,8 @@
             "in": "query",
             "schema": {
               "type": "integer"
-            }
+            },
+            "description": "Page cursor: fetches with a lower id (the previous page's next)."
           },
           {
             "name": "limit",
@@ -3055,15 +3469,20 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 200
-            }
+            },
+            "description": "Page size, 1-200."
           }
-        ]
+        ],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/phones/{id}/preview": {
       "get": {
         "operationId": "previewPhoneFile",
         "summary": "Render a file as the phone would get it, with the SIP secret, admin password and token masked; not a fetch",
+        "description": "Renders one provisioning file as the phone would get it, with secrets masked, without counting as a fetch. Use it to check a template change.",
         "tags": ["phones"],
         "responses": {
           "200": {
@@ -3090,6 +3509,16 @@
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
+          },
+          "422": {
+            "description": "The template fails to render for this phone (code render_error)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -3102,15 +3531,20 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "The file name the phone would request, such as its MAC-named configuration file."
           }
-        ]
+        ],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/prov/templates": {
       "get": {
         "operationId": "listProvTemplates",
         "summary": "Built-in and stored provisioning templates",
+        "description": "Lists the built-in and stored provisioning templates.",
         "tags": ["provisioning"],
         "responses": {
           "200": {
@@ -3141,11 +3575,15 @@
           "503": {
             "$ref": "#/components/responses/Unavailable"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "post": {
         "operationId": "createProvTemplate",
         "summary": "Create a template",
+        "description": "Creates a stored provisioning template.",
         "tags": ["provisioning"],
         "responses": {
           "201": {
@@ -3180,13 +3618,17 @@
               }
             }
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/prov/templates/validate": {
       "post": {
         "operationId": "validateProvTemplate",
         "summary": "Validate a template without saving it",
+        "description": "Checks that a template parses and renders, without saving it.",
         "tags": ["provisioning"],
         "responses": {
           "200": {
@@ -3223,13 +3665,17 @@
               }
             }
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/prov/templates/{id}": {
       "get": {
         "operationId": "getProvTemplate",
         "summary": "One template",
+        "description": "Returns one provisioning template by id.",
         "tags": ["provisioning"],
         "responses": {
           "200": {
@@ -3265,11 +3711,15 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "patch": {
         "operationId": "updateProvTemplate",
         "summary": "Change a stored template; the previous version is kept",
+        "description": "Changes a stored provisioning template; the previous version is kept.",
         "tags": ["provisioning"],
         "responses": {
           "200": {
@@ -3321,11 +3771,15 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       },
       "delete": {
         "operationId": "deleteProvTemplate",
         "summary": "Delete a stored template; refused while a phone overrides with it",
+        "description": "Deletes a stored provisioning template.",
         "tags": ["provisioning"],
         "responses": {
           "204": {
@@ -3357,13 +3811,17 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/prov/templates/{id}/copy": {
       "post": {
         "operationId": "copyProvTemplate",
         "summary": "Copy a template (built-in or stored) to edit, one priority higher",
+        "description": "Copies a template, built-in or stored, into a new stored one to edit.",
         "tags": ["provisioning"],
         "responses": {
           "201": {
@@ -3399,13 +3857,17 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/prov/firmware": {
       "get": {
         "operationId": "listFirmware",
         "summary": "Uploaded firmware files",
+        "description": "Lists the uploaded firmware files.",
         "tags": ["provisioning"],
         "responses": {
           "200": {
@@ -3436,11 +3898,15 @@
           "503": {
             "$ref": "#/components/responses/Unavailable"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       },
       "post": {
         "operationId": "uploadFirmware",
         "summary": "Upload a firmware file (up to 512 MiB); the fields vendor, modelGlob, version (and optional filename) precede the file part",
+        "description": "Uploads a firmware file for phones to fetch.",
         "tags": ["provisioning"],
         "responses": {
           "201": {
@@ -3467,6 +3933,9 @@
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
           }
         },
         "requestBody": {
@@ -3478,25 +3947,35 @@
                 "required": ["vendor", "modelGlob", "version", "file"],
                 "properties": {
                   "vendor": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Phone vendor the firmware is for."
                   },
                   "modelGlob": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "Shell-style glob of the models it is for."
                   },
                   "version": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The firmware version string, as the phone reports it."
                   },
                   "filename": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "File name the phone fetches; defaults to the uploaded file's name."
                   },
                   "file": {
                     "type": "string",
-                    "format": "binary"
+                    "format": "binary",
+                    "description": "The firmware image, up to 512 MiB; must be the last part."
                   }
                 }
               }
             }
           }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "multipart file upload"
         }
       }
     },
@@ -3504,6 +3983,7 @@
       "put": {
         "operationId": "putFirmwarePins",
         "summary": "Replace every firmware pin",
+        "description": "Replaces every firmware pin.",
         "tags": ["provisioning"],
         "responses": {
           "200": {
@@ -3550,13 +4030,17 @@
               }
             }
           }
-        }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/prov/firmware/{id}": {
       "delete": {
         "operationId": "deleteFirmware",
         "summary": "Delete a firmware file; refused while pinned",
+        "description": "Deletes an uploaded firmware file.",
         "tags": ["provisioning"],
         "responses": {
           "204": {
@@ -3582,13 +4066,17 @@
           {
             "$ref": "#/components/parameters/id"
           }
-        ]
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/prov/redirect": {
       "get": {
         "operationId": "listRedirectAccounts",
         "summary": "The vendor redirect-service accounts",
+        "description": "Lists the vendor redirect-service accounts used to point new phones at Hello; credentials are never returned.",
         "tags": ["provisioning"],
         "responses": {
           "200": {
@@ -3619,13 +4107,17 @@
           "503": {
             "$ref": "#/components/responses/Unavailable"
           }
-        }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/prov/redirect/{vendor}": {
       "put": {
         "operationId": "putRedirectAccount",
         "summary": "Set a vendor's account; credentials are checked with the vendor, sealed and never returned. Accounts set by the deployment are read-only",
+        "description": "Sets a vendor's redirect-service account.",
         "tags": ["provisioning"],
         "responses": {
           "200": {
@@ -3675,13 +4167,18 @@
             "schema": {
               "type": "string",
               "enum": ["yealink", "poly", "grandstream", "snom", "fanvil"]
-            }
+            },
+            "description": "The phone vendor whose redirect-service account to act on."
           }
-        ]
+        ],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
       },
       "delete": {
         "operationId": "deleteRedirectAccount",
         "summary": "Remove a vendor's stored account",
+        "description": "Removes a vendor's stored redirect-service account.",
         "tags": ["provisioning"],
         "responses": {
           "204": {
@@ -3711,15 +4208,20 @@
             "schema": {
               "type": "string",
               "enum": ["yealink", "poly", "grandstream", "snom", "fanvil"]
-            }
+            },
+            "description": "The phone vendor whose redirect-service account to act on."
           }
-        ]
+        ],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/prov/redirect/{vendor}/check": {
       "post": {
         "operationId": "checkRedirectAccount",
         "summary": "Test the vendor's effective credentials",
+        "description": "Checks the vendor's effective redirect-service credentials against the vendor and records the result.",
         "tags": ["provisioning"],
         "responses": {
           "200": {
@@ -3756,15 +4258,20 @@
             "schema": {
               "type": "string",
               "enum": ["yealink", "poly", "grandstream", "snom", "fanvil"]
-            }
+            },
+            "description": "The phone vendor whose redirect-service account to check."
           }
-        ]
+        ],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/prov/settings": {
       "get": {
         "operationId": "getProvSettings",
         "summary": "Computed provisioning URLs, CA fingerprint and DHCP option values",
+        "description": "Returns the computed provisioning settings: URLs, CA fingerprint and DHCP option values. Use it to configure DHCP for phones.",
         "tags": ["provisioning"],
         "responses": {
           "200": {
@@ -3780,7 +4287,10 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
       }
     }
   },
@@ -3805,7 +4315,8 @@
           "type": "integer",
           "format": "int64",
           "minimum": 1
-        }
+        },
+        "description": "Numeric id of the resource the path names, as its list operation returns it."
       }
     },
     "responses": {
@@ -3861,6 +4372,16 @@
       },
       "Unavailable": {
         "description": "Live state (Valkey) is unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Upstream": {
+        "description": "Object storage (MinIO) answered with an error; try again shortly (code upstream)",
         "content": {
           "application/json": {
             "schema": {
@@ -3993,7 +4514,9 @@
             "type": "object",
             "properties": {
               "provisioningUrl": {
-                "type": "string"
+                "type": "string",
+                "x-hello-secret": true,
+                "description": "The provisioning URL with the phone's token. Shown only once."
               },
               "secretRotated": {
                 "type": "boolean"
@@ -4007,37 +4530,47 @@
         "required": ["mac", "vendor", "model", "extensionId"],
         "properties": {
           "mac": {
-            "type": "string"
+            "type": "string",
+            "description": "The phone's MAC address (any common notation)."
           },
           "serial": {
-            "type": "string"
+            "type": "string",
+            "description": "The phone's serial number, when the vendor's redirect service needs it."
           },
           "vendor": {
-            "type": "string"
+            "type": "string",
+            "description": "Phone vendor: yealink, poly, grandstream, snom or fanvil."
           },
           "model": {
-            "type": "string"
+            "type": "string",
+            "description": "The vendor's model name, used to pick the template and firmware."
           },
           "label": {
-            "type": "string"
+            "type": "string",
+            "description": "A label to recognise the phone by, such as its desk."
           },
           "extensionId": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Id of the extension the phone's first line registers to."
           },
           "deviceId": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Id of an existing device to bind (binding rotates its secret); on update, null unbinds and disables the phone."
           },
           "templateId": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Id of a template that overrides the automatic choice; null for automatic."
           },
           "blf": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Extension numbers shown as busy-lamp-field keys."
           },
           "enabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the phone is served its configuration."
           }
         }
       },
@@ -4045,34 +4578,43 @@
         "type": "object",
         "properties": {
           "serial": {
-            "type": "string"
+            "type": "string",
+            "description": "The phone's serial number, when the vendor's redirect service needs it."
           },
           "vendor": {
-            "type": "string"
+            "type": "string",
+            "description": "Phone vendor: yealink, poly, grandstream, snom or fanvil."
           },
           "model": {
-            "type": "string"
+            "type": "string",
+            "description": "The vendor's model name, used to pick the template and firmware."
           },
           "label": {
-            "type": "string"
+            "type": "string",
+            "description": "A label to recognise the phone by, such as its desk."
           },
           "extensionId": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Id of the extension the phone's first line registers to."
           },
           "deviceId": {
-            "type": ["integer", "null"]
+            "type": ["integer", "null"],
+            "description": "Id of an existing device to bind (binding rotates its secret); on update, null unbinds and disables the phone."
           },
           "templateId": {
-            "type": ["integer", "null"]
+            "type": ["integer", "null"],
+            "description": "Id of a template that overrides the automatic choice; null for automatic."
           },
           "blf": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "Extension numbers shown as busy-lamp-field keys."
           },
           "enabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the phone is served its configuration."
           }
         }
       },
@@ -4192,16 +4734,20 @@
         "type": "object",
         "properties": {
           "vendor": {
-            "type": "string"
+            "type": "string",
+            "description": "Phone vendor the template applies to (yealink, poly, grandstream, snom, fanvil)."
           },
           "modelGlob": {
-            "type": "string"
+            "type": "string",
+            "description": "Shell-style glob of the models it applies to, such as T4*."
           },
           "priority": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Among matching templates the highest priority wins."
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "description": "A name to recognise the template by."
           },
           "files": {
             "type": "array",
@@ -4218,7 +4764,8 @@
                   "type": "string"
                 }
               }
-            }
+            },
+            "description": "The files the template serves: each a path pattern, content type and template body."
           }
         }
       },
@@ -4304,7 +4851,8 @@
         "type": "object",
         "properties": {
           "enabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether new phones of this vendor are pointed at Hello through the service."
           },
           "credentials": {
             "type": "object",
@@ -4314,7 +4862,8 @@
             "description": "Write-only; keyed by the hello-prov-redirect secret's key names"
           },
           "settings": {
-            "type": "object"
+            "type": "object",
+            "description": "The vendor's credentials and options, as the vendor's account form names them; checked with the vendor and sealed, never returned."
           }
         }
       },
@@ -4415,11 +4964,12 @@
           "password": {
             "type": "string",
             "minLength": 4,
-            "maxLength": 72
+            "maxLength": 72,
+            "description": "New voicemail PIN; stored as a hash and never returned."
           },
           "email": {
             "type": "string",
-            "description": "Empty disables voicemail email."
+            "description": "Address new messages are mailed to; empty disables voicemail email."
           }
         }
       },
@@ -4636,7 +5186,8 @@
         "properties": {
           "name": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique group name (letters, digits, . _ -)."
           },
           "strategy": {
             "type": "string",
@@ -4646,30 +5197,37 @@
               "round-robin",
               "longest-idle",
               "weighted"
-            ]
+            ],
+            "description": "How members are rung: all at once, in order, round robin, longest idle first, or weighted."
           },
           "hunt": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "true: members ring one at a time and the call moves on on no-answer or busy."
           },
           "ringTimeout": {
             "type": "integer",
             "minimum": 5,
-            "maximum": 300
+            "maximum": 300,
+            "description": "Seconds to ring before the failure action, 5-300."
           },
           "memberDelay": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 60
+            "maximum": 60,
+            "description": "Seconds between members in sequential strategies, 0-60."
           },
           "ignoreDnd": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Ring members even when they set do not disturb."
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external", "announcement"]
+            "enum": ["none", "voicemail", "external", "announcement"],
+            "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
           "failureTarget": {
-            "type": "string"
+            "type": "string",
+            "description": "The voicemail extension, external number or announcement id that failureKind names."
           },
           "members": {
             "type": "array",
@@ -4699,7 +5257,8 @@
                   "default": 0
                 }
               }
-            }
+            },
+            "description": "The extensions in the group, with their position (and weight)."
           }
         }
       },
@@ -4711,7 +5270,8 @@
         "properties": {
           "name": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique group name (letters, digits, . _ -)."
           },
           "strategy": {
             "type": "string",
@@ -4721,30 +5281,37 @@
               "round-robin",
               "longest-idle",
               "weighted"
-            ]
+            ],
+            "description": "How members are rung: all at once, in order, round robin, longest idle first, or weighted."
           },
           "hunt": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "true: members ring one at a time and the call moves on on no-answer or busy."
           },
           "ringTimeout": {
             "type": "integer",
             "minimum": 5,
-            "maximum": 300
+            "maximum": 300,
+            "description": "Seconds to ring before the failure action, 5-300."
           },
           "memberDelay": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 60
+            "maximum": 60,
+            "description": "Seconds between members in sequential strategies, 0-60."
           },
           "ignoreDnd": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Ring members even when they set do not disturb."
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external", "announcement"]
+            "enum": ["none", "voicemail", "external", "announcement"],
+            "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
           "failureTarget": {
-            "type": "string"
+            "type": "string",
+            "description": "The voicemail extension, external number or announcement id that failureKind names."
           },
           "members": {
             "type": "array",
@@ -4774,7 +5341,8 @@
                   "default": 0
                 }
               }
-            }
+            },
+            "description": "The extensions in the group, with their position (and weight)."
           }
         }
       },
@@ -4868,7 +5436,8 @@
                   "default": ""
                 }
               }
-            }
+            },
+            "description": "Every feature code with its action; codes not listed are removed."
           }
         }
       },
@@ -4941,7 +5510,9 @@
                   "not_found",
                   "conflict",
                   "internal",
-                  "unavailable"
+                  "unavailable",
+                  "upstream",
+                  "render_error"
                 ]
               },
               "message": {
@@ -4964,11 +5535,13 @@
         "required": ["username", "password"],
         "properties": {
           "username": {
-            "type": "string"
+            "type": "string",
+            "description": "The user's login name."
           },
           "password": {
             "type": "string",
-            "format": "password"
+            "format": "password",
+            "description": "The user's password."
           }
         }
       },
@@ -4990,7 +5563,8 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
-            "example": "Reception"
+            "example": "Reception",
+            "description": "A label to recognise the token by, such as the client using it."
           }
         }
       },
@@ -5042,7 +5616,8 @@
           },
           "token": {
             "type": "string",
-            "description": "Bearer token. Shown only once; only its SHA-256 is stored."
+            "description": "Bearer token. Shown only once; only its SHA-256 is stored.",
+            "x-hello-secret": true
           }
         }
       },
@@ -5126,13 +5701,15 @@
           "number": {
             "type": "string",
             "pattern": "^[0-9]{2,10}$",
-            "example": "101"
+            "example": "101",
+            "description": "The dialable extension number, 2-10 digits, unique."
           },
           "name": {
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
-            "example": "Reception"
+            "example": "Reception",
+            "description": "Display name shown as caller ID inside the PBX."
           },
           "externalNumber": {
             "type": "string",
@@ -5149,13 +5726,15 @@
           "number": {
             "type": "string",
             "pattern": "^[0-9]{2,10}$",
-            "example": "101"
+            "example": "101",
+            "description": "New extension number, 2-10 digits, unique; refused while a route refers to the old one."
           },
           "name": {
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
-            "example": "Reception"
+            "example": "Reception",
+            "description": "New display name."
           },
           "externalNumber": {
             "type": "string",
@@ -5339,7 +5918,8 @@
           "secret": {
             "type": "string",
             "description": "24 random bytes, base64url without padding. Shown only once.",
-            "example": "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            "example": "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "x-hello-secret": true
           },
           "sipDomain": {
             "type": "string",
@@ -5355,16 +5935,19 @@
         "properties": {
           "extensionId": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "Id of the extension the device belongs to."
           },
           "sipUsername": {
             "type": "string",
             "pattern": "^[A-Za-z0-9._-]{1,64}$",
-            "example": "101-desk"
+            "example": "101-desk",
+            "description": "The SIP username the phone registers with, unique."
           },
           "enabled": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Whether the device may register; true by default."
           }
         }
       },
@@ -5373,11 +5956,13 @@
         "additionalProperties": false,
         "properties": {
           "enabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the device may register."
           },
           "extensionId": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "Id of the extension to move the device to."
           }
         },
         "minProperties": 1
@@ -5837,22 +6422,27 @@
           "name": {
             "type": "string",
             "pattern": "^[A-Za-z0-9._-]{1,64}$",
-            "example": "carrier-primary"
+            "example": "carrier-primary",
+            "description": "Unique trunk name (letters, digits, . _ -)."
           },
           "mode": {
             "type": "string",
-            "enum": ["registration", "ip"]
+            "enum": ["registration", "ip"],
+            "description": "registration registers with the carrier using username and password; ip trusts calls from the destinations' addresses."
           },
           "username": {
             "type": "string",
-            "maxLength": 128
+            "maxLength": 128,
+            "description": "Registration and authentication username at the carrier."
           },
           "realm": {
             "type": "string",
-            "maxLength": 128
+            "maxLength": 128,
+            "description": "Authentication realm, when the carrier requires a fixed one."
           },
           "fromDomain": {
-            "type": "string"
+            "type": "string",
+            "description": "Domain used in the From header of outbound calls."
           },
           "registerExpires": {
             "type": "integer",
@@ -5884,10 +6474,12 @@
           "defaultCallerId": {
             "type": "string",
             "pattern": "^(\\+?[0-9]{2,20})?$",
-            "example": "+97142000000"
+            "example": "+97142000000",
+            "description": "Caller ID presented when the extension has no external number."
           },
           "enabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the trunk carries calls."
           },
           "destinations": {
             "type": "array",
@@ -5895,7 +6487,8 @@
             "maxItems": 16,
             "items": {
               "$ref": "#/components/schemas/Destination"
-            }
+            },
+            "description": "The carrier's SIP servers, tried by priority and weight."
           },
           "password": {
             "type": "string",
@@ -5914,22 +6507,27 @@
           "name": {
             "type": "string",
             "pattern": "^[A-Za-z0-9._-]{1,64}$",
-            "example": "carrier-primary"
+            "example": "carrier-primary",
+            "description": "Unique trunk name (letters, digits, . _ -)."
           },
           "mode": {
             "type": "string",
-            "enum": ["registration", "ip"]
+            "enum": ["registration", "ip"],
+            "description": "registration registers with the carrier using username and password; ip trusts calls from the destinations' addresses."
           },
           "username": {
             "type": "string",
-            "maxLength": 128
+            "maxLength": 128,
+            "description": "Registration and authentication username at the carrier."
           },
           "realm": {
             "type": "string",
-            "maxLength": 128
+            "maxLength": 128,
+            "description": "Authentication realm, when the carrier requires a fixed one."
           },
           "fromDomain": {
-            "type": "string"
+            "type": "string",
+            "description": "Domain used in the From header of outbound calls."
           },
           "registerExpires": {
             "type": "integer",
@@ -5961,10 +6559,12 @@
           "defaultCallerId": {
             "type": "string",
             "pattern": "^(\\+?[0-9]{2,20})?$",
-            "example": "+97142000000"
+            "example": "+97142000000",
+            "description": "Caller ID presented when the extension has no external number."
           },
           "enabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the trunk carries calls."
           },
           "destinations": {
             "type": "array",
@@ -5972,7 +6572,8 @@
             "maxItems": 16,
             "items": {
               "$ref": "#/components/schemas/Destination"
-            }
+            },
+            "description": "The carrier's SIP servers, tried by priority and weight."
           },
           "password": {
             "type": "string",
@@ -6164,11 +6765,13 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
-            "example": "UAE Mobile"
+            "example": "UAE Mobile",
+            "description": "A name to recognise the route by."
           },
           "matchKind": {
             "type": "string",
-            "enum": ["prefix", "regex"]
+            "enum": ["prefix", "regex"],
+            "description": "How match is read: a dialled-number prefix or an RE2 regex."
           },
           "match": {
             "type": "string",
@@ -6191,7 +6794,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "When the route applies; null means always."
           },
           "numberTransform": {
             "$ref": "#/components/schemas/Transform"
@@ -6219,10 +6823,12 @@
             "description": "Default 408, 480, 500, 502, 503, 504"
           },
           "emergency": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Marks the route as one for emergency numbers; the decision and its trace carry the flag."
           },
           "enabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the route is used."
           }
         }
       },
@@ -6235,11 +6841,13 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
-            "example": "UAE Mobile"
+            "example": "UAE Mobile",
+            "description": "A name to recognise the route by."
           },
           "matchKind": {
             "type": "string",
-            "enum": ["prefix", "regex"]
+            "enum": ["prefix", "regex"],
+            "description": "How match is read: a dialled-number prefix or an RE2 regex."
           },
           "match": {
             "type": "string",
@@ -6262,7 +6870,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "When the route applies; null means always."
           },
           "numberTransform": {
             "$ref": "#/components/schemas/Transform"
@@ -6290,10 +6899,12 @@
             "description": "Default 408, 480, 500, 502, 503, 504"
           },
           "emergency": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Marks the route as one for emergency numbers; the decision and its trace carry the flag."
           },
           "enabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the route is used."
           }
         }
       },
@@ -6397,15 +7008,18 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
-            "example": "UAE Mobile"
+            "example": "UAE Mobile",
+            "description": "A name to recognise the route by."
           },
           "didKind": {
             "type": "string",
-            "enum": ["any", "exact", "prefix", "regex"]
+            "enum": ["any", "exact", "prefix", "regex"],
+            "description": "How did is matched against the called number: any, exact, prefix or regex."
           },
           "did": {
             "type": "string",
-            "maxLength": 500
+            "maxLength": 500,
+            "description": "The called number (DID) to match, read as didKind says."
           },
           "trunkId": {
             "oneOf": [
@@ -6420,10 +7034,12 @@
             "description": "null = any trunk"
           },
           "sipDomain": {
-            "type": "string"
+            "type": "string",
+            "description": "Match only calls to this SIP domain; empty for any."
           },
           "headerName": {
-            "type": "string"
+            "type": "string",
+            "description": "Match only calls carrying this SIP header (with headerRegex); empty for none."
           },
           "headerRegex": {
             "type": "string",
@@ -6438,14 +7054,16 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "When the route applies; null means always."
           },
           "callerIdTransform": {
             "$ref": "#/components/schemas/Transform"
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri"]
+            "enum": ["extension", "external", "sip_uri"],
+            "description": "What destination names: an extension number, an external number or a SIP URI."
           },
           "destination": {
             "type": "string",
@@ -6453,7 +7071,8 @@
             "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
           },
           "enabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the route is used."
           }
         }
       },
@@ -6466,15 +7085,18 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
-            "example": "UAE Mobile"
+            "example": "UAE Mobile",
+            "description": "A name to recognise the route by."
           },
           "didKind": {
             "type": "string",
-            "enum": ["any", "exact", "prefix", "regex"]
+            "enum": ["any", "exact", "prefix", "regex"],
+            "description": "How did is matched against the called number: any, exact, prefix or regex."
           },
           "did": {
             "type": "string",
-            "maxLength": 500
+            "maxLength": 500,
+            "description": "The called number (DID) to match, read as didKind says."
           },
           "trunkId": {
             "oneOf": [
@@ -6489,10 +7111,12 @@
             "description": "null = any trunk"
           },
           "sipDomain": {
-            "type": "string"
+            "type": "string",
+            "description": "Match only calls to this SIP domain; empty for any."
           },
           "headerName": {
-            "type": "string"
+            "type": "string",
+            "description": "Match only calls carrying this SIP header (with headerRegex); empty for none."
           },
           "headerRegex": {
             "type": "string",
@@ -6507,14 +7131,16 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "When the route applies; null means always."
           },
           "callerIdTransform": {
             "$ref": "#/components/schemas/Transform"
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri"]
+            "enum": ["extension", "external", "sip_uri"],
+            "description": "What destination names: an extension number, an external number or a SIP URI."
           },
           "destination": {
             "type": "string",
@@ -6522,7 +7148,8 @@
             "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
           },
           "enabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "description": "Whether the route is used."
           }
         }
       },
@@ -6565,10 +7192,12 @@
           },
           "number": {
             "type": "string",
-            "example": "0501234567"
+            "example": "0501234567",
+            "description": "The dialled number to route."
           },
           "callerId": {
-            "type": "string"
+            "type": "string",
+            "description": "The caller ID the simulated call presents."
           },
           "at": {
             "type": "string",
@@ -7054,6 +7683,17 @@
               }
             ],
             "description": "Why it is not registered; null while registered"
+          }
+        }
+      },
+      "VoicemailMarkHeard": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional body of POST /api/v1/voicemail/messages/{id}/heard; no body means heard true.",
+        "properties": {
+          "heard": {
+            "type": "boolean",
+            "description": "true marks the message heard, false unheard again."
           }
         }
       }

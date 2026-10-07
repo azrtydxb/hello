@@ -740,3 +740,45 @@ func TestExtensionExternalNumber(t *testing.T) {
 		t.Fatalf("listed = %v", n)
 	}
 }
+
+// TestRoutingStatuses fails if reading a route, reordering the routes,
+// changing or deleting a missing trunk or route, or renaming a trunk to a
+// taken name answers anything but its documented status (spec
+// ai-external-access S-2, S-3).
+func TestRoutingStatuses(t *testing.T) {
+	p := newP2Env(t, nil, false)
+	c := p.login()
+	peer := func(name string) any {
+		return c.must(http.StatusCreated, "POST", "/api/v1/trunks", map[string]any{
+			"name": name, "mode": "ip", "destinations": []map[string]any{{"host": "10.0.0.5"}},
+		}).json(t)["id"]
+	}
+	trunk, other := peer("peer"), peer("other")
+	c.must(http.StatusConflict, "PATCH", fmt.Sprintf("/api/v1/trunks/%v", other), map[string]any{"name": "peer"})
+	c.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]any{"number": "101", "name": "Desk"})
+
+	out := c.must(http.StatusCreated, "POST", "/api/v1/routes/outbound", map[string]any{
+		"name": "Mobile", "matchKind": "prefix", "match": "05", "trunks": []any{trunk},
+	}).json(t)
+	in := c.must(http.StatusCreated, "POST", "/api/v1/routes/inbound", map[string]any{
+		"name": "Main DID", "didKind": "exact", "did": "+97142000000", "destinationKind": "extension", "destination": "101",
+	}).json(t)
+	c.must(http.StatusOK, "GET", fmt.Sprintf("/api/v1/routes/outbound/%v", out["id"]), nil)
+	c.must(http.StatusOK, "GET", fmt.Sprintf("/api/v1/routes/inbound/%v", in["id"]), nil)
+	c.must(http.StatusNoContent, "PUT", "/api/v1/routes/outbound/order", map[string]any{"ids": []any{out["id"]}})
+	c.must(http.StatusNoContent, "PUT", "/api/v1/routes/inbound/order", map[string]any{"ids": []any{in["id"]}})
+
+	for _, op := range []struct {
+		method, path string
+		body         any
+	}{
+		{"PATCH", "/api/v1/trunks/999999", map[string]any{"enabled": false}},
+		{"DELETE", "/api/v1/trunks/999999", nil},
+		{"PATCH", "/api/v1/routes/outbound/999999", map[string]any{"enabled": false}},
+		{"DELETE", "/api/v1/routes/outbound/999999", nil},
+		{"PATCH", "/api/v1/routes/inbound/999999", map[string]any{"enabled": false}},
+		{"DELETE", "/api/v1/routes/inbound/999999", nil},
+	} {
+		c.must(http.StatusNotFound, op.method, op.path, op.body)
+	}
+}

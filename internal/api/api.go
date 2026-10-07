@@ -179,8 +179,12 @@ func Handler(c Config) http.Handler {
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.
-	return http.NewCrossOriginProtection().Handler(mux)
+	return wrapForTest(http.NewCrossOriginProtection().Handler(mux))
 }
+
+// wrapForTest is the identity; the package tests replace it from TestMain
+// with the OpenAPI conformance validator (spec ai-external-access S-2).
+var wrapForTest = func(h http.Handler) http.Handler { return h }
 
 func (s *server) version(w http.ResponseWriter, r *http.Request) {
 	rev, err := s.Store.ConfigRevision(r.Context())

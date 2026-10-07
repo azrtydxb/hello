@@ -57,20 +57,21 @@ func TestCSVSafe(t *testing.T) {
 // TestCDRQueryValidation fails if an invalid filter or range reaches the
 // store (the stub store panics on any call) instead of answering 400.
 func TestCDRQueryValidation(t *testing.T) {
-	s := &server{Config: Config{Store: stubStore{}}}
-	for _, tc := range []struct {
-		path string
-		h    http.HandlerFunc
-	}{
-		{"/api/v1/cdrs?direction=sideways", s.cdrs},
-		{"/api/v1/cdrs?failed=yes", s.cdrs},
-		{"/api/v1/cdrs/export?direction=up", s.cdrExport},
-		{"/api/v1/cdrs/concurrency?range=7d", s.cdrConcurrency},
+	// Through Handler, so the OpenAPI validator sees each 400 (spec
+	// ai-external-access S-3).
+	h := Handler(Config{Store: tokenStore{}})
+	for _, path := range []string{
+		"/api/v1/cdrs?direction=sideways",
+		"/api/v1/cdrs?failed=yes",
+		"/api/v1/cdrs/export?direction=up",
+		"/api/v1/cdrs/concurrency?range=7d",
 	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer anything")
 		rec := httptest.NewRecorder()
-		tc.h(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		h.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
-			t.Errorf("%s = %d %s, want 400", tc.path, rec.Code, rec.Body)
+			t.Errorf("%s = %d %s, want 400", path, rec.Code, rec.Body)
 		}
 	}
 }
