@@ -50,17 +50,26 @@ Why in hello-control and not a separate service: the MCP server must replay thro
 7. **MCP** (`internal/mcp/mcp.go`): `New(Options) (http.Handler, error)` with `Options{API http.Handler; Spec *apispec.Spec; PublicURL string; AllowedOrigins []string; Lookup auth.Lookup; MetadataURL string; Metrics *Metrics; Log *slog.Logger}`.
 8. **Config** (`internal/config`): `Control.AI{PublicURL string; AccessTTL, RefreshIdle, RefreshMax time.Duration; DCR, CIMDAllowPrivate bool; MCPAllowedOrigins []string}` from the spec's env keys.
 
+Recorded at Task 1 (deviations and decisions the streams build on):
+
+- Contract 4: the exported table is `api.Routes() []RouteInfo`, not `RouteTable()`, because `api.RouteTable` is already the call-routing interface. Tests that the plan names as iterating `RouteTable()` iterate `Routes()`.
+- Contract 4: the rows of every new route in the spec's Interfaces section are in `routes()` already, with their scope and role, answering `501` `not_implemented` through `s.pending`; a stream replaces `s.pending` in its rows and edits nothing else in `routes.go`. Choices the spec left open: `GET /oauth/requests/{id}` is `read`; `DELETE /oauth/grants/{id}` is `session` (revocation from the console; the handler applies the admin rule for other users' grants); `GET /tokens` and `GET /prov/redirect` are `admin` (credentials); `POST /auth/logout` is `read`; skills and `ai/settings` are `read`; users and service accounts are `admin`. `TestRoutesTable` holds the scope-to-role rule and the `secrets` list.
+- Contract 3: `Require` is a pass-through until Task 3, and `Middleware` fills `Kind` and `Scopes` for sessions (`AllScopes` + `session`) and unprefixed tokens (`legacy_token`, `AllScopes`) when the lookup leaves them empty; `Options.Cookies` is honoured, `Resource` and `MetadataURL` are Task 3's.
+- Contract 1: `oauth_clients` carries `role` (service accounts, with a `CHECK` that a `service` row has a role and scopes); `oauth_requests`, `oauth_grants` and `oauth_tokens` reference `oauth_clients` (cascade), `oauth_tokens.grant_id` references `oauth_grants` (cascade); `oauth_clients.created_by` is set null when the user is deleted.
+- Contracts 5–7: `apispec.Load` checks the document's shape and `Operations()` is empty until Task 2; `oauth.Server` computes `Resources`/`MetadataURL` and its endpoints answer `404` and consent operations `ErrNotImplemented` until Task 3; `oauth.Store` is empty until Task 3's first commit; `mcp.New` serves an empty stateless SDK server until Task 5. `oauth.Limiter` is `Allow(ctx, key, limit, window) (bool, error)`; `oauth.Metrics` and `mcp.Metrics` are empty structs until their tasks.
+- Contract 8: `HELLO_OAUTH_DCR` and `HELLO_OAUTH_CIMD_ALLOW_PRIVATE` accept only `true`/`false`; `HELLO_OAUTH_REFRESH_TTL` must not exceed `HELLO_OAUTH_REFRESH_MAX`; `AI.Enabled()` is `PublicURL != ""`.
+
 ## Task 1: Shared contracts (lead, branch ai-contracts)
 
 Files: `migrations/00008_ai_access.sql`, `internal/auth/scope.go`, `internal/auth/middleware.go`, `internal/api/routes.go`, `internal/api/api.go`, `internal/apispec/apispec.go` (types and `Load` only), `internal/oauth/oauth.go` and `store.go` (types and signatures), `internal/mcp/mcp.go` (signature), `internal/config/config.go`, `go.mod`, `go.sum`, this plan.
 Interfaces: everything listed in Shared contracts.
 
-- [ ] Write the migration; `HELLO_TEST_DATABASE_URL=… go test -run Migrate ./test/integration/` → applies and rolls back (`TestMigrateAIAccessRollback`).
-- [ ] Move every `public(...)`/`private(...)` call in `Handler` into `routes()` with a scope per the spec's S-5 list and a minimum role per S-23 (read → viewer, write → operator, admin and secrets → admin, session → viewer); the middleware enforces neither yet, so no behaviour change: `go test ./internal/api/` → all existing tests pass unchanged.
-- [ ] Add `scope.go`, the `Actor` fields, prefixes and the replay marker; `go test ./internal/auth/` → `TestScopesHas` (hierarchy, `secrets` orthogonal, `session` session-only) passes.
-- [ ] `go get github.com/modelcontextprotocol/go-sdk@v1.8.0`; `go build ./...` → ok.
-- [ ] Config fields with defaults and validation (`HELLO_PUBLIC_URL` https scheme-and-host, `http://localhost` allowed); `go test ./internal/config/` → `TestLoadAI*` pass.
-- [ ] Commit to `ai-contracts`, then branch `ai-openapi`, `ai-oauth`, `ai-roles`, `ai-mcp` and `ai-ui-skills`, each in its own worktree.
+- [x] Write the migration; `HELLO_TEST_DATABASE_URL=… go test -run Migrate ./test/integration/` → applies and rolls back (`TestMigrateAIAccessRollback`).
+- [x] Move every `public(...)`/`private(...)` call in `Handler` into `routes()` with a scope per the spec's S-5 list and a minimum role per S-23 (read → viewer, write → operator, admin and secrets → admin, session → viewer); the middleware enforces neither yet, so no behaviour change: `go test ./internal/api/` → all existing tests pass unchanged.
+- [x] Add `scope.go`, the `Actor` fields, prefixes and the replay marker; `go test ./internal/auth/` → `TestScopesHas` (hierarchy, `secrets` orthogonal, `session` session-only) passes.
+- [x] `go get github.com/modelcontextprotocol/go-sdk@v1.8.0`; `go build ./...` → ok.
+- [x] Config fields with defaults and validation (`HELLO_PUBLIC_URL` https scheme-and-host, `http://localhost` allowed); `go test ./internal/config/` → `TestLoadAI*` pass.
+- [x] Commit to `ai-contracts` and merge it to main (PR); the `ai-openapi`, `ai-oauth`, `ai-roles`, `ai-mcp` and `ai-ui-skills` branches start from that main, each in its own worktree, when their streams start.
 
 ## Task 2: OpenAPI completeness (branch ai-openapi)
 
