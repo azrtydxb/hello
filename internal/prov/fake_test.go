@@ -33,6 +33,9 @@ type fakeStore struct {
 	outage    error // returned by every read when set
 	insertErr error
 	nextID    int64
+	// beforeMark, when set, runs as MarkFetched starts: the race window
+	// between PhoneByToken and the write.
+	beforeMark func()
 }
 
 type fakePhone struct {
@@ -124,13 +127,19 @@ func (s *fakeStore) PhoneByToken(_ context.Context, hash []byte) (PhoneRecord, e
 	return PhoneRecord{}, ErrNotFound
 }
 
-func (s *fakeStore) MarkFetched(_ context.Context, id int64, st FetchState) error {
+func (s *fakeStore) MarkFetched(_ context.Context, id int64, hash []byte, st FetchState) error {
+	if s.beforeMark != nil {
+		s.beforeMark() // a concurrent administrator change, outside the lock
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.outage != nil {
 		return s.outage
 	}
 	p := s.phones[id]
+	if _, ok := p.tokens.Match(hash, s.now); !ok {
+		return nil // the token was replaced since the request matched it
+	}
 	if p.firstFetch.IsZero() {
 		p.firstFetch = st.At
 	}
@@ -144,9 +153,12 @@ func (s *fakeStore) MarkFetched(_ context.Context, id int64, st FetchState) erro
 	return nil
 }
 
-func (s *fakeStore) PromoteToken(_ context.Context, id int64) error {
+func (s *fakeStore) PromoteToken(_ context.Context, id int64, hash []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if via, ok := s.phones[id].tokens.Match(hash, s.now); !ok || via {
+		return nil // no longer the current token
+	}
 	s.phones[id].tokens = s.phones[id].tokens.Promote()
 	return nil
 }

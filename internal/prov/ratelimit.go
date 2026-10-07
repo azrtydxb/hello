@@ -45,7 +45,7 @@ const (
 // skewed clocks agree. When Valkey does not answer within 50 ms, the
 // replica enforces the same limits in memory; it never fails open.
 type Limiter struct {
-	c       valkey.Client // nil: memory only
+	client  func() valkey.Client // returns nil: memory only (for now)
 	lim     Limits
 	log     *slog.Logger
 	mem     *memLimiter
@@ -56,7 +56,13 @@ type Limiter struct {
 
 // NewLimiter returns a limiter on c (nil for memory only).
 func NewLimiter(c valkey.Client, lim Limits, log *slog.Logger) *Limiter {
-	return &Limiter{c: c, lim: lim, log: log, mem: newMemLimiter(), prefix: rand.Text()[:8]}
+	return NewLazyLimiter(func() valkey.Client { return c }, lim, log)
+}
+
+// NewLazyLimiter returns a limiter on the client get returns at each call:
+// nil while Valkey is still connecting, which limits in memory meanwhile.
+func NewLazyLimiter(get func() valkey.Client, lim Limits, log *slog.Logger) *Limiter {
+	return &Limiter{client: get, lim: lim, log: log, mem: newMemLimiter(), prefix: rand.Text()[:8]}
 }
 
 // slideLua is a sliding-window log: it drops entries older than the
@@ -92,12 +98,13 @@ func (l *Limiter) member() string { return l.prefix + strconv.FormatUint(l.seq.A
 
 // exec runs a script with the 50 ms bound; ok is false when Valkey failed.
 func (l *Limiter) exec(ctx context.Context, s *valkey.Lua, keys, args []string) (allowed, ok bool) {
-	if l.c == nil {
+	c := l.client()
+	if c == nil {
 		return false, false
 	}
 	ctx, cancel := context.WithTimeout(ctx, valkeyTimeout)
 	defer cancel()
-	n, err := s.Exec(ctx, l.c, keys, args).AsInt64()
+	n, err := s.Exec(ctx, c, keys, args).AsInt64()
 	if err != nil {
 		if !l.degrade.Swap(true) {
 			l.log.Warn("provisioning rate limits fall back to memory: valkey unavailable", "error", err)
@@ -126,10 +133,10 @@ func (l *Limiter) Request(ctx context.Context, ip netip.Addr) bool {
 
 func (l *Limiter) blocked(ctx context.Context, ip netip.Addr) bool {
 	k := ip.String()
-	if l.c != nil {
+	if c := l.client(); c != nil {
 		ctx, cancel := context.WithTimeout(ctx, valkeyTimeout)
 		defer cancel()
-		n, err := l.c.Do(ctx, l.c.B().Exists().Key(keyBlock+k).Build()).AsInt64()
+		n, err := c.Do(ctx, c.B().Exists().Key(keyBlock+k).Build()).AsInt64()
 		if err == nil {
 			return n == 1
 		}

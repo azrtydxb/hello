@@ -17,6 +17,7 @@ import (
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/migrate"
+	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
@@ -117,7 +118,9 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		return fmt.Errorf("MINIO_ENDPOINT: %w", err)
 	}
 	go ensureBuckets(ctx, objs, log)
-	if err := startProv(ctx, cfg, st, objs, vk, deployment, log); err != nil {
+	metrics := telemetry.NewMetrics("hello-control", version.Version, version.Commit)
+	provMetrics := prov.NewMetrics(metrics.Registry)
+	if err := startProv(ctx, cfg, st, objs, vk, deployment, provMetrics, log); err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_PROV_ADDR: %w", err)
 	}
@@ -145,7 +148,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			SessionTTL:    cfg.SessionTTL,
 			Log:           log,
 		}),
-		Metrics:         telemetry.NewMetrics("hello-control", version.Version, version.Commit),
+		Metrics:         metrics,
 		Log:             log,
 		DrainDelay:      cfg.DrainDelay,
 		ShutdownTimeout: cfg.ShutdownTimeout,

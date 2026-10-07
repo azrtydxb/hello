@@ -61,19 +61,25 @@ func ipArg(st prov.FetchState) any {
 }
 
 // MarkFetched implements prov.Store.
-func (s *Store) MarkFetched(ctx context.Context, phoneID int64, st prov.FetchState) error {
+// The update is compare-and-set on hash: a fetch that matched a token
+// since replaced (a re-arm or a rotation) changes nothing.
+func (s *Store) MarkFetched(ctx context.Context, phoneID int64, hash []byte, st prov.FetchState) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE phones SET first_fetch_at = COALESCE(first_fetch_at, $2), last_fetch_at = $2,
 		       last_fetch_ip = $3::inet, last_fetch_ua = $4, last_fetch_file = $5,
 		       firmware_seen = COALESCE(NULLIF($6, ''), firmware_seen),
 		       ua_mismatch = ua_mismatch OR $7, boot_armed = FALSE
-		WHERE id = $1`, phoneID, st.At, ipArg(st), st.UserAgent, st.File, st.FirmwareSeen, st.UAMismatch)
+		WHERE id = $1 AND (token_hash = $8 OR (prev_token_hash = $8 AND prev_token_expires > now()))`,
+		phoneID, st.At, ipArg(st), st.UserAgent, st.File, st.FirmwareSeen, st.UAMismatch, hash)
 	return err
 }
 
-// PromoteToken implements prov.Store.
-func (s *Store) PromoteToken(ctx context.Context, phoneID int64) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE phones SET prev_token_hash = NULL, prev_token_expires = NULL WHERE id = $1`, phoneID)
+// PromoteToken implements prov.Store, only while hash is still the current
+// token.
+func (s *Store) PromoteToken(ctx context.Context, phoneID int64, hash []byte) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE phones SET prev_token_hash = NULL, prev_token_expires = NULL
+		WHERE id = $1 AND token_hash = $2`, phoneID, hash)
 	return err
 }
 
@@ -113,9 +119,8 @@ func (s *Store) ClaimBoot(ctx context.Context, mac string) (prov.PhoneRecord, *p
 			return err // rolls the disarm back
 		}
 		rec.BootArmed = false
-		handoff = &prov.ProvInfo{
-			URL: s.prov.phoneBase(token), CAURL: s.prov.CAURL(), ResyncSeconds: s.prov.resyncSeconds(rec.MAC),
-		}
+		info := s.prov.info(token, rec.MAC)
+		handoff = &info
 		return nil
 	})
 	if errors.Is(err, ErrNotFound) {
@@ -199,7 +204,7 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	}
 	host, port := splitHostPort(s.prov.SIPServer)
 	d.Server = prov.Server{Host: host, Port: port, Transport: "udp", Expiry: int(s.prov.Expiry / time.Second)}
-	d.Prov = prov.ProvInfo{URL: s.prov.phoneBase(token), CAURL: s.prov.CAURL(), ResyncSeconds: s.prov.resyncSeconds(d.Phone.MAC)}
+	d.Prov = s.prov.info(token, d.Phone.MAC)
 	d.Time = prov.TimeInfo{Zone: s.prov.Timezone, NTP: s.prov.NTP}
 	if d.BLF, err = s.blfKeys(ctx, blfJSON); err != nil {
 		return d, prov.Template{}, err
@@ -382,11 +387,15 @@ func (q redirectQueue) Account(ctx context.Context, v prov.Vendor) (redirect.Acc
 }
 
 // jobDone runs update on the job row, only while it still has j.Seq, and
-// then sets the phone's status (when the phone exists with that vendor).
-func (q redirectQueue) jobDone(ctx context.Context, j redirect.Job, st redirect.Status, update string, args ...any) error {
-	b, err := json.Marshal(st)
-	if err != nil {
-		return err
+// then, when st is not nil, sets the phone's status (when the phone exists
+// with that vendor).
+func (q redirectQueue) jobDone(ctx context.Context, j redirect.Job, st *redirect.Status, update string, args ...any) error {
+	var b []byte
+	if st != nil {
+		var err error
+		if b, err = json.Marshal(*st); err != nil {
+			return err
+		}
 	}
 	return q.s.tx(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, update, append([]any{j.Vendor, j.MAC, j.Seq}, args...)...)
@@ -396,19 +405,40 @@ func (q redirectQueue) jobDone(ctx context.Context, j redirect.Job, st redirect.
 		if n, err := res.RowsAffected(); err != nil || n == 0 {
 			return err // replaced since it was read: its own status stands
 		}
+		if st == nil {
+			return nil
+		}
 		_, err = tx.ExecContext(ctx, `UPDATE phones SET redirect_status = $3 WHERE mac = $2 AND vendor = $1`, j.Vendor, j.MAC, string(b))
 		return err
 	})
 }
 
-func (q redirectQueue) FinishJob(ctx context.Context, j redirect.Job, st redirect.Status) error {
+func (q redirectQueue) FinishJob(ctx context.Context, j redirect.Job, st *redirect.Status) error {
 	return q.jobDone(ctx, j, st, `DELETE FROM prov_redirect_jobs WHERE vendor = $1 AND mac = $2 AND seq = $3`)
 }
 
-func (q redirectQueue) RetryJob(ctx context.Context, j redirect.Job, next time.Time, st redirect.Status) error {
+func (q redirectQueue) RetryJob(ctx context.Context, j redirect.Job, next time.Time, st *redirect.Status) error {
+	var reason sql.NullString
+	if st != nil {
+		reason = sql.NullString{String: st.Reason, Valid: true}
+	}
 	return q.jobDone(ctx, j, st, `
-		UPDATE prov_redirect_jobs SET attempts = attempts + 1, next_attempt_at = $4, last_error = $5
-		WHERE vendor = $1 AND mac = $2 AND seq = $3`, next, st.Reason)
+		UPDATE prov_redirect_jobs SET attempts = attempts + 1, next_attempt_at = $4,
+			last_error = COALESCE($5, last_error)
+		WHERE vendor = $1 AND mac = $2 AND seq = $3`, next, reason)
+}
+
+func (q redirectQueue) LastDriftCheck(ctx context.Context) (time.Time, error) {
+	var t sql.NullTime
+	if err := q.s.db.QueryRowContext(ctx, `SELECT prov_drift_checked_at FROM schema_info`).Scan(&t); err != nil {
+		return time.Time{}, err
+	}
+	return t.Time, nil
+}
+
+func (q redirectQueue) SetLastDriftCheck(ctx context.Context, t time.Time) error {
+	_, err := q.s.db.ExecContext(ctx, `UPDATE schema_info SET prov_drift_checked_at = $1`, t)
+	return err
 }
 
 func (q redirectQueue) Registered(ctx context.Context, v prov.Vendor) ([]redirect.Target, error) {

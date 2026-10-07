@@ -3,6 +3,7 @@ package prov
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"reflect"
 	"slices"
 	"strings"
@@ -109,6 +110,88 @@ func TestRenderedConfigContents(t *testing.T) {
 					t.Errorf("%s (firmware pinned %v):\n got %+v\nwant %+v", v, pinned, g, want)
 				}
 			}
+		}
+	}
+}
+
+// TestCACertInTemplates fails if the Poly or Grandstream built-ins (device
+// files and boot bodies) do not carry the CA certificate PEM byte for byte
+// once parsed (Poly device.sec.TLS.customCaCert1, Grandstream P8433), its
+// line breaks included, or carry the CA keys when no CA is configured.
+func TestCACertInTemplates(t *testing.T) {
+	const caPEM = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIU\nZm9vYmFy\n-----END CERTIFICATE-----"
+	polyCA := func(t *testing.T, body []byte) string {
+		t.Helper()
+		var doc struct {
+			Device struct {
+				Attrs []xml.Attr `xml:",any,attr"`
+			} `xml:"device"`
+		}
+		if err := xml.Unmarshal(body, &doc); err != nil {
+			t.Fatalf("poly: %v\n%s", err, body)
+		}
+		var ca, set string
+		for _, a := range doc.Device.Attrs {
+			switch a.Name.Local {
+			case "device.sec.TLS.customCaCert1":
+				ca = a.Value
+			case "device.sec.TLS.customCaCert1.set":
+				set = a.Value
+			}
+		}
+		if (ca == "") != (set == "") {
+			t.Fatalf("poly: customCaCert1 %q with .set %q", ca, set)
+		}
+		return ca
+	}
+	gsCA := func(t *testing.T, body []byte) string {
+		t.Helper()
+		var doc struct {
+			P8433 *string `xml:"config>P8433"`
+		}
+		if err := xml.Unmarshal(body, &doc); err != nil {
+			t.Fatalf("grandstream: %v\n%s", err, body)
+		}
+		if doc.P8433 == nil {
+			return ""
+		}
+		return *doc.P8433
+	}
+	for _, withCA := range []bool{true, false} {
+		d := renderSample(false)
+		d.Phone.Vendor, d.Phone.Model = Poly, "VVX 450"
+		want := ""
+		if withCA {
+			d.Prov.CACertPEM, want = caPEM, caPEM
+		}
+		render := func(v Vendor, name string) []byte {
+			t.Helper()
+			b, err := Render(context.Background(), builtinFor(t, v), name, d)
+			if err != nil {
+				t.Fatalf("%s %s: %v", v, name, err)
+			}
+			return b
+		}
+		boot := func(v Vendor) []byte {
+			t.Helper()
+			b, err := renderBody(context.Background(), bootBodies[v].common, RenderData{Phone: d.Phone, Prov: d.Prov})
+			if err != nil {
+				t.Fatalf("%s boot: %v", v, err)
+			}
+			return b
+		}
+		if got := polyCA(t, render(Poly, d.Phone.MAC+"-hello.cfg")); got != want {
+			t.Errorf("poly device (CA %v): customCaCert1 = %q, want %q", withCA, got, want)
+		}
+		if got := polyCA(t, boot(Poly)); got != want {
+			t.Errorf("poly boot (CA %v): customCaCert1 = %q, want %q", withCA, got, want)
+		}
+		d.Phone.Vendor, d.Phone.Model = Grandstream, "GRP2614"
+		if got := gsCA(t, render(Grandstream, "cfg"+d.Phone.MAC+".xml")); got != want {
+			t.Errorf("grandstream device (CA %v): P8433 = %q, want %q", withCA, got, want)
+		}
+		if got := gsCA(t, boot(Grandstream)); got != want {
+			t.Errorf("grandstream boot (CA %v): P8433 = %q, want %q", withCA, got, want)
 		}
 	}
 }

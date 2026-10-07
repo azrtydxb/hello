@@ -39,6 +39,7 @@ func provSettings(cfg config.Control, deployment map[prov.Vendor]redirect.Creden
 	p := store.ProvSettings{
 		SIPServer: cfg.Prov.SIPServer, Domain: cfg.SIPDomain, Expiry: cfg.Prov.RegisterExpiry,
 		Resync: cfg.Prov.Resync, Timezone: cfg.Prov.Timezone, NTP: cfg.Prov.NTP, TokenGrace: cfg.Prov.TokenGrace,
+		CACertFile: cfg.Prov.CACert,
 		Deployment: map[prov.Vendor]bool{},
 	}
 	if cfg.Prov.PublicURL != nil {
@@ -87,7 +88,7 @@ func caFingerprint(path string, log *slog.Logger) string {
 // returns once the listener is bound, or with its error. Nothing starts
 // while provisioning is off (no HELLO_PROV_PUBLIC_URL).
 func startProv(ctx context.Context, cfg config.Control, st *store.Store, objs *api.MinioObjects, vk *api.LazyValkey,
-	deployment map[prov.Vendor]redirect.Credentials, log *slog.Logger) error {
+	deployment map[prov.Vendor]redirect.Credentials, metrics *prov.Metrics, log *slog.Logger) error {
 	if !cfg.Prov.Enabled() {
 		log.Info("phone provisioning disabled (HELLO_PROV_PUBLIC_URL not set)")
 		return nil
@@ -104,8 +105,20 @@ func startProv(ctx context.Context, cfg config.Control, st *store.Store, objs *a
 		}
 		ln = tls.NewListener(ln, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
 	}
+	plog := log.With("component", "prov")
+	limiter := prov.NewLazyLimiter(vk.Client, prov.Limits{
+		IPPerMin: cfg.Prov.RateIPPerMin, DeniedPer10Min: cfg.Prov.RateDeniedPer10Min, PhonePerHour: cfg.Prov.RatePhonePerHour,
+	}, plog)
+	// The fetch audit writes off the request path; it runs (and flushes
+	// what is queued) until shutdown.
+	audit := prov.NewAudit(st, metrics, plog)
+	go audit.Run(ctx)
+	handler := prov.NewHandler(st, limiter, objs, prov.Options{
+		PublicURL: cfg.Prov.PublicURL, TrustedProxies: cfg.Prov.TrustedProxies, BootCIDRs: cfg.Prov.BootCIDRs,
+		CACertFile: cfg.Prov.CACert, Resync: cfg.Prov.Resync, Audit: audit, Metrics: metrics, Log: plog,
+	})
 	srv := &http.Server{
-		Handler:           prov.NewHandler(st, nil, objs, prov.Options{}),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       time.Minute,
 		IdleTimeout:       2 * time.Minute,
@@ -125,7 +138,7 @@ func startProv(ctx context.Context, cfg config.Control, st *store.Store, objs *a
 	}()
 	log.Info("phone provisioning listening", "addr", cfg.Prov.Addr, "tls", cfg.Prov.TLSCert != "")
 	go pruneFetches(ctx, st, vk, cfg.NodeID, cfg.Prov.AuditRetention, log)
-	go runRedirectWorker(ctx, st, vk, cfg.NodeID, deployment, log)
+	go runRedirectWorker(ctx, st, vk, cfg.NodeID, deployment, metrics, log)
 	return nil
 }
 
@@ -166,7 +179,8 @@ func pruneFetches(ctx context.Context, st *store.Store, l lease, node string, re
 // runRedirectWorker runs the redirect worker on the replica holding the
 // redirect lease, stopping it as soon as a renewal fails, so two replicas
 // never work the queue at once.
-func runRedirectWorker(ctx context.Context, st *store.Store, l lease, node string, deployment map[prov.Vendor]redirect.Credentials, log *slog.Logger) {
+func runRedirectWorker(ctx context.Context, st *store.Store, l lease, node string, deployment map[prov.Vendor]redirect.Credentials,
+	metrics *prov.Metrics, log *slog.Logger) {
 	t := time.NewTicker(redirectLeaseTTL / 3)
 	defer t.Stop()
 	// running is the worker's stop function while this replica runs it.
@@ -182,7 +196,7 @@ func runRedirectWorker(ctx context.Context, st *store.Store, l lease, node strin
 		held, err := l.AcquireLease(ctx, redirectLeaseKey, node, redirectLeaseTTL)
 		switch {
 		case held && running == nil:
-			running = startWorker(ctx, st, deployment, log)
+			running = startWorker(ctx, st, deployment, metrics, log)
 			log.Info("redirect worker started (lease held)")
 		case !held && running != nil:
 			stop()
@@ -202,12 +216,14 @@ func runRedirectWorker(ctx context.Context, st *store.Store, l lease, node strin
 
 // startWorker runs the redirect worker until the returned function stops
 // it and waits for it to return.
-func startWorker(ctx context.Context, st *store.Store, deployment map[prov.Vendor]redirect.Credentials, log *slog.Logger) func() {
+func startWorker(ctx context.Context, st *store.Store, deployment map[prov.Vendor]redirect.Credentials, metrics *prov.Metrics, log *slog.Logger) func() {
 	wctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		redirect.NewWorker(st.Redirect(), deployment, log).Run(wctx)
+		w := redirect.NewWorker(st.Redirect(), deployment, log)
+		w.Metrics = metrics
+		w.Run(wctx)
 	}()
 	return func() {
 		cancel()

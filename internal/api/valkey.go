@@ -58,6 +58,14 @@ func (l *LazyValkey) Close() {
 	}
 }
 
+// Client returns the connected client, or nil while it is connecting.
+func (l *LazyValkey) Client() valkey.Client {
+	if c := l.p.Load(); c != nil {
+		return c.c
+	}
+	return nil
+}
+
 func (l *LazyValkey) get() (*lazyClient, error) {
 	if c := l.p.Load(); c != nil {
 		return c, nil

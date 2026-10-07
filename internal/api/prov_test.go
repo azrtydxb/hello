@@ -317,7 +317,8 @@ func TestPhoneTokenRotation(t *testing.T) {
 	c.must(http.StatusBadRequest, "POST", path+"/rotate-token?immediate=maybe", nil)
 
 	// The first HTTPS fetch disarms; re-arm rotates at once and arms.
-	if err := p.st.MarkFetched(ctx, id, prov.FetchState{At: time.Now(), File: "x.cfg"}); err != nil {
+	curHash, _ := hex.DecodeString(p.scalar(`SELECT encode(token_hash, 'hex') FROM phones WHERE id = $1`, id))
+	if err := p.st.MarkFetched(ctx, id, curHash, prov.FetchState{At: time.Now(), File: "x.cfg"}); err != nil {
 		t.Fatal(err)
 	}
 	if g := c.must(http.StatusOK, "GET", path, nil).json(t); g["bootArmed"] != false || g["lastFetchFile"] != "x.cfg" {
@@ -328,6 +329,29 @@ func TestPhoneTokenRotation(t *testing.T) {
 	if re["bootArmed"] != true || p.scalar(`SELECT count(*) FROM phones WHERE id = $1 AND prev_token_hash IS NULL`, id) != "1" ||
 		p.scalar(`SELECT encode(token_hash, 'hex') FROM phones WHERE id = $1`, id) == cur {
 		t.Fatalf("rearm = %v, want armed with a new token and no previous one", re)
+	}
+	// A fetch in flight with the replaced token (matched before the
+	// re-arm) changes nothing: the hand-off stays armed, the old file
+	// stays recorded, and no promote touches the new token.
+	if err := p.st.MarkFetched(ctx, id, curHash, prov.FetchState{At: time.Now(), File: "stale.cfg"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.st.PromoteToken(ctx, id, curHash); err != nil {
+		t.Fatal(err)
+	}
+	if g := c.must(http.StatusOK, "GET", path, nil).json(t); g["bootArmed"] != true || g["lastFetchFile"] != "x.cfg" {
+		t.Fatalf("a stale-token fetch after the re-arm changed the phone: %v", g)
+	}
+	// A rolling rotation, then an overtaken current-token promote: the
+	// grace of the newer rotation survives.
+	c.must(http.StatusOK, "POST", path+"/rotate-token", nil)
+	mid, _ := hex.DecodeString(p.scalar(`SELECT encode(token_hash, 'hex') FROM phones WHERE id = $1`, id))
+	c.must(http.StatusOK, "POST", path+"/rotate-token", nil)
+	if err := p.st.PromoteToken(ctx, id, mid); err != nil {
+		t.Fatal(err)
+	}
+	if p.scalar(`SELECT count(*) FROM phones WHERE id = $1 AND prev_token_hash = decode($2, 'hex')`, id, hex.EncodeToString(mid)) != "1" {
+		t.Fatal("a promote with the replaced token ended the newer rotation's grace")
 	}
 }
 

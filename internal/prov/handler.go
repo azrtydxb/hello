@@ -294,12 +294,13 @@ func (h *handler) serveDevice(w http.ResponseWriter, r *http.Request, ev *event,
 	}
 	etag := etagOf(body)
 	st := FetchState{At: ev.rec.At, IP: ev.rec.IP, UserAgent: ev.rec.UserAgent, File: name, FirmwareSeen: uaFirmware(ua), UAMismatch: ev.rec.UAMismatch}
-	if err := h.s.MarkFetched(ctx, rec.ID, st); err != nil {
+	hash := HashToken(token)
+	if err := h.s.MarkFetched(ctx, rec.ID, hash, st); err != nil {
 		h.outage(w, ev, "mark fetched", err)
 		return
 	}
 	if !rec.ViaPrevious && rec.HasPrevious {
-		if err := h.s.PromoteToken(ctx, rec.ID); err != nil {
+		if err := h.s.PromoteToken(ctx, rec.ID, hash); err != nil {
 			h.opt.Log.Error("provisioning: promote token", "phone", rec.ID, "error", err)
 		}
 	}
@@ -437,9 +438,8 @@ func (h *handler) serveCA(w http.ResponseWriter, r *http.Request, ev *event, nam
 		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
 		return
 	}
-	pemBytes, err := os.ReadFile(h.opt.CACertFile)
-	block, _ := pem.Decode(pemBytes)
-	if err != nil || block == nil || block.Type != "CERTIFICATE" {
+	block, err := ReadCACert(h.opt.CACertFile)
+	if err != nil {
 		h.opt.Log.Error("provisioning: the CA certificate file is unreadable", "file", h.opt.CACertFile, "error", err)
 		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
 		return
@@ -529,7 +529,36 @@ func (h *handler) bootInfo() ProvInfo {
 	if h.opt.PublicURL == nil {
 		return ProvInfo{}
 	}
-	return ProvInfo{URL: BootURL(h.opt.PublicURL), CAURL: CAURL(h.opt.PublicURL), ResyncSeconds: ResyncSeconds("", h.opt.Resync)}
+	return ProvInfo{URL: BootURL(h.opt.PublicURL), CAURL: CAURL(h.opt.PublicURL), ResyncSeconds: ResyncSeconds("", h.opt.Resync),
+		CACertPEM: CACertPEM(h.opt.CACertFile)}
+}
+
+// ReadCACert reads the CA certificate file's first PEM block, which must
+// be a CERTIFICATE.
+func ReadCACert(path string) (*pem.Block, error) {
+	b, err := os.ReadFile(path) //nolint:gosec // G304: the operator's HELLO_PROV_CA_CERT
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(b)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, errors.New("prov: the CA file holds no PEM certificate")
+	}
+	return block, nil
+}
+
+// CACertPEM is ProvInfo.CACertPEM for the CA file at path: read on each
+// call, so a renewed CA reaches the next render without a restart; empty
+// when path is empty or unreadable.
+func CACertPEM(path string) string {
+	if path == "" {
+		return ""
+	}
+	block, err := ReadCACert(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSuffix(string(pem.EncodeToMemory(block)), "\n")
 }
 
 func (h *handler) bootBody(ctx context.Context, w http.ResponseWriter, ev *event, res Result, ctype, body string, p Phone, info ProvInfo) {

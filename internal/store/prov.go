@@ -44,6 +44,9 @@ type ProvSettings struct {
 	Timezone   string
 	NTP        string
 	TokenGrace time.Duration
+	// CACertFile is HELLO_PROV_CA_CERT, read per render into
+	// ProvInfo.CACertPEM.
+	CACertFile string
 	// Deployment lists the vendors whose redirect credentials the
 	// deployment sets (they count as configured whatever is stored).
 	Deployment map[prov.Vendor]bool
@@ -79,6 +82,12 @@ func (p ProvSettings) plainBase() string {
 		return ""
 	}
 	return "http://" + u.Hostname()
+}
+
+// info is the ProvInfo of a phone whose current token is token.
+func (p ProvSettings) info(token, mac string) prov.ProvInfo {
+	return prov.ProvInfo{URL: p.phoneBase(token), CAURL: p.CAURL(), ResyncSeconds: p.resyncSeconds(mac),
+		CACertPEM: prov.CACertPEM(p.CACertFile)}
 }
 
 // CAURL is the plain-HTTP URL of Hello's provisioning CA.

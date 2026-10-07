@@ -160,10 +160,10 @@ func TestRedirectQueueReplace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := q.FinishJob(ctx, old, redirect.Status{State: redirect.StateRegistered, At: time.Now()}); err != nil {
+	if err := q.FinishJob(ctx, old, &redirect.Status{State: redirect.StateRegistered, At: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := q.RetryJob(ctx, old, time.Now().Add(time.Hour), redirect.Status{State: redirect.StateFailed, Reason: "x"}); err != nil {
+	if err := q.RetryJob(ctx, old, time.Now().Add(time.Hour), &redirect.Status{State: redirect.StateFailed, Reason: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	jobs, err = q.DueJobs(ctx, 10)
@@ -177,7 +177,7 @@ func TestRedirectQueueReplace(t *testing.T) {
 	if tg, _ := q.Target(ctx, prov.Snom, "000413000001"); tg.URL != "https://prov.hello.test/p/"+rot.Token+"/{mac}" {
 		t.Fatalf("target after rotation = %s", tg.URL)
 	}
-	if err := q.FinishJob(ctx, jobs[0], redirect.Status{State: redirect.StateRegistered}); err != nil {
+	if err := q.FinishJob(ctx, jobs[0], &redirect.Status{State: redirect.StateRegistered}); err != nil {
 		t.Fatal(err)
 	}
 	var n int
@@ -190,6 +190,62 @@ func TestRedirectQueueReplace(t *testing.T) {
 	}
 	if _, err := q.Target(ctx, prov.Yealink, "000413000001"); !errors.Is(err, prov.ErrNotFound) {
 		t.Fatalf("target of another vendor = %v", err)
+	}
+}
+
+// TestRedirectQueueNilStatusAndDrift fails if a nil status overwrites the
+// phone's status or the retry's last error, or the drift-check time does
+// not round-trip through the settings row.
+func TestRedirectQueueNilStatusAndDrift(t *testing.T) {
+	st, db, ext := provStore(t)
+	ctx := context.Background()
+	q := st.Redirect()
+	if last, err := q.LastDriftCheck(ctx); err != nil || !last.IsZero() {
+		t.Fatalf("last drift check before any = %v, %v; want zero", last, err)
+	}
+	at := time.Date(2026, 10, 7, 3, 4, 5, 0, time.UTC)
+	if err := q.SetLastDriftCheck(ctx, at); err != nil {
+		t.Fatal(err)
+	}
+	if last, err := q.LastDriftCheck(ctx); err != nil || !last.Equal(at) {
+		t.Fatalf("last drift check = %v, %v; want %v", last, err, at)
+	}
+
+	c, err := st.CreatePhone(ctx, "test", PhoneInput{MAC: "000413000002", Vendor: prov.Snom, Model: "D785",
+		ExtensionID: ext, Enabled: true, Realm: "hello.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := q.DueJobs(ctx, 10)
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("due = %+v, %v", jobs, err)
+	}
+	if err := q.RetryJob(ctx, jobs[0], time.Now().Add(-time.Second), &redirect.Status{State: redirect.StatePending, Reason: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.RetryJob(ctx, jobs[0], time.Now().Add(-time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+	var (
+		attempts int
+		lastErr  string
+	)
+	if err := db.QueryRow(`SELECT attempts, COALESCE(last_error, '') FROM prov_redirect_jobs`).Scan(&attempts, &lastErr); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || lastErr != "first" {
+		t.Fatalf("after a nil retry: attempts %d, last error %q; want 2, \"first\"", attempts, lastErr)
+	}
+	if p, _ := st.GetPhone(ctx, c.Phone.ID); p.RedirectStatus.Reason != "first" {
+		t.Fatalf("nil retry changed the status: %+v", p.RedirectStatus)
+	}
+	if err := q.FinishJob(ctx, jobs[0], nil); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	_ = db.QueryRow(`SELECT count(*) FROM prov_redirect_jobs`).Scan(&n)
+	if p, _ := st.GetPhone(ctx, c.Phone.ID); n != 0 || p.RedirectStatus.State != redirect.StatePending || p.RedirectStatus.Reason != "first" {
+		t.Fatalf("jobs %d, status %+v after a nil finish; want 0 and the status unchanged", n, p.RedirectStatus)
 	}
 }
 

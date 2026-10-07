@@ -15,14 +15,6 @@ import (
 	"github.com/azrtydxb/hello/internal/prov"
 )
 
-// OpsTotal is hello_prov_redirect_ops_total{vendor,op,result} (spec S-17):
-// op is register, unregister or lookup (the drift check), result ok or
-// error. hello-control registers it.
-var OpsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Name: "hello_prov_redirect_ops_total",
-	Help: "Vendor redirect-service operations by vendor, operation and result.",
-}, []string{"vendor", "op", "result"})
-
 // Worker timing (spec S-11): back-off doubles from retryBase to an hour,
 // and a job is given up as failed 24 hours after it was first queued.
 const (
@@ -37,6 +29,12 @@ const (
 // Worker works the prov_redirect_jobs queue and runs the daily drift
 // check. hello-control runs it only while it holds the redirect lease.
 type Worker struct {
+	// Metrics counts hello_prov_redirect_ops_total (spec S-17): op is
+	// register, unregister or lookup (the drift check), result ok or
+	// error. NewWorker sets an unregistered set; hello-control replaces it
+	// with the registered one before Run.
+	Metrics *prov.Metrics
+
 	store      Store
 	deployment map[prov.Vendor]Credentials
 	log        *slog.Logger
@@ -59,11 +57,15 @@ type cachedClient struct {
 // deployment sets (Deployment), which win over stored ones.
 func NewWorker(s Store, deployment map[prov.Vendor]Credentials, log *slog.Logger) *Worker {
 	return &Worker{
-		store: s, deployment: deployment, log: log,
+		Metrics: prov.NewMetrics(prometheus.NewRegistry()),
+		store:   s, deployment: deployment, log: log,
 		hc: &http.Client{Timeout: 30 * time.Second}, now: time.Now,
 		poll: pollEvery, driftEvery: driftEvery, clients: map[prov.Vendor]cachedClient{},
 	}
 }
+
+// op counts one redirect-service operation.
+func (w *Worker) op(v prov.Vendor, op, result string) { w.Metrics.RedirectOp(v, op, result) }
 
 // Run processes due jobs every few seconds and runs the drift check when
 // the last one (kept by the store) is a day old, at start included, so a
@@ -162,7 +164,7 @@ func (w *Worker) process(ctx context.Context, j Job) {
 			return
 		}
 		if c.Capabilities().NeedsSerial && strings.TrimSpace(t.Serial) == "" {
-			OpsTotal.WithLabelValues(string(j.Vendor), string(j.Op), "error").Inc()
+			w.op(j.Vendor, string(j.Op), "error")
 			w.finish(ctx, j, Status{State: StateFailed, Reason: "the vendor needs the phone's serial number", At: now})
 			return
 		}
@@ -170,7 +172,7 @@ func (w *Worker) process(ctx context.Context, j Job) {
 		if errors.Is(err, ErrRejected) {
 			// Retrying cannot fix it: failed at once with the vendor's message.
 			reason := redactURL(err.Error(), t.URL)
-			OpsTotal.WithLabelValues(string(j.Vendor), string(j.Op), "error").Inc()
+			w.op(j.Vendor, string(j.Op), "error")
 			w.log.Warn("redirect: operation rejected", "vendor", j.Vendor, "op", j.Op, "mac", j.MAC, "err", reason)
 			w.finish(ctx, j, Status{State: StateFailed, Reason: reason, At: now})
 			return
@@ -179,14 +181,14 @@ func (w *Worker) process(ctx context.Context, j Job) {
 			w.failed(ctx, j, redactURL(err.Error(), t.URL))
 			return
 		}
-		OpsTotal.WithLabelValues(string(j.Vendor), string(j.Op), "ok").Inc()
+		w.op(j.Vendor, string(j.Op), "ok")
 		w.finish(ctx, j, Status{State: StateRegistered, At: now})
 	case OpUnregister:
 		if err := c.Unregister(ctx, j.MAC); err != nil {
 			w.failed(ctx, j, err.Error())
 			return
 		}
-		OpsTotal.WithLabelValues(string(j.Vendor), string(j.Op), "ok").Inc()
+		w.op(j.Vendor, string(j.Op), "ok")
 		w.drop(ctx, j)
 	default:
 		w.log.Error("redirect: unknown job operation", "vendor", j.Vendor, "op", j.Op)
@@ -197,7 +199,7 @@ func (w *Worker) process(ctx context.Context, j Job) {
 // failed retries j with exponential back-off, or gives up as failed once
 // it has been queued for 24 hours.
 func (w *Worker) failed(ctx context.Context, j Job, reason string) {
-	OpsTotal.WithLabelValues(string(j.Vendor), string(j.Op), "error").Inc()
+	w.op(j.Vendor, string(j.Op), "error")
 	now := w.now()
 	w.log.Warn("redirect: operation failed", "vendor", j.Vendor, "op", j.Op, "mac", j.MAC, "attempt", j.Attempts+1, "err", reason)
 	if now.Sub(j.FirstQueuedAt) >= giveUp {
@@ -323,11 +325,11 @@ func (w *Worker) reconcile(ctx context.Context) {
 				break
 			}
 			if err != nil {
-				OpsTotal.WithLabelValues(string(v), "lookup", "error").Inc()
+				w.op(v, "lookup", "error")
 				w.log.Warn("redirect: drift check failed", "vendor", v, "mac", t.MAC, "err", redactURL(err.Error(), t.URL))
 				continue
 			}
-			OpsTotal.WithLabelValues(string(v), "lookup", "ok").Inc()
+			w.op(v, "lookup", "ok")
 			if found && u == t.URL {
 				continue
 			}

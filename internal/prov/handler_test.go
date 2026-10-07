@@ -215,6 +215,43 @@ func TestCACertificate(t *testing.T) {
 	expectEmpty(t, none, none.do(req{path: "/p/ca.crt"}), 404, ResultNotFound)
 }
 
+// TestFetchRaceWithRearmAndRotation fails if a fetch that matched a token
+// before a concurrent re-arm still records the fetch and disarms the
+// re-armed hand-off, or if a fetch with the current token that a rotation
+// overtakes still ends the new rotation's grace (MarkFetched and
+// PromoteToken are compare-and-set on the matched hash).
+func TestFetchRaceWithRearmAndRotation(t *testing.T) {
+	e := newEnv(t)
+	p, t0 := e.s.addPhone(Yealink, "T54W", macA)
+	file := macA + ".cfg"
+
+	// A re-arm lands between PhoneByToken and MarkFetched.
+	e.s.beforeMark = func() { e.s.rotate(p.id, true, true) }
+	if w := e.do(req{path: devPath(t0, file)}); w.Code != 200 {
+		t.Fatalf("fetch: %d", w.Code)
+	}
+	e.s.beforeMark = nil
+	if ph := e.s.phone(p.id); !ph.armed || ph.fetched != 0 || !ph.firstFetch.IsZero() {
+		t.Fatalf("the stale fetch changed the re-armed phone: armed %v, fetched %d, first %v", ph.armed, ph.fetched, ph.firstFetch)
+	}
+
+	// A rolling rotation lands between the current-token fetch's match
+	// and its promote: the new previous token keeps its grace.
+	t1 := e.s.rotate(p.id, false, false)
+	var t2 string
+	e.s.beforeMark = func() { t2 = e.s.rotate(p.id, false, false) }
+	if w := e.do(req{path: devPath(t1, file)}); w.Code != 200 {
+		t.Fatalf("fetch: %d", w.Code)
+	}
+	e.s.beforeMark = nil
+	if toks := e.s.phone(p.id).tokens; !bytes.Equal(toks.Hash, HashToken(t2)) || !bytes.Equal(toks.PrevHash, HashToken(t1)) {
+		t.Fatalf("the overtaken fetch promoted: %+v", toks)
+	}
+	if w := e.do(req{path: devPath(t1, file)}); w.Code != 200 {
+		t.Fatal("the previous token lost its grace to an overtaken fetch")
+	}
+}
+
 // TestTokenRollingRotation fails if the previous token stops working
 // before the phone's first fetch with the new token or the grace period,
 // if a previous-token fetch does not render the new provisioning URL, if
