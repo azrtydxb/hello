@@ -106,15 +106,15 @@ export async function listCallRecordings(
 }
 
 /**
- * GET /api/v1/recordings/{id}/audio?download=1: the presigned URL carries
- * an attachment disposition, so following it saves recording-<id>.wav.
+ * GET /api/v1/recordings/{id}/audio?download=1: the audio with an attachment
+ * disposition, so following it saves recording-<id>.wav.
  */
 export const recordingDownloadPath = (recordingId: Id) =>
   `${recordingAudioPath(recordingId)}?download=1`;
 
 // --- announcements ------------------------------------------------------------
 
-/** GET /api/v1/announcements/{id}/audio: 302 to a presigned URL. */
+/** GET /api/v1/announcements/{id}/audio: the audio, streamed. */
 export const announcementAudioPath = (announcementId: Id) =>
   `/api/v1/announcements/${seg(announcementId)}/audio`;
 

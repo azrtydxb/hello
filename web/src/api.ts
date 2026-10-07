@@ -867,27 +867,19 @@ export const deleteVoicemailMessage = (messageId: Id) =>
   request<void>("DELETE", `/api/v1/voicemail/messages/${id(messageId)}`);
 
 /**
- * GET /api/v1/voicemail/messages/{id}/audio: answers 302 with a presigned
- * MinIO URL. Played by pointing an <audio> element at this path, so the
- * browser follows the redirect itself; `isPlayableAudio` gates it.
+ * GET /api/v1/voicemail/messages/{id}/audio: the audio, streamed by
+ * hello-control (Range supported). Played by pointing an <audio> element at
+ * this path; `isPlayableAudio` gates it.
  */
 export const voicemailAudioPath = (messageId: Id) =>
   `/api/v1/voicemail/messages/${id(messageId)}/audio`;
 
 /**
  * Whether GET audio answered with something an <audio> element can play: the
- * 302 to the presigned URL (seen as an opaque redirect through fetch), a
- * 3xx redirect status, or the audio streamed directly.
+ * audio itself (200, or 206 for the gate's one-byte Range probe).
  */
 export function isPlayableAudio(res: Response): boolean {
-  return (
-    res.type === "opaqueredirect" ||
-    res.ok ||
-    res.status === 302 ||
-    res.status === 303 ||
-    res.status === 307 ||
-    res.status === 308
-  );
+  return res.ok;
 }
 
 /** GET /api/v1/extensions/{id}/voicemail. */
@@ -1104,9 +1096,9 @@ export async function listRecordings(
 }
 
 /**
- * GET /api/v1/recordings/{id}/audio: answers 302 with a presigned MinIO URL.
- * Played by pointing an <audio> element at this path, so the browser follows
- * the redirect itself; `isPlayableAudio` gates it, like voicemail.
+ * GET /api/v1/recordings/{id}/audio: the audio, streamed by hello-control.
+ * Played by pointing an <audio> element at this path; `isPlayableAudio`
+ * gates it, like voicemail.
  */
 export const recordingAudioPath = (recordingId: Id) =>
   `/api/v1/recordings/${id(recordingId)}/audio`;

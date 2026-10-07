@@ -2,14 +2,14 @@ package api
 
 // The MinIO object store behind audio (spec contracts 4 and 6): bucket
 // hello-voicemail for voicemail audio, hello-recordings and
-// hello-announcements for the Phase 5 media, presigned GET URLs for playback
-// and uploads from hello-control.
+// hello-announcements for the Phase 5 media. Playback streams through
+// hello-control (OpenAudio): the store's endpoint is cluster-internal, so a
+// browser cannot follow a presigned URL to it.
 
 import (
 	"context"
 	"fmt"
 	"io"
-	"net/url"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -23,15 +23,22 @@ const (
 	AnnouncementsBucket = "hello-announcements"
 )
 
-// presignTTL is how long a playback URL stays valid (spec contract 6).
-const presignTTL = 15 * time.Minute
+// AudioObject is an opened object, ready to stream: Body seeks, so the
+// handler can answer Range requests from it.
+type AudioObject struct {
+	Body        io.ReadSeekCloser
+	Size        int64
+	ContentType string
+	ModTime     time.Time
+}
 
 // Objects is the audio store the API and mailer need. It is the seam that
 // keeps MinIO out of internal/store and the mailer: a fake in tests, MinIO in
 // main.
 type Objects interface {
-	// Presign returns a GET URL for a voicemail object, valid 15 minutes.
-	Presign(ctx context.Context, object string) (string, error)
+	// OpenAudio opens an object of bucket for streaming playback. The caller
+	// closes Body.
+	OpenAudio(ctx context.Context, bucket, object string) (*AudioObject, error)
 	// Put uploads r (size known) as a voicemail object.
 	Put(ctx context.Context, object string, r io.Reader, size int64) error
 	// Get returns a voicemail object's bytes (mailer attachments).
@@ -41,19 +48,12 @@ type Objects interface {
 	// EnsureBucket creates hello-voicemail when it is missing.
 	EnsureBucket(ctx context.Context) error
 
-	// PresignRecording returns a GET URL for a recording, valid 15 minutes.
-	// A non-empty download names the file the browser saves it as
-	// (Content-Disposition: attachment); empty plays it inline.
-	PresignRecording(ctx context.Context, object, download string) (string, error)
 	// PutRecording uploads r (size known) as recording audio.
 	PutRecording(ctx context.Context, object string, r io.Reader, size int64) error
 	// RemoveRecording deletes a recording object.
 	RemoveRecording(ctx context.Context, object string) error
 	// PutAnnouncement uploads r (size known) as announcement audio.
 	PutAnnouncement(ctx context.Context, object string, r io.Reader, size int64) error
-	// PresignAnnouncement returns a GET URL for announcement audio, valid 15
-	// minutes.
-	PresignAnnouncement(ctx context.Context, object string) (string, error)
 	// RemoveAnnouncement deletes announcement audio.
 	RemoveAnnouncement(ctx context.Context, object string) error
 	// EnsureMediaBuckets creates hello-recordings and hello-announcements when
@@ -76,12 +76,19 @@ func NewMinioObjects(endpoint, accessKey, secretKey string, secure bool) (*Minio
 	return &MinioObjects{cli: cli}, err
 }
 
-func (m *MinioObjects) Presign(ctx context.Context, object string) (string, error) {
-	u, err := m.cli.PresignedGetObject(ctx, VoicemailBucket, object, presignTTL, nil)
+func (m *MinioObjects) OpenAudio(ctx context.Context, bucket, object string) (*AudioObject, error) {
+	obj, err := m.cli.GetObject(ctx, bucket, object, minio.GetObjectOptions{})
 	if err != nil {
-		return "", fmt.Errorf("api: presign %s: %w", object, err)
+		return nil, fmt.Errorf("api: open %s/%s: %w", bucket, object, err)
 	}
-	return u.String(), nil
+	// GetObject is lazy; Stat surfaces an absent object before any byte is
+	// written.
+	info, err := obj.Stat()
+	if err != nil {
+		_ = obj.Close()
+		return nil, fmt.Errorf("api: stat %s/%s: %w", bucket, object, err)
+	}
+	return &AudioObject{Body: obj, Size: info.Size, ContentType: info.ContentType, ModTime: info.LastModified}, nil
 }
 
 func (m *MinioObjects) Put(ctx context.Context, object string, r io.Reader, size int64) error {
@@ -118,18 +125,6 @@ func (m *MinioObjects) EnsureBucket(ctx context.Context) error {
 	return m.ensure(ctx, VoicemailBucket)
 }
 
-func (m *MinioObjects) PresignRecording(ctx context.Context, object, download string) (string, error) {
-	var params url.Values
-	if download != "" {
-		params = url.Values{"response-content-disposition": {fmt.Sprintf("attachment; filename=%q", download)}}
-	}
-	u, err := m.cli.PresignedGetObject(ctx, RecordingsBucket, object, presignTTL, params)
-	if err != nil {
-		return "", fmt.Errorf("api: presign recording %s: %w", object, err)
-	}
-	return u.String(), nil
-}
-
 func (m *MinioObjects) PutRecording(ctx context.Context, object string, r io.Reader, size int64) error {
 	_, err := m.cli.PutObject(ctx, RecordingsBucket, object, r, size, minio.PutObjectOptions{ContentType: "audio/wav"})
 	if err != nil {
@@ -151,14 +146,6 @@ func (m *MinioObjects) PutAnnouncement(ctx context.Context, object string, r io.
 		return fmt.Errorf("api: put announcement %s: %w", object, err)
 	}
 	return nil
-}
-
-func (m *MinioObjects) PresignAnnouncement(ctx context.Context, object string) (string, error) {
-	u, err := m.cli.PresignedGetObject(ctx, AnnouncementsBucket, object, presignTTL, nil)
-	if err != nil {
-		return "", fmt.Errorf("api: presign announcement %s: %w", object, err)
-	}
-	return u.String(), nil
 }
 
 func (m *MinioObjects) RemoveAnnouncement(ctx context.Context, object string) error {

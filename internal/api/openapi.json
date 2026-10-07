@@ -1887,8 +1887,30 @@
           }
         ],
         "responses": {
-          "302": {
-            "description": "Redirect to a presigned object-store URL, valid 15 minutes"
+          "200": {
+            "description": "The audio, streamed through hello-control with Content-Length, Accept-Ranges: bytes and Cache-Control: private",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested byte range of the audio (Range request)",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The object store failed"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -1903,7 +1925,7 @@
             "$ref": "#/components/responses/Internal"
           }
         },
-        "description": "302 to a presigned GET URL (15 minutes) for the message audio; the client follows it. The message must exist before anything is presigned: a missing message is 404."
+        "description": "The message audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. The message must exist before the store is touched: a missing message is 404."
       }
     },
     "/api/v1/voicemail/messages/{id}": {
@@ -2007,12 +2029,34 @@
             "in": "query",
             "required": false,
             "schema": { "type": "string", "enum": ["true", "false", "1", "0"] },
-            "description": "true or 1 presigns the audio as an attachment named recording-<id>.wav, so the browser saves it instead of playing it."
+            "description": "true or 1 sends the audio as an attachment named recording-<id>.wav (Content-Disposition), so the browser saves it instead of playing it."
           }
         ],
         "responses": {
-          "302": {
-            "description": "Redirect to a presigned object-store URL, valid 15 minutes"
+          "200": {
+            "description": "The audio, streamed through hello-control with Content-Length, Accept-Ranges: bytes and Cache-Control: private",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested byte range of the audio (Range request)",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The object store failed"
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "404": { "$ref": "#/components/responses/NotFound" },
@@ -2020,7 +2064,7 @@
           "503": { "$ref": "#/components/responses/Unavailable" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
-        "description": "302 to a presigned GET URL (15 minutes) for the recording audio; the client follows it. The recording must exist before anything is presigned: a missing recording is 404."
+        "description": "The recording audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. The recording must exist before the store is touched: a missing recording is 404."
       }
     },
     "/api/v1/announcements": {
@@ -2153,15 +2197,37 @@
         "tags": ["media"],
         "parameters": [{ "$ref": "#/components/parameters/id" }],
         "responses": {
-          "302": {
-            "description": "Redirect to a presigned object-store URL, valid 15 minutes"
+          "200": {
+            "description": "The audio, streamed through hello-control with Content-Length, Accept-Ranges: bytes and Cache-Control: private",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested byte range of the audio (Range request)",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The object store failed"
           },
           "404": { "$ref": "#/components/responses/NotFound" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "503": { "$ref": "#/components/responses/Unavailable" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
-        "description": "302 to a presigned GET URL (15 minutes) for the announcement audio; the client follows it. A missing announcement is 404."
+        "description": "The announcement audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. A missing announcement is 404."
       }
     },
     "/api/v1/ring-groups": {
