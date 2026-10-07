@@ -214,7 +214,7 @@ Hello can only be operated by a person in the console or by a script holding a u
 
 ## Acceptance criteria
 
-- [ ] [S-1] `TestRoutesMatchOpenAPI` in `internal/api` passes. It fails if a route in the table has no operation, an operation has no route, or a route's scope differs from the operation's `x-hello-scope`.
+- [ ] [S-1] `TestRoutesMatchOpenAPI` in `internal/api` passes. It fails if a route in the table has no operation, an operation has no route, or a route's scope or minimum role differs from the operation's `x-hello-scope` or `x-hello-role`.
 - [ ] [S-2] [S-3] `TestOpenAPIConformance` in `internal/api` passes over the whole package suite. It fails if any response has an undocumented status or a body that does not validate, any request body the suite sends does not validate or reaches an operation without a `requestBody`, or a documented status (outside `401`, `500`, `503` and the commented exemptions) is never observed — including `422` on preview, `502` on each listed MinIO-backed operation, both voicemail PUT body forms and the heard body.
 - [ ] [S-4] `TestOpenAPIForTools` in `internal/api` passes. It fails if an operation lacks a summary, a description of at least one sentence, a description on any parameter or top-level body property, `x-hello-scope`, or `x-hello-mcp`, or if a response property carrying a show-once secret lacks `x-hello-secret`.
 - [ ] [S-5] `TestScopeEnforcement` in `internal/api` passes. For every operation it fails if a token whose scopes are just below the operation's is admitted, if the operation's own scope (or a higher one) is refused, if the `403` lacks the `insufficient_scope` challenge, if a bearer token can call a `session` operation, or if a session or legacy token is refused anything.
