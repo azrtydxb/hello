@@ -376,3 +376,60 @@ func TestLoadMediaAnchorHost(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadAIDefaults fails if OAuth and MCP are on without HELLO_PUBLIC_URL
+// or a default lifetime or switch differs from the spec's.
+func TestLoadAIDefaults(t *testing.T) {
+	c, err := LoadControl(env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := c.AI
+	if a.Enabled() || a.AccessTTL != time.Hour || a.RefreshIdle != 30*24*time.Hour || a.RefreshMax != 90*24*time.Hour ||
+		a.DCR || a.CIMDAllowPrivate || a.MCPAllowedOrigins != nil {
+		t.Fatalf("defaults = %+v", a)
+	}
+}
+
+// TestLoadAISet fails if a valid AI configuration is not read as given.
+func TestLoadAISet(t *testing.T) {
+	c, err := LoadControl(env(map[string]string{
+		"HELLO_PUBLIC_URL": "https://hello.kw.watteel.lab/", "HELLO_OAUTH_ACCESS_TTL": "15m",
+		"HELLO_OAUTH_REFRESH_TTL": "7d", "HELLO_OAUTH_REFRESH_MAX": "30d", "HELLO_OAUTH_DCR": "true",
+		"HELLO_OAUTH_CIMD_ALLOW_PRIVATE": "true", "HELLO_MCP_ALLOWED_ORIGINS": "https://a.example, http://localhost:5173",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := c.AI
+	if a.PublicURL != "https://hello.kw.watteel.lab" || a.AccessTTL != 15*time.Minute || a.RefreshIdle != 7*24*time.Hour ||
+		a.RefreshMax != 30*24*time.Hour || !a.DCR || !a.CIMDAllowPrivate ||
+		strings.Join(a.MCPAllowedOrigins, " ") != "https://a.example http://localhost:5173" {
+		t.Fatalf("AI = %+v", a)
+	}
+	if c, err := LoadControl(env(map[string]string{"HELLO_PUBLIC_URL": "http://localhost:8081"})); err != nil || c.AI.PublicURL != "http://localhost:8081" {
+		t.Fatalf("localhost public URL = %q, %v", c.AI.PublicURL, err)
+	}
+}
+
+// TestLoadAIRejects fails if a public URL that is not https scheme and
+// host, a non-positive or inverted lifetime, a junk switch or a junk origin
+// is accepted.
+func TestLoadAIRejects(t *testing.T) {
+	for key, vals := range map[string][]string{
+		"HELLO_PUBLIC_URL":               {"http://hello.example", "https://hello.example/app", "hello.example", "https://u:p@hello.example", "https://hello.example?x=1"},
+		"HELLO_OAUTH_ACCESS_TTL":         {"0s", "-1h", "soon"},
+		"HELLO_OAUTH_REFRESH_TTL":        {"0d", "91d", "x"},
+		"HELLO_OAUTH_REFRESH_MAX":        {"0s", "1d"},
+		"HELLO_OAUTH_DCR":                {"yes", "1"},
+		"HELLO_OAUTH_CIMD_ALLOW_PRIVATE": {"on"},
+		"HELLO_MCP_ALLOWED_ORIGINS":      {"https://a.example/path", "a.example", "https://a.example,,https://b.example"},
+	} {
+		for _, v := range vals {
+			_, err := LoadControl(env(map[string]string{key: v}))
+			if err == nil || !strings.Contains(err.Error(), "HELLO_") {
+				t.Errorf("%s=%q accepted: %v", key, v, err)
+			}
+		}
+	}
+}

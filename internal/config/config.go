@@ -74,7 +74,30 @@ type Control struct {
 	SecretKey string
 	// Prov is the phone provisioning listener (HELLO_PROV_*).
 	Prov Prov
+	// AI is external AI access: OAuth and MCP (spec ai-external-access).
+	AI AI
 }
+
+// AI is the OAuth authorization server and MCP server configuration. An
+// empty PublicURL disables both.
+type AI struct {
+	// PublicURL is HELLO_PUBLIC_URL, scheme and host only, no trailing
+	// slash: the issuer and the base of the resource identifiers.
+	PublicURL string
+	// AccessTTL (HELLO_OAUTH_ACCESS_TTL), RefreshIdle
+	// (HELLO_OAUTH_REFRESH_TTL) and RefreshMax (HELLO_OAUTH_REFRESH_MAX).
+	AccessTTL, RefreshIdle, RefreshMax time.Duration
+	// DCR (HELLO_OAUTH_DCR) enables dynamic client registration;
+	// CIMDAllowPrivate (HELLO_OAUTH_CIMD_ALLOW_PRIVATE) lets client ID
+	// metadata documents come from private addresses.
+	DCR, CIMDAllowPrivate bool
+	// MCPAllowedOrigins (HELLO_MCP_ALLOWED_ORIGINS) are browser origins
+	// trusted on /mcp besides PublicURL's.
+	MCPAllowedOrigins []string
+}
+
+// Enabled reports whether OAuth and MCP are served.
+func (a AI) Enabled() bool { return a.PublicURL != "" }
 
 // Prov is hello-control's phone provisioning configuration (spec
 // phone-auto-provisioning-service, Interfaces). The listener is enabled
@@ -265,7 +288,78 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
 	c.Prov = r.prov()
+	c.AI = r.ai()
 	return c, r.err()
+}
+
+// ai reads HELLO_PUBLIC_URL, HELLO_OAUTH_* and HELLO_MCP_ALLOWED_ORIGINS.
+func (r *reader) ai() AI {
+	a := AI{
+		AccessTTL:         r.duration("HELLO_OAUTH_ACCESS_TTL", time.Hour),
+		RefreshIdle:       r.days("HELLO_OAUTH_REFRESH_TTL", 30*24*time.Hour),
+		RefreshMax:        r.days("HELLO_OAUTH_REFRESH_MAX", 90*24*time.Hour),
+		DCR:               r.boolean("HELLO_OAUTH_DCR"),
+		CIMDAllowPrivate:  r.boolean("HELLO_OAUTH_CIMD_ALLOW_PRIVATE"),
+		MCPAllowedOrigins: r.origins("HELLO_MCP_ALLOWED_ORIGINS"),
+	}
+	if v := r.getenv("HELLO_PUBLIC_URL"); v != "" {
+		if o, ok := origin(v); ok && (o.Scheme == "https" || o.Hostname() == "localhost") {
+			a.PublicURL = o.String()
+		} else {
+			r.fail("HELLO_PUBLIC_URL", errors.New("must be https:// with a host and nothing else (http://localhost is accepted for tests)"))
+		}
+	}
+	for key, d := range map[string]time.Duration{"HELLO_OAUTH_ACCESS_TTL": a.AccessTTL, "HELLO_OAUTH_REFRESH_TTL": a.RefreshIdle, "HELLO_OAUTH_REFRESH_MAX": a.RefreshMax} {
+		if d <= 0 {
+			r.fail(key, errors.New("must be positive"))
+		}
+	}
+	if a.RefreshIdle > a.RefreshMax {
+		r.fail("HELLO_OAUTH_REFRESH_TTL", errors.New("must not exceed HELLO_OAUTH_REFRESH_MAX"))
+	}
+	return a
+}
+
+// origin parses v as a bare origin: http or https, a host, and no path,
+// query, fragment or credentials. It returns it without a trailing slash.
+func origin(v string) (*url.URL, bool) {
+	u, err := url.Parse(v)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" ||
+		u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return nil, false
+	}
+	u.Path = ""
+	return u, true
+}
+
+// origins reads a comma-separated list of origins.
+func (r *reader) origins(key string) []string {
+	v := r.getenv(key)
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, s := range strings.Split(v, ",") {
+		o, ok := origin(strings.TrimSpace(s))
+		if !ok {
+			r.fail(key, errors.New("each entry must be an origin such as https://app.example.com"))
+			continue
+		}
+		out = append(out, o.String())
+	}
+	return out
+}
+
+// boolean reads "true" or "false"; empty is false.
+func (r *reader) boolean(key string) bool {
+	switch r.getenv(key) {
+	case "", "false":
+		return false
+	case "true":
+		return true
+	}
+	r.fail(key, errors.New("must be true or false"))
+	return false
 }
 
 // ntpRe is the shape of an NTP server name or address.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -18,14 +19,30 @@ type Actor struct {
 	UserID   int64
 	Username string
 	// TokenID is the API token that authenticated the request, or 0 for a
-	// session.
+	// session or an OAuth credential.
 	TokenID int64
+	// Role is the owning user's current role, or the service account's.
+	Role Role
+	// Kind is how the actor authenticated.
+	Kind Kind
+	// Scopes are what the credential carries: AllScopes for legacy tokens,
+	// AllScopes plus ScopeSession for sessions.
+	Scopes Scopes
+	// ClientID is the OAuth client of an OAuth or service credential.
+	ClientID string
+	// Audience is the resources an OAuth access token is bound to.
+	Audience []string
+	// ServiceName is the service account's name for KindService.
+	ServiceName string
 }
 
-// String is the audit form of the actor: "user:<username>" for a session,
-// "token:<id>" for an API token.
+// String is the audit form of the actor: "service:<name>" for a service
+// account, "token:<id>" for an API token, "user:<username>" otherwise.
 func (a Actor) String() string {
-	if a.TokenID != 0 {
+	switch {
+	case a.Kind == KindService:
+		return "service:" + a.ServiceName
+	case a.TokenID != 0:
 		return "token:" + strconv.FormatInt(a.TokenID, 10)
 	}
 	return "user:" + a.Username
@@ -36,7 +53,9 @@ func (a Actor) String() string {
 type Lookup interface {
 	// SessionActor resolves an unexpired session.
 	SessionActor(ctx context.Context, hash []byte) (Actor, error)
-	// TokenActor resolves an API token and records its use.
+	// TokenActor resolves any bearer credential and records its use: the
+	// prefix decides the kind (PrefixPersonal, PrefixAccess, ...), an
+	// unprefixed token is a legacy API token.
 	TokenActor(ctx context.Context, hash []byte) (Actor, error)
 }
 
@@ -53,11 +72,23 @@ func ActorFrom(ctx context.Context) (Actor, bool) {
 	return a, ok
 }
 
-// Middleware admits a request carrying a valid bearer token or session
-// cookie, with the actor in its context, and answers 401 otherwise. When an
-// Authorization header is present it alone decides; the cookie is not
-// consulted.
-func Middleware(l Lookup, log *slog.Logger) func(http.Handler) http.Handler {
+// Options configure Middleware.
+type Options struct {
+	// Resource is the resource identifier this middleware guards (the
+	// /api/v1 or /mcp URL under HELLO_PUBLIC_URL); empty without it.
+	Resource string
+	// MetadataURL is the protected resource metadata URL that 401 and 403
+	// challenges point to; empty without HELLO_PUBLIC_URL.
+	MetadataURL string
+	// Cookies admits the session cookie; /mcp takes bearer tokens only.
+	Cookies bool
+}
+
+// Middleware admits a request carrying a valid bearer token or (with
+// o.Cookies) session cookie, with the actor in its context, and answers 401
+// otherwise. When an Authorization header is present it alone decides; the
+// cookie is not consulted.
+func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var (
@@ -72,6 +103,14 @@ func Middleware(l Lookup, log *slog.Logger) func(http.Handler) http.Handler {
 					break
 				}
 				a, err = l.TokenActor(r.Context(), HashToken(tok))
+				if a.Kind == "" {
+					a.Kind = KindLegacyToken
+				}
+				if a.Kind == KindLegacyToken && a.Scopes == nil {
+					a.Scopes = slices.Clone(AllScopes)
+				}
+			case !o.Cookies:
+				err = ErrNoCredentials
 			default:
 				c, cerr := r.Cookie(SessionCookie)
 				if cerr != nil || c.Value == "" {
@@ -79,6 +118,8 @@ func Middleware(l Lookup, log *slog.Logger) func(http.Handler) http.Handler {
 					break
 				}
 				a, err = l.SessionActor(r.Context(), HashToken(c.Value))
+				a.Kind = KindSession
+				a.Scopes = append(slices.Clone(AllScopes), ScopeSession)
 			}
 			switch {
 			case errors.Is(err, ErrNoCredentials):
@@ -92,6 +133,18 @@ func Middleware(l Lookup, log *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), a)))
 		})
 	}
+}
+
+// Require admits a request whose actor has at least role minRole and holds
+// scope s, answering 403 forbidden_role or 403 insufficient_scope otherwise.
+// It runs inside Middleware.
+//
+// Contract only: enforcement lands with the authorization server (plan
+// ai-external-access, Task 3); until then it admits every request, so
+// sessions and API tokens behave exactly as before.
+func Require(minRole Role, s Scope) func(http.Handler) http.Handler {
+	_, _ = minRole, s
+	return func(next http.Handler) http.Handler { return next }
 }
 
 // WriteError writes the API's error envelope.

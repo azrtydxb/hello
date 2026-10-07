@@ -167,139 +167,15 @@ func Handler(c Config) http.Handler {
 		c.Router = engineRouter{}
 	}
 	s := &server{c}
-	authed := auth.Middleware(c.Store, c.Log)
+	authed := auth.Middleware(c.Store, auth.Options{Cookies: true}, c.Log)
 	mux := http.NewServeMux()
-	public := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, h) }
-	private := func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, authed(h)) }
-
-	public("GET /api/v1/version", s.version)
-	public("GET /api/v1/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(openAPI)
-	})
-	public("POST /api/v1/auth/login", s.login)
-	private("POST /api/v1/auth/logout", s.logout)
-	private("GET /api/v1/auth/me", s.me)
-
-	private("GET /api/v1/tokens", s.listTokens)
-	private("POST /api/v1/tokens", s.createToken)
-	private("DELETE /api/v1/tokens/{id}", s.deleteToken)
-
-	private("GET /api/v1/extensions", s.listExtensions)
-	private("POST /api/v1/extensions", s.createExtension)
-	private("GET /api/v1/extensions/{id}", s.getExtension)
-	private("PATCH /api/v1/extensions/{id}", s.updateExtension)
-	private("DELETE /api/v1/extensions/{id}", s.deleteExtension)
-
-	private("GET /api/v1/devices", s.listDevices)
-	private("POST /api/v1/devices", s.createDevice)
-	private("GET /api/v1/devices/{id}", s.getDevice)
-	private("PATCH /api/v1/devices/{id}", s.updateDevice)
-	private("DELETE /api/v1/devices/{id}", s.deleteDevice)
-	private("POST /api/v1/devices/{id}/rotate-secret", s.rotateSecret)
-
-	private("GET /api/v1/extensions/{id}/voicemail", s.getVoicemailBox)
-	private("PUT /api/v1/extensions/{id}/voicemail", s.putVoicemailBox)
-
-	private("GET /api/v1/voicemail/boxes", s.listVoicemailBoxes)
-	private("GET /api/v1/voicemail/messages", s.listVoicemailMessages)
-	private("POST /api/v1/voicemail/messages/{id}/heard", s.markMessageHeard)
-	private("DELETE /api/v1/voicemail/messages/{id}", s.deleteMessage)
-	private("GET /api/v1/voicemail/messages/{id}/audio", s.messageAudio)
-
-	private("GET /api/v1/recordings", s.listRecordings)
-	private("DELETE /api/v1/recordings/{id}", s.deleteRecording)
-	private("GET /api/v1/recordings/{id}/audio", s.recordingAudio)
-
-	private("GET /api/v1/announcements", s.listAnnouncements)
-	private("POST /api/v1/announcements", s.createAnnouncement)
-	private("PUT /api/v1/announcements/{id}", s.replaceAnnouncement)
-	private("DELETE /api/v1/announcements/{id}", s.deleteAnnouncement)
-	private("GET /api/v1/announcements/{id}/audio", s.announcementAudio)
-
-	private("GET /api/v1/ring-groups", s.listRingGroups)
-	private("POST /api/v1/ring-groups", s.createRingGroup)
-	private("GET /api/v1/ring-groups/{id}", s.getRingGroup)
-	private("PATCH /api/v1/ring-groups/{id}", s.updateRingGroup)
-	private("DELETE /api/v1/ring-groups/{id}", s.deleteRingGroup)
-
-	private("GET /api/v1/feature-codes", s.listFeatureCodes)
-	private("PUT /api/v1/feature-codes", s.putFeatureCodes)
-
-	private("GET /api/v1/presence", s.presence)
-
-	private("GET /api/v1/registrations", s.registrations)
-	private("GET /api/v1/calls", s.calls)
-	private("GET /api/v1/cdrs", s.cdrs)
-	private("GET /api/v1/cdrs/counts", s.cdrCounts)
-	private("GET /api/v1/cdrs/concurrency", s.cdrConcurrency)
-	private("GET /api/v1/cdrs/export", s.cdrExport)
-	private("GET /api/v1/cdrs/{id}", s.getCDR)
-
-	private("GET /api/v1/trunks", s.listTrunks)
-	private("POST /api/v1/trunks", s.createTrunk)
-	private("GET /api/v1/trunks/status", s.trunkStatus)
-	private("GET /api/v1/trunks/{id}", s.getTrunk)
-	private("PATCH /api/v1/trunks/{id}", s.updateTrunk)
-	private("DELETE /api/v1/trunks/{id}", s.deleteTrunk)
-
-	private("GET /api/v1/routes/outbound", s.listOutbound)
-	private("POST /api/v1/routes/outbound", s.createOutbound)
-	private("PUT /api/v1/routes/outbound/order", s.reorder(store.Outbound))
-	private("GET /api/v1/routes/outbound/{id}", s.getOutbound)
-	private("PATCH /api/v1/routes/outbound/{id}", s.updateOutbound)
-	private("DELETE /api/v1/routes/outbound/{id}", s.deleteOutbound)
-
-	private("GET /api/v1/routes/inbound", s.listInbound)
-	private("POST /api/v1/routes/inbound", s.createInbound)
-	private("PUT /api/v1/routes/inbound/order", s.reorder(store.Inbound))
-	private("GET /api/v1/routes/inbound/{id}", s.getInbound)
-	private("PATCH /api/v1/routes/inbound/{id}", s.updateInbound)
-	private("DELETE /api/v1/routes/inbound/{id}", s.deleteInbound)
-
-	private("POST /api/v1/routing/test", s.routingTest)
-
-	private("GET /api/v1/cluster", s.clusterOverview)
-	private("GET /api/v1/cluster/nodes", s.clusterNodes)
-	private("POST /api/v1/cluster/nodes/{id}/drain", s.requestDrain)
-	private("DELETE /api/v1/cluster/nodes/{id}/drain", s.cancelDrain)
-
-	private("GET /api/v1/phones", s.listPhones)
-	private("POST /api/v1/phones", s.createPhone)
-	private("POST /api/v1/phones/import", s.importPhones)
-	private("GET /api/v1/phones/{id}", s.getPhone)
-	private("PATCH /api/v1/phones/{id}", s.updatePhone)
-	private("DELETE /api/v1/phones/{id}", s.deletePhone)
-	private("POST /api/v1/phones/{id}/rotate-token", s.rotatePhoneToken)
-	private("POST /api/v1/phones/{id}/rearm", s.rearmPhone)
-	private("POST /api/v1/phones/{id}/admin-password/reveal", s.revealAdminPassword)
-	private("POST /api/v1/phones/{id}/admin-password/rotate", s.rotateAdminPassword)
-	private("GET /api/v1/phones/{id}/fetches", s.phoneFetches)
-	private("GET /api/v1/phones/{id}/preview", s.previewPhone)
-
-	private("GET /api/v1/prov/templates", s.listTemplates)
-	private("POST /api/v1/prov/templates", s.createTemplate)
-	private("POST /api/v1/prov/templates/validate", s.validateTemplateRoute)
-	private("GET /api/v1/prov/templates/{id}", s.getTemplate)
-	private("PATCH /api/v1/prov/templates/{id}", s.updateTemplate)
-	private("DELETE /api/v1/prov/templates/{id}", s.deleteTemplate)
-	private("POST /api/v1/prov/templates/{id}/copy", s.copyTemplate)
-
-	private("GET /api/v1/prov/firmware", s.listFirmware)
-	private("POST /api/v1/prov/firmware", s.uploadFirmware)
-	private("PUT /api/v1/prov/firmware/pins", s.putFirmwarePins)
-	private("DELETE /api/v1/prov/firmware/{id}", s.deleteFirmware)
-
-	private("GET /api/v1/prov/redirect", s.listRedirect)
-	private("PUT /api/v1/prov/redirect/{vendor}", s.putRedirect)
-	private("DELETE /api/v1/prov/redirect/{vendor}", s.deleteRedirect)
-	private("POST /api/v1/prov/redirect/{vendor}/check", s.postRedirectCheck)
-
-	private("GET /api/v1/prov/settings", s.provSettings)
-
-	private("GET /api/v1/diagnostics/devices/{id}", s.deviceDiagnostics)
-	private("GET /api/v1/diagnostics/auth-failures", s.listAuthFailures)
-	private("DELETE /api/v1/diagnostics/auth-failures/{ip}", s.clearAuthFailures)
+	for _, rt := range s.routes() {
+		h := http.Handler(rt.H)
+		if !rt.Public {
+			h = authed(auth.Require(rt.Role, rt.Scope)(h))
+		}
+		mux.Handle(rt.Method+" "+rt.Pattern, h)
+	}
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.

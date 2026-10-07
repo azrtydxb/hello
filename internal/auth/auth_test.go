@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -94,9 +96,15 @@ func TestMiddleware(t *testing.T) {
 		sessions: map[string]Actor{hex.EncodeToString(HashToken("sess-1")): alice},
 		tokens:   map[string]Actor{hex.EncodeToString(HashToken("tok-1")): bot},
 	}
+	// Sessions carry every scope plus session; unprefixed tokens are legacy
+	// tokens with every scope.
+	aliceSession := alice
+	aliceSession.Kind, aliceSession.Scopes = KindSession, append(slices.Clone(AllScopes), ScopeSession)
+	botLegacy := bot
+	botLegacy.Kind, botLegacy.Scopes = KindLegacyToken, slices.Clone(AllScopes)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	var got Actor
-	h := Middleware(l, log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := Middleware(l, Options{Cookies: true}, log)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a, ok := ActorFrom(r.Context())
 		if !ok {
 			t.Error("no actor in context")
@@ -113,10 +121,10 @@ func TestMiddleware(t *testing.T) {
 		actor  Actor
 	}{
 		{name: "none", want: 401},
-		{name: "session", cookie: "sess-1", want: 418, actor: alice},
+		{name: "session", cookie: "sess-1", want: 418, actor: aliceSession},
 		{name: "unknown session", cookie: "sess-2", want: 401},
 		{name: "empty session", cookie: "", authz: "", want: 401},
-		{name: "bearer", authz: "Bearer tok-1", want: 418, actor: bot},
+		{name: "bearer", authz: "Bearer tok-1", want: 418, actor: botLegacy},
 		{name: "unknown bearer", authz: "Bearer tok-2", want: 401},
 		{name: "not bearer", authz: "Basic tok-1", want: 401},
 		{name: "empty bearer", authz: "Bearer ", want: 401},
@@ -140,14 +148,14 @@ func TestMiddleware(t *testing.T) {
 			if c.want == 401 && !strings.Contains(rec.Body.String(), `"code":"unauthorized"`) {
 				t.Fatalf("401 body = %s", rec.Body)
 			}
-			if got != c.actor {
+			if !reflect.DeepEqual(got, c.actor) {
 				t.Fatalf("actor = %+v, want %+v", got, c.actor)
 			}
 		})
 	}
 
 	// A lookup failure is an internal error, not an anonymous pass.
-	h = Middleware(fakeLookup{err: errors.New("db down")}, log)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h = Middleware(fakeLookup{err: errors.New("db down")}, Options{Cookies: true}, log)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -156,6 +164,19 @@ func TestMiddleware(t *testing.T) {
 	h.ServeHTTP(rec, r)
 	if rec.Code != 500 {
 		t.Fatalf("lookup error: status = %d, want 500", rec.Code)
+	}
+
+	// Without Cookies (the /mcp transport) a valid session cookie is not a
+	// credential.
+	h = Middleware(l, Options{}, log)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	r = httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	r.AddCookie(&http.Cookie{Name: SessionCookie, Value: "sess-1"})
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != 401 {
+		t.Fatalf("cookie without Options.Cookies: status = %d, want 401", rec.Code)
 	}
 }
 
