@@ -62,7 +62,7 @@ func TestConfigChangeAuditedAndRevisioned(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain, tokHash := auth.NewToken()
-	tok, err := st.CreateToken(ctx, "test", uid, "it", tokHash)
+	tok, err := st.CreateToken(ctx, "test", uid, store.NewToken{Name: "it"}, tokHash)
 	if err != nil {
 		t.Fatal(err)
 	}

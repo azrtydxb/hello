@@ -126,28 +126,46 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	go runMailer(ctx, cfg, st, objs, log)
 
+	// External AI access (spec ai-external-access): the OAuth
+	// authorization server and /mcp, only with HELLO_PUBLIC_URL.
+	as, err := newAuthServer(cfg.AI, st, vk, metrics.Registry, log)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("HELLO_PUBLIC_URL: %w", err)
+	}
+	apiCfg := api.Config{
+		Store:         st,
+		Live:          vk,
+		Trunks:        vk,
+		Cluster:       vk,
+		Valkey:        vk,
+		Objects:       objs,
+		Diagnostics:   vk,
+		AuthFailLimit: cfg.AuthFailLimit,
+		EmailDelivery: cfg.SmtpHost != "",
+		ProvStore:     st,
+		Prov:          provAPI(cfg, settings, deployment, objs, log),
+		SIPDomain:     cfg.SIPDomain,
+		SessionTTL:    cfg.SessionTTL,
+		Log:           log,
+	}
+	if as != nil {
+		apiCfg.AI = as
+		go pruneOAuth(ctx, as, vk, cfg.NodeID, log)
+	}
+	app, err := composeApp(cfg.AI, api.Handler(apiCfg), as, st, log)
+	if err != nil {
+		_ = ln.Close()
+		return err
+	}
+
 	// The node lifecycle: JOINING until PostgreSQL first answers, READY,
 	// UNHEALTHY while it fails, DRAINING on SIGTERM or a drain request
 	// (/readyz 503, in-flight requests finish, then exit), OFFLINE after.
 	node := api.NewNode(api.NodeOptions{
 		ID: cfg.NodeID, HTTPAddr: cfg.HTTPAddr, Version: version.Version,
 		Postgres: db.PingContext, Valkey: vk, Revision: st.ConfigRevision,
-		App: api.Handler(api.Config{
-			Store:         st,
-			Live:          vk,
-			Trunks:        vk,
-			Cluster:       vk,
-			Valkey:        vk,
-			Objects:       objs,
-			Diagnostics:   vk,
-			AuthFailLimit: cfg.AuthFailLimit,
-			EmailDelivery: cfg.SmtpHost != "",
-			ProvStore:     st,
-			Prov:          provAPI(cfg, settings, deployment, objs, log),
-			SIPDomain:     cfg.SIPDomain,
-			SessionTTL:    cfg.SessionTTL,
-			Log:           log,
-		}),
+		App:             app,
 		Metrics:         metrics,
 		Log:             log,
 		DrainDelay:      cfg.DrainDelay,
