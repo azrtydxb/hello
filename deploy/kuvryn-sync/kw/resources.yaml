@@ -11,7 +11,8 @@
 # One-time kw facts below are confirmed against the cluster (first sync of
 # 2026-10-04): HELLO_SIP_TRUSTED_PROXIES is kw's pod CIDR 10.42.0.0/16 (node
 # podCIDRs), HELLO_DNS_RESOLVER is kube-dns 10.43.0.10, KAMAILIO_PUBLIC_HOST
-# is node master-11 192.168.10.101 (NodePort 30508/udp).
+# is node master-11 192.168.10.101, where the hostNetwork kamailio pod binds
+# 30508 (udp+tcp) itself.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -27,10 +28,11 @@ metadata:
 data:
   # Verbatim copy of deploy/kamailio/kamailio.cfg, enforced by
   # test/deploy (TestKwKamailioConfigMatchesSource); kw-specific values come
-  # from the #!trydefenv parameters, never text edits. The pod's env sets
-  # KAMAILIO_LISTEN_IP from status.podIP, so the "hello" socket's Path and
-  # Record-Route name the kamailio pod itself — reachable in-cluster with no
-  # advertise override — and the phones socket advertises
+  # from the #!trydefenv parameters, never text edits. The pod runs with
+  # hostNetwork on master-11 and its env sets KAMAILIO_LISTEN_IP from
+  # status.podIP (the node address 192.168.10.101), so the "hello" socket's
+  # Path and Record-Route name it, and the phones sockets bind
+  # KAMAILIO_PHONES_PORT 30508 there and advertise
   # KAMAILIO_PUBLIC_HOST:30508.
   kamailio.cfg: |
     #!KAMAILIO
@@ -58,7 +60,7 @@ data:
     #   - Hello nodes: requests received on the "hello" socket (UDP 5070). Their
     #     requests go to phones (Route = the Path or Record-Route Kamailio put
     #     there, both of which name the hello socket).
-    #   - Phones: requests received on the "phones" socket (UDP 5060). Their
+    #   - Phones: requests received on the "phones" sockets (PHONES_PORT). Their
     #     requests only ever go to Hello nodes.
     # The source address cannot decide this: on kw the hello-sip pods run with
     # hostNetwork, so their datagrams reach Kamailio SNAT'd from a node address
@@ -88,6 +90,21 @@ data:
     #!trydefenv LISTEN_IP=KAMAILIO_LISTEN_IP
     #!ifndef LISTEN_IP
     #!define LISTEN_IP 10.89.53.10
+    #!endif
+
+    # The port the "phones" sockets (UDP and TCP) bind on LISTEN_IP, and the
+    # metrics socket's TCP port. The lab keeps the defaults; on kw Kamailio runs
+    # with hostNetwork on master-11 and binds the phones' port (30508) directly
+    # on the node address, so phones reach it with no NAT in between and
+    # Kamailio sees their real source address (a NodePort SNATs them), and the
+    # metrics port moves off 9090 (taken on that node).
+    #!trydefenv PHONES_PORT=KAMAILIO_PHONES_PORT
+    #!ifndef PHONES_PORT
+    #!define PHONES_PORT 5060
+    #!endif
+    #!trydefenv METRICS_PORT=KAMAILIO_METRICS_PORT
+    #!ifndef METRICS_PORT
+    #!define METRICS_PORT 9090
     #!endif
 
     # How long (ms) an INVITE towards Hello may stay unanswered after its first
@@ -141,8 +158,9 @@ data:
     sip_warning=0
 
     # Two SIP sockets, so each side sees an address it can reach:
-    #   phones - UDP 5060, published to the host as UDP 5080 and advertised as
-    #            PUBLIC_HOST:PUBLIC_PORT. Phones send here.
+    #   phones - UDP (and TCP) PHONES_PORT (5060), published to the host as UDP
+    #            5080 in the lab and advertised as PUBLIC_HOST:PUBLIC_PORT.
+    #            Phones send here.
     #   hello  - UDP 5070, internal to the edge network. Kamailio talks to the
     #            hello-sip nodes from here: dispatcher probes, Path, the
     #            Hello-facing Record-Route. Hello nodes send here.
@@ -150,16 +168,18 @@ data:
     # coming from a Hello node (request_route sets FLT_FROM_HELLO on it) and may
     # be relayed to any phone. So 5070 must stay internal: never published to
     # the host in compose, never exposed through a NodePort/LoadBalancer
-    # Service on Kubernetes (deploy/kuvryn-sync/kw exposes only 5060, as
-    # NodePort 30508). Phones only ever learn the advertised phones socket.
+    # Service on Kubernetes (on kw the hostNetwork pod binds it on the node
+    # address, which only the Hello nodes are told about). Phones only ever
+    # learn the advertised phones socket.
     # A request crossing from one socket to the other gets two Record-Route
     # headers (rr enable_double_rr), each naming the socket its side uses.
-    listen=udp:LISTEN_IP:5060 advertise PUBLIC_HOST:PUBLIC_PORT name "phones"
+    listen=udp:LISTEN_IP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones"
+    listen=tcp:LISTEN_IP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones_tcp"
     listen=udp:LISTEN_IP:5070 name "hello"
     # Prometheus metrics (xhttp_prom), internal only: not published to the host.
-    # The only TCP socket, so every HTTP request arrives here; SIP sent to it
-    # is dropped in request_route.
-    listen=tcp:LISTEN_IP:9090 name "metrics"
+    # HTTP is served only here (event_route[xhttp:request] refuses it on the
+    # phones TCP socket); SIP sent to it is dropped in request_route.
+    listen=tcp:LISTEN_IP:METRICS_PORT name "metrics"
     tcp_accept_no_cl=yes
 
     # Answer quickly when a Hello node is gone: DNS failover and SRV are not
@@ -283,7 +303,7 @@ data:
     modparam("pike", "reqs_density_per_unit", PIKE_DENSITY)
     modparam("pike", "remove_latency", 4)
 
-    # xhttp_prom: GET http://<kamailio>:9090/metrics inside the network.
+    # xhttp_prom: GET http://<kamailio>:METRICS_PORT/metrics inside the network.
     modparam("xhttp", "url_skip", "^/(RPC|rpc)")
     modparam("xhttp_prom", "xhttp_prom_stats", "all")
     modparam("xhttp_prom", "prom_gauge", "name=dispatcher_set_destinations; label=setid")
@@ -300,7 +320,7 @@ data:
 
     request_route {
     	# The metrics socket is HTTP only: no SIP over it.
-    	if ($Rp == 9090) {
+    	if ($Rp == METRICS_PORT) {
     		drop;
     	}
 
@@ -566,17 +586,28 @@ data:
     		# In-dialog requests from both sides cross Kamailio: the phone's
     		# later requests (BYE, re-INVITE) come to the phones socket, Hello's
     		# to the hello socket.
-    		$fsn = "phones";
+    		route(PHONES_SOCKET);
     		record_route();
     	}
     	route(TO_PHONE);
+    }
+
+    # Send towards a phone from the phones socket of the phone's transport: TCP
+    # when the destination (the Path's received, an alias or the R-URI) says so,
+    # UDP otherwise.
+    route[PHONES_SOCKET] {
+    	if ($dP == "tcp") {
+    		$fsn = "phones_tcp";
+    	} else {
+    		$fsn = "phones";
+    	}
     }
 
     route[TO_PHONE] {
     	# Phones may be slow, far away and lossy: longer timers than towards
     	# Hello. A phone answers our Via's rport, i.e. the source port it saw.
     	t_set_fr(120000, 8000);
-    	$fsn = "phones";
+    	route(PHONES_SOCKET);
     	add_local_rport();
     	if (is_method("INVITE|SUBSCRIBE|REFER|UPDATE")) {
     		t_on_reply("PHONE_REPLY");
@@ -687,8 +718,12 @@ data:
     	prom_gauge_set("dispatcher_set_active", "$dsg(active)", "1");
     }
 
-    # HTTP only arrives on the metrics socket (the only TCP listener).
+    # HTTP is answered on the metrics socket only, never on the phones TCP one.
     event_route[xhttp:request] {
+    	if ($Rp != METRICS_PORT) {
+    		xhttp_reply("403", "Forbidden", "text/plain", "forbidden\n");
+    		exit;
+    	}
     	if (prom_check_uri()) {
     		prom_dispatch();
     		exit;
@@ -795,8 +830,17 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: 0b51ea9e7131f0f50ff8303768092b6102436f1e6a4dccc72984c94f6ed7038a
+        hello.watteel.com/kamailio-config-sha256: 043abb2bb19ed13eb14e0a8a06171a050c75ffffecada7f1ce84c784705c5667
     spec:
+      # Phones must reach Kamailio with no NAT in between: through a NodePort
+      # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's
+      # address and later INVITEs to it are lost. So the pod binds the node
+      # address itself on the node phones are provisioned with.
+      hostNetwork: true
+      # Keep cluster DNS (the dispatcher's hello-sip-N Service names).
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        kubernetes.io/hostname: master-11
       securityContext:
         # /run/kamailio is an emptyDir the kamailio user (102) must write its
         # ctl socket and RPC FIFO into; group ownership via fsGroup.
@@ -821,31 +865,39 @@ spec:
                 - ALL
           env:
             - name: KAMAILIO_LISTEN_IP
-              # Bind the pod IP: the "hello" socket (5070) must carry an
-              # address hello nodes can route to, and the phones socket
-              # advertises KAMAILIO_PUBLIC_HOST:30508.
+              # The pod IP, i.e. master-11's address (hostNetwork): the
+              # "hello" socket (5070) carries it to hello nodes, and the
+              # phones sockets bind it at KAMAILIO_PHONES_PORT.
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
             - name: KAMAILIO_PUBLIC_HOST
-              # Where phones reach this Kamailio: a kw node address at the
-              # NodePort below (master-11; k3s NodePorts are reachable on
-              # every node's address).
+              # Where phones reach this Kamailio: master-11's address, which
+              # the pod binds directly (nodeSelector above).
               value: 192.168.10.101
             - name: KAMAILIO_PUBLIC_PORT
               value: "30508"
+            - name: KAMAILIO_PHONES_PORT
+              # Bound on the node, so the same as the advertised port.
+              value: "30508"
+            - name: KAMAILIO_METRICS_PORT
+              # 9090 is taken on master-11 (truenas-csi-node).
+              value: "9071"
             - name: KAMAILIO_INVITE_TIMEOUT
               # Above HELLO_SIP_RING_TIMEOUT (10s), as in the lab.
               value: "25000"
           ports:
             - name: phones
-              containerPort: 5060
+              containerPort: 30508
               protocol: UDP
+            - name: phones-tcp
+              containerPort: 30508
+              protocol: TCP
             - name: hello
               containerPort: 5070
               protocol: UDP
             - name: metrics
-              containerPort: 9090
+              containerPort: 9071
               protocol: TCP
           readinessProbe:
             httpGet:
@@ -892,17 +944,14 @@ metadata:
     app.kubernetes.io/component: edge
     app.kubernetes.io/managed-by: kuvryn-sync
 spec:
-  type: NodePort
+  # In-cluster only (metrics). Phones reach the hostNetwork pod directly at
+  # 192.168.10.101:30508; a NodePort would SNAT them (and hold the port).
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: hello
     app.kubernetes.io/instance: hello
     app.kubernetes.io/component: edge
   ports:
-    - name: phones
-      port: 5060
-      protocol: UDP
-      targetPort: phones
-      nodePort: 30508
     - name: metrics
       port: 9090
       protocol: TCP
@@ -1456,8 +1505,8 @@ spec:
             - name: HELLO_PROV_PUBLIC_URL
               value: https://prov.hello.kw.watteel.lab
             - name: HELLO_PROV_SIP_SERVER
-              # Where provisioned phones register: Kamailio's NodePort, as
-              # KAMAILIO_PUBLIC_HOST/PORT advertise it.
+              # Where provisioned phones register: Kamailio on master-11's
+              # address, as KAMAILIO_PUBLIC_HOST/PORT advertise it.
               value: 192.168.10.101:30508
             - name: HELLO_PROV_TRUSTED_PROXIES
               # kw's pod CIDR: ingress-nginx's X-Forwarded-Proto/-For are
