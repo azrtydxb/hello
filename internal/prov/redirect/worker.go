@@ -46,6 +46,8 @@ type Worker struct {
 	poll       time.Duration
 	driftEvery time.Duration
 	clients    map[prov.Vendor]cachedClient // only touched by Run's goroutine
+	lastDrift  time.Time                    // when the drift check last completed
+	driftKnown bool                         // lastDrift was read from the store
 }
 
 type cachedClient struct {
@@ -63,23 +65,52 @@ func NewWorker(s Store, deployment map[prov.Vendor]Credentials, log *slog.Logger
 	}
 }
 
-// Run processes due jobs every few seconds and checks for drift once a
-// day, until ctx ends.
+// Run processes due jobs every few seconds and runs the drift check when
+// the last one (kept by the store) is a day old, at start included, so a
+// restart or a lease hand-over does not postpone it, until ctx ends.
 func (w *Worker) Run(ctx context.Context) {
 	poll := time.NewTicker(w.poll)
 	defer poll.Stop()
-	drift := time.NewTicker(w.driftEvery)
-	defer drift.Stop()
-	w.work(ctx)
 	for {
+		w.work(ctx)
+		if w.driftDue(ctx) {
+			w.reconcile(ctx)
+			w.driftDone(ctx)
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-poll.C:
-			w.work(ctx)
-		case <-drift.C:
-			w.reconcile(ctx)
 		}
+	}
+}
+
+// driftDue reports whether the drift check is due, reading when it last
+// ran from the store once; a read error defers it to the next poll.
+func (w *Worker) driftDue(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if !w.driftKnown {
+		t, err := w.store.LastDriftCheck(ctx)
+		if err != nil {
+			w.log.Error("redirect: reading the last drift check", "err", err)
+			return false
+		}
+		w.lastDrift, w.driftKnown = t, true
+	}
+	return w.now().Sub(w.lastDrift) >= w.driftEvery
+}
+
+// driftDone records a completed drift check. A failed write is logged and
+// the time kept in memory, so the check is not repeated every poll.
+func (w *Worker) driftDone(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	w.lastDrift = w.now()
+	if err := w.store.SetLastDriftCheck(ctx, w.lastDrift); err != nil {
+		w.log.Error("redirect: recording the drift check", "err", err)
 	}
 }
 
@@ -113,7 +144,8 @@ func (w *Worker) process(ctx context.Context, j Job) {
 		// Not configured or not supported: nothing to call. An unregister
 		// leaves the status alone (the phone is gone or changed vendor).
 		if j.Op == OpUnregister {
-			st = Status{}
+			w.drop(ctx, j)
+			return
 		}
 		w.finish(ctx, j, st)
 		return
@@ -122,7 +154,7 @@ func (w *Worker) process(ctx context.Context, j Job) {
 	case OpRegister:
 		t, err := w.store.Target(ctx, j.Vendor, j.MAC)
 		if errors.Is(err, prov.ErrNotFound) {
-			w.finish(ctx, j, Status{}) // the phone is gone or has another vendor
+			w.drop(ctx, j) // the phone is gone or has another vendor
 			return
 		}
 		if err != nil {
@@ -135,6 +167,14 @@ func (w *Worker) process(ctx context.Context, j Job) {
 			return
 		}
 		err = c.Register(ctx, t.MAC, t.Serial, t.URL)
+		if errors.Is(err, ErrRejected) {
+			// Retrying cannot fix it: failed at once with the vendor's message.
+			reason := redactURL(err.Error(), t.URL)
+			OpsTotal.WithLabelValues(string(j.Vendor), string(j.Op), "error").Inc()
+			w.log.Warn("redirect: operation rejected", "vendor", j.Vendor, "op", j.Op, "mac", j.MAC, "err", reason)
+			w.finish(ctx, j, Status{State: StateFailed, Reason: reason, At: now})
+			return
+		}
 		if err != nil {
 			w.failed(ctx, j, redactURL(err.Error(), t.URL))
 			return
@@ -147,10 +187,10 @@ func (w *Worker) process(ctx context.Context, j Job) {
 			return
 		}
 		OpsTotal.WithLabelValues(string(j.Vendor), string(j.Op), "ok").Inc()
-		w.finish(ctx, j, Status{})
+		w.drop(ctx, j)
 	default:
 		w.log.Error("redirect: unknown job operation", "vendor", j.Vendor, "op", j.Op)
-		w.finish(ctx, j, Status{})
+		w.drop(ctx, j)
 	}
 }
 
@@ -164,16 +204,26 @@ func (w *Worker) failed(ctx context.Context, j Job, reason string) {
 		w.finish(ctx, j, Status{State: StateFailed, Reason: reason, At: now})
 		return
 	}
-	st := Status{State: StatePending, Reason: reason, At: now}
-	if j.Op == OpUnregister {
-		st = Status{}
+	var st *Status // an unregister leaves the phone's status alone
+	if j.Op != OpUnregister {
+		st = &Status{State: StatePending, Reason: reason, At: now}
 	}
 	if err := w.store.RetryJob(ctx, j, now.Add(backoff(j.Attempts)), st); err != nil {
 		w.log.Error("redirect: scheduling a retry", "vendor", j.Vendor, "mac", j.MAC, "err", err)
 	}
 }
 
+// finish removes j and sets the phone's status.
 func (w *Worker) finish(ctx context.Context, j Job, st Status) {
+	w.finishJob(ctx, j, &st)
+}
+
+// drop removes j without writing the phone's status.
+func (w *Worker) drop(ctx context.Context, j Job) {
+	w.finishJob(ctx, j, nil)
+}
+
+func (w *Worker) finishJob(ctx context.Context, j Job, st *Status) {
 	if err := w.store.FinishJob(ctx, j, st); err != nil {
 		w.log.Error("redirect: finishing a job", "vendor", j.Vendor, "mac", j.MAC, "err", err)
 	}
@@ -248,9 +298,16 @@ func (w *Worker) client(ctx context.Context, v prov.Vendor) (Client, Status, err
 // is gone) is marked failed: drift.
 func (w *Worker) reconcile(ctx context.Context) {
 	for _, v := range []prov.Vendor{prov.Snom, prov.Yealink, prov.Grandstream} {
-		c, _, err := w.client(ctx, v)
-		if err != nil || c == nil || !c.Capabilities().RegistersURL {
+		c, st, err := w.client(ctx, v)
+		switch {
+		case err != nil:
+			w.log.Error("redirect: drift check skipped: reading the account", "vendor", v, "err", err)
 			continue
+		case c == nil && st.State == StateFailed:
+			w.log.Warn("redirect: drift check skipped: unusable credentials or settings", "vendor", v, "err", st.Reason)
+			continue
+		case c == nil || !c.Capabilities().RegistersURL:
+			continue // not configured, or no per-device URL to read back
 		}
 		targets, err := w.store.Registered(ctx, v)
 		if err != nil {

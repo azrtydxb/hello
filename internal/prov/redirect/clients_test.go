@@ -344,6 +344,7 @@ type ymcsFake struct {
 	tokens     int
 	devices    map[string]map[string]string
 	calls      []string
+	existsErr  string // addDevicesByMac errors[] entry for a MAC it holds
 }
 
 func (f *ymcsFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -391,6 +392,16 @@ func (f *ymcsFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.devices[m] = map[string]string{"mac": m, "sn": sn, "uniqueServerUrl": u}
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"id":"d1"}`))
+	case "/v2/rps/addDevicesByMac":
+		var list []map[string]string
+		_ = json.Unmarshal(body, &list)
+		m := list[0]["mac"]
+		if _, ok := f.devices[m]; ok {
+			_, _ = fmt.Fprintf(w, `{"total":1,"successCount":0,"failureCount":1,"errors":[%s]}`, f.existsErr)
+			return
+		}
+		f.devices[m] = map[string]string{"mac": m, "uniqueServerUrl": list[0]["uniqueServerUrl"]}
+		_, _ = w.Write([]byte(`{"total":1,"successCount":1,"failureCount":0}`))
 	case "/v2/rps/delDevices":
 		ids, _ := in["deviceIds"].([]any)
 		m, _ := ids[0].(string)
@@ -467,7 +478,11 @@ func (f *gdmsFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(body) > 0 {
 		want += sha256h(string(body)) + "&"
 	}
-	if q.Get("access_token") != tok || q.Get("signature") != sha256h(want) {
+	if q.Get("access_token") != tok {
+		_, _ = w.Write([]byte(`{"retCode":40004,"msg":"access_token is invalid or expired"}`))
+		return
+	}
+	if q.Get("signature") != sha256h(want) {
 		_, _ = w.Write([]byte(`{"retCode":40002,"msg":"signature error"}`))
 		return
 	}
@@ -491,6 +506,16 @@ func (f *gdmsFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		f.devices[m] = devs[0]
 		_, _ = w.Write([]byte(`{"retCode":0,"msg":"","data":{}}`))
+	case "/oapi/v1.0.0/device/list":
+		var in map[string]any
+		_ = json.Unmarshal(body, &in)
+		m, _ := in["mac"].(string)
+		var res []map[string]any
+		if d, ok := f.devices[m]; ok {
+			res = append(res, map[string]any{"mac": m, "siteId": d["siteId"]})
+		}
+		b, _ := json.Marshal(map[string]any{"retCode": 0, "msg": "", "data": map[string]any{"result": res}})
+		_, _ = w.Write(b)
 	case "/oapi/v1.0.0/device/delete":
 		var in struct {
 			MacList []string `json:"macList"`
@@ -534,12 +559,21 @@ func ymcsCreds() Credentials {
 type finished struct {
 	Job    Job
 	Status Status
+	Set    bool // false: the worker left the phone's status alone
 }
 
 type retried struct {
 	Job    Job
 	Next   time.Time
 	Status Status
+	Set    bool
+}
+
+func deref(st *Status) (Status, bool) {
+	if st == nil {
+		return Status{}, false
+	}
+	return *st, true
 }
 
 type fakeStore struct {
@@ -551,6 +585,9 @@ type fakeStore struct {
 	finished   []finished
 	retried    []retried
 	statuses   map[string]Status
+	accountErr map[prov.Vendor]error
+	lastDrift  time.Time
+	driftSets  []time.Time
 }
 
 func newFakeStore() *fakeStore {
@@ -579,6 +616,9 @@ func (s *fakeStore) Target(_ context.Context, v prov.Vendor, mac string) (Target
 func (s *fakeStore) Account(_ context.Context, v prov.Vendor) (Account, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.accountErr[v]; err != nil {
+		return Account{}, err
+	}
 	a, ok := s.accounts[v]
 	if !ok {
 		return Account{}, prov.ErrNotFound
@@ -586,17 +626,33 @@ func (s *fakeStore) Account(_ context.Context, v prov.Vendor) (Account, error) {
 	return a, nil
 }
 
-func (s *fakeStore) FinishJob(_ context.Context, j Job, st Status) error {
+func (s *fakeStore) FinishJob(_ context.Context, j Job, st *Status) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.finished = append(s.finished, finished{j, st})
+	v, set := deref(st)
+	s.finished = append(s.finished, finished{j, v, set})
 	return nil
 }
 
-func (s *fakeStore) RetryJob(_ context.Context, j Job, next time.Time, st Status) error {
+func (s *fakeStore) RetryJob(_ context.Context, j Job, next time.Time, st *Status) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.retried = append(s.retried, retried{j, next, st})
+	v, set := deref(st)
+	s.retried = append(s.retried, retried{j, next, v, set})
+	return nil
+}
+
+func (s *fakeStore) LastDriftCheck(context.Context) (time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastDrift, nil
+}
+
+func (s *fakeStore) SetLastDriftCheck(_ context.Context, t time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastDrift = t
+	s.driftSets = append(s.driftSets, t)
 	return nil
 }
 
@@ -817,7 +873,7 @@ func TestRedirectClients(t *testing.T) {
 		cr := ymcsCreds()
 		f := &ymcsFake{id: cr[KeyYMCSClientID], secret: cr[KeyYMCSClientSecret], devices: map[string]map[string]string{}}
 		hc, _ := fakeHTTP(t, f)
-		c, err := New(prov.Yealink, cr, nil, hc)
+		c, err := New(prov.Yealink, cr, []byte(`{"api":"ymcs"}`), hc)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -849,10 +905,10 @@ func TestRedirectClients(t *testing.T) {
 		if f.tokens != 1 {
 			t.Fatalf("token fetched %d times, want once (cached)", f.tokens)
 		}
-		if _, err := New(prov.Yealink, Credentials{KeyYMCSClientID: "a", KeyYMCSClientSecret: "b", KeyYMCSRegion: "evil.example/"}, nil, hc); err == nil {
+		if _, err := New(prov.Yealink, Credentials{KeyYMCSClientID: "a", KeyYMCSClientSecret: "b", KeyYMCSRegion: "evil.example/"}, []byte(`{"api":"ymcs"}`), hc); err == nil {
 			t.Fatal("a region that is not a region code was accepted")
 		}
-		mo, _ := New(prov.Yealink, cr, []byte(`{"macOnly":true}`), hc)
+		mo, _ := New(prov.Yealink, cr, []byte(`{"api":"ymcs","macOnly":true}`), hc)
 		if mo.Capabilities().NeedsSerial {
 			t.Fatal("macOnly still needs the serial")
 		}

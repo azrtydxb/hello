@@ -44,12 +44,11 @@ func newYealink(creds Credentials, settings []byte, hc *http.Client) (Client, er
 	if err := decodeSettings(prov.Yealink, settings, &s); err != nil {
 		return nil, err
 	}
+	// RPS unless the settings choose YMCS (spec S-11): YMCS credentials
+	// alone do not switch the API.
 	api := s.API
 	if api == "" {
 		api = "rps"
-		if creds[KeyYMCSClientID] != "" {
-			api = "ymcs"
-		}
 	}
 	switch api {
 	case "rps":
@@ -80,6 +79,7 @@ func newYealink(creds Credentials, settings []byte, hc *http.Client) (Client, er
 	return nil, errors.New(`redirect: yealink settings: api must be "rps" or "ymcs"`)
 }
 
+// yealinkMAC normalises a MAC the vendor returned, for comparison.
 func yealinkMAC(mac string) string {
 	return strings.ToLower(strings.NewReplacer(":", "", "-", "", ".", "").Replace(mac))
 }
@@ -106,7 +106,10 @@ func (r *rps) Check(ctx context.Context) error {
 // Register binds the MAC to the phone's URL (uniqueServerUrl) under Hello's
 // server entry, editing the device when RPS already holds it.
 func (r *rps) Register(ctx context.Context, mac, _, u string) error {
-	m := yealinkMAC(mac)
+	m, err := normMAC(mac)
+	if err != nil {
+		return r.clean("register", err)
+	}
 	id, err := r.server(ctx, u)
 	if err != nil {
 		return r.clean("register", err)
@@ -129,7 +132,11 @@ func (r *rps) Register(ctx context.Context, mac, _, u string) error {
 }
 
 func (r *rps) Unregister(ctx context.Context, mac string) error {
-	err := r.call(ctx, http.MethodPost, "/api/open/v1/device/delete", nil, map[string]any{"macs": []string{yealinkMAC(mac)}}, nil)
+	m, err := normMAC(mac)
+	if err != nil {
+		return r.clean("unregister", err)
+	}
+	err = r.call(ctx, http.MethodPost, "/api/open/v1/device/delete", nil, map[string]any{"macs": []string{m}}, nil)
 	if rpsCode(err) == "device.not.found" {
 		err = nil
 	}
@@ -137,7 +144,11 @@ func (r *rps) Unregister(ctx context.Context, mac string) error {
 }
 
 func (r *rps) Lookup(ctx context.Context, mac string) (string, bool, error) {
-	dev, found, err := r.device(ctx, yealinkMAC(mac))
+	m, err := normMAC(mac)
+	if err != nil {
+		return "", false, r.clean("lookup", err)
+	}
+	dev, found, err := r.device(ctx, m)
 	if err != nil || !found {
 		return "", false, r.clean("lookup", err)
 	}
@@ -379,12 +390,15 @@ func (y *ymcs) Check(ctx context.Context) error {
 // Register adds the device with the phone's URL; a device YMCS already
 // holds is deleted and added again, since the API documents no edit.
 func (y *ymcs) Register(ctx context.Context, mac, serial, u string) error {
-	m := yealinkMAC(mac)
+	m, err := normMAC(mac)
+	if err != nil {
+		return y.clean("register", err)
+	}
 	if !y.macOnly && strings.TrimSpace(serial) == "" {
 		return y.clean("register", errors.New("YMCS needs the phone's serial number"))
 	}
-	err := y.add(ctx, m, serial, u)
-	if ymcsCode(err) == "800003" { // resource already exists
+	err = y.add(ctx, m, serial, u)
+	if ymcsCode(err) == ymcsExists {
 		if err = y.del(ctx, m); err == nil {
 			err = y.add(ctx, m, serial, u)
 		}
@@ -397,18 +411,26 @@ func (y *ymcs) add(ctx context.Context, m, serial, u string) error {
 		var res struct {
 			SuccessCount int `json:"successCount"`
 			Errors       []struct {
-				ErrorInfo string `json:"errorInfo"`
+				Code      json.RawMessage `json:"code"`
+				ErrorCode json.RawMessage `json:"errorCode"`
+				ErrorInfo string          `json:"errorInfo"`
+				Msg       string          `json:"msg"`
 			} `json:"errors"`
 		}
 		if err := y.call(ctx, "/v2/rps/addDevicesByMac", []map[string]string{{"mac": m, "uniqueServerUrl": u}}, &res, http.StatusOK); err != nil {
 			return err
 		}
 		if res.SuccessCount == 0 {
-			msg := "no device added"
-			if len(res.Errors) > 0 {
-				msg = res.Errors[0].ErrorInfo
+			if len(res.Errors) == 0 {
+				return &ymcsError{Msg: "no device added"}
 			}
-			return &ymcsError{Code: msg, Msg: msg}
+			e := res.Errors[0]
+			code := firstNonEmpty(rawCode(e.ErrorCode), rawCode(e.Code))
+			msg := firstNonEmpty(e.ErrorInfo, e.Msg)
+			if code == ymcsExists || existsText(msg) {
+				code = ymcsExists // route to delete-and-add like the serial path
+			}
+			return &ymcsError{Code: code, Msg: msg}
 		}
 		return nil
 	}
@@ -430,6 +452,21 @@ func (y *ymcs) del(ctx context.Context, m string) error {
 	return nil
 }
 
+// ymcsExists is YMCS's "resource already exists" code.
+const ymcsExists = "800003"
+
+// rawCode is a JSON code given as a string or a number.
+func rawCode(raw json.RawMessage) string {
+	return strings.Trim(strings.TrimSpace(string(raw)), `"`)
+}
+
+// existsText reports a vendor message saying the device already exists
+// (and not that it does not).
+func existsText(msg string) bool {
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "exist") && !strings.Contains(m, "not exist")
+}
+
 func firstErr(errs ...error) error {
 	for _, e := range errs {
 		if e != nil {
@@ -440,11 +477,19 @@ func firstErr(errs ...error) error {
 }
 
 func (y *ymcs) Unregister(ctx context.Context, mac string) error {
-	return y.clean("unregister", y.del(ctx, yealinkMAC(mac)), y.tok())
+	m, err := normMAC(mac)
+	if err != nil {
+		return y.clean("unregister", err)
+	}
+	return y.clean("unregister", y.del(ctx, m), y.tok())
 }
 
 func (y *ymcs) Lookup(ctx context.Context, mac string) (string, bool, error) {
-	u, found, err := y.find(ctx, yealinkMAC(mac))
+	m, err := normMAC(mac)
+	if err != nil {
+		return "", false, y.clean("lookup", err)
+	}
+	u, found, err := y.find(ctx, m)
 	return u, found, y.clean("lookup", err, y.tok())
 }
 
@@ -528,7 +573,25 @@ func (y *ymcs) request(ctx context.Context, path string, body any) (*http.Reques
 	return req, nil
 }
 
+// call sends an authorised call; a refusal of the access token (revoked
+// or expired before its time) drops it and retries once with a new one.
 func (y *ymcs) call(ctx context.Context, path string, body, dst any, ok ...int) error {
+	err := y.callOnce(ctx, path, body, dst, ok...)
+	var e *ymcsError
+	if errors.As(err, &e) && (e.Status == http.StatusUnauthorized || e.Code == "900401") {
+		y.dropToken()
+		err = y.callOnce(ctx, path, body, dst, ok...)
+	}
+	return err
+}
+
+func (y *ymcs) dropToken() {
+	y.mu.Lock()
+	defer y.mu.Unlock()
+	y.token = ""
+}
+
+func (y *ymcs) callOnce(ctx context.Context, path string, body, dst any, ok ...int) error {
 	tok, err := y.accessToken(ctx)
 	if err != nil {
 		return err

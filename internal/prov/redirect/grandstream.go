@@ -77,13 +77,18 @@ func (g *gdms) Register(ctx context.Context, mac, serial, _ string) error {
 	return g.clean("register", err, g.tok())
 }
 
-// add adds the device; existed reports that GDMS already held it, which
-// counts as registered.
+// add adds the device; existed reports that GDMS already held it in
+// Hello's site, which counts as registered. A device GDMS holds elsewhere
+// (another site or organisation) is a rejection with GDMS's message.
 func (g *gdms) add(ctx context.Context, mac, serial string) (existed bool, err error) {
+	m, err := normMAC(mac)
+	if err != nil {
+		return false, err
+	}
 	if strings.TrimSpace(serial) == "" {
 		return false, errors.New("GDMS needs the phone's serial number")
 	}
-	m := gdmsMAC(mac)
+	m = gdmsMAC(m)
 	dev := map[string]any{"deviceName": "Hello " + m, "mac": m, "sn": serial, "siteId": gdmsID(g.siteID)}
 	if g.orgID != 0 {
 		dev["orgId"] = g.orgID
@@ -91,16 +96,49 @@ func (g *gdms) add(ctx context.Context, mac, serial string) (existed bool, err e
 	err = g.call(ctx, http.MethodPost, "/oapi/v1.0.0/device/add", []any{dev}, nil)
 	var r *gdmsRefusal
 	if errors.As(err, &r) && gdmsExists(r.Msg) {
+		in, lerr := g.inSite(ctx, m)
+		switch {
+		case lerr != nil:
+			return false, fmt.Errorf("%w; confirming the site: %w", err, lerr)
+		case !in:
+			return false, rejection{err}
+		}
 		return true, nil
 	}
 	return false, err
+}
+
+// inSite reports whether GDMS lists the device (colon MAC) in Hello's
+// site. The list call's body and answer follow the API guide's paged
+// calls (unconfirmed): POST device/list {"mac", "pageNum", "pageSize"},
+// data.result[] with mac and siteId.
+func (g *gdms) inSite(ctx context.Context, m string) (bool, error) {
+	var page struct {
+		Result []struct {
+			MAC    string          `json:"mac"`
+			SiteID json.RawMessage `json:"siteId"`
+		} `json:"result"`
+	}
+	if err := g.call(ctx, http.MethodPost, "/oapi/v1.0.0/device/list", map[string]any{"mac": m, "pageNum": 1, "pageSize": 10}, &page); err != nil {
+		return false, err
+	}
+	for _, d := range page.Result {
+		if strings.EqualFold(d.MAC, m) && rawCode(d.SiteID) == g.siteID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Unregister deletes the device from GDMS. The delete call and its body
 // are not in the public API guide (unconfirmed): POST device/delete with
 // {"macList": [...]}, as the guide's other batch calls take MACs.
 func (g *gdms) Unregister(ctx context.Context, mac string) error {
-	err := g.call(ctx, http.MethodPost, "/oapi/v1.0.0/device/delete", map[string]any{"macList": []string{gdmsMAC(mac)}}, nil)
+	m, err := normMAC(mac)
+	if err != nil {
+		return g.clean("unregister", err)
+	}
+	err = g.call(ctx, http.MethodPost, "/oapi/v1.0.0/device/delete", map[string]any{"macList": []string{gdmsMAC(m)}}, nil)
 	var r *gdmsRefusal
 	if errors.As(err, &r) && gdmsMissing(r.Msg) {
 		err = nil
@@ -114,8 +152,7 @@ func (*gdms) Lookup(context.Context, string) (string, bool, error) {
 }
 
 func gdmsExists(msg string) bool {
-	m := strings.ToLower(msg)
-	return strings.Contains(m, "exist") && !gdmsMissing(m)
+	return existsText(msg) && !gdmsMissing(msg)
 }
 
 func gdmsMissing(msg string) bool {
@@ -123,7 +160,7 @@ func gdmsMissing(msg string) bool {
 	return strings.Contains(m, "not exist") || strings.Contains(m, "not found")
 }
 
-// gdmsMAC is the MAC as GDMS wants it: XX:XX:XX:XX:XX:XX.
+// gdmsMAC is a normalised MAC as GDMS wants it: XX:XX:XX:XX:XX:XX.
 func gdmsMAC(mac string) string {
 	m := strings.ToUpper(strings.NewReplacer(":", "", "-", "", ".", "").Replace(mac))
 	var parts []string
@@ -235,9 +272,31 @@ func (e *gdmsRefusal) Error() string {
 	return fmt.Sprintf("GDMS refused (retCode %d): %s", e.Code, e.Msg)
 }
 
-// call sends a signed request: access_token, timestamp and signature in
-// the query, the JSON body (if any) covered by the signature.
+// call sends a signed request; a refusal of the access token (HTTP 401,
+// or a refusal naming the token) drops it and retries once with a new one.
 func (g *gdms) call(ctx context.Context, method, path string, body any, dst any) error {
+	err := g.callOnce(ctx, method, path, body, dst)
+	if gdmsTokenRefused(err) {
+		g.mu.Lock()
+		g.token = ""
+		g.mu.Unlock()
+		err = g.callOnce(ctx, method, path, body, dst)
+	}
+	return err
+}
+
+func gdmsTokenRefused(err error) bool {
+	var a *apiError
+	if errors.As(err, &a) && a.Status == http.StatusUnauthorized {
+		return true
+	}
+	var r *gdmsRefusal
+	return errors.As(err, &r) && strings.Contains(strings.ToLower(r.Msg), "token")
+}
+
+// callOnce sends one signed request: access_token, timestamp and
+// signature in the query, the JSON body (if any) covered by the signature.
+func (g *gdms) callOnce(ctx context.Context, method, path string, body any, dst any) error {
 	tok, err := g.accessToken(ctx)
 	if err != nil {
 		return err

@@ -69,7 +69,11 @@ func TestRedirectLive(t *testing.T) {
 func liveRoundTrip(t *testing.T, v prov.Vendor, creds Credentials, mac, serial string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	cl, err := New(v, creds, nil, nil)
+	var settings []byte
+	if v == prov.Yealink && creds[KeyYealinkKey] == "" {
+		settings = []byte(`{"api":"ymcs"}`) // YMCS only when chosen (spec S-11)
+	}
+	cl, err := New(v, creds, settings, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

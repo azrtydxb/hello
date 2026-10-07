@@ -88,6 +88,10 @@ func (s *snom) Check(ctx context.Context) error {
 }
 
 func (s *snom) Register(ctx context.Context, mac, _, u string) error {
+	mac, err := normMAC(mac)
+	if err != nil {
+		return s.clean("register", err)
+	}
 	if s.xmlrpc {
 		return s.clean("register", s.rpcOK(ctx, "redirect.registerPhone", snomMAC(mac, true), u))
 	}
@@ -95,6 +99,10 @@ func (s *snom) Register(ctx context.Context, mac, _, u string) error {
 }
 
 func (s *snom) Unregister(ctx context.Context, mac string) error {
+	mac, err := normMAC(mac)
+	if err != nil {
+		return s.clean("unregister", err)
+	}
 	if s.xmlrpc {
 		_, found, err := s.lookupRPC(ctx, mac)
 		if err != nil || !found {
@@ -114,6 +122,10 @@ func (s *snom) Unregister(ctx context.Context, mac string) error {
 }
 
 func (s *snom) Lookup(ctx context.Context, mac string) (string, bool, error) {
+	mac, err := normMAC(mac)
+	if err != nil {
+		return "", false, s.clean("lookup", err)
+	}
 	if s.xmlrpc {
 		u, found, err := s.lookupRPC(ctx, mac)
 		return u, found, s.clean("lookup", err)

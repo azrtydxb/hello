@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -45,8 +46,8 @@ const maxBody = 1 << 20
 //   - snom: {"api": "rest" (default, SRAPS REST with Hawk) | "xmlrpc" (the
 //     legacy redirect XML-RPC service, with the same key ID and secret as
 //     its user name and password)}
-//   - yealink: {"api": "rps" | "ymcs" (default: ymcs when its client ID is
-//     set, else rps), "serverName": the RPS server entry Hello creates
+//   - yealink: {"api": "rps" (default) | "ymcs" (only when set so, spec
+//     S-11), "serverName": the RPS server entry Hello creates
 //     (default "hello-" plus a hash of the access key), "macOnly": true when
 //     Yealink enabled MAC-only registration on the YMCS account, so no
 //     serial number is needed}
@@ -210,6 +211,9 @@ func (c *conn) clean(op string, err error, extra ...string) error {
 			return fmt.Errorf("%s (%w)", msg, ce)
 		}
 	}
+	if errors.Is(err, ErrRejected) {
+		return &cleaned{msg: msg, is: ErrRejected}
+	}
 	return errors.New(msg)
 }
 
@@ -220,3 +224,33 @@ func sameOrigin(base, link string) bool {
 	l, err2 := url.Parse(link)
 	return err1 == nil && err2 == nil && b.Scheme == l.Scheme && b.Host == l.Host
 }
+
+var macDigits = regexp.MustCompile(`^[0-9a-f]{12}$`)
+
+// errBadMAC does not echo the input, which may be anything.
+var errBadMAC = errors.New("the MAC must be 12 hex digits (separators : - . allowed)")
+
+// normMAC is the MAC as 12 lowercase hex digits, or an error for anything
+// else, so no caller's input reaches a vendor's path or body unchecked.
+func normMAC(mac string) (string, error) {
+	m := strings.ToLower(strings.NewReplacer(":", "", "-", "", ".", "").Replace(mac))
+	if !macDigits.MatchString(m) {
+		return "", errBadMAC
+	}
+	return m, nil
+}
+
+// rejection marks a vendor refusal as permanent (ErrRejected) while
+// keeping the vendor's message as its text.
+type rejection struct{ error }
+
+func (rejection) Is(target error) bool { return target == ErrRejected }
+
+// cleaned is a redacted error that still matches ErrRejected.
+type cleaned struct {
+	msg string
+	is  error
+}
+
+func (e *cleaned) Error() string { return e.msg }
+func (e *cleaned) Unwrap() error { return e.is }
