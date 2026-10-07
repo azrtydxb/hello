@@ -27,7 +27,8 @@ import (
 // It is empty on purpose: every kw-specific value is supplied through the
 // cfg's #!trydefenv parameters by the kamailio Deployment's env
 // (KAMAILIO_LISTEN_IP = pod IP, KAMAILIO_PUBLIC_HOST = 192.168.10.101,
-// KAMAILIO_PUBLIC_PORT = 30508, KAMAILIO_INVITE_TIMEOUT) and the kw
+// KAMAILIO_PUBLIC_PORT = KAMAILIO_PHONES_PORT = 30508, KAMAILIO_METRICS_PORT,
+// KAMAILIO_INVITE_TIMEOUT) and the kw
 // dispatcher.list (Service names instead of the lab's fixed IPs), which is a
 // separate ConfigMap key and not compared here. Prefer a new #!trydefenv
 // parameter over adding an entry.

@@ -70,8 +70,9 @@ Confirmed against the cluster during the first-sync bootstrap:
   Service FQDN `hello-control.hello.svc.cluster.local` (guarded by
   `test/deploy/ui_upstream_test.go`); the UI container exits at startup if it
   does not resolve.
-- `KAMAILIO_PUBLIC_HOST` (kamailio): `192.168.10.101` (node master-11;
-  NodePort 30508/udp is reachable on every node address).
+- `KAMAILIO_PUBLIC_HOST` (kamailio): `192.168.10.101` (node master-11; the
+  kamailio pod runs there with hostNetwork and binds 30508 udp+tcp itself, so
+  phones reach it un-NATed — a NodePort SNATs them and breaks calls to them).
 - Images pull from `192.168.10.131:5000/...` with no imagePullSecret: the
   nodes trust Nexus directly (containerd `certs.d`), verified with a
   disposable pod in this namespace before the first sync.
