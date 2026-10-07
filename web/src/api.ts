@@ -16,6 +16,8 @@ export interface VersionInfo {
 /** GET /api/v1/auth/me */
 export interface Me {
   username: string;
+  /** The caller's role (spec S-23); read fresh on every request. */
+  role: "viewer" | "operator" | "admin";
 }
 
 /** An API token as listed; the token itself is never returned. */

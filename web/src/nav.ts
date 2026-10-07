@@ -1,3 +1,5 @@
+import { atLeast, type Role } from "./role";
+
 /**
  * Primary navigation, from the Kuvryn Hello console design (groups, labels,
  * order and icons). `phase` is when the page gets content (spec §21).
@@ -8,6 +10,8 @@ export interface NavItem {
   phase: number;
   /** Lucide icon name (design/azrty icon font). */
   icon: string;
+  /** The least role that sees the item (spec S-23); default viewer. */
+  minRole?: Role;
 }
 
 /** A section of the sidebar; the first one has no heading. */
@@ -55,6 +59,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         path: "/routes/test",
         phase: 2,
         icon: "flask-conical",
+        // The tester runs POST /routing/test, a write operation.
+        minRole: "operator",
       },
       {
         label: "Ring groups",
@@ -95,9 +101,24 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "stethoscope",
       },
       { label: "System", path: "/system", phase: 3, icon: "settings" },
+      {
+        label: "Users",
+        path: "/users",
+        phase: 5,
+        icon: "user-cog",
+        minRole: "admin",
+      },
     ],
   },
 ];
+
+/** The groups and items `role` may see; empty groups are dropped. */
+export function navGroupsFor(role: string | undefined): NavGroup[] {
+  return NAV_GROUPS.map((g) => ({
+    ...g,
+    items: g.items.filter((i) => atLeast(role, i.minRole ?? "viewer")),
+  })).filter((g) => g.items.length > 0);
+}
 
 /** Every nav item, in sidebar order. */
 export const NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap((g) => g.items);

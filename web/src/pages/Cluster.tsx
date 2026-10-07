@@ -46,6 +46,7 @@ import {
   type Tone,
 } from "./platform/health";
 import "./platform/platform.css";
+import { Can } from "../role";
 
 /** The live views around the cluster; each is absent when it cannot be read. */
 interface Around {
@@ -977,15 +978,17 @@ function DrainControl({
     <div className="pf-drain">
       {step.kind === "idle" && (
         <div ref={trigger}>
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={draining ? "play" : "pause"}
-            aria-label={`${verb} ${m.id}`}
-            onClick={() => setStep({ kind: "confirm" })}
-          >
-            {verb}
-          </Button>
+          <Can min="admin">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={draining ? "play" : "pause"}
+              aria-label={`${verb} ${m.id}`}
+              onClick={() => setStep({ kind: "confirm" })}
+            >
+              {verb}
+            </Button>
+          </Can>
         </div>
       )}
       {step.kind === "confirm" && (

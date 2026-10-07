@@ -31,6 +31,7 @@ import {
 } from "../design/azrty/components";
 import { formatDuration, formatTime } from "../format";
 import { NowPlaying, usePlayback } from "./media/MediaParts";
+import { Can } from "../role";
 
 export const PAGE_SIZE = 50;
 
@@ -208,11 +209,13 @@ export function Recordings() {
           >
             <Icon name="download" size={16} />
           </a>
-          <IconButton
-            icon="trash-2"
-            label={`Delete the recording ${r.correlationId}`}
-            onClick={() => setDeleting(r)}
-          />
+          <Can>
+            <IconButton
+              icon="trash-2"
+              label={`Delete the recording ${r.correlationId}`}
+              onClick={() => setDeleting(r)}
+            />
+          </Can>
         </div>
       ),
     },

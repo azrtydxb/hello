@@ -28,6 +28,7 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatBytes, PhonesTabs } from "./phones/ui";
+import { Can } from "../role";
 
 type ListState =
   | { status: "loading" }
@@ -162,12 +163,14 @@ export function ProvFirmware() {
       key: "pinned",
       label: "Pinned",
       render: (f) => (
-        <Switch
-          checked={f.pinned}
-          disabled={pinBusy}
-          aria-label={`Pin ${f.version} for ${vendorLabel(f.vendor)} ${f.modelGlob}`}
-          onChange={(e) => void onPin(f, e.target.checked)}
-        />
+        <Can fallback={f.pinned ? "On" : "Off"}>
+          <Switch
+            checked={f.pinned}
+            disabled={pinBusy}
+            aria-label={`Pin ${f.version} for ${vendorLabel(f.vendor)} ${f.modelGlob}`}
+            onChange={(e) => void onPin(f, e.target.checked)}
+          />
+        </Can>
       ),
     },
     {
@@ -175,11 +178,13 @@ export function ProvFirmware() {
       label: <span className="visually-hidden">Actions</span>,
       align: "right",
       render: (f) => (
-        <IconButton
-          icon="trash-2"
-          label={`Delete ${f.filename}`}
-          onClick={() => setDeleting(f)}
-        />
+        <Can>
+          <IconButton
+            icon="trash-2"
+            label={`Delete ${f.filename}`}
+            onClick={() => setDeleting(f)}
+          />
+        </Can>
       ),
     },
   ];
@@ -338,9 +343,11 @@ function UploadForm({ onUploaded }: { onUploaded: (f: Firmware) => void }) {
         </Alert>
       )}
       <div className="prov-row">
-        <Button type="submit" icon="upload" disabled={busy}>
-          {busy ? "Uploading…" : "Upload"}
-        </Button>
+        <Can>
+          <Button type="submit" icon="upload" disabled={busy}>
+            {busy ? "Uploading…" : "Upload"}
+          </Button>
+        </Can>
       </div>
     </form>
   );

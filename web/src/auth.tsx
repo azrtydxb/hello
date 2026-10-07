@@ -14,15 +14,24 @@ import {
   loginPath,
   logout as apiLogout,
   setUnauthorizedHandler,
+  type Me,
 } from "./api";
 import { Alert, Button, Spinner } from "./design/azrty/components";
+import type { Role } from "./role";
 
 /** The session as the UI knows it. */
 export type AuthState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "signedOut" }
-  | { status: "signedIn"; username: string };
+  | { status: "signedIn"; username: string; role: Role };
+
+/** The auth state for a GET /auth/me answer (null: signed out). */
+function fromMe(me: Me | null): AuthState {
+  return me
+    ? { status: "signedIn", username: me.username, role: me.role ?? "viewer" }
+    : { status: "signedOut" };
+}
 
 interface AuthContextValue {
   state: AuthState;
@@ -41,11 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const me = await fetchMe();
-      setState(
-        me
-          ? { status: "signedIn", username: me.username }
-          : { status: "signedOut" },
-      );
+      setState(fromMe(me));
     } catch (err) {
       setState({ status: "error", message: errorMessage(err) });
     }
@@ -64,11 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fetchMe()
       .then((me) => {
         if (!active) return;
-        setState(
-          me
-            ? { status: "signedIn", username: me.username }
-            : { status: "signedOut" },
-        );
+        setState(fromMe(me));
       })
       .catch((err: unknown) => {
         if (active) setState({ status: "error", message: errorMessage(err) });

@@ -38,6 +38,9 @@ type Store interface {
 	CreateSession(ctx context.Context, userID int64, hash []byte, expires time.Time) error
 	DeleteSession(ctx context.Context, hash []byte) error
 
+	ListUsers(ctx context.Context) ([]store.User, error)
+	SetUserRole(ctx context.Context, actor string, id int64, role auth.Role) (store.User, error)
+
 	ListTokens(ctx context.Context, userID int64) ([]store.Token, error)
 	CreateToken(ctx context.Context, actor string, userID int64, name string, hash []byte) (store.Token, error)
 	DeleteToken(ctx context.Context, actor string, userID, id int64) error

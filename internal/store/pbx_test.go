@@ -7,6 +7,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
@@ -21,6 +22,16 @@ import (
 
 // scratchStore returns a Store over a migrated throwaway database.
 func scratchStore(t *testing.T) *Store {
+	t.Helper()
+	db := scratchDB(t)
+	if _, err := migrate.Up(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	return New(db)
+}
+
+// scratchDB returns a throwaway, unmigrated database.
+func scratchDB(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := os.Getenv("HELLO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -46,10 +57,7 @@ func scratchStore(t *testing.T) *Store {
 	}
 	db := stdlib.OpenDB(*scfg)
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := migrate.Up(ctx, db); err != nil {
-		t.Fatal(err)
-	}
-	return New(db)
+	return db
 }
 
 func mustExtension(t *testing.T, s *Store, number string) Extension {

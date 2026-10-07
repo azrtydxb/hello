@@ -236,6 +236,113 @@
         }
       }
     },
+    "/api/v1/users": {
+      "get": {
+        "operationId": "listUsers",
+        "summary": "Every management user with their role",
+        "description": "Admin only. Users are created and deleted with `hello-control user add`; the console and the API only change roles.",
+        "tags": ["users"],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "responses": {
+          "200": {
+            "description": "Users, by id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The caller's role is below admin (forbidden_role)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "patch": {
+        "operationId": "updateUser",
+        "summary": "Change a user's role",
+        "description": "Admin only, audited. The new role applies on the user's next request, whatever credential it carries. Demoting the last admin answers 409 last_admin.",
+        "tags": ["users"],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The caller's role is below admin (forbidden_role)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The change would leave no admin (last_admin)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
     "/api/v1/extensions": {
       "get": {
         "operationId": "listExtensions",
@@ -4974,10 +5081,61 @@
       },
       "Me": {
         "type": "object",
-        "required": ["username"],
+        "required": ["username", "role"],
         "properties": {
           "username": {
+            "type": "string",
+            "description": "Empty for a service account"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        }
+      },
+      "Role": {
+        "type": "string",
+        "enum": ["viewer", "operator", "admin"],
+        "description": "viewer: every read operation; operator: also every write operation; admin: also every admin and secrets operation"
+      },
+      "User": {
+        "type": "object",
+        "required": ["id", "username", "role", "createdAt"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "username": {
             "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "UserList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/User"
+            }
+          }
+        }
+      },
+      "UserUpdate": {
+        "type": "object",
+        "required": ["role"],
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/Role"
           }
         }
       },

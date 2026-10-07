@@ -77,7 +77,7 @@ func newEnvConfig(t *testing.T, cfg Config, box *secret.Box) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.CreateUser(ctx, "test", testUser, hash); err != nil {
+	if _, err := st.CreateUser(ctx, "test", testUser, hash, auth.RoleAdmin); err != nil {
 		t.Fatal(err)
 	}
 	cfg.Store, cfg.SIPDomain, cfg.SessionTTL = st, testDomain, sessionTTL

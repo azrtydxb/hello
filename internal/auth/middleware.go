@@ -137,14 +137,24 @@ func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.H
 
 // Require admits a request whose actor has at least role minRole and holds
 // scope s, answering 403 forbidden_role or 403 insufficient_scope otherwise.
-// It runs inside Middleware.
+// It runs inside Middleware. The actor's role is the one its lookup read for
+// this request, so a demotion applies on the next request (spec S-23).
 //
-// Contract only: enforcement lands with the authorization server (plan
-// ai-external-access, Task 3); until then it admits every request, so
-// sessions and API tokens behave exactly as before.
+// The scope check lands with the authorization server (plan
+// ai-external-access, Task 3); until then every credential carries every
+// scope.
 func Require(minRole Role, s Scope) func(http.Handler) http.Handler {
-	_, _ = minRole, s
-	return func(next http.Handler) http.Handler { return next }
+	_ = s
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			a, _ := ActorFrom(r.Context())
+			if !a.Role.AtLeast(minRole) {
+				WriteError(w, http.StatusForbidden, "forbidden_role", "your role does not allow this operation")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // WriteError writes the API's error envelope.

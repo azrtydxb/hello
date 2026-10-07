@@ -111,7 +111,8 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"username": actor(r).Username})
+	a := actor(r)
+	writeJSON(w, http.StatusOK, map[string]string{"username": a.Username, "role": string(a.Role)})
 }
 
 // Tokens.

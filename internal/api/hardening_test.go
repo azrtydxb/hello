@@ -16,7 +16,7 @@ import (
 type tokenStore struct{ stubStore }
 
 func (tokenStore) TokenActor(context.Context, []byte) (auth.Actor, error) {
-	return auth.Actor{UserID: 1, Username: "admin", TokenID: 1}, nil
+	return auth.Actor{UserID: 1, Username: "admin", TokenID: 1, Role: auth.RoleAdmin}, nil
 }
 
 type oneBinding struct{}

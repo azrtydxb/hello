@@ -41,6 +41,7 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatMac, PhonesTabs, vendorModel } from "./phones/ui";
+import { Can } from "../role";
 
 type ListState =
   | { status: "loading" }
@@ -271,34 +272,40 @@ export function ProvTemplates() {
             >
               View
             </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="copy"
-              disabled={copying}
-              aria-label={`Copy ${t.name} to edit`}
-              onClick={() => void onCopy(t)}
-            >
-              Copy to edit
-            </Button>
+            <Can>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="copy"
+                disabled={copying}
+                aria-label={`Copy ${t.name} to edit`}
+                onClick={() => void onCopy(t)}
+              >
+                Copy to edit
+              </Button>
+            </Can>
           </div>
         ) : (
           <div className="prov-row" style={{ justifyContent: "flex-end" }}>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="pencil"
-              aria-label={`Edit ${t.name}`}
-              onClick={() => setEditing({ saved: t, draft: draftOf(t) })}
-            >
-              Edit
-            </Button>
-            <IconButton
-              icon="trash-2"
-              label={`Delete ${t.name}`}
-              size={15}
-              onClick={() => setDeleting(t)}
-            />
+            <Can>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="pencil"
+                aria-label={`Edit ${t.name}`}
+                onClick={() => setEditing({ saved: t, draft: draftOf(t) })}
+              >
+                Edit
+              </Button>
+            </Can>
+            <Can>
+              <IconButton
+                icon="trash-2"
+                label={`Delete ${t.name}`}
+                size={15}
+                onClick={() => setDeleting(t)}
+              />
+            </Can>
           </div>
         ),
     },
@@ -312,13 +319,15 @@ export function ProvTemplates() {
         description="The files each phone fetches. Built-ins are read-only: copy one to change it; deleting the copy restores the built-in."
         actions={
           editing ? undefined : (
-            <Button
-              icon="plus"
-              disabled={list.status !== "ready"}
-              onClick={() => setEditing({ saved: null, draft: NEW_DRAFT() })}
-            >
-              New template
-            </Button>
+            <Can>
+              <Button
+                icon="plus"
+                disabled={list.status !== "ready"}
+                onClick={() => setEditing({ saved: null, draft: NEW_DRAFT() })}
+              >
+                New template
+              </Button>
+            </Can>
           )
         }
       />
@@ -353,14 +362,16 @@ export function ProvTemplates() {
                 title="No templates"
                 description="A template renders the files a phone fetches."
                 action={
-                  <Button
-                    icon="plus"
-                    onClick={() =>
-                      setEditing({ saved: null, draft: NEW_DRAFT() })
-                    }
-                  >
-                    New template
-                  </Button>
+                  <Can>
+                    <Button
+                      icon="plus"
+                      onClick={() =>
+                        setEditing({ saved: null, draft: NEW_DRAFT() })
+                      }
+                    >
+                      New template
+                    </Button>
+                  </Can>
                 }
               />
             )}
@@ -391,14 +402,16 @@ export function ProvTemplates() {
               >
                 Close
               </Button>
-              <Button
-                size="sm"
-                icon="copy"
-                disabled={copying}
-                onClick={() => void onCopy(viewing)}
-              >
-                Copy to edit
-              </Button>
+              <Can>
+                <Button
+                  size="sm"
+                  icon="copy"
+                  disabled={copying}
+                  onClick={() => void onCopy(viewing)}
+                >
+                  Copy to edit
+                </Button>
+              </Can>
             </>
           }
         >
@@ -701,17 +714,21 @@ function TemplateEditor({
         )}
 
         <div className="prov-row">
-          <Button
-            variant="secondary"
-            icon="check"
-            disabled={busy !== null}
-            onClick={() => void run("validate")}
-          >
-            {busy === "validate" ? "Validating…" : "Validate"}
-          </Button>
-          <Button type="submit" icon="save" disabled={busy !== null}>
-            {busy === "save" ? "Saving…" : "Save"}
-          </Button>
+          <Can>
+            <Button
+              variant="secondary"
+              icon="check"
+              disabled={busy !== null}
+              onClick={() => void run("validate")}
+            >
+              {busy === "validate" ? "Validating…" : "Validate"}
+            </Button>
+          </Can>
+          <Can>
+            <Button type="submit" icon="save" disabled={busy !== null}>
+              {busy === "save" ? "Saving…" : "Save"}
+            </Button>
+          </Can>
         </div>
       </form>
 

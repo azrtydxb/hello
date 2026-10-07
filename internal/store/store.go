@@ -328,8 +328,8 @@ func (s *Store) CreateFirstUser(ctx context.Context, username, passwordHash stri
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		var id int64
 		err := tx.QueryRowContext(ctx, `
-			INSERT INTO users (username, password_hash)
-			SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM users)
+			INSERT INTO users (username, password_hash, role)
+			SELECT $1, $2, 'admin' WHERE NOT EXISTS (SELECT 1 FROM users)
 			ON CONFLICT (username) DO NOTHING
 			RETURNING id`, username, passwordHash).Scan(&id)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -342,20 +342,6 @@ func (s *Store) CreateFirstUser(ctx context.Context, username, passwordHash stri
 		return insertAudit(ctx, tx, "system", "create", "user", strconv.FormatInt(id, 10))
 	})
 	return created, err
-}
-
-// CreateUser inserts a management user.
-func (s *Store) CreateUser(ctx context.Context, actor, username, passwordHash string) (int64, error) {
-	var id int64
-	err := s.tx(ctx, func(tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx,
-			`INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id`,
-			username, passwordHash).Scan(&id); err != nil {
-			return err
-		}
-		return insertAudit(ctx, tx, actor, "create", "user", strconv.FormatInt(id, 10))
-	})
-	return id, err
 }
 
 // UserByName returns a user's id and bcrypt hash.
@@ -395,8 +381,8 @@ func (s *Store) PruneSessions(ctx context.Context) (int64, error) {
 func (s *Store) SessionActor(ctx context.Context, hash []byte) (auth.Actor, error) {
 	var a auth.Actor
 	err := s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.token_hash = $1 AND s.expires_at > now()`, hash).Scan(&a.UserID, &a.Username)
+		SELECT u.id, u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id
+		WHERE s.token_hash = $1 AND s.expires_at > now()`, hash).Scan(&a.UserID, &a.Username, &a.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
 	}
@@ -409,7 +395,7 @@ func (s *Store) TokenActor(ctx context.Context, hash []byte) (auth.Actor, error)
 	err := s.db.QueryRowContext(ctx, `
 		UPDATE api_tokens t SET last_used_at = now() FROM users u
 		WHERE t.token_hash = $1 AND u.id = t.user_id
-		RETURNING t.id, u.id, u.username`, hash).Scan(&a.TokenID, &a.UserID, &a.Username)
+		RETURNING t.id, u.id, u.username, u.role`, hash).Scan(&a.TokenID, &a.UserID, &a.Username, &a.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
 	}

@@ -38,6 +38,7 @@ import {
 } from "../design/azrty/components";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import "./directory/directory.css";
+import { Can } from "../role";
 
 type ListState =
   | { status: "loading" }
@@ -193,11 +194,13 @@ export function Devices() {
       key: "enabled",
       label: "Enabled",
       render: (d) => (
-        <Switch
-          aria-label={`Enabled: ${d.sipUsername}`}
-          checked={d.enabled}
-          onChange={(e) => void onToggle(d, e.target.checked)}
-        />
+        <Can fallback={d.enabled ? "On" : "Off"}>
+          <Switch
+            aria-label={`Enabled: ${d.sipUsername}`}
+            checked={d.enabled}
+            onChange={(e) => void onToggle(d, e.target.checked)}
+          />
+        </Can>
       ),
     },
     {
@@ -206,21 +209,25 @@ export function Devices() {
       align: "right",
       render: (d) => (
         <div className="dir-actions">
-          <Button
-            variant="secondary"
-            size="sm"
-            icon="key-round"
-            aria-label={`Rotate secret for ${d.sipUsername}`}
-            onClick={() => setPending({ kind: "rotate", device: d })}
-          >
-            Rotate secret
-          </Button>
-          <IconButton
-            icon="trash-2"
-            label={`Delete device ${d.sipUsername}`}
-            size={15}
-            onClick={() => setPending({ kind: "delete", device: d })}
-          />
+          <Can min="admin">
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="key-round"
+              aria-label={`Rotate secret for ${d.sipUsername}`}
+              onClick={() => setPending({ kind: "rotate", device: d })}
+            >
+              Rotate secret
+            </Button>
+          </Can>
+          <Can>
+            <IconButton
+              icon="trash-2"
+              label={`Delete device ${d.sipUsername}`}
+              size={15}
+              onClick={() => setPending({ kind: "delete", device: d })}
+            />
+          </Can>
         </div>
       ),
     },
@@ -233,13 +240,15 @@ export function Devices() {
         title="Devices"
         description="SIP credentials. Every device belongs to one extension; secrets are shown once."
         actions={
-          <Button
-            icon="plus"
-            disabled={list.status !== "ready"}
-            onClick={() => setCreating(true)}
-          >
-            New device
-          </Button>
+          <Can>
+            <Button
+              icon="plus"
+              disabled={list.status !== "ready"}
+              onClick={() => setCreating(true)}
+            >
+              New device
+            </Button>
+          </Can>
         }
       />
 
@@ -264,9 +273,11 @@ export function Devices() {
               list.extensions.length === 0 ? (
                 <LinkButton to="/extensions">Open extensions</LinkButton>
               ) : (
-                <Button icon="plus" onClick={() => setCreating(true)}>
-                  New device
-                </Button>
+                <Can>
+                  <Button icon="plus" onClick={() => setCreating(true)}>
+                    New device
+                  </Button>
+                </Can>
               )
             }
           />
