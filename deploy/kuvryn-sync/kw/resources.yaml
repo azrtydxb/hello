@@ -808,7 +808,7 @@ spec:
           # kamailio/Dockerfile), pinned to the tag it published for
           # commit 1c3fe03 (the full sha tag; the registry keeps no short
           # tags). Later: an immutable repository@sha256:... digest.
-          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-855ebf86bd3fd9f76d66f435870d551770d39a01
+          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-f55ac3578354b32c0473409cb751f5a38bb93f89
           imagePullPolicy: IfNotPresent
           securityContext:
             # uid/gid of the image's kamailio user (read from the image).
@@ -960,7 +960,7 @@ spec:
       terminationGracePeriodSeconds: 120 # a drain must finish (lab: 2h, capped here)
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-855ebf86bd3fd9f76d66f435870d551770d39a01
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-f55ac3578354b32c0473409cb751f5a38bb93f89
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1171,7 +1171,7 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-855ebf86bd3fd9f76d66f435870d551770d39a01
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-f55ac3578354b32c0473409cb751f5a38bb93f89
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1355,7 +1355,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-855ebf86bd3fd9f76d66f435870d551770d39a01
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-f55ac3578354b32c0473409cb751f5a38bb93f89
           command:
             - sh
             - -c
@@ -1402,7 +1402,7 @@ spec:
               value: "false"
       containers:
         - name: hello-control
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-855ebf86bd3fd9f76d66f435870d551770d39a01
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-f55ac3578354b32c0473409cb751f5a38bb93f89
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1642,7 +1642,7 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-855ebf86bd3fd9f76d66f435870d551770d39a01
+          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-f55ac3578354b32c0473409cb751f5a38bb93f89
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1725,7 +1725,7 @@ spec:
             path: /
             pathType: Prefix
 ---
-# Phone provisioning (spec S-12): its own Service, Ingress and certificate.
+# Phone provisioning (spec S-12): its own Service and Ingress (with certificate).
 apiVersion: v1
 kind: Service
 metadata:
@@ -1748,33 +1748,14 @@ spec:
       protocol: TCP
       targetPort: prov
 ---
-# The provisioning host's certificate from the cluster's cluster-ca
-# ClusterIssuer (the kuvryn-ai pattern). Its secret also carries ca.crt,
-# which hello-control serves at /p/ca.crt. The Sync deployer needs
-# cert-manager.io certificates in its Role (README, Bootstrap).
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: hello-prov-tls
-  namespace: hello
-  labels:
-    app.kubernetes.io/name: hello
-    app.kubernetes.io/instance: hello
-    app.kubernetes.io/component: prov
-    app.kubernetes.io/managed-by: kuvryn-sync
-spec:
-  secretName: hello-prov-tls
-  dnsNames:
-    - prov.hello.kw.watteel.lab
-  issuerRef:
-    kind: ClusterIssuer
-    name: cluster-ca
----
 # prov.hello.kw.watteel.lab: HTTPS for the per-device paths, and plain HTTP
 # kept open (no ssl-redirect) only because the DHCP boot path and the CA
 # download need it; hello-control refuses per-device paths over plain HTTP.
 # Access logging is off because the token is in the path; Hello's fetch
-# audit records it redacted.
+# audit records it redacted. The certificate comes from cert-manager's
+# ingress-shim off the cluster-issuer annotation (the novamem/nexora
+# pattern): it writes hello-prov-tls, ca.crt included, which hello-control
+# serves at /p/ca.crt.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -1786,6 +1767,7 @@ metadata:
     app.kubernetes.io/component: prov
     app.kubernetes.io/managed-by: kuvryn-sync
   annotations:
+    cert-manager.io/cluster-issuer: cluster-ca
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/enable-access-log: "false"
 spec:

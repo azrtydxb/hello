@@ -96,7 +96,7 @@ func envValue(c map[string]any, name string) string {
 }
 
 // TestKwProvisioningIngress (spec S-12) fails if the kw manifest lacks the
-// prov.hello.kw.watteel.lab Ingress, its Certificate from cluster-ca,
+// prov.hello.kw.watteel.lab Ingress, its cluster-ca issuer annotation,
 // ssl-redirect "false", enable-access-log "false", the hello-prov Service
 // on port 8083 reaching hello-control's prov port, the public URL and CA
 // file on hello-control, or the optional redirect-secret env.
@@ -120,19 +120,17 @@ func TestKwProvisioningIngress(t *testing.T) {
 		t.Errorf("hello-prov Ingress backend = %v, want hello-prov:8083", backend)
 	}
 
-	cert := findDoc(docs, "Certificate", "hello-prov-tls")
-	if cert == nil {
-		t.Fatal("no hello-prov-tls Certificate")
+	// cert-manager's ingress-shim issues the certificate from the Ingress
+	// annotation; the Sync deployer cannot create Certificate objects.
+	if findDoc(docs, "Certificate", "hello-prov-tls") != nil {
+		t.Error("hello-prov-tls is a Certificate object; the Sync deployer cannot create it, use the Ingress annotation")
 	}
-	if at(cert, "spec", "issuerRef", "kind") != "ClusterIssuer" || at(cert, "spec", "issuerRef", "name") != "cluster-ca" {
-		t.Errorf("hello-prov-tls is not issued by the cluster-ca ClusterIssuer")
+	if at(ing, "metadata", "annotations", "cert-manager.io/cluster-issuer") != "cluster-ca" {
+		t.Error("hello-prov Ingress is not annotated cert-manager.io/cluster-issuer: cluster-ca")
 	}
-	if at(cert, "spec", "dnsNames", 0) != provHost {
-		t.Errorf("hello-prov-tls does not name %s", provHost)
-	}
-	secret := at(cert, "spec", "secretName")
-	if at(ing, "spec", "tls", 0, "secretName") != secret {
-		t.Errorf("the Ingress TLS secret is not the Certificate's %v", secret)
+	secret := at(ing, "spec", "tls", 0, "secretName")
+	if secret != "hello-prov-tls" {
+		t.Errorf("the Ingress TLS secret is %v, want hello-prov-tls", secret)
 	}
 
 	svc := findDoc(docs, "Service", "hello-prov")
