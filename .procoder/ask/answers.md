@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-06 10:24 UTC. procoder reads this
+Written 2026-10-07 20:24 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -15,6 +15,13 @@ Question: Phase 7 in-call HA scope (after the anchored-vs-direct explanation)
 - Defer Phase 7; stop at the current scope
 
 Answer: Anchor everything + full HA (all calls anchor, LAN-to-LAN included; reverses Phase 5 conditional anchoring deliberately)
+
+## [spec] ai-external-access
+
+Key: 01f93861d03b
+Question: OPEN: Auditing MCP reads. "Every call is audited like a user call": a user's reads write no audit row today. Should MCP read tool calls write audit rows too, or is a log line plus metrics per call (and the normal audit rows for every change) enough? Proposed: log line plus metrics for reads, audit rows for changes, as for users.
+
+Answer: Reads get a log line and metrics; every change writes its normal audit row with the client in `via` (proposed)
 
 ## [decision] decisions.md
 
@@ -107,6 +114,18 @@ Question: UI package manager
 
 Answer: pnpm
 
+## [decision] decisions.md
+
+Key: 237b6f7b23a7
+Question: AI phase 1: user roles for OAuth consent
+
+Hello has one kind of user, who can do everything, so the role that should bound the scopes a user can grant bounds nothing today (spec ai-external-access, S-5).
+
+- Keep one role in phase 1: every user may grant every scope, `secrets` included; `GrantableScopes` is where a later roles spec plugs in (proposed)
+- Add roles now (for example administrator, operator, read-only), applied to the console and the API as well as to consent
+
+Answer: Add roles now: viewer (read-only), operator (day-to-day configuration writes), admin (users, roles, tokens, secrets, OAuth clients, settings); existing users become admin; the console shows and edits a user's role; the API enforces a minimum role on every route; consent, MCP scopes and service accounts are bounded by role
+
 ## (no longer asked)
 
 Key: 2a0645102517
@@ -193,6 +212,18 @@ Answer: One node registers each trunk at a time (Valkey lease, another node take
 
 ## [decision] decisions.md
 
+Key: 43202daa3527
+Question: AI phase 1: dynamic client registration on kw
+
+Client ID metadata documents are preferred and DCR is deprecated, but some MCP clients still only register dynamically (spec ai-external-access, S-10).
+
+- On for kw, rate-limited, labelled unverified on the consent screen, unused clients cleaned up (proposed)
+- Off: only client ID metadata documents and service accounts
+
+Answer: On for kw, rate-limited, labelled unverified on the consent screen, unused clients cleaned up (proposed)
+
+## [decision] decisions.md
+
 Key: 451638dd32f2
 Question: Phone auto-provisioning: vendor redirect accounts
 
@@ -228,6 +259,13 @@ Key: 5470505a44c0
 Question: OPEN: Scope of the first build — Phase 0 only, or Phase 0 plus Phase 1 (SIP/UDP REGISTER, digest auth, internal calls between two phones) in the same milestone?
 
 Answer: all — build the full roadmap (Phases 0-7) in phase order; Phase 0 first, one spec + milestone per phase.
+
+## [spec] ai-external-access
+
+Key: 56930f270aca
+Question: OPEN: Dynamic client registration on kw. Client ID metadata documents are the preferred registration and DCR is deprecated, but some MCP clients still only register dynamically. Should `HELLO_OAUTH_DCR` be on for kw? Proposed: on, so every client works today, with the rate limit, the "unverified" consent label and the cleanup rules of S-10.
+
+Answer: On for kw, rate-limited, labelled unverified on the consent screen, unused clients cleaned up (proposed)
 
 ## [decision] decisions.md
 
@@ -296,6 +334,18 @@ Question: Phase 1 delivery
 - Hold for your review first
 
 Answer: Push phase-1-minimum-pbx and open a PR to main
+
+## [decision] decisions.md
+
+Key: 803693c6f34d
+Question: AI phase 1: auditing MCP read calls
+
+A user's reads write no audit row today; the decision says every MCP call is audited like a user call (spec ai-external-access, S-15).
+
+- Reads get a log line and metrics; every change writes its normal audit row with the client in `via` (proposed)
+- Every MCP tool call, reads included, writes an audit row
+
+Answer: Reads get a log line and metrics; every change writes its normal audit row with the client in `via` (proposed)
 
 ## (no longer asked)
 
@@ -376,6 +426,13 @@ Question: Phone auto-provisioning: provisioning host certificate
 - Both: public certificate for phones, cluster-ca kept for the lab
 
 Answer: cluster-ca (kw private CA), with Hello's CA pushed over plain HTTP via the DHCP boot path or uploaded by hand
+
+## [spec] ai-external-access
+
+Key: b4b673d5b75c
+Question: OPEN: User roles. Hello has one kind of user, who can do everything, so "the user's role bounds the scopes on the consent screen" bounds nothing today. Should phase 1 add roles (for example administrator, operator, read-only, applied to the console and the API too), or keep one role so every user can grant every scope including `secrets`? Proposed: keep one role in phase 1 (`GrantableScopes` is the single place a later roles spec plugs in).
+
+Answer: Add roles now: viewer (read-only), operator (day-to-day configuration writes), admin (users, roles, tokens, secrets, OAuth clients, settings); existing users become admin; the console shows and edits a user's role; the API enforces a minimum role on every route; consent, MCP scopes and service accounts are bounded by role
 
 ## [decision] decisions.md
 
