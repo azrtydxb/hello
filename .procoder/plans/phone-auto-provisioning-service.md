@@ -148,10 +148,10 @@ Interfaces: consumes everything above.
 
 - [x] Merge the core, control, redirect and ui branches, resolving conflicts hunk by hunk. Run the full gate. _(Each landed on main by its own PR, #27–#30; this branch starts from that main.)_
 - [x] `test/provclient`: each vendor's sequence for its representative model (spec S-18), with fallbacks (Poly `<mac>.cfg` then `000000000000.cfg`; Grandstream `cfg<mac>.xml`, `cfg<mac>`, …) and the vendor User-Agent format.
-- [ ] `TestProvisioningAsVendors`: create an extension and a phone per vendor through the API, fetch over HTTPS with `provclient`, parse, register a `test/sipua` phone through Kamailio with the parsed credentials, expect `200 OK`. Extend `TestNoSecretsInLogs`.
+- [x] `TestProvisioningAsVendors`: create an extension and a phone per vendor through the API, fetch over HTTPS with `provclient`, parse, register a `test/sipua` phone through Kamailio with the parsed credentials, expect `200 OK`. Extend `TestNoSecretsInLogs`.
 - [x] kw manifest and `TestKwProvisioningIngress` (`cluster-ca` certificate, the optional redirect-secret env).
 - [x] `docs/provisioning.md` per spec S-19 and `TestDocsProvisioningLinks`; link from `docs/phones.md`; README configuration table.
-- [ ] Run `HELLO_DOCKER=1 go test -timeout 25m ./test/integration/` on CI (pass), then the full gate.
+- [x] Run `HELLO_DOCKER=1 go test -timeout 25m ./test/integration/` on CI (pass), then the full gate.
 - [ ] After merge: pin images, Sync to kw, and check live from the LAN: one real or emulated phone per available vendor fetches through `prov.hello.kw.watteel.lab` (DHCP boot hand-off included) and registers. Once the user has supplied the `hello-prov-redirect` secret, run `TestRedirectLive` on kw for Snom, Yealink and GDMS; record the evidence, or the named missing keys, in the stories.
 
 ## Acceptance criteria
