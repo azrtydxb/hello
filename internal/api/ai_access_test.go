@@ -56,20 +56,7 @@ func (e *aiEnv) oauthPost(path string, form url.Values, basic ...string) respons
 func (e *aiEnv) oauthToken(c *client, scope string) map[string]any {
 	t := e.t
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(`{"redirect_uris":["http://127.0.0.1/cb"],"client_name":"Agent"}`))
-	rec := httptest.NewRecorder()
-	e.as.Handler().ServeHTTP(rec, req)
-	reg := response{code: rec.Code, body: rec.Body.Bytes()}.json(t)
-	clientID := reg["client_id"].(string)
-	verifier := strings.Repeat("v", 50)
-	sum := sha256.Sum256([]byte(verifier))
-	q := url.Values{"response_type": {"code"}, "client_id": {clientID}, "redirect_uri": {"http://127.0.0.1/cb"},
-		"code_challenge": {base64.RawURLEncoding.EncodeToString(sum[:])}, "code_challenge_method": {"S256"},
-		"scope": {scope}, "state": {"s"}, "resource": {"http://localhost/api/v1"}}
-	rec = httptest.NewRecorder()
-	e.as.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+q.Encode(), nil))
-	loc, _ := url.Parse(rec.Header().Get("Location"))
-	id := loc.Query().Get("request")
+	id, clientID, verifier := e.authorizeRequest(scope)
 	view := c.must(http.StatusOK, "GET", "/api/v1/oauth/requests/"+id, nil).json(t)
 	if view["clientName"] != "Agent" || view["verified"] != false {
 		t.Fatalf("consent view = %v", view)
@@ -85,6 +72,28 @@ func (e *aiEnv) oauthToken(c *client, scope string) map[string]any {
 	out := tok.json(t)
 	out["client_id"] = clientID
 	return out
+}
+
+// authorizeRequest registers a public client and starts an authorization
+// request for scope, returning the pending request id, the client id and
+// the PKCE verifier.
+func (e *aiEnv) authorizeRequest(scope string) (id, clientID, verifier string) {
+	t := e.t
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(`{"redirect_uris":["http://127.0.0.1/cb"],"client_name":"Agent"}`))
+	rec := httptest.NewRecorder()
+	e.as.Handler().ServeHTTP(rec, req)
+	reg := response{code: rec.Code, body: rec.Body.Bytes()}.json(t)
+	clientID = reg["client_id"].(string)
+	verifier = strings.Repeat("v", 50)
+	sum := sha256.Sum256([]byte(verifier))
+	q := url.Values{"response_type": {"code"}, "client_id": {clientID}, "redirect_uri": {"http://127.0.0.1/cb"},
+		"code_challenge": {base64.RawURLEncoding.EncodeToString(sum[:])}, "code_challenge_method": {"S256"},
+		"scope": {scope}, "state": {"s"}, "resource": {"http://localhost/api/v1"}}
+	rec = httptest.NewRecorder()
+	e.as.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/oauth/authorize?"+q.Encode(), nil))
+	loc, _ := url.Parse(rec.Header().Get("Location"))
+	return loc.Query().Get("request"), clientID, verifier
 }
 
 // TestTokenLifecycle (store and API half) fails if a new personal token
@@ -188,6 +197,7 @@ func TestServiceAccountsAPI(t *testing.T) {
 	secret := s1["secret"].(string)
 	c.must(http.StatusCreated, "POST", "/api/v1/service-accounts/"+id+"/secrets", map[string]any{})
 	c.must(http.StatusConflict, "POST", "/api/v1/service-accounts/"+id+"/secrets", nil)
+	c.must(http.StatusBadRequest, "POST", "/api/v1/service-accounts/"+id+"/secrets", "{")
 	got := c.must(http.StatusOK, "GET", "/api/v1/service-accounts/"+id, nil)
 	list := c.must(http.StatusOK, "GET", "/api/v1/service-accounts", nil)
 	if bytes.Contains(got.body, []byte(secret)) || bytes.Contains(list.body, []byte(secret)) || len(got.json(t)["secrets"].([]any)) != 2 {
@@ -205,11 +215,13 @@ func TestServiceAccountsAPI(t *testing.T) {
 		t.Fatalf("an operator service account read API tokens: %d", r.code)
 	}
 	c.must(http.StatusOK, "PATCH", "/api/v1/service-accounts/"+id, map[string]any{"enabled": false})
+	c.must(http.StatusBadRequest, "PATCH", "/api/v1/service-accounts/"+id, "{")
 	b.must(http.StatusUnauthorized, "GET", "/api/v1/extensions", nil)
 	c.must(http.StatusNoContent, "DELETE", "/api/v1/service-accounts/"+id+"/secrets/"+fmt.Sprint(s1["id"]), nil)
 	c.must(http.StatusNotFound, "DELETE", "/api/v1/service-accounts/"+id+"/secrets/"+fmt.Sprint(s1["id"]), nil)
 	c.must(http.StatusNoContent, "DELETE", "/api/v1/service-accounts/"+id, nil)
 	c.must(http.StatusNotFound, "GET", "/api/v1/service-accounts/"+id, nil)
+	c.must(http.StatusNotFound, "DELETE", "/api/v1/service-accounts/"+id, nil)
 	var n int
 	if err := e.db.QueryRowContext(context.Background(), `SELECT count(*) FROM audit_events WHERE resource IN ('service_account', 'client_secret')`).Scan(&n); err != nil || n < 6 {
 		t.Fatalf("service-account audit rows = %d (%v)", n, err)
@@ -232,6 +244,18 @@ func TestGrantsAPI(t *testing.T) {
 	b.bearer = tok["access_token"].(string)
 	b.must(http.StatusOK, "GET", "/api/v1/extensions", nil)
 	c.must(http.StatusNoContent, "DELETE", "/api/v1/oauth/grants/"+fmt.Sprint(gs[0].(map[string]any)["id"]), nil)
+	c.must(http.StatusNotFound, "DELETE", "/api/v1/oauth/grants/"+fmt.Sprint(gs[0].(map[string]any)["id"]), nil)
+
+	// Consent refusals: a bad scope list, an unknown request, and a
+	// denial that sends the client back with access_denied.
+	c.must(http.StatusBadRequest, "POST", "/api/v1/oauth/requests/x/approve", map[string]any{"scopes": []string{"root"}})
+	c.must(http.StatusNotFound, "POST", "/api/v1/oauth/requests/nope/approve", map[string]any{"scopes": []string{"read"}})
+	c.must(http.StatusNotFound, "POST", "/api/v1/oauth/requests/nope/deny", nil)
+	pending, _, _ := e.authorizeRequest("read")
+	denied := c.must(http.StatusOK, "POST", "/api/v1/oauth/requests/"+pending+"/deny", nil).json(t)
+	if !strings.Contains(denied["redirect"].(string), "error=access_denied") {
+		t.Fatalf("deny redirect = %v", denied)
+	}
 	b.must(http.StatusUnauthorized, "GET", "/api/v1/extensions", nil)
 	set := c.must(http.StatusOK, "GET", "/api/v1/ai/settings", nil).json(t)
 	if set["enabled"] != true || set["mcpUrl"] != "http://localhost/mcp" || set["dcr"] != true {
