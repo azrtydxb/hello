@@ -1,6 +1,6 @@
 # ai-external-access — implementation plan
 
-Status: draft
+Status: approved
 Spec: .procoder/specs/ai-external-access.md
 
 ## Goal
@@ -30,21 +30,22 @@ Why in hello-control and not a separate service: the MCP server must replay thro
   - leaves `procoder check` with 0 blocking findings, and `procoder test` and `procoder lint` green over `web/` where it touches the console
   - gives every security-relevant behaviour a test that fails without it, mutation-checked (snapshot immediately before, restore immediately after, `cmp`)
 - The REVIEW.md rubric applies. CI runs on the Arc runners; deployment is Kuvryn Sync; no workloads on the user's Mac.
-- The spec's three open questions (roles, auditing MCP reads, DCR on kw) do not block Tasks 1–5: each has a single switch point (`auth.GrantableScopes`, the tool-call logger in `internal/mcp`, `HELLO_OAUTH_DCR` in the kw manifest), built to the proposed answer and changed in one place if the user decides otherwise.
+- Decided 2026-10-08: user roles `viewer`/`operator`/`admin` are built in this phase (spec S-23, Task 4); MCP reads get a log line and metrics, changes their audit rows; DCR is on for kw.
 
 ### Shared contracts (fixed; a stream that needs a change asks the lead and never edits another stream's files)
 
-1. **Schema:** `migrations/00008_ai_access.sql`, as the spec's Data section lists it, with `CHECK` lists for `api_tokens.kind`, `oauth_clients.kind` and `oauth_tokens.kind`, and `oauth_tokens.scopes`/`resources` non-null.
+1. **Schema:** `migrations/00008_ai_access.sql`, as the spec's Data section lists it, with `users.role` (existing rows set to `admin`) and `CHECK` lists for `users.role`, `api_tokens.kind`, `oauth_clients.kind` and `oauth_tokens.kind`, and `oauth_tokens.scopes`/`resources` non-null.
 2. **Scopes and actors** (`internal/auth/scope.go`):
    - `type Scope string`; `ScopeRead`, `ScopeWrite`, `ScopeAdmin`, `ScopeSecrets`, `ScopeSession`; `AllScopes` (read, write, admin, secrets).
    - `type Scopes []Scope` with `Has(Scope) bool` (admin implies write implies read; `secrets` and `session` only when present), `ParseScopes(string) (Scopes, error)` (space-separated, unknown → error), `String()`.
-   - `GrantableScopes(Actor) Scopes`: `AllScopes` for every user (the single switch point for the roles question).
-   - `Actor` gains `Kind` (`KindSession`, `KindLegacyToken`, `KindPersonalToken`, `KindOAuth`, `KindService`), `Scopes`, `ClientID`, `Audience []string`, `ServiceName`. `String()`: `service:<name>` for `KindService`, otherwise as today. Sessions and legacy tokens carry `AllScopes` plus `ScopeSession` for sessions.
+   - `type Role string`; `RoleViewer`, `RoleOperator`, `RoleAdmin`, ordered, with `AtLeast(Role) bool` and `ParseRole`.
+   - `GrantableScopes(Role) Scopes`: viewer → read; operator → read, write; admin → `AllScopes`.
+   - `Actor` gains `Role` (the owning user's current role, or the service account's), `Kind` (`KindSession`, `KindLegacyToken`, `KindPersonalToken`, `KindOAuth`, `KindService`), `Scopes`, `ClientID`, `Audience []string`, `ServiceName`. `String()`: `service:<name>` for `KindService`, otherwise as today. Sessions and legacy tokens carry `AllScopes` plus `ScopeSession` for sessions.
    - Prefixes: `PrefixPersonal = "hello_pat_"`, `PrefixAccess = "hello_at_"`, `PrefixRefresh = "hello_rt_"`, `PrefixClientSecret = "hello_cs_"`; `NewPrefixed(prefix) (plain string, hash []byte)` over `NewToken`.
    - Replay marker: `WithReplay(ctx, Replay{ClientID string})`, `ReplayFrom(ctx) (Replay, bool)`; the middleware accepts an MCP-audience access token on `/api/v1` only when `ReplayFrom` is set.
-3. **Middleware** (`internal/auth/middleware.go`): `Middleware(l Lookup, o Options, log)` with `Options{Resource string; MetadataURL string; Cookies bool}`, and `Require(s Scope) func(http.Handler) http.Handler`, which answers the spec's `403` challenge. `Lookup.TokenActor` resolves every bearer kind (prefix decides the table; unprefixed is legacy).
-4. **Route table** (`internal/api/routes.go`): `type route struct{ Method, Pattern string; Scope auth.Scope; Public bool; H http.HandlerFunc }`, `func (s *server) routes() []route`, and exported `RouteTable() []RouteInfo{Method, Pattern string; Scope auth.Scope; Public bool}` for tests outside the package. `Handler` registers from it. `OpenAPI() []byte` exports the embedded document.
-5. **apispec** (`internal/apispec/apispec.go`): `Load([]byte) (*Spec, error)`; `Spec.Operations() []Operation`; `Operation{ID, Method, Path, Summary, Description string; Scope auth.Scope; Exclude string; Params []Param; Body *Body; Output map[string]any; Secrets []string}`; `Param{Name, In, Description string; Required bool; Schema map[string]any}`; `Body{ContentTypes []string; JSON map[string]any}`; `Secrets` are JSON-pointer-like paths (`/secret`, `/items/*/url`).
+3. **Middleware** (`internal/auth/middleware.go`): `Middleware(l Lookup, o Options, log)` with `Options{Resource string; MetadataURL string; Cookies bool}`, and `Require(r Role, s Scope) func(http.Handler) http.Handler`, which checks the role (`403` `forbidden_role`) and then the scope (the spec's `403` challenge). `Lookup.TokenActor` resolves every bearer kind (prefix decides the table; unprefixed is legacy).
+4. **Route table** (`internal/api/routes.go`): `type route struct{ Method, Pattern string; Scope auth.Scope; Role auth.Role; Public bool; H http.HandlerFunc }`, `func (s *server) routes() []route`, and exported `RouteTable() []RouteInfo{Method, Pattern string; Scope auth.Scope; Role auth.Role; Public bool}` for tests outside the package. `Handler` registers from it. `OpenAPI() []byte` exports the embedded document.
+5. **apispec** (`internal/apispec/apispec.go`): `Load([]byte) (*Spec, error)`; `Spec.Operations() []Operation`; `Operation{ID, Method, Path, Summary, Description string; Scope auth.Scope; Role auth.Role; Exclude string; Params []Param; Body *Body; Output map[string]any; Secrets []string}`; `Param{Name, In, Description string; Required bool; Schema map[string]any}`; `Body{ContentTypes []string; JSON map[string]any}`; `Secrets` are JSON-pointer-like paths (`/secret`, `/items/*/url`).
 6. **OAuth** (`internal/oauth/oauth.go`, `store.go`): `New(Options) (*Server, error)` with `Options{Store Store; PublicURL string; AccessTTL, RefreshIdle, RefreshMax time.Duration; DCR, CIMDAllowPrivate bool; Limiter Limiter; Client *http.Client; Metrics *Metrics; Log *slog.Logger}`; `(*Server).Handler() http.Handler` (well-knowns and `/oauth/*`); `(*Server).Request(ctx, id) (ConsentView, error)`, `Approve(ctx, auth.Actor, id string, Scopes) (redirect string, error)`, `Deny(ctx, auth.Actor, id string) (redirect string, error)`; `MetadataURL(resource string) string`; `Resources() (api, mcp string)`. `Store` lists the client, request, grant, token and secret operations Task 3 needs (written by the lead with Task 3's first commit and fixed thereafter).
 7. **MCP** (`internal/mcp/mcp.go`): `New(Options) (http.Handler, error)` with `Options{API http.Handler; Spec *apispec.Spec; PublicURL string; AllowedOrigins []string; Lookup auth.Lookup; MetadataURL string; Metrics *Metrics; Log *slog.Logger}`.
 8. **Config** (`internal/config`): `Control.AI{PublicURL string; AccessTTL, RefreshIdle, RefreshMax time.Duration; DCR, CIMDAllowPrivate bool; MCPAllowedOrigins []string}` from the spec's env keys.
@@ -55,11 +56,11 @@ Files: `migrations/00008_ai_access.sql`, `internal/auth/scope.go`, `internal/aut
 Interfaces: everything listed in Shared contracts.
 
 - [ ] Write the migration; `HELLO_TEST_DATABASE_URL=… go test -run Migrate ./test/integration/` → applies and rolls back (`TestMigrateAIAccessRollback`).
-- [ ] Move every `public(...)`/`private(...)` call in `Handler` into `routes()` with a scope per the spec's S-5 list; no behaviour change: `go test ./internal/api/` → all existing tests pass unchanged.
+- [ ] Move every `public(...)`/`private(...)` call in `Handler` into `routes()` with a scope per the spec's S-5 list and a minimum role per S-23 (read → viewer, write → operator, admin and secrets → admin, session → viewer); the middleware enforces neither yet, so no behaviour change: `go test ./internal/api/` → all existing tests pass unchanged.
 - [ ] Add `scope.go`, the `Actor` fields, prefixes and the replay marker; `go test ./internal/auth/` → `TestScopesHas` (hierarchy, `secrets` orthogonal, `session` session-only) passes.
 - [ ] `go get github.com/modelcontextprotocol/go-sdk@v1.8.0`; `go build ./...` → ok.
 - [ ] Config fields with defaults and validation (`HELLO_PUBLIC_URL` https scheme-and-host, `http://localhost` allowed); `go test ./internal/config/` → `TestLoadAI*` pass.
-- [ ] Commit to `ai-contracts`, then branch `ai-openapi`, `ai-oauth`, `ai-mcp` and `ai-ui-skills`, each in its own worktree.
+- [ ] Commit to `ai-contracts`, then branch `ai-openapi`, `ai-oauth`, `ai-roles`, `ai-mcp` and `ai-ui-skills`, each in its own worktree.
 
 ## Task 2: OpenAPI completeness (branch ai-openapi)
 
@@ -67,8 +68,8 @@ Files: `internal/api/openapi.json`, `internal/apispec/` (`Load` implementation, 
 Interfaces: produces the completed document (every operation with `x-hello-scope`, `x-hello-mcp`, descriptions, `x-hello-secret`) and `apispec`; consumes contract 4.
 
 - [ ] `apispec.Load`: operations, parameters (path and query, path required), JSON body schemas and `2xx` schemas with `$ref` inlined to depth 8, `x-hello-*` fields, secret paths; table test over a small fixture document.
-- [ ] `TestRoutesMatchOpenAPI`: `RouteTable()` versus `apispec` operations, both directions, scope equality.
-- [ ] Add `x-hello-scope` and `x-hello-mcp` to all 103 operations (exclusions and reasons per spec S-14), descriptions for the 61 without one and for every parameter and top-level body property, `x-hello-secret` on the show-once properties; `TestOpenAPIForTools` passes.
+- [ ] `TestRoutesMatchOpenAPI`: `RouteTable()` versus `apispec` operations, both directions, scope and role equality.
+- [ ] Add `x-hello-scope`, `x-hello-role` and `x-hello-mcp` to all 103 operations (exclusions and reasons per spec S-14), descriptions for the 61 without one and for every parameter and top-level body property, `x-hello-secret` on the show-once properties; `TestOpenAPIForTools` passes.
 - [ ] The validator: wrap `Handler` in tests (installed in `TestMain`), validate request bodies and responses with `jsonschema-go`, record observed `(operation, status)` pairs, detect handlers that read a body without a documented `requestBody`; at exit, fail on violations and on documented statuses never observed outside the exemptions (commented list in `conformance_test.go`).
 - [ ] Fix the spec S-3 gaps: preview `422`, the seven `502` entries, the voicemail PUT `oneOf` body and the heard body; add the test cases that produce each, and every reachable `409`/`400`; remove documented statuses no handler can send. `TestOpenAPIConformance` passes.
 - [ ] Mutation-check: drop one route from the table, one operation from the document, one documented status, one `requestBody` — each fails the suite. Run the full gate.
@@ -79,17 +80,27 @@ Files: `internal/oauth/` (`metadata.go`, `authorize.go`, `cimd.go`, `token.go`, 
 Interfaces: produces contract 6 and the `Lookup` behaviour of contract 3; consumes contracts 1–4.
 
 - [ ] Store: every credential, client, grant and consent change in one transaction with its audit row; `TokenActor` dispatches on prefix and returns scopes, kind, client and audience; expired, revoked, spent and disabled credentials return `ErrNoCredentials`. `TestTokenLifecycle`.
-- [ ] Middleware: `Require(scope)` from the route table, audience check (`/api/v1` resource, or MCP resource inside a replay), `WWW-Authenticate` on `401` and `403`, `session` scope only for cookies. `TestScopeEnforcement` iterates `RouteTable()` with a token one scope short and one exactly sufficient.
+- [ ] Middleware: `Require(role, scope)` from the route table (role read per request from the owning user or service account), audience check (`/api/v1` resource, or MCP resource inside a replay), `WWW-Authenticate` on `401` and `403`, `session` scope only for cookies. `TestScopeEnforcement` iterates `RouteTable()` with a token one scope short and one exactly sufficient.
 - [ ] Metadata documents and the `404`s without `HELLO_PUBLIC_URL`; `TestOAuthMetadata` (decodes with `oauthex.AuthServerMeta` and `oauthex.ProtectedResourceMetadata`).
 - [ ] CIMD fetcher: `https` only, no redirects, 5 s, 64 KiB, dial-time refusal of private, loopback and link-local addresses (unless allowed), `client_id` equality, cache by `Cache-Control`/`Expires` capped at 24 h; table test with `httptest` servers and a custom dialer.
 - [ ] Authorize and consent: request validation order (client and redirect URI first, error page before that point), PKCE S256, `resource` normalisation, stored request, redirect to `/oauth/consent`; `Request`, `Approve` (narrowing only, `GrantableScopes`, code issue), `Deny`; `TestAuthorizeAndConsent`.
 - [ ] Token endpoint: code exchange with reuse revocation, refresh rotation with reuse revocation and idle/absolute limits, client credentials, RFC 6749 errors, `no-store`; `TestTokenEndpoint`.
 - [ ] Revocation and grants: `/oauth/revoke`, grant list and delete with the `admin` rule; `TestGrantsAndRevocation`.
-- [ ] Service accounts: CRUD, at most two live secrets, disable; `TestServiceAccounts`.
+- [ ] Service accounts: CRUD with a role, scopes bounded by `GrantableScopes(role)`, at most two live secrets, disable; `TestServiceAccounts`.
 - [ ] DCR behind `HELLO_OAUTH_DCR`, public clients only, cleanup in the daily prune; `TestDynamicRegistration`. Throttle in Valkey with in-memory fallback; `TestOAuthThrottle`.
 - [ ] Metrics `hello_oauth_*`. Mutation-check PKCE verification, code reuse revocation, refresh reuse revocation, the audience check, the CIMD private-address refusal and the `session` scope rule. Run the full gate.
 
-## Task 4: MCP server (branch ai-mcp)
+## Task 4: User roles (branch ai-roles, after Task 3's middleware)
+
+Files: `internal/store/` (user role reads and `SetUserRole` with the last-admin check and audit row), `internal/api/users.go` and its test (`GET /api/v1/users`, `PATCH /api/v1/users/{id}`, `role` on `auth/me`, their OpenAPI entries), `cmd/hello-control` (`user add --role`), `web/src/pages/Users.tsx` and `Users.test.tsx`, `web/src/nav.ts` and `web/src/App.tsx` (role-aware navigation from `auth/me`).
+Interfaces: consumes contracts 1–4 and Task 3's middleware; produces the users routes the console calls.
+
+- [ ] Store and API: list users with roles, change a role (admin; `409` `last_admin`; audited), `role` on `auth/me`; CLI `--role` (default `viewer`, first user `admin`). `TestUserRoles`.
+- [ ] `TestRoleEnforcement` iterates `RouteTable()` with a viewer, an operator and an admin through a session, a personal token, an OAuth token and a service account; one case demotes a user and expects the next request refused.
+- [ ] Console: Users page (admin) with a role editor; navigation and write actions hidden below the needed role. `Users.test.tsx`.
+- [ ] Mutation-check the role comparison, the per-request role read and the last-admin guard. Run the full gate.
+
+## Task 5: MCP server (branch ai-mcp)
 
 Files: `internal/mcp/` (`server.go` transport and auth, `tools.go` generation and filtering, `replay.go`, `redact.go`, `resources.go`, `prompts.go`, `metrics.go`, tests, `bench_test.go`).
 Interfaces: produces contract 7; consumes contracts 2, 3 and 5 and `api.Handler` (a fake handler in unit tests, the real one with fakes in `TestToolReplay`).
@@ -102,7 +113,7 @@ Interfaces: produces contract 7; consumes contracts 2, 3 and 5 and `api.Handler`
 - [ ] Tool-call log line (tool, actor, client, status, duration) and `hello_mcp_*` metrics; `TestOAuthMCPMetrics` (MCP half). `TestToolCallOverhead` (`HELLO_BENCH=1`).
 - [ ] Mutation-check the scope filter, the step-up `403`, the replay-marker refusal for external requests and the redaction walk. Run the full gate.
 
-## Task 5: Console and skills (branch ai-ui-skills)
+## Task 6: Console and skills (branch ai-ui-skills)
 
 Files: `web/src/pages/Consent.tsx` and `Consent.test.tsx`, `web/src/pages/AIAccess.tsx` and `AIAccess.test.tsx`, `web/src/pages/Login.tsx` (return-to), `web/src/pages/System.tsx` (tokens move out, a link remains), `web/src/nav.ts`, `web/src/App.tsx`, `web/src/api/` (typed calls), `skills/hello-setup/`, `skills/hello-routing/`, `skills/hello-troubleshoot/` (each `SKILL.md` and `references/`), `skills/skills.go` and `skills/skills_test.go`, `internal/api/skills.go` and its test (handlers and OpenAPI entries; route rows are Task 1's).
 Interfaces: consumes the consent, grants, service-account, token, skills and `ai/settings` routes of the spec's Interfaces section (against mocked responses until Task 3 lands) and the tool names `apispec` derives.
@@ -113,12 +124,12 @@ Interfaces: consumes the consent, grants, service-account, token, skills and `ai
 - [ ] Download routes: list and zip from the embedded FS; `TestSkillsDownload`.
 - [ ] Run the full gate including `procoder test` and `procoder lint` over `web/`.
 
-## Task 6: Lab, kw, docs and end to end (lead, branch ai-contracts)
+## Task 7: Lab, kw, docs and end to end (lead, branch ai-contracts)
 
-Files: `deploy/docker-compose/compose.yaml` (the public URL, the UI proxy locations, a lab certificate), `web/nginx/default.conf.template` (`/mcp`, `/oauth/`, `/.well-known/oauth-` locations), `deploy/kuvryn-sync/kw/resources.yaml` (`hello-tls` Certificate from `cluster-ca`, TLS on the `hello` Ingress, `HELLO_PUBLIC_URL`, `HELLO_OAUTH_DCR`), `test/deploy/` (`TestKwAIAccess`, `TestDocsAIAccess`), `test/integration/mcp_e2e_test.go` (`TestMCPEndToEnd`), `test/integration` (`TestNoSecretsInLogs` extension), `docs/ai-access.md`, `README.md`.
+Files: `deploy/docker-compose/compose.yaml` (the public URL, the UI proxy locations, a lab certificate), `web/nginx/default.conf.template` (`/mcp`, `/oauth/`, `/.well-known/oauth-` locations), `deploy/kuvryn-sync/kw/resources.yaml` (`hello-tls` Certificate from `cluster-ca`, TLS on the `hello` Ingress, `HELLO_PUBLIC_URL`, `HELLO_OAUTH_DCR=true`), `test/deploy/` (`TestKwAIAccess`, `TestDocsAIAccess`), `test/integration/mcp_e2e_test.go` (`TestMCPEndToEnd`), `test/integration` (`TestNoSecretsInLogs` extension), `docs/ai-access.md`, `README.md`.
 Interfaces: consumes everything above.
 
-- [ ] Merge the openapi, oauth, mcp and ui-skills branches (each by its own PR), resolving conflicts hunk by hunk; run the full gate.
+- [ ] Merge the openapi, oauth, roles, mcp and ui-skills branches (each by its own PR), resolving conflicts hunk by hunk; run the full gate.
 - [ ] `TestMCPEndToEnd`: hello-control with the lab database, a test-served client ID metadata document, the SDK client's authorization-code handler driving `/oauth/authorize`, consent approved through the API with a session, tool calls, a resource read, refresh, revoke, refusal — each step of spec S-22.
 - [ ] Extend `TestNoSecretsInLogs` with every credential kind and a withheld value from the end-to-end run.
 - [ ] kw manifest, nginx template and `TestKwAIAccess`.
