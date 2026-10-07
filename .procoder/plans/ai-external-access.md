@@ -76,12 +76,20 @@ Interfaces: everything listed in Shared contracts.
 Files: `internal/api/openapi.json`, `internal/apispec/` (`Load` implementation, `$ref` inlining, secret paths, tests), `internal/api/conformance_test.go` (the validator and `TestMain`), `internal/api/openapi_test.go` (`TestRoutesMatchOpenAPI`, `TestOpenAPIForTools`), the existing `internal/api/*_test.go` files only to add cases that reach documented statuses.
 Interfaces: produces the completed document (every operation with `x-hello-scope`, `x-hello-mcp`, descriptions, `x-hello-secret`) and `apispec`; consumes contract 4.
 
-- [ ] `apispec.Load`: operations, parameters (path and query, path required), JSON body schemas and `2xx` schemas with `$ref` inlined to depth 8, `x-hello-*` fields, secret paths; table test over a small fixture document.
-- [ ] `TestRoutesMatchOpenAPI`: `RouteTable()` versus `apispec` operations, both directions, scope and role equality.
-- [ ] Add `x-hello-scope`, `x-hello-role` and `x-hello-mcp` to all 103 operations (exclusions and reasons per spec S-14), descriptions for the 61 without one and for every parameter and top-level body property, `x-hello-secret` on the show-once properties; `TestOpenAPIForTools` passes.
-- [ ] The validator: wrap `Handler` in tests (installed in `TestMain`), validate request bodies and responses with `jsonschema-go`, record observed `(operation, status)` pairs, detect handlers that read a body without a documented `requestBody`; at exit, fail on violations and on documented statuses never observed outside the exemptions (commented list in `conformance_test.go`).
-- [ ] Fix the spec S-3 gaps: preview `422`, the seven `502` entries, the voicemail PUT `oneOf` body and the heard body; add the test cases that produce each, and every reachable `409`/`400`; remove documented statuses no handler can send. `TestOpenAPIConformance` passes.
-- [ ] Mutation-check: drop one route from the table, one operation from the document, one documented status, one `requestBody` — each fails the suite. Run the full gate.
+- [x] `apispec.Load`: operations, parameters (path and query, path required), JSON body schemas and `2xx` schemas with `$ref` inlined to depth 8, `x-hello-*` fields, secret paths; table test over a small fixture document.
+- [x] `TestRoutesMatchOpenAPI`: `RouteTable()` versus `apispec` operations, both directions, scope and role equality.
+- [x] Add `x-hello-scope`, `x-hello-role` and `x-hello-mcp` to all 103 operations (exclusions and reasons per spec S-14), descriptions for the 61 without one and for every parameter and top-level body property, `x-hello-secret` on the show-once properties; `TestOpenAPIForTools` passes.
+- [x] The validator: wrap `Handler` in tests (installed in `TestMain`), validate request bodies and responses with `jsonschema-go`, record observed `(operation, status)` pairs, detect handlers that read a body without a documented `requestBody`; at exit, fail on violations and on documented statuses never observed outside the exemptions (commented list in `conformance_test.go`).
+- [x] Fix the spec S-3 gaps: preview `422`, the seven `502` entries, the voicemail PUT `oneOf` body and the heard body; add the test cases that produce each, and every reachable `409`/`400`; remove documented statuses no handler can send. `TestOpenAPIConformance` passes.
+- [x] Mutation-check: drop one route from the table, one operation from the document, one documented status, one `requestBody` — each fails the suite. Run the full gate.
+
+Recorded at Task 2:
+
+- Contract 5 grows two read-only methods, `Spec.Responses(id)` (status → inlined JSON schema, nil without a JSON body) and `Spec.RequestContent(id)` (content type → inlined schema), which the conformance validator needs; `Operation` is unchanged. A `$ref` past depth 8 keeps only its sibling keywords.
+- The validator is installed through a package variable `wrapForTest` in `api.go` (identity outside tests) wrapping `Handler`'s result; it matches requests to operations itself. A request body is checked against the document only when the API accepted it (`2xx`); a rejected one is the suite probing validation. A request without `Content-Type` is read as JSON (the handlers' default). `TestOpenAPIConformance` runs from `TestMain` after the suite; the observed-status check runs only on a full run (`HELLO_TEST_DATABASE_URL`, `HELLO_TEST_MINIO_ENDPOINT` and `HELLO_TEST_VALKEY_ADDR` set, no `-run`/`-skip`/`-short`). No exemptions were needed.
+- `TestRoutesMatchOpenAPI` skips route rows whose handler is still `s.pending`; each stream's rows become required in the document the moment it replaces `s.pending`.
+- `importPhones` is excluded from MCP (`text/csv` body; tools send JSON), beyond S-14's list. Public operations carry no `x-hello-scope`/`x-hello-role`, as their route rows.
+- Document changes found by the validator: `403` on `login` (cross-origin refusal), `409` on `deleteDevice`, the `importPhones` `400` as `oneOf` error or result, `upstream` and `render_error` in `Error.code`; `listPresence` answered `items: null` with no devices and now answers `[]`.
 
 ## Task 3: Authorization server and scoped credentials (branch ai-oauth)
 
