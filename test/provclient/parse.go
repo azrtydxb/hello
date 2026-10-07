@@ -53,6 +53,9 @@ func xmlUnescape(s string) string {
 }
 
 func hostPort(s string) (string, int, error) {
+	if s == "" { // a boot file carries no account
+		return "", 0, nil
+	}
 	h, p, err := net.SplitHostPort(s)
 	if err != nil {
 		return "", 0, err

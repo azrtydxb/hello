@@ -139,6 +139,43 @@ func startProv(ctx context.Context, cfg config.Control, st *store.Store, objs *a
 	log.Info("phone provisioning listening", "addr", cfg.Prov.Addr, "tls", cfg.Prov.TLSCert != "")
 	go pruneFetches(ctx, st, vk, cfg.NodeID, cfg.Prov.AuditRetention, log)
 	go runRedirectWorker(ctx, st, vk, cfg.NodeID, deployment, metrics, log)
+	go publishPhoneStates(ctx, st, metrics, cfg.Prov.Resync, log)
+	return nil
+}
+
+// phoneStatesEvery is how often the hello_prov_phones gauge is refreshed.
+const phoneStatesEvery = time.Minute
+
+// phoneCounter counts the phone inventory by fetch state.
+type phoneCounter interface {
+	PhoneFetchStates(ctx context.Context, staleBefore time.Time) (neverFetched, fetched, stale int, err error)
+}
+
+// publishPhoneStates keeps the hello_prov_phones gauge current on every
+// replica: a read-only count, so no lease is needed.
+func publishPhoneStates(ctx context.Context, c phoneCounter, m *prov.Metrics, resync time.Duration, log *slog.Logger) {
+	t := time.NewTicker(phoneStatesEvery)
+	defer t.Stop()
+	for {
+		if err := setPhoneStates(ctx, c, m, resync, time.Now()); err != nil && ctx.Err() == nil {
+			log.Warn("count phones by fetch state", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// setPhoneStates sets the gauge once: a phone is stale when its last fetch
+// is older than twice the re-check interval (spec S-17).
+func setPhoneStates(ctx context.Context, c phoneCounter, m *prov.Metrics, resync time.Duration, now time.Time) error {
+	never, fetched, stale, err := c.PhoneFetchStates(ctx, now.Add(-2*resync))
+	if err != nil {
+		return err
+	}
+	m.SetPhones(never, fetched, stale)
 	return nil
 }
 

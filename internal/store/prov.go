@@ -863,6 +863,18 @@ func (s *Store) PruneFetches(ctx context.Context, before time.Time) (int64, erro
 	return res.RowsAffected()
 }
 
+// PhoneFetchStates counts the inventory by fetch state for the
+// hello_prov_phones gauge (spec S-17): never fetched, fetched since
+// staleBefore, and stale (the last fetch is older than staleBefore).
+func (s *Store) PhoneFetchStates(ctx context.Context, staleBefore time.Time) (neverFetched, fetched, stale int, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT
+		count(*) FILTER (WHERE last_fetch_at IS NULL),
+		count(*) FILTER (WHERE last_fetch_at >= $1),
+		count(*) FILTER (WHERE last_fetch_at < $1)
+		FROM phones`, staleBefore).Scan(&neverFetched, &fetched, &stale)
+	return neverFetched, fetched, stale, err
+}
+
 // boundPhone names the phone bound to one of a set of devices, for the
 // 409 that refuses deleting them (contract 8).
 func boundPhone(ctx context.Context, tx *sql.Tx, where string, arg int64) error {
