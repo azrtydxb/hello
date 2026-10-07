@@ -1,15 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Kuvryn Hello bootstrap: no account here. Hello CA certificate: {{xml .Prov.CAURL}} -->
+<!-- Kuvryn Hello bootstrap: no account and no server here, so it never overrides the hand-off. Hello CA certificate: {{xml .Prov.CAURL}} -->
 <gs_provision version="1">
-{{- with .Phone.MAC}}
-  <mac>{{.}}</mac>
-{{- end}}
   <config version="1">
-    <P212>2</P212>
 {{- with .Prov.CACertPEM}}
     <P8433>{{xml .}}</P8433>
 {{- end}}
-    <P237>{{xml .Prov.URL}}</P237>
     <P194>1</P194>
     <P193>{{div .Prov.ResyncSeconds 60}}</P193>
   </config>

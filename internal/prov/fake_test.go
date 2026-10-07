@@ -56,6 +56,8 @@ type fakePhone struct {
 	lastIP                     netip.Addr
 	lastUA                     string
 	firstFetch, lastFetch      time.Time
+	handoffAt                  time.Time
+	handoffIP                  netip.Addr
 	admin, secret, user, label string
 }
 
@@ -184,7 +186,7 @@ func (s *fakeStore) PhoneByMAC(_ context.Context, mac string) (PhoneRecord, erro
 	return PhoneRecord{}, ErrNotFound
 }
 
-func (s *fakeStore) ClaimBoot(_ context.Context, mac string) (PhoneRecord, *ProvInfo, error) {
+func (s *fakeStore) ClaimBoot(_ context.Context, mac string, ip netip.Addr) (PhoneRecord, *ProvInfo, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.outage != nil {
@@ -200,7 +202,10 @@ func (s *fakeStore) ClaimBoot(_ context.Context, mac string) (PhoneRecord, *Prov
 			if p.sealedBroken {
 				return rec, nil, ErrSealed
 			}
-			p.armed = false
+			p.armed, p.handoffAt, p.handoffIP = false, s.now, ip
+			return rec, &ProvInfo{URL: DeviceURL(s.public, p.plain), CAURL: CAURL(s.public), ResyncSeconds: ResyncSeconds(p.mac, 24*time.Hour)}, nil
+		case !p.armed && !p.handoffAt.IsZero() && s.now.Sub(p.handoffAt) <= BootHandoffGrace &&
+			(!ip.IsValid() || !p.handoffIP.IsValid() || ip == p.handoffIP):
 			return rec, &ProvInfo{URL: DeviceURL(s.public, p.plain), CAURL: CAURL(s.public), ResyncSeconds: ResyncSeconds(p.mac, 24*time.Hour)}, nil
 		case !p.armed:
 			p.reclaimed = true

@@ -61,16 +61,32 @@ func Builtins() []Template {
 // only Phone.MAC, Phone.Model and Prov: the common bodies carry the boot
 // URL, the hand-off bodies the phone's own HTTPS URL, and neither ever a
 // SIP secret or an admin password, because the data they render has none.
+//
+// A phone fetches the common names and its per-MAC name in one boot cycle,
+// in an order the vendor picks, so a common body never sets the server
+// URL or the DHCP-option override: it would undo the hand-off. The
+// hand-off body sets the phone's own URL and turns the DHCP option off, so
+// the next boot does not go back to the boot URL. Snom's common body must
+// name the server (it is how the phone finds its per-MAC name), and Poly's
+// per-MAC name comes from the master, so both share one body.
 type bootBody struct {
-	master string // Poly's master on the boot path (no claim)
-	common string // also the hand-off body
-	ctype  string
+	master  string // Poly's master on the boot path (no claim)
+	common  string // the common names
+	handoff string // the per-MAC hand-off; common when empty
+	ctype   string
+}
+
+func (b bootBody) handoffBody() string {
+	if b.handoff != "" {
+		return b.handoff
+	}
+	return b.common
 }
 
 var bootBodies = map[Vendor]bootBody{
-	Yealink:     {common: builtinBody("yealink/boot.cfg"), ctype: ctText},
+	Yealink:     {common: builtinBody("yealink/boot.cfg"), handoff: builtinBody("yealink/handoff.cfg"), ctype: ctText},
 	Poly:        {master: builtinBody("poly/boot-master.cfg"), common: builtinBody("poly/boot.cfg"), ctype: ctXML},
-	Grandstream: {common: builtinBody("grandstream/boot.xml"), ctype: ctXML},
+	Grandstream: {common: builtinBody("grandstream/boot.xml"), handoff: builtinBody("grandstream/handoff.xml"), ctype: ctXML},
 	Snom:        {common: builtinBody("snom/boot.xml"), ctype: ctXML},
-	Fanvil:      {common: builtinBody("fanvil/boot.cfg"), ctype: ctText},
+	Fanvil:      {common: builtinBody("fanvil/boot.cfg"), handoff: builtinBody("fanvil/handoff.cfg"), ctype: ctText},
 }

@@ -503,7 +503,7 @@ func (h *handler) serveBoot(ctx context.Context, w http.ResponseWriter, ev *even
 		h.deny(ctx, w, ev, ResultBootDenied)
 		return
 	}
-	rec, handoff, err := h.s.ClaimBoot(ctx, rec.MAC)
+	rec, handoff, err := h.s.ClaimBoot(ctx, rec.MAC, ev.rec.IP)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		h.deny(ctx, w, ev, ResultNotAllowlisted)
@@ -522,7 +522,7 @@ func (h *handler) serveBoot(ctx context.Context, w http.ResponseWriter, ev *even
 		h.deny(ctx, w, ev, ResultBootReclaim)
 		return
 	}
-	h.bootBody(ctx, w, ev, ResultBootHandoff, bb.ctype, bb.common, phone, *handoff)
+	h.bootBody(ctx, w, ev, ResultBootHandoff, bb.ctype, bb.handoffBody(), phone, *handoff)
 }
 
 func (h *handler) bootInfo() ProvInfo {

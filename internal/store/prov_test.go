@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"sync"
@@ -89,9 +90,9 @@ func TestClaimBootConcurrent(t *testing.T) {
 		mu   sync.Mutex
 		wins []*prov.ProvInfo
 	)
-	for range 8 {
+	for i := range 8 {
 		wg.Go(func() {
-			_, h, err := st.ClaimBoot(ctx, "805ec0000001")
+			_, h, err := st.ClaimBoot(ctx, "805ec0000001", netip.AddrFrom4([4]byte{192, 0, 2, byte(10 + i)}))
 			if err != nil {
 				t.Error(err)
 				return
@@ -114,7 +115,7 @@ func TestClaimBootConcurrent(t *testing.T) {
 	if err := db.QueryRow(`SELECT boot_armed, boot_reclaimed FROM phones WHERE id = $1`, c.Phone.ID).Scan(&armed, &reclaimed); err != nil || armed || !reclaimed {
 		t.Fatalf("armed %v reclaimed %v (%v)", armed, reclaimed, err)
 	}
-	if _, _, err := st.ClaimBoot(ctx, "000000000000"); !errors.Is(err, prov.ErrNotFound) {
+	if _, _, err := st.ClaimBoot(ctx, "000000000000", netip.Addr{}); !errors.Is(err, prov.ErrNotFound) {
 		t.Fatalf("unknown MAC = %v", err)
 	}
 
@@ -124,10 +125,52 @@ func TestClaimBootConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec, h, err := st.ClaimBoot(ctx, "805ec0000002"); err != nil || h != nil || rec.Allowlisted || !rec.BootArmed {
+	if rec, h, err := st.ClaimBoot(ctx, "805ec0000002", netip.Addr{}); err != nil || h != nil || rec.Allowlisted || !rec.BootArmed {
 		t.Fatalf("unallowlisted claim = %+v, %v, %v", rec, h, err)
 	}
 	_ = off
+}
+
+// TestClaimBootGrace fails if the same source asking again inside
+// prov.BootHandoffGrace does not get the same hand-off without a reclaim
+// flag, or if another source, or the same one after the grace, does not
+// count as a reclaim.
+func TestClaimBootGrace(t *testing.T) {
+	st, db, ext := provStore(t)
+	ctx := context.Background()
+	c, err := st.CreatePhone(ctx, "test", PhoneInput{MAC: "ec74d769e044", Vendor: prov.Grandstream, Model: "WP836",
+		ExtensionID: ext, Enabled: true, Realm: "hello.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	phone := netip.MustParseAddr("192.168.10.77")
+	_, first, err := st.ClaimBoot(ctx, c.Phone.MAC, phone)
+	if err != nil || first == nil {
+		t.Fatalf("first claim = %v, %v", first, err)
+	}
+	_, again, err := st.ClaimBoot(ctx, c.Phone.MAC, phone)
+	if err != nil || again == nil || again.URL != first.URL {
+		t.Fatalf("repeat claim = %+v, %v; want %s", again, err, first.URL)
+	}
+	reclaimed := func() bool {
+		var r bool
+		if err := db.QueryRow(`SELECT boot_reclaimed FROM phones WHERE id = $1`, c.Phone.ID).Scan(&r); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	if reclaimed() {
+		t.Fatal("a repeat inside the grace flagged a reclaim")
+	}
+	if _, h, err := st.ClaimBoot(ctx, c.Phone.MAC, netip.MustParseAddr("192.168.10.78")); err != nil || h != nil || !reclaimed() {
+		t.Fatalf("other source = %v, %v, reclaimed %v", h, err, reclaimed())
+	}
+	if _, err := db.Exec(`UPDATE phones SET boot_reclaimed = FALSE, boot_handoff_at = now() - interval '11 minutes' WHERE id = $1`, c.Phone.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, h, err := st.ClaimBoot(ctx, c.Phone.MAC, phone); err != nil || h != nil || !reclaimed() {
+		t.Fatalf("after the grace = %v, %v, reclaimed %v", h, err, reclaimed())
+	}
 }
 
 // TestRedirectQueueReplace fails if a job replaced between Target and
