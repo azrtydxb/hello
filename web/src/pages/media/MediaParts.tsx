@@ -8,9 +8,9 @@ import { formatDuration } from "../../format";
 import "./media.css";
 
 /**
- * The playback gate: GET the audio route first and only play when it
- * answers with something an <audio> element can play (the 302 to the
- * presigned URL), so a missing object is an error, not a silent player.
+ * The playback gate: probe the audio route for its first byte and only play
+ * when it answers with audio, so a missing object is an error, not a silent
+ * player.
  */
 export function usePlayback(failure: (status: string) => string) {
   const [playing, setPlaying] = useState<Id | null>(null);
@@ -21,7 +21,10 @@ export function usePlayback(failure: (status: string) => string) {
     setError(null);
     setChecking(key);
     try {
-      const res = await fetch(path, { credentials: "same-origin" });
+      const res = await fetch(path, {
+        credentials: "same-origin",
+        headers: { Range: "bytes=0-0" },
+      });
       if (isPlayableAudio(res)) {
         setPlaying(key);
       } else {

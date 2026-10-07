@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,22 +22,30 @@ import (
 // memObjects is an in-memory Objects, for tests that exercise the handlers
 // without an object store (the MinIO container test uses the real one).
 type memObjects struct {
-	mu       sync.Mutex
-	objs     map[string][]byte
-	presigns int
+	mu    sync.Mutex
+	objs  map[string][]byte
+	opens int
 }
 
 func newMemObjects() *memObjects { return &memObjects{objs: map[string][]byte{}} }
 
-func (m *memObjects) Presign(_ context.Context, object string) (string, error) {
+// OpenAudio serves the stored bytes; recordings and announcements live under
+// their "rec:" and "ann:" prefixes.
+func (m *memObjects) OpenAudio(_ context.Context, bucket, object string) (*AudioObject, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.objs[object]; !ok {
-		return "", fmt.Errorf("memObjects: %s: not found", object)
+	key := map[string]string{RecordingsBucket: "rec:", AnnouncementsBucket: "ann:"}[bucket] + object
+	b, ok := m.objs[key]
+	if !ok {
+		return nil, fmt.Errorf("memObjects: %s/%s: not found", bucket, object)
 	}
-	m.presigns++
-	return "http://objects.test/" + object + "?sig=1", nil
+	m.opens++
+	return &AudioObject{Body: nopSeekCloser{bytes.NewReader(b)}, Size: int64(len(b)), ContentType: "audio/wav"}, nil
 }
+
+type nopSeekCloser struct{ *bytes.Reader }
+
+func (nopSeekCloser) Close() error { return nil }
 
 func (m *memObjects) Put(_ context.Context, object string, r io.Reader, _ int64) error {
 	m.mu.Lock()
@@ -67,30 +76,6 @@ func (m *memObjects) Remove(_ context.Context, object string) error {
 }
 
 func (m *memObjects) EnsureBucket(context.Context) error { return nil }
-
-func (m *memObjects) PresignRecording(_ context.Context, object, download string) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.objs["rec:"+object]; !ok {
-		return "", fmt.Errorf("memObjects: %s: not found", object)
-	}
-	m.presigns++
-	u := "http://objects.test/rec/" + object + "?sig=1"
-	if download != "" {
-		u += "&download=" + download
-	}
-	return u, nil
-}
-
-func (m *memObjects) PresignAnnouncement(_ context.Context, object string) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.objs["ann:"+object]; !ok {
-		return "", fmt.Errorf("memObjects: %s: not found", object)
-	}
-	m.presigns++
-	return "http://objects.test/ann/" + object + "?sig=1", nil
-}
 
 func (m *memObjects) PutRecording(_ context.Context, object string, r io.Reader, _ int64) error {
 	m.mu.Lock()
@@ -456,20 +441,25 @@ func TestVoicemailMessagesFlow(t *testing.T) {
 		t.Fatalf("unheard after unmark = %d, want 2", len(list.Items))
 	}
 
-	// Audio: 302 to a presigned URL, 15 minutes, only for a real message.
-	// The test client follows redirects; stop at the 302 to inspect it.
-	c.hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	defer func() { c.hc.CheckRedirect = nil }()
-	rec := c.do("GET", "/api/v1/voicemail/messages/"+fmt.Sprint(list.Items[1]["id"])+"/audio", nil)
-	if rec.code != http.StatusFound {
-		t.Fatalf("audio = %d %s, want 302", rec.code, rec.body)
+	// Audio streams through hello-control (the store's endpoint is not the
+	// browser's), only for a real message.
+	stored, err := objs.Get(ctx, object)
+	if err != nil {
+		t.Fatal(err)
 	}
-	loc := rec.header.Get("Location")
-	if !strings.Contains(loc, object) || !strings.Contains(loc, "X-Amz-Signature") {
-		t.Fatalf("Location %q is not a presigned URL for %s", loc, object)
+	audioPath := "/api/v1/voicemail/messages/" + fmt.Sprint(list.Items[1]["id"]) + "/audio"
+	rec := c.must(http.StatusOK, "GET", audioPath, nil)
+	if !bytes.Equal(rec.body, stored) || rec.header.Get("Content-Type") != "audio/wav" {
+		t.Fatalf("audio = %d bytes %q, want the stored %d bytes as audio/wav", len(rec.body), rec.header.Get("Content-Type"), len(stored))
+	}
+	c.header.Set("Range", "bytes=0-3")
+	part := c.must(http.StatusPartialContent, "GET", audioPath, nil)
+	c.header.Del("Range")
+	if !bytes.Equal(part.body, stored[:4]) {
+		t.Fatalf("range body = %q, want %q", part.body, stored[:4])
 	}
 	if r := c.do("GET", "/api/v1/voicemail/messages/999999/audio", nil); r.code != http.StatusNotFound {
-		t.Fatalf("audio for a missing message = %d, want 404 (presign gate)", r.code)
+		t.Fatalf("audio for a missing message = %d, want 404 (message gate)", r.code)
 	}
 
 	// Delete removes the row and the object.

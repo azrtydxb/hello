@@ -326,9 +326,9 @@ func (s *server) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// messageAudio is GET /api/v1/voicemail/messages/{id}/audio: a 302 to a
-// presigned GET URL (15 minutes, spec contract 6). The message must exist
-// before anything is presigned.
+// messageAudio is GET /api/v1/voicemail/messages/{id}/audio: the audio,
+// streamed through hello-control (Range supported). The message must exist
+// before the store is touched.
 func (s *server) messageAudio(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -343,13 +343,33 @@ func (s *server) messageAudio(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "object storage is unavailable; try again shortly")
 		return
 	}
-	url, err := s.Objects.Presign(r.Context(), m.Object)
+	s.serveAudio(w, r, VoicemailBucket, m.Object, "", "voicemail: message audio")
+}
+
+// serveAudio streams an object of bucket to the browser: its type (WAV when
+// the store has none worth sending), length and Range support via
+// http.ServeContent, kept out of shared caches. A non-empty download names
+// the file the browser saves it as. A store failure answers 502.
+func (s *server) serveAudio(w http.ResponseWriter, r *http.Request, bucket, object, download, logMsg string) {
+	obj, err := s.Objects.OpenAudio(r.Context(), bucket, object)
 	if err != nil {
-		s.Log.Error("voicemail: presign message audio", "error", err)
+		s.Log.Error(logMsg, "error", err)
 		writeError(w, http.StatusBadGateway, "upstream", "object storage is unavailable; try again shortly")
 		return
 	}
-	http.Redirect(w, r, url, http.StatusFound)
+	defer func() { _ = obj.Body.Close() }()
+	ct := obj.ContentType
+	if ct == "" || ct == "application/octet-stream" || ct == "binary/octet-stream" {
+		ct = "audio/wav"
+	}
+	h := w.Header()
+	h.Set("Content-Type", ct)
+	h.Set("Cache-Control", "private, max-age=0")
+	h.Set("X-Content-Type-Options", "nosniff")
+	if download != "" {
+		h.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", download))
+	}
+	http.ServeContent(w, r, "", obj.ModTime, obj.Body)
 }
 
 // Ring groups.

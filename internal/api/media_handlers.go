@@ -80,9 +80,9 @@ func (s *server) deleteRecording(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// recordingAudio is GET /api/v1/recordings/{id}/audio: a 302 to a presigned
-// GET URL (15 minutes, contract 6). The recording must exist before anything
-// is presigned. ?download=1 presigns it as an attachment
+// recordingAudio is GET /api/v1/recordings/{id}/audio: the audio, streamed
+// through hello-control (Range supported). The recording must exist before
+// the store is touched. ?download=1 sends it as an attachment
 // (recording-<id>.wav) so the browser saves it instead of playing it.
 func (s *server) recordingAudio(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
@@ -107,15 +107,7 @@ func (s *server) recordingAudio(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "object storage is unavailable; try again shortly")
 		return
 	}
-	url, err := s.Objects.PresignRecording(r.Context(), rec.Object, download)
-	if err != nil {
-		s.Log.Error("media: presign recording audio", "error", err)
-		writeError(w, http.StatusBadGateway, "upstream", "object storage is unavailable; try again shortly")
-		return
-	}
-	// The URL is the object store's presign; the query only picks a fixed
-	// attachment name built from the numeric id.
-	http.Redirect(w, r, url, http.StatusFound) //nolint:gosec // G710: presigned by the object store, not client-chosen.
+	s.serveAudio(w, r, RecordingsBucket, rec.Object, download, "media: recording audio")
 }
 
 // Announcements.
@@ -249,8 +241,8 @@ func (s *server) replaceAnnouncement(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
-// announcementAudio is GET /api/v1/announcements/{id}/audio: a 302 to a
-// presigned GET URL (15 minutes), like the recording audio route.
+// announcementAudio is GET /api/v1/announcements/{id}/audio: the audio,
+// streamed like the recording audio route.
 func (s *server) announcementAudio(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -265,13 +257,7 @@ func (s *server) announcementAudio(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "object storage is unavailable; try again shortly")
 		return
 	}
-	url, err := s.Objects.PresignAnnouncement(r.Context(), a.Object)
-	if err != nil {
-		s.Log.Error("media: presign announcement audio", "error", err)
-		writeError(w, http.StatusBadGateway, "upstream", "object storage is unavailable; try again shortly")
-		return
-	}
-	http.Redirect(w, r, url, http.StatusFound)
+	s.serveAudio(w, r, AnnouncementsBucket, a.Object, "", "media: announcement audio")
 }
 
 // checkAnnouncementAudio adds the file errors of an upload: required, and

@@ -6,6 +6,7 @@ package api
 // throwaway container).
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -127,25 +128,18 @@ func TestRecordingAudioAndDelete(t *testing.T) {
 	}
 	seedRecording(t, e, "corr-abc", object, 5100)
 
-	// The audio route 302s to a presigned URL of the recording bucket.
-	c.hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	defer func() { c.hc.CheckRedirect = nil }()
-	rec := c.do("GET", "/api/v1/recordings/1/audio", nil)
-	if rec.code != http.StatusFound {
-		t.Fatalf("audio = %d %s, want 302", rec.code, rec.body)
+	// The audio route streams the recording bucket's object, inline.
+	rec := c.must(http.StatusOK, "GET", "/api/v1/recordings/1/audio", nil)
+	if !bytes.Equal(rec.body, wav) || rec.header.Get("Content-Type") != "audio/wav" {
+		t.Fatalf("audio = %d bytes %q, want the recording", len(rec.body), rec.header.Get("Content-Type"))
 	}
-	loc := rec.header.Get("Location")
-	if !strings.Contains(loc, object) || !strings.Contains(loc, "X-Amz-Signature") {
-		t.Fatalf("Location %q is not a presigned URL for %s", loc, object)
+	if cd := rec.header.Get("Content-Disposition"); cd != "" {
+		t.Fatalf("plain audio plays as a download: %q", cd)
 	}
-	if strings.Contains(loc, "response-content-disposition") {
-		t.Fatalf("Location %q plays as a download", loc)
-	}
-	// ?download=1 presigns the same object as an attachment.
-	dl := c.do("GET", "/api/v1/recordings/1/audio?download=1", nil)
-	if dl.code != http.StatusFound ||
-		!strings.Contains(dl.header.Get("Location"), "response-content-disposition=attachment") {
-		t.Fatalf("download = %d Location %q, want a presigned attachment", dl.code, dl.header.Get("Location"))
+	// ?download=1 sends the same object as an attachment.
+	dl := c.must(http.StatusOK, "GET", "/api/v1/recordings/1/audio?download=1", nil)
+	if !strings.HasPrefix(dl.header.Get("Content-Disposition"), "attachment") || !bytes.Equal(dl.body, wav) {
+		t.Fatalf("download Content-Disposition %q, want an attachment", dl.header.Get("Content-Disposition"))
 	}
 
 	// Delete removes the row and the object; the mutation was audited.
@@ -377,12 +371,19 @@ func TestAnnouncementReplace(t *testing.T) {
 		t.Fatalf("replace audits = %d, want 1", audits)
 	}
 
-	// Playback: a 302 to the announcement bucket; 404 for an unknown id.
-	c.hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	defer func() { c.hc.CheckRedirect = nil }()
-	audio := c.must(http.StatusFound, "GET", path+"/audio", nil)
-	if loc := audio.header.Get("Location"); !strings.Contains(loc, "/ann/ann/closing.wav") {
-		t.Fatalf("Location %q is not the announcement audio", loc)
+	// Playback: the announcement bucket's bytes, streamed with Range
+	// support; 404 for an unknown id.
+	stored := objs.objs["ann:ann/closing.wav"]
+	audio := c.must(http.StatusOK, "GET", path+"/audio", nil)
+	if len(stored) == 0 || !bytes.Equal(audio.body, stored) || audio.header.Get("Content-Type") != "audio/wav" ||
+		audio.header.Get("Content-Length") != fmt.Sprint(len(stored)) || !strings.HasPrefix(audio.header.Get("Cache-Control"), "private") {
+		t.Fatalf("audio = %d bytes %v, want the announcement audio", len(audio.body), audio.header)
+	}
+	c.header.Set("Range", "bytes=4-7")
+	part := c.must(http.StatusPartialContent, "GET", path+"/audio", nil)
+	c.header.Del("Range")
+	if !bytes.Equal(part.body, stored[4:8]) {
+		t.Fatalf("range body = %q, want %q", part.body, stored[4:8])
 	}
 	c.must(http.StatusNotFound, "GET", "/api/v1/announcements/999999/audio", nil)
 }
@@ -424,16 +425,14 @@ func TestRecordingPartiesAndDownload(t *testing.T) {
 		t.Fatalf("recording with a CDR = %v, want CDR %d", withCDR, cdrID)
 	}
 
-	c.hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	defer func() { c.hc.CheckRedirect = nil }()
 	id := fmt.Sprint(withCDR["id"])
-	plain := c.must(http.StatusFound, "GET", "/api/v1/recordings/"+id+"/audio", nil)
-	if strings.Contains(plain.header.Get("Location"), "download=") {
-		t.Fatalf("plain audio presigned as a download: %s", plain.header.Get("Location"))
+	plain := c.must(http.StatusOK, "GET", "/api/v1/recordings/"+id+"/audio", nil)
+	if cd := plain.header.Get("Content-Disposition"); cd != "" {
+		t.Fatalf("plain audio sent as a download: %q", cd)
 	}
-	dl := c.must(http.StatusFound, "GET", "/api/v1/recordings/"+id+"/audio?download=1", nil)
-	if want := "download=recording-" + id + ".wav"; !strings.Contains(dl.header.Get("Location"), want) {
-		t.Fatalf("download Location %q lacks %q", dl.header.Get("Location"), want)
+	dl := c.must(http.StatusOK, "GET", "/api/v1/recordings/"+id+"/audio?download=1", nil)
+	if want := `attachment; filename="recording-` + id + `.wav"`; dl.header.Get("Content-Disposition") != want {
+		t.Fatalf("download Content-Disposition %q, want %q", dl.header.Get("Content-Disposition"), want)
 	}
 	c.must(http.StatusBadRequest, "GET", "/api/v1/recordings/"+id+"/audio?download=maybe", nil)
 }

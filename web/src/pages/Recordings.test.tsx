@@ -74,9 +74,9 @@ describe("Recordings", () => {
   it("plays only recordings whose audio answers the gate", async () => {
     const calls = setup({
       "GET /api/v1/recordings/31/audio": () =>
-        new Response(null, {
-          status: 302,
-          headers: { Location: "https://minio.example/rec/a.wav" },
+        new Response("R", {
+          status: 206,
+          headers: { "Content-Type": "audio/wav" },
         }),
       "GET /api/v1/recordings/32/audio": () =>
         apiError(404, "not_found", "no audio"),
