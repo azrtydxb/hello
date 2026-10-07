@@ -1,0 +1,6 @@
+/* Provisioning settings page: layout only, tokens only. */
+.prov-plain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}

@@ -1,0 +1,41 @@
+/* Phones inventory and detail: layout around the Azrty components, tokens only. */
+.inv-actions {
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.inv-blf {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.inv-blf__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+}
+.inv-blf__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  max-width: 320px;
+}
+.inv-blf__tools {
+  display: inline-flex;
+  gap: 2px;
+}
+.inv-import__error {
+  color: var(--az-bad);
+  font-size: 13px;
+}
+.inv-section-title {
+  margin: 0;
+  font-size: var(--az-text-base);
+  font-weight: 600;
+}
