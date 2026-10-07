@@ -161,9 +161,9 @@ describe("Announcements", () => {
   it("plays an announcement through its audio route", async () => {
     setup({
       "GET /api/v1/announcements/7/audio": () =>
-        new Response(null, {
-          status: 302,
-          headers: { Location: "https://minio.example/ann/closing.wav" },
+        new Response("R", {
+          status: 206,
+          headers: { "Content-Type": "audio/wav" },
         }),
     });
     renderApp("/announcements");

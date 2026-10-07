@@ -166,9 +166,9 @@ describe("Voicemail", () => {
   it("plays only messages whose audio answers the gate", async () => {
     const calls = setup({
       "GET /api/v1/voicemail/messages/21/audio": () =>
-        new Response(null, {
-          status: 302,
-          headers: { Location: "https://minio.example/box/11/a.wav" },
+        new Response("R", {
+          status: 206,
+          headers: { "Content-Type": "audio/wav" },
         }),
       "GET /api/v1/voicemail/messages/22/audio": () =>
         apiError(404, "not_found", "no audio"),
