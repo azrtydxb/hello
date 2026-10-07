@@ -436,6 +436,7 @@ func TestVoicemailMessagesFlow(t *testing.T) {
 		t.Fatalf("unheard after mark = %d, want 1", len(list.Items))
 	}
 	c.must(http.StatusOK, "POST", "/api/v1/voicemail/messages/"+newest+"/heard", map[string]bool{"heard": false})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/voicemail/messages/"+newest+"/heard", map[string]string{"heard": "yes"})
 	get(listPath + "&unheard=true")
 	if len(list.Items) != 2 {
 		t.Fatalf("unheard after unmark = %d, want 2", len(list.Items))

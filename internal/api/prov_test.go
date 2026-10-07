@@ -713,3 +713,98 @@ func TestMaskSecrets(t *testing.T) {
 		t.Fatal("masking changed the caller's firmware value in place")
 	}
 }
+
+// TestProvStatuses fails if an operation on a missing phone, template,
+// firmware file or vendor answers anything but 404, if binding a device
+// another phone holds is not a 409, if a device can be deleted while a
+// phone provisions it or not once it is free, if a template that fails for
+// this phone previews as anything but 422 render_error, or if the
+// provisioning reads fail (spec ai-external-access S-2, S-3).
+func TestProvStatuses(t *testing.T) {
+	p := newProvEnv(t, ProvConfig{})
+	c := p.c
+
+	for _, op := range []struct {
+		method, path string
+		body         any
+	}{
+		{"PATCH", "/api/v1/phones/999999", map[string]string{"label": "x"}},
+		{"GET", "/api/v1/phones/999999/fetches", nil},
+		{"POST", "/api/v1/phones/999999/rotate-token", nil},
+		{"POST", "/api/v1/phones/999999/rearm", nil},
+		{"POST", "/api/v1/phones/999999/admin-password/rotate", nil},
+		{"PATCH", "/api/v1/prov/templates/999999", map[string]string{"name": "x"}},
+		{"DELETE", "/api/v1/prov/templates/999999", nil},
+		{"POST", "/api/v1/prov/templates/999999/copy", nil},
+		{"DELETE", "/api/v1/prov/firmware/999999", nil},
+		{"DELETE", "/api/v1/prov/redirect/nokia", nil},
+		{"POST", "/api/v1/prov/redirect/nokia/check", nil},
+	} {
+		c.must(http.StatusNotFound, op.method, op.path, op.body)
+	}
+	// A supported vendor without credentials has nothing to check.
+	c.must(http.StatusBadRequest, "POST", "/api/v1/prov/redirect/snom/check", nil)
+
+	tpl := c.must(http.StatusCreated, "POST", "/api/v1/prov/templates", map[string]any{
+		"vendor": "yealink", "modelGlob": "T5*", "priority": 50, "name": "Fails for one phone",
+		"files": []map[string]string{{
+			"pattern": "{mac}.cfg", "contentType": "text/plain",
+			"body": `{{if eq .Phone.MAC "805ec0000042"}}{{index .Phone.MAC 99}}{{end}}ok`,
+		}},
+	}).json(t)
+	c.must(http.StatusOK, "GET", "/api/v1/prov/templates", nil)
+	c.must(http.StatusOK, "GET", fmt.Sprintf("/api/v1/prov/templates/%v", tpl["id"]), nil)
+	c.must(http.StatusOK, "GET", "/api/v1/prov/firmware", nil)
+
+	a := p.phone("805ec0000042", nil)
+	b := p.phone("805ec0000043", nil)
+	r := c.must(http.StatusUnprocessableEntity, "GET", fmt.Sprintf("/api/v1/phones/%v/preview?file=805ec0000042.cfg", a["id"]), nil)
+	if !bytes.Contains(r.body, []byte(`"render_error"`)) {
+		t.Fatalf("preview of a failing render = %s, want render_error", r.body)
+	}
+	c.must(http.StatusOK, "GET", fmt.Sprintf("/api/v1/phones/%v/preview?file=805ec0000043.cfg", b["id"]), nil)
+
+	c.must(http.StatusOK, "GET", fmt.Sprintf("/api/v1/phones/%v/fetches", a["id"]), nil)
+	c.must(http.StatusBadRequest, "GET", fmt.Sprintf("/api/v1/phones/%v/fetches?limit=0", a["id"]), nil)
+
+	// Phone b cannot take the device phone a provisions, and that device
+	// cannot be deleted while a holds it.
+	c.must(http.StatusConflict, "PATCH", fmt.Sprintf("/api/v1/phones/%v", b["id"]),
+		map[string]any{"deviceId": a["deviceId"], "extensionId": p.ext101["id"]})
+	c.must(http.StatusConflict, "DELETE", fmt.Sprintf("/api/v1/devices/%v", a["deviceId"]), nil)
+	free := c.must(http.StatusCreated, "POST", "/api/v1/devices",
+		map[string]any{"extensionId": p.ext102["id"], "sipUsername": "102-spare"}).json(t)
+	c.must(http.StatusNoContent, "DELETE", fmt.Sprintf("/api/v1/devices/%v", free["id"]), nil)
+}
+
+// downFirmware is a firmware store that refuses every write, as an
+// unreachable MinIO does.
+type downFirmware struct{}
+
+var errFirmwareStoreDown = errors.New("object store: connection refused")
+
+func (downFirmware) PutFirmware(context.Context, string, io.Reader) error {
+	return errFirmwareStoreDown
+}
+func (downFirmware) MoveFirmware(context.Context, string, string) error { return errFirmwareStoreDown }
+func (downFirmware) RemoveFirmware(context.Context, string) error       { return nil }
+
+// TestFirmwareUploadStoreDown fails if a firmware upload the object store
+// refuses answers anything but 502 upstream (spec ai-external-access S-3).
+func TestFirmwareUploadStoreDown(t *testing.T) {
+	p := newProvEnv(t, ProvConfig{Firmware: downFirmware{}})
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for _, kv := range [][2]string{{"vendor", "yealink"}, {"modelGlob", "T5*"}, {"version", "96.86.0.70"}} {
+		_ = mw.WriteField(kv[0], kv[1])
+	}
+	fw, _ := mw.CreateFormFile("file", "T54W-96.86.0.70.rom")
+	_, _ = fw.Write([]byte("firmware"))
+	_ = mw.Close()
+	p.c.header.Set("Content-Type", mw.FormDataContentType())
+	defer p.c.header.Del("Content-Type")
+	r := p.c.must(http.StatusBadGateway, "POST", "/api/v1/prov/firmware", buf.String())
+	if !bytes.Contains(r.body, []byte(`"upstream"`)) {
+		t.Fatalf("upload with the store down = %s, want code upstream", r.body)
+	}
+}
