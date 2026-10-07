@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kuvryn Hello. Hello CA certificate: {{xml .Prov.CAURL}} -->
+<settings>
+  <phone-settings e="2">
+    <setting_server perm="R">{{xml .Prov.URL}}{mac}</setting_server>
+    <prov_polling_enabled perm="R">on</prov_polling_enabled>
+    <prov_polling_mode perm="R">rel</prov_polling_mode>
+    <prov_polling_period perm="R">{{.Prov.ResyncSeconds}}</prov_polling_period>
+  </phone-settings>
+</settings>
