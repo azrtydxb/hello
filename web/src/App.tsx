@@ -38,6 +38,11 @@ import { Extensions } from "./pages/Extensions";
 import { History } from "./pages/History";
 import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
+import { PhoneDetail } from "./pages/PhoneDetail";
+import { Phones } from "./pages/Phones";
+import { ProvFirmware } from "./pages/ProvFirmware";
+import { ProvSettings } from "./pages/ProvSettings";
+import { ProvTemplates } from "./pages/ProvTemplates";
 import { Placeholder } from "./pages/Placeholder";
 import { usePlatformBadges } from "./pages/platform/ui";
 import { Recordings } from "./pages/Recordings";
@@ -55,6 +60,7 @@ import { useControlPlane } from "./useControlPlane";
 const PAGES: Readonly<Record<string, ComponentType>> = {
   "/extensions": Extensions,
   "/devices": Devices,
+  "/phones": Phones,
   "/registrations": Registrations,
   "/calls": Calls,
   "/history": History,
@@ -188,6 +194,11 @@ export function App() {
               element={<Navigate to="/routes" replace />}
             />
             <Route path="/history/:id" element={<CallDetail />} />
+            {/* Phones sections; static paths outrank /phones/:id. */}
+            <Route path="/phones/templates" element={<ProvTemplates />} />
+            <Route path="/phones/firmware" element={<ProvFirmware />} />
+            <Route path="/phones/settings" element={<ProvSettings />} />
+            <Route path="/phones/:id" element={<PhoneDetail />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

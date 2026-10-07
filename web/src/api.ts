@@ -340,6 +340,8 @@ export class ApiError extends Error {
 /** A validation failure on one field (routing.FieldError). */
 export interface FieldError {
   path: string;
+  /** 1-based line of a template body, when the failure has one. */
+  line?: number;
   message: string;
 }
 
@@ -451,6 +453,16 @@ export async function request<T>(
     credentials: "same-origin",
     signal,
   });
+  return responseJson<T>(res, method, path, redirectOn401);
+}
+
+/** A response's JSON, or its error envelope as ApiError (401 handled as `request` does). */
+export async function responseJson<T>(
+  res: Response,
+  method: string,
+  path: string,
+  redirectOn401 = true,
+): Promise<T> {
   if (!res.ok) {
     const err = await errorFrom(res, method, path);
     if (res.status === 401 && redirectOn401) unauthorizedHandler();
@@ -458,6 +470,25 @@ export async function request<T>(
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
+}
+
+/** One API call answered with a text body (e.g. a rendered file); errors as `request`. */
+export async function requestText(
+  path: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const res = await fetch(path, {
+    method: "GET",
+    headers: { Accept: "*/*" },
+    credentials: "same-origin",
+    signal,
+  });
+  if (!res.ok) {
+    const err = await errorFrom(res, "GET", path);
+    if (res.status === 401) unauthorizedHandler();
+    throw err;
+  }
+  return res.text();
 }
 
 function items<T>(value: unknown, path: string): T[] {
@@ -470,6 +501,9 @@ function items<T>(value: unknown, path: string): T[] {
   }
   return list as T[];
 }
+
+/** The `items` of a list response, or an error naming the path. */
+export { items as listItems };
 
 export async function list<T>(
   path: string,

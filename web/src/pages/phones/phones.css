@@ -1,0 +1,155 @@
+/* Phones pages (inventory, detail, templates, firmware, provisioning
+   settings): layout around the Azrty components, tokens only. */
+.prov-tabs {
+  margin-bottom: 20px;
+}
+a.az-tab {
+  text-decoration: none;
+}
+.prov-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.prov-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.prov-flags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.prov-muted {
+  color: var(--az-muted);
+}
+.prov-cell-sm {
+  font-size: 13px;
+}
+.prov-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 720px) {
+  .prov-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A show-once or copyable value: mono text on the code background. */
+.prov-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.prov-copy__box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--az-radius-sm);
+  background: var(--az-code-bg);
+  border: 1px solid var(--az-border-strong);
+}
+.prov-copy__value {
+  font-family: var(--az-font-mono);
+  font-size: var(--az-text-base);
+  color: var(--az-text);
+  flex: 1;
+  word-break: break-all;
+}
+
+/* Multi-line text fields (CSV, template bodies) in the input's look. */
+.prov-textarea {
+  font-family: var(--az-font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 160px;
+  resize: vertical;
+}
+
+/* Template body editor: a line-number gutter beside the text. */
+.prov-editor {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  border: 1px solid var(--az-border-strong);
+  border-radius: var(--az-radius-md);
+  background: var(--az-input-bg);
+  overflow: hidden;
+}
+.prov-editor__gutter {
+  margin: 0;
+  padding: 11px 8px;
+  list-style: none;
+  font-family: var(--az-font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: right;
+  color: var(--az-faint);
+  background: var(--az-code-bg);
+  user-select: none;
+}
+.prov-editor__gutter li[data-error] {
+  color: var(--az-bad-strong);
+  font-weight: 600;
+}
+.prov-editor textarea {
+  border: 0;
+  border-radius: 0;
+  min-height: 320px;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+.prov-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 960px) {
+  .prov-editor-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.prov-varref {
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.prov-varref code {
+  font-family: var(--az-font-mono);
+}
+
+.prov-card {
+  border: 1px solid var(--az-border);
+  border-radius: var(--az-radius-md);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.prov-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.prov-card__title {
+  margin: 0;
+  font-size: var(--az-text-lg);
+  font-weight: 600;
+}
+.prov-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+.prov-progress {
+  width: 100%;
+}
