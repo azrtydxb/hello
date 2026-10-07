@@ -181,10 +181,11 @@ func TestProvisioningAsVendors(t *testing.T) {
 				return nil
 			})
 
-			// A second boot from the same MAC is a reclaim: no token again.
+			// A second boot from the same source inside the hand-off grace
+			// is the same boot cycle: the same hand-off, not a reclaim.
 			again, err := pc.Boot(ctx, m, mac, labProvBoot)
-			if err == nil || again.Config.ProvURL != "" {
-				t.Fatalf("a second boot hand-off was served (%v)", again.Fetches)
+			if err != nil || again.Config.ProvURL != boot.Config.ProvURL {
+				t.Fatalf("a repeat boot inside the grace did not get the same hand-off (%v, %v)", again.Fetches, err)
 			}
 		})
 	}
