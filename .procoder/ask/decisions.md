@@ -259,3 +259,24 @@ using. Fixing it changes the fixed prov.Store contract (Task 1).
 - All AI and LLM connections use our go-ai-sdk (github.com/azrtydxb/go-ai-sdk), never another client library
 - talking-agent stays a separate service and repo; Hello routes calls to it over SIP; it is changed there (personas from Hello, MCP client, auth)
 - TTS: keep Breeze TTS 2 for the lab (research-only weights); make TTS pluggable for a commercial model later
+
+## AI phase 1: user roles for OAuth consent
+
+Hello has one kind of user, who can do everything, so the role that should bound the scopes a user can grant bounds nothing today (spec ai-external-access, S-5).
+
+- Keep one role in phase 1: every user may grant every scope, `secrets` included; `GrantableScopes` is where a later roles spec plugs in (proposed)
+- Add roles now (for example administrator, operator, read-only), applied to the console and the API as well as to consent
+
+## AI phase 1: auditing MCP read calls
+
+A user's reads write no audit row today; the decision says every MCP call is audited like a user call (spec ai-external-access, S-15).
+
+- Reads get a log line and metrics; every change writes its normal audit row with the client in `via` (proposed)
+- Every MCP tool call, reads included, writes an audit row
+
+## AI phase 1: dynamic client registration on kw
+
+Client ID metadata documents are preferred and DCR is deprecated, but some MCP clients still only register dynamically (spec ai-external-access, S-10).
+
+- On for kw, rate-limited, labelled unverified on the consent screen, unused clients cleaned up (proposed)
+- Off: only client ID metadata documents and service accounts
