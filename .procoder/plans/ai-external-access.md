@@ -127,11 +127,11 @@ Interfaces: produces contract 7; consumes contracts 2, 3 and 5 and `api.Handler`
 Files: `web/src/pages/Consent.tsx` and `Consent.test.tsx`, `web/src/pages/AIAccess.tsx` and `AIAccess.test.tsx`, `web/src/pages/Login.tsx` (return-to), `web/src/pages/System.tsx` (tokens move out, a link remains), `web/src/nav.ts`, `web/src/App.tsx`, `web/src/api/` (typed calls), `skills/hello-setup/`, `skills/hello-routing/`, `skills/hello-troubleshoot/` (each `SKILL.md` and `references/`), `skills/skills.go` and `skills/skills_test.go`, `internal/api/skills.go` and its test (handlers and OpenAPI entries; route rows are Task 1's).
 Interfaces: consumes the consent, grants, service-account, token, skills and `ai/settings` routes of the spec's Interfaces section (against mocked responses until Task 3 lands) and the tool names `apispec` derives.
 
-- [ ] Consent page: client name and host, resources, scopes with plain-language lines, `secrets` unchecked with its warning, non-grantable scopes disabled, approve and deny then `window.location` to the returned URL; login return-to; `Consent.test.tsx`.
-- [ ] AI access page: MCP URL and metadata from `GET /api/v1/ai/settings`, scope explanations, connected apps with revoke, service accounts and secrets (admin, shown once), personal tokens with scopes and expiry, skills list with downloads; `AIAccess.test.tsx`.
-- [ ] Skills: write the three skills against the tool names in the completed document (from `ai-openapi`; until it merges, against `operationId`s, which do not change), each with connecting instructions, workflows, and `references/` (tool tables, worked examples, failure meanings); `TestSkills`.
-- [ ] Download routes: list and zip from the embedded FS; `TestSkillsDownload`.
-- [ ] Run the full gate including `procoder test` and `procoder lint` over `web/`.
+- [x] Consent page: client name and host, resources, scopes with plain-language lines, `secrets` unchecked with its warning, non-grantable scopes disabled, approve and deny then `window.location` to the returned URL; login return-to; `Consent.test.tsx`.
+- [x] AI access page: MCP URL and metadata from `GET /api/v1/ai/settings`, scope explanations, connected apps with revoke, service accounts and secrets (admin, shown once), personal tokens with scopes and expiry, skills list with downloads; `AIAccess.test.tsx`.
+- [x] Skills: write the three skills against the tool names in the completed document (from `ai-openapi`; until it merges, against `operationId`s, which do not change), each with connecting instructions, workflows, and `references/` (tool tables, worked examples, failure meanings); `TestSkills`.
+- [x] Download routes: list and zip from the embedded FS; `TestSkillsDownload`.
+- [x] Run the full gate including `procoder test` and `procoder lint` over `web/`.
 
 ## Task 7: Lab, kw, docs and end to end (lead, branch ai-contracts)
 

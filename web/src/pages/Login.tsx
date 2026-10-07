@@ -70,6 +70,8 @@ export function Login() {
   }
 
   const describedBy = error ? ERROR_ID : undefined;
+  // An MCP client's authorization request returns here after sign-in.
+  const consent = safeNext(params.get("next")).startsWith("/oauth/consent");
 
   return (
     <div className="signin" data-pillar="operate">
@@ -86,7 +88,9 @@ export function Login() {
               Welcome back
             </h1>
             <p className="signin__subtitle">
-              Sign in to manage extensions, trunks, routes and the cluster.
+              {consent
+                ? "Sign in to review an app's request for access to Hello."
+                : "Sign in to manage extensions, trunks, routes and the cluster."}
             </p>
           </div>
 

@@ -3782,6 +3782,100 @@
           }
         }
       }
+    },
+    "/api/v1/skills": {
+      "get": {
+        "operationId": "listSkills",
+        "summary": "The agent skills this Hello ships",
+        "description": "Lists the agent skills embedded in hello-control (agentskills.io format), each with its name, description and the Hello API version it targets. Use it to find a skill to install in an MCP client; download one with downloadSkill.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true,
+        "responses": {
+          "200": {
+            "description": "Skills",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Skill"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{name}/download": {
+      "get": {
+        "operationId": "downloadSkill",
+        "summary": "Download one skill as a zip archive",
+        "description": "Returns the skill's folder (SKILL.md and references/) as a zip archive whose entries sit under the skill's name, ready to unpack into a client's skills directory. Nothing changes on the server.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "returns a binary zip archive for a person to install, not data for an agent"
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The skill's name, as GET /api/v1/skills lists it (for example hello-setup).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The skill folder as a zip",
+            "headers": {
+              "Content-Disposition": {
+                "description": "attachment; filename=\"<name>.zip\"",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/zip"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7054,6 +7148,26 @@
               }
             ],
             "description": "Why it is not registered; null while registered"
+          }
+        }
+      },
+      "Skill": {
+        "type": "object",
+        "required": ["name", "description", "version"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The skill's folder and frontmatter name.",
+            "example": "hello-setup"
+          },
+          "description": {
+            "type": "string",
+            "description": "What the skill does and when to use it."
+          },
+          "version": {
+            "type": "string",
+            "description": "The Hello API version the skill targets (metadata.hello-version).",
+            "example": "v1"
           }
         }
       }

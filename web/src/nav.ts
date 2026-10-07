@@ -95,6 +95,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "stethoscope",
       },
       { label: "System", path: "/system", phase: 3, icon: "settings" },
+      { label: "AI access", path: "/ai", phase: 5, icon: "bot" },
     ],
   },
 ];

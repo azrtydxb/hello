@@ -28,9 +28,11 @@ import {
   NAV_ITEMS,
   pageTitle,
 } from "./nav";
+import { AIAccess } from "./pages/AIAccess";
 import { CallDetail } from "./pages/CallDetail";
 import { Cluster } from "./pages/Cluster";
 import { Calls } from "./pages/Calls";
+import { Consent } from "./pages/Consent";
 import { Dashboard } from "./pages/Dashboard";
 import { Devices } from "./pages/Devices";
 import { Diagnostics } from "./pages/Diagnostics";
@@ -74,6 +76,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/announcements": Announcements,
   "/system": System,
   "/routes/test": RouteTest,
+  "/ai": AIAccess,
 };
 
 function Shell() {
@@ -168,6 +171,15 @@ export function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          {/* OAuth consent: full page, outside the shell, after sign-in. */}
+          <Route
+            path="/oauth/consent"
+            element={
+              <RequireAuth>
+                <Consent />
+              </RequireAuth>
+            }
+          />
           <Route
             element={
               <RequireAuth>

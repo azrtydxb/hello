@@ -24,6 +24,11 @@ export interface ApiToken {
   name: string;
   createdAt: string;
   lastUsedAt?: string | null;
+  /** legacy tokens predate scopes and carry every one. */
+  kind?: "legacy" | "personal";
+  /** Absent or null on a legacy token: every scope. */
+  scopes?: string[] | null;
+  expiresAt?: string | null;
 }
 
 /** POST /api/v1/tokens response. */
@@ -568,8 +573,11 @@ export async function fetchMe(signal?: AbortSignal): Promise<Me | null> {
 export const listTokens = (signal?: AbortSignal) =>
   list<ApiToken>("/api/v1/tokens", signal);
 
-export const createToken = (name: string) =>
-  request<CreatedApiToken>("POST", "/api/v1/tokens", { body: { name } });
+export const createToken = (input: {
+  name: string;
+  scopes: string[];
+  expiresAt?: string;
+}) => request<CreatedApiToken>("POST", "/api/v1/tokens", { body: input });
 
 export const deleteToken = (tokenId: Id) =>
   request<void>("DELETE", `/api/v1/tokens/${id(tokenId)}`);
