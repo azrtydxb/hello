@@ -322,3 +322,47 @@ func TestTemplateResolutionAndValidation(t *testing.T) {
 		t.Errorf("deadline not enforced: %+v", errs)
 	}
 }
+
+// TestBootBodiesHandOff fails if a common boot body sets the server URL or
+// the DHCP-option override (fetched in the same boot cycle, it would undo
+// the hand-off), or if a hand-off body does not set the phone's own HTTPS
+// URL with HTTPS and the DHCP option off (Grandstream P237/P212/P145,
+// Yealink, Fanvil, Poly), so the next boot leaves the boot URL.
+func TestBootBodiesHandOff(t *testing.T) {
+	const own = "https://prov.hello.test/p/TOKEN/"
+	bootInfo := ProvInfo{URL: "http://prov.hello.test/p/boot/", CAURL: "http://prov.hello.test/p/ca.crt", ResyncSeconds: 86400}
+	ownInfo := ProvInfo{URL: own, CAURL: bootInfo.CAURL, ResyncSeconds: 86400}
+	render := func(t *testing.T, body string, info ProvInfo) string {
+		t.Helper()
+		b, err := renderBody(context.Background(), body, RenderData{Phone: Phone{MAC: "ec74d769e044", Model: "WP836"}, Prov: info})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	cases := []struct {
+		v             Vendor
+		commonMustNot []string
+		handoffMust   []string
+	}{
+		{Grandstream, []string{"<P237>", "<P145>", "<P212>"}, []string{"<P237>" + own + "</P237>", "<P212>2</P212>", "<P145>0</P145>"}},
+		{Yealink, []string{"auto_provision.server.url", "dhcp_option"}, []string{"static.auto_provision.server.url = " + own, "static.auto_provision.dhcp_option.enable = 0"}},
+		{Fanvil, []string{"FlashServerIP"}, []string{"FlashServerIP      :" + own}},
+		{Poly, nil, []string{`device.prov.serverName="` + own + `"`, `device.dhcp.bootSrvUseOpt="2"`}},
+	}
+	for _, c := range cases {
+		bb := bootBodies[c.v]
+		common := render(t, bb.common, bootInfo)
+		for _, s := range c.commonMustNot {
+			if strings.Contains(common, s) {
+				t.Errorf("%s common boot body sets %q:\n%s", c.v, s, common)
+			}
+		}
+		handoff := render(t, bb.handoffBody(), ownInfo)
+		for _, s := range c.handoffMust {
+			if !strings.Contains(handoff, s) {
+				t.Errorf("%s hand-off lacks %q:\n%s", c.v, s, handoff)
+			}
+		}
+	}
+}

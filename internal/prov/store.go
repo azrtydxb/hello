@@ -101,12 +101,15 @@ type Store interface {
 	//     same transaction); exactly one concurrent caller gets it. When
 	//     the token does not open, the disarm rolls back and the error is
 	//     ErrSealed, so a phone is never disarmed without its token.
-	//   - disarmed: sets boot_reclaimed; nil hand-off
+	//   - disarmed, handed off within BootHandoffGrace to the same source
+	//     (ip, or either side unknown): the same hand-off again, nothing
+	//     changed, so one boot cycle's repeated requests are not a reclaim
+	//   - disarmed otherwise: sets boot_reclaimed; nil hand-off
 	//   - armed but not allowlisted: changes nothing; nil hand-off
 	// ErrNotFound when no phone has the MAC. The handler checks the
 	// vendor's file set and HELLO_PROV_BOOT_CIDRS before calling, so a
 	// wrong-vendor name or a denied source never disarms.
-	ClaimBoot(ctx context.Context, mac string) (rec PhoneRecord, handoff *ProvInfo, err error)
+	ClaimBoot(ctx context.Context, mac string, ip netip.Addr) (rec PhoneRecord, handoff *ProvInfo, err error)
 
 	// RenderInputs returns the render data with every secret opened, the
 	// current token in Prov.URL (also for a previous-token fetch, so the
@@ -130,3 +133,8 @@ type Store interface {
 type Opener interface {
 	OpenFirmware(ctx context.Context, objectKey string) (io.ReadSeekCloser, error)
 }
+
+// BootHandoffGrace is how long after a boot hand-off the same phone's
+// repeated boot requests (one boot cycle asks for its file more than once)
+// get the same hand-off again instead of counting as a reclaim.
+const BootHandoffGrace = 10 * time.Minute

@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/netip"
@@ -378,10 +379,30 @@ func TestBootTrustOnFirstUse(t *testing.T) {
 		if got.armed || got.exposed {
 			t.Fatalf("%s after hand-off: armed %v exposed %v", vd.v, got.armed, got.exposed)
 		}
-		expectEmpty(t, e, e.do(req{path: "/p/boot/" + vd.claim, proto: "http"}), 404, ResultBootReclaim)
+		// The same phone asking again in the same boot cycle (same
+		// source, inside the grace) gets the same hand-off, not a reclaim.
+		if w2 := e.do(req{path: "/p/boot/" + vd.claim, proto: "http"}); w2.Code != 200 || w2.Body.String() != body || e.last().Result != ResultBootHandoff {
+			t.Fatalf("%s repeat hand-off: %d %q", vd.v, w2.Code, w2.Body.String())
+		}
+		if e.s.phone(p.id).reclaimed {
+			t.Fatalf("%s: a repeat inside the grace flagged a reclaim", vd.v)
+		}
+		// Another source inside the grace is a reclaim.
+		expectEmpty(t, e, e.do(req{path: "/p/boot/" + vd.claim, proto: "http", client: "192.168.10.66"}), 404, ResultBootReclaim)
 		if !e.s.phone(p.id).reclaimed {
 			t.Fatalf("%s: reclaim not flagged", vd.v)
 		}
+	}
+
+	// After the grace, even the same source is a reclaim.
+	late, _ := e.s.addPhone(Yealink, "T54W", "805ec0000012")
+	if w := e.do(req{path: "/p/boot/805ec0000012.cfg", proto: "http"}); w.Code != 200 {
+		t.Fatalf("late hand-off: %d", w.Code)
+	}
+	e.s.advance(BootHandoffGrace + time.Second)
+	expectEmpty(t, e, e.do(req{path: "/p/boot/805ec0000012.cfg", proto: "http"}), 404, ResultBootReclaim)
+	if !e.s.phone(late.id).reclaimed {
+		t.Fatal("a repeat after the grace did not flag a reclaim")
 	}
 
 	// Unknown MAC, and an armed phone that is not allowlisted.
@@ -405,12 +426,15 @@ func TestBootTrustOnFirstUse(t *testing.T) {
 		t.Fatal("disarmed without a hand-off")
 	}
 
-	// Concurrent first requests: exactly one hand-off.
+	// Concurrent first requests from different sources: exactly one
+	// hand-off.
 	racer, _ := e.s.addPhone(Yealink, "T54W", "805ec0000020")
 	var wg sync.WaitGroup
 	codes := make(chan int, 20)
-	for range 20 {
-		wg.Go(func() { codes <- e.do(req{path: "/p/boot/805ec0000020.cfg", proto: "http"}).Code })
+	for i := range 20 {
+		wg.Go(func() {
+			codes <- e.do(req{path: "/p/boot/805ec0000020.cfg", proto: "http", client: fmt.Sprintf("192.168.10.%d", 100+i)}).Code
+		})
 	}
 	wg.Wait()
 	close(codes)

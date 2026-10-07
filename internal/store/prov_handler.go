@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"path"
 	"strings"
 	"time"
@@ -92,7 +93,7 @@ func (s *Store) FlagTokenExposed(ctx context.Context, phoneID int64) error {
 // ClaimBoot implements prov.Store. The row lock serialises concurrent
 // claims: the second waits for the first to commit and then finds the
 // phone disarmed.
-func (s *Store) ClaimBoot(ctx context.Context, mac string) (prov.PhoneRecord, *prov.ProvInfo, error) {
+func (s *Store) ClaimBoot(ctx context.Context, mac string, ip netip.Addr) (prov.PhoneRecord, *prov.ProvInfo, error) {
 	var (
 		rec     prov.PhoneRecord
 		handoff *prov.ProvInfo
@@ -103,16 +104,34 @@ func (s *Store) ClaimBoot(ctx context.Context, mac string) (prov.PhoneRecord, *p
 		if err != nil {
 			return err
 		}
-		switch {
-		case !rec.BootArmed:
-			_, err = tx.ExecContext(ctx, `UPDATE phones SET boot_reclaimed = TRUE WHERE id = $1`, rec.ID)
-			return err
-		case !rec.Allowlisted:
-			return nil
+		var src any
+		if ip.IsValid() {
+			src = ip.Unmap().String()
 		}
 		var enc []byte
-		if err := tx.QueryRowContext(ctx, `UPDATE phones SET boot_armed = FALSE WHERE id = $1 AND boot_armed RETURNING token_enc`, rec.ID).Scan(&enc); err != nil {
-			return err
+		switch {
+		case !rec.BootArmed:
+			// The same boot cycle asking again: the same hand-off.
+			err = tx.QueryRowContext(ctx, `
+				SELECT token_enc FROM phones
+				WHERE id = $1 AND boot_handoff_at > now() - make_interval(secs => $2)
+				  AND (boot_handoff_ip IS NULL OR $3::inet IS NULL OR boot_handoff_ip = $3::inet)`,
+				rec.ID, prov.BootHandoffGrace.Seconds(), src).Scan(&enc)
+			if errors.Is(err, sql.ErrNoRows) {
+				_, err = tx.ExecContext(ctx, `UPDATE phones SET boot_reclaimed = TRUE WHERE id = $1`, rec.ID)
+				return err
+			}
+			if err != nil {
+				return err
+			}
+		case !rec.Allowlisted:
+			return nil
+		default:
+			if err := tx.QueryRowContext(ctx, `
+				UPDATE phones SET boot_armed = FALSE, boot_handoff_at = now(), boot_handoff_ip = $2::inet
+				WHERE id = $1 AND boot_armed RETURNING token_enc`, rec.ID, src).Scan(&enc); err != nil {
+				return err
+			}
 		}
 		token, err := s.openToken(rec.ID, enc)
 		if err != nil {

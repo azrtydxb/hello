@@ -26,6 +26,7 @@
     <P8433>{{xml .}}</P8433>
 {{- end}}
     <P237>{{xml .Prov.URL}}</P237>
+    <P145>0</P145>
     <P194>1</P194>
     <P193>{{div .Prov.ResyncSeconds 60}}</P193>
     <P30>{{xml .Time.NTP}}</P30>
