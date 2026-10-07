@@ -44,10 +44,22 @@ x-valkey-deps: &valkey-deps
   sentinel-2: { condition: service_healthy }
   sentinel-3: { condition: service_healthy }
 
+# Phone provisioning (.procoder/specs/phone-auto-provisioning-service.md):
+# the listener terminates TLS itself here (no ingress), with a lab CA and
+# certificate the prov-certs one-shot generates. Phones on this host reach
+# it at https://localhost:8443 (host 8083 is hello-sip-2's readyz); the
+# rendered configs register through Kamailio on host UDP 5080.
+x-prov-env: &prov-env
+  HELLO_PROV_PUBLIC_URL: https://localhost:8443
+  HELLO_PROV_SIP_SERVER: 127.0.0.1:5080
+  HELLO_PROV_CA_CERT: /etc/hello/prov/ca.crt
+  HELLO_PROV_TLS_CERT: /etc/hello/prov/tls.crt
+  HELLO_PROV_TLS_KEY: /etc/hello/prov/tls.key
+
 x-control: &control
   build: { context: ../.., target: hello-control }
   image: hello-control:dev
-  depends_on:
+  depends_on: &control-deps
     <<: *valkey-deps
     postgres: { condition: service_healthy }
     hello-migrate: { condition: service_completed_successfully }
@@ -193,17 +205,50 @@ services:
       HELLO_NODE_ID: hello-migrate
     networks: [state]
 
+  # The provisioning CA and the listener's certificate (lab only; the CA
+  # key is discarded once the certificate is signed). Generated once per
+  # volume, so `down -v` starts a fresh CA. The tests read the CA with
+  # `docker compose cp hello-control-1:/etc/hello/prov/ca.crt`.
+  prov-certs:
+    image: alpine/openssl:3.5.9
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        cd /certs
+        [ -s tls.crt ] && exit 0
+        printf '%s\n' '[req]' 'distinguished_name=dn' 'prompt=no' '[dn]' 'CN=Hello lab provisioning CA' \
+          '[ca]' 'basicConstraints=critical,CA:TRUE' 'keyUsage=critical,keyCertSign,cRLSign' 'subjectKeyIdentifier=hash' > ca.cnf
+        printf '%s\n' '[req]' 'distinguished_name=dn' 'prompt=no' '[dn]' 'CN=localhost' \
+          '[leaf]' 'basicConstraints=critical,CA:FALSE' 'keyUsage=critical,digitalSignature' 'extendedKeyUsage=serverAuth' \
+          'subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:hello-control-1,DNS:hello-control-2' > leaf.cnf
+        openssl req -x509 -config ca.cnf -extensions ca -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 -keyout ca.key -out ca.crt
+        openssl req -new -config leaf.cnf -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout tls.key -out tls.csr
+        openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 30 -extfile leaf.cnf -extensions leaf -out tls.part
+        mv tls.part tls.crt
+        rm -f ca.key ca.srl tls.csr ca.cnf leaf.cnf
+        chmod 0444 ca.crt tls.crt tls.key
+    volumes: [provcerts:/certs]
+    network_mode: none
+
   hello-control-1:
     <<: *control
+    depends_on:
+      <<: *control-deps
+      prov-certs: { condition: service_completed_successfully }
     environment:
-      <<: *db-env
+      <<: [*db-env, *prov-env]
       HELLO_NODE_ID: hello-control-1
       HELLO_BOOTSTRAP_ADMIN_PASSWORD: hello-lab-admin
-    ports: ["8081:8081"]
+    volumes: [provcerts:/etc/hello/prov:ro]
+    ports: ["8081:8081", "8443:8083"]
 
   hello-control-2:
     <<: *control
-    environment: { <<: *db-env, HELLO_NODE_ID: hello-control-2 }
+    depends_on:
+      <<: *control-deps
+      prov-certs: { condition: service_completed_successfully }
+    environment: { <<: [*db-env, *prov-env], HELLO_NODE_ID: hello-control-2 }
+    volumes: [provcerts:/etc/hello/prov:ro]
 
   hello-sip-1:
     <<: *sip
@@ -333,3 +378,4 @@ networks:
 
 volumes:
   pgdata:
+  provcerts:

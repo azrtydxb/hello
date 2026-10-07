@@ -13,7 +13,8 @@ are health-checked with OPTIONS, fail over to backups, respect concurrency
 limits, and every call carries a routing trace in its record. A route tester
 explains any number before it goes live. Media flows directly between the
 endpoints; anchoring arrives in Phase 5. See [docs/phones.md](docs/phones.md)
-for phones and [docs/trunks.md](docs/trunks.md) for trunks.
+for phones, [docs/provisioning.md](docs/provisioning.md) for configuring
+them automatically, and [docs/trunks.md](docs/trunks.md) for trunks.
 
 ## Layout
 
@@ -41,6 +42,7 @@ curl localhost:8080/api/v1/version
 | UI (proxies `/api`)                         | <http://localhost:8080>                                                                    |
 | hello-control-1                             | <http://localhost:8081> (`/api/v1/version`, `/api/v1/openapi.json`, `/readyz`, `/metrics`) |
 | kamailio                                    | SIP/UDP `5080`: the phone entry point                                                      |
+| hello-control-1 provisioning                | <https://localhost:8443> (`/p/…`; TLS from the lab CA in the `provcerts` volume)           |
 | hello-sip-1, hello-sip-2                    | <http://localhost:8082>, <http://localhost:8083> (`/readyz`, `/metrics`)                   |
 | hello-sip-1, hello-sip-2                    | SIP/UDP `5060`, `5062` (direct, bypassing Kamailio; for tests)                             |
 | carrier-primary, carrier-backup             | `8091`, `8092` (simulated carriers)                                                        |
@@ -111,6 +113,18 @@ naming the key, if one is missing or malformed.
 | `HELLO_SIP_TRUSTED_PROXIES`                       | sip     | unset (trust none); CIDRs of the SIP balancers (Kamailio) whose `Path` and client address are believed                        |
 | `HELLO_DRAIN_TIMEOUT`                             | sip     | `2h`; a draining node hangs up remaining calls after this                                                                     |
 | `HELLO_MEMBER_HEARTBEAT`                          | sip     | `1s`; how often the node refreshes its cluster membership in Valkey (at most 1.33s: a third of the 4s membership TTL)         |
+| `HELLO_PROV_PUBLIC_URL`                           | control | unset (off); the `https://` host phones reach; boot and CA URLs use its plain-HTTP form                                       |
+| `HELLO_PROV_ADDR`                                 | control | `:8083`; the provisioning listener                                                                                            |
+| `HELLO_PROV_SIP_SERVER`                           | control | `HELLO_SIP_ADVERTISED_ADDR`; the `host:port` provisioned phones register with (Kamailio)                                      |
+| `HELLO_PROV_TRUSTED_PROXIES`                      | control | unset; CIDRs of the reverse proxies whose `X-Forwarded-Proto`/`-For` are believed                                             |
+| `HELLO_PROV_CA_CERT`                              | control | unset; PEM served at `/p/ca.crt` for phones to trust                                                                          |
+| `HELLO_PROV_TLS_CERT` / `_TLS_KEY`                | control | unset; TLS on the listener itself, when no proxy terminates it                                                                |
+| `HELLO_PROV_BOOT_CIDRS`                           | control | unset (any); sources allowed the DHCP trust-on-first-use hand-off                                                             |
+| `HELLO_PROV_TOKEN_GRACE` / `_RESYNC`              | control | `7d` / `24h`; old-token grace after a rotation; the phones' re-check interval                                                 |
+| `HELLO_PROV_TIMEZONE` / `_NTP`                    | control | `UTC` / `pool.ntp.org`                                                                                                        |
+| `HELLO_PROV_AUDIT_RETENTION`                      | control | `90d`; how long the fetch audit is kept                                                                                       |
+| `HELLO_PROV_RATE_*`                               | control | `IP_PER_MIN` `60`, `DENIED_PER_10MIN` `10`, `PHONE_PER_HOUR` `30`                                                             |
+| `HELLO_PROV_SNOM_*` etc.                          | control | unset; vendor redirect credentials (`_SNOM_`, `_YEALINK_`, `_YMCS_`, `_GDMS_`), see docs/provisioning.md                      |
 
 The UI container proxies `/api` to `HELLO_CONTROL_UPSTREAM` and re-resolves it through `HELLO_DNS_RESOLVER` (default `127.0.0.11`, Docker's DNS; use your cluster DNS elsewhere).
 

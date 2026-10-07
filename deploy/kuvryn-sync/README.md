@@ -85,6 +85,24 @@ Confirmed against the cluster during the first-sync bootstrap:
 | `kw/secret-hello-nonce.sops.yaml`     | `hello-nonce`     | `nonceSecret`                 | hello-sip-1/2 (`HELLO_SIP_NONCE_SECRET`)                          |
 | `kw/secret-hello-bootstrap.sops.yaml` | `hello-bootstrap` | `password`                    | hello-control (`HELLO_BOOTSTRAP_ADMIN_PASSWORD`)                  |
 
+Optional, not yet supplied: `kw/secret-hello-prov-redirect.sops.yaml`
+(`hello-prov-redirect`), the phone vendors' redirect-service credentials.
+hello-control maps each key to its variable, every one optional:
+`snomSrapsAccessKeyId`/`snomSrapsAccessKeySecret` to
+`HELLO_PROV_SNOM_KEY_ID`/`_KEY_SECRET`; `yealinkRpsAccessKey`/`yealinkRpsAccessSecret`
+to `HELLO_PROV_YEALINK_KEY`/`_SECRET`; `yealinkYmcsClientId`/`yealinkYmcsClientSecret`/`yealinkYmcsRegion`
+to `HELLO_PROV_YMCS_CLIENT_ID`/`_CLIENT_SECRET`/`_REGION`; and `gdmsClientId`,
+`gdmsClientSecret`, `gdmsUsername`, `gdmsPassword`, `gdmsRegion`, `gdmsSiteId`
+to `HELLO_PROV_GDMS_*`. A vendor's group is all set or all absent. The
+`liveTest*` keys (`liveTestSnomMac`, `liveTestYealinkMac`,
+`liveTestYealinkSerial`, `liveTestGdmsMac`, `liveTestGdmsSerial`) name the
+real phones `TestRedirectLive` uses. Its comment-only skeleton is
+`skeletons/secret-hello-prov-redirect.sops.yaml`, kept outside `kw/`
+because Sync decrypts every `kw/*.sops.yaml` and a comment-only file there
+would stop the whole sync; copy it into `kw/` and encrypt it when the
+credentials exist. Without it the redirect services show as unconfigured
+and phones are added by DHCP or a typed URL (docs/provisioning.md).
+
 Voicemail-to-email is off on kw: hello-control gets no `SMTP_*`
 environment, so its mailer stays disabled (no send attempts, no failure
 metrics) and the console shows email as not configured. To turn it on, add
@@ -107,8 +125,10 @@ Pointers, with dhole's files as the templates (`azrtydxb/dhole`
 2. **Deployer RBAC**: apply `deploy/kuvryn-sync/rbac.yaml` from dhole with
    the namespace and subjects changed to `hello` (ServiceAccount
    `kuvryn-sync-deployer`, Role, RoleBinding). Hello needs no named
-   cluster-role adoption and no sandbox roles, so plain
-   configmap/secret/service/deployment/ingress coverage suffices.
+   cluster-role adoption and no sandbox roles: configmap, secret, service,
+   deployment and ingress coverage, plus `cert-manager.io` `certificates`
+   for the provisioning host's `hello-prov-tls` (add that rule to an
+   existing Role before the first sync that carries it).
 3. **Repository + Application**: copy dhole's
    `deploy/kuvryn-sync/repository.yaml` and `application.yaml`, with name
    and namespace `hello`, `url: https://github.com/azrtydxb/hello.git`,

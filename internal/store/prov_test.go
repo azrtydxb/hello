@@ -302,3 +302,32 @@ func TestRenderInputsFirmwareAndFetches(t *testing.T) {
 		t.Fatalf("fetches left = %d", n)
 	}
 }
+
+// TestPhoneFetchStates fails if a phone that never fetched, one that
+// fetched since the stale bound and one whose last fetch is older are not
+// counted in their own state.
+func TestPhoneFetchStates(t *testing.T) {
+	st, db, ext := provStore(t)
+	ctx := context.Background()
+	now := time.Now()
+	lastFetch := map[string]*time.Time{"805ec0000011": nil, "805ec0000012": new(now.Add(-time.Hour)), "805ec0000013": new(now.Add(-72 * time.Hour))}
+	for mac, at := range lastFetch {
+		c, err := st.CreatePhone(ctx, "test", PhoneInput{MAC: mac, Vendor: prov.Yealink, Model: "T54W",
+			ExtensionID: ext, Enabled: true, Realm: "hello.test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if at != nil {
+			if _, err := db.ExecContext(ctx, `UPDATE phones SET last_fetch_at = $1 WHERE id = $2`, *at, c.Phone.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	never, fetched, stale, err := st.PhoneFetchStates(ctx, now.Add(-48*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if never != 1 || fetched != 1 || stale != 1 {
+		t.Fatalf("states = never %d, fetched %d, stale %d; want 1 each", never, fetched, stale)
+	}
+}

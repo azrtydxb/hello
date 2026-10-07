@@ -1450,9 +1450,114 @@ spec:
             - name: MINIO_SECURE
               # In-cluster traffic to the Service, no TLS.
               value: "false"
+            # Phone provisioning (.procoder/specs/phone-auto-provisioning-service.md):
+            # the listener on :8083 (HELLO_PROV_ADDR's default) behind the
+            # hello-prov Ingress, which terminates TLS with hello-prov-tls.
+            - name: HELLO_PROV_PUBLIC_URL
+              value: https://prov.hello.kw.watteel.lab
+            - name: HELLO_PROV_SIP_SERVER
+              # Where provisioned phones register: Kamailio's NodePort, as
+              # KAMAILIO_PUBLIC_HOST/PORT advertise it.
+              value: 192.168.10.101:30508
+            - name: HELLO_PROV_TRUSTED_PROXIES
+              # kw's pod CIDR: ingress-nginx's X-Forwarded-Proto/-For are
+              # believed from there only (HTTPS check, per-IP limits).
+              value: 10.42.0.0/16
+            - name: HELLO_PROV_CA_CERT
+              # cluster-ca's certificate, from the hello-prov-tls secret
+              # cert-manager writes; served at /p/ca.crt for phones to trust.
+              value: /etc/hello/prov/ca.crt
+            # Vendor redirect-service credentials (spec S-11) from the
+            # hello-prov-redirect secret, every key optional: until the
+            # secret exists the redirect clients stay unconfigured (see
+            # ../README.md, Secrets).
+            - name: HELLO_PROV_SNOM_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: snomSrapsAccessKeyId
+                  optional: true
+            - name: HELLO_PROV_SNOM_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: snomSrapsAccessKeySecret
+                  optional: true
+            - name: HELLO_PROV_YEALINK_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: yealinkRpsAccessKey
+                  optional: true
+            - name: HELLO_PROV_YEALINK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: yealinkRpsAccessSecret
+                  optional: true
+            - name: HELLO_PROV_YMCS_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: yealinkYmcsClientId
+                  optional: true
+            - name: HELLO_PROV_YMCS_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: yealinkYmcsClientSecret
+                  optional: true
+            - name: HELLO_PROV_YMCS_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: yealinkYmcsRegion
+                  optional: true
+            - name: HELLO_PROV_GDMS_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: gdmsClientId
+                  optional: true
+            - name: HELLO_PROV_GDMS_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: gdmsClientSecret
+                  optional: true
+            - name: HELLO_PROV_GDMS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: gdmsUsername
+                  optional: true
+            - name: HELLO_PROV_GDMS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: gdmsPassword
+                  optional: true
+            - name: HELLO_PROV_GDMS_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: gdmsRegion
+                  optional: true
+            - name: HELLO_PROV_GDMS_SITE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: hello-prov-redirect
+                  key: gdmsSiteId
+                  optional: true
+          volumeMounts:
+            - name: prov-ca
+              mountPath: /etc/hello/prov
+              readOnly: true
           ports:
             - name: http
               containerPort: 8081
+            - name: prov
+              containerPort: 8083
           readinessProbe:
             httpGet:
               path: /readyz
@@ -1476,6 +1581,13 @@ spec:
               memory: 64Mi
             limits:
               memory: 256Mi
+      volumes:
+        - name: prov-ca
+          secret:
+            secretName: hello-prov-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
 ---
 apiVersion: v1
 kind: Service
@@ -1611,6 +1723,87 @@ spec:
                 port:
                   number: 8080
             path: /
+            pathType: Prefix
+---
+# Phone provisioning (spec S-12): its own Service, Ingress and certificate.
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-prov
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: prov
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: control
+  ports:
+    - name: prov
+      port: 8083
+      protocol: TCP
+      targetPort: prov
+---
+# The provisioning host's certificate from the cluster's cluster-ca
+# ClusterIssuer (the kuvryn-ai pattern). Its secret also carries ca.crt,
+# which hello-control serves at /p/ca.crt. The Sync deployer needs
+# cert-manager.io certificates in its Role (README, Bootstrap).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hello-prov-tls
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: prov
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  secretName: hello-prov-tls
+  dnsNames:
+    - prov.hello.kw.watteel.lab
+  issuerRef:
+    kind: ClusterIssuer
+    name: cluster-ca
+---
+# prov.hello.kw.watteel.lab: HTTPS for the per-device paths, and plain HTTP
+# kept open (no ssl-redirect) only because the DHCP boot path and the CA
+# download need it; hello-control refuses per-device paths over plain HTTP.
+# Access logging is off because the token is in the path; Hello's fetch
+# audit records it redacted.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hello-prov
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: prov
+    app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/enable-access-log: "false"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - prov.hello.kw.watteel.lab
+      secretName: hello-prov-tls
+  rules:
+    - host: prov.hello.kw.watteel.lab
+      http:
+        paths:
+          - backend:
+              service:
+                name: hello-prov
+                port:
+                  number: 8083
+            path: /p/
             pathType: Prefix
 ---
 apiVersion: apps/v1

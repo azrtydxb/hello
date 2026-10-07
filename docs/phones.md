@@ -4,6 +4,11 @@ This guide takes you from a running lab to two phones calling each other: one
 desk phone or softphone per extension, registered with Hello over SIP/UDP. It
 takes about ten minutes.
 
+Have more than a couple of phones, or phones that support auto-provisioning
+(Yealink, Poly, Grandstream, Snom, Fanvil)? Prefer
+[automatic provisioning](provisioning.md): assign each phone's MAC to an
+extension and let it configure itself. This guide is the manual path.
+
 You need the lab host's LAN IP address (here `192.168.1.10`) and two SIP
 phones or softphones on the same network that can reach it.
 
