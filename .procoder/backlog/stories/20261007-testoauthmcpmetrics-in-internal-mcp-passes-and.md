@@ -10,6 +10,8 @@ Sprint: -
 <!-- The user story: who needs what, and why. What "done" looks like in
      the reader's terms — a title is not a description. -->
 
+Operators see OAuth and MCP activity in hello_oauth_* and hello_mcp_* metrics and a tool-call log line, and no credential or withheld value ever reaches a log (spec S-20; MCP half in plan Task 5).
+
 ## Acceptance criteria
 
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
@@ -21,3 +23,9 @@ Sprint: -
 
 <!-- Filled at close time: the commands run and what their output proved,
      one line per criterion. Empty evidence keeps the story open. -->
+
+Fingerprint: sha256:58bc4ab3f9553cb8e72fc1f85b062df1cc3dad51d110b20b33623330f47ebd94
+Produced: 124 bytes, exit 0
+Command: go test -race -count=1 -run ^TestOAuthMCPMetrics$ -v ./internal/mcp/
+
+Open: the MCP half (requests, tool calls, duration, log line without credentials, arguments or withheld values) passes; the OAuth half and `TestNoSecretsInLogs` are plan Tasks 3 and 7.
