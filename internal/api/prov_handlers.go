@@ -451,7 +451,7 @@ func (s *server) previewPhone(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	body, err := prov.Render(ctx, t, file, d)
 	if err != nil {
-		if errors.Is(err, prov.ErrNotFound) {
+		if errors.Is(err, prov.ErrNoFile) || errors.Is(err, prov.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "the phone's template has no file "+strconv.Quote(file))
 			return
 		}

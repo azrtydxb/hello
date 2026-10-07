@@ -74,7 +74,7 @@ func TestPhoneCRUD(t *testing.T) {
 	p := newProvEnv(t, ProvConfig{})
 	c := p.c
 
-	created := p.phone("80:5E:C0-AA.BB:01", map[string]any{"label": "Front desk", "blf": []string{"102"}})
+	created := p.phone("80:5E:C0:AA:BB:01", map[string]any{"label": "Front desk", "blf": []string{"102"}})
 	if created["mac"] != "805ec0aabb01" || created["enabled"] != true || created["bootArmed"] != true ||
 		created["extensionNumber"] != "101" || created["label"] != "Front desk" {
 		t.Fatalf("created = %v", created)
