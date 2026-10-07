@@ -126,9 +126,10 @@ Pointers, with dhole's files as the templates (`azrtydxb/dhole`
    the namespace and subjects changed to `hello` (ServiceAccount
    `kuvryn-sync-deployer`, Role, RoleBinding). Hello needs no named
    cluster-role adoption and no sandbox roles: configmap, secret, service,
-   deployment and ingress coverage, plus `cert-manager.io` `certificates`
-   for the provisioning host's `hello-prov-tls` (add that rule to an
-   existing Role before the first sync that carries it).
+   deployment and ingress coverage (the provisioning host's
+   `hello-prov-tls` comes from cert-manager's ingress-shim via the
+   `cert-manager.io/cluster-issuer` annotation, so no `cert-manager.io`
+   rule is needed).
 3. **Repository + Application**: copy dhole's
    `deploy/kuvryn-sync/repository.yaml` and `application.yaml`, with name
    and namespace `hello`, `url: https://github.com/azrtydxb/hello.git`,

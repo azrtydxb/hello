@@ -1,6 +1,6 @@
 # Questions procoder cannot answer for you
 
-Written 2026-10-06 04:02 UTC.
+Written 2026-10-07 14:32 UTC.
 
 Answer each one by writing a line beginning `Answer: ` under it, then
 hand the file back with `procoder ask --file .procoder/ask/QA.md`.
@@ -8,10 +8,16 @@ Leave the `Key:` lines alone — they are what ties an answer to its question.
 
 ## Q1: [decision] decisions.md
 
-Key: add7750575a3
-Question: In-call HA crash detection time
+Key: bb1f0088a82e
+Question: Provisioning contract 4: MarkFetched and PromoteToken race a rotation or re-arm
 
-- Faster detection: membership heartbeat 1 s / TTL 4 s, so a crashed node's calls re-home in about 5 s; update docs to the measured numbers
-- Keep 15 s detection; correct docs to the honest numbers (crash ~15–18 s gap, restart ~4 s, graceful <1 s)
+Found in the Task 3 pre-PR review (prov-control). Both update by phone id
+only, so a fetch that passed PhoneByToken just before a re-arm can set
+boot_armed = FALSE after it (undoing the re-arm), and a PromoteToken that
+lands after a concurrent rotate-token clears the token the phone is still
+using. Fixing it changes the fixed prov.Store contract (Task 1).
 
-Answer: Faster detection: membership heartbeat 1 s / TTL 4 s (re-home in ~5 s); docs updated to measured numbers
+- Pass the matched token hash to MarkFetched and PromoteToken and condition the updates on it (contract change; Task 2 and Task 3 adapt)
+- Accept the race as documented (an administrator re-arms or rotates again)
+
+Answer: Resolved by the lead: pass the matched token hash; MarkFetched and PromoteToken compare-and-set on it (merged in #28; see the plan's contracts, lead decision 2026-10-07)

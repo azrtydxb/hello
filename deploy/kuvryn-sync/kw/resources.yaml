@@ -1725,7 +1725,7 @@ spec:
             path: /
             pathType: Prefix
 ---
-# Phone provisioning (spec S-12): its own Service, Ingress and certificate.
+# Phone provisioning (spec S-12): its own Service and Ingress (with certificate).
 apiVersion: v1
 kind: Service
 metadata:
@@ -1748,33 +1748,14 @@ spec:
       protocol: TCP
       targetPort: prov
 ---
-# The provisioning host's certificate from the cluster's cluster-ca
-# ClusterIssuer (the kuvryn-ai pattern). Its secret also carries ca.crt,
-# which hello-control serves at /p/ca.crt. The Sync deployer needs
-# cert-manager.io certificates in its Role (README, Bootstrap).
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: hello-prov-tls
-  namespace: hello
-  labels:
-    app.kubernetes.io/name: hello
-    app.kubernetes.io/instance: hello
-    app.kubernetes.io/component: prov
-    app.kubernetes.io/managed-by: kuvryn-sync
-spec:
-  secretName: hello-prov-tls
-  dnsNames:
-    - prov.hello.kw.watteel.lab
-  issuerRef:
-    kind: ClusterIssuer
-    name: cluster-ca
----
 # prov.hello.kw.watteel.lab: HTTPS for the per-device paths, and plain HTTP
 # kept open (no ssl-redirect) only because the DHCP boot path and the CA
 # download need it; hello-control refuses per-device paths over plain HTTP.
 # Access logging is off because the token is in the path; Hello's fetch
-# audit records it redacted.
+# audit records it redacted. The certificate comes from cert-manager's
+# ingress-shim off the cluster-issuer annotation (the novamem/nexora
+# pattern): it writes hello-prov-tls, ca.crt included, which hello-control
+# serves at /p/ca.crt.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -1786,6 +1767,7 @@ metadata:
     app.kubernetes.io/component: prov
     app.kubernetes.io/managed-by: kuvryn-sync
   annotations:
+    cert-manager.io/cluster-issuer: cluster-ca
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/enable-access-log: "false"
 spec:
