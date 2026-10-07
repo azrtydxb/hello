@@ -236,3 +236,14 @@
 - Random per phone, sealed, revealable to administrators (audited)
 - One site-wide password the user sets
 - Leave the phones' admin password untouched
+
+## Provisioning contract 4: MarkFetched and PromoteToken race a rotation or re-arm
+
+Found in the Task 3 pre-PR review (prov-control). Both update by phone id
+only, so a fetch that passed PhoneByToken just before a re-arm can set
+boot_armed = FALSE after it (undoing the re-arm), and a PromoteToken that
+lands after a concurrent rotate-token clears the token the phone is still
+using. Fixing it changes the fixed prov.Store contract (Task 1).
+
+- Pass the matched token hash to MarkFetched and PromoteToken and condition the updates on it (contract change; Task 2 and Task 3 adapt)
+- Accept the race as documented (an administrator re-arms or rotates again)

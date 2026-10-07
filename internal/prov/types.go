@@ -139,9 +139,13 @@ type BLFKey struct {
 
 // ProvInfo is the phone's own provisioning URL and re-check settings.
 type ProvInfo struct {
-	URL           string // https://…/p/<current token>/; masked in previews
-	CAURL         string // the plain-HTTP CA certificate URL
-	ResyncSeconds int    // re-check interval, jitter from the MAC included
+	URL   string // https://…/p/<current token>/; masked in previews
+	CAURL string // the plain-HTTP CA certificate URL
+	// CACertPEM is the CA certificate itself (one PEM block, trailing
+	// newline trimmed; empty when none is configured), for vendors whose
+	// CA setting takes the certificate, not a URL (Poly, Grandstream).
+	CACertPEM     string
+	ResyncSeconds int // re-check interval, jitter from the MAC included
 }
 
 // FirmwareInfo is the firmware pinned for the phone's model.

@@ -7,6 +7,11 @@
 -- values stay what hello-sip verifies. NULL for every unbound device.
 ALTER TABLE devices ADD COLUMN secret_enc BYTEA;
 
+-- When the redirect worker's daily drift check last completed (NULL:
+-- never), on the singleton settings row, so a restart or a lease
+-- hand-over runs an overdue check at once instead of a day later.
+ALTER TABLE schema_info ADD COLUMN prov_drift_checked_at TIMESTAMPTZ;
+
 -- Administrator templates. Built-in templates live in the binary
 -- (internal/prov/builtin), not here; builtin_ref names the built-in a row
 -- copies. An override (phones.template_id) therefore always names a row:
@@ -167,4 +172,5 @@ DROP TABLE prov_firmware;
 DROP TABLE phones;
 DROP TABLE prov_template_versions;
 DROP TABLE prov_templates;
+ALTER TABLE schema_info DROP COLUMN prov_drift_checked_at;
 ALTER TABLE devices DROP COLUMN secret_enc;

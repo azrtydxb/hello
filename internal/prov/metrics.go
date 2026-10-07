@@ -42,7 +42,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 }
 
 // RedirectOp counts one redirect-service operation (register, unregister,
-// check, lookup) and its result (ok, failed, unsupported).
+// lookup) and its result (ok, error).
 func (m *Metrics) RedirectOp(v Vendor, op, result string) {
 	m.RedirectOps.WithLabelValues(string(v), op, result).Inc()
 }

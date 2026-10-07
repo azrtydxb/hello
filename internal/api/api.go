@@ -149,6 +149,10 @@ type Config struct {
 	// set); the voicemail box responses carry it so the console can say
 	// email is not configured instead of showing messages stuck pending.
 	EmailDelivery bool
+	// ProvStore is the phone provisioning persistence; nil answers 503 on
+	// the provisioning routes. Prov wires the rest of them.
+	ProvStore ProvStore
+	Prov      ProvConfig
 }
 
 type server struct{ Config }
@@ -260,6 +264,39 @@ func Handler(c Config) http.Handler {
 	private("POST /api/v1/cluster/nodes/{id}/drain", s.requestDrain)
 	private("DELETE /api/v1/cluster/nodes/{id}/drain", s.cancelDrain)
 
+	private("GET /api/v1/phones", s.listPhones)
+	private("POST /api/v1/phones", s.createPhone)
+	private("POST /api/v1/phones/import", s.importPhones)
+	private("GET /api/v1/phones/{id}", s.getPhone)
+	private("PATCH /api/v1/phones/{id}", s.updatePhone)
+	private("DELETE /api/v1/phones/{id}", s.deletePhone)
+	private("POST /api/v1/phones/{id}/rotate-token", s.rotatePhoneToken)
+	private("POST /api/v1/phones/{id}/rearm", s.rearmPhone)
+	private("POST /api/v1/phones/{id}/admin-password/reveal", s.revealAdminPassword)
+	private("POST /api/v1/phones/{id}/admin-password/rotate", s.rotateAdminPassword)
+	private("GET /api/v1/phones/{id}/fetches", s.phoneFetches)
+	private("GET /api/v1/phones/{id}/preview", s.previewPhone)
+
+	private("GET /api/v1/prov/templates", s.listTemplates)
+	private("POST /api/v1/prov/templates", s.createTemplate)
+	private("POST /api/v1/prov/templates/validate", s.validateTemplateRoute)
+	private("GET /api/v1/prov/templates/{id}", s.getTemplate)
+	private("PATCH /api/v1/prov/templates/{id}", s.updateTemplate)
+	private("DELETE /api/v1/prov/templates/{id}", s.deleteTemplate)
+	private("POST /api/v1/prov/templates/{id}/copy", s.copyTemplate)
+
+	private("GET /api/v1/prov/firmware", s.listFirmware)
+	private("POST /api/v1/prov/firmware", s.uploadFirmware)
+	private("PUT /api/v1/prov/firmware/pins", s.putFirmwarePins)
+	private("DELETE /api/v1/prov/firmware/{id}", s.deleteFirmware)
+
+	private("GET /api/v1/prov/redirect", s.listRedirect)
+	private("PUT /api/v1/prov/redirect/{vendor}", s.putRedirect)
+	private("DELETE /api/v1/prov/redirect/{vendor}", s.deleteRedirect)
+	private("POST /api/v1/prov/redirect/{vendor}/check", s.postRedirectCheck)
+
+	private("GET /api/v1/prov/settings", s.provSettings)
+
 	private("GET /api/v1/diagnostics/devices/{id}", s.deviceDiagnostics)
 	private("GET /api/v1/diagnostics/auth-failures", s.listAuthFailures)
 	private("DELETE /api/v1/diagnostics/auth-failures/{ip}", s.clearAuthFailures)
@@ -312,7 +349,10 @@ func (s *server) internal(w http.ResponseWriter, what string, err error) {
 
 // storeError answers a store failure: 404, 409 or 500.
 func (s *server) storeError(w http.ResponseWriter, what string, err error) {
+	var used *store.InUseError
 	switch {
+	case errors.As(err, &used):
+		writeError(w, http.StatusConflict, "conflict", used.Msg)
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", what+": not found")
 	case errors.Is(err, store.ErrConflict):

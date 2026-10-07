@@ -22,6 +22,9 @@
 {{- end}}
     <P2>{{xml .Phone.AdminPassword}}</P2>
     <P212>2</P212>
+{{- with .Prov.CACertPEM}}
+    <P8433>{{xml .}}</P8433>
+{{- end}}
     <P237>{{xml .Prov.URL}}</P237>
     <P194>1</P194>
     <P193>{{div .Prov.ResyncSeconds 60}}</P193>

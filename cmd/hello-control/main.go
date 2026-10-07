@@ -17,6 +17,8 @@ import (
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/migrate"
+	"github.com/azrtydxb/hello/internal/prov"
+	"github.com/azrtydxb/hello/internal/prov/redirect"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/telemetry"
@@ -100,7 +102,9 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_SECRET_KEY: %w", err)
 	}
-	st := store.New(db).WithSecretBox(box)
+	deployment := redirect.Deployment(cfg.Prov.Redirect)
+	settings := provSettings(cfg, deployment)
+	st := store.New(db).WithSecretBox(box).WithProv(settings)
 	go bootstrap(ctx, st, cfg.BootstrapAdminPassword, log)
 	go pruneSessions(ctx, st, log)
 	go seedFeatureCodes(ctx, st, log)
@@ -114,6 +118,12 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		return fmt.Errorf("MINIO_ENDPOINT: %w", err)
 	}
 	go ensureBuckets(ctx, objs, log)
+	metrics := telemetry.NewMetrics("hello-control", version.Version, version.Commit)
+	provMetrics := prov.NewMetrics(metrics.Registry)
+	if err := startProv(ctx, cfg, st, objs, vk, deployment, provMetrics, log); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("HELLO_PROV_ADDR: %w", err)
+	}
 	go runMailer(ctx, cfg, st, objs, log)
 
 	// The node lifecycle: JOINING until PostgreSQL first answers, READY,
@@ -132,11 +142,13 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			Diagnostics:   vk,
 			AuthFailLimit: cfg.AuthFailLimit,
 			EmailDelivery: cfg.SmtpHost != "",
+			ProvStore:     st,
+			Prov:          provAPI(cfg, settings, deployment, objs, log),
 			SIPDomain:     cfg.SIPDomain,
 			SessionTTL:    cfg.SessionTTL,
 			Log:           log,
 		}),
-		Metrics:         telemetry.NewMetrics("hello-control", version.Version, version.Commit),
+		Metrics:         metrics,
 		Log:             log,
 		DrainDelay:      cfg.DrainDelay,
 		ShutdownTimeout: cfg.ShutdownTimeout,

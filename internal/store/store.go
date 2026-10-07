@@ -68,8 +68,9 @@ const NotifyChannel = "hello_config"
 
 // Store wraps the hello-control database.
 type Store struct {
-	db  *sql.DB
-	box *secret.Box
+	db   *sql.DB
+	box  *secret.Box
+	prov ProvSettings
 }
 
 // New wraps db.
@@ -93,6 +94,14 @@ func mapErr(err error) error {
 		case "23505": // unique_violation
 			return fmt.Errorf("%w: %s", ErrConflict, pg.ConstraintName)
 		case "23503": // foreign_key_violation
+			// A delete refused by an ON DELETE RESTRICT key (a device or
+			// template a phone names, a pinned firmware) is a conflict,
+			// not a missing row (provisioning contract 8). The callers
+			// check first and name the referencing row; this covers a
+			// reference added concurrently.
+			if strings.HasPrefix(pg.Message, "update or delete on table") {
+				return &InUseError{Msg: "still referenced (" + pg.ConstraintName + "); remove the reference first"}
+			}
 			return fmt.Errorf("%w: %s", ErrNotFound, pg.ConstraintName)
 		}
 	}

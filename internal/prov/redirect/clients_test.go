@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 
 	"github.com/azrtydxb/hello/internal/config"
@@ -1002,9 +1003,10 @@ func TestRedirectClients(t *testing.T) {
 func testWorker(t *testing.T, col *collector) {
 	ctx := context.Background()
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	metrics := prov.NewMetrics(prometheus.NewRegistry())
 	mkWorker := func(st Store, dep map[prov.Vendor]Credentials, hc *http.Client) *Worker {
 		w := NewWorker(st, dep, col.logger())
-		w.hc, w.now = hc, func() time.Time { return now }
+		w.hc, w.now, w.Metrics = hc, func() time.Time { return now }, metrics
 		return w
 	}
 
@@ -1015,7 +1017,7 @@ func testWorker(t *testing.T, col *collector) {
 		st.accounts[prov.Snom] = Account{Vendor: prov.Snom, Enabled: true, Credentials: snomCreds()}
 		st.targets["snom/"+macPlain] = Target{MAC: macPlain, URL: phoneURL}
 		st.jobs = []Job{{Seq: 1, Vendor: prov.Snom, MAC: macPlain, Op: OpRegister, FirstQueuedAt: now}}
-		before := opsCount("snom", "register", "ok")
+		before := opsCount(metrics, "snom", "register", "ok")
 		mkWorker(st, nil, hc).work(ctx)
 		if len(st.finished) != 1 || st.finished[0].Status.State != StateRegistered || st.finished[0].Job.Seq != 1 {
 			t.Fatalf("finished = %+v", st.finished)
@@ -1023,7 +1025,7 @@ func testWorker(t *testing.T, col *collector) {
 		if f.eps[macPlain] == nil {
 			t.Fatal("the vendor was not called")
 		}
-		if got := opsCount("snom", "register", "ok"); got != before+1 {
+		if got := opsCount(metrics, "snom", "register", "ok"); got != before+1 {
 			t.Fatalf("ops metric = %v, want %v", got, before+1)
 		}
 		st.jobs = []Job{{Seq: 2, Vendor: prov.Snom, MAC: macPlain, Op: OpUnregister, FirstQueuedAt: now}}
@@ -1162,9 +1164,9 @@ func testWorker(t *testing.T, col *collector) {
 	})
 }
 
-func opsCount(labels ...string) float64 {
+func opsCount(pm *prov.Metrics, labels ...string) float64 {
 	var m dto.Metric
-	_ = OpsTotal.WithLabelValues(labels...).Write(&m)
+	_ = pm.RedirectOps.WithLabelValues(labels...).Write(&m)
 	return m.GetCounter().GetValue()
 }
 
