@@ -20,6 +20,10 @@ import (
 // vendor the administrator enters the URL in the vendor's portal by hand.
 var ErrUnsupported = errors.New("redirect: not supported for this vendor; register the phone in the vendor's portal")
 
+// ErrRejected marks a refusal that retrying cannot fix; the worker
+// records it as failed at once, with the vendor's message.
+var ErrRejected = errors.New("redirect: the vendor rejected the request")
+
 // Caps states what a vendor's client can do.
 type Caps struct {
 	// RegistersURL: Register binds the MAC to the phone's own URL. False
@@ -149,14 +153,20 @@ type Store interface {
 	// Account returns the vendor's stored account; prov.ErrNotFound when
 	// there is none.
 	Account(ctx context.Context, v prov.Vendor) (Account, error)
-	// FinishJob removes j and sets the phone's status (when the phone
-	// exists), only while the row still has j.Seq: a replacement queued
-	// since j was read (a rotation's new URL) stays queued and its status
-	// stands.
-	FinishJob(ctx context.Context, j Job, st Status) error
-	// RetryJob counts an attempt, schedules the next one at next and sets
-	// the phone's status, only while the row still has j.Seq.
-	RetryJob(ctx context.Context, j Job, next time.Time, st Status) error
+	// FinishJob removes j and, when st is not nil, sets the phone's status
+	// (when the phone exists); nil leaves the status alone. Only while
+	// the row still has j.Seq: a replacement queued since j was read (a
+	// rotation's new URL) stays queued and its status stands.
+	FinishJob(ctx context.Context, j Job, st *Status) error
+	// RetryJob counts an attempt, schedules the next one at next and,
+	// when st is not nil, sets the phone's status; only while the row
+	// still has j.Seq.
+	RetryJob(ctx context.Context, j Job, next time.Time, st *Status) error
+	// LastDriftCheck returns when the drift check last completed (zero
+	// when never), so a restarted worker runs an overdue one at once.
+	LastDriftCheck(ctx context.Context) (time.Time, error)
+	// SetLastDriftCheck records when the drift check completed.
+	SetLastDriftCheck(ctx context.Context, t time.Time) error
 	// Registered returns the vendor's phones whose status is registered,
 	// for the daily drift check.
 	Registered(ctx context.Context, v prov.Vendor) ([]Target, error)
