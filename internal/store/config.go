@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/auth"
@@ -128,6 +129,9 @@ func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, che
 		if len(routes) > 0 {
 			return id, inUse("extension "+number, routes)
 		}
+		if err := boundPhone(ctx, tx, `d.extension_id = $1`, id); err != nil {
+			return id, err
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM extensions WHERE id = $1`, id)
 		if err != nil {
 			return id, err
@@ -226,6 +230,24 @@ func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, 
 		if err := tx.QueryRowContext(ctx, `SELECT sip_username FROM devices WHERE id = $1 FOR UPDATE`, id).Scan(&username); err != nil {
 			return id, err
 		}
+		// A device a phone provisions keeps its secret sealed for the
+		// renderer (spec S-2): re-seal it so the phone picks the new one up
+		// at its next fetch.
+		var bound bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM phones WHERE device_id = $1)`, id).Scan(&bound); err != nil {
+			return id, err
+		}
+		if bound {
+			if s.box == nil {
+				return id, errors.New("store: no secret box to seal a provisioned device's secret")
+			}
+			if err := s.sealDeviceSecret(ctx, tx, id, realm, secret); err != nil {
+				return id, err
+			}
+			var err error
+			d, err = scanDevice(tx.QueryRowContext(ctx, `SELECT `+deviceCols+` FROM devices WHERE id = $1`, id))
+			return id, err
+		}
 		md5Hex, shaHex := auth.HA1(username, realm, secret)
 		var err error
 		d, err = scanDevice(tx.QueryRowContext(ctx, `
@@ -239,6 +261,9 @@ func (s *Store) RotateDeviceSecret(ctx context.Context, actor string, id int64, 
 // DeleteDevice removes a device.
 func (s *Store) DeleteDevice(ctx context.Context, actor string, id int64) error {
 	return s.configChange(ctx, actor, "delete", "device", nil, func(tx *sql.Tx) (int64, error) {
+		if err := boundPhone(ctx, tx, `d.id = $1`, id); err != nil {
+			return id, err
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM devices WHERE id = $1`, id)
 		if err != nil {
 			return id, err

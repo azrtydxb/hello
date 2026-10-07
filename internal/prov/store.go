@@ -68,13 +68,20 @@ type Store interface {
 	// unset, the last_fetch_* fields, firmware_seen and ua_mismatch as
 	// FetchState says. It also disarms the boot hand-off (boot_armed =
 	// false), because a phone that fetched over HTTPS with its token never
-	// needs it (spec S-10).
-	MarkFetched(ctx context.Context, phoneID int64, st FetchState) error
+	// needs it (spec S-10). Compare-and-set on hash, the token hash the
+	// request matched: it updates only while hash is still the phone's
+	// current token or its in-grace previous one, and is otherwise a
+	// no-op (nil error), so a fetch in flight across a re-arm or a
+	// rotation cannot disarm the re-armed hand-off.
+	MarkFetched(ctx context.Context, phoneID int64, hash []byte, st FetchState) error
 
 	// PromoteToken ends the previous token's grace at once; called on the
 	// first served or not_modified fetch with the current token while
-	// HasPrevious.
-	PromoteToken(ctx context.Context, phoneID int64) error
+	// HasPrevious. Compare-and-set on hash: it acts only while hash is
+	// still the phone's current token, otherwise it is a no-op (nil
+	// error), so a fetch in flight across a rotation cannot end the new
+	// rotation's grace.
+	PromoteToken(ctx context.Context, phoneID int64, hash []byte) error
 
 	// FlagTokenExposed sets token_exposed after a per-device request
 	// arrived over plain HTTP.

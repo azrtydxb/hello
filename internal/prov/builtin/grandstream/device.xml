@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Kuvryn Hello: {{xml .Phone.Model}} {{.Phone.MAC}}. Hello CA certificate: {{xml .Prov.CAURL}} -->
+<gs_provision version="1">
+  <mac>{{.Phone.MAC}}</mac>
+  <config version="1">
+    <P271>1</P271>
+    <P270>{{xml .Line.Label}}</P270>
+    <P47>{{xml .Server.Host}}:{{.Server.Port}}</P47>
+    <P35>{{xml .Line.Username}}</P35>
+    <P36>{{xml .Line.AuthName}}</P36>
+    <P34>{{xml .Line.Password}}</P34>
+    <P3>{{xml .Line.DisplayName}}</P3>
+    <P130>0</P130>
+    <P32>{{div .Server.Expiry 60}}</P32>
+{{- with .Line.VoicemailCode}}
+    <P33>{{xml .}}</P33>
+{{- end}}
+{{- range $i, $k := .BLF}}
+    <P{{add 323 (mul $i 3)}}>1</P{{add 323 (mul $i 3)}}>
+    <P{{add 324 (mul $i 3)}}>0</P{{add 324 (mul $i 3)}}>
+    <P{{add 325 (mul $i 3)}}>{{xml $k.Number}}</P{{add 325 (mul $i 3)}}>
+{{- end}}
+    <P2>{{xml .Phone.AdminPassword}}</P2>
+    <P212>2</P212>
+{{- with .Prov.CACertPEM}}
+    <P8433>{{xml .}}</P8433>
+{{- end}}
+    <P237>{{xml .Prov.URL}}</P237>
+    <P194>1</P194>
+    <P193>{{div .Prov.ResyncSeconds 60}}</P193>
+    <P30>{{xml .Time.NTP}}</P30>
+    <P246>{{xml .Time.Zone}}</P246>
+{{- with .Firmware}}
+    <P6767>2</P6767>
+    <P192>{{xml .URL}}</P192>
+{{- end}}
+  </config>
+</gs_provision>
