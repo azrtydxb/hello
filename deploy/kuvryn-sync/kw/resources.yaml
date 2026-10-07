@@ -1760,6 +1760,12 @@ metadata:
     app.kubernetes.io/instance: hello
     app.kubernetes.io/component: ui
     app.kubernetes.io/managed-by: kuvryn-sync
+  annotations:
+    # Firmware uploads go up to 512 MB; the controller's 1 MB default 413s.
+    nginx.ingress.kubernetes.io/proxy-body-size: "520m"
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
 spec:
   ingressClassName: nginx
   rules:
