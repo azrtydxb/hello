@@ -13,6 +13,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/oauth"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -120,11 +121,14 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 // createdToken is the only shape that ever carries an API token: the
 // create response.
 type createdToken struct {
-	ID         int64      `json:"id"`
-	Name       string     `json:"name"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	LastUsedAt *time.Time `json:"lastUsedAt"`
-	Token      string     `json:"token"`
+	ID         int64       `json:"id"`
+	Name       string      `json:"name"`
+	Kind       string      `json:"kind"`
+	Scopes     auth.Scopes `json:"scopes"`
+	CreatedAt  time.Time   `json:"createdAt"`
+	ExpiresAt  *time.Time  `json:"expiresAt"`
+	LastUsedAt *time.Time  `json:"lastUsedAt"`
+	Token      string      `json:"token"`
 }
 
 func (s *server) listTokens(w http.ResponseWriter, r *http.Request) {
@@ -136,9 +140,14 @@ func (s *server) listTokens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items(ts))
 }
 
+// createToken issues a personal API token (hello_pat_, spec S-6). Without
+// scopes it carries every scope but secrets, which must be named; it never
+// carries a scope its creator's credential lacks.
 func (s *server) createToken(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Name string `json:"name"`
+		Name      string     `json:"name"`
+		Scopes    []string   `json:"scopes"`
+		ExpiresAt *time.Time `json:"expiresAt"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -149,13 +158,37 @@ func (s *server) createToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a := actor(r)
-	plain, hash := auth.NewToken()
-	t, err := s.Store.CreateToken(r.Context(), a.String(), a.UserID, name, hash)
+	if a.UserID == 0 {
+		badRequest(w, "service accounts have no personal tokens")
+		return
+	}
+	scopes := auth.Scopes{auth.ScopeRead, auth.ScopeWrite, auth.ScopeAdmin}
+	if in.Scopes != nil {
+		var err error
+		if scopes, err = oauth.ParseRequestScopes(strings.Join(in.Scopes, " ")); err != nil {
+			badRequest(w, "scopes: "+err.Error())
+			return
+		}
+	}
+	for _, sc := range scopes {
+		if !a.Scopes.Has(sc) || !auth.GrantableScopes(a.Role).Has(sc) {
+			badRequest(w, "scopes: you cannot grant "+string(sc))
+			return
+		}
+	}
+	if in.ExpiresAt != nil && !in.ExpiresAt.After(time.Now()) {
+		badRequest(w, "expiresAt must be in the future")
+		return
+	}
+	plain, hash := auth.NewPrefixed(auth.PrefixPersonal)
+	t, err := s.Store.CreateToken(r.Context(), a.String(), a.UserID,
+		store.NewToken{Name: name, Scopes: scopes, ExpiresAt: in.ExpiresAt}, hash)
 	if err != nil {
 		s.storeError(w, "token", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, createdToken{ID: t.ID, Name: t.Name, CreatedAt: t.CreatedAt, LastUsedAt: t.LastUsedAt, Token: plain})
+	writeJSON(w, http.StatusCreated, createdToken{ID: t.ID, Name: t.Name, Kind: t.Kind, Scopes: t.Scopes,
+		CreatedAt: t.CreatedAt, ExpiresAt: t.ExpiresAt, LastUsedAt: t.LastUsedAt, Token: plain})
 }
 
 func (s *server) deleteToken(w http.ResponseWriter, r *http.Request) {

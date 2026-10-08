@@ -8,9 +8,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -124,9 +126,18 @@ func insertAudit(ctx context.Context, q interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, actor, action, resource, resourceID string) error {
 	_, err := q.ExecContext(ctx,
-		`INSERT INTO audit_events (actor, action, resource, resource_id) VALUES ($1, $2, $3, $4)`,
-		actor, action, resource, resourceID)
+		`INSERT INTO audit_events (actor, action, resource, resource_id, via) VALUES ($1, $2, $3, $4, $5)`,
+		actor, action, resource, resourceID, auditVia(ctx))
 	return err
+}
+
+// auditVia is the audit row's via (spec S-6): the OAuth client of the
+// request's actor, or NULL for the console, API tokens and the system.
+func auditVia(ctx context.Context) any {
+	if a, ok := auth.ActorFrom(ctx); ok && a.ClientID != "" {
+		return a.ClientID
+	}
+	return nil
 }
 
 // configLockKey is the transaction-scoped advisory lock every configuration
@@ -389,55 +400,159 @@ func (s *Store) SessionActor(ctx context.Context, hash []byte) (auth.Actor, erro
 	return a, err
 }
 
-// TokenActor implements auth.Lookup and records the token's last use.
+// tokenActorSQL resolves any bearer credential in one statement (the hash
+// has lost the prefix, so both tables are probed by their unique hash
+// index): a live API token (legacy or personal) or a live OAuth access
+// token whose grant is live, or whose service account is enabled. The
+// role is the owning user's or the service account's, read now, so a
+// demotion applies to the next request. Uses are recorded.
+//
+//nolint:gosec // G101: SQL over credential hashes, not a credential.
+const tokenActorSQL = `
+WITH pat AS (
+	UPDATE api_tokens t SET last_used_at = now() FROM users u
+	WHERE t.token_hash = $1 AND u.id = t.user_id AND t.revoked_at IS NULL
+	  AND (t.expires_at IS NULL OR t.expires_at > now())
+	RETURNING t.id, u.id AS uid, u.username, u.role, t.kind, to_json(t.scopes)::text AS scopes,
+		''::text AS client_id, '[]'::text AS resources, ''::text AS service
+), oat AS (
+	SELECT 0::bigint AS id, coalesce(u.id, 0) AS uid, coalesce(u.username, '') AS username,
+		coalesce(u.role, c.role) AS role, CASE WHEN c.kind = 'service' THEN 'service' ELSE 'oauth' END AS kind,
+		to_json(o.scopes)::text AS scopes, o.client_id, to_json(o.resources)::text AS resources,
+		CASE WHEN c.kind = 'service' THEN c.name ELSE '' END AS service
+	FROM oauth_tokens o
+	JOIN oauth_clients c ON c.client_id = o.client_id
+	LEFT JOIN users u ON u.id = o.user_id
+	LEFT JOIN oauth_grants g ON g.id = o.grant_id
+	WHERE o.hash = $1 AND o.kind = 'access' AND o.revoked_at IS NULL AND o.expires_at > now()
+	  AND (o.grant_id IS NULL OR g.revoked_at IS NULL)
+	  AND (c.kind <> 'service' OR c.enabled)
+), touch AS (
+	UPDATE oauth_grants g SET last_used_at = now() FROM oauth_tokens o
+	WHERE o.hash = $1 AND o.kind = 'access' AND g.id = o.grant_id
+)
+SELECT * FROM pat UNION ALL SELECT * FROM oat`
+
+// TokenActor implements auth.Lookup and records the credential's use.
 func (s *Store) TokenActor(ctx context.Context, hash []byte) (auth.Actor, error) {
-	var a auth.Actor
-	err := s.db.QueryRowContext(ctx, `
-		UPDATE api_tokens t SET last_used_at = now() FROM users u
-		WHERE t.token_hash = $1 AND u.id = t.user_id
-		RETURNING t.id, u.id, u.username, u.role`, hash).Scan(&a.TokenID, &a.UserID, &a.Username, &a.Role)
+	var (
+		a                 auth.Actor
+		kind              string
+		scopes, resources sql.NullString
+	)
+	err := s.db.QueryRowContext(ctx, tokenActorSQL, hash).Scan(&a.TokenID, &a.UserID, &a.Username, &a.Role,
+		&kind, &scopes, &a.ClientID, &resources, &a.ServiceName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
 	}
-	return a, err
+	if err != nil {
+		return a, err
+	}
+	switch kind {
+	case "legacy":
+		a.Kind, a.Scopes = auth.KindLegacyToken, slices.Clone(auth.AllScopes)
+		return a, nil
+	case "personal":
+		a.Kind = auth.KindPersonalToken
+	case "service":
+		a.Kind = auth.KindService
+	default:
+		a.Kind = auth.KindOAuth
+	}
+	if a.Scopes, err = scanScopes(scopes); err != nil {
+		return a, err
+	}
+	if resources.Valid {
+		if err := json.Unmarshal([]byte(resources.String), &a.Audience); err != nil {
+			return a, err
+		}
+	}
+	return a, nil
+}
+
+// scanScopes decodes a to_json(text[]) column into scopes.
+func scanScopes(v sql.NullString) (auth.Scopes, error) {
+	out := auth.Scopes{}
+	if !v.Valid || v.String == "null" {
+		return out, nil
+	}
+	err := json.Unmarshal([]byte(v.String), &out)
+	return out, err
+}
+
+// scopeArg is scopes as a text[] parameter.
+func scopeArg(ss auth.Scopes) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = string(s)
+	}
+	return out
 }
 
 // Token is an API token's metadata; the token itself is never stored.
+// Kind is "legacy" (no prefix, every scope) or "personal" (hello_pat_).
 type Token struct {
-	ID         int64      `json:"id"`
-	Name       string     `json:"name"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	LastUsedAt *time.Time `json:"lastUsedAt"`
+	ID         int64       `json:"id"`
+	Name       string      `json:"name"`
+	Kind       string      `json:"kind"`
+	Scopes     auth.Scopes `json:"scopes"`
+	CreatedAt  time.Time   `json:"createdAt"`
+	ExpiresAt  *time.Time  `json:"expiresAt"`
+	LastUsedAt *time.Time  `json:"lastUsedAt"`
 }
 
-// ListTokens returns a user's API tokens, oldest first.
+// NewToken is an API token to store: a personal token with Scopes, or,
+// with nil Scopes, a legacy token carrying every scope (tests and tools;
+// the API always creates personal tokens).
+type NewToken struct {
+	Name      string
+	Scopes    auth.Scopes
+	ExpiresAt *time.Time
+}
+
+// ListTokens returns a user's live API tokens, oldest first.
 func (s *Store) ListTokens(ctx context.Context, userID int64) ([]Token, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, created_at, last_used_at FROM api_tokens WHERE user_id = $1 ORDER BY id`, userID)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, kind, to_json(scopes)::text, created_at, expires_at, last_used_at FROM api_tokens
+		WHERE user_id = $1 AND revoked_at IS NULL ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	out := []Token{}
 	for rows.Next() {
-		var t Token
-		var last sql.NullTime
-		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt, &last); err != nil {
+		var (
+			t      Token
+			scopes sql.NullString
+			exp    sql.NullTime
+			last   sql.NullTime
+		)
+		if err := rows.Scan(&t.ID, &t.Name, &t.Kind, &scopes, &t.CreatedAt, &exp, &last); err != nil {
 			return nil, err
 		}
-		t.LastUsedAt = nullTime(last)
+		if t.Kind == "legacy" {
+			t.Scopes = slices.Clone(auth.AllScopes)
+		} else if t.Scopes, err = scanScopes(scopes); err != nil {
+			return nil, err
+		}
+		t.ExpiresAt, t.LastUsedAt = nullTime(exp), nullTime(last)
 		out = append(out, t)
 	}
 	return out, rows.Err()
 }
 
 // CreateToken stores a new API token for userID by its hash.
-func (s *Store) CreateToken(ctx context.Context, actor string, userID int64, name string, hash []byte) (Token, error) {
-	t := Token{Name: name}
+func (s *Store) CreateToken(ctx context.Context, actor string, userID int64, in NewToken, hash []byte) (Token, error) {
+	t := Token{Name: in.Name, Kind: "personal", Scopes: in.Scopes, ExpiresAt: in.ExpiresAt}
+	var scopes any = scopeArg(in.Scopes)
+	if in.Scopes == nil {
+		t.Kind, t.Scopes, scopes = "legacy", slices.Clone(auth.AllScopes), nil
+	}
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx,
-			`INSERT INTO api_tokens (user_id, name, token_hash) VALUES ($1, $2, $3) RETURNING id, created_at`,
-			userID, name, hash).Scan(&t.ID, &t.CreatedAt); err != nil {
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO api_tokens (user_id, name, token_hash, kind, scopes, expires_at)
+			VALUES ($1, $2, $3, $4, $5::text[], $6) RETURNING id, created_at`,
+			userID, in.Name, hash, t.Kind, scopes, in.ExpiresAt).Scan(&t.ID, &t.CreatedAt); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "api_token", strconv.FormatInt(t.ID, 10))

@@ -85,7 +85,7 @@ func TestUserRoles(t *testing.T) {
 	if err := s.CreateSession(ctx, viewer, sess, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateToken(ctx, "test", viewer, "t", tok); err != nil {
+	if _, err := s.CreateToken(ctx, "test", viewer, NewToken{Name: "t", Scopes: auth.AllScopes}, tok); err != nil {
 		t.Fatal(err)
 	}
 	lookupRoles := func() (auth.Role, auth.Role) {

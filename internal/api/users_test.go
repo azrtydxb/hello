@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/oauth"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -77,7 +79,8 @@ func refusedForRole(h http.Handler, method, path string, c credential) bool {
 
 // TestRoleEnforcement (spec S-23) fails if, for any route, a role below the
 // route's minimum is admitted or the minimum (or above) is refused, with a
-// session, a personal token, an OAuth token or a service account; if an
+// session, a personal token, an OAuth token or a service account (faked
+// over every route, then real ones minted through the API); if an
 // actor with no role is admitted anywhere; if a demotion does not apply on
 // the next request; or if a route's role differs from its x-hello-role.
 func TestRoleEnforcement(t *testing.T) {
@@ -89,7 +92,11 @@ func TestRoleEnforcement(t *testing.T) {
 	}
 	roles := []auth.Role{auth.RoleViewer, auth.RoleOperator, auth.RoleAdmin, ""}
 	l := roleLookup{actors: map[string]*auth.Actor{}}
-	h := Handler(Config{Store: l})
+	as, err := oauth.New(oauth.Options{PublicURL: "https://hello.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := Handler(Config{Store: l, AI: as})
 
 	for _, k := range kinds {
 		a := &auth.Actor{UserID: 7, Username: "u", Kind: k.kind, Scopes: append(slices.Clone(auth.AllScopes), auth.ScopeSession)}
@@ -128,6 +135,49 @@ func TestRoleEnforcement(t *testing.T) {
 		}
 	})
 
+	t.Run("real credentials", func(t *testing.T) {
+		e := newAIEnv(t)
+		hash, err := auth.HashPassword(testPassword)
+		if err != nil {
+			t.Fatal(err)
+		}
+		uid, err := e.st.CreateUser(context.Background(), "test", "dave", hash, auth.RoleAdmin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		alice, sess := e.login(), e.client()
+		sess.must(http.StatusNoContent, "POST", "/api/v1/auth/login", map[string]string{"username": "dave", "password": testPassword})
+		pat, oat := e.client(), e.client()
+		pat.bearer = sess.must(http.StatusCreated, "POST", "/api/v1/tokens", map[string]any{"name": "ci"}).json(t)["token"].(string)
+		oat.bearer = e.oauthToken(sess, "read write admin")["access_token"].(string)
+		sa := alice.must(http.StatusCreated, "POST", "/api/v1/service-accounts",
+			map[string]any{"name": "ci", "role": "operator", "scopes": []string{"read", "write"}}).json(t)
+		secret := alice.must(http.StatusCreated, "POST", "/api/v1/service-accounts/"+sa["id"].(string)+"/secrets", nil).json(t)["secret"].(string)
+		tok := e.oauthPost("/oauth/token", url.Values{"grant_type": {"client_credentials"}}, sa["id"].(string), secret)
+		if tok.code != http.StatusOK {
+			t.Fatalf("client credentials = %d %s", tok.code, tok.body)
+		}
+		svc := e.client()
+		svc.bearer = tok.json(t)["access_token"].(string)
+
+		creds := map[string]*client{"session": sess, "personal token": pat, "oauth token": oat}
+		for _, c := range creds {
+			c.must(http.StatusOK, "GET", "/api/v1/users", nil)
+		}
+		forbiddenRole := func(name string, c *client) {
+			t.Helper()
+			r := c.do("GET", "/api/v1/users", nil)
+			if r.code != http.StatusForbidden || !strings.Contains(string(r.body), "forbidden_role") {
+				t.Errorf("%s: GET /api/v1/users = %d %s, want 403 forbidden_role", name, r.code, r.body)
+			}
+		}
+		forbiddenRole("operator service account", svc)
+		alice.must(http.StatusOK, "PATCH", "/api/v1/users/"+strconv.FormatInt(uid, 10), map[string]string{"role": "operator"})
+		for name, c := range creds {
+			forbiddenRole("demoted "+name, c)
+		}
+	})
+
 	t.Run("route roles match x-hello-role", func(t *testing.T) {
 		var doc struct {
 			Paths map[string]map[string]struct {
@@ -141,11 +191,6 @@ func TestRoleEnforcement(t *testing.T) {
 			op, ok := doc.Paths[rt.Pattern][strings.ToLower(rt.Method)]
 			if !ok {
 				continue // TestVersionAndOpenAPI owns missing operations
-			}
-			// The users operations carry x-hello-role from this change;
-			// the rest gain it with the OpenAPI completeness work.
-			if op.Role == "" && rt.Pattern != "/api/v1/users" && rt.Pattern != "/api/v1/users/{id}" {
-				continue
 			}
 			if auth.Role(op.Role) != rt.Role {
 				t.Errorf("%s %s: route role %q, x-hello-role %q", rt.Method, rt.Pattern, rt.Role, op.Role)

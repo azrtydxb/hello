@@ -684,5 +684,8 @@ func (s *server) presence(w http.ResponseWriter, r *http.Request) {
 		s.liveDown(w, "list presence", err)
 		return
 	}
+	if states == nil {
+		states = []livestate.DeviceState{} // items is an array, never null
+	}
 	writeJSON(w, http.StatusOK, presenceList{Items: states})
 }
