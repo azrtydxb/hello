@@ -179,8 +179,17 @@ func TestAIAgentEndToEnd(t *testing.T) {
 	// Nothing changes before a human applies it.
 	lc.must("GET", fmt.Sprintf("/api/v1/ring-groups/%d", drop.ID), nil, nil, 200)
 
-	// A dismissed proposal cannot be applied.
-	dismissed := propose(actions)
+	// A dismissed proposal cannot be applied. It changes a different ring
+	// group: an equal draft would refresh the open proposal above (same
+	// fingerprint, same row) and dismissing it would close that one.
+	var gone struct{ ID int64 }
+	lc.must("POST", "/api/v1/ring-groups", map[string]any{"name": "ai-gone-" + randDigits(6), "strategy": "ring-all", "members": member}, &gone, 201)
+	dismissed := propose([]map[string]any{
+		{"operationId": "deleteRingGroup", "pathParams": map[string]string{"id": fmt.Sprint(gone.ID)}},
+	})
+	if dismissed.ID == p.ID {
+		t.Fatal("the second draft refreshed the first proposal instead of making a new one")
+	}
 	lc.must("POST", "/api/v1/ai/proposals/"+dismissed.ID+"/dismiss", map[string]any{"reason": "not_needed"}, nil, 200)
 	if err := lc.do("POST", "/api/v1/ai/proposals/"+dismissed.ID+"/apply", nil, nil, 409); err != nil {
 		t.Fatalf("applying a dismissed proposal: %v", err)
