@@ -151,6 +151,7 @@ type toolset struct {
 	ident     auth.Agent
 	dataBlock func(any) string
 	metric    *prometheus.CounterVec
+	hook      func(operation, result string)
 	// abort ends the task (a read answered 401: the user was deleted).
 	abort context.CancelCauseFunc
 
@@ -161,7 +162,7 @@ type toolset struct {
 
 // newToolset returns the read tools for one message, replayed as ident.
 func (a *Assistant) newToolset(ident auth.Agent, abort context.CancelCauseFunc) (*toolset, []aisdk.Tool) {
-	ts := &toolset{api: a.cfg.API, ident: ident, dataBlock: a.cfg.DataBlock, metric: a.toolCalls, abort: abort}
+	ts := &toolset{api: a.cfg.API, ident: ident, dataBlock: a.cfg.DataBlock, metric: a.toolCalls, hook: a.cfg.ToolCalls, abort: abort}
 	tools := make([]aisdk.Tool, len(a.tools))
 	for i, d := range a.tools {
 		tools[i] = &readTool{def: d, ts: ts}
@@ -259,7 +260,9 @@ func (t *readTool) Execute(ctx context.Context, args json.RawMessage) (any, erro
 
 // count adds one call to hello_ai_tool_calls_total.
 func (ts *toolset) count(op, result string) {
-	if ts.metric != nil {
+	if ts.hook != nil {
+		ts.hook(op, result)
+	} else if ts.metric != nil {
 		ts.metric.WithLabelValues(op, result).Inc()
 	}
 }
@@ -406,3 +409,6 @@ func largestArray(obj map[string]any) (string, []any) {
 	}
 	return key, best
 }
+
+// ToolNames is the assistant's tool list, in order, for docs/ai-agent.md.
+func ToolNames() []string { return append([]string(nil), assistantTools...) }

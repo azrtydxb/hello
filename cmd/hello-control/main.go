@@ -204,12 +204,12 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			Generate: func(ctx context.Context, c ai.Call[assistant.Answer]) (assistant.Answer, ai.Usage, error) {
 				return ai.Generate(ctx, agent, c)
 			},
-			API:        &assistantAPI,
-			Spec:       spec,
-			Proposals:  &assistant.Proposals{Validator: validator, Store: props},
-			MaxSteps:   cfg.AIAgent.MaxSteps,
-			Log:        log,
-			Registerer: metrics.Registry,
+			API:       &assistantAPI,
+			Spec:      spec,
+			Proposals: &assistant.Proposals{Validator: validator, Store: props},
+			MaxSteps:  cfg.AIAgent.MaxSteps,
+			Log:       log,
+			ToolCalls: agent.Metrics().ToolCall,
 		})
 		if err != nil {
 			_ = ln.Close()

@@ -8,6 +8,10 @@ import (
 	"testing"
 )
 
+// labAIKey is the lab's HELLO_AI_API_KEY (compose.yaml). TestAIAgentEndToEnd
+// also remembers a marker it puts in a prompt: neither may reach a log.
+const labAIKey = "lab-ai-api-key-0123456789abcdef"
+
 // TestNoSecretsInLogs checks every service's log for any
 // secret the lab tests used.
 func TestNoSecretsInLogs(t *testing.T) {
@@ -19,7 +23,7 @@ func TestNoSecretsInLogs(t *testing.T) {
 	logs := string(out)
 	secrets.Lock()
 	defer secrets.Unlock()
-	checks := append([]string{labPassword, "lab-only-nonce-secret-0123456789abcdef"}, secrets.values...)
+	checks := append([]string{labPassword, "lab-only-nonce-secret-0123456789abcdef", labAIKey}, secrets.values...)
 	for _, s := range checks {
 		if s != "" && strings.Contains(logs, s) {
 			t.Errorf("a secret (%d chars) appears in the lab logs", len(s))

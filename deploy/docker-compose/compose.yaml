@@ -64,6 +64,18 @@ x-prov-env: &prov-env
 x-ai-env: &ai-env
   HELLO_PUBLIC_URL: http://localhost:8080
   HELLO_OAUTH_DCR: "true"
+  # The in-product AI agent (docs/ai-agent.md) talks to the scripted
+  # OpenAI-compatible fixture the integration tests run on the host
+  # (test/fakellm, port 18088); 10.89.53.1 is the edge gateway, the host as
+  # the containers see it. Nothing else answers there, so with no test
+  # running the agent's calls fail with provider_error and nothing else
+  # changes. Agents run only on request (run-now) and explain at once.
+  HELLO_AI_BASE_URL: http://10.89.53.1:18088/v1
+  HELLO_AI_MODEL: lab-fake-model
+  HELLO_AI_API_KEY: lab-ai-api-key-0123456789abcdef
+  HELLO_AI_AGENT_START_DELAY: 24h
+  HELLO_AI_AIOPS_INTERVAL: 24h
+  HELLO_AI_EXPLAIN_MIN_INTERVAL: 1s
 
 x-control: &control
   build: { context: ../.., target: hello-control }

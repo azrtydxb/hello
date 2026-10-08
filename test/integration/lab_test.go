@@ -76,7 +76,8 @@ func labUp(t *testing.T) {
 		labStarted = true
 		out, err := compose("up", "-d", "--build", "--wait", "--wait-timeout", "240").CombinedOutput()
 		if err != nil {
-			labErr = fmt.Errorf("compose up: %w\n%s", err, out)
+			logs, _ := compose("logs", "--no-color", "--tail", "40", "hello-control-1", "hello-control-2").CombinedOutput()
+			labErr = fmt.Errorf("compose up: %w\n%s\ncontrol logs:\n%s", err, out, logs)
 		}
 	})
 	if labErr != nil {

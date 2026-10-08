@@ -7,9 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/azrtydxb/hello/internal/ai/doctable"
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/apispec"
 	"github.com/azrtydxb/hello/internal/mcp"
+	"go.yaml.in/yaml/v3"
 )
 
 const helloHost = "hello.kw.watteel.lab"
@@ -161,4 +163,126 @@ func mdTable(s string) string {
 		out = append(out, strings.Join(row, "|"))
 	}
 	return strings.Join(out, "\n")
+}
+
+// TestKwAIAgent (spec ai-agent S-27) fails if hello-control does not read
+// the AI connection settings from Secret hello-ai optionally, if the
+// public-endpoint opt-in is not off, if the Secret is not SOPS-encrypted
+// (a plaintext value or no sops block) or the manifest commits a key.
+func TestKwAIAgent(t *testing.T) {
+	c := controlContainer(t, kwDocs(t))
+	env, _ := c["env"].([]any)
+	for name, key := range map[string]string{"HELLO_AI_PROVIDER": "provider", "HELLO_AI_BASE_URL": "base-url",
+		"HELLO_AI_MODEL": "model", "HELLO_AI_API_KEY": "api-key"} {
+		var found bool
+		for _, e := range env {
+			if at(e, "name") != name {
+				continue
+			}
+			found = true
+			ref := at(e, "valueFrom", "secretKeyRef")
+			if at(ref, "name") != "hello-ai" || at(ref, "key") != key || at(ref, "optional") != true {
+				t.Errorf("%s is not Secret hello-ai key %s with optional: true: %v", name, key, ref)
+			}
+			if at(e, "value") != nil {
+				t.Errorf("%s carries a literal value in the manifest", name)
+			}
+		}
+		if !found {
+			t.Errorf("hello-control has no %s", name)
+		}
+	}
+	if v := envValue(c, "HELLO_AI_ALLOW_PUBLIC_ENDPOINT"); v != "false" {
+		t.Errorf("HELLO_AI_ALLOW_PUBLIC_ENDPOINT = %q, want false (kw is private-only)", v)
+	}
+	if v := envValue(c, "HELLO_AI_STRUCTURED_OUTPUT"); v != "prompt" {
+		t.Errorf("HELLO_AI_STRUCTURED_OUTPUT = %q, want prompt: fastllm ignores tools when response_format is set", v)
+	}
+	for _, name := range []string{"HELLO_AI_AIOPS_INTERVAL", "HELLO_AI_DAILY_TOKEN_BUDGET", "HELLO_AI_BACKGROUND_BUDGET_PERCENT"} {
+		if envValue(c, name) == "" {
+			t.Errorf("hello-control sets no %s", name)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kuvryn-sync", "kw", "secret-hello-ai.sops.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc["sops"] == nil || at(doc, "metadata", "name") != "hello-ai" {
+		t.Fatal("secret-hello-ai.sops.yaml is not the SOPS-encrypted Secret hello-ai")
+	}
+	data, _ := doc["data"].(map[string]any)
+	for _, k := range []string{"provider", "base-url", "model", "api-key"} {
+		if s, _ := data[k].(string); !strings.HasPrefix(s, "ENC[") {
+			t.Errorf("data.%s is not SOPS-encrypted", k)
+		}
+	}
+}
+
+// TestDocsAIAgent (spec ai-agent S-28) fails if docs/ai-agent.md lacks a
+// topic of S-28, if its tool list, proposal allowlist or detector threshold
+// tables differ from the code (paste `go run ./internal/ai/cmd/doctable`
+// between the doctable markers), or if the README or docs/ai-access.md does
+// not link it.
+func TestDocsAIAgent(t *testing.T) {
+	root := repoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "ai-agent.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	guide := string(raw)
+	var headings []string
+	for _, l := range strings.Split(guide, "\n") {
+		if strings.HasPrefix(l, "#") {
+			headings = append(headings, strings.ToLower(l))
+		}
+	}
+	for _, topic := range []string{"enable it", "privacy and public endpoints", "what the assistant can and cannot do",
+		"proposals and the allowlist", "detectors and findings", "budgets and metrics", "retention", "troubleshooting by error code"} {
+		var ok bool
+		for _, h := range headings {
+			ok = ok || strings.Contains(h, topic)
+		}
+		if !ok {
+			t.Errorf("no section on %q", topic)
+		}
+	}
+	for _, name := range []string{"HELLO_AI_PROVIDER", "HELLO_AI_BASE_URL", "HELLO_AI_MODEL", "HELLO_AI_API_KEY", "HELLO_AI_ALLOW_PUBLIC_ENDPOINT",
+		"HELLO_AI_STRUCTURED_OUTPUT", "HELLO_AI_VALIDATION_ATTEMPTS", "HELLO_AI_MAX_STEPS", "HELLO_AI_MAX_CONCURRENCY", "HELLO_AI_REQUESTS_PER_MINUTE",
+		"HELLO_AI_TIMEOUT", "HELLO_AI_DAILY_TOKEN_BUDGET", "HELLO_AI_BACKGROUND_BUDGET_PERCENT", "HELLO_AI_AGENT_START_DELAY",
+		"HELLO_AI_AIOPS_INTERVAL", "HELLO_AI_EXPLAIN_MIN_INTERVAL", "ai_disabled", "endpoint_not_private", "provider_error", "timeout",
+		"invalid_output", "tools_unsupported", "budget_exhausted", "instance_stopped", "hello-ai"} {
+		if !strings.Contains(guide, name) {
+			t.Errorf("the guide lacks %q", name)
+		}
+	}
+	spec, err := apispec.Load(api.OpenAPI())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := doctable.Tables(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var have strings.Builder
+	for _, section := range strings.Split(guide, "\n\n") {
+		if strings.HasPrefix(section, "|") && (strings.HasPrefix(section, "| Tool |") || strings.HasPrefix(section, "| Operation | Request") || strings.HasPrefix(section, "| Detector |")) {
+			have.WriteString(section + "\n\n")
+		}
+	}
+	if mdTable(strings.TrimSpace(have.String())) != mdTable(strings.TrimSpace(want)) {
+		t.Error("the guide's tool, allowlist or threshold tables are stale: paste `go run ./internal/ai/cmd/doctable` over them")
+	}
+	for _, f := range []string{"README.md", filepath.Join("docs", "ai-access.md")} {
+		b, err := os.ReadFile(filepath.Join(root, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), "ai-agent.md") {
+			t.Errorf("%s does not link docs/ai-agent.md", f)
+		}
+	}
 }
