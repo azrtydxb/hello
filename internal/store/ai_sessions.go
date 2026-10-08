@@ -240,7 +240,7 @@ func (s *Store) PostAIMessage(ctx context.Context, sessionID, content, title str
 		return 0, "", err
 	}
 	slices.Reverse(history)
-	taskID, err := start(ctx, msgID, history)
+	taskID, err := start(context.WithValue(ctx, sessionLocked{}, sessionID), msgID, history)
 	if err != nil {
 		return 0, "", err
 	}

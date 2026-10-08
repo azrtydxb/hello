@@ -85,6 +85,7 @@ Confirmed against the cluster during the first-sync bootstrap:
 | `kw/secret-hello-app.sops.yaml`       | `hello-app`       | `secretKey`                   | hello-control/hello-sip (`HELLO_SECRET_KEY`)                      |
 | `kw/secret-hello-nonce.sops.yaml`     | `hello-nonce`     | `nonceSecret`                 | hello-sip-1/2 (`HELLO_SIP_NONCE_SECRET`)                          |
 | `kw/secret-hello-bootstrap.sops.yaml` | `hello-bootstrap` | `password`                    | hello-control (`HELLO_BOOTSTRAP_ADMIN_PASSWORD`)                  |
+| `kw/secret-hello-ai.sops.yaml` | `hello-ai` | `provider`, `base-url`, `model`, `api-key` | hello-control (`HELLO_AI_*`, optional, see docs/ai-agent.md) |
 
 Optional, not yet supplied: `kw/secret-hello-prov-redirect.sops.yaml`
 (`hello-prov-redirect`), the phone vendors' redirect-service credentials.

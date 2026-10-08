@@ -321,3 +321,5 @@ tool that does not exist.
 - **Limits.** An approved agent can do anything its user's role and the
   granted scopes allow, including `write` changes; grant `read` unless the
   agent needs more, and revoke apps you no longer use.
+
+Hello also has an agent of its own, inside the console: see [ai-agent.md](ai-agent.md).

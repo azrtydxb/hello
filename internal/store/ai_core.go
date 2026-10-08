@@ -42,6 +42,11 @@ func (s *Store) AIUsage(ctx context.Context, day time.Time) (ai.Usage, error) {
 	return u, err
 }
 
+// sessionLocked marks a context whose caller already holds the session's
+// advisory lock in an open transaction (PostAIMessage): CreateAITask, on its
+// own connection, must not wait for that lock or the post deadlocks.
+type sessionLocked struct{}
+
 // CreateAITask inserts a queued task. A task for a session serialises on
 // the session (a transaction-scoped advisory lock) so two posts cannot both
 // pass the running-task check.
@@ -53,8 +58,10 @@ func (s *Store) CreateAITask(ctx context.Context, t ai.Task) error {
 	defer func() { _ = tx.Rollback() }()
 	session := sql.NullString{String: t.SessionID, Valid: t.SessionID != ""}
 	if session.Valid {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('hello:ai:session:' || $1::text))`, t.SessionID); err != nil {
-			return err
+		if held, _ := ctx.Value(sessionLocked{}).(string); held != t.SessionID {
+			if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('hello:ai:session:' || $1::text))`, t.SessionID); err != nil {
+				return err
+			}
 		}
 		var busy bool
 		if err := tx.QueryRowContext(ctx, `

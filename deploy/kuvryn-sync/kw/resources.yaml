@@ -1521,6 +1521,50 @@ spec:
                 secretKeyRef:
                   name: hello-bootstrap
                   key: password
+            # In-product AI agent (docs/ai-agent.md): the local fastllm, private-only.
+            # Secret hello-ai is optional; without it the agent stays off.
+            - name: HELLO_AI_PROVIDER
+              valueFrom:
+                secretKeyRef:
+                  name: hello-ai
+                  key: provider
+                  optional: true
+            - name: HELLO_AI_BASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: hello-ai
+                  key: base-url
+                  optional: true
+            - name: HELLO_AI_MODEL
+              valueFrom:
+                secretKeyRef:
+                  name: hello-ai
+                  key: model
+                  optional: true
+            - name: HELLO_AI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hello-ai
+                  key: api-key
+                  optional: true
+            - name: HELLO_AI_ALLOW_PUBLIC_ENDPOINT
+              value: "false"
+            # fastllm ignores tools whenever response_format is set, so the
+            # answer's schema goes in the prompt instead (docs/ai-agent.md).
+            - name: HELLO_AI_STRUCTURED_OUTPUT
+              value: "prompt"
+            - name: HELLO_AI_AIOPS_INTERVAL
+              value: "120s"
+            - name: HELLO_AI_EXPLAIN_MIN_INTERVAL
+              value: "10m"
+            - name: HELLO_AI_DAILY_TOKEN_BUDGET
+              value: "2000000"
+            - name: HELLO_AI_BACKGROUND_BUDGET_PERCENT
+              value: "80"
+            - name: HELLO_AI_MAX_CONCURRENCY
+              value: "2"
+            - name: HELLO_AI_TIMEOUT
+              value: "180s"
             - name: MINIO_ENDPOINT
               # The voicemail object store (contract 6): the in-namespace
               # MinIO Deployment/Service, as in the lab's compose file.

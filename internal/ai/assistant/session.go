@@ -103,6 +103,10 @@ type Config struct {
 	// Registerer receives hello_ai_tool_calls_total; nil keeps it
 	// unregistered.
 	Registerer prometheus.Registerer
+	// ToolCalls, when set, counts each tool call in the service's own
+	// hello_ai_tool_calls_total (ai.Metrics.ToolCall) and replaces
+	// Registerer: one process registers that name once.
+	ToolCalls func(operation, result string)
 }
 
 // Assistant is the chat assistant.
@@ -131,7 +135,7 @@ func New(cfg Config) (*Assistant, error) {
 		Name: "hello_ai_tool_calls_total",
 		Help: "Assistant tool calls by operation and result (ok, truncated, error, limit).",
 	}, []string{"operation", "result"})
-	if cfg.Registerer != nil {
+	if cfg.Registerer != nil && cfg.ToolCalls == nil {
 		if err := cfg.Registerer.Register(calls); err != nil {
 			return nil, err
 		}
