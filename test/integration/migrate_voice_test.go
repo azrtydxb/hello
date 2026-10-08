@@ -104,7 +104,7 @@ func TestMigrateVoiceAgentsRollback(t *testing.T) {
 	// Ring group members: an extension or a voice agent, never both, never
 	// neither; one agent per group.
 	var gid int64
-	if err := db.QueryRowContext(ctx, `INSERT INTO ring_groups (name) VALUES ('front') RETURNING id`).Scan(&gid); err != nil {
+	if err := db.QueryRowContext(ctx, `INSERT INTO ring_groups (name, strategy) VALUES ('front', 'sequential') RETURNING id`).Scan(&gid); err != nil {
 		t.Fatal(err)
 	}
 	var eid int64
@@ -139,7 +139,7 @@ func TestMigrateVoiceAgentsRollback(t *testing.T) {
 	// Deleting a referenced agent is refused; deleting the group leaves the
 	// agent; the version history follows the agent.
 	accepted("a version", `INSERT INTO voice_agent_versions (agent_id, revision, persona) VALUES ($1, 1, '{}')`, aid)
-	accepted("a ring group naming the agent", `INSERT INTO ring_groups (name, failure_kind) VALUES ('back', 'voice_agent')`)
+	accepted("a ring group naming the agent", `INSERT INTO ring_groups (name, strategy, failure_kind) VALUES ('back', 'sequential', 'voice_agent')`)
 	refused("deleting a referenced agent", `DELETE FROM voice_agents WHERE id = $1`, aid)
 	accepted("deleting the group", `DELETE FROM ring_groups`)
 	var left int

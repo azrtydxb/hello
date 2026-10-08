@@ -97,8 +97,8 @@ ALTER TABLE ring_group_members DROP CONSTRAINT ring_group_members_pkey;
 ALTER TABLE ring_group_members ALTER COLUMN extension_id DROP NOT NULL;
 ALTER TABLE ring_group_members ADD COLUMN voice_agent_id BIGINT REFERENCES voice_agents (id) ON DELETE RESTRICT;
 ALTER TABLE ring_group_members ADD CONSTRAINT ring_group_members_target CHECK (num_nonnulls(extension_id, voice_agent_id) = 1);
-ALTER TABLE ring_group_members ADD UNIQUE (group_id, extension_id);
-ALTER TABLE ring_group_members ADD UNIQUE (group_id, voice_agent_id);
+ALTER TABLE ring_group_members ADD CONSTRAINT ring_group_members_extension_key UNIQUE (group_id, extension_id);
+ALTER TABLE ring_group_members ADD CONSTRAINT ring_group_members_voice_agent_key UNIQUE (group_id, voice_agent_id);
 
 ALTER TABLE ring_groups DROP CONSTRAINT ring_groups_failure_kind_check;
 ALTER TABLE ring_groups ADD CONSTRAINT ring_groups_failure_kind_check
@@ -160,8 +160,8 @@ ALTER TABLE inbound_routes ADD CONSTRAINT inbound_routes_destination_kind_check
 ALTER TABLE ring_groups DROP CONSTRAINT ring_groups_failure_kind_check;
 ALTER TABLE ring_groups ADD CONSTRAINT ring_groups_failure_kind_check
     CHECK (failure_kind IN ('none', 'voicemail', 'external'));
-ALTER TABLE ring_group_members DROP CONSTRAINT ring_group_members_voice_agent_id_key;
-ALTER TABLE ring_group_members DROP CONSTRAINT ring_group_members_group_id_extension_id_key;
+ALTER TABLE ring_group_members DROP CONSTRAINT ring_group_members_voice_agent_key;
+ALTER TABLE ring_group_members DROP CONSTRAINT ring_group_members_extension_key;
 ALTER TABLE ring_group_members DROP CONSTRAINT ring_group_members_target;
 ALTER TABLE ring_group_members DROP COLUMN voice_agent_id;
 ALTER TABLE ring_group_members ALTER COLUMN extension_id SET NOT NULL;
