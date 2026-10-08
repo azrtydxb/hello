@@ -6563,7 +6563,8 @@
                   "upstream",
                   "render_error",
                   "forbidden_role",
-                  "insufficient_scope"
+                  "insufficient_scope",
+                  "last_admin"
                 ]
               },
               "message": {
