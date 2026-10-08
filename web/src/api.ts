@@ -134,6 +134,10 @@ export interface Cdr {
   rewrittenDestination: string;
   route: string;
   trunk: string;
+  /** Call quality of an anchored call; null when not measured. */
+  rtpPackets?: number | null;
+  rtpLost?: number | null;
+  rtpJitterMs?: number | null;
 }
 
 /** One line of a routing trace (routing.Step). */

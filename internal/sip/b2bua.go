@@ -95,6 +95,10 @@ type call struct {
 	// destination that applies when the group gives up.
 	stages    *callStages
 	mediaMode string
+	// quality is the anchored relay's latest stats snapshot (spec S-5.1),
+	// guarded by qmu (not mu: the relay delivers it from Close).
+	qmu       sync.Mutex
+	quality   *media.RelayStats
 	vmSession media.Session
 	held      bool
 
@@ -1010,6 +1014,11 @@ func (c *call) record(status int, side, reason, result string) {
 	c.mu.Unlock()
 	if media != "" {
 		r.MediaMode = media
+	}
+	if r.MediaMode == "anchored" && !answer.IsZero() {
+		if p, l, j, ok := c.qualityStats(); ok {
+			r.RTPPackets, r.RTPLost, r.RTPJitterMs = &p, &l, &j
+		}
 	}
 	c.s.deps.CDRs.Enqueue(r)
 }
