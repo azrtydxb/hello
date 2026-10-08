@@ -675,7 +675,7 @@ func throttleLimiters(t *testing.T) map[string]Limiter {
 		out["valkey down"] = NewLimiter(func() valkey.Client { return down }, log)
 	}
 	if addr := os.Getenv("HELLO_TEST_VALKEY_ADDR"); addr != "" {
-		c, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true})
+		c, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 12}) // oauth's own DB: other packages FLUSHDB theirs in parallel (TestValkeyDBsPerPackage)
 		if err != nil {
 			t.Fatal(err)
 		}
