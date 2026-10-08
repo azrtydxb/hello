@@ -131,7 +131,7 @@ The UI container proxies `/api` to `HELLO_CONTROL_UPSTREAM` and re-resolves it t
 Every SIP node must share the same `HELLO_SIP_NONCE_SECRET`. A node with a
 different one rejects digest challenges issued by the others.
 
-Commands: `hello-control serve | migrate up | migrate status`, `hello-sip serve`.
+Commands: `hello-control serve | migrate up | migrate status | user add [--role viewer|operator|admin] <username>` (password on stdin; the role defaults to `viewer`, the first user is always `admin`), `hello-sip serve`.
 
 ## License
 

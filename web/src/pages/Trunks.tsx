@@ -43,6 +43,7 @@ import {
   UNKNOWN,
 } from "./callflow/format";
 import { FormAlert } from "./callflow/ui";
+import { Can } from "../role";
 
 const TRUNK_NAME_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const FORM_ID = "trunk-form";
@@ -258,13 +259,15 @@ export function Trunks() {
   const statusOf = (t: Trunk) =>
     statuses?.find((s) => String(s.trunkId) === String(t.id));
   const newTrunk = (
-    <Button
-      icon="plus"
-      disabled={list.status !== "ready"}
-      onClick={() => setEditing({ kind: "new" })}
-    >
-      New trunk
-    </Button>
+    <Can>
+      <Button
+        icon="plus"
+        disabled={list.status !== "ready"}
+        onClick={() => setEditing({ kind: "new" })}
+      >
+        New trunk
+      </Button>
+    </Can>
   );
 
   return (
@@ -531,16 +534,18 @@ function TrunkCard({
         >
           Test a route
         </LinkButton>
-        <Button
-          variant="ghost"
-          size="sm"
-          icon="trash-2"
-          className="cf-danger"
-          aria-label={`Delete trunk ${t.name}`}
-          onClick={onDelete}
-        >
-          Delete
-        </Button>
+        <Can>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="trash-2"
+            className="cf-danger"
+            aria-label={`Delete trunk ${t.name}`}
+            onClick={onDelete}
+          >
+            Delete
+          </Button>
+        </Can>
       </div>
     </li>
   );
@@ -627,9 +632,11 @@ function TrunkDrawer({
           <Button variant="secondary" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" form={FORM_ID} disabled={busy}>
-            {trunk ? "Save trunk" : "Create trunk"}
-          </Button>
+          <Can>
+            <Button type="submit" form={FORM_ID} disabled={busy}>
+              {trunk ? "Save trunk" : "Create trunk"}
+            </Button>
+          </Can>
         </>
       }
     >

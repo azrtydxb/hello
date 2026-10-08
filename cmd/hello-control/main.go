@@ -35,7 +35,7 @@ const (
 	pruneEvery = time.Hour
 )
 
-const usage = "usage: hello-control serve | migrate up | migrate status"
+const usage = "usage: hello-control serve | migrate up | migrate status | user add [--role viewer|operator|admin] <username> < password"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -78,6 +78,8 @@ func run(args []string) error {
 			fmt.Printf("%05d %-8s %s\n", s.Source.Version, s.State, s.Source.Path)
 		}
 		return nil
+	case len(args) >= 2 && args[0] == "user" && args[1] == "add":
+		return userAdd(ctx, store.New(db), args[2:], os.Stdin, os.Stdout)
 	}
 	return fmt.Errorf("%s", usage)
 }

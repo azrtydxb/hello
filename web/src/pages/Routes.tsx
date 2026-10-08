@@ -66,6 +66,7 @@ import { fieldId, mapFieldErrors, splitList, type ErrorMap } from "../forms";
 import { useOrderedList } from "../useOrderedList";
 import { formatSchedule, formatTransform } from "./callflow/format";
 import { FormAlert } from "./callflow/ui";
+import { Can } from "../role";
 
 const DEFAULT_FAILOVER = "408, 480, 500, 502, 503, 504";
 const FORM_ID = "route-form";
@@ -216,12 +217,14 @@ export function RoutesPage() {
             <LinkButton to="/routes/test" icon="flask-conical">
               Route tester
             </LinkButton>
-            <Button
-              icon="plus"
-              onClick={() => setEditing({ kind: "new", direction: tab })}
-            >
-              New route
-            </Button>
+            <Can>
+              <Button
+                icon="plus"
+                onClick={() => setEditing({ kind: "new", direction: tab })}
+              >
+                New route
+              </Button>
+            </Can>
           </>
         }
       />
@@ -516,9 +519,11 @@ function RouteList<
           title={`No ${what} yet.`}
           description="Routes are matched top to bottom; the first enabled match wins."
           action={
-            <Button icon="plus" onClick={onNew}>
-              New route
-            </Button>
+            <Can>
+              <Button icon="plus" onClick={onNew}>
+                New route
+              </Button>
+            </Can>
           }
         />
       )}
@@ -599,38 +604,46 @@ function RouteList<
                     </td>
                   ))}
                   <td>
-                    <Switch
-                      aria-label={`${item.name} enabled`}
-                      checked={item.enabled}
-                      onChange={(e) => onToggle(item, e.target.checked)}
-                    />
+                    <Can fallback={item.enabled ? "On" : "Off"}>
+                      <Switch
+                        aria-label={`${item.name} enabled`}
+                        checked={item.enabled}
+                        onChange={(e) => onToggle(item, e.target.checked)}
+                      />
+                    </Can>
                   </td>
                   <td className="az-table--right">
                     <span className="cf-row-actions">
-                      <IconButton
-                        icon="arrow-up"
-                        data-move={`${String(item.id)}:up`}
-                        label={`Move ${item.name} up`}
-                        disabled={list.busy || i === 0}
-                        onClick={() => void move(item, i, -1)}
-                      />
-                      <IconButton
-                        icon="arrow-down"
-                        data-move={`${String(item.id)}:down`}
-                        label={`Move ${item.name} down`}
-                        disabled={list.busy || i === items.length - 1}
-                        onClick={() => void move(item, i, 1)}
-                      />
+                      <Can>
+                        <IconButton
+                          icon="arrow-up"
+                          data-move={`${String(item.id)}:up`}
+                          label={`Move ${item.name} up`}
+                          disabled={list.busy || i === 0}
+                          onClick={() => void move(item, i, -1)}
+                        />
+                      </Can>
+                      <Can>
+                        <IconButton
+                          icon="arrow-down"
+                          data-move={`${String(item.id)}:down`}
+                          label={`Move ${item.name} down`}
+                          disabled={list.busy || i === items.length - 1}
+                          onClick={() => void move(item, i, 1)}
+                        />
+                      </Can>
                       <IconButton
                         icon="pencil"
                         label={`Edit ${item.name}`}
                         onClick={() => onEdit(item)}
                       />
-                      <IconButton
-                        icon="trash-2"
-                        label={`Delete ${item.name}`}
-                        onClick={() => onDelete(item)}
-                      />
+                      <Can>
+                        <IconButton
+                          icon="trash-2"
+                          label={`Delete ${item.name}`}
+                          onClick={() => onDelete(item)}
+                        />
+                      </Can>
                     </span>
                   </td>
                 </tr>
@@ -711,14 +724,16 @@ function RouteDrawer({
           <Button variant="secondary" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button
-            type="submit"
-            form={FORM_ID}
-            disabled={busy || !trunksReady}
-            aria-describedby={trunksReady ? undefined : TRUNKS_PENDING_ID}
-          >
-            {submitLabel}
-          </Button>
+          <Can>
+            <Button
+              type="submit"
+              form={FORM_ID}
+              disabled={busy || !trunksReady}
+              aria-describedby={trunksReady ? undefined : TRUNKS_PENDING_ID}
+            >
+              {submitLabel}
+            </Button>
+          </Can>
         </>
       }
     >

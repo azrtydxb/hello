@@ -33,6 +33,7 @@ import {
   PhonesTabs,
 } from "./phones/ui";
 import "./phones/settings.css";
+import { useCan } from "../role";
 
 type Load<T> =
   | { status: "loading" }
@@ -65,6 +66,8 @@ export function ProvSettings() {
   });
   const toast = useToast();
   const { show } = toast;
+  // Redirect credentials are admin-only (spec S-23).
+  const isAdmin = useCan("admin");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -75,15 +78,17 @@ export function ProvSettings() {
           setSettings({ status: "error", message: errorMessage(err) });
         }
       });
-    listRedirectAccounts(controller.signal)
-      .then((data) => setAccounts({ status: "ready", data }))
-      .catch((err: unknown) => {
-        if (!controller.signal.aborted) {
-          setAccounts({ status: "error", message: errorMessage(err) });
-        }
-      });
+    if (isAdmin) {
+      listRedirectAccounts(controller.signal)
+        .then((data) => setAccounts({ status: "ready", data }))
+        .catch((err: unknown) => {
+          if (!controller.signal.aborted) {
+            setAccounts({ status: "error", message: errorMessage(err) });
+          }
+        });
+    }
     return () => controller.abort();
-  }, []);
+  }, [isAdmin]);
 
   /** Reload the redirect accounts; a failure rejects for the caller to show. */
   const reloadAccounts = useCallback(async () => {
@@ -126,45 +131,47 @@ export function ProvSettings() {
             <CaSection settings={settings.data} onCopied={show} />
           </>
         )}
-        <section className="prov-card" aria-labelledby="prov-redirect-title">
-          <h2 id="prov-redirect-title" className="prov-card__title">
-            Redirect services
-          </h2>
-          <p className="prov-muted">
-            A vendor&apos;s redirect service sends a factory-new phone to Hello
-            without DHCP. Credentials are write-only: once saved they are never
-            shown again.
-          </p>
-          {accounts.status === "loading" && (
-            <Spinner label="Loading redirect services…" />
-          )}
-          {accounts.status === "error" && (
-            <Alert tone="bad" title="Could not load redirect services">
-              {accounts.message}
-            </Alert>
-          )}
-          {accounts.status === "ready" && (
-            <ul
-              className="prov-cards prov-plain"
-              aria-label="Redirect services"
-            >
-              {accounts.data.map((a) => (
-                <RedirectCard
-                  key={a.vendor}
-                  account={a}
-                  onSaved={(saved) => {
-                    onAccountSaved(saved);
-                    show(`${vendorLabel(saved.vendor)} redirect saved.`);
-                  }}
-                  onReload={reloadAccounts}
-                  onRemoved={() =>
-                    show(`${vendorLabel(a.vendor)} credentials removed.`)
-                  }
-                />
-              ))}
-            </ul>
-          )}
-        </section>
+        {isAdmin && (
+          <section className="prov-card" aria-labelledby="prov-redirect-title">
+            <h2 id="prov-redirect-title" className="prov-card__title">
+              Redirect services
+            </h2>
+            <p className="prov-muted">
+              A vendor&apos;s redirect service sends a factory-new phone to
+              Hello without DHCP. Credentials are write-only: once saved they
+              are never shown again.
+            </p>
+            {accounts.status === "loading" && (
+              <Spinner label="Loading redirect services…" />
+            )}
+            {accounts.status === "error" && (
+              <Alert tone="bad" title="Could not load redirect services">
+                {accounts.message}
+              </Alert>
+            )}
+            {accounts.status === "ready" && (
+              <ul
+                className="prov-cards prov-plain"
+                aria-label="Redirect services"
+              >
+                {accounts.data.map((a) => (
+                  <RedirectCard
+                    key={a.vendor}
+                    account={a}
+                    onSaved={(saved) => {
+                      onAccountSaved(saved);
+                      show(`${vendorLabel(saved.vendor)} redirect saved.`);
+                    }}
+                    onReload={reloadAccounts}
+                    onRemoved={() =>
+                      show(`${vendorLabel(a.vendor)} credentials removed.`)
+                    }
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
       </div>
       {toast.node}
     </section>

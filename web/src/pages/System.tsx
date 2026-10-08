@@ -38,6 +38,7 @@ import { mapFieldErrors, type ErrorMap } from "../forms";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import { ago } from "./platform/health";
 import "./platform/platform.css";
+import { Can, useCan } from "../role";
 
 /** System: feature codes, live presence and API tokens. */
 export function System() {
@@ -48,13 +49,19 @@ export function System() {
       <PageHeader
         eyebrow="Platform"
         title="System"
-        description="Feature codes, live presence and API tokens."
+        description={
+          useCan("admin")
+            ? "Feature codes, live presence and API tokens."
+            : "Feature codes and live presence."
+        }
       />
       <div className="pf-grid2 pf-grid2--wide">
         <FeatureCodes onSaved={() => showToast("Feature codes saved.")} />
         <div className="pf-stack" style={{ minWidth: 0 }}>
           <Presence />
-          <Tokens showToast={showToast} />
+          <Can min="admin">
+            <Tokens showToast={showToast} />
+          </Can>
         </div>
       </div>
       {toast.node}
@@ -224,13 +231,15 @@ function FeatureCodes({ onSaved }: { onSaved: () => void }) {
                   error={errors[`items[${i}].argument`]}
                   onChange={(e) => setRow(i, { argument: e.target.value })}
                 />
-                <IconButton
-                  icon="x"
-                  label={`Remove code ${r.code || i + 1}`}
-                  onClick={() =>
-                    setRows((prev) => prev.filter((_, j) => j !== i))
-                  }
-                />
+                <Can>
+                  <IconButton
+                    icon="x"
+                    label={`Remove code ${r.code || i + 1}`}
+                    onClick={() =>
+                      setRows((prev) => prev.filter((_, j) => j !== i))
+                    }
+                  />
+                </Can>
               </div>
             ))}
           </div>
@@ -241,22 +250,26 @@ function FeatureCodes({ onSaved }: { onSaved: () => void }) {
             </Alert>
           )}
           <div className="pf-codes__actions">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="plus"
-              onClick={() =>
-                setRows((prev) => [
-                  ...prev,
-                  { code: "", action: "voicemail", argument: "" },
-                ])
-              }
-            >
-              Add code
-            </Button>
-            <Button type="submit" size="sm" disabled={busy}>
-              Save feature codes
-            </Button>
+            <Can>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="plus"
+                onClick={() =>
+                  setRows((prev) => [
+                    ...prev,
+                    { code: "", action: "voicemail", argument: "" },
+                  ])
+                }
+              >
+                Add code
+              </Button>
+            </Can>
+            <Can>
+              <Button type="submit" size="sm" disabled={busy}>
+                Save feature codes
+              </Button>
+            </Can>
           </div>
         </>
       )}

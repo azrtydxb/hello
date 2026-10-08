@@ -50,6 +50,7 @@ import {
   vendorModel,
 } from "./phones/ui";
 import "./phones/inventory.css";
+import { Can } from "../role";
 
 type PhoneState =
   | { status: "loading" }
@@ -140,27 +141,33 @@ export function PhoneDetail() {
         actions={
           phone && (
             <>
-              <Button
-                variant="secondary"
-                icon="key-round"
-                onClick={() => setPending("rotate")}
-              >
-                Rotate token
-              </Button>
-              <Button
-                variant="secondary"
-                icon="rotate-ccw"
-                onClick={() => setPending("rearm")}
-              >
-                Re-arm
-              </Button>
-              <Button
-                variant="danger"
-                icon="trash-2"
-                onClick={() => setPending("delete")}
-              >
-                Delete
-              </Button>
+              <Can min="admin">
+                <Button
+                  variant="secondary"
+                  icon="key-round"
+                  onClick={() => setPending("rotate")}
+                >
+                  Rotate token
+                </Button>
+              </Can>
+              <Can min="admin">
+                <Button
+                  variant="secondary"
+                  icon="rotate-ccw"
+                  onClick={() => setPending("rearm")}
+                >
+                  Re-arm
+                </Button>
+              </Can>
+              <Can>
+                <Button
+                  variant="danger"
+                  icon="trash-2"
+                  onClick={() => setPending("delete")}
+                >
+                  Delete
+                </Button>
+              </Can>
             </>
           )
         }
@@ -256,21 +263,25 @@ export function PhoneDetail() {
                 </Alert>
               )}
               <div className="prov-row">
-                <Button
-                  variant="secondary"
-                  icon="eye"
-                  disabled={revealing}
-                  onClick={() => void onReveal()}
-                >
-                  Reveal admin password
-                </Button>
-                <Button
-                  variant="secondary"
-                  icon="key-round"
-                  onClick={() => setPending("rotate-admin")}
-                >
-                  Rotate admin password
-                </Button>
+                <Can min="admin">
+                  <Button
+                    variant="secondary"
+                    icon="eye"
+                    disabled={revealing}
+                    onClick={() => void onReveal()}
+                  >
+                    Reveal admin password
+                  </Button>
+                </Can>
+                <Can min="admin">
+                  <Button
+                    variant="secondary"
+                    icon="key-round"
+                    onClick={() => setPending("rotate-admin")}
+                  >
+                    Rotate admin password
+                  </Button>
+                </Can>
               </div>
             </div>
 

@@ -40,6 +40,7 @@ import {
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { UNKNOWN } from "./callflow/format";
 import { FormAlert } from "./callflow/ui";
+import { Can } from "../role";
 
 const FORM_ID = "group-form";
 
@@ -152,13 +153,15 @@ export function RingGroups() {
   }
 
   const newGroup = (
-    <Button
-      icon="plus"
-      disabled={list.status !== "ready"}
-      onClick={() => setEditing({ kind: "new" })}
-    >
-      New ring group
-    </Button>
+    <Can>
+      <Button
+        icon="plus"
+        disabled={list.status !== "ready"}
+        onClick={() => setEditing({ kind: "new" })}
+      >
+        New ring group
+      </Button>
+    </Can>
   );
 
   return (
@@ -312,16 +315,18 @@ function GroupCard({
         >
           Edit
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          icon="trash-2"
-          className="cf-danger"
-          aria-label={`Delete ring group ${g.name}`}
-          onClick={onDelete}
-        >
-          Delete
-        </Button>
+        <Can>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon="trash-2"
+            className="cf-danger"
+            aria-label={`Delete ring group ${g.name}`}
+            onClick={onDelete}
+          >
+            Delete
+          </Button>
+        </Can>
       </div>
     </li>
   );
@@ -540,9 +545,11 @@ function RingGroupDrawer({
           <Button variant="secondary" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" form={FORM_ID} disabled={busy}>
-            {group ? "Save group" : "Create group"}
-          </Button>
+          <Can>
+            <Button type="submit" form={FORM_ID} disabled={busy}>
+              {group ? "Save group" : "Create group"}
+            </Button>
+          </Can>
         </>
       }
     >

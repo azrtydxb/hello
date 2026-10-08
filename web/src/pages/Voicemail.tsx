@@ -39,6 +39,7 @@ import {
 import { formatDuration, formatTime } from "../format";
 import { mapFieldErrors } from "../forms";
 import { NowPlaying, usePlayback } from "./media/MediaParts";
+import { Can } from "../role";
 
 type Load<T> =
   | { status: "loading" }
@@ -323,16 +324,20 @@ function BoxPanel({
       align: "right",
       render: (m) => (
         <div className="media-actions">
-          <IconButton
-            icon={m.heard ? "mail" : "check-check"}
-            label={`Mark the message from ${m.caller} ${m.heard ? "unheard" : "heard"}`}
-            onClick={() => void onMarkHeard(m, !m.heard)}
-          />
-          <IconButton
-            icon="trash-2"
-            label={`Delete the message from ${m.caller}`}
-            onClick={() => setDeleting(m)}
-          />
+          <Can>
+            <IconButton
+              icon={m.heard ? "mail" : "check-check"}
+              label={`Mark the message from ${m.caller} ${m.heard ? "unheard" : "heard"}`}
+              onClick={() => void onMarkHeard(m, !m.heard)}
+            />
+          </Can>
+          <Can>
+            <IconButton
+              icon="trash-2"
+              label={`Delete the message from ${m.caller}`}
+              onClick={() => setDeleting(m)}
+            />
+          </Can>
         </div>
       ),
     },
@@ -520,9 +525,11 @@ function BoxSettings({
           >
             Cancel
           </Button>
-          <Button type="submit" size="sm" form={formId} disabled={busy}>
-            Save box settings
-          </Button>
+          <Can>
+            <Button type="submit" size="sm" form={formId} disabled={busy}>
+              Save box settings
+            </Button>
+          </Can>
         </>
       }
     >

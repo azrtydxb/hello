@@ -31,6 +31,7 @@ import {
 import { formatTime } from "../format";
 import { mapFieldErrors } from "../forms";
 import { checkWav, NowPlaying, usePlayback, WavDrop } from "./media/MediaParts";
+import { Can } from "../role";
 
 const NAME_HINT =
   "Letters, digits, . _ - · up to 64; destinations use this name.";
@@ -142,16 +143,20 @@ export function Announcements() {
       align: "right",
       render: (a) => (
         <div className="media-actions">
-          <IconButton
-            icon="replace"
-            label={`Replace the audio of ${a.name}`}
-            onClick={() => setReplacing(a)}
-          />
-          <IconButton
-            icon="trash-2"
-            label={`Delete announcement ${a.name}`}
-            onClick={() => setDeleting(a)}
-          />
+          <Can>
+            <IconButton
+              icon="replace"
+              label={`Replace the audio of ${a.name}`}
+              onClick={() => setReplacing(a)}
+            />
+          </Can>
+          <Can>
+            <IconButton
+              icon="trash-2"
+              label={`Delete announcement ${a.name}`}
+              onClick={() => setDeleting(a)}
+            />
+          </Can>
         </div>
       ),
     },
@@ -165,12 +170,14 @@ export function Announcements() {
         description="Named prompts that ring groups and routes can play. WAV, up to 10 MB."
       />
       <div className="ann-grid">
-        <UploadCard
-          onUploaded={(a) => {
-            upsert(a);
-            showToast(`Announcement ${a.name} uploaded.`);
-          }}
-        />
+        <Can>
+          <UploadCard
+            onUploaded={(a) => {
+              upsert(a);
+              showToast(`Announcement ${a.name} uploaded.`);
+            }}
+          />
+        </Can>
         <div className="ann-list media-stack">
           {playback.error && <Alert tone="bad">{playback.error}</Alert>}
           {playingAnn && (
@@ -359,15 +366,17 @@ function ReplaceAudio({
           >
             Cancel
           </Button>
-          <Button
-            type="submit"
-            size="sm"
-            icon="replace"
-            form={formId}
-            disabled={busy}
-          >
-            Replace audio
-          </Button>
+          <Can>
+            <Button
+              type="submit"
+              size="sm"
+              icon="replace"
+              form={formId}
+              disabled={busy}
+            >
+              Replace audio
+            </Button>
+          </Can>
         </>
       }
     >
