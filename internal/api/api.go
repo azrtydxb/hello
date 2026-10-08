@@ -160,6 +160,8 @@ type Config struct {
 	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
 	// routes answer 404 and bearer tokens get no audience check.
 	AI AIAccess
+	// Findings is the AIOps findings store (spec ai-agent); nil is AI off.
+	Findings AIFindings
 }
 
 type server struct{ Config }

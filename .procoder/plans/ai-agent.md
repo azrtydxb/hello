@@ -113,13 +113,20 @@ Interfaces: produces the CDR quality columns the `call_quality` detector (Task 6
 Files: `internal/ai/detect/` (`detect.go` candidate types and the `aiops` agent, `reg_failures.go`, `auth_bruteforce.go`, `trunk_down.go`, `trunk_asr.go`, `node_health.go`, `trunk_capacity.go`, `call_quality.go`, `config_smells.go`, `samples.go`, `findings.go`, `explain.go`, tests, `bench_test.go`), `internal/store/ai_findings.go`, `internal/api/ai_findings.go` and tests.
 Interfaces: produces the findings routes and proposals with source `finding:<type>`; consumes contracts 1, 5, 6, `livestate`, `cluster`, `routing`, call quality from CDRs and the store.
 
-- [ ] One detector at a time, test first, a table per detector at, above and below each threshold of S-19 against PostgreSQL and Valkey; `TestDetectors`.
-- [ ] Samples (member start times and tombstones, trunk active calls, device registered-today) and their reads; part of `TestDetectors`.
-- [ ] Findings upsert, acknowledge, dismiss with 24 h suppression and severity-rise reopen, 30-minute resolve, severity history, health score; `TestFindingsLifecycle`.
-- [ ] Explanation: only on set or severity change and once per interval, background budget, validator (known ids, ranks unique, at most one proposal per finding, validated by contract 6), unexplained fallback; `TestFindingsLifecycle` (model half).
-- [ ] `call_quality` detector: per trunk (`trunk_name`) and node (`sip_node`), the last 5 CDRs with non-null quality ended in the last 60 min; ≥ 3 with loss ≥ 1 % or `rtp_jitter_ms` ≥ 100 → warning; fewer than 5 raise nothing. `TestDetectors` covers the threshold and one just below it.
-- [ ] `TestDetectorLatency` (`HELLO_BENCH=1`) over a generated 1-million-CDR, 10 000-device database; add the indexes it shows are needed to `00009`.
-- [ ] Mutation-check each threshold comparison and the suppression window. Full gate.
+- [x] One detector at a time, test first, a table per detector at, above and below each threshold of S-19 against PostgreSQL and Valkey; `TestDetectors`.
+- [x] Samples (member start times and tombstones, trunk active calls, device registered-today) and their reads; part of `TestDetectors`.
+- [x] Findings upsert, acknowledge, dismiss with 24 h suppression and severity-rise reopen, 30-minute resolve, severity history, health score; `TestFindingsLifecycle`.
+- [x] Explanation: only on set or severity change and once per interval, background budget, validator (known ids, ranks unique, at most one proposal per finding, validated by contract 6), unexplained fallback; `TestFindingsLifecycle` (model half).
+- [x] `call_quality` detector: per trunk (`trunk_name`) and node (`sip_node`), the last 5 CDRs with non-null quality ended in the last 60 min; ≥ 3 with loss ≥ 1 % or `rtp_jitter_ms` ≥ 100 → warning; fewer than 5 raise nothing. `TestDetectors` covers the threshold and one just below it.
+- [x] `TestDetectorLatency` (`HELLO_BENCH=1`) over a generated 1-million-CDR, 10 000-device database; add the indexes it shows are needed to `00009`.
+- [x] Mutation-check each threshold comparison and the suppression window. Full gate.
+
+**Deviations recorded by Task 6:**
+
+- `TestDetectorLatency` over 1 000 000 CDRs and 10 000 devices measured every DB-reading detector at 0.3 s or less without any index (`trunk_asr_drop` and `call_quality` the slowest), so no index is added to `00009`: CDR inserts are hello-sip's hot path. Rerun on CI; the `reg_failures` and `auth_bruteforce` rows need its Valkey.
+- `trunk_capacity` cannot read hello-sip's `hello_trunk_slot_overcommit_total`; it reads the same condition from the trunk's slot set (active calls above `max_calls` in a sample). `trunk_asr_drop` counts outbound CDRs only. Samples also record `trunk_state` and `node` (every run, kept 7 days) for the "for 2 minutes" and flap rules.
+- Findings: a severity change clears the explanation (`explained false`) until the next explanation; acknowledged findings reopen on a rise. A detector that failed in a run keeps its findings open (no resolve for its type). The explanation's proposals read as the oldest admin (`AIReadIdentity`), as `via ai-assistant`.
+- `detect.Generate` is a function type the wiring binds to `ai.Generate` (the `ai.Service` type is Task 2's); `api.Config.Findings` (nil is AI off) and the `ai_disabled` code in the `Error` enum of `openapi.json` are the only edits outside Task 6's files. Test Valkey database 15.
 
 ## Task 7: Console (branch ai-agent-ui)
 

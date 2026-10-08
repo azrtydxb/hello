@@ -7630,7 +7630,8 @@
                   "render_error",
                   "forbidden_role",
                   "insufficient_scope",
-                  "last_admin"
+                  "last_admin",
+                  "ai_disabled"
                 ]
               },
               "message": {
