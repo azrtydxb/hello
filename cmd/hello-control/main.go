@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/ai"
+	"github.com/azrtydxb/hello/internal/ai/proposal"
 	"github.com/azrtydxb/hello/internal/api"
+	"github.com/azrtydxb/hello/internal/apispec"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/mailer"
@@ -169,11 +171,29 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		SessionTTL:    cfg.SessionTTL,
 		Log:           log,
 	}
+	// Proposals (spec ai-agent) exist only while the agent is on; reads in
+	// their validation replay through the API handler built just below.
+	var validator *proposal.SchemaValidator
+	if on, _ := agent.Enabled(); on {
+		spec, err := apispec.Load(api.OpenAPI())
+		if err == nil {
+			validator, err = proposal.NewValidator(spec, nil, st)
+		}
+		if err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("ai proposals: %w", err)
+		}
+		apiCfg.Proposals = proposal.NewStore(db, validator)
+	}
 	if as != nil {
 		apiCfg.AI = as
 		go pruneOAuth(ctx, as, vk, cfg.NodeID, log)
 	}
-	app, err := composeApp(cfg.AI, api.Handler(apiCfg), as, st, metrics.Registry, log)
+	apiHandler := api.Handler(apiCfg)
+	if validator != nil {
+		validator.SetHandler(apiHandler)
+	}
+	app, err := composeApp(cfg.AI, apiHandler, as, st, metrics.Registry, log)
 	if err != nil {
 		_ = ln.Close()
 		return err

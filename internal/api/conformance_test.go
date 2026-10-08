@@ -29,7 +29,16 @@ import (
 // 401, 500 and 503 are exempt everywhere (spec ai-external-access S-2): 401
 // is the middleware's and TestVersionAndOpenAPI covers it for every
 // operation, 500 is a store failure, and 503 is a dependency being down.
-var conformanceExempt = map[string]string{}
+var conformanceExempt = func() map[string]string {
+	const why = "the proposal routes need the database-backed store; internal/ai/proposal drives them against PostgreSQL"
+	m := map[string]string{}
+	for _, k := range []string{"listAIProposals 200", "listAIProposals 400", "getAIProposal 200", "getAIProposal 404",
+		"applyAIProposal 200", "applyAIProposal 404", "applyAIProposal 409",
+		"dismissAIProposal 200", "dismissAIProposal 400", "dismissAIProposal 404", "dismissAIProposal 409"} {
+		m[k] = why
+	}
+	return m
+}()
 
 // conformance validates every request the package suite sends through
 // Handler, and every response, against openapi.json (spec S-2).
