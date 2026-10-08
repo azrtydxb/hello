@@ -12,7 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/ai"
+	"github.com/azrtydxb/hello/internal/ai/detect"
+	"github.com/azrtydxb/hello/internal/ai/proposal"
 	"github.com/azrtydxb/hello/internal/api"
+	"github.com/azrtydxb/hello/internal/apispec"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/mailer"
@@ -25,6 +29,7 @@ import (
 	"github.com/azrtydxb/hello/internal/version"
 	"github.com/azrtydxb/hello/internal/vkconn"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/valkey-io/valkey-go"
 )
 
 const (
@@ -135,7 +140,23 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_PUBLIC_URL: %w", err)
 	}
+	// The in-product AI agent (spec ai-agent): off, starting nothing,
+	// unless HELLO_AI_BASE_URL and HELLO_AI_MODEL are set.
+	agent, err := ai.NewWith(cfg.AIAgent, st, nil, metrics.Registry, log, ai.Options{Replica: cfg.NodeID})
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("HELLO_AI_*: %w", err)
+	}
+	if on, reason := agent.Enabled(); on {
+		go func() {
+			agent.SetValkey(awaitValkey(ctx, vk))
+		}()
+		go agent.Run(ctx)
+	} else {
+		log.Info("ai agent off", "reason", reason)
+	}
 	apiCfg := api.Config{
+		AIAgent:       agent,
 		Store:         st,
 		Live:          vk,
 		Trunks:        vk,
@@ -151,11 +172,51 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		SessionTTL:    cfg.SessionTTL,
 		Log:           log,
 	}
+	// Proposals (spec ai-agent) exist only while the agent is on; reads in
+	// their validation replay through the API handler built just below.
+	var validator *proposal.SchemaValidator
+	if on, _ := agent.Enabled(); on {
+		spec, err := apispec.Load(api.OpenAPI())
+		if err == nil {
+			validator, err = proposal.NewValidator(spec, nil, st)
+		}
+		if err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("ai proposals: %w", err)
+		}
+		props := proposal.NewStore(db, validator)
+		apiCfg.Proposals = props
+		apiCfg.Findings = st
+		// The aiops agent (spec S-17): the detectors run without the model,
+		// and explain findings through it when it answers.
+		if cfg.AIAgent.AIOpsInterval > 0 {
+			env := &detect.Env{
+				DB: db, Store: st, Live: vk, Cluster: vk,
+				VKFunc:        vk.Client,
+				AuthFailLimit: cfg.AuthFailLimit,
+				Log:           log,
+			}
+			agent.Scheduler.Register(detect.NewAIOps(env, detect.Options{
+				Interval:           cfg.AIAgent.AIOpsInterval,
+				ExplainMinInterval: cfg.AIAgent.ExplainMinInterval,
+				Generate: func(ctx context.Context, c ai.Call[detect.Explanations]) (detect.Explanations, ai.Usage, error) {
+					return ai.Generate(ctx, agent, c)
+				},
+				Validator: validator,
+				Proposals: props,
+				Metrics:   agent.Metrics(),
+			}))
+		}
+	}
 	if as != nil {
 		apiCfg.AI = as
 		go pruneOAuth(ctx, as, vk, cfg.NodeID, log)
 	}
-	app, err := composeApp(cfg.AI, api.Handler(apiCfg), as, st, metrics.Registry, log)
+	apiHandler := api.Handler(apiCfg)
+	if validator != nil {
+		validator.SetHandler(apiHandler)
+	}
+	app, err := composeApp(cfg.AI, apiHandler, as, st, metrics.Registry, log)
 	if err != nil {
 		_ = ln.Close()
 		return err
@@ -280,6 +341,23 @@ func pruneSessions(ctx context.Context, st *store.Store, log *slog.Logger) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-t.C:
+		}
+	}
+}
+
+// awaitValkey returns vk's client once it is connected, nil if ctx ends
+// first.
+func awaitValkey(ctx context.Context, vk *api.LazyValkey) valkey.Client {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		if c := vk.Client(); c != nil {
+			return c
+		}
+		select {
+		case <-ctx.Done():
+			return nil
 		case <-t.C:
 		}
 	}

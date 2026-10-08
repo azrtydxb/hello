@@ -65,28 +65,38 @@ Interfaces: produces contracts 1–7.
 Files: `internal/ai/` (`provider.go`, `privacy.go`, `limits.go`, `usage.go`, `generate.go`, `datablock.go`, `tasks.go`, `heartbeat.go`, `scheduler.go`, `prune.go`, `metrics.go`, `status.go`, tests), `internal/ai/aifake/`, `internal/store/ai_*.go`, `internal/api/ai_status.go`, `cmd/hello-control/main.go` (wiring), `test/fakellm/`.
 Interfaces: produces contract 5 and `getAIStatus`, `listAIAgents`, `runAIAgent`, `getAITask`; consumes contracts 1–2.
 
-- [ ] Provider for `openai` and `anthropic` with the privacy dialer (resolve, check every address, dial the checked address); `TestPrivacyGuard` covers literals, `localhost`, mixed public/private answers, rebinding between start and call, and the opt-in.
-- [ ] Enablement and `503` `ai_disabled` for every AI operation while off; `TestAIEnablement`.
-- [ ] `Service` limits (semaphore, token bucket, timeout, 5 s interactive wait), usage upsert per call, budget with the background share; `TestTasksAndLimits` (limits half).
-- [ ] `Generate`: feature line and notice, `Output` object mode or prompt mode, validator retry with the error text, `length` retry, reasoning dropped and counted; `DataBlock` escaping; `TestGenerate` with `aitest` scripts.
-- [ ] Tasks and heartbeats (`hello:ai:heartbeat:{replica}`, 5 s, stale at 15 s), `getAITask` ownership; `TestTasksAndLimits` (tasks half, with Valkey).
-- [ ] Scheduler (tick 5 s, run-now rows, advisory lock on a dedicated connection, run rows, start delay), agents list and run-now handlers; `TestScheduler` with two schedulers on one database.
-- [ ] Prune (hourly, lock, every retention of S-26); `TestPrune`.
-- [ ] Metrics of S-25 for the core and the status handler; `TestAIMetrics` (core half). `test/fakellm` with `/v1/chat/completions` scripted per feature and a request log.
-- [ ] Mutation-check the privacy check, the budget share and the heartbeat staleness. Full gate.
+- [x] Provider for `openai` and `anthropic` with the privacy dialer (resolve, check every address, dial the checked address); `TestPrivacyGuard` covers literals, `localhost`, mixed public/private answers, rebinding between start and call, and the opt-in.
+- [x] Enablement and `503` `ai_disabled` for every AI operation while off; `TestAIEnablement`.
+- [x] `Service` limits (semaphore, token bucket, timeout, 5 s interactive wait), usage upsert per call, budget with the background share; `TestTasksAndLimits` (limits half).
+- [x] `Generate`: feature line and notice, `Output` object mode or prompt mode, validator retry with the error text, `length` retry, reasoning dropped and counted; `DataBlock` escaping; `TestGenerate` with `aitest` scripts.
+- [x] Tasks and heartbeats (`hello:ai:heartbeat:{replica}`, 5 s, stale at 15 s), `getAITask` ownership; `TestTasksAndLimits` (tasks half, with Valkey).
+- [x] Scheduler (tick 5 s, run-now rows, advisory lock on a dedicated connection, run rows, start delay), agents list and run-now handlers; `TestScheduler` with two schedulers on one database.
+- [x] Prune (hourly, lock, every retention of S-26); `TestPrune`.
+- [x] Metrics of S-25 for the core and the status handler; `TestAIMetrics` (core half). `test/fakellm` with `/v1/chat/completions` scripted per feature and a request log.
+- [x] Mutation-check the privacy check, the budget share and the heartbeat staleness. Full gate.
+
+**Deviations recorded by Task 2:**
+
+- Contract 5: `New` is `NewWith(..., Options{})`; `Options{Replica, Model, Now}` (main passes `Replica: cfg.NodeID`; tests pass an `aitest` model). `New` accepts a nil Valkey client and `Service.SetValkey` installs it once connected (hello-control's Valkey is lazy). `api.Config.AIAgent *ai.Service` carries it; nil or off makes every AI agent route but `getAIStatus` answer `503` `ai_disabled` (`aiGuard`, applied in `Handler`).
+- `internal/ai/store.go` holds the `Store` interface, `Task`, `AgentRun`, `Counts`, `ErrNotFound`; `service.go` holds `Service`. `ai.CodeTaskRunning`/`ErrTaskRunning` (session busy, from `Tasks.Start`), `ai.NewID`/`ValidID`, `ai.SetRunDetail(ctx, key, v)` for an agent's run detail, `Service.Metrics()` with `ToolCall`, `Proposal`, `Detector`, `SetFindings` for the other streams; `api.(*server).agentError` maps AI errors to HTTP.
+- `openapi.json`'s `Error.code` enum gained `ai_disabled`, `ai_busy`, `ai_budget_exhausted`, `task_running`, `proposal_not_open` (the conformance validator rejected `503 ai_disabled` without them).
+- Generate uses go-ai-sdk's object `Output` only when the model has native JSON or there are no tools (go-ai-sdk refuses `Output` plus tools otherwise); else the prompt mode. The schema check runs on the answer text (jsonschema-go, unknown properties rejected). The HTTP client disables keep-alives so the privacy dialer runs before every call. Background calls never wait for a slot (immediate `ai_busy`). A replica that finds an agent's lock held records no `skipped_locked` row (the holder's row is the record); only the metric moves.
+- Not run locally (no containers on the Mac; CI runs them): the PostgreSQL halves (`TestSchedulerPostgres`, `TestTasksPostgres`, `TestPrune`) and the Valkey heartbeat case of `TestTasksAndLimits`, so the heartbeat-staleness mutation check is CI-only.
 
 ## Task 3: Proposals (branch ai-agent-proposals)
 
 Files: `internal/ai/proposal/` (`allowlist.go`, `validate.go`, `diff.go`, `fingerprint.go`, `store.go`, `apply.go`, tests incl. `injection_test.go`), `internal/store/ai_proposals.go`, `internal/api/ai_proposals.go` and tests.
 Interfaces: produces contract 6 and the proposal routes; consumes contracts 1, 3, 4, 7 and `apispec`.
 
-- [ ] Allowlist with its document check (exists, `write`, no secret in the response): `updateExtension`, `updateDevice`, `createRingGroup`, `updateRingGroup`, `deleteRingGroup`, `putFeatureCodes`, `createOutboundRoute`, `updateOutboundRoute`, `deleteOutboundRoute`, `createInboundRoute`, `updateInboundRoute`, `deleteInboundRoute`, `updateTrunk`, `updatePhone`. Deletes are visually marked and require explicit confirmation. `TestProposalValidation` (allowlist half), `TestProposalDeleteValidation`.
-- [ ] Validation: body against the request schema (`jsonschema-go`, unknown properties rejected), path parameters through a replayed `GET`, credential properties refused, route dry run through `internal/routing` compile, at most 8 actions; `before` from the `GET`, `after` = body for `PUT`, merge for `PATCH`, body for `POST`, empty for `DELETE`; `TestProposalValidation`.
-- [ ] Delete proposals compute `after` as empty, the diff shows what disappears, and references to the deleted resource are listed; `TestProposalDeleteValidation` fails if a delete diff does not show references.
-- [ ] Fingerprint, upsert with refresh, supersede, 7-day dismissed suppression; `TestProposalDedupe`.
-- [ ] Get with live `current`, apply (row lock, staleness by revision then per-target compare, ordered replay with the applier's `Cookie`/`Authorization`, `via` `ai-proposal:<id>`, stop on first failure, `409` → stale), dismiss with reason, audit rows; `TestProposalApply`.
-- [ ] Injection fixtures for proposals; `TestInjection` (proposal half).
-- [ ] Mutation-check the allowlist, the credential-property check, the staleness compare and the header copy. Full gate.
+- [x] Allowlist with its document check (exists, `write`, no secret in the response): `updateExtension`, `updateDevice`, `createRingGroup`, `updateRingGroup`, `deleteRingGroup`, `putFeatureCodes`, `createOutboundRoute`, `updateOutboundRoute`, `deleteOutboundRoute`, `createInboundRoute`, `updateInboundRoute`, `deleteInboundRoute`, `updateTrunk`, `updatePhone`. Deletes are visually marked and require explicit confirmation. `TestProposalValidation` (allowlist half), `TestProposalDeleteValidation`.
+- [x] Validation: body against the request schema (`jsonschema-go`, unknown properties rejected), path parameters through a replayed `GET`, credential properties refused, route dry run through `internal/routing` compile, at most 8 actions; `before` from the `GET`, `after` = body for `PUT`, merge for `PATCH`, body for `POST`, empty for `DELETE`; `TestProposalValidation`.
+- [x] Delete proposals compute `after` as empty, the diff shows what disappears, and references to the deleted resource are listed; `TestProposalDeleteValidation` fails if a delete diff does not show references.
+- [x] Fingerprint, upsert with refresh, supersede, 7-day dismissed suppression; `TestProposalDedupe`.
+- [x] Get with live `current`, apply (row lock, staleness by revision then per-target compare, ordered replay with the applier's `Cookie`/`Authorization`, `via` `ai-proposal:<id>`, stop on first failure, `409` → stale), dismiss with reason, audit rows; `TestProposalApply`.
+- [x] Injection fixtures for proposals; `TestInjection` (proposal half).
+- [x] Mutation-check the allowlist, the credential-property check, the staleness compare and the header copy. Full gate.
+
+Deviations recorded by Task 3: the store code is in `internal/ai/proposal/store.go` and `apply.go` (not `internal/store`), with the validator and store as `SchemaValidator`/`DBStore` implementing contract 6's interfaces and wired with `SetHandler` once `api.Handler` exists; `Action` gained `Destructive` and `References`, `Draft` gained `CreatedBy`; `api.Config.Proposals` carries the service; `openapi.json` gained the action's `destructive`/`references` and the error codes `ai_disabled`, `proposal_not_open`, `proposal_stale`; `apispec_test.go` reads `openapi.json` from disk because `internal/api` now imports a package that imports `apispec`; a stale apply answers `409` `proposal_stale`, a failed one `200` with `status: failed` and the failure detail.
 
 ## Task 4: Assistant (branch ai-agent-assistant, after Task 2's `Generate` merges)
 

@@ -69,10 +69,13 @@ type Members interface {
 
 // Env is what the detectors read.
 type Env struct {
-	DB      *sql.DB
-	Store   *store.Store
-	Live    Live
-	VK      valkey.Client
+	DB    *sql.DB
+	Store *store.Store
+	Live  Live
+	VK    valkey.Client
+	// VKFunc yields the Valkey client once it has connected; it is used
+	// while VK is nil, so detectors that need no Valkey run before it does.
+	VKFunc  func() valkey.Client
 	Cluster Members
 	// AuthFailLimit is hello-sip's failed-auth throttle limit
 	// (HELLO_SIP_AUTH_FAIL_LIMIT); 0 means its default, 10.
@@ -125,6 +128,8 @@ type Run struct {
 	attempts map[string][]livestate.RegisterAttempt
 	attErr   error
 	attRead  bool
+	// observe, when set, receives each detector's duration.
+	observe func(name string, d time.Duration)
 }
 
 // NewRun starts a pass at the environment's clock.
@@ -142,7 +147,11 @@ type Result struct {
 func RunAll(ctx context.Context, r *Run) Result {
 	res := Result{Errors: map[string]error{}}
 	for _, d := range Detectors() {
+		start := time.Now()
 		cs, err := d.Run(ctx, r)
+		if r.observe != nil {
+			r.observe(d.Name, time.Since(start))
+		}
 		if err != nil {
 			res.Errors[d.Name] = fmt.Errorf("%s: %w", d.Name, err)
 			continue
@@ -165,6 +174,9 @@ type Options struct {
 	// carries; nil drops them.
 	Validator proposal.Validator
 	Proposals proposal.Store
+	// Metrics receives detector durations and the findings gauge (spec
+	// S-25); nil records none.
+	Metrics *ai.Metrics
 }
 
 // AIOps is the `aiops` background agent (spec S-17, S-18): it runs every
@@ -196,6 +208,9 @@ func (a *AIOps) Interval() time.Duration { return a.opt.Interval }
 // the run.
 func (a *AIOps) Run(ctx context.Context) (ai.Outcome, error) {
 	r := NewRun(a.env)
+	if m := a.opt.Metrics; m != nil {
+		r.observe = m.Detector
+	}
 	before, err := a.env.Store.ListAIFindings(ctx, store.AIFindingFilter{Status: store.FindingOpen, Limit: 200})
 	if err != nil {
 		return ai.OutcomeFailed, err
@@ -214,6 +229,7 @@ func (a *AIOps) Run(ctx context.Context) (ai.Outcome, error) {
 	if err != nil {
 		return ai.OutcomeFailed, err
 	}
+	a.setFindingsGauge(ctx, after)
 	called, err := a.explain(ctx, r)
 	switch {
 	case ai.CodeOf(err) == ai.CodeBudgetExhausted:
@@ -245,4 +261,23 @@ func (a *AIOps) identity(ctx context.Context) (proposal.Identity, error) {
 		return proposal.Identity{}, err
 	}
 	return proposal.Identity{UserID: id, TaskID: "aiops"}, nil
+}
+
+// setFindingsGauge refreshes hello_ai_findings from the open findings just
+// read and the acknowledged ones.
+func (a *AIOps) setFindingsGauge(ctx context.Context, open []store.AIFinding) {
+	m := a.opt.Metrics
+	if m == nil {
+		return
+	}
+	acked, err := a.env.Store.ListAIFindings(ctx, store.AIFindingFilter{Status: store.FindingAcknowledged, Limit: 200})
+	if err != nil {
+		a.log.Warn("findings gauge", "error", err)
+		return
+	}
+	n := map[[3]string]int{}
+	for _, f := range append(open, acked...) {
+		n[[3]string{f.Type, f.Severity, f.Status}]++
+	}
+	m.SetFindings(n)
 }

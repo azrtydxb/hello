@@ -34,7 +34,7 @@ func (r *Run) registerAttempts(ctx context.Context) (map[string][]livestate.Regi
 		return r.attempts, r.attErr
 	}
 	r.attRead = true
-	r.attempts, r.attErr = scanAttempts(ctx, r.VK)
+	r.attempts, r.attErr = scanAttempts(ctx, r.valkeyClient())
 	return r.attempts, r.attErr
 }
 
@@ -138,4 +138,11 @@ func evalRegFailures(att map[string][]livestate.RegisterAttempt, enabled map[str
 	}
 	slices.SortFunc(out, func(a, b Candidate) int { return strings.Compare(a.ID, b.ID) })
 	return out
+}
+
+func (e *Env) valkeyClient() valkey.Client {
+	if e.VK == nil && e.VKFunc != nil {
+		return e.VKFunc()
+	}
+	return e.VK
 }
