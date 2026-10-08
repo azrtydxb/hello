@@ -116,10 +116,15 @@ type Config struct {
 	Extensions map[string]string
 	// VoiceAgents is every registered voice agent; VoiceSIPAddress is
 	// host:port of talking-agent, empty when voice agents are not configured
-	// (then a route to an agent is a FieldError, reason voice_not_configured
-	// once Task 3 compiles the kind).
+	// (then a route to an agent is a FieldError, reason voice_not_configured,
+	// spec S-17).
 	VoiceAgents     []VoiceAgent
 	VoiceSIPAddress string
+	// VoiceAgentExtensions maps the extension number of every agent that has
+	// one (S-3) to the agent's name, so dialling it from a phone resolves to
+	// the agent (S-13). The registry keeps agent extensions unique across the
+	// extension namespace; Compile refuses a collision that slips through.
+	VoiceAgentExtensions map[string]string
 	// ResolvedIPs maps a trunk ID to the IPs its destination hostnames
 	// resolved to, for source validation. hello-sip fills it off the call
 	// path (DNS); hello-control's route tester may leave it empty.

@@ -74,10 +74,10 @@ Interfaces: produces the registry operations, caller verification fields and the
 Files: `internal/routing/` (types, engine, decide, tests), `internal/store/routing.go` and ring group code, `internal/api` route and ring group handlers and validation, `migrations` follows contract 1.
 Interfaces: produces `voice_agent` as destination everywhere of S-10 to S-13; consumes contracts 1, 3.
 
-- [ ] Compile and validate `voice_agent` for inbound routes and internal extension resolution; trace line; `TestVoiceAgentRouting`.
-- [ ] Ring group member and failure target, `sequential`-only restriction, XOR constraint; `TestVoiceAgentRingGroup` (routing and API halves).
-- [ ] Routing test endpoint shows the step; transfer and feature code reach the agent extension.
-- [ ] Mutation-check the strategy restriction and the disabled-agent validation. Full gate.
+- [x] Compile and validate `voice_agent` for inbound routes and internal extension resolution; trace line; `TestVoiceAgentRouting`.
+- [x] Ring group member and failure target, `sequential`-only restriction, XOR constraint; `TestVoiceAgentRingGroup` (routing and API halves).
+- [x] Routing test endpoint shows the step; transfer and feature code reach the agent extension.
+- [x] Mutation-check the strategy restriction and the disabled-agent validation. Full gate.
 
 ## Task 4: The call leg (branch voice-agents-sip, after Tasks 1 and 3)
 

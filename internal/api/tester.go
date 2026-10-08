@@ -21,6 +21,7 @@ type testDecision struct {
 	Kind       routing.Kind `json:"kind"`
 	Extension  string       `json:"extension"`
 	SIPURI     string       `json:"sipUri"`
+	VoiceAgent string       `json:"voiceAgent,omitempty"`
 	Number     string       `json:"number"`
 	CallerID   string       `json:"callerId"`
 	Route      string       `json:"route"`
@@ -103,6 +104,7 @@ func (s *server) routingTest(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "routing test: load configuration", err)
 		return
 	}
+	snap.Config.VoiceSIPAddress = s.VoiceSIPAddress
 	table, errs := s.Router.Compile(snap.Config)
 	if len(errs) > 0 || table == nil {
 		s.Log.Error("routing test: saved configuration does not compile", "fields", errs)
@@ -132,6 +134,9 @@ func (s *server) routingTest(w http.ResponseWriter, r *http.Request) {
 	out := testDecision{
 		Kind: d.Kind, Extension: d.Extension, SIPURI: d.SIPURI, Number: d.Number, CallerID: d.CallerID,
 		Route: d.Route, Trunks: []string{}, Emergency: d.Emergency, RejectCode: d.RejectCode, Reason: d.Reason,
+	}
+	if d.VoiceAgent != nil {
+		out.VoiceAgent = d.VoiceAgent.Name
 	}
 	for _, c := range d.Candidates {
 		if c.Trunk != nil {

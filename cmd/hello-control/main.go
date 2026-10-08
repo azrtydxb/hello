@@ -157,21 +157,22 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		log.Info("ai agent off", "reason", reason)
 	}
 	apiCfg := api.Config{
-		AIAgent:       agent,
-		Store:         st,
-		Live:          vk,
-		Trunks:        vk,
-		Cluster:       vk,
-		Valkey:        vk,
-		Objects:       objs,
-		Diagnostics:   vk,
-		AuthFailLimit: cfg.AuthFailLimit,
-		EmailDelivery: cfg.SmtpHost != "",
-		ProvStore:     st,
-		Prov:          provAPI(cfg, settings, deployment, objs, log),
-		SIPDomain:     cfg.SIPDomain,
-		SessionTTL:    cfg.SessionTTL,
-		Log:           log,
+		AIAgent:         agent,
+		Store:           st,
+		Live:            vk,
+		Trunks:          vk,
+		Cluster:         vk,
+		Valkey:          vk,
+		Objects:         objs,
+		Diagnostics:     vk,
+		AuthFailLimit:   cfg.AuthFailLimit,
+		EmailDelivery:   cfg.SmtpHost != "",
+		ProvStore:       st,
+		Prov:            provAPI(cfg, settings, deployment, objs, log),
+		SIPDomain:       cfg.SIPDomain,
+		SessionTTL:      cfg.SessionTTL,
+		VoiceSIPAddress: cfg.Voice.SIPAddress,
+		Log:             log,
 	}
 	// Proposals (spec ai-agent) exist only while the agent is on; reads in
 	// their validation replay through the API handler built just below.
