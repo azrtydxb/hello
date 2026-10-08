@@ -3,6 +3,9 @@
 // authorize, token, revoke, optional dynamic registration, client ID
 // metadata documents, and the consent operations the console calls through
 // /api/v1.
+//
+// No credential, code, verifier or secret is ever logged: log lines name
+// the client and the outcome only.
 package oauth
 
 import (
@@ -17,10 +20,6 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 )
 
-// ErrNotImplemented is returned by the consent operations until plan
-// ai-external-access Task 3 lands them.
-var ErrNotImplemented = errors.New("oauth: not implemented")
-
 // Options configure the authorization server.
 type Options struct {
 	Store Store
@@ -34,7 +33,10 @@ type Options struct {
 	// metadata documents be fetched from private and loopback addresses.
 	DCR, CIMDAllowPrivate bool
 	Limiter               Limiter
-	// Client fetches client ID metadata documents.
+	// Client fetches client ID metadata documents. nil uses a client that
+	// refuses private, loopback and link-local addresses at dial time
+	// (unless CIMDAllowPrivate); redirects, the timeout and the size cap
+	// are enforced on any client.
 	Client  *http.Client
 	Metrics *Metrics
 	Log     *slog.Logger
@@ -47,9 +49,6 @@ type Limiter interface {
 	// hits per window.
 	Allow(ctx context.Context, key string, limit int, window time.Duration) (bool, error)
 }
-
-// Metrics are the hello_oauth_* series; Task 3 registers them.
-type Metrics struct{}
 
 // ConsentView is what the consent screen shows for a pending request.
 type ConsentView struct {
@@ -65,11 +64,21 @@ type ConsentView struct {
 	ExpiresAt time.Time
 }
 
+// Lifetimes the spec fixes.
+const (
+	requestTTL = 10 * time.Minute
+	codeTTL    = 60 * time.Second
+	// serviceTokenTTL is a client-credentials access token's lifetime.
+	serviceTokenTTL = time.Hour
+)
+
 // Server is the authorization server.
 type Server struct {
 	o        Options
 	public   string
 	api, mcp string
+	cimd     *cimdFetcher
+	now      func() time.Time
 }
 
 // New returns the authorization server for o.PublicURL.
@@ -81,8 +90,24 @@ func New(o Options) (*Server, error) {
 	if o.Log == nil {
 		o.Log = slog.New(slog.DiscardHandler)
 	}
+	if o.AccessTTL <= 0 {
+		o.AccessTTL = time.Hour
+	}
+	if o.RefreshIdle <= 0 {
+		o.RefreshIdle = 30 * 24 * time.Hour
+	}
+	if o.RefreshMax <= 0 {
+		o.RefreshMax = 90 * 24 * time.Hour
+	}
+	if o.Limiter == nil {
+		o.Limiter = NewLimiter(nil, o.Log)
+	}
 	pub := strings.TrimSuffix(o.PublicURL, "/")
-	return &Server{o: o, public: pub, api: pub + "/api/v1", mcp: pub + "/mcp"}, nil
+	return &Server{
+		o: o, public: pub, api: pub + "/api/v1", mcp: pub + "/mcp",
+		cimd: newCIMDFetcher(o.Client, o.CIMDAllowPrivate, o.Metrics),
+		now:  time.Now,
+	}, nil
 }
 
 // Resources returns the two protected resource identifiers.
@@ -94,26 +119,41 @@ func (s *Server) MetadataURL(resource string) string {
 	return s.public + "/.well-known/oauth-protected-resource" + strings.TrimPrefix(resource, s.public)
 }
 
+// Issuer is the authorization server's issuer identifier.
+func (s *Server) Issuer() string { return s.public }
+
+// DCR reports whether dynamic client registration is on.
+func (s *Server) DCR() bool { return s.o.DCR }
+
 // Handler serves the well-known metadata documents and /oauth/*.
-//
-// Contract only: Task 3 implements the endpoints; until then it answers
-// 404, as a deployment without HELLO_PUBLIC_URL does.
-func (s *Server) Handler() http.Handler { return http.NotFoundHandler() }
-
-// Request returns the pending authorization request id for the consent
-// screen.
-func (s *Server) Request(_ context.Context, _ string) (ConsentView, error) {
-	return ConsentView{}, ErrNotImplemented
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.serverMetadata)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", s.resourceMetadata(s.mcp, "Hello MCP server"))
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/api/v1", s.resourceMetadata(s.api, "Hello management API"))
+	mux.HandleFunc("GET /oauth/authorize", s.authorize)
+	mux.HandleFunc("POST /oauth/token", s.token)
+	mux.HandleFunc("POST /oauth/revoke", s.revoke)
+	if s.o.DCR {
+		mux.HandleFunc("POST /oauth/register", s.register)
+	}
+	return mux
 }
 
-// Approve grants the request id with scopes (a subset of the requested and
-// of a's GrantableScopes) and returns the client redirect carrying the code.
-func (s *Server) Approve(_ context.Context, _ auth.Actor, _ string, _ auth.Scopes) (string, error) {
-	return "", ErrNotImplemented
-}
+// InputError rejects a consent or service-account request; its message is
+// safe to show to API clients.
+type InputError struct{ Msg string }
 
-// Deny refuses the request id and returns the client redirect carrying
-// access_denied.
-func (s *Server) Deny(_ context.Context, _ auth.Actor, _ string) (string, error) {
-	return "", ErrNotImplemented
+func (e *InputError) Error() string { return e.Msg }
+
+func inputErr(msg string) error { return &InputError{Msg: msg} }
+
+// clientIP is the request's peer address, without the port. Forwarded
+// headers are not trusted.
+func clientIP(r *http.Request) string {
+	host := r.RemoteAddr
+	if i := strings.LastIndexByte(host, ':'); i > 0 {
+		host = host[:i]
+	}
+	return strings.Trim(host, "[]")
 }

@@ -123,6 +123,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -153,6 +156,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -191,6 +197,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -234,6 +243,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -265,6 +277,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -305,6 +320,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -349,6 +367,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -385,6 +406,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -437,6 +461,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -464,6 +491,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -505,6 +535,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -552,6 +585,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -588,6 +624,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -637,6 +676,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -664,6 +706,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -705,6 +750,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -744,6 +792,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -785,6 +836,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -859,6 +913,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -884,6 +941,7 @@
             }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
         "x-hello-scope": "read",
@@ -920,6 +978,7 @@
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
         "x-hello-scope": "read",
@@ -961,6 +1020,7 @@
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
         "x-hello-scope": "read",
@@ -997,6 +1057,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1035,6 +1098,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1079,6 +1145,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -1120,6 +1189,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -1156,6 +1228,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1208,6 +1283,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -1238,6 +1316,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1276,6 +1357,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1317,6 +1401,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -1351,6 +1438,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1388,6 +1478,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1437,6 +1530,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -1464,6 +1560,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1502,6 +1601,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1543,6 +1645,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -1577,6 +1682,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1614,6 +1722,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1663,6 +1774,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -1690,6 +1804,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1733,6 +1850,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -1761,6 +1881,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1802,6 +1925,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -1858,6 +1984,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -1899,6 +2028,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -1935,6 +2067,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -2013,6 +2148,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "503": {
             "$ref": "#/components/responses/Unavailable"
           },
@@ -2046,6 +2184,7 @@
             }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
         "x-hello-scope": "read",
@@ -2075,6 +2214,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -2125,6 +2267,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -2178,6 +2323,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "503": {
             "$ref": "#/components/responses/Unavailable"
           },
@@ -2212,6 +2360,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -2267,6 +2418,7 @@
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
         "x-hello-scope": "read",
@@ -2285,6 +2437,7 @@
           "204": { "description": "Deleted" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
         "x-hello-scope": "write",
@@ -2337,6 +2490,7 @@
           "400": { "$ref": "#/components/responses/BadRequest" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "503": { "$ref": "#/components/responses/Unavailable" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
@@ -2363,6 +2517,7 @@
             }
           },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
         "x-hello-scope": "read",
@@ -2408,6 +2563,7 @@
           },
           "400": { "$ref": "#/components/responses/BadRequest" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "409": { "$ref": "#/components/responses/Conflict" },
           "503": { "$ref": "#/components/responses/Unavailable" },
           "500": { "$ref": "#/components/responses/Internal" },
@@ -2464,6 +2620,7 @@
           "400": { "$ref": "#/components/responses/BadRequest" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "503": { "$ref": "#/components/responses/Unavailable" },
           "500": { "$ref": "#/components/responses/Internal" },
           "502": {
@@ -2486,6 +2643,7 @@
           "204": { "description": "Deleted" },
           "404": { "$ref": "#/components/responses/NotFound" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
         "x-hello-scope": "write",
@@ -2528,6 +2686,7 @@
           },
           "404": { "$ref": "#/components/responses/NotFound" },
           "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
           "503": { "$ref": "#/components/responses/Unavailable" },
           "500": { "$ref": "#/components/responses/Internal" }
         },
@@ -2557,6 +2716,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -2601,6 +2763,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -2637,6 +2802,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -2686,6 +2854,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -2713,6 +2884,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -2742,6 +2916,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -2783,6 +2960,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -2811,6 +2991,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -2862,6 +3045,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -2893,6 +3079,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -2933,6 +3122,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
@@ -2971,6 +3163,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -3003,6 +3198,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -3066,6 +3264,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -3120,6 +3321,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -3160,6 +3364,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3205,6 +3412,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -3247,6 +3457,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3298,6 +3511,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -3348,6 +3564,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -3382,6 +3601,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3439,6 +3661,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3500,6 +3725,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3569,6 +3797,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -3601,6 +3832,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -3652,6 +3886,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "503": {
             "$ref": "#/components/responses/Unavailable"
           }
@@ -3690,6 +3927,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3737,6 +3977,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3788,6 +4031,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -3836,6 +4082,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -3892,6 +4141,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -3924,6 +4176,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -4011,6 +4266,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -4048,6 +4306,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4101,6 +4362,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -4135,6 +4399,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4186,6 +4453,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -4240,6 +4510,9 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -4286,11 +4559,678 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
         },
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ai/settings": {
+      "get": {
+        "operationId": "getAISettings",
+        "summary": "External AI access settings",
+        "description": "Returns whether external AI access is enabled (HELLO_PUBLIC_URL), the MCP and API resource URLs, their metadata URLs, the MCP protocol versions, whether dynamic client registration is on, and what each scope allows.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true,
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AISettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/oauth/requests/{id}": {
+      "get": {
+        "operationId": "getOAuthRequest",
+        "summary": "A pending authorization request",
+        "description": "Returns what the consent screen shows for a pending authorization request: the client, its host, the requested scopes and resources, and the scopes the caller's role may grant. Answers 404 when the request is unknown, expired or already decided, or external AI access is off.",
+        "tags": ["oauth"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The authorization request id from the consent redirect.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthRequest"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/oauth/requests/{id}/approve": {
+      "post": {
+        "operationId": "approveOAuthRequest",
+        "summary": "Approve an authorization request",
+        "description": "Approves a pending authorization request with the given scopes, which must be a subset of the requested ones and of the caller's role's grantable scopes, and returns the client redirect carrying a single-use code. Only a browser session may call it.",
+        "tags": ["oauth"],
+        "x-hello-scope": "session",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The authorization request id from the consent redirect.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["scopes"],
+                "properties": {
+                  "scopes": {
+                    "type": "array",
+                    "description": "The scopes to grant.",
+                    "items": {
+                      "type": "string",
+                      "enum": ["read", "write", "admin", "secrets"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The client redirect URI to send the browser to",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["redirect"],
+                  "properties": {
+                    "redirect": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "The client's redirect URI with code (or error=access_denied), state and iss."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/oauth/requests/{id}/deny": {
+      "post": {
+        "operationId": "denyOAuthRequest",
+        "summary": "Deny an authorization request",
+        "description": "Refuses a pending authorization request and returns the client redirect carrying error=access_denied. Only a browser session may call it.",
+        "tags": ["oauth"],
+        "x-hello-scope": "session",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The authorization request id from the consent redirect.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The client redirect URI to send the browser to",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["redirect"],
+                  "properties": {
+                    "redirect": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "The client's redirect URI with code (or error=access_denied), state and iss."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/oauth/grants": {
+      "get": {
+        "operationId": "listOAuthGrants",
+        "summary": "Connected apps",
+        "description": "Lists the live OAuth grants (connected apps) of the caller; an admin sees every user's.",
+        "tags": ["oauth"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "responses": {
+          "200": {
+            "description": "Grants",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OAuthGrant"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/oauth/grants/{id}": {
+      "delete": {
+        "operationId": "revokeOAuthGrant",
+        "summary": "Revoke a connected app",
+        "description": "Revokes a grant and every token issued under it; the next request with any of them is refused. Users revoke their own grants, admins anyone's.",
+        "tags": ["oauth"],
+        "x-hello-scope": "session",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/service-accounts": {
+      "get": {
+        "operationId": "listServiceAccounts",
+        "summary": "Service accounts",
+        "description": "Lists the service accounts with their role, scopes and live client secrets (metadata only; a secret is shown once, when created).",
+        "tags": ["service-accounts"],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "responses": {
+          "200": {
+            "description": "Service accounts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ServiceAccount"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createServiceAccount",
+        "summary": "Create a service account",
+        "description": "Creates a service account for a headless agent: a name, a role, and the scopes it may hold, bounded by the role. It has no secret until one is created.",
+        "tags": ["service-accounts"],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/service-accounts/{id}": {
+      "get": {
+        "operationId": "getServiceAccount",
+        "summary": "A service account",
+        "description": "Returns one service account.",
+        "tags": ["service-accounts"],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The service account's client id (hello_sa_...).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateServiceAccount",
+        "summary": "Change a service account",
+        "description": "Changes a service account's description, role, scopes or enabled state. Changing the role, scopes or enabled state revokes its live tokens.",
+        "tags": ["service-accounts"],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The service account's client id (hello_sa_...).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceAccount"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteServiceAccount",
+        "summary": "Delete a service account",
+        "description": "Deletes a service account, its secrets and its tokens.",
+        "tags": ["service-accounts"],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The service account's client id (hello_sa_...).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/service-accounts/{id}/secrets": {
+      "post": {
+        "operationId": "createServiceAccountSecret",
+        "summary": "Create a client secret",
+        "description": "Creates a client secret for the service account and returns it once; only its SHA-256 is stored. An account holds at most two live secrets (409 for a third), so secrets can be rotated.",
+        "tags": ["service-accounts"],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The service account's client id (hello_sa_...).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "expiresAt": {
+                    "type": ["string", "null"],
+                    "format": "date-time",
+                    "description": "When the secret stops working; null or absent for never."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The secret, shown once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedClientSecret"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/service-accounts/{id}/secrets/{secretId}": {
+      "delete": {
+        "operationId": "revokeServiceAccountSecret",
+        "summary": "Revoke a client secret",
+        "description": "Revokes a client secret and the account's live access tokens; the next request with them is refused.",
+        "tags": ["service-accounts"],
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The service account's client id (hello_sa_...).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "secretId",
+            "in": "path",
+            "required": true,
+            "description": "The client secret's id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
       }
     }
   },
@@ -4332,6 +5272,16 @@
       },
       "Unauthorized": {
         "description": "Missing or invalid credentials",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The caller's role (forbidden_role) or the credential's scope (insufficient_scope, with a WWW-Authenticate step-up challenge) is not enough",
         "content": {
           "application/json": {
             "schema": {
@@ -5512,7 +6462,9 @@
                   "internal",
                   "unavailable",
                   "upstream",
-                  "render_error"
+                  "render_error",
+                  "forbidden_role",
+                  "insufficient_scope"
                 ]
               },
               "message": {
@@ -5565,12 +6517,33 @@
             "maxLength": 100,
             "example": "Reception",
             "description": "A label to recognise the token by, such as the client using it."
+          },
+          "scopes": {
+            "type": "array",
+            "description": "The token's scopes, at most the caller's; absent means read, write and admin (secrets must be named).",
+            "items": {
+              "type": "string",
+              "enum": ["read", "write", "admin", "secrets"]
+            }
+          },
+          "expiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the token stops working; absent or null for never."
           }
         }
       },
       "Token": {
         "type": "object",
-        "required": ["id", "name", "createdAt", "lastUsedAt"],
+        "required": [
+          "id",
+          "name",
+          "createdAt",
+          "lastUsedAt",
+          "kind",
+          "scopes",
+          "expiresAt"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -5589,12 +6562,37 @@
           "lastUsedAt": {
             "type": ["string", "null"],
             "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["legacy", "personal"],
+            "description": "legacy: created before scopes, every scope; personal: hello_pat_ with its scopes."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["read", "write", "admin", "secrets"]
+            }
+          },
+          "expiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
           }
         }
       },
       "CreatedToken": {
         "type": "object",
-        "required": ["id", "name", "createdAt", "lastUsedAt", "token"],
+        "required": [
+          "id",
+          "name",
+          "createdAt",
+          "lastUsedAt",
+          "token",
+          "kind",
+          "scopes",
+          "expiresAt"
+        ],
         "properties": {
           "id": {
             "type": "integer",
@@ -5611,6 +6609,22 @@
             "format": "date-time"
           },
           "lastUsedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["legacy", "personal"],
+            "description": "legacy: created before scopes, every scope; personal: hello_pat_ with its scopes."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["read", "write", "admin", "secrets"]
+            }
+          },
+          "expiresAt": {
             "type": ["string", "null"],
             "format": "date-time"
           },
@@ -7683,6 +8697,382 @@
               }
             ],
             "description": "Why it is not registered; null while registered"
+          }
+        }
+      },
+      "AISettings": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "publicUrl",
+          "issuer",
+          "apiUrl",
+          "mcpUrl",
+          "authorizationServerMetadataUrl",
+          "apiMetadataUrl",
+          "mcpMetadataUrl",
+          "protocolVersions",
+          "dcr",
+          "scopes"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether HELLO_PUBLIC_URL is set; the URLs are empty when not."
+          },
+          "publicUrl": {
+            "type": "string",
+            "description": "HELLO_PUBLIC_URL."
+          },
+          "issuer": {
+            "type": "string",
+            "description": "The authorization server's issuer."
+          },
+          "apiUrl": {
+            "type": "string",
+            "description": "The management API's resource identifier."
+          },
+          "mcpUrl": {
+            "type": "string",
+            "description": "The MCP server URL to give an MCP client."
+          },
+          "authorizationServerMetadataUrl": {
+            "type": "string",
+            "description": "RFC 8414 metadata URL."
+          },
+          "apiMetadataUrl": {
+            "type": "string",
+            "description": "RFC 9728 metadata URL of the API."
+          },
+          "mcpMetadataUrl": {
+            "type": "string",
+            "description": "RFC 9728 metadata URL of the MCP server."
+          },
+          "protocolVersions": {
+            "type": "array",
+            "description": "MCP protocol versions, newest first.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "dcr": {
+            "type": "boolean",
+            "description": "Whether dynamic client registration is on."
+          },
+          "scopes": {
+            "type": "array",
+            "description": "The grantable scopes with what each allows.",
+            "items": {
+              "type": "object",
+              "required": ["name", "description"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "enum": ["read", "write", "admin", "secrets"]
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "OAuthRequest": {
+        "type": "object",
+        "required": [
+          "id",
+          "clientId",
+          "clientName",
+          "clientUri",
+          "clientHost",
+          "redirectUri",
+          "redirectHost",
+          "verified",
+          "scopes",
+          "resources",
+          "expiresAt",
+          "grantableScopes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "clientId": {
+            "type": "string",
+            "description": "The client id: a metadata document URL or a registered id."
+          },
+          "clientName": {
+            "type": "string",
+            "description": "Self-asserted by the client."
+          },
+          "clientUri": {
+            "type": "string"
+          },
+          "clientHost": {
+            "type": "string",
+            "description": "The host of a metadata-document client id; empty for registered clients."
+          },
+          "redirectUri": {
+            "type": "string"
+          },
+          "redirectHost": {
+            "type": "string"
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "False for dynamically registered clients."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["read", "write", "admin", "secrets"]
+            }
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "grantableScopes": {
+            "type": "array",
+            "description": "The scopes the caller's role may grant.",
+            "items": {
+              "type": "string",
+              "enum": ["read", "write", "admin", "secrets"]
+            }
+          }
+        }
+      },
+      "OAuthGrant": {
+        "type": "object",
+        "required": [
+          "id",
+          "userId",
+          "username",
+          "clientId",
+          "clientName",
+          "clientHost",
+          "verified",
+          "scopes",
+          "resources",
+          "createdAt",
+          "lastUsedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "userId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "username": {
+            "type": "string"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "clientName": {
+            "type": "string"
+          },
+          "clientHost": {
+            "type": "string"
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["read", "write", "admin", "secrets"]
+            }
+          },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "ClientSecret": {
+        "type": "object",
+        "required": ["id", "createdAt", "expiresAt", "lastUsedAt"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "CreatedClientSecret": {
+        "type": "object",
+        "required": ["id", "clientId", "secret", "createdAt", "expiresAt"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "clientId": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string",
+            "description": "The client secret (hello_cs_...). Shown only once; only its SHA-256 is stored.",
+            "x-hello-secret": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "ServiceAccount": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "role",
+          "scopes",
+          "enabled",
+          "createdAt",
+          "lastUsedAt",
+          "secrets"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The OAuth client id (hello_sa_...)."
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["viewer", "operator", "admin"]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["read", "write", "admin", "secrets"]
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "secrets": {
+            "type": "array",
+            "description": "Live secrets, metadata only.",
+            "items": {
+              "$ref": "#/components/schemas/ClientSecret"
+            }
+          }
+        }
+      },
+      "ServiceAccountCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "role", "scopes"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "A unique name; audit rows show service:<name>."
+          },
+          "description": {
+            "type": "string",
+            "description": "What the account is for."
+          },
+          "role": {
+            "type": "string",
+            "enum": ["viewer", "operator", "admin"],
+            "description": "The account's role, which bounds its scopes."
+          },
+          "scopes": {
+            "type": "array",
+            "description": "The scopes it may hold.",
+            "items": {
+              "type": "string",
+              "enum": ["read", "write", "admin", "secrets"]
+            }
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Default true."
+          }
+        }
+      },
+      "ServiceAccountUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What the account is for."
+          },
+          "role": {
+            "type": "string",
+            "enum": ["viewer", "operator", "admin"],
+            "description": "The account's role."
+          },
+          "scopes": {
+            "type": "array",
+            "description": "The scopes it may hold.",
+            "items": {
+              "type": "string",
+              "enum": ["read", "write", "admin", "secrets"]
+            }
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "False stops its tokens on the next request."
           }
         }
       },

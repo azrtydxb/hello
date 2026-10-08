@@ -221,7 +221,7 @@ func TestAuthRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	revoked, revokedHash := auth.NewToken()
-	tok, err := e.st.CreateToken(ctx, "test", userID, "revoked", revokedHash)
+	tok, err := e.st.CreateToken(ctx, "test", userID, store.NewToken{Name: "revoked"}, revokedHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestAuthRequired(t *testing.T) {
 		t.Fatal(err)
 	}
 	good, goodHash := auth.NewToken()
-	if _, err := e.st.CreateToken(ctx, "test", userID, "good", goodHash); err != nil {
+	if _, err := e.st.CreateToken(ctx, "test", userID, store.NewToken{Name: "good"}, goodHash); err != nil {
 		t.Fatal(err)
 	}
 
@@ -368,8 +368,9 @@ func TestAPITokenHashed(t *testing.T) {
 
 	created := c.must(http.StatusCreated, "POST", "/api/v1/tokens", map[string]string{"name": "ci"}).json(t)
 	plain, _ := created["token"].(string)
-	if raw, err := base64.RawURLEncoding.DecodeString(plain); err != nil || len(raw) != 32 {
-		t.Fatalf("token %q is not 32 random bytes", plain)
+	rest, prefixed := strings.CutPrefix(plain, auth.PrefixPersonal)
+	if raw, err := base64.RawURLEncoding.DecodeString(rest); !prefixed || err != nil || len(raw) != 32 {
+		t.Fatalf("token %q is not hello_pat_ and 32 random bytes", plain)
 	}
 	for _, k := range []string{"id", "name", "createdAt", "lastUsedAt"} {
 		if _, ok := created[k]; !ok {
