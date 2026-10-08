@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/ai"
+	"github.com/azrtydxb/hello/internal/ai/aifake"
 	"github.com/azrtydxb/hello/internal/ai/assistant"
 	"github.com/azrtydxb/hello/internal/apispec"
 	"github.com/azrtydxb/hello/internal/auth"
@@ -58,7 +59,8 @@ func (d *dbTasks) Start(ctx context.Context, kind string, userID int64, sessionI
 // reach the model, or an answer is not stored with its task.
 func TestAssistantSessions(t *testing.T) {
 	late := &lateAssistant{}
-	e := newEnvConfig(t, Config{Live: noLive{}, Assistant: late}, nil)
+	agent, _, _ := aifake.Service(t, aifake.Config())
+	e := newEnvConfig(t, Config{Live: noLive{}, Assistant: late, AIAgent: agent}, nil)
 	ctx := context.Background()
 	tasks := &dbTasks{db: e.db}
 	release := make(chan struct{})
