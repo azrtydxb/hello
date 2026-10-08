@@ -104,9 +104,9 @@ Interfaces: produces the session, message and task routes; consumes contracts 3�
 Files: `migrations/00009_ai_agent.sql` (Task 1 adds the nullable `cdrs` columns `rtp_packets bigint`, `rtp_lost bigint`, `rtp_jitter_ms real`), `internal/sip/media.go` and `internal/sip/takeover.go` (keep the relay's last `RelayStats` snapshot per call), `internal/cdr/cdr.go` (write the three columns), `internal/store/cdr.go` (`RTPPackets *int64`, `RTPLost *int64`, `RTPJitterMs *float64`, JSON `rtpPackets`, `rtpLost`, `rtpJitterMs`), `internal/api/openapi.json` (CDR schema), `web/src/pages/CallDetail.tsx`, tests.
 Interfaces: produces the CDR quality columns the `call_quality` detector (Task 6) reads; consumes `internal/media` `RelayStats`/`DirectionStats` (`Packets`, `Lost`, `JitterMs`) unchanged.
 
-- [ ] The `relay.Observe` callback in `internal/sip/media.go` (and the takeover re-anchor in `takeover.go`) also stores the latest snapshot on the call; at call end the CDR gets `rtp_packets` = sum of `Packets`, `rtp_lost` = sum of `Lost`, `rtp_jitter_ms` = max of `JitterMs` over both directions; directly-media and unanswered calls keep null. `TestCallQualityCDR` in `internal/cdr`.
-- [ ] `store.CDR` scans the columns; the CDR schema in `openapi.json` gains `rtpPackets`, `rtpLost`, `rtpJitterMs` (nullable); `TestOpenAPIMatchesRoutes` stays green.
-- [ ] `CallDetail.tsx` shows loss percent (`rtpLost / (rtpPackets + rtpLost) × 100`) and jitter for anchored calls and "not measured" otherwise; `CallDetail.test.tsx` covers both.
+- [x] The `relay.Observe` callback in `internal/sip/media.go` (and the takeover re-anchor in `takeover.go`) also stores the latest snapshot on the call; at call end the CDR gets `rtp_packets` = sum of `Packets`, `rtp_lost` = sum of `Lost`, `rtp_jitter_ms` = max of `JitterMs` over both directions; directly-media and unanswered calls keep null. `TestCallQualityCDR` in `internal/cdr`.
+- [x] `store.CDR` scans the columns; the CDR schema in `openapi.json` gains `rtpPackets`, `rtpLost`, `rtpJitterMs` (nullable); `TestOpenAPIMatchesRoutes` stays green.
+- [x] `CallDetail.tsx` shows loss percent (`rtpLost / (rtpPackets + rtpLost) × 100`) and jitter for anchored calls and "not measured" otherwise; `CallDetail.test.tsx` covers both.
 
 ## Task 6: Detectors and findings (branch ai-agent-aiops, after Task 2's scheduler and Task 5's quality merge)
 
