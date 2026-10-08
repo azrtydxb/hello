@@ -8,6 +8,7 @@ package fakellm
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,10 +61,23 @@ type Server struct {
 
 // New starts a fixture, closed when t ends.
 func New(t testing.TB) *Server {
+	return NewOn(t, "127.0.0.1:0")
+}
+
+// NewOn is New listening on addr, for a service in a container that reaches
+// the test through the host's address (the lab's hello-control). URL still
+// names the loopback address; the caller supplies the one the service uses.
+func NewOn(t testing.TB, addr string) *Server {
 	s := &Server{queues: map[string][]Reply{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/chat/completions", s.complete)
-	srv := httptest.NewServer(mux)
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("fakellm: listen %s: %v", addr, err)
+	}
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Listener = l
+	srv.Start()
 	t.Cleanup(srv.Close)
 	s.URL = srv.URL + "/v1"
 	return s

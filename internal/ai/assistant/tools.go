@@ -406,3 +406,6 @@ func largestArray(obj map[string]any) (string, []any) {
 	}
 	return key, best
 }
+
+// ToolNames is the assistant's tool list, in order, for docs/ai-agent.md.
+func ToolNames() []string { return append([]string(nil), assistantTools...) }
