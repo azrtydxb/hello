@@ -41,11 +41,12 @@ func TestComposeWithoutPublicURL(t *testing.T) {
 		if enabled {
 			cfg = config.AI{PublicURL: "https://hello.example", DCR: true}
 		}
-		as, err := newAuthServer(cfg, st, vk, prometheus.NewRegistry(), log)
+		reg := prometheus.NewRegistry()
+		as, err := newAuthServer(cfg, st, vk, reg, log)
 		if err != nil {
 			t.Fatal(err)
 		}
-		app, err := composeApp(cfg, apiH, as, st, log)
+		app, err := composeApp(cfg, apiH, as, st, reg, log)
 		if err != nil {
 			t.Fatal(err)
 		}

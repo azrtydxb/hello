@@ -140,13 +140,13 @@ Recorded at Task 4 (ran in parallel with Task 3):
 Files: `internal/mcp/` (`server.go` transport and auth, `tools.go` generation and filtering, `replay.go`, `redact.go`, `resources.go`, `prompts.go`, `metrics.go`, tests, `bench_test.go`).
 Interfaces: produces contract 7; consumes contracts 2, 3 and 5 and `api.Handler` (a fake handler in unit tests, the real one with fakes in `TestToolReplay`).
 
-- [ ] Transport: SDK `mcp.NewServer` per request with the caller's tool set, `mcp.NewStreamableHTTPHandler` with `Stateless: true`, `JSONResponse: true` and a `CrossOriginProtection` trusting the public origin and `HELLO_MCP_ALLOWED_ORIGINS`; bearer-only authentication through `auth.Lookup` with the MCP audience; 1 MiB body cap; `TestMCPTransport` initializes with both protocol versions through the SDK client.
-- [ ] Tools: one per non-excluded operation, name, title, description, input schema (parameters plus `body`), output schema for object `2xx` bodies, annotations by method; `tools/list` filtered by `Scopes.Has`; a call beyond scope answers HTTP `403` with the challenge; `TestToolsFromOpenAPI` iterates every operation.
-- [ ] Replay: build the request from the arguments (escaped path parameters, query, JSON body), copy only `Authorization`, set `auth.WithReplay`, refuse nested replay, 30 s timeout, map results (`structuredContent`, `isError` with code, message, fields, 64 KiB text cap); `TestToolReplay` runs against `api.Handler` with the store fakes of `internal/api`.
-- [ ] Redaction: walk the decoded result by `Operation.Secrets` and replace values; a test per operation that has secrets, device create included.
-- [ ] Resources and prompts of spec S-16, read through the same replay; `TestResourcesAndPrompts`.
-- [ ] Tool-call log line (tool, actor, client, status, duration) and `hello_mcp_*` metrics; `TestOAuthMCPMetrics` (MCP half). `TestToolCallOverhead` (`HELLO_BENCH=1`).
-- [ ] Mutation-check the scope filter, the step-up `403`, the replay-marker refusal for external requests and the redaction walk. Run the full gate.
+- [x] Transport: SDK `mcp.NewServer` per request with the caller's tool set, `mcp.NewStreamableHTTPHandler` with `Stateless: true`, `JSONResponse: true` and a `CrossOriginProtection` trusting the public origin and `HELLO_MCP_ALLOWED_ORIGINS`; bearer-only authentication through `auth.Lookup` with the MCP audience; 1 MiB body cap; `TestMCPTransport` initializes with both protocol versions through the SDK client.
+- [x] Tools: one per non-excluded operation, name, title, description, input schema (parameters plus `body`), output schema for object `2xx` bodies, annotations by method; `tools/list` filtered by `Scopes.Has`; a call beyond scope answers HTTP `403` with the challenge; `TestToolsFromOpenAPI` iterates every operation.
+- [x] Replay: build the request from the arguments (escaped path parameters, query, JSON body), copy only `Authorization`, set `auth.WithReplay`, refuse nested replay, 30 s timeout, map results (`structuredContent`, `isError` with code, message, fields, 64 KiB text cap); `TestToolReplay` runs against `api.Handler` with the store fakes of `internal/api`.
+- [x] Redaction: walk the decoded result by `Operation.Secrets` and replace values; a test per operation that has secrets, device create included.
+- [x] Resources and prompts of spec S-16, read through the same replay; `TestResourcesAndPrompts`.
+- [x] Tool-call log line (tool, actor, client, status, duration) and `hello_mcp_*` metrics; `TestOAuthMCPMetrics` (MCP half). `TestToolCallOverhead` (`HELLO_BENCH=1`).
+- [x] Mutation-check the scope filter, the step-up `403`, the replay-marker refusal for external requests and the redaction walk. Run the full gate.
 
 ## Task 6: Console and skills (branch ai-ui-skills)
 

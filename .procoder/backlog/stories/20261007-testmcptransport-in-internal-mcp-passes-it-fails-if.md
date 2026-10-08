@@ -1,6 +1,6 @@
 # `TestMCPTransport` in `internal/mcp` passes. It fails if `initialize` with `2026-07-28` or `2025-11-25` does not negotiate that version, a session cookie alone is admitted, a foreign `Origin` is not `403`, an unauthenticated request lacks the challenge, or a body over 1 MiB is read.
 
-Status: open
+Status: done 2026-10-07
 Created: 2026-10-07
 Epic: ai-external-access
 Sprint: -
@@ -10,14 +10,20 @@ Sprint: -
 <!-- The user story: who needs what, and why. What "done" looks like in
      the reader's terms — a title is not a description. -->
 
+An MCP client reaches Hello at POST /mcp over stateless Streamable HTTP with a bearer token only, negotiating 2026-07-28 or 2025-11-25, while browsers on foreign origins, cookie-only callers and oversized bodies are refused (spec S-13; plan ai-external-access Task 5).
+
 ## Acceptance criteria
 
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
      true — the closer will ask for the evidence. -->
 
-- [ ] `TestMCPTransport` in `internal/mcp` passes. It fails if `initialize` with `2026-07-28` or `2025-11-25` does not negotiate that version, a session cookie alone is admitted, a foreign `Origin` is not `403`, an unauthenticated request lacks the challenge, or a body over 1 MiB is read.
+- [x] `TestMCPTransport` in `internal/mcp` passes. It fails if `initialize` with `2026-07-28` or `2025-11-25` does not negotiate that version, a session cookie alone is admitted, a foreign `Origin` is not `403`, an unauthenticated request lacks the challenge, or a body over 1 MiB is read.
 
 ## Evidence
 
 <!-- Filled at close time: the commands run and what their output proved,
      one line per criterion. Empty evidence keeps the story open. -->
+
+Fingerprint: sha256:73bcfb1bcbe433713f173c62cd1b6b0ae23c26ca4165fabb9727a88aff28d1e9
+Produced: 756 bytes, exit 0
+Command: go test -race -count=1 -run ^TestMCPTransport$ -v ./internal/mcp/
