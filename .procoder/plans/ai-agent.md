@@ -150,10 +150,10 @@ Interfaces: produces the findings routes and proposals with source `finding:<typ
 Files: `web/src/pages/AIAssistant.tsx`, `AIFindings.tsx`, `AIProposals.tsx`, `AIProposalDetail.tsx`, `AIStatus.tsx` and their `*.test.tsx`, `web/src/components/ai/` (`JsonDiff.tsx`, `ProposalCard.tsx`, `FindingCard.tsx`, `TaskStatus.tsx`, `AIOff.tsx`, `PlainText.tsx`), `web/src/pages/Dashboard.tsx` (AI card), `web/src/nav.ts`, `web/src/App.tsx`, `web/src/api/`.
 Interfaces: consumes the routes of the spec's Interfaces section (mocked until Tasks 2–6 land).
 
-- [ ] Assistant: sessions, composer (4000 characters), 2 s task polling, plain-text rendering, data sources per answer, inline proposal card; `AIAssistant.test.tsx`.
-- [ ] Findings: filters, evidence, explanation or "not explained", acknowledge and dismiss; `AIFindings.test.tsx`.
-- [ ] Proposals: inbox by status, detail with the diff (`current` differences marked), apply confirmation listing each operation, dismiss with reason, failure detail naming applied actions; `AIProposals.test.tsx`.
-- [ ] Status page and dashboard card, role-aware controls; `AIStatus.test.tsx`. Full gate including `procoder test` and `procoder lint` over `web/`.
+- [x] Assistant: sessions, composer (4000 characters), 2 s task polling, plain-text rendering, data sources per answer, inline proposal card; `AIAssistant.test.tsx`.
+- [x] Findings: filters, evidence, explanation or "not explained", acknowledge and dismiss; `AIFindings.test.tsx`.
+- [x] Proposals: inbox by status, detail with the diff (`current` differences marked), apply confirmation listing each operation, dismiss with reason, failure detail naming applied actions; `AIProposals.test.tsx`.
+- [x] Status page and dashboard card, role-aware controls; `AIStatus.test.tsx`. Full gate including `procoder test` and `procoder lint` over `web/`.
 
 ## Task 8: kw, docs and end to end (lead, branch ai-agent-contracts, after Tasks 2, 3, 4, 5 and 6 merge)
 

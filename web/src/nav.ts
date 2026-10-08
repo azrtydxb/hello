@@ -91,6 +91,32 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
+    label: "AI",
+    items: [
+      {
+        label: "Assistant",
+        path: "/ai/assistant",
+        phase: 5,
+        icon: "message-square",
+        // Chatting posts messages, a write; viewers do not see it.
+        minRole: "operator",
+      },
+      {
+        label: "Findings",
+        path: "/ai/findings",
+        phase: 5,
+        icon: "scan-search",
+      },
+      {
+        label: "Proposals",
+        path: "/ai/proposals",
+        phase: 5,
+        icon: "git-pull-request",
+      },
+      { label: "AI status", path: "/ai/status", phase: 5, icon: "activity" },
+    ],
+  },
+  {
     label: "Platform",
     items: [
       { label: "Cluster", path: "/cluster", phase: 3, icon: "server" },
@@ -113,11 +139,22 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   },
 ];
 
-/** The groups and items `role` may see; empty groups are dropped. */
-export function navGroupsFor(role: string | undefined): NavGroup[] {
+/**
+ * The groups and items `role` may see; empty groups are dropped. The AI
+ * group shows in full only while AI is enabled; while it is off, only its
+ * status page stays, so the reason can be read.
+ */
+export function navGroupsFor(
+  role: string | undefined,
+  aiEnabled = false,
+): NavGroup[] {
   return NAV_GROUPS.map((g) => ({
     ...g,
-    items: g.items.filter((i) => atLeast(role, i.minRole ?? "viewer")),
+    items: g.items.filter(
+      (i) =>
+        atLeast(role, i.minRole ?? "viewer") &&
+        (g.label !== "AI" || aiEnabled || i.path === "/ai/status"),
+    ),
   })).filter((g) => g.items.length > 0);
 }
 
@@ -138,6 +175,7 @@ export function pageTitle(pathname: string): string | null {
   const exact = NAV_ITEMS.find((i) => i.path === pathname);
   if (exact) return exact.label;
   if (/^\/history\/[^/]+$/.test(pathname)) return "Call detail";
+  if (/^\/ai\/proposals\/[^/]+$/.test(pathname)) return "Proposal";
   const parent = NAV_ITEMS.filter(
     (i) => i.path !== "/" && pathname.startsWith(i.path + "/"),
   ).sort((a, b) => b.path.length - a.path.length)[0];

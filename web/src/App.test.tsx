@@ -3,12 +3,18 @@ import { describe, expect, it } from "vitest";
 import { NAV_GROUPS, NAV_ITEMS } from "./nav";
 import { json, ME, mockApi, renderApp } from "./test/api";
 
+/** The AI group shows while AI is enabled. */
+const AI_ON = {
+  "GET /api/v1/ai/status": () => json({ enabled: true, reason: null }),
+};
+
 describe("App navigation", () => {
   it("renders every primary nav item and marks the active one", async () => {
-    mockApi(ME);
+    mockApi({ ...ME, ...AI_ON });
     renderApp("/diagnostics");
 
     const nav = await screen.findByRole("navigation", { name: "Primary" });
+    await within(nav).findByRole("link", { name: "Findings" });
     const links = within(nav).getAllByRole("link");
     expect(links.map((l) => l.textContent)).toEqual(
       NAV_ITEMS.map((i) => i.label),
@@ -87,10 +93,15 @@ describe("App navigation", () => {
   });
 
   it("groups the nav as the design does and breadcrumbs the page", async () => {
-    mockApi({ ...ME, "GET /api/v1/trunks": () => json({ items: [] }) });
+    mockApi({
+      ...ME,
+      ...AI_ON,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+    });
     renderApp("/trunks");
 
     const nav = await screen.findByRole("navigation", { name: "Primary" });
+    await within(nav).findByRole("link", { name: "Findings" });
     for (const group of NAV_GROUPS.filter((g) => g.label)) {
       const section = within(nav).getByRole("group", { name: group.label });
       expect(
@@ -105,6 +116,7 @@ describe("App navigation", () => {
       "Call flow",
       "Media",
       "Activity",
+      "AI",
       "Platform",
     ]);
     const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
