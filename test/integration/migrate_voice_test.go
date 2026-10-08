@@ -142,6 +142,7 @@ func TestMigrateVoiceAgentsRollback(t *testing.T) {
 	accepted("a ring group naming the agent", `INSERT INTO ring_groups (name, strategy, failure_kind) VALUES ('back', 'sequential', 'voice_agent')`)
 	refused("deleting a referenced agent", `DELETE FROM voice_agents WHERE id = $1`, aid)
 	accepted("deleting the group", `DELETE FROM ring_groups`)
+	accepted("deleting the route naming the agent", `DELETE FROM inbound_routes WHERE destination_kind = 'voice_agent'`)
 	var left int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM voice_agents WHERE id = $1`, aid).Scan(&left); err != nil || left != 1 {
 		t.Fatalf("the agent did not survive its ring group: %d, %v", left, err)
