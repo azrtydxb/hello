@@ -14,14 +14,20 @@ import type {
   ProposalReference,
 } from "./aiagent";
 import type { Cdr } from "../api";
-import openapi from "../../../internal/api/openapi.json";
 
 interface Schema {
   properties?: Record<string, Schema>;
   items?: Schema;
 }
 
-const doc = openapi as unknown as {
+// The document lives outside web/, which the image build's context does not
+// hold: it is read through a glob so that tsc, which the image build runs,
+// does not need it.
+const found = import.meta.glob("../../../internal/api/openapi.json", {
+  eager: true,
+  import: "default",
+});
+const doc = Object.values(found)[0] as {
   components: { schemas: Record<string, Schema> };
 };
 const schema = (name: string) => doc.components.schemas[name]!;
