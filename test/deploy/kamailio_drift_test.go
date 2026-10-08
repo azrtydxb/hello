@@ -150,3 +150,83 @@ func TestKwKamailioConfigChecksum(t *testing.T) {
 		t.Fatalf("Deployment kamailio pod template annotation %s = %q, want %q (sha256 of the hello-kamailio kamailio.cfg + dispatcher.list)", configChecksumAnnotation, got, want)
 	}
 }
+
+// TestKamailioHelloSocketVetsSource guards the trust boundary of the hello
+// socket (UDP 5070): on kw it is on the node address, so request_route must
+// refuse requests received there from addresses outside dispatcher set 1.
+func TestKamailioHelloSocketVetsSource(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kamailio", "kamailio.cfg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := string(b)
+	vet := strings.Index(cfg, `if (!ds_is_from_list("1", "3")) {`)
+	reqinit := strings.Index(cfg, "\troute(REQINIT);\n\n\tif ($Rn == \"hello\") {\n\t\t# A hello-sip node")
+	flag := strings.Index(cfg, "setflag(FLT_FROM_HELLO);")
+	if vet < 0 || reqinit < 0 || flag < 0 || vet >= reqinit || reqinit >= flag {
+		t.Fatalf("the hello socket's source check (ds_is_from_list on set 1) must run before FLT_FROM_HELLO is set (vet=%d reqinit=%d flag=%d)", vet, reqinit, flag)
+	}
+}
+
+// TestKwSIPRolloutStaggered guards the rollout order of the two hostNetwork
+// hello-sip Deployments: both are Recreate and Sync applies them together, so
+// hello-sip-2 must wait in a preStop for hello-sip-1 to be ready again, and
+// its grace period must cover that wait plus its own drain.
+func TestKwSIPRolloutStaggered(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kuvryn-sync", "kw", "resources.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	for {
+		var d struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Strategy struct {
+					Type string `yaml:"type"`
+				} `yaml:"strategy"`
+				Template struct {
+					Spec struct {
+						Grace      int `yaml:"terminationGracePeriodSeconds"`
+						Containers []struct {
+							Lifecycle struct {
+								PreStop struct {
+									Exec struct {
+										Command []string `yaml:"command"`
+									} `yaml:"exec"`
+								} `yaml:"preStop"`
+							} `yaml:"lifecycle"`
+						} `yaml:"containers"`
+					} `yaml:"spec"`
+				} `yaml:"template"`
+			} `yaml:"spec"`
+		}
+		if err := dec.Decode(&d); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Fatal(err)
+		}
+		if d.Kind != "Deployment" || d.Metadata.Name != "hello-sip-2" {
+			continue
+		}
+		found = true
+		if d.Spec.Strategy.Type != "Recreate" {
+			t.Errorf("hello-sip-2 strategy = %q, want Recreate (hostNetwork ports)", d.Spec.Strategy.Type)
+		}
+		cmd := strings.Join(d.Spec.Template.Spec.Containers[0].Lifecycle.PreStop.Exec.Command, " ")
+		if !strings.Contains(cmd, "http://hello-sip-1:8082/readyz") {
+			t.Errorf("hello-sip-2 preStop must wait for hello-sip-1 /readyz, got %q", cmd)
+		}
+		if d.Spec.Template.Spec.Grace < 270 {
+			t.Errorf("hello-sip-2 terminationGracePeriodSeconds = %d, must cover the preStop wait (~140s) plus the 90s drain", d.Spec.Template.Spec.Grace)
+		}
+	}
+	if !found {
+		t.Fatal("no hello-sip-2 Deployment")
+	}
+}
