@@ -175,10 +175,10 @@ func TestPrune(t *testing.T) {
 			exec(`INSERT INTO ai_samples (kind, subject, at, value) VALUES ('k', $1, $2, '{}')`, id, at)
 		case "ai_findings":
 			exec(`INSERT INTO ai_findings (id, candidate_id, type, subject, severity, status, title, resolved_at, last_seen)
-				VALUES ($1, $1, 't', 's', 'info', 'resolved', 't', $2, $2)`, id, at)
+				VALUES ($1, $3, 't', 's', 'info', 'resolved', 't', $2, $2)`, id, at, id)
 		case "ai_proposals":
 			exec(`INSERT INTO ai_proposals (id, source, fingerprint, title, actions, config_revision, status, updated_at)
-				VALUES ($1, 'assistant', $1, 't', '[]', 1, 'applied', $2)`, id, at)
+				VALUES ($1, 'assistant', $3, 't', '[]', 1, 'applied', $2)`, id, at, id)
 		case "ai_sessions":
 			exec(`INSERT INTO ai_sessions (id, owner, last_active_at) VALUES ($1, $2, $3)`, id, uid, at)
 			exec(`INSERT INTO ai_messages (session_id, role, content) VALUES ($1, 'user', 'hi')`, id)
