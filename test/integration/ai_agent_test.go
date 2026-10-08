@@ -28,6 +28,7 @@ func (lc *labClient) askAssistant(content string) string {
 	var sess struct{ ID string }
 	lc.must("POST", "/api/v1/ai/sessions", map[string]any{}, &sess, 201)
 	var acc struct{ TaskID string }
+	lc.t.Logf("asking %q", content[:min(len(content), 30)])
 	lc.must("POST", "/api/v1/ai/sessions/"+sess.ID+"/messages", map[string]any{"content": content}, &acc, 202)
 	eventually(lc.t, 90*time.Second, "the assistant task to succeed", func() error {
 		var task aiTask
@@ -115,6 +116,12 @@ func (lc *labClient) auditCount(t *testing.T, via string) int {
 // dismissed proposal cannot be applied.
 func TestAIAgentEndToEnd(t *testing.T) {
 	lc := newLabClient(t)
+	t.Cleanup(func() {
+		if t.Failed() {
+			logs, _ := compose("logs", "--no-color", "--tail", "60", "hello-control-1", "hello-control-2").CombinedOutput()
+			t.Logf("control logs:\n%s", logs)
+		}
+	})
 	llm := fakellm.NewOn(t, labLLMAddr)
 	marker := "PROMPT-MARKER-" + randDigits(12)
 	remember(marker, labAIKey)
