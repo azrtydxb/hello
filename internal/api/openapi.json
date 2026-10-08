@@ -992,7 +992,10 @@
             "name": "failed",
             "in": "query",
             "description": "true keeps only failed calls (final status outside 2xx)",
-            "schema": { "type": "boolean", "default": false }
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
           }
         ],
         "responses": {
@@ -1035,13 +1038,21 @@
             "description": "CDR counts",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/CDRCounts" }
+                "schema": {
+                  "$ref": "#/components/schemas/CDRCounts"
+                }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
         },
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
@@ -1071,14 +1082,24 @@
             "description": "Concurrency samples",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/CDRConcurrency" }
+                "schema": {
+                  "$ref": "#/components/schemas/CDRConcurrency"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
         },
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
@@ -1105,7 +1126,10 @@
             "name": "failed",
             "in": "query",
             "description": "true keeps only failed calls (final status outside 2xx)",
-            "schema": { "type": "boolean", "default": false }
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
           }
         ],
         "responses": {
@@ -1113,14 +1137,24 @@
             "description": "CSV with a header row",
             "content": {
               "text/csv": {
-                "schema": { "type": "string" }
+                "schema": {
+                  "type": "string"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
         },
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
@@ -2282,9 +2316,15 @@
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
         },
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
@@ -2483,14 +2523,20 @@
             "name": "extension",
             "in": "query",
             "required": false,
-            "schema": { "type": "string" },
+            "schema": {
+              "type": "string"
+            },
             "description": "Keep only recordings of calls this extension was on (joined through the CDRs)."
           },
           {
             "name": "before",
             "in": "query",
             "required": false,
-            "schema": { "type": "integer", "format": "int64", "minimum": 1 },
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
             "description": "Page cursor: recordings with a lower id."
           },
           {
@@ -2511,14 +2557,24 @@
             "description": "Recordings, newest first, with the cursor for the next page",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/RecordingPage" }
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingPage"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
         },
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
@@ -2531,13 +2587,27 @@
         "summary": "Delete a recording",
         "description": "Deletes a call recording and its audio. Removes the row and the audio object in the hello-recordings bucket.",
         "tags": ["media"],
-        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
         "responses": {
-          "204": { "description": "Deleted" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
         },
         "x-hello-scope": "write",
         "x-hello-role": "operator",
@@ -2551,12 +2621,17 @@
         "description": "Streams a call recording's audio (WAV, Range supported). The recording audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. The recording must exist before the store is touched: a missing recording is 404.",
         "tags": ["media"],
         "parameters": [
-          { "$ref": "#/components/parameters/id" },
+          {
+            "$ref": "#/components/parameters/id"
+          },
           {
             "name": "download",
             "in": "query",
             "required": false,
-            "schema": { "type": "string", "enum": ["true", "false", "1", "0"] },
+            "schema": {
+              "type": "string",
+              "enum": ["true", "false", "1", "0"]
+            },
             "description": "true or 1 sends the audio as an attachment named recording-<id>.wav (Content-Disposition), so the browser saves it instead of playing it."
           }
         ],
@@ -2586,12 +2661,24 @@
           "502": {
             "$ref": "#/components/responses/Upstream"
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "503": { "$ref": "#/components/responses/Unavailable" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
         },
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
@@ -2611,13 +2698,21 @@
             "description": "Announcements ordered by name",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AnnouncementList" }
+                "schema": {
+                  "$ref": "#/components/schemas/AnnouncementList"
+                }
               }
             }
           },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
         },
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
@@ -2656,16 +2751,30 @@
             "description": "Created",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Announcement" }
+                "schema": {
+                  "$ref": "#/components/schemas/Announcement"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "409": { "$ref": "#/components/responses/Conflict" },
-          "503": { "$ref": "#/components/responses/Unavailable" },
-          "500": { "$ref": "#/components/responses/Internal" },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
           "502": {
             "$ref": "#/components/responses/Upstream"
           }
@@ -2683,7 +2792,11 @@
         "summary": "Replace an announcement's audio",
         "description": "Replaces an announcement's name or audio. Overwrites the audio at ann/<name>.wav in the hello-announcements bucket, validated like the upload, then moves updatedAt; audited, bumps the configuration revision and notifies hello-sip.",
         "tags": ["media"],
-        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -2712,16 +2825,30 @@
             "description": "Replaced",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Announcement" }
+                "schema": {
+                  "$ref": "#/components/schemas/Announcement"
+                }
               }
             }
           },
-          "400": { "$ref": "#/components/responses/BadRequest" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "503": { "$ref": "#/components/responses/Unavailable" },
-          "500": { "$ref": "#/components/responses/Internal" },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
           "502": {
             "$ref": "#/components/responses/Upstream"
           }
@@ -2737,13 +2864,27 @@
         "summary": "Delete an announcement",
         "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time.",
         "tags": ["media"],
-        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
         "responses": {
-          "204": { "description": "Deleted" },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
         },
         "x-hello-scope": "write",
         "x-hello-role": "operator",
@@ -2756,7 +2897,11 @@
         "summary": "Play an announcement",
         "description": "Streams an announcement's audio (WAV, Range supported). The announcement audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. A missing announcement is 404.",
         "tags": ["media"],
-        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
         "responses": {
           "200": {
             "description": "The audio, streamed through hello-control with Content-Length, Accept-Ranges: bytes and Cache-Control: private",
@@ -2783,11 +2928,21 @@
           "502": {
             "$ref": "#/components/responses/Upstream"
           },
-          "404": { "$ref": "#/components/responses/NotFound" },
-          "401": { "$ref": "#/components/responses/Unauthorized" },
-          "403": { "$ref": "#/components/responses/Forbidden" },
-          "503": { "$ref": "#/components/responses/Unavailable" },
-          "500": { "$ref": "#/components/responses/Internal" }
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
         },
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
@@ -6367,6 +6522,1038 @@
           }
         }
       }
+    },
+    "/api/v1/voice/agents": {
+      "get": {
+        "operationId": "listVoiceAgents",
+        "summary": "List voice agents",
+        "description": "Lists every voice agent with its persona summary, limits and enabled flag, one row per agent. The console's voice agents page is built from it.",
+        "tags": ["voice"],
+        "responses": {
+          "200": {
+            "description": "Every voice agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceAgentList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createVoiceAgent",
+        "summary": "Create a voice agent",
+        "description": "Creates a voice agent from a persona and its limits, generating its sip_user. Saves the persona as version 1 and bumps the voice revision so talking-agent reloads within its poll. Refuses a name, extension or sip_user conflict with 409.",
+        "tags": ["voice"],
+        "requestBody": {
+          "description": "The request body",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceAgentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The agent, as created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceAgent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/voice/agents/{id}": {
+      "get": {
+        "operationId": "getVoiceAgent",
+        "summary": "Show a voice agent",
+        "description": "Returns one voice agent by id: its persona, limits, caller verification and current revision.",
+        "tags": ["voice"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The agent's id, as listVoiceAgents returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceAgent"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "updateVoiceAgent",
+        "summary": "Update a voice agent",
+        "description": "Replaces a voice agent's editable fields, saves the previous persona as a version and bumps the voice revision. Refuses to disable an agent that a route or ring group names unless force is true (spec Edge cases). A 409 names the references that block a conflicting name, extension or sip_user.",
+        "tags": ["voice"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The agent's id, as listVoiceAgents returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The request body",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceAgentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The agent, as updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceAgent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteVoiceAgent",
+        "summary": "Delete a voice agent",
+        "description": "Deletes a voice agent that no route, ring group member, failure target or feature code names; a 409 names the references. Its versions and attachments go with it, and the voice revision moves.",
+        "tags": ["voice"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The agent's id, as listVoiceAgents returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/voice/agents/{id}/versions": {
+      "get": {
+        "operationId": "listVoiceAgentVersions",
+        "summary": "List a voice agent's versions",
+        "description": "Lists a voice agent's saved personas, newest first, at most the last 10 revisions. Each version carries the persona fields it held and who saved it.",
+        "tags": ["voice"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The agent's id, as listVoiceAgents returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agent's versions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceAgentVersionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/voice/agents/{id}/versions/{v}/restore": {
+      "post": {
+        "operationId": "restoreVoiceAgentVersion",
+        "summary": "Restore a voice agent version",
+        "description": "Restores a saved persona as the agent's current one, as a new revision (the version itself is kept), and bumps the voice revision so talking-agent reloads.",
+        "tags": ["voice"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The agent's id, as listVoiceAgents returns it.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "v",
+            "in": "path",
+            "required": true,
+            "description": "The revision to restore, as listVoiceAgentVersions returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agent with the restored persona",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceAgent"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/voice/agents/{id}/tools": {
+      "put": {
+        "operationId": "putVoiceAgentTools",
+        "summary": "Set a voice agent's MCP tools",
+        "description": "Replaces the agent's MCP attachments: which servers are enabled for it and, per server, the allowlisted tool names with their confirm and write flags. Tool name conflicts across attachments are refused with 409 (voice_tool_conflict), and write tools require caller verification on the agent (spec S-36).",
+        "tags": ["voice"],
+        "requestBody": {
+          "description": "The request body",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceAgentTools"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The agent's attachments, as saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceAgentTools"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/voice/agents/{id}/calls": {
+      "get": {
+        "operationId": "listVoiceAgentCalls",
+        "summary": "List a voice agent's calls",
+        "description": "Lists the calls routed to one voice agent, joined with their reports: outcome, summary, tool calls and token counts, newest first (the CDR join of spec Interfaces).",
+        "tags": ["voice"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The agent's id, as listVoiceAgents returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agent's calls with their reports",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceAgentCallList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/voice/mcp-servers": {
+      "get": {
+        "operationId": "listVoiceMCPServers",
+        "summary": "List MCP servers",
+        "description": "Lists every MCP server configured for voice agents, without any credential material (the sealed credential is write-only and appears only in the runtime view).",
+        "tags": ["voice"],
+        "responses": {
+          "200": {
+            "description": "Every MCP server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceMCPServerList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createVoiceMCPServer",
+        "summary": "Create an MCP server",
+        "description": "Registers an MCP server for voice agents, sealing the credential it authenticates with. A public URL or loopback address is refused unless the matching voice configuration allows it (mcp_endpoint_not_private). An agent never creates one.",
+        "tags": ["voice"],
+        "requestBody": {
+          "description": "The request body",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceMCPServerInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The server, as created, without its credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceMCPServer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        }
+      }
+    },
+    "/api/v1/voice/mcp-servers/{id}": {
+      "get": {
+        "operationId": "getVoiceMCPServer",
+        "summary": "Show an MCP server",
+        "description": "Returns one MCP server by id: its URL, authentication kind, timeout and last check, without its credential.",
+        "tags": ["voice"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The server's id, as listVoiceMCPServers returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The server, without its credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceMCPServer"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "updateVoiceMCPServer",
+        "summary": "Update an MCP server",
+        "description": "Replaces an MCP server's configuration, sealing any new credential; a credential the operator leaves empty keeps the stored one. The voice revision moves so talking-agent reloads. An agent never updates one.",
+        "tags": ["voice"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The server's id, as listVoiceMCPServers returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The request body",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceMCPServerInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The server, as updated, without its credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceMCPServer"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        }
+      },
+      "delete": {
+        "operationId": "deleteVoiceMCPServer",
+        "summary": "Delete an MCP server",
+        "description": "Deletes an MCP server no agent attachment names; a 409 names the agents. The voice revision moves.",
+        "tags": ["voice"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The server's id, as listVoiceMCPServers returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        }
+      }
+    },
+    "/api/v1/voice/mcp-servers/{id}/discover": {
+      "post": {
+        "operationId": "discoverVoiceMCPServer",
+        "summary": "Discover an MCP server's tools",
+        "description": "Calls the server's tool listing through the egress guard and returns the tools it offers, for building an attachment. Not an agent tool: an agent cannot make Hello dial out.",
+        "tags": ["voice"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The server's id, as listVoiceMCPServers returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tools the server offers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceMCPDiscovery"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "Console egress to an operator-configured MCP server, never an agent tool: an agent cannot make Hello dial out."
+        }
+      }
+    },
+    "/api/v1/voice/mcp-servers/{id}/test": {
+      "post": {
+        "operationId": "testVoiceMCPServer",
+        "summary": "Test an MCP server",
+        "description": "Runs one guarded tool call against the server and returns its result and latency, recording the last check. Not an agent tool: an agent cannot make Hello dial out.",
+        "tags": ["voice"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The server's id, as listVoiceMCPServers returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The request body",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceMCPTestInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The tool call's result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceMCPTest"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "Console egress to an operator-configured MCP server, never an agent tool: an agent cannot make Hello dial out."
+        }
+      }
+    },
+    "/api/v1/voice/status": {
+      "get": {
+        "operationId": "getVoiceStatus",
+        "summary": "Show the voice runtime status",
+        "description": "Returns the runtime status: the current voice revision, when talking-agent last acked and the version it reported, and per-agent loaded state (red after two minutes of silence, spec S-22).",
+        "tags": ["voice"],
+        "responses": {
+          "200": {
+            "description": "The runtime status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/voice/secret/rotate": {
+      "post": {
+        "operationId": "rotateVoiceSIPSecret",
+        "summary": "Rotate the voice SIP secret",
+        "description": "Returns a new signing secret for calls to talking-agent, to store as HELLO_VOICE_SIP_SECRET while the old one moves to HELLO_VOICE_SIP_SECRET_NEXT (both sides accept two keys during a rotation). Shown once, never again.",
+        "tags": ["voice"],
+        "responses": {
+          "200": {
+            "description": "The new secret, shown once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceSecretRotation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        }
+      }
+    },
+    "/api/v1/voice/runtime-account": {
+      "post": {
+        "operationId": "createVoiceRuntimeAccount",
+        "summary": "Create the voice runtime account",
+        "description": "Creates or rotates the service account talking-agent reads the runtime API with, holding the voice-runtime scope alone, and returns its client secret once. Revoking it stops persona reads at once.",
+        "tags": ["voice"],
+        "responses": {
+          "201": {
+            "description": "The service account, with its secret shown once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceRuntimeAccount"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "Credential management stays in the console: an agent never manages its own or other credentials."
+        }
+      }
+    },
+    "/api/v1/voice-runtime/agents": {
+      "get": {
+        "operationId": "getVoiceRuntimeAgents",
+        "summary": "Read the voice runtime view",
+        "description": "Returns every enabled agent with its persona, limits and unsealed MCP credentials under one revision, for talking-agent's live reload. Long-polls while a revision change is pending; an ETag answers 304. This is the only place a credential is unsealed, and it is never exposed to an agent.",
+        "tags": ["voice-runtime"],
+        "responses": {
+          "200": {
+            "description": "The runtime view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceRuntimeView"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The view is unchanged (ETag)"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "voice-runtime",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "Serving talking-agent, not an agent tool: the credential-bearing view is not exposed."
+        }
+      }
+    },
+    "/api/v1/voice-runtime/ack": {
+      "post": {
+        "operationId": "ackVoiceRuntime",
+        "summary": "Acknowledge a runtime load",
+        "description": "Records that talking-agent loaded a revision: the runtime status stays green while acks arrive, and turns red after two minutes of silence (spec S-22).",
+        "tags": ["voice-runtime"],
+        "requestBody": {
+          "description": "The request body",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceRuntimeAck"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Recorded"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "voice-runtime",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "Serving talking-agent, not an agent tool: the credential-bearing view is not exposed."
+        }
+      }
+    },
+    "/api/v1/voice-runtime/calls": {
+      "post": {
+        "operationId": "reportVoiceCall",
+        "summary": "Report a voice call",
+        "description": "Stores talking-agent's report for one call: outcome, summary, tool calls, token counts and, when the agent records it, the transcript. Idempotent by correlation id; a report for a call that has none yet is stored until retention prunes it.",
+        "tags": ["voice-runtime"],
+        "requestBody": {
+          "description": "The request body",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceCallReport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Stored"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "description": "The report exceeds its size limits"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "voice-runtime",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "Serving talking-agent, not an agent tool: the credential-bearing view is not exposed."
+        }
+      }
     }
   },
   "components": {
@@ -7097,15 +8284,25 @@
             "format": "int64",
             "description": "The box id (the messages list's box parameter)."
           },
-          "extensionId": { "type": "integer", "format": "int64" },
-          "number": { "type": "string" },
-          "name": { "type": "string" },
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
           "unheard": {
             "type": "integer",
             "format": "int64",
             "description": "Messages not played yet."
           },
-          "total": { "type": "integer", "format": "int64" }
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
         }
       },
       "VoicemailBoxSummaryList": {
@@ -7114,7 +8311,9 @@
         "properties": {
           "items": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/VoicemailBoxSummary" }
+            "items": {
+              "$ref": "#/components/schemas/VoicemailBoxSummary"
+            }
           }
         }
       },
@@ -8018,7 +9217,10 @@
           "destination"
         ],
         "properties": {
-          "id": { "type": "integer", "format": "int64" },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
           "correlationId": {
             "type": "string",
             "description": "The call the recording belongs to; matches the CDR's correlationId."
@@ -8027,8 +9229,14 @@
             "type": "string",
             "enum": ["dtmf", "default", "api"]
           },
-          "durationMs": { "type": "integer", "format": "int64" },
-          "createdAt": { "type": "string", "format": "date-time" },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
           "cdrId": {
             "type": "integer",
             "format": "int64",
@@ -8050,7 +9258,9 @@
         "properties": {
           "items": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/Recording" }
+            "items": {
+              "$ref": "#/components/schemas/Recording"
+            }
           },
           "next": {
             "type": "string",
@@ -8062,10 +9272,22 @@
         "type": "object",
         "required": ["id", "name", "createdAt", "updatedAt"],
         "properties": {
-          "id": { "type": "integer", "format": "int64" },
-          "name": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
-          "createdAt": { "type": "string", "format": "date-time" },
-          "updatedAt": { "type": "string", "format": "date-time" }
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
         }
       },
       "AnnouncementList": {
@@ -8074,7 +9296,9 @@
         "properties": {
           "items": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/Announcement" }
+            "items": {
+              "$ref": "#/components/schemas/Announcement"
+            }
           }
         }
       },
@@ -9545,7 +10769,10 @@
         "type": "object",
         "required": ["all", "failed"],
         "properties": {
-          "all": { "type": "integer", "format": "int64" },
+          "all": {
+            "type": "integer",
+            "format": "int64"
+          },
           "failed": {
             "type": "integer",
             "format": "int64",
@@ -9557,32 +10784,59 @@
         "type": "object",
         "required": ["at", "inbound", "outbound", "internal"],
         "properties": {
-          "at": { "type": "string", "format": "date-time" },
-          "inbound": { "type": "integer", "format": "int64" },
-          "outbound": { "type": "integer", "format": "int64" },
-          "internal": { "type": "integer", "format": "int64" }
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "inbound": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outbound": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "internal": {
+            "type": "integer",
+            "format": "int64"
+          }
         }
       },
       "CDRConcurrency": {
         "type": "object",
         "required": ["range", "stepSeconds", "points", "peak"],
         "properties": {
-          "range": { "type": "string", "enum": ["1h", "6h", "24h"] },
-          "stepSeconds": { "type": "integer" },
+          "range": {
+            "type": "string",
+            "enum": ["1h", "6h", "24h"]
+          },
+          "stepSeconds": {
+            "type": "integer"
+          },
           "points": {
             "type": "array",
-            "items": { "$ref": "#/components/schemas/ConcurrencyPoint" }
+            "items": {
+              "$ref": "#/components/schemas/ConcurrencyPoint"
+            }
           },
           "peak": {
             "description": "The sample with the most calls in progress; null when no call was in progress",
             "oneOf": [
-              { "type": "null" },
+              {
+                "type": "null"
+              },
               {
                 "type": "object",
                 "required": ["calls", "at"],
                 "properties": {
-                  "calls": { "type": "integer", "format": "int64" },
-                  "at": { "type": "string", "format": "date-time" }
+                  "calls": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
                 }
               }
             ]
@@ -11289,6 +12543,654 @@
             "type": "string",
             "format": "date-time",
             "description": "When the request was recorded."
+          }
+        }
+      },
+      "VoiceAgent": {
+        "type": "object",
+        "description": "A voice agent: the persona talking-agent plays, its limits and its place in the sip_user namespace.",
+        "required": ["id", "name", "sipUser", "enabled", "revision"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The agent's id."
+          },
+          "name": {
+            "type": "string",
+            "description": "The agent's unique name, shown in routes and CDRs."
+          },
+          "description": {
+            "type": "string",
+            "description": "What the agent is for."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "False refuses new calls to the agent."
+          },
+          "sipUser": {
+            "type": "string",
+            "description": "The user part of the agent's SIP address, generated on create."
+          },
+          "extension": {
+            "type": "string",
+            "description": "The internal extension that reaches the agent, if any."
+          },
+          "revision": {
+            "type": "integer",
+            "description": "The persona's revision; bumped on every save."
+          }
+        }
+      },
+      "VoiceAgentList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/VoiceAgent"
+        },
+        "description": "Every voice agent."
+      },
+      "VoiceAgentInput": {
+        "type": "object",
+        "description": "The editable fields of a voice agent.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The agent's unique name."
+          },
+          "description": {
+            "type": "string",
+            "description": "What the agent is for."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "False refuses new calls to the agent."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The system prompt of the persona."
+          },
+          "greeting": {
+            "type": "string",
+            "description": "What the agent says first."
+          },
+          "language": {
+            "type": "string",
+            "description": "The language the agent speaks."
+          },
+          "voice": {
+            "type": "string",
+            "description": "The voice the agent speaks with."
+          },
+          "voiceReference": {
+            "type": "string",
+            "description": "A reference sample for voice cloning, if the backend supports it."
+          },
+          "style": {
+            "type": "string",
+            "description": "Style instructions for the persona."
+          },
+          "temperature": {
+            "type": "number",
+            "description": "The model temperature, when the backend supports it."
+          },
+          "maxCallSeconds": {
+            "type": "integer",
+            "description": "The longest call in seconds before the agent hangs up."
+          },
+          "maxConcurrent": {
+            "type": "integer",
+            "description": "How many calls the agent takes at once."
+          },
+          "maxToolCalls": {
+            "type": "integer",
+            "description": "The most tool calls one call may make."
+          },
+          "idleTimeoutSeconds": {
+            "type": "integer",
+            "description": "Silence before the agent ends the call."
+          },
+          "recordTranscript": {
+            "type": "boolean",
+            "description": "True keeps a transcript with the call report."
+          },
+          "transcriptRetentionDays": {
+            "type": "integer",
+            "description": "How long a transcript is kept."
+          },
+          "callerVerification": {
+            "type": "string",
+            "enum": ["none", "allowlist", "pin", "allowlist_or_pin"],
+            "description": "How a caller proves their identity before write tools run (spec S-36)."
+          },
+          "callerAllowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Numbers or users that pass allowlist verification."
+          }
+        }
+      },
+      "VoiceAgentVersion": {
+        "type": "object",
+        "description": "One saved persona of a voice agent.",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "description": "The revision the persona was saved under."
+          },
+          "actor": {
+            "type": "string",
+            "description": "Who saved it."
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "When it was saved."
+          },
+          "persona": {
+            "type": "object",
+            "description": "The persona fields of that revision."
+          }
+        }
+      },
+      "VoiceAgentVersionList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/VoiceAgentVersion"
+        },
+        "description": "A voice agent's saved personas, newest first."
+      },
+      "VoiceAgentTools": {
+        "type": "object",
+        "description": "A voice agent's MCP attachments: the allowlisted tools per server.",
+        "properties": {
+          "servers": {
+            "type": "array",
+            "description": "One entry per attached server.",
+            "items": {
+              "type": "object",
+              "description": "One attached MCP server.",
+              "properties": {
+                "serverId": {
+                  "type": "integer",
+                  "description": "The server's id."
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "description": "False detaches the server without deleting it."
+                },
+                "tools": {
+                  "type": "array",
+                  "description": "The allowlisted tools of this attachment.",
+                  "items": {
+                    "type": "object",
+                    "description": "One allowlisted tool.",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "The tool name without the server prefix."
+                      },
+                      "confirm": {
+                        "type": "boolean",
+                        "description": "True reads the action aloud and waits for a spoken yes."
+                      },
+                      "write": {
+                        "type": "boolean",
+                        "description": "True when the tool changes data; it needs caller verification."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "VoiceAgentCall": {
+        "type": "object",
+        "description": "One call to a voice agent, joined with its report.",
+        "properties": {
+          "correlationId": {
+            "type": "string",
+            "description": "The call's correlation id."
+          },
+          "agentName": {
+            "type": "string",
+            "description": "The agent's name at call time."
+          },
+          "startTime": {
+            "type": "string",
+            "description": "When the call started."
+          },
+          "finalStatus": {
+            "type": "integer",
+            "description": "The CDR's final SIP status."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "The report's outcome, unreported when none arrived."
+          },
+          "summary": {
+            "type": "string",
+            "description": "The report's call summary."
+          },
+          "toolCalls": {
+            "type": "integer",
+            "description": "How many tool calls the agent made."
+          },
+          "tokensIn": {
+            "type": "integer",
+            "description": "Input tokens the backend counted."
+          },
+          "tokensOut": {
+            "type": "integer",
+            "description": "Output tokens the backend counted."
+          }
+        }
+      },
+      "VoiceAgentCallList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/VoiceAgentCall"
+        },
+        "description": "One call per report, newest first."
+      },
+      "VoiceMCPServer": {
+        "type": "object",
+        "description": "An MCP server voice agents can use, without its credential material.",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The server's id."
+          },
+          "name": {
+            "type": "string",
+            "description": "The server's unique name."
+          },
+          "url": {
+            "type": "string",
+            "description": "The server's streamable HTTP URL."
+          },
+          "auth": {
+            "type": "string",
+            "enum": ["none", "bearer", "header", "oauth_client_credentials"],
+            "description": "How Hello authenticates to the server."
+          },
+          "headerName": {
+            "type": "string",
+            "description": "The header carrying the credential, for auth header."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "description": "The tool call timeout in milliseconds."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "False detaches the server from every agent."
+          },
+          "lastCheckAt": {
+            "type": "string",
+            "description": "When the console last discovered or tested it."
+          },
+          "lastCheckStatus": {
+            "type": "string",
+            "description": "ok, refused or unreachable, from the last check."
+          }
+        }
+      },
+      "VoiceMCPServerList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/VoiceMCPServer"
+        },
+        "description": "Every MCP server."
+      },
+      "VoiceMCPServerInput": {
+        "type": "object",
+        "description": "The fields of an MCP server. The credential is write-only: a response never returns it.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The server's unique name."
+          },
+          "url": {
+            "type": "string",
+            "description": "The server's streamable HTTP URL."
+          },
+          "auth": {
+            "type": "string",
+            "enum": ["none", "bearer", "header", "oauth_client_credentials"],
+            "description": "How Hello authenticates to the server."
+          },
+          "headerName": {
+            "type": "string",
+            "description": "The header carrying the credential, for auth header."
+          },
+          "credential": {
+            "type": "string",
+            "description": "The bearer token or header value, sealed on save and never returned."
+          },
+          "tokenUrl": {
+            "type": "string",
+            "description": "The OAuth token endpoint, for auth oauth_client_credentials."
+          },
+          "clientId": {
+            "type": "string",
+            "description": "The OAuth client id."
+          },
+          "clientSecret": {
+            "type": "string",
+            "description": "The OAuth client secret, sealed on save and never returned."
+          },
+          "scope": {
+            "type": "string",
+            "description": "The OAuth scope to request."
+          },
+          "audience": {
+            "type": "string",
+            "description": "The OAuth audience to request."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "description": "The tool call timeout in milliseconds."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "False detaches the server from every agent."
+          }
+        }
+      },
+      "VoiceMCPDiscovery": {
+        "type": "object",
+        "description": "The tools an MCP server offers.",
+        "properties": {
+          "tools": {
+            "type": "array",
+            "description": "One entry per tool the server offers.",
+            "items": {
+              "type": "object",
+              "description": "One offered tool.",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The tool's name."
+                },
+                "description": {
+                  "type": "string",
+                  "description": "What the tool does."
+                }
+              }
+            }
+          }
+        }
+      },
+      "VoiceMCPTestInput": {
+        "type": "object",
+        "description": "One guarded tool call for a test.",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "The tool to call."
+          },
+          "arguments": {
+            "type": "object",
+            "description": "The arguments of the call."
+          }
+        }
+      },
+      "VoiceMCPTest": {
+        "type": "object",
+        "description": "The result of a test tool call.",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether the call succeeded."
+          },
+          "latencyMs": {
+            "type": "integer",
+            "description": "How long the call took."
+          },
+          "result": {
+            "type": "string",
+            "description": "The tool's result, as text."
+          }
+        }
+      },
+      "VoiceStatus": {
+        "type": "object",
+        "description": "The voice runtime status (spec S-22).",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "description": "The current voice revision."
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "description": "When talking-agent last acked; null when never."
+          },
+          "version": {
+            "type": "string",
+            "description": "The version talking-agent reported."
+          },
+          "healthy": {
+            "type": "boolean",
+            "description": "False when the last ack is more than two minutes old."
+          },
+          "agents": {
+            "type": "array",
+            "description": "Per-agent state as last reported.",
+            "items": {
+              "type": "object",
+              "description": "One agent's state.",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The agent's name."
+                },
+                "revision": {
+                  "type": "integer",
+                  "description": "The revision the agent loaded."
+                },
+                "state": {
+                  "type": "string",
+                  "description": "loaded, loading or failed."
+                }
+              }
+            }
+          }
+        }
+      },
+      "VoiceSecretRotation": {
+        "type": "object",
+        "description": "A new signing secret for calls to talking-agent.",
+        "required": ["secret"],
+        "properties": {
+          "secret": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The new HELLO_VOICE_SIP_SECRET, shown once."
+          }
+        }
+      },
+      "VoiceRuntimeAccount": {
+        "type": "object",
+        "description": "The service account talking-agent reads the runtime API with.",
+        "required": ["id", "secret"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "The service account's id."
+          },
+          "clientId": {
+            "type": "string",
+            "description": "The OAuth client id of the service account."
+          },
+          "secret": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The client secret, shown once."
+          }
+        }
+      },
+      "VoiceRuntimeView": {
+        "type": "object",
+        "description": "The runtime view talking-agent reads (spec S-19): every enabled agent with persona, limits and unsealed MCP credentials, under one revision.",
+        "required": ["tenant", "revision", "agents"],
+        "properties": {
+          "tenant": {
+            "type": "string",
+            "description": "The Hello instance's voice tenant."
+          },
+          "revision": {
+            "type": "integer",
+            "description": "The voice revision the view was built at."
+          },
+          "agents": {
+            "type": "array",
+            "description": "One entry per enabled agent.",
+            "items": {
+              "type": "object",
+              "description": "One agent as talking-agent plays it.",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The agent's name."
+                },
+                "sipUser": {
+                  "type": "string",
+                  "description": "The agent's SIP user."
+                },
+                "revision": {
+                  "type": "integer",
+                  "description": "The persona revision loaded."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "The system prompt."
+                },
+                "greeting": {
+                  "type": "string",
+                  "description": "What the agent says first."
+                },
+                "servers": {
+                  "type": "array",
+                  "description": "The agent's MCP servers with unsealed credentials.",
+                  "items": {
+                    "type": "object",
+                    "description": "One MCP server with its credential.",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "The server's name."
+                      },
+                      "url": {
+                        "type": "string",
+                        "description": "The server's URL."
+                      },
+                      "auth": {
+                        "type": "string",
+                        "description": "The authentication kind."
+                      },
+                      "credential": {
+                        "type": "string",
+                        "x-hello-secret": true,
+                        "description": "The unsealed credential, runtime view only."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "VoiceRuntimeAck": {
+        "type": "object",
+        "description": "A runtime load acknowledgement.",
+        "required": ["revision"],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "description": "The revision loaded."
+          },
+          "version": {
+            "type": "string",
+            "description": "The talking-agent version, on the first ack."
+          },
+          "agents": {
+            "type": "array",
+            "description": "Per-agent state after the load.",
+            "items": {
+              "type": "object",
+              "description": "One agent's state.",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The agent's name."
+                },
+                "state": {
+                  "type": "string",
+                  "description": "loaded, loading or failed."
+                }
+              }
+            }
+          }
+        }
+      },
+      "VoiceCallReport": {
+        "type": "object",
+        "description": "Talking-agent's report for one call.",
+        "required": ["correlationId", "outcome"],
+        "properties": {
+          "correlationId": {
+            "type": "string",
+            "description": "The call's correlation id."
+          },
+          "agentName": {
+            "type": "string",
+            "description": "The agent that took the call."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": ["answered", "unanswered", "failed", "unreported"],
+            "description": "How the call went."
+          },
+          "summary": {
+            "type": "string",
+            "description": "What the call was about."
+          },
+          "toolCalls": {
+            "type": "array",
+            "description": "The tool calls made, in order.",
+            "items": {
+              "type": "object",
+              "description": "One tool call.",
+              "properties": {
+                "tool": {
+                  "type": "string",
+                  "description": "The tool's name."
+                },
+                "ok": {
+                  "type": "boolean",
+                  "description": "Whether it succeeded."
+                },
+                "arguments": {
+                  "type": "object",
+                  "description": "The arguments used."
+                }
+              }
+            }
+          },
+          "tokensIn": {
+            "type": "integer",
+            "description": "Input tokens the backend counted."
+          },
+          "tokensOut": {
+            "type": "integer",
+            "description": "Output tokens the backend counted."
+          },
+          "transcript": {
+            "type": "string",
+            "description": "The transcript, only when the agent records it."
           }
         }
       }

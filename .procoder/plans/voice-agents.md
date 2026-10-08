@@ -38,16 +38,24 @@ Why talking-agent stays outside, why the runtime pulls (long poll) instead of He
 6. **Auth:** `auth.ScopeVoiceRuntime = "voice-runtime"`, excluded from `GrantableScopes` and from consent; a service account may hold it alone.
 7. **Routes** (`internal/api/routes.go`): every operation of the spec's Interfaces table in `routes()` with its scope and role answering `501` through `s.pending` until its stream lands, and in `openapi.json` with descriptions, `x-hello-*` and schemas, so phase 1's route/document tests stay green from the first merge.
 
+Deviations recorded when Task 1 landed (all compatible with Tasks 2-7; ask the lead before relying on more):
+
+- `voice_revision` is its own single-row table (`voice_revision(id, revision)`, seeded 0), not a column of `voice_runtime`: the runtime singleton records what talking-agent last read (revision, last_seen_at, loaded, version, service account), while the counter is bumped once per registry change in its own transaction.
+- `ring_group_members`' old primary key `(group_id, extension_id)` cannot span a nullable column; the up migration drops it for two unique constraints, `(group_id, extension_id)` and `(group_id, voice_agent_id)`, with `CHECK (num_nonnulls(extension_id, voice_agent_id) = 1)`; the down migration restores the primary key.
+- The three `voice-runtime` operations carry minimum role `viewer` (the scope alone gates them; TestRoutesTable's scope→role map now lists `voice-runtime → viewer`).
+- `X-Hello-Auth` key ids are derived (`hex(sha256("hello-voice-key-id|"+secret))[:4]`), so the vectors file needs no separate id column and both sides derive the same id from a shared secret; `TestVoiceCallAuth` proves the derivation.
+- Task 1 landed on branch `voice-contracts` (the plan's heading says `voice-agents-contracts`; the lead's stream name won).
+
 ## Task 1: Shared contracts (lead, branch voice-agents-contracts)
 
 Files: `migrations/00010_voice_agents.sql`, `internal/config/`, `internal/auth/scope.go`, `internal/routing/types.go`, `internal/voice/sign.go` and vectors, `internal/api/routes.go`, `internal/api/openapi.json`.
 Interfaces: produces contracts 1-7.
 
-- [ ] Migration up and down; `go test -run Migrate ./test/integration/` has `TestMigrateVoiceAgentsRollback`, passing.
-- [ ] Config keys with defaults and validation; `TestLoadVoice*`, plus `TestVoiceDisabledWithoutAddress` (config half).
-- [ ] `voice-runtime` scope, service-account only; `TestVoiceRuntimeScope` (consent cannot grant it, it grants nothing else).
-- [ ] `Sign`/`Verify` with vectors, skew, replay input, two keys; `TestVoiceCallAuth` (the `internal/voice` half).
-- [ ] Route rows and OpenAPI operations (`501` pending); `TestRoutesMatchOpenAPI`, `TestOpenAPIForTools`, `TestRoleEnforcement` green.
+- [x] Migration up and down; `go test -run Migrate ./test/integration/` has `TestMigrateVoiceAgentsRollback`, passing.
+- [x] Config keys with defaults and validation; `TestLoadVoice*`, plus `TestVoiceDisabledWithoutAddress` (config half).
+- [x] `voice-runtime` scope, service-account only; `TestVoiceRuntimeScope` (consent cannot grant it, it grants nothing else).
+- [x] `Sign`/`Verify` with vectors, skew, replay input, two keys; `TestVoiceCallAuth` (the `internal/voice` half).
+- [x] Route rows and OpenAPI operations (`501` pending); `TestRoutesMatchOpenAPI`, `TestOpenAPIForTools`, `TestRoleEnforcement` green.
 
 ## Task 2: Registry, versions, MCP servers (branch voice-agents-registry, after Task 1)
 

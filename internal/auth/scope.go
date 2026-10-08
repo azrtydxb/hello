@@ -20,9 +20,15 @@ const (
 	// ScopeSession is carried only by a browser session: consent approval
 	// and denial need it, so no token can grant itself scopes.
 	ScopeSession Scope = "session"
+	// ScopeVoiceRuntime lets talking-agent read personas and report calls
+	// (voice-agents S-18). A service account may hold it, alone; consent,
+	// personal tokens and GrantableScopes never carry it, and it grants
+	// nothing else.
+	ScopeVoiceRuntime Scope = "voice-runtime"
 )
 
-// AllScopes is every scope a credential can be granted.
+// AllScopes is every scope a user's credential can be granted. It leaves out
+// ScopeSession and ScopeVoiceRuntime.
 var AllScopes = Scopes{ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets}
 
 // Scopes is the set of scopes a credential carries.
@@ -35,7 +41,7 @@ func (ss Scopes) Has(s Scope) bool {
 		return slices.Contains(ss, ScopeRead) || ss.Has(ScopeWrite)
 	case ScopeWrite:
 		return slices.Contains(ss, ScopeWrite) || ss.Has(ScopeAdmin)
-	case ScopeAdmin, ScopeSecrets, ScopeSession:
+	case ScopeAdmin, ScopeSecrets, ScopeSession, ScopeVoiceRuntime:
 		return slices.Contains(ss, s)
 	}
 	return false
@@ -57,7 +63,7 @@ func ParseScopes(v string) (Scopes, error) {
 	for _, f := range strings.Fields(v) {
 		s := Scope(f)
 		switch s {
-		case ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeSession:
+		case ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeSession, ScopeVoiceRuntime:
 		default:
 			return nil, fmt.Errorf("unknown scope %q", f)
 		}
@@ -116,6 +122,10 @@ func GrantableScopes(r Role) Scopes {
 	}
 	return nil
 }
+
+// ServiceOnly reports whether s may be held by a service account only,
+// never granted through consent or to a user's token.
+func ServiceOnly(s Scope) bool { return s == ScopeVoiceRuntime }
 
 // Kind is how an actor authenticated.
 type Kind string
