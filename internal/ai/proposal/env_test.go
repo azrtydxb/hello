@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/ai/aifake"
 	"github.com/azrtydxb/hello/internal/ai/proposal"
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/apispec"
@@ -91,7 +92,8 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	ps := proposal.NewStore(db, val)
-	h := api.Handler(api.Config{Store: st, SIPDomain: "hello.test", SessionTTL: time.Hour, Proposals: ps})
+	agent, _, _ := aifake.Service(t, aifake.Config())
+	h := api.Handler(api.Config{Store: st, AIAgent: agent, SIPDomain: "hello.test", SessionTTL: time.Hour, Proposals: ps})
 	val.SetHandler(h)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
