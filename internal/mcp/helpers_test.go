@@ -263,3 +263,7 @@ func testAI(t testing.TB) *oauth.Server {
 	}
 	return as
 }
+
+func (fakeLookup) UserActor(context.Context, int64) (auth.Actor, error) {
+	return auth.Actor{}, auth.ErrNoCredentials
+}

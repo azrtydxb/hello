@@ -12,6 +12,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/replay"
 	"github.com/azrtydxb/hello/internal/store"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -130,7 +131,7 @@ func TestToolReplay(t *testing.T) {
 	})
 	t.Run("a replay cannot replay", func(t *testing.T) {
 		nested := auth.WithReplay(ctx, auth.Replay{ClientID: "c"})
-		if _, err := s.replay(nested, caller{authz: "Bearer " + tokRead}, "GET", "/api/v1/extensions", nil, nil); !errors.Is(err, errNestedReplay) {
+		if _, err := s.replay(nested, caller{authz: "Bearer " + tokRead}, "GET", "/api/v1/extensions", nil, nil); !errors.Is(err, replay.ErrNested) {
 			t.Errorf("nested replay = %v", err)
 		}
 		req := httptest.NewRequestWithContext(nested, http.MethodPost, "/mcp", strings.NewReader(callBody("listExtensions", nil)))
@@ -203,7 +204,7 @@ func TestToolReplay(t *testing.T) {
 		boom := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") })
 		_, ps := newTestServer(t, boom, fixtureOps(), nil)
 		r, err := ps.replay(ctx, caller{authz: "Bearer " + tokRead}, "GET", "/api/v1/extensions", nil, nil)
-		if err != nil || r.fail != "internal" || !toolResult(r, nil).IsError {
+		if err != nil || r.Fail != "internal" || !toolResult(r, nil).IsError {
 			t.Errorf("panicking handler = %+v, %v", r, err)
 		}
 		big := strings.Repeat("é", textCap)
@@ -211,4 +212,8 @@ func TestToolReplay(t *testing.T) {
 			t.Errorf("capText kept %d bytes", len(got))
 		}
 	})
+}
+
+func (*apiStore) UserActor(context.Context, int64) (auth.Actor, error) {
+	return auth.Actor{}, auth.ErrNoCredentials
 }

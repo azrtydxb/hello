@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/azrtydxb/hello/internal/replay"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -71,30 +72,30 @@ func (s *server) resourceHandler(d resourceDef) sdk.ResourceHandler {
 			return nil, err
 		}
 		switch {
-		case res.fail != "":
-			return nil, fmt.Errorf("reading %s: %s", uri, res.fail)
-		case res.status == http.StatusNotFound:
+		case res.Fail != "":
+			return nil, fmt.Errorf("reading %s: %s", uri, res.Fail)
+		case res.Status == http.StatusNotFound:
 			return nil, sdk.ResourceNotFoundError(uri)
-		case res.status >= 300:
+		case res.Status >= 300:
 			return nil, fmt.Errorf("reading %s: %s", uri, apiErrorText(res))
 		}
-		v, err := decode(res.body)
+		v, err := decode(res.Body)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: the API answered malformed JSON", uri)
 		}
-		redact(v, s.ops[d.op].Secrets)
+		replay.Redact(v, s.ops[d.op].Secrets)
 		text, _ := json.Marshal(v)
 		return &sdk.ReadResourceResult{Contents: []*sdk.ResourceContents{{URI: uri, MIMEType: "application/json", Text: string(text)}}}, nil
 	}
 }
 
 // apiErrorText is the API's error code and message of a non-2xx response.
-func apiErrorText(res apiResult) string {
+func apiErrorText(res replay.Result) string {
 	r := apiError(res)
 	if len(r.Content) == 1 {
 		if t, ok := r.Content[0].(*sdk.TextContent); ok {
 			return t.Text
 		}
 	}
-	return http.StatusText(res.status)
+	return http.StatusText(res.Status)
 }

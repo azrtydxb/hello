@@ -140,3 +140,7 @@ func (fakeAI) Resources() (string, string) {
 func (fakeAI) MetadataURL(r string) string {
 	return "https://hello.example/.well-known/oauth-protected-resource" + strings.TrimPrefix(r, "https://hello.example")
 }
+
+func (scopeStore) UserActor(context.Context, int64) (auth.Actor, error) {
+	return auth.Actor{}, auth.ErrNoCredentials
+}

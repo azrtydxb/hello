@@ -430,3 +430,8 @@ func (f *fakeStore) TokenActor(_ context.Context, hash []byte) (auth.Actor, erro
 func (f *fakeStore) SessionActor(context.Context, []byte) (auth.Actor, error) {
 	return auth.Actor{}, auth.ErrNoCredentials
 }
+
+// UserActor is the lookup of the in-product agent, unused by OAuth.
+func (*fakeStore) UserActor(context.Context, int64) (auth.Actor, error) {
+	return auth.Actor{}, auth.ErrNoCredentials
+}

@@ -265,8 +265,8 @@ func (s *server) toolHandler(t *tool) sdk.ToolHandler {
 			if rerr != nil {
 				return nil, rerr
 			}
-			status, res = r.status, toolResult(r, t.op.Secrets)
-			if r.fail != "" {
+			status, res = r.Status, toolResult(r, t.op.Secrets)
+			if r.Fail != "" {
 				status = 0
 			}
 		}

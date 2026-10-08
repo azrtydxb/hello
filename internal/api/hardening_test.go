@@ -95,3 +95,7 @@ func TestRegistrationsRedactFlowToken(t *testing.T) {
 		t.Fatalf("registrations = %d %s, want 200 with the flow token redacted", rec.Code, body)
 	}
 }
+
+func (tokenStore) UserActor(context.Context, int64) (auth.Actor, error) {
+	return auth.Actor{}, auth.ErrNoCredentials
+}

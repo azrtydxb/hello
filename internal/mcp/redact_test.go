@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"github.com/azrtydxb/hello/internal/replay"
 	"strings"
 	"testing"
 )
@@ -25,7 +26,7 @@ func TestRedactOperations(t *testing.T) {
 			for _, p := range op.Secrets {
 				plant(v, strings.Split(strings.TrimPrefix(p, "/"), "/"))
 			}
-			redact(v, op.Secrets)
+			replay.Redact(v, op.Secrets)
 			b, _ := json.Marshal(v)
 			if strings.Contains(string(b), sentinel) || !strings.Contains(string(b), "visible") {
 				t.Fatalf("after redaction: %s", b)
@@ -57,7 +58,7 @@ func TestRedactWalk(t *testing.T) {
 	var v any
 	_ = json.Unmarshal([]byte(`{"secret":"a","name":"secret","items":[{"url":"b","mac":"m"},{"url":"c"},{"mac":"n"}],
 		"phone":{"admin":{"password":"d"}},"map":{"x":{"token":"e"},"y":{"token":"f"}},"null":null}`), &v)
-	redact(v, []string{"/secret", "/items/*/url", "/phone/admin/password", "/map/*/token", "/missing/x", "/items/*/missing"})
+	replay.Redact(v, []string{"/secret", "/items/*/url", "/phone/admin/password", "/map/*/token", "/missing/x", "/items/*/missing"})
 	b, _ := json.Marshal(v)
 	for _, leaked := range []string{`"a"`, `"b"`, `"c"`, `"d"`, `"e"`, `"f"`} {
 		if strings.Contains(string(b), leaked) {
@@ -76,7 +77,7 @@ func TestRedactWalk(t *testing.T) {
 
 // plant puts the sentinel at segs, building objects and one-element lists.
 func plant(v map[string]any, segs []string) {
-	seg := unescape(segs[0])
+	seg := replay.Unescape(segs[0])
 	if len(segs) == 1 {
 		v[seg] = sentinel
 		return
@@ -114,7 +115,7 @@ func schemaAt(s map[string]any, path string) map[string]any {
 			continue
 		}
 		props, _ := node["properties"].(map[string]any)
-		node, _ = props[unescape(seg)].(map[string]any)
+		node, _ = props[replay.Unescape(seg)].(map[string]any)
 	}
 	return node
 }

@@ -5431,6 +5431,942 @@
           }
         }
       }
+    },
+    "/api/v1/ai/status": {
+      "get": {
+        "operationId": "getAIStatus",
+        "summary": "AI agent status",
+        "description": "Reports whether the AI agent is on and why not, the provider, model and endpoint host, today's token use against the budget, the agents with their last run and next due time, the last call errors, and open finding and proposal counts. It never contains a URL path, key, prompt or response; with AI off it still answers 200 with enabled false.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true,
+        "responses": {
+          "200": {
+            "description": "The status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/findings": {
+      "get": {
+        "operationId": "listAIFindings",
+        "summary": "AIOps findings",
+        "description": "Lists the PBX findings the deterministic detectors raised, with the model's explanation when there is one, most severe and best ranked first. Filter by status and severity; the response carries the health score.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true,
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Keep only findings in this status.",
+            "schema": {
+              "type": "string",
+              "enum": ["open", "acknowledged", "dismissed", "resolved"]
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "description": "Keep only findings of this severity.",
+            "schema": {
+              "type": "string",
+              "enum": ["info", "warning", "critical"]
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "description": "Keep only findings of this detector type.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Findings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIFindingList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/findings/{id}": {
+      "get": {
+        "operationId": "getAIFinding",
+        "summary": "One finding",
+        "description": "Returns one finding with its evidence, explanation, severity history and lifecycle times.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The finding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIFinding"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/findings/{id}/acknowledge": {
+      "post": {
+        "operationId": "acknowledgeAIFinding",
+        "summary": "Acknowledge a finding",
+        "description": "Marks an open finding acknowledged: it stays listed and is not raised again while it persists. Audited.",
+        "tags": ["ai"],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "human-in-the-loop"
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The finding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIFinding"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/findings/{id}/dismiss": {
+      "post": {
+        "operationId": "dismissAIFinding",
+        "summary": "Dismiss a finding",
+        "description": "Dismisses a finding with a reason; it is not raised again for 24 hours unless its severity rises. Audited.",
+        "tags": ["ai"],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "human-in-the-loop"
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIFindingDismiss"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The finding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIFinding"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/proposals": {
+      "get": {
+        "operationId": "listAIProposals",
+        "summary": "AI proposals",
+        "description": "Lists the configuration changes the AI agent proposed, newest first. A proposal is a suggestion: nothing changes until an operator applies it. Filter by status and source.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true,
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Keep only proposals in this status.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "applied",
+                "failed",
+                "stale",
+                "dismissed",
+                "superseded"
+              ]
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "description": "Keep only proposals from this source, assistant or finding:<detector>.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Proposals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIProposalList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/proposals/{id}": {
+      "get": {
+        "operationId": "getAIProposal",
+        "summary": "One proposal with its diff",
+        "description": "Returns one proposal with each action's stored before and after and the target's current state read with the caller's identity, so a change made since the proposal shows as a difference.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The proposal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIProposal"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/proposals/{id}/apply": {
+      "post": {
+        "operationId": "applyAIProposal",
+        "summary": "Apply a proposal",
+        "description": "Replays an open proposal's actions in order through the API with the caller's own credentials, so role checks, validation and audit are those of a direct call. A proposal whose targets changed since it was made becomes stale and nothing is sent; the first failing action stops it, with the earlier ones listed as applied.",
+        "tags": ["ai"],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "human-in-the-loop"
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The proposal, applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIProposal"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The proposal is not open (proposal_not_open) or went stale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/proposals/{id}/dismiss": {
+      "post": {
+        "operationId": "dismissAIProposal",
+        "summary": "Dismiss a proposal",
+        "description": "Dismisses an open proposal with a reason; the same change is not proposed again for 7 days. Audited.",
+        "tags": ["ai"],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "human-in-the-loop"
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIProposalDismiss"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The proposal, dismissed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIProposal"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The proposal is not open (proposal_not_open)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/sessions": {
+      "get": {
+        "operationId": "listAISessions",
+        "summary": "Assistant sessions",
+        "description": "Lists the caller's assistant sessions, most recently active first; an admin also sees other users' sessions.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true,
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1-200.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AISessionList"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createAISession",
+        "summary": "Start an assistant session",
+        "description": "Creates an empty assistant session owned by the caller. The first message names it unless a title is given.",
+        "tags": ["ai"],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "The in-product assistant's conversations belong to the console."
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AISessionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AISession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/sessions/{id}": {
+      "get": {
+        "operationId": "getAISession",
+        "summary": "One assistant session",
+        "description": "Returns a session with its messages, oldest first, and its running task if one exists. Others' sessions answer 404 except to an admin.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AISessionDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateAISession",
+        "summary": "Rename an assistant session",
+        "description": "Changes a session's title. Others' sessions answer 404 except to an admin.",
+        "tags": ["ai"],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "The in-product assistant's conversations belong to the console."
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AISessionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AISession"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteAISession",
+        "summary": "Delete an assistant session",
+        "description": "Deletes a session and its messages. Proposals made in it stay. Others' sessions answer 404 except to an admin.",
+        "tags": ["ai"],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "The in-product assistant's conversations belong to the console."
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/sessions/{id}/messages": {
+      "post": {
+        "operationId": "postAIMessage",
+        "summary": "Ask the assistant",
+        "description": "Posts a question of at most 4000 characters and answers 202 with a task id; the assistant works asynchronously with read-only tools replayed as the caller, so poll getAITask. One task per session runs at a time (409 task_running); a busy or budget-exhausted service answers 429.",
+        "tags": ["ai"],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "human-in-the-loop"
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIMessageCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIMessageAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "A task is already running in the session (task_running)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/AIBusy"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/tasks/{id}": {
+      "get": {
+        "operationId": "getAITask",
+        "summary": "An AI task",
+        "description": "Returns an AI task's status and, when it failed, its error code. Only the requester or an admin may read it; anyone else gets 404.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true,
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AITask"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/agents": {
+      "get": {
+        "operationId": "listAIAgents",
+        "summary": "Background agents",
+        "description": "Lists the background agents with their interval, last run and next due time.",
+        "tags": ["ai"],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true,
+        "responses": {
+          "200": {
+            "description": "Agents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAgentList"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
+    },
+    "/api/v1/ai/agents/{name}/run": {
+      "post": {
+        "operationId": "runAIAgent",
+        "summary": "Run an agent now",
+        "description": "Records a run-now request for a background agent; the scheduler starts it within seconds on one replica, never overlapping a run already in progress.",
+        "tags": ["ai"],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "human-in-the-loop"
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The agent's name, as listAIAgents returns it.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Requested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIAgentRunRequest"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/AIDisabled"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5456,6 +6392,16 @@
           "minimum": 1
         },
         "description": "Numeric id of the resource the path names, as its list operation returns it."
+      },
+      "uuid": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "description": "The id (a UUID) of the finding, proposal, session or task, as its list operation or creating call returned it."
       }
     },
     "responses": {
@@ -5521,6 +6467,26 @@
       },
       "Unavailable": {
         "description": "Live state (Valkey) is unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "AIDisabled": {
+        "description": "The AI agent is off (ai_disabled); GET /api/v1/ai/status says why",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "AIBusy": {
+        "description": "No model slot within 5 seconds (ai_busy) or the daily token budget is spent (ai_budget_exhausted)",
         "content": {
           "application/json": {
             "schema": {
@@ -9355,6 +10321,924 @@
             "type": "string",
             "description": "The Hello API version the skill targets (metadata.hello-version).",
             "example": "v1"
+          }
+        }
+      },
+      "AIAgentRun": {
+        "type": "object",
+        "required": ["startedAt", "tokens"],
+        "properties": {
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the run started."
+          },
+          "finishedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When it ended; null while it runs."
+          },
+          "outcome": {
+            "type": ["string", "null"],
+            "enum": [
+              "ok",
+              "no_change",
+              "skipped_budget",
+              "skipped_locked",
+              "failed",
+              null
+            ],
+            "description": "How it ended."
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tokens the run used."
+          },
+          "error": {
+            "type": ["string", "null"],
+            "description": "The failure, when the outcome is failed."
+          }
+        }
+      },
+      "AIAgent": {
+        "type": "object",
+        "required": [
+          "name",
+          "intervalSeconds",
+          "lastRun",
+          "nextDueAt",
+          "runRequested"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The agent's name, as runAIAgent takes it (for example aiops)."
+          },
+          "intervalSeconds": {
+            "type": "integer",
+            "description": "Seconds between runs; 0 disables the agent."
+          },
+          "lastRun": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AIAgentRun"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most recent run, or null if it never ran."
+          },
+          "nextDueAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the agent is next due; null when disabled."
+          },
+          "runRequested": {
+            "type": "boolean",
+            "description": "Whether a run-now request is waiting."
+          }
+        }
+      },
+      "AIAgentList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AIAgent"
+            }
+          }
+        }
+      },
+      "AIStatus": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "reason",
+          "provider",
+          "model",
+          "endpointHost",
+          "endpointPrivate",
+          "structuredOutput",
+          "tokensToday",
+          "dailyTokenBudget",
+          "backgroundTokenLimit",
+          "concurrencyInUse",
+          "maxConcurrency",
+          "agents",
+          "recentErrors",
+          "openFindings",
+          "healthScore",
+          "openProposals"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the AI agent runs: HELLO_AI_BASE_URL and HELLO_AI_MODEL are set and the endpoint passed the privacy check."
+          },
+          "reason": {
+            "type": ["string", "null"],
+            "description": "Why it is off (not_configured, incomplete_configuration, endpoint_not_private); null when enabled."
+          },
+          "provider": {
+            "type": "string",
+            "description": "openai or anthropic."
+          },
+          "model": {
+            "type": "string",
+            "description": "The model name."
+          },
+          "endpointHost": {
+            "type": "string",
+            "description": "The endpoint's host and port, never its path or key."
+          },
+          "endpointPrivate": {
+            "type": "boolean",
+            "description": "Whether the endpoint host resolves only to private addresses."
+          },
+          "structuredOutput": {
+            "type": "string",
+            "description": "json_schema or prompt."
+          },
+          "tokensToday": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tokens used today (UTC) across replicas."
+          },
+          "dailyTokenBudget": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The daily token budget."
+          },
+          "backgroundTokenLimit": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tokens background work may use today before it stops."
+          },
+          "concurrencyInUse": {
+            "type": "integer",
+            "description": "Model calls in flight on this replica."
+          },
+          "maxConcurrency": {
+            "type": "integer",
+            "description": "The most model calls in flight per replica."
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AIAgent"
+            }
+          },
+          "recentErrors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["code", "at"],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "The error code."
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "When it happened."
+                }
+              }
+            },
+            "description": "The last 10 call errors, without prompt or response text."
+          },
+          "openFindings": {
+            "type": "object",
+            "description": "Open and acknowledged findings by severity.",
+            "required": ["info", "warning", "critical"],
+            "properties": {
+              "info": {
+                "type": "integer"
+              },
+              "warning": {
+                "type": "integer"
+              },
+              "critical": {
+                "type": "integer"
+              }
+            }
+          },
+          "healthScore": {
+            "type": "integer",
+            "description": "max(0, 10 - 3 x critical - warning) over open findings."
+          },
+          "openProposals": {
+            "type": "integer",
+            "description": "Proposals waiting to be applied or dismissed."
+          }
+        }
+      },
+      "AIFindingExplanation": {
+        "type": "object",
+        "required": ["summary", "likelyCause", "nextStep"],
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "A short explanation."
+          },
+          "likelyCause": {
+            "type": "string",
+            "description": "The likely cause."
+          },
+          "nextStep": {
+            "type": "string",
+            "description": "The suggested next step."
+          },
+          "relatedIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ids of related findings."
+          }
+        }
+      },
+      "AIFinding": {
+        "type": "object",
+        "required": [
+          "id",
+          "candidateId",
+          "type",
+          "subject",
+          "severity",
+          "status",
+          "title",
+          "evidence",
+          "explanation",
+          "explained",
+          "rank",
+          "firstSeen",
+          "lastSeen",
+          "occurrences",
+          "severityHistory",
+          "acknowledgedBy",
+          "acknowledgedAt",
+          "dismissedBy",
+          "dismissedAt",
+          "dismissReason",
+          "resolvedAt",
+          "proposalId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The finding's id."
+          },
+          "candidateId": {
+            "type": "string",
+            "description": "The detector's candidate id, type:subject."
+          },
+          "type": {
+            "type": "string",
+            "description": "The detector."
+          },
+          "subject": {
+            "type": "string",
+            "description": "What the finding is about."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["info", "warning", "critical"],
+            "description": "The current severity."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["open", "acknowledged", "dismissed", "resolved"],
+            "description": "Where it is in its lifecycle."
+          },
+          "title": {
+            "type": "string",
+            "description": "The detector's own title."
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Numbers and up to 10 sample rows the detector saw."
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AIFindingExplanation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The model's explanation, or null when not explained."
+          },
+          "explained": {
+            "type": "boolean",
+            "description": "Whether the model explained it."
+          },
+          "rank": {
+            "type": ["integer", "null"],
+            "description": "The model's rank among open findings, 1 first; null when not ranked."
+          },
+          "firstSeen": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the candidate first appeared."
+          },
+          "lastSeen": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When a detector last produced it."
+          },
+          "occurrences": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many runs produced it."
+          },
+          "severityHistory": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["severity", "at"],
+              "properties": {
+                "severity": {
+                  "type": "string",
+                  "enum": ["info", "warning", "critical"]
+                },
+                "at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "description": "Severity changes."
+          },
+          "acknowledgedBy": {
+            "type": ["integer", "null"],
+            "description": "The user who acknowledged it."
+          },
+          "acknowledgedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When it was acknowledged."
+          },
+          "dismissedBy": {
+            "type": ["integer", "null"],
+            "description": "The user who dismissed it."
+          },
+          "dismissedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When it was dismissed."
+          },
+          "dismissReason": {
+            "type": ["string", "null"],
+            "description": "Why it was dismissed."
+          },
+          "resolvedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When it resolved."
+          },
+          "proposalId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The open proposal the explanation made, if any."
+          }
+        }
+      },
+      "AIFindingList": {
+        "type": "object",
+        "required": ["items", "healthScore"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AIFinding"
+            }
+          },
+          "healthScore": {
+            "type": "integer",
+            "description": "max(0, 10 - 3 x critical - warning) over open findings."
+          }
+        }
+      },
+      "AIFindingDismiss": {
+        "type": "object",
+        "required": ["reason"],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Why the finding is dismissed, at most 500 characters."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AIProposalAction": {
+        "type": "object",
+        "required": ["operationId", "pathParams"],
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "description": "An allowlisted operation id."
+          },
+          "pathParams": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Path parameter values by name."
+          },
+          "body": {
+            "description": "The request body, absent for operations without one."
+          },
+          "before": {
+            "description": "The target as it was when the proposal was made; null for creates."
+          },
+          "after": {
+            "description": "The target as the action would leave it; null for deletes."
+          },
+          "current": {
+            "description": "The target now, read with the caller's identity; only on getAIProposal."
+          }
+        }
+      },
+      "AIProposalFailure": {
+        "type": "object",
+        "required": ["index", "status", "code", "message", "applied"],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "description": "The failing action's position, from 0."
+          },
+          "status": {
+            "type": "integer",
+            "description": "The HTTP status it answered."
+          },
+          "code": {
+            "type": "string",
+            "description": "The API error code."
+          },
+          "message": {
+            "type": "string",
+            "description": "The API error message."
+          },
+          "applied": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "Positions of the actions applied before it."
+          }
+        }
+      },
+      "AIProposal": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "sessionId",
+          "findingId",
+          "title",
+          "rationale",
+          "status",
+          "configRevision",
+          "actions",
+          "hasDelete",
+          "createdBy",
+          "createdAt",
+          "updatedAt",
+          "appliedBy",
+          "appliedAt",
+          "dismissedBy",
+          "dismissedAt",
+          "dismissReason",
+          "dismissText",
+          "failure"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The proposal's id."
+          },
+          "source": {
+            "type": "string",
+            "description": "assistant or finding:<detector>."
+          },
+          "sessionId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The session it came from."
+          },
+          "findingId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The finding it came from."
+          },
+          "title": {
+            "type": "string",
+            "description": "A short title."
+          },
+          "rationale": {
+            "type": "string",
+            "description": "Why the change is proposed."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "applied",
+              "failed",
+              "stale",
+              "dismissed",
+              "superseded"
+            ],
+            "description": "Where it is."
+          },
+          "configRevision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The configuration revision it was validated against."
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AIProposalAction"
+            },
+            "description": "At most 8 ordered actions."
+          },
+          "hasDelete": {
+            "type": "boolean",
+            "description": "Whether an action deletes a resource; the console marks it and asks for confirmation."
+          },
+          "createdBy": {
+            "type": ["integer", "null"],
+            "description": "The user the assistant worked for; null for a finding."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was made."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was last refreshed or changed."
+          },
+          "appliedBy": {
+            "type": ["integer", "null"],
+            "description": "The user who applied it."
+          },
+          "appliedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When it was applied."
+          },
+          "dismissedBy": {
+            "type": ["integer", "null"],
+            "description": "The user who dismissed it."
+          },
+          "dismissedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When it was dismissed."
+          },
+          "dismissReason": {
+            "type": ["string", "null"],
+            "description": "not_needed, wrong, later or other."
+          },
+          "dismissText": {
+            "type": ["string", "null"],
+            "description": "Optional text with the reason."
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AIProposalFailure"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why a failed proposal stopped."
+          }
+        }
+      },
+      "AIProposalList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AIProposal"
+            }
+          }
+        }
+      },
+      "AIProposalDismiss": {
+        "type": "object",
+        "required": ["reason"],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "enum": ["not_needed", "wrong", "later", "other"],
+            "description": "Why it is dismissed."
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Optional detail, at most 500 characters."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AISession": {
+        "type": "object",
+        "required": ["id", "owner", "title", "createdAt", "lastActiveAt"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The session's id."
+          },
+          "owner": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The user who owns it."
+          },
+          "title": {
+            "type": "string",
+            "description": "The title; editable."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it started."
+          },
+          "lastActiveAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it last had a message."
+          }
+        }
+      },
+      "AISessionList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AISession"
+            }
+          }
+        }
+      },
+      "AIToolCall": {
+        "type": "object",
+        "required": ["operationId", "status", "truncated"],
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "description": "The read operation called."
+          },
+          "arguments": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The arguments it was called with."
+          },
+          "status": {
+            "type": "integer",
+            "description": "The HTTP status it answered; 0 for a failed replay."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Whether the result was cut at 16 KiB."
+          }
+        }
+      },
+      "AIMessage": {
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "content",
+          "toolCalls",
+          "citations",
+          "proposalId",
+          "taskId",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The message's id."
+          },
+          "role": {
+            "type": "string",
+            "enum": ["user", "assistant"],
+            "description": "Who wrote it."
+          },
+          "content": {
+            "type": "string",
+            "description": "The text, shown as plain text."
+          },
+          "toolCalls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AIToolCall"
+            },
+            "description": "The tool calls an assistant message made."
+          },
+          "citations": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "Positions in toolCalls the answer relies on."
+          },
+          "proposalId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The proposal the answer made."
+          },
+          "taskId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The task that produced it."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was written."
+          }
+        }
+      },
+      "AISessionDetail": {
+        "type": "object",
+        "required": ["session", "messages", "task"],
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/AISession"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AIMessage"
+            },
+            "description": "The session's messages, oldest first."
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AITask"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The running task, or null."
+          }
+        }
+      },
+      "AISessionCreate": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "An optional title; the first message names it otherwise."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AISessionUpdate": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "The new title."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AIMessageCreate": {
+        "type": "object",
+        "required": ["content"],
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "The question, at most 4000 characters."
+          }
+        },
+        "additionalProperties": false
+      },
+      "AIMessageAccepted": {
+        "type": "object",
+        "required": ["taskId", "messageId"],
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The task answering the message; poll getAITask."
+          },
+          "messageId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The stored user message."
+          }
+        }
+      },
+      "AITask": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "sessionId",
+          "errorCode",
+          "errorMessage",
+          "result",
+          "createdAt",
+          "startedAt",
+          "finishedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The task's id."
+          },
+          "kind": {
+            "type": "string",
+            "description": "What it does, for example message."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["queued", "running", "succeeded", "failed"],
+            "description": "Where it is."
+          },
+          "sessionId": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "The session it works for."
+          },
+          "errorCode": {
+            "type": ["string", "null"],
+            "description": "invalid_output, timeout, provider_error, endpoint_not_private, budget_exhausted, tools_unsupported or instance_stopped."
+          },
+          "errorMessage": {
+            "type": ["string", "null"],
+            "description": "The failure's message, without prompt or response text."
+          },
+          "result": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "description": "What it produced, for example the assistant message id."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was queued."
+          },
+          "startedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When it started."
+          },
+          "finishedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When it ended."
+          }
+        }
+      },
+      "AIAgentRunRequest": {
+        "type": "object",
+        "required": ["agent", "requestedAt"],
+        "properties": {
+          "agent": {
+            "type": "string",
+            "description": "The agent asked to run."
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the request was recorded."
           }
         }
       }

@@ -34,6 +34,9 @@ type Actor struct {
 	Audience []string
 	// ServiceName is the service account's name for KindService.
 	ServiceName string
+	// Via is how the change was made when not through a client: the audit
+	// via of an agent request (ViaAssistant), else empty.
+	Via string
 }
 
 // String is the audit form of the actor: "service:<name>" for a service
@@ -57,6 +60,9 @@ type Lookup interface {
 	// prefix decides the kind (PrefixPersonal, PrefixAccess, ...), an
 	// unprefixed token is a legacy API token.
 	TokenActor(ctx context.Context, hash []byte) (Actor, error)
+	// UserActor resolves the user an agent acts for, with their current
+	// role; ErrNoCredentials when the user no longer exists.
+	UserActor(ctx context.Context, id int64) (Actor, error)
 }
 
 type actorKey struct{}
@@ -92,7 +98,8 @@ type Options struct {
 // An OAuth access token is admitted only for a resource in its audience:
 // o.Resource, or, inside an MCP replay (ReplayFrom) by the same client, the
 // MCP resource next to it (spec S-9). The session scope is only ever held
-// by a session (spec S-5). With o.MetadataURL set, every 401 carries the
+// by a session (spec S-5). A request without credentials whose context
+// holds an agent (AgentFrom) is that user, read only. With o.MetadataURL set, every 401 carries the
 // RFC 9728 challenge.
 func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -101,7 +108,14 @@ func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.H
 				a   Actor
 				err error
 			)
+			ag, isAgent := AgentFrom(r.Context())
 			switch h := r.Header.Get("Authorization"); {
+			case h == "" && isAgent:
+				// The agent marker rides in the context, never in a header,
+				// so only code in this process can set it. The agent reads
+				// as the user it works for, with their current role.
+				a, err = l.UserActor(r.Context(), ag.UserID)
+				a.Kind, a.Scopes, a.Via = KindAgent, Scopes{ScopeRead}, ViaAssistant
 			case h != "":
 				tok, ok := strings.CutPrefix(h, "Bearer ")
 				if !ok || tok == "" {
@@ -147,6 +161,9 @@ func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.H
 				log.Error("authenticate request", "error", err)
 				WriteError(w, http.StatusInternalServerError, "internal", "internal error")
 				return
+			}
+			if a.Via == "" {
+				a.Via = ViaFrom(r.Context())
 			}
 			next.ServeHTTP(w, r.WithContext(WithActor(withChallenge(r.Context(), o.MetadataURL), a)))
 		})

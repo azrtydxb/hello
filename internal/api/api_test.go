@@ -123,3 +123,7 @@ func TestVersionAndOpenAPI(t *testing.T) {
 		t.Fatalf("GET /api/v1/nope = %d, want 404", rec.Code)
 	}
 }
+
+func (stubStore) UserActor(context.Context, int64) (auth.Actor, error) {
+	return auth.Actor{}, auth.ErrNoCredentials
+}
