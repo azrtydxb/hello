@@ -542,10 +542,17 @@ func (s *Store) RestoreVoiceAgentVersion(ctx context.Context, actor string, id, 
 			SELECT id, revision, $2, $3 FROM voice_agents WHERE id = $1`, id, pj, actor); err != nil {
 			return "", err
 		}
+		// The prune keeps the newest maxVoiceAgentVersions-1 rows beside the
+		// source, so the restored snapshot always survives its own prune.
 		if _, err := tx.ExecContext(ctx, `
-			DELETE FROM voice_agent_versions v USING voice_agents a
-			WHERE v.agent_id = a.id AND a.id = $1 AND v.revision < a.revision - $2`,
-			id, maxVoiceAgentVersions-1); err != nil {
+			DELETE FROM voice_agent_versions v
+			WHERE v.agent_id = $1 AND v.revision <> $2 AND v.revision IN (
+				SELECT revision FROM (
+					SELECT revision, row_number() OVER (ORDER BY revision DESC) rn
+					FROM voice_agent_versions
+					WHERE agent_id = $1 AND revision <> $2
+				) r WHERE rn > $3)`,
+			id, revision, maxVoiceAgentVersions-1); err != nil {
 			return "", err
 		}
 		if err := bumpVoiceRevision(ctx, tx); err != nil {
@@ -819,7 +826,9 @@ func (s *Store) CreateVoiceMCPServer(ctx context.Context, actor string, in NewVo
 }
 
 // UpdateVoiceMCPServer replaces the server's fields; an empty credential
-// keeps the stored one (spec S-5: PUT without a credential keeps it).
+// keeps the stored one (spec S-5: PUT without a credential keeps it, the
+// sealed bytes included) and the voice revision still moves (the runtime
+// reloads on it).
 func (s *Store) UpdateVoiceMCPServer(ctx context.Context, actor string, id int64, in NewVoiceMCPServer, check Check) (VoiceMCPServer, error) {
 	if in.Auth != "none" && in.Credential == "" {
 		kept, err := s.VoiceMCPServerCredential(ctx, id)
@@ -829,9 +838,15 @@ func (s *Store) UpdateVoiceMCPServer(ctx context.Context, actor string, id int64
 		if err != nil {
 			return VoiceMCPServer{}, err
 		}
-		in.Credential = kept
+		if kept == "" {
+			return VoiceMCPServer{}, newVoiceError(400, "bad_request", in.Auth+" auth needs a credential")
+		}
+		in.Credential = ""
 	}
 	err := s.configChangeID(ctx, actor, "update", "voice_mcp_server", check, func(tx *sql.Tx) (string, error) {
+		if err := bumpVoiceRevision(ctx, tx); err != nil {
+			return "", err
+		}
 		var cred any
 		if in.Credential != "" {
 			if s.box == nil {

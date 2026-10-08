@@ -26,7 +26,7 @@ func TestVoiceCallerVerification(t *testing.T) {
 		func(m map[string]any) {
 			m["callerVerification"] = "pin"
 			m["pin"] = "1234"
-			m["callerAllowlist"] = []string{"+32123456789", "101"}
+			m["callerAllowlist"] = []string{"+31405550199", "101"}
 		})).json(t)
 	if a["pinSet"] != true || a["callerVerification"] != "pin" {
 		t.Fatalf("created agent = %v", a)
@@ -68,7 +68,7 @@ func TestVoiceCallerVerification(t *testing.T) {
 	var leaked bool
 	if err := e.db.QueryRowContext(ctx, `
 		SELECT EXISTS (SELECT 1 FROM audit_events WHERE resource = 'voice_agent'
-		  AND (to_jsonb(audit_events)::text LIKE '%32123456789%'
+		  AND (to_jsonb(audit_events)::text LIKE '%31405550199%'
 		    OR to_jsonb(audit_events)::text LIKE '%1234%'))`).Scan(&leaked); err != nil || leaked {
 		t.Fatalf("allowlist or PIN in audit rows (%v)", err)
 	}

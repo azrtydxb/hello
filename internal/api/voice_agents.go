@@ -129,11 +129,11 @@ func (s *server) listVoiceAgents(w http.ResponseWriter, r *http.Request) {
 		s.voiceError(w, "voice agents", err)
 		return
 	}
-	out := make([]voiceAgentJSON, len(as))
-	for i, a := range as {
-		out[i] = agentBody(a, nil)
+	out := make([]voiceAgentJSON, 0, len(as))
+	for _, a := range as {
+		out = append(out, agentBody(a, nil))
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, items(out))
 }
 
 // voiceAgentIn is the create and update body.
@@ -263,11 +263,11 @@ func (s *server) listVoiceAgentVersions(w http.ResponseWriter, r *http.Request) 
 		s.voiceError(w, "voice agent versions", err)
 		return
 	}
-	out := make([]voiceAgentVersionJSON, len(vs))
-	for i, v := range vs {
-		out[i] = voiceAgentVersionJSON{Revision: v.Revision, Actor: v.Actor, CreatedAt: v.CreatedAt, Persona: v.Persona}
+	out := make([]voiceAgentVersionJSON, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, voiceAgentVersionJSON{Revision: v.Revision, Actor: v.Actor, CreatedAt: v.CreatedAt, Persona: v.Persona})
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, items(out))
 }
 
 func (s *server) restoreVoiceAgentVersion(w http.ResponseWriter, r *http.Request) {

@@ -12596,9 +12596,15 @@
         }
       },
       "VoiceAgentList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceAgent"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceAgent"
+            }
+          }
         },
         "description": "Every voice agent."
       },
@@ -12712,9 +12718,15 @@
         }
       },
       "VoiceAgentVersionList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceAgentVersion"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceAgentVersion"
+            }
+          }
         },
         "description": "A voice agent's saved personas, newest first."
       },
@@ -12807,9 +12819,15 @@
         }
       },
       "VoiceAgentCallList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceAgentCall"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceAgentCall"
+            }
+          }
         },
         "description": "One call per report, newest first."
       },
@@ -12857,9 +12875,15 @@
         }
       },
       "VoiceMCPServerList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceMCPServer"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceMCPServer"
+            }
+          }
         },
         "description": "Every MCP server."
       },

@@ -97,7 +97,7 @@ func (s *server) listVoiceMCPServers(w http.ResponseWriter, r *http.Request) {
 	for _, v := range vs {
 		out = append(out, serverBody(v, byName[v.Name]))
 	}
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, items(out))
 }
 
 func (s *server) createVoiceMCPServer(w http.ResponseWriter, r *http.Request) {
