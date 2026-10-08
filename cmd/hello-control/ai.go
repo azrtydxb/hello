@@ -42,7 +42,7 @@ func newAuthServer(cfg config.AI, st *store.Store, vk *api.LazyValkey, reg prome
 // composeApp is hello-control's HTTP surface: /api/v1 always; with
 // HELLO_PUBLIC_URL also the authorization server's well-known documents
 // and /oauth/*, and /mcp. Without it those paths answer 404 as before.
-func composeApp(cfg config.AI, apiHandler http.Handler, as *oauth.Server, st *store.Store, log *slog.Logger) (http.Handler, error) {
+func composeApp(cfg config.AI, apiHandler http.Handler, as *oauth.Server, st *store.Store, reg prometheus.Registerer, log *slog.Logger) (http.Handler, error) {
 	if as == nil {
 		return apiHandler, nil
 	}
@@ -53,7 +53,7 @@ func composeApp(cfg config.AI, apiHandler http.Handler, as *oauth.Server, st *st
 	_, mcpResource := as.Resources()
 	mcpHandler, err := mcp.New(mcp.Options{
 		API: apiHandler, Spec: spec, PublicURL: cfg.PublicURL, AllowedOrigins: cfg.MCPAllowedOrigins,
-		Lookup: st, MetadataURL: as.MetadataURL(mcpResource), Log: log,
+		Lookup: st, MetadataURL: as.MetadataURL(mcpResource), Metrics: mcp.NewMetrics(reg), Log: log,
 	})
 	if err != nil {
 		return nil, err

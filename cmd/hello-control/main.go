@@ -153,7 +153,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		apiCfg.AI = as
 		go pruneOAuth(ctx, as, vk, cfg.NodeID, log)
 	}
-	app, err := composeApp(cfg.AI, api.Handler(apiCfg), as, st, log)
+	app, err := composeApp(cfg.AI, api.Handler(apiCfg), as, st, metrics.Registry, log)
 	if err != nil {
 		_ = ln.Close()
 		return err

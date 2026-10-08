@@ -14,6 +14,7 @@ import (
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/apispec"
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/oauth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -25,6 +26,7 @@ const (
 	tokAdmin     = "hello_pat_admin"
 	tokOAuth     = "hello_at_mcp"
 	tokOAuthAPI  = "hello_at_api"
+	tokOAuthW    = "hello_at_write"
 	tokSecrets   = "hello_pat_secrets"
 	tokBroken    = "hello_pat_broken"
 )
@@ -46,6 +48,8 @@ func actorFor(tok string) (auth.Actor, error) {
 		return auth.Actor{UserID: 3, Username: "cat", TokenID: 14, Role: auth.RoleAdmin, Kind: auth.KindPersonalToken, Scopes: auth.Scopes{auth.ScopeSecrets}}, nil
 	case tokOAuth:
 		return auth.Actor{UserID: 1, Username: "ann", Role: auth.RoleViewer, Kind: auth.KindOAuth, Scopes: auth.Scopes{auth.ScopeRead}, ClientID: "https://client.test/cimd", Audience: []string{testPublic + "/mcp"}}, nil
+	case tokOAuthW:
+		return auth.Actor{UserID: 2, Username: "bob", Role: auth.RoleOperator, Kind: auth.KindOAuth, Scopes: auth.Scopes{auth.ScopeRead, auth.ScopeWrite}, ClientID: "https://client.test/cimd", Audience: []string{testPublic + "/mcp"}}, nil
 	case tokOAuthAPI:
 		return auth.Actor{UserID: 1, Username: "ann", Role: auth.RoleViewer, Kind: auth.KindOAuth, Scopes: auth.Scopes{auth.ScopeRead}, ClientID: "c", Audience: []string{testPublic + "/api/v1"}}, nil
 	case tokBroken:
@@ -56,7 +60,7 @@ func actorFor(tok string) (auth.Actor, error) {
 
 var tokenByHash = func() map[string]string {
 	m := map[string]string{}
-	for _, t := range []string{tokRead, tokWrite, tokAdmin, tokOAuth, tokOAuthAPI, tokSecrets, tokBroken} {
+	for _, t := range []string{tokRead, tokWrite, tokAdmin, tokOAuth, tokOAuthAPI, tokOAuthW, tokSecrets, tokBroken} {
 		m[string(auth.HashToken(t))] = t
 	}
 	return m
@@ -247,4 +251,15 @@ func resultText(t *testing.T, r *sdk.CallToolResult) string {
 		t.Fatalf("content is %T", r.Content[0])
 	}
 	return tc.Text
+}
+
+// testAI is an authorization server for testPublic, so the API admits
+// OAuth tokens bound to its resources.
+func testAI(t testing.TB) *oauth.Server {
+	t.Helper()
+	as, err := oauth.New(oauth.Options{PublicURL: testPublic})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return as
 }

@@ -23,6 +23,7 @@ type apiStore struct {
 	mu      sync.Mutex
 	secrets []string
 	actors  []string
+	vias    []string
 }
 
 func (*apiStore) SessionActor(ctx context.Context, h []byte) (auth.Actor, error) {
@@ -44,22 +45,26 @@ func (*apiStore) GetExtension(_ context.Context, id int64) (store.Extension, err
 	return store.Extension{ID: 7, Number: "201", Name: "Ann"}, nil
 }
 
-func (s *apiStore) CreateDevice(_ context.Context, actor string, in store.NewDevice) (store.Device, error) {
+func (s *apiStore) CreateDevice(ctx context.Context, actor string, in store.NewDevice) (store.Device, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.secrets = append(s.secrets, in.Secret)
 	s.actors = append(s.actors, actor)
+	a, _ := auth.ActorFrom(ctx)
+	s.vias = append(s.vias, a.ClientID)
 	return store.Device{ID: 9, ExtensionID: in.ExtensionID, SIPUsername: in.SIPUsername, Enabled: in.Enabled}, nil
 }
 
 // TestToolReplay fails if a tool call does not reach the handler with the
 // caller's credentials and the replay marker, an external request carrying
-// any header can pose as a replay, a replay can replay, an API error is not
+// any header can pose as a replay, a replay can replay, a mutation's audit
+// row lacks via (the store's insertAudit reads it from the actor the
+// replayed request carries into the store), an API error is not
 // returned as isError with code and fields, or an x-hello-secret value
 // (device create included) appears in a result (spec S-15).
 func TestToolReplay(t *testing.T) {
 	st := &apiStore{}
-	rec := &recordingAPI{next: api.Handler(api.Config{Store: st, SIPDomain: "pbx.test"})}
+	rec := &recordingAPI{next: api.Handler(api.Config{AI: testAI(t), Store: st, SIPDomain: "pbx.test"})}
 	ts, s := newTestServer(t, rec, fixtureOps(), nil)
 	ctx := context.Background()
 
@@ -79,6 +84,19 @@ func TestToolReplay(t *testing.T) {
 		items, _ := res.StructuredContent.(map[string]any)["items"].([]any)
 		if len(items) != 1 || !strings.Contains(resultText(t, res), `"number":"201"`) {
 			t.Errorf("structuredContent = %v, text %s", res.StructuredContent, resultText(t, res))
+		}
+	})
+	t.Run("a mutation's audit row carries via", func(t *testing.T) {
+		cs := connect(t, ts.URL, tokOAuthW, "2025-11-25")
+		res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "createDevice", Arguments: map[string]any{
+			"body": map[string]any{"extensionId": 7, "sipUsername": "via-check"}}})
+		if err != nil || res.IsError {
+			t.Fatalf("createDevice = %+v, %v", res, err)
+		}
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if n := len(st.vias); n == 0 || st.vias[n-1] != "https://client.test/cimd" {
+			t.Errorf("store saw via %v, want the OAuth client", st.vias)
 		}
 	})
 	t.Run("only Authorization is copied", func(t *testing.T) {

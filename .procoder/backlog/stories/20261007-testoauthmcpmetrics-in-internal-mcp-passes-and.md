@@ -24,8 +24,8 @@ Operators see OAuth and MCP activity in hello_oauth_* and hello_mcp_* metrics an
 <!-- Filled at close time: the commands run and what their output proved,
      one line per criterion. Empty evidence keeps the story open. -->
 
-Fingerprint: sha256:58bc4ab3f9553cb8e72fc1f85b062df1cc3dad51d110b20b33623330f47ebd94
+Fingerprint: sha256:dba4698f6cef4b218d6528bfb2ef882582531fc58692d84d41816f64018c80e0
 Produced: 124 bytes, exit 0
 Command: go test -race -count=1 -run ^TestOAuthMCPMetrics$ -v ./internal/mcp/
 
-Open: the MCP half (requests, tool calls, duration, log line without credentials, arguments or withheld values) passes; the OAuth half and `TestNoSecretsInLogs` are plan Tasks 3 and 7.
+Both halves pass: the OAuth half (client credentials issue, invalid_client failure, client ID metadata document fetch, on the same registry and log as the MCP metrics, no token or client secret in the log) and the MCP half. Open: the `TestNoSecretsInLogs` extension is plan Task 7.

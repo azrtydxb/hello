@@ -19,7 +19,7 @@ func TestToolCallOverhead(t *testing.T) {
 	if os.Getenv("HELLO_BENCH") != "1" {
 		t.Skip("HELLO_BENCH=1 not set")
 	}
-	apiH := api.Handler(api.Config{Store: &apiStore{}})
+	apiH := api.Handler(api.Config{AI: testAI(t), Store: &apiStore{}})
 	ts, _ := newTestServer(t, apiH, fixtureOps(), nil)
 	direct := httpServe(t, apiH)
 	client := &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 4}}
