@@ -160,6 +160,9 @@ type Config struct {
 	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
 	// routes answer 404 and bearer tokens get no audience check.
 	AI AIAccess
+	// Proposals serves the AI proposal routes (spec ai-agent); nil answers
+	// 503 ai_disabled.
+	Proposals ProposalService
 }
 
 type server struct{ Config }

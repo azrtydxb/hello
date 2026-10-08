@@ -1,17 +1,23 @@
 package apispec
 
 import (
+	"os"
 	"strings"
 	"testing"
 
-	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/auth"
 )
 
 // TestLoadShape fails if the embedded document does not load or a
 // non-OpenAPI document does.
 func TestLoadShape(t *testing.T) {
-	if _, err := Load(api.OpenAPI()); err != nil {
+	// Read the file: importing internal/api would make a cycle, since the
+	// API serves the proposal routes, which use this package.
+	doc, err := os.ReadFile("../api/openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(doc); err != nil {
 		t.Fatalf("embedded document: %v", err)
 	}
 	for _, bad := range []string{`nope`, `{"swagger":"2.0","paths":{}}`, `{"openapi":"3.1.0"}`} {
