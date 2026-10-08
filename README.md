@@ -14,7 +14,8 @@ limits, and every call carries a routing trace in its record. A route tester
 explains any number before it goes live. Media flows directly between the
 endpoints; anchoring arrives in Phase 5. See [docs/phones.md](docs/phones.md)
 for phones, [docs/provisioning.md](docs/provisioning.md) for configuring
-them automatically, and [docs/trunks.md](docs/trunks.md) for trunks.
+them automatically, [docs/trunks.md](docs/trunks.md) for trunks, and
+[docs/ai-access.md](docs/ai-access.md) for connecting AI agents over MCP.
 
 ## Layout
 
@@ -125,8 +126,14 @@ naming the key, if one is missing or malformed.
 | `HELLO_PROV_AUDIT_RETENTION`                      | control | `90d`; how long the fetch audit is kept                                                                                       |
 | `HELLO_PROV_RATE_*`                               | control | `IP_PER_MIN` `60`, `DENIED_PER_10MIN` `10`, `PHONE_PER_HOUR` `30`                                                             |
 | `HELLO_PROV_SNOM_*` etc.                          | control | unset; vendor redirect credentials (`_SNOM_`, `_YEALINK_`, `_YMCS_`, `_GDMS_`), see docs/provisioning.md                      |
+| `HELLO_PUBLIC_URL`                                | control | unset; https:// base of Hello for OAuth and `/mcp` (off when unset), see docs/ai-access.md                                    |
+| `HELLO_OAUTH_ACCESS_TTL`                          | control | `1h`; OAuth access token lifetime                                                                                             |
+| `HELLO_OAUTH_REFRESH_TTL` / `_REFRESH_MAX`        | control | `30` / `90` days; refresh token idle and absolute limits                                                                      |
+| `HELLO_OAUTH_DCR`                                 | control | `false`; `true` allows dynamic client registration                                                                            |
+| `HELLO_OAUTH_CIMD_ALLOW_PRIVATE`                  | control | `false`; `true` fetches client ID metadata from private addresses                                                             |
+| `HELLO_MCP_ALLOWED_ORIGINS`                       | control | unset; browser origins allowed on `/mcp`                                                                                      |
 
-The UI container proxies `/api` to `HELLO_CONTROL_UPSTREAM` and re-resolves it through `HELLO_DNS_RESOLVER` (default `127.0.0.11`, Docker's DNS; use your cluster DNS elsewhere).
+The UI container proxies `/api/`, `/mcp`, `/oauth/` (except the console's `/oauth/consent`) and `/.well-known/oauth-` to `HELLO_CONTROL_UPSTREAM` and re-resolves it through `HELLO_DNS_RESOLVER` (default `127.0.0.11`, Docker's DNS; use your cluster DNS elsewhere).
 
 Every SIP node must share the same `HELLO_SIP_NONCE_SECRET`. A node with a
 different one rejects digest challenges issued by the others.

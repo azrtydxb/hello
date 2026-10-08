@@ -1,3 +1,11 @@
+# The scheme the client used: an ingress in front (kw) terminates TLS and
+# says so in X-Forwarded-Proto; without one it is this listener's own.
+# hello-control marks session cookies Secure from it.
+map $http_x_forwarded_proto $hello_forwarded_proto {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+
 server {
     listen 8080;
     listen [::]:8080;
@@ -18,7 +26,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Proto $hello_forwarded_proto;
 
         # Firmware uploads (Phones -> Firmware) go up to 512 MB; nginx's
         # 1 MB default answers 413. Stream the body straight to
@@ -27,6 +35,50 @@ server {
         proxy_request_buffering off;
         proxy_read_timeout 600s;
         proxy_send_timeout 600s;
+    }
+
+    # External AI access (docs/ai-access.md): the MCP endpoint, the OAuth
+    # authorization server and its well-known metadata are hello-control's.
+    location = /mcp {
+        set $hello_control ${HELLO_CONTROL_UPSTREAM};
+        proxy_pass $hello_control;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $hello_forwarded_proto;
+        # Streamable HTTP answers may be an event stream: pass it through.
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+
+    location /oauth/ {
+        set $hello_control ${HELLO_CONTROL_UPSTREAM};
+        proxy_pass $hello_control;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $hello_forwarded_proto;
+    }
+
+    location /.well-known/oauth- {
+        set $hello_control ${HELLO_CONTROL_UPSTREAM};
+        proxy_pass $hello_control;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $hello_forwarded_proto;
+    }
+
+    # The consent page is the console's own route, not the authorization
+    # server's, and must never be framed (clickjacking a consent click).
+    location = /oauth/consent {
+        add_header Cache-Control "no-cache" always;
+        add_header Content-Security-Policy "frame-ancestors 'none'" always;
+        add_header X-Frame-Options "DENY" always;
+        try_files /index.html =404;
     }
 
     location /assets/ {
