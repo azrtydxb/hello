@@ -1,6 +1,6 @@
 # Questions procoder cannot answer for you
 
-Written 2026-10-08 06:03 UTC.
+Written 2026-10-08 14:27 UTC.
 
 Answer each one by writing a line beginning `Answer: ` under it, then
 hand the file back with `procoder ask --file .procoder/ask/QA.md`.
@@ -39,23 +39,65 @@ using. Fixing it changes the fixed prov.Store contract (Task 1).
 
 Answer:
 
-## Q3: [spec] ai-agent
+## Q3: [spec] voice-agents
 
-Key: 52c1aa98bde5
-Question: 1. **Call quality detection.** Hello measures RTP loss and jitter only as per-node Prometheus counters (`hello_rtp_loss_total`, `hello_rtp_jitter_ms`) and only for anchored calls; CDRs carry no quality data and directly-media calls are not measured at all. Options: (a) hello-sip writes per-call loss/jitter summaries into the CDR for anchored calls and a `call_quality` detector flags trunks or nodes with degraded calls; (b) hello-control queries the Prometheus on kw; (c) leave call quality out of phase 2.
+Key: e7214583272b
+Question: 1. **Who is the audience of "tenant"?** Is talking-agent shared by several Hello instances (lab, kw, perhaps a customer), or only by Hello on kw plus its own web UI? This spec supports many Hello tenants with a per-tenant secret and service account; if there is only one, S-16's key ids and the tenant header can collapse to one secret and one account. (Assumed: many, because the decision calls it multi-tenant.)
 
-Answer: (a) Store per-call quality in CDRs — hello-sip measures and writes loss/jitter to the CDR for each anchored call leg; a `call_quality` detector flags trunks/nodes with loss ≥ 1% or jitter ≥ 100ms in 3+ of last 5 samples (S-5.1, S-19). Add scope item for CDR quality column (migration 00009), relay per-call stats collection in hello-sip, detector, and console call detail exposure (Task 5a).
+Answer: One shared talking-agent for several Hello instances, tenant-scoped (per-tenant secret and service account). Transcripts off by default, opt-in per agent, 30-day retention.
 
-## Q4: [spec] ai-agent
+## Q4: [spec] voice-agents
 
-Key: 1ab11704f3b5
-Question: 2. **Public endpoints and personal data.** With `HELLO_AI_ALLOW_PUBLIC_ENDPOINT=true` (for example Anthropic's API), phone numbers, names and User-Agents would leave the network. Should Hello then mask phone numbers and names in `<data>` blocks (consistent tokens per value, unmasked in the console), or send them as is once an administrator opted in?
+Key: 48b95c74d6ea
+Question: 2. **Transcripts.** Default is summaries only, transcripts off per agent and readable by admins only, 30 days. Is that right for your use, and do you need transcripts at all (recorded-calls law differs by country, and an LLM summary is itself derived personal data)?
 
-Answer: Never mask — data goes as-is when an administrator explicitly opts in to public endpoints. The private-only default (S-3) is the control; the console renders everything unmasked. No masking code needed (S-3 clarified to state this).
+Answer: Transcripts off by default, opt-in per agent, admin-read only, 30-day retention (see Q3 answer).
 
-## Q5: [spec] ai-agent
+## Q5: [spec] voice-agents
 
-Key: a2698ff8dc49
-Question: 3. **Allowlist breadth.** The allowlist (S-11) has no deletes; a config smell such as an unreachable route can only be fixed by editing it. Should phase 2 also allow deleting outbound/inbound routes and ring groups as proposals, or stay update-and-create only?
+Key: 226906a02b58
+Question: 3. **MCP credentials beyond bearer/header.** Real MCP servers use OAuth 2.1. Is a static token or header enough for the servers you will attach (for example Hello's own MCP server, home-automation, calendar), or must a voice agent act through OAuth on behalf of a user (a much bigger design: token refresh, per-user consent, caller identity)?
 
-Answer: Allow deletes of routes and ring groups — `deleteOutboundRoute`, `deleteInboundRoute`, `deleteRingGroup` added to allowlist (S-11). Deletes are visually marked, require explicit confirmation, and the diff clearly shows what disappears and what references it. Other deletes (secrets, users, tokens, etc.) remain forbidden. Tests: `TestProposalDeleteValidation` on validation and reference display; `TestProposalDeleteUI` on console markup and confirm (Task 6).
+Answer: Both: static bearer/header tokens and OAuth 2.1 client-credentials (for example a Hello service account), all credentials sealed in Hello.
+
+## Q6: [spec] voice-agents
+
+Key: a9850601d3c6
+Question: 4. **Caller identity and tool authority.** Today a persona runs with the tools' credentials regardless of who calls (caller ID is never identity). Do you want any caller verification (spoken PIN, known-caller list per agent) before mutating tools, or is "confirm aloud" the whole control?
+
+Answer: talking-agent gets the same licence as Hello (Apache License 2.0, see Hello's LICENSE).
+
+## Q7: [spec] voice-agents
+
+Key: 67129a37407e
+Question: 5. **TLS/SRTP between Hello and talking-agent.** Both sit on the same LAN on kw. Is plaintext SIP/RTP acceptable on kw for phase 3 with the HMAC signature (S-16), or is SIPS/SRTP a requirement before first use?
+
+Answer: Spoken confirmation PLUS caller verification (known caller ID / allowlist, or a PIN) before any data-changing tool; tools allowlisted per agent.
+
+## Q8: [spec] voice-agents
+
+Key: 2567471bf9c0
+Question: 6. **Licence of talking-agent and Breeze.** `LICENSE.md` contains only `ok`; Breeze TTS 2 weights are research-only. Which licence should talking-agent have, and is any commercial or customer use of the lab voice intended before a commercial TTS is chosen?
+
+Answer: Plaintext SIP/RTP with the HMAC-signed INVITE is acceptable on kw; TLS/SRTP is a later option.
+
+## Q9: [spec] voice-agents
+
+Key: 0dbd568da15e
+Question: 7. **Agents in ring groups.** The spec forbids an agent in `ring-all`/`longest-idle`/`weighted` groups and recommends it as the failure target. Do you also want it as a normal `sequential` member (for example "ring the desk phone, then the assistant"), or only as a failure target?
+
+Answer: Sequential member and failure target both allowed (sequential and round-robin as in the spec).
+
+## Q10: [spec] voice-agents
+
+Key: 61c77b143f82
+Question: 8. **Test call.** The spec offers a test extension and CDR following, not a browser or console-originated call. Do you want Hello to originate a call to a chosen phone and connect it to the agent (needs click-to-call, which Hello does not have), or a WebRTC softphone in the console (a new media stack)?
+
+Answer: A dialable test extension per agent plus CDR following; no WebRTC and no click-to-call.
+
+## Q11: [spec] voice-agents
+
+Key: 457b17a5bdc0
+Question: 9. **Where limits are enforced.** Concurrency is enforced by talking-agent (`486`). Should Hello also cap simultaneous agent calls per agent or globally (it knows the calls and could refuse before sending an INVITE), accepting that two sources then hold the number?
+
+Answer: Hello caps calls per agent and in total (busy sends the call to the failover destination); talking-agent also refuses with 486 when its speech models are saturated.
