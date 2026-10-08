@@ -87,6 +87,7 @@ func TestAIFindingsAPI(t *testing.T) {
 	op.must(http.StatusConflict, "POST", "/api/v1/ai/findings/"+a.ID+"/acknowledge", nil)
 	op.must(http.StatusNotFound, "POST", "/api/v1/ai/findings/00000000-0000-0000-0000-000000000000/acknowledge", nil)
 
+	op.must(http.StatusNotFound, "POST", "/api/v1/ai/findings/00000000-0000-0000-0000-000000000000/dismiss", map[string]string{"reason": "x"})
 	op.must(http.StatusBadRequest, "POST", "/api/v1/ai/findings/"+a.ID+"/dismiss", map[string]string{})
 	op.must(http.StatusBadRequest, "POST", "/api/v1/ai/findings/"+a.ID+"/dismiss", map[string]string{"reason": ""})
 	op.must(http.StatusBadRequest, "POST", "/api/v1/ai/findings/"+a.ID+"/dismiss", map[string]string{"reason": string(make([]rune, 501))})
