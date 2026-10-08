@@ -7632,6 +7632,9 @@
                   "insufficient_scope",
                   "last_admin",
                   "ai_disabled",
+                  "ai_busy",
+                  "ai_budget_exhausted",
+                  "task_running",
                   "proposal_not_open",
                   "proposal_stale"
                 ]
