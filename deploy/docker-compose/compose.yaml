@@ -56,6 +56,15 @@ x-prov-env: &prov-env
   HELLO_PROV_TLS_CERT: /etc/hello/prov/tls.crt
   HELLO_PROV_TLS_KEY: /etc/hello/prov/tls.key
 
+# External AI access (.procoder/specs/ai-external-access.md): the lab's
+# public URL is the console on this host (hello-ui proxies /mcp, /oauth/
+# and /.well-known/oauth- to hello-control-1); http://localhost is the one
+# non-https public URL hello-control accepts. MCP clients register
+# themselves, as on kw (docs/ai-access.md).
+x-ai-env: &ai-env
+  HELLO_PUBLIC_URL: http://localhost:8080
+  HELLO_OAUTH_DCR: "true"
+
 x-control: &control
   build: { context: ../.., target: hello-control }
   image: hello-control:dev
@@ -236,7 +245,7 @@ services:
       <<: *control-deps
       prov-certs: { condition: service_completed_successfully }
     environment:
-      <<: [*db-env, *prov-env]
+      <<: [*db-env, *prov-env, *ai-env]
       HELLO_NODE_ID: hello-control-1
       HELLO_BOOTSTRAP_ADMIN_PASSWORD: hello-lab-admin
     volumes: [provcerts:/etc/hello/prov:ro]
@@ -247,7 +256,8 @@ services:
     depends_on:
       <<: *control-deps
       prov-certs: { condition: service_completed_successfully }
-    environment: { <<: [*db-env, *prov-env], HELLO_NODE_ID: hello-control-2 }
+    environment:
+      { <<: [*db-env, *prov-env, *ai-env], HELLO_NODE_ID: hello-control-2 }
     volumes: [provcerts:/etc/hello/prov:ro]
 
   hello-sip-1:

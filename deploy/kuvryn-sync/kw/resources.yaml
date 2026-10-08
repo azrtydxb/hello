@@ -1496,6 +1496,14 @@ spec:
             - name: MINIO_SECURE
               # In-cluster traffic to the Service, no TLS.
               value: "false"
+            # External AI access (.procoder/specs/ai-external-access.md): the
+            # OAuth authorization server and /mcp behind the hello Ingress,
+            # which terminates TLS with hello-tls (docs/ai-access.md). MCP
+            # clients register themselves (dynamic client registration).
+            - name: HELLO_PUBLIC_URL
+              value: https://hello.kw.watteel.lab
+            - name: HELLO_OAUTH_DCR
+              value: "true"
             # Phone provisioning (.procoder/specs/phone-auto-provisioning-service.md):
             # the listener on :8083 (HELLO_PROV_ADDR's default) behind the
             # hello-prov Ingress, which terminates TLS with hello-prov-tls.
@@ -1763,8 +1771,16 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    # The console, the API, the OAuth authorization server and /mcp over
+    # TLS: cert-manager's ingress-shim issues hello-tls from cluster-ca
+    # (the Sync deployer cannot create Certificate objects).
+    cert-manager.io/cluster-issuer: cluster-ca
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - hello.kw.watteel.lab
+      secretName: hello-tls
   rules:
     - host: hello.kw.watteel.lab
       http:
