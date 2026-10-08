@@ -48,6 +48,9 @@ type valkeyLimiter struct {
 	seq     atomic.Uint64
 	degrade atomic.Bool
 
+	// run executes the sliding-window script on c; tests replace it.
+	run func(ctx context.Context, c valkey.Client, key string, limit int, window time.Duration, member string) (int64, error)
+
 	mu  sync.Mutex
 	mem map[string][]time.Time
 }
@@ -61,22 +64,34 @@ func NewLimiter(get func() valkey.Client, log *slog.Logger) Limiter {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &valkeyLimiter{client: get, log: log, prefix: rand.Text()[:8], mem: map[string][]time.Time{}}
+	return &valkeyLimiter{client: get, log: log, prefix: rand.Text()[:8], mem: map[string][]time.Time{}, run: runSlide}
+}
+
+func runSlide(ctx context.Context, c valkey.Client, key string, limit int, window time.Duration, member string) (int64, error) {
+	return slideScript.Exec(ctx, c, []string{keyPrefix + key},
+		[]string{strconv.Itoa(limit), strconv.FormatInt(window.Milliseconds(), 10), member}).AsInt64()
 }
 
 // Allow implements Limiter.
 func (l *valkeyLimiter) Allow(ctx context.Context, key string, limit int, window time.Duration) (bool, error) {
 	if c := l.client(); c != nil {
 		vctx, cancel := context.WithTimeout(ctx, valkeyTimeout)
-		n, err := slideScript.Exec(vctx, c, []string{keyPrefix + key},
-			[]string{strconv.Itoa(limit), strconv.FormatInt(window.Milliseconds(), 10),
-				l.prefix + strconv.FormatUint(l.seq.Add(1), 36)}).AsInt64()
+		n, err := l.run(vctx, c, key, limit, window, l.prefix+strconv.FormatUint(l.seq.Add(1), 36))
 		cancel()
 		if err == nil {
 			if l.degrade.Swap(false) {
 				l.log.Info("oauth throttle back on valkey")
 			}
-			return n == 1, nil
+			if n != 1 {
+				return false, nil
+			}
+			// Mirror the hit in memory: a call that times out (a slow
+			// script under -race or load) falls back to a window that
+			// already counts the earlier hits, and the hit it records
+			// there, which Valkey never saw, still counts afterwards.
+			// Memory only ever holds a subset of what is hit, so it can
+			// only make this stricter.
+			return l.memAllow(key, limit, window, time.Now()), nil
 		}
 		if !l.degrade.Swap(true) {
 			l.log.Warn("oauth throttle falls back to memory: valkey unavailable", "error", err)
