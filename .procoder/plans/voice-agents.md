@@ -118,7 +118,7 @@ Interfaces: consumes the routes of the spec's Interfaces table.
 Files: `test/fakeagent/`, `test/integration/lab_voice_test.go`, `test/integration` CDR and logs tests.
 Interfaces: consumes everything above.
 
-- [ ] `test/fakeagent`: SIP UA verifying `X-Hello-Auth` with the shared vectors, answering with a tone, polling the runtime API with a service account and reloading within 2 s, posting reports.
+- [x] `test/fakeagent`: SIP UA verifying `X-Hello-Auth` with the shared vectors, answering with a tone, polling the runtime API with a service account and reloading within 2 s, posting reports.
 - [ ] `TestVoiceAgentsEndToEnd` in the lab (docker compose on the CI runner, never on a developer Mac): create agent and route through the API, call from a fake phone, persona edit propagates, bad signature refused, ring group failure target, disabled agent, CDR with report.
 - [ ] `TestVoiceCDRFields` and `TestNoSecretsInLogs` extension run against that stack.
 

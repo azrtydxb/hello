@@ -77,6 +77,17 @@ x-ai-env: &ai-env
   HELLO_AI_AIOPS_INTERVAL: 24h
   HELLO_AI_EXPLAIN_MIN_INTERVAL: 1s
 
+# Voice agents (spec voice-agents S-15 to S-17): the lab's talking-agent is
+# test/fakeagent, which the integration tests run on the host at the edge
+# gateway (10.89.53.1:15060), like the fake LLM above. Nothing answers there
+# between tests, so a stray call to an agent fails with a timeout and
+# nothing else changes. The tenant and secret are lab-only; both services
+# must hold the same values, since hello-sip signs what hello-control routes.
+x-voice-env: &voice-env
+  HELLO_VOICE_SIP_ADDRESS: 10.89.53.1:15060
+  HELLO_VOICE_SIP_SECRET: lab-only-voice-secret-0123456789abcdef
+  HELLO_VOICE_TENANT: lab
+
 x-control: &control
   build: { context: ../.., target: hello-control }
   image: hello-control:dev
@@ -257,7 +268,7 @@ services:
       <<: *control-deps
       prov-certs: { condition: service_completed_successfully }
     environment:
-      <<: [*db-env, *prov-env, *ai-env]
+      <<: [*db-env, *prov-env, *ai-env, *voice-env]
       HELLO_NODE_ID: hello-control-1
       HELLO_BOOTSTRAP_ADMIN_PASSWORD: hello-lab-admin
     volumes: [provcerts:/etc/hello/prov:ro]
@@ -269,13 +280,16 @@ services:
       <<: *control-deps
       prov-certs: { condition: service_completed_successfully }
     environment:
-      { <<: [*db-env, *prov-env, *ai-env], HELLO_NODE_ID: hello-control-2 }
+      {
+        <<: [*db-env, *prov-env, *ai-env, *voice-env],
+        HELLO_NODE_ID: hello-control-2,
+      }
     volumes: [provcerts:/etc/hello/prov:ro]
 
   hello-sip-1:
     <<: *sip
     environment:
-      <<: *sip-env
+      <<: [*sip-env, *voice-env]
       HELLO_NODE_ID: hello-sip-1
       # Phones outside Docker need an address they can reach, e.g. this
       # host's LAN IP: HELLO_SIP1_ADVERTISED=192.168.1.10:5060 (docs/phones.md).
@@ -289,7 +303,7 @@ services:
   hello-sip-2:
     <<: *sip
     environment:
-      <<: *sip-env
+      <<: [*sip-env, *voice-env]
       HELLO_NODE_ID: hello-sip-2
       HELLO_SIP_ADVERTISED_ADDR: ${HELLO_SIP2_ADVERTISED:-hello-sip-2:5060}
       HELLO_DRAIN_TIMEOUT: ${HELLO_SIP2_DRAIN_TIMEOUT:-2h}
