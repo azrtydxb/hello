@@ -18,6 +18,7 @@ import (
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/version"
+	"github.com/azrtydxb/hello/internal/voice"
 )
 
 //go:embed openapi.json
@@ -172,6 +173,10 @@ type Config struct {
 	// AIAgent is the in-product AI agent (spec ai-agent); nil or off makes
 	// every AI agent operation but getAIStatus answer 503 ai_disabled.
 	AIAgent *ai.Service
+	// Voice is the voice agent runtime service (spec voice-agents); nil
+	// answers 503 voice_disabled on the voice-runtime operations and the
+	// voice status.
+	Voice *voice.Service
 }
 
 type server struct{ Config }

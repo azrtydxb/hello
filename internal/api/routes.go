@@ -230,12 +230,12 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/voice/mcp-servers/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
 		{"POST", "/api/v1/voice/mcp-servers/{id}/discover", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
 		{"POST", "/api/v1/voice/mcp-servers/{id}/test", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
-		{"GET", "/api/v1/voice/status", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"GET", "/api/v1/voice/status", auth.ScopeRead, auth.RoleViewer, false, s.getVoiceStatus},
 		{"POST", "/api/v1/voice/secret/rotate", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
 		{"POST", "/api/v1/voice/runtime-account", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
-		{"GET", "/api/v1/voice-runtime/agents", auth.ScopeVoiceRuntime, auth.RoleViewer, false, s.pending},
-		{"POST", "/api/v1/voice-runtime/ack", auth.ScopeVoiceRuntime, auth.RoleViewer, false, s.pending},
-		{"POST", "/api/v1/voice-runtime/calls", auth.ScopeVoiceRuntime, auth.RoleViewer, false, s.pending},
+		{"GET", "/api/v1/voice-runtime/agents", auth.ScopeVoiceRuntime, auth.RoleViewer, false, s.getVoiceRuntimeAgents},
+		{"POST", "/api/v1/voice-runtime/ack", auth.ScopeVoiceRuntime, auth.RoleViewer, false, s.ackVoiceRuntime},
+		{"POST", "/api/v1/voice-runtime/calls", auth.ScopeVoiceRuntime, auth.RoleViewer, false, s.reportVoiceCall},
 	}
 }
 
