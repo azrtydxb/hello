@@ -163,7 +163,7 @@ func TestKamailioHelloSocketVetsSource(t *testing.T) {
 	vet := strings.Index(cfg, `if (!ds_is_from_list("1", "3")) {`)
 	reqinit := strings.Index(cfg, "\troute(REQINIT);\n\n\tif ($Rn == \"hello\") {\n\t\t# A hello-sip node")
 	flag := strings.Index(cfg, "setflag(FLT_FROM_HELLO);")
-	if vet < 0 || reqinit < 0 || flag < 0 || !(vet < reqinit && reqinit < flag) {
+	if vet < 0 || reqinit < 0 || flag < 0 || vet >= reqinit || reqinit >= flag {
 		t.Fatalf("the hello socket's source check (ds_is_from_list on set 1) must run before FLT_FROM_HELLO is set (vet=%d reqinit=%d flag=%d)", vet, reqinit, flag)
 	}
 }
