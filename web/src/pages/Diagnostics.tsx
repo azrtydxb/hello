@@ -56,6 +56,7 @@ import {
   type HealthCheck,
 } from "./platform/health";
 import "./platform/platform.css";
+import { Can } from "../role";
 
 type TabId = "trace" | "reg" | "probes" | "health";
 const TABS: readonly TabId[] = ["trace", "reg", "probes", "health"];
@@ -549,25 +550,27 @@ function RegistrationsTab({
               label: <span className="visually-hidden">Actions</span>,
               align: "right",
               render: (b) => (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  aria-label={`Unblock ${b.ip}`}
-                  onClick={() => {
-                    clearAuthFailures(b.ip)
-                      .then(() => {
-                        showToast(`${b.ip} unblocked.`);
-                        reloadLive();
-                      })
-                      .catch((err: unknown) =>
-                        showToast(
-                          `Could not unblock ${b.ip}: ${errorMessage(err)}`,
-                        ),
-                      );
-                  }}
-                >
-                  Unblock
-                </Button>
+                <Can>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    aria-label={`Unblock ${b.ip}`}
+                    onClick={() => {
+                      clearAuthFailures(b.ip)
+                        .then(() => {
+                          showToast(`${b.ip} unblocked.`);
+                          reloadLive();
+                        })
+                        .catch((err: unknown) =>
+                          showToast(
+                            `Could not unblock ${b.ip}: ${errorMessage(err)}`,
+                          ),
+                        );
+                    }}
+                  >
+                    Unblock
+                  </Button>
+                </Can>
               ),
             },
           ]}

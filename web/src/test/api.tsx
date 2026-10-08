@@ -72,7 +72,9 @@ export function mockApi(routes: Routes): Call[] {
   return calls;
 }
 
-export const ME = { "GET /api/v1/auth/me": () => json({ username: "admin" }) };
+export const ME = {
+  "GET /api/v1/auth/me": () => json({ username: "admin", role: "admin" }),
+};
 
 function LocationProbe() {
   const location = useLocation();

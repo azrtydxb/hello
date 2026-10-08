@@ -54,7 +54,10 @@ describe("Login", () => {
 
   it("signs in and navigates to next", async () => {
     const calls = mockApi({
-      "GET /api/v1/auth/me": [UNAUTHORIZED, () => json({ username: "admin" })],
+      "GET /api/v1/auth/me": [
+        UNAUTHORIZED,
+        () => json({ username: "admin", role: "admin" }),
+      ],
       "POST /api/v1/auth/login": noContent,
       "GET /api/v1/cdrs?limit=50": () => json({ items: [], next: "" }),
     });

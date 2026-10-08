@@ -59,6 +59,7 @@ import {
   vendorModel,
 } from "./phones/ui";
 import "./phones/inventory.css";
+import { Can } from "../role";
 
 type ListState =
   | { status: "loading" }
@@ -321,24 +322,30 @@ export function Phones() {
             size={15}
             onClick={() => setEditing(p)}
           />
-          <IconButton
-            icon="key-round"
-            label={`Rotate token for ${formatMac(p.mac)}`}
-            size={15}
-            onClick={() => setPending({ kind: "rotate", phone: p })}
-          />
-          <IconButton
-            icon="rotate-ccw"
-            label={`Re-arm ${formatMac(p.mac)}`}
-            size={15}
-            onClick={() => setPending({ kind: "rearm", phone: p })}
-          />
-          <IconButton
-            icon="trash-2"
-            label={`Delete ${formatMac(p.mac)}`}
-            size={15}
-            onClick={() => setPending({ kind: "delete", phone: p })}
-          />
+          <Can min="admin">
+            <IconButton
+              icon="key-round"
+              label={`Rotate token for ${formatMac(p.mac)}`}
+              size={15}
+              onClick={() => setPending({ kind: "rotate", phone: p })}
+            />
+          </Can>
+          <Can min="admin">
+            <IconButton
+              icon="rotate-ccw"
+              label={`Re-arm ${formatMac(p.mac)}`}
+              size={15}
+              onClick={() => setPending({ kind: "rearm", phone: p })}
+            />
+          </Can>
+          <Can>
+            <IconButton
+              icon="trash-2"
+              label={`Delete ${formatMac(p.mac)}`}
+              size={15}
+              onClick={() => setPending({ kind: "delete", phone: p })}
+            />
+          </Can>
         </div>
       ),
     },
@@ -352,21 +359,25 @@ export function Phones() {
         description="Phones that fetch their configuration from Hello. Provisioning URLs are shown once."
         actions={
           <>
-            <Button
-              variant="secondary"
-              icon="upload"
-              disabled={!ready}
-              onClick={() => setImporting(true)}
-            >
-              Import CSV
-            </Button>
-            <Button
-              icon="plus"
-              disabled={!ready}
-              onClick={() => setEditing("new")}
-            >
-              New phone
-            </Button>
+            <Can>
+              <Button
+                variant="secondary"
+                icon="upload"
+                disabled={!ready}
+                onClick={() => setImporting(true)}
+              >
+                Import CSV
+              </Button>
+            </Can>
+            <Can>
+              <Button
+                icon="plus"
+                disabled={!ready}
+                onClick={() => setEditing("new")}
+              >
+                New phone
+              </Button>
+            </Can>
           </>
         }
       />
@@ -385,9 +396,11 @@ export function Phones() {
             title="No phones yet"
             description="Add a phone by its MAC, or import a CSV of them."
             action={
-              <Button icon="plus" onClick={() => setEditing("new")}>
-                New phone
-              </Button>
+              <Can>
+                <Button icon="plus" onClick={() => setEditing("new")}>
+                  New phone
+                </Button>
+              </Can>
             }
           />
         )}
@@ -792,9 +805,11 @@ function PhoneForm({
           <Button variant="secondary" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" form="phone-form" disabled={busy}>
-            {editing ? "Save" : "Add phone"}
-          </Button>
+          <Can>
+            <Button type="submit" form="phone-form" disabled={busy}>
+              {editing ? "Save" : "Add phone"}
+            </Button>
+          </Can>
         </>
       }
     >

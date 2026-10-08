@@ -57,7 +57,7 @@ func TestConfigChangeAuditedAndRevisioned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uid, err := st.CreateUser(ctx, "test", "alice", hash)
+	uid, err := st.CreateUser(ctx, "test", "alice", hash, auth.RoleAdmin)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -123,10 +123,17 @@ Recorded at Task 3:
 Files: `internal/store/` (user role reads and `SetUserRole` with the last-admin check and audit row), `internal/api/users.go` and its test (`GET /api/v1/users`, `PATCH /api/v1/users/{id}`, `role` on `auth/me`, their OpenAPI entries), `cmd/hello-control` (`user add --role`), `web/src/pages/Users.tsx` and `Users.test.tsx`, `web/src/nav.ts` and `web/src/App.tsx` (role-aware navigation from `auth/me`).
 Interfaces: consumes contracts 1–4 and Task 3's middleware; produces the users routes the console calls.
 
-- [ ] Store and API: list users with roles, change a role (admin; `409` `last_admin`; audited), `role` on `auth/me`; CLI `--role` (default `viewer`, first user `admin`). `TestUserRoles`.
-- [ ] `TestRoleEnforcement` iterates `RouteTable()` with a viewer, an operator and an admin through a session, a personal token, an OAuth token and a service account; one case demotes a user and expects the next request refused.
-- [ ] Console: Users page (admin) with a role editor; navigation and write actions hidden below the needed role. `Users.test.tsx`.
-- [ ] Mutation-check the role comparison, the per-request role read and the last-admin guard. Run the full gate.
+- [x] Store and API: list users with roles, change a role (admin; `409` `last_admin`; audited), `role` on `auth/me`; CLI `--role` (default `viewer`, first user `admin`). `TestUserRoles`.
+- [x] `TestRoleEnforcement` iterates `RouteTable()` with a viewer, an operator and an admin through a session, a personal token, an OAuth token and a service account; one case demotes a user and expects the next request refused.
+- [x] Console: Users page (admin) with a role editor; navigation and write actions hidden below the needed role. `Users.test.tsx`.
+- [x] Mutation-check the role comparison, the per-request role read and the last-admin guard. Run the full gate.
+
+Recorded at Task 4 (ran in parallel with Task 3):
+
+- `auth.Require` checks the role (`403` `forbidden_role`) now; its scope check stays Task 3's. `TestRoleEnforcement` presents session, personal, OAuth and service actors through a stub `Lookup`, since those credentials land with Task 3; it iterates `api.Routes()`.
+- `store.CreateUser` takes a role (the first user is `admin` whatever is asked); `hello-control user add` did not exist and is new (password on stdin).
+- Service accounts holding a scope outside their role is bounded by `GrantableScopes`, which `TestUserRoles` checks; the service-account API applying it is Task 3's.
+- The console hides create, save, delete, reorder and toggle actions below `operator`, secret operations, node drain, API tokens and redirect credentials below `admin`, and the route tester (a `write` operation) below `operator`.
 
 ## Task 5: MCP server (branch ai-mcp)
 

@@ -18,11 +18,11 @@ import (
 func TestTokenLifecycle(t *testing.T) {
 	s := scratchStore(t)
 	ctx := context.Background()
-	uid, err := s.CreateUser(ctx, "test", "alice", "x")
+	uid, err := s.CreateUser(ctx, "test", "alice", "x", auth.RoleViewer)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bob, err := s.CreateUser(ctx, "test", "bob", "x")
+	bob, err := s.CreateUser(ctx, "test", "bob", "x", auth.RoleViewer)
 	if err != nil {
 		t.Fatal(err)
 	}

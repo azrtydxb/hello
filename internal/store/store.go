@@ -355,22 +355,6 @@ func (s *Store) CreateFirstUser(ctx context.Context, username, passwordHash stri
 	return created, err
 }
 
-// CreateUser inserts a management user: an admin when it is the first
-// user, a viewer otherwise (spec S-23).
-func (s *Store) CreateUser(ctx context.Context, actor, username, passwordHash string) (int64, error) {
-	var id int64
-	err := s.tx(ctx, func(tx *sql.Tx) error {
-		if err := tx.QueryRowContext(ctx,
-			`INSERT INTO users (username, password_hash, role)
-			SELECT $1, $2, CASE WHEN EXISTS (SELECT 1 FROM users) THEN 'viewer' ELSE 'admin' END RETURNING id`,
-			username, passwordHash).Scan(&id); err != nil {
-			return err
-		}
-		return insertAudit(ctx, tx, actor, "create", "user", strconv.FormatInt(id, 10))
-	})
-	return id, err
-}
-
 // UserByName returns a user's id and bcrypt hash.
 func (s *Store) UserByName(ctx context.Context, username string) (int64, string, error) {
 	var (
