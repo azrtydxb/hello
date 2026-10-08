@@ -332,15 +332,23 @@ func TestTakeoverCDRContinuity(t *testing.T) {
 				t.Fatalf("CDR start %s ring %s answer %s: want the original times (dialled %s, killed %s)",
 					cd.StartTime, cd.RingTime, cd.AnswerTime, before, killed)
 			}
-			if cd.BillableMs < time.Since(killed).Milliseconds() {
-				t.Fatalf("billable %dms is shorter than the time since the kill", cd.BillableMs)
+			// The CDR's end was snapshotted when the call closed, before
+			// this assertion ran, so the moving clock would outrun it: the
+			// answer is the original one, so billable spans kill -> end.
+			if cd.BillableMs < cd.EndTime.Sub(killed).Milliseconds() {
+				t.Fatalf("billable %dms is shorter than the %s from the kill to the call's end", cd.BillableMs, cd.EndTime.Sub(killed))
 			}
 			took, gap := haTraceTimes(t, cd)
 			if took > time.Since(claimed) {
 				t.Fatalf("takeover took %s, longer than since the claim", took)
 			}
-			if gap < claimed.Sub(killed) {
-				t.Fatalf("media gap %s < the %s before the claim: it must run from the owner's last heartbeat", gap, claimed.Sub(killed))
+			// The killed process can flush one last heartbeat after the kill
+			// is sampled (its loop stops only when Serve flips serving off),
+			// so the gap may fall a heartbeat short of the outage; it must
+			// still start before the claim: measured from the claim it would
+			// equal the takeover (kw: 3ms for an 11s outage).
+			if gap < claimed.Sub(killed)-2*taker.cfg.HADialogHeartbeat || gap <= took {
+				t.Fatalf("media gap %s (took %s): must run from the owner's last heartbeat before the claim, not the claim (outage %s)", gap, took, claimed.Sub(killed))
 			}
 			if !strings.Contains(traceText(cd.Trace), "the owner's last heartbeat") {
 				t.Fatalf("trace does not say where the gap runs from: %s", traceText(cd.Trace))
