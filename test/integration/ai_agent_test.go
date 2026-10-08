@@ -253,14 +253,15 @@ func TestAIAgentEndToEnd(t *testing.T) {
 		}
 		return fmt.Errorf("no open auth_bruteforce finding in %v", findings())
 	})
-	// Explain the whole open set, the flood first.
+	// Explain the whole open set, the flood first. The ids echoed back are
+	// the finding ids: the explanation is stored per finding id.
 	var entries []map[string]any
-	entries = append(entries, map[string]any{"id": brute.CandidateID, "rank": 1, "summary": "Someone is guessing REGISTER credentials.",
+	entries = append(entries, map[string]any{"id": brute.ID, "rank": 1, "summary": "Someone is guessing REGISTER credentials.",
 		"likelyCause": "A scanner from one source.", "nextStep": "Block the source at the firewall."})
 	rank := 2
 	for _, f := range findings() {
-		if f.Status == "open" && f.CandidateID != brute.CandidateID {
-			entries = append(entries, map[string]any{"id": f.CandidateID, "rank": rank, "summary": "See the evidence.", "likelyCause": "Unknown.", "nextStep": "Review it."})
+		if f.Status == "open" && f.ID != brute.ID {
+			entries = append(entries, map[string]any{"id": f.ID, "rank": rank, "summary": "See the evidence.", "likelyCause": "Unknown.", "nextStep": "Review it."})
 			rank++
 		}
 	}
