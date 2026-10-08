@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
@@ -25,6 +26,7 @@ import (
 	"github.com/azrtydxb/hello/internal/version"
 	"github.com/azrtydxb/hello/internal/vkconn"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/valkey-io/valkey-go"
 )
 
 const (
@@ -135,7 +137,23 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_PUBLIC_URL: %w", err)
 	}
+	// The in-product AI agent (spec ai-agent): off, starting nothing,
+	// unless HELLO_AI_BASE_URL and HELLO_AI_MODEL are set.
+	agent, err := ai.NewWith(cfg.AIAgent, st, nil, metrics.Registry, log, ai.Options{Replica: cfg.NodeID})
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("HELLO_AI_*: %w", err)
+	}
+	if on, reason := agent.Enabled(); on {
+		go func() {
+			agent.SetValkey(awaitValkey(ctx, vk))
+		}()
+		go agent.Run(ctx)
+	} else {
+		log.Info("ai agent off", "reason", reason)
+	}
 	apiCfg := api.Config{
+		AIAgent:       agent,
 		Store:         st,
 		Live:          vk,
 		Trunks:        vk,
@@ -280,6 +298,23 @@ func pruneSessions(ctx context.Context, st *store.Store, log *slog.Logger) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-t.C:
+		}
+	}
+}
+
+// awaitValkey returns vk's client once it is connected, nil if ctx ends
+// first.
+func awaitValkey(ctx context.Context, vk *api.LazyValkey) valkey.Client {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		if c := vk.Client(); c != nil {
+			return c
+		}
+		select {
+		case <-ctx.Done():
+			return nil
 		case <-t.C:
 		}
 	}
