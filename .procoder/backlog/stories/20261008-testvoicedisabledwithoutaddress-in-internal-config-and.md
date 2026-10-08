@@ -1,4 +1,4 @@
-# `docs/voice-agents.md` exists and covers every item of S-34; `TestDocsVoiceAgents` in `test/deploy` fails if its operation table or limits differ from the code, or the README does not link it.
+# `TestVoiceDisabledWithoutAddress` in `internal/config` and `internal/routing` passes. It fails if a route to an agent compiles with no `HELLO_VOICE_SIP_ADDRESS`, or the registry stops editing.
 
 Status: open
 Created: 2026-10-08
@@ -14,7 +14,7 @@ Implements the acceptance criterion of the voice-agents spec (`.procoder/specs/v
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
      true — the closer will ask for the evidence. -->
 
-- [ ] `docs/voice-agents.md` exists and covers every item of S-34; `TestDocsVoiceAgents` in `test/deploy` fails if its operation table or limits differ from the code, or the README does not link it.
+- [ ] `TestVoiceDisabledWithoutAddress` in `internal/config` and `internal/routing` passes. It fails if a route to an agent compiles with no `HELLO_VOICE_SIP_ADDRESS`, or the registry stops editing.
 
 ## Evidence
 

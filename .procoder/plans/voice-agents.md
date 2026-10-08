@@ -1,6 +1,6 @@
 # voice-agents — implementation plan
 
-Status: draft (blocked on the spec's open questions; tasks that do not depend on them can start once the spec is approved)
+Status: approved (spec open questions answered 2026-10-08)
 Spec: .procoder/specs/voice-agents.md
 
 ## Goal
@@ -31,9 +31,9 @@ Why talking-agent stays outside, why the runtime pulls (long poll) instead of He
 ### Shared contracts (fixed; a stream that needs a change asks the lead and never edits another stream's files)
 
 1. **Schema:** `migrations/00010_voice_agents.sql` with its down migration, as the spec's Data section lists it, `CHECK` lists on every enum and range.
-2. **Config** (`internal/config`): `Voice{SIPAddress, Secret, SecretNext, Tenant string; MaxAgents int; AllowPublicMCP, AllowLoopback bool}` with validation (host:port, key length at least 32 bytes), env names of the spec.
+2. **Config** (`internal/config`): `Voice{SIPAddress, Secret, SecretNext, Tenant string; MaxAgents, MaxCalls int; AllowPublicMCP, AllowLoopback bool}` with validation (host:port, key length at least 32 bytes), env names of the spec.
 3. **Routing input:** `routing.Config.VoiceAgents []VoiceAgent{Name, SIPUser string; Enabled bool}` and `routing.Config.VoiceSIPAddress string`; `Decision.VoiceAgent *VoiceRef{Name, SIPUser string}`; destination kind `voice_agent` in inbound routes, ring group members and failure targets.
-4. **Signature** (`internal/voice`): `Sign(key Key, tenant, agent, sipUser, correlation string, ts time.Time) string` and `Verify(keys []Key, header string, now time.Time, ...)`; vectors in `internal/voice/testdata/voice_auth_vectors.json`, copied to talking-agent's repo.
+4. **Signature** (`internal/voice`): `Sign(key Key, tenant, agent, sipUser, correlation string, ts time.Time) string` (the origin header `X-Hello-Caller-Origin` is sent but not signed input; the signed string stays as S-16) and `Verify(keys []Key, header string, now time.Time, ...)`; vectors in `internal/voice/testdata/voice_auth_vectors.json`, copied to talking-agent's repo.
 5. **Runtime view:** `voice.View{Tenant string; Revision int64; Agents []RuntimeAgent}`, ETag = `W/"v<revision>"`-free strong tag `"<revision>"`; the unsealed credentials exist only in `voice.RuntimeView(ctx)`.
 6. **Auth:** `auth.ScopeVoiceRuntime = "voice-runtime"`, excluded from `GrantableScopes` and from consent; a service account may hold it alone.
 7. **Routes** (`internal/api/routes.go`): every operation of the spec's Interfaces table in `routes()` with its scope and role answering `501` through `s.pending` until its stream lands, and in `openapi.json` with descriptions, `x-hello-*` and schemas, so phase 1's route/document tests stay green from the first merge.
@@ -52,11 +52,12 @@ Interfaces: produces contracts 1-7.
 ## Task 2: Registry, versions, MCP servers (branch voice-agents-registry, after Task 1)
 
 Files: `internal/voice/registry.go`, `versions.go`, `mcp.go`, `egress.go`, `internal/store/voice.go`, `internal/api/voice_agents.go`, `voice_mcp.go` and tests, `test/fakemcp/`.
-Interfaces: produces the registry operations and the `voice_revision` counter; consumes contracts 1, 2, 7 and `internal/secret`.
+Interfaces: produces the registry operations, caller verification fields and the `voice_revision` counter; consumes contracts 1, 2, 7 and `internal/secret`.
 
 - [ ] Agent CRUD, limits, generated `sip_user`, extension namespace uniqueness, 10 versions, restore, references on delete (`409`), audit rows without text; `TestVoiceAgentCRUD`.
-- [ ] MCP servers: sealed credential, write-only, admin-only credential, attachments with allowlists and `confirm` defaults, tool name conflicts; `TestVoiceMCPServers`.
-- [ ] Guarded dialer, discovery and test through the Go SDK client against `test/fakemcp`; `TestVoiceMCPDiscovery`.
+- [ ] Caller verification (S-36): modes, allowlist, salted PIN hash, `voice_verification_required` on write tools without it; `TestVoiceCallerVerification`.
+- [ ] MCP servers: bearer, header and OAuth client-credentials auth, sealed credential, write-only, admin-only credential, attachments with allowlists and `confirm` defaults, tool name conflicts; `TestVoiceMCPServers`.
+- [ ] Guarded dialer (token URL too), OAuth client-credentials exchange, discovery and test through the Go SDK client against `test/fakemcp`; `TestVoiceMCPDiscovery`.
 - [ ] Every change bumps `voice_revision` in its own transaction; covered inside `TestVoiceAgentCRUD`.
 - [ ] Mutation-check the credential response filter, the egress check and the admin-only gate. Full gate.
 
@@ -66,7 +67,7 @@ Files: `internal/routing/` (types, engine, decide, tests), `internal/store/routi
 Interfaces: produces `voice_agent` as destination everywhere of S-10 to S-13; consumes contracts 1, 3.
 
 - [ ] Compile and validate `voice_agent` for inbound routes and internal extension resolution; trace line; `TestVoiceAgentRouting`.
-- [ ] Ring group member and failure target, strategy restrictions, XOR constraint; `TestVoiceAgentRingGroup` (routing and API halves).
+- [ ] Ring group member and failure target, `sequential`-only restriction, XOR constraint; `TestVoiceAgentRingGroup` (routing and API halves).
 - [ ] Routing test endpoint shows the step; transfer and feature code reach the agent extension.
 - [ ] Mutation-check the strategy restriction and the disabled-agent validation. Full gate.
 
@@ -77,6 +78,7 @@ Interfaces: produces the signed INVITE and the CDR fields; consumes contracts 2,
 
 - [ ] Headers, signature, G.711 offer, stripped caller headers, ring timeout, response mapping; `TestVoiceAgentInvite` against `test/sipua`.
 - [ ] Refuse the agent address as a caller; covered by `TestVoiceAgentInvite`.
+- [ ] Capacity (S-35): per-agent and total caps counted like trunk `max_calls`, busy to the next step or failover, `486` mapped the same, `X-Hello-Caller-Origin` header; `TestVoiceCapacity`.
 - [ ] CDR columns written and filter `voiceAgent` on `listCDRs`; `TestVoiceCDRFields` (integration, in Task 8 if databases are needed).
 - [ ] Metrics `hello_voice_*` for setup and unreachable; `TestVoiceMetrics` (SIP half).
 - [ ] Mutation-check the header strip and the signature input. Full gate; media tests unchanged and green.
