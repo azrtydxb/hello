@@ -186,8 +186,8 @@ func TestVoiceAgentCRUD(t *testing.T) {
 	if got["sipUser"] != sipUser || got["revision"] != float64(2) {
 		t.Fatalf("updated agent = %v", got)
 	}
-	if revision() != rev0+2 { // the create and the update
-		t.Fatalf("voice revision = %d, want %d", revision(), rev0+2)
+	if revision() != rev0+3 { // the billing and third creates and the update
+		t.Fatalf("voice revision = %d, want %d", revision(), rev0+3)
 	}
 
 	// Versions: 10 more persona edits make 12 versions total, 10 kept.
