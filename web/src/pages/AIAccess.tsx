@@ -454,7 +454,7 @@ function ServiceAccounts({
           ) : (
             <ul className="pf-tokens" aria-labelledby="service-accounts">
               {accounts.map((a) => {
-                const live = (a.secrets ?? []).filter((s) => !s.revokedAt);
+                const live = a.secrets;
                 return (
                   <li key={String(a.id)}>
                     <Icon name="bot" size={15} />
@@ -470,12 +470,12 @@ function ServiceAccounts({
                       </div>
                       <div className="pf-tokens__when">
                         {a.role} · client id{" "}
-                        <span className="pf-mono">{a.clientId}</span>
+                        <span className="pf-mono">{a.id}</span>
                       </div>
                       <ScopeBadges scopes={a.scopes} />
                       {live.map((s) => (
                         <div key={String(s.id)} className="pf-tokens__when">
-                          Secret {s.prefix ? `${s.prefix}… ` : ""}created{" "}
+                          Secret #{s.id} created{" "}
                           {new Date(s.createdAt).toLocaleDateString()}
                           {s.expiresAt
                             ? ` · expires ${new Date(s.expiresAt).toLocaleDateString()}`
@@ -484,7 +484,7 @@ function ServiceAccounts({
                             variant="ghost"
                             size="sm"
                             className="pf-revoke"
-                            aria-label={`Revoke secret ${s.prefix ?? s.id} of ${a.name}`}
+                            aria-label={`Revoke secret #${s.id} of ${a.name}`}
                             onClick={() => void revokeSecret(a, String(s.id))}
                           >
                             Revoke

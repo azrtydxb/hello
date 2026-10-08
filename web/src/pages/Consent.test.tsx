@@ -7,7 +7,10 @@ const REQUEST = {
   id: "req-1",
   clientId: "https://agent.example.com/oauth/client.json",
   clientName: "Hello Assistant",
+  clientUri: "",
+  clientHost: "agent.example.com",
   redirectUri: "http://127.0.0.1:43123/callback",
+  redirectHost: "127.0.0.1:43123",
   verified: true,
   scopes: ["read", "write", "admin", "secrets"],
   resources: ["https://hello.test/mcp"],
@@ -16,12 +19,18 @@ const REQUEST = {
 
 const AT = "/oauth/consent?request=req-1";
 
-function setup(role: string | undefined, extra = {}) {
+const GRANTABLE: Record<string, string[]> = {
+  viewer: ["read"],
+  operator: ["read", "write"],
+  admin: ["read", "write", "admin", "secrets"],
+};
+
+function setup(role: "viewer" | "operator" | "admin", extra = {}) {
   const go = vi.spyOn(browser, "go").mockImplementation(() => {});
   const calls = mockApi({
-    "GET /api/v1/auth/me": () =>
-      json(role ? { username: "pat", role } : { username: "pat" }),
-    "GET /api/v1/oauth/requests/req-1": () => json(REQUEST),
+    "GET /api/v1/auth/me": () => json({ username: "pat", role }),
+    "GET /api/v1/oauth/requests/req-1": () =>
+      json({ ...REQUEST, grantableScopes: GRANTABLE[role] }),
     ...extra,
   });
   return { go, calls };
@@ -130,7 +139,14 @@ describe("Consent", () => {
   it("marks an unverified client and explains an expired request", async () => {
     setup("admin", {
       "GET /api/v1/oauth/requests/req-1": [
-        () => json({ ...REQUEST, verified: false, clientId: "hello_dcr_x1" }),
+        () =>
+          json({
+            ...REQUEST,
+            grantableScopes: GRANTABLE.admin,
+            verified: false,
+            clientId: "hello_dcr_x1",
+            clientHost: "hello_dcr_x1",
+          }),
       ],
     });
     renderApp(AT);
@@ -156,7 +172,8 @@ describe("Consent", () => {
     mockApi({
       "GET /api/v1/auth/me": [unauthorized, () => json({ username: "pat" })],
       "POST /api/v1/auth/login": noContent,
-      "GET /api/v1/oauth/requests/req-1": () => json(REQUEST),
+      "GET /api/v1/oauth/requests/req-1": () =>
+        json({ ...REQUEST, grantableScopes: GRANTABLE.admin }),
     });
     renderApp(AT);
 

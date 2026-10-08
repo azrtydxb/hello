@@ -24,8 +24,8 @@ import {
 import {
   CURRENT_PHASE,
   EXACT_PATHS,
-  NAV_GROUPS,
   NAV_ITEMS,
+  navGroupsFor,
   pageTitle,
 } from "./nav";
 import { AIAccess } from "./pages/AIAccess";
@@ -46,6 +46,8 @@ import { ProvFirmware } from "./pages/ProvFirmware";
 import { ProvSettings } from "./pages/ProvSettings";
 import { ProvTemplates } from "./pages/ProvTemplates";
 import { Placeholder } from "./pages/Placeholder";
+import { Users } from "./pages/Users";
+import { Can } from "./role";
 import { usePlatformBadges } from "./pages/platform/ui";
 import { Recordings } from "./pages/Recordings";
 import { Announcements } from "./pages/Announcements";
@@ -77,7 +79,14 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/system": System,
   "/routes/test": RouteTest,
   "/ai": AIAccess,
+  "/users": Users,
 };
+
+const ROLE_LABELS = {
+  viewer: "Viewer",
+  operator: "Operator",
+  admin: "Administrator",
+} as const;
 
 function Shell() {
   const { state, signOut } = useAuth();
@@ -113,13 +122,15 @@ function Shell() {
         }}
         user={
           state.status === "signedIn"
-            ? { name: state.username, role: "Administrator" }
+            ? { name: state.username, role: ROLE_LABELS[state.role] }
             : undefined
         }
         onSignOut={onLogout}
       >
         <SidebarNav label="Primary">
-          {NAV_GROUPS.map((group) => (
+          {navGroupsFor(
+            state.status === "signedIn" ? state.role : undefined,
+          ).map((group) => (
             <SidebarNavGroup key={group.label} label={group.label}>
               {group.items.map((item) => (
                 // NavLink sets aria-current="page" on the active link.
@@ -149,9 +160,11 @@ function Shell() {
           crumbs={title ? ["Kuvryn Hello", title] : ["Kuvryn Hello"]}
           live={reachable}
         >
-          <LinkButton to="/routes/test" size="sm" icon="flask-conical">
-            Test a number
-          </LinkButton>
+          <Can>
+            <LinkButton to="/routes/test" size="sm" icon="flask-conical">
+              Test a number
+            </LinkButton>
+          </Can>
           <ThemeToggle />
         </Topbar>
         <main id="main" className="app-shell__main" tabIndex={-1}>

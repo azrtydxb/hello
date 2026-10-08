@@ -3,6 +3,7 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -18,9 +19,10 @@ import (
 
 // TestSkillsDownload fails if the list differs from the embedded skills, a
 // download is not a zip whose files equal the skill folder, an unknown name
-// is not 404, or the routes are reachable without credentials or documented
-// below the read scope (spec ai-external-access S-18; scope enforcement for
-// every route is TestScopeEnforcement's).
+// is not 404, or the routes are reachable without credentials, admit a
+// token without the read scope, refuse one holding only read, or are
+// documented below the read scope (spec ai-external-access S-18; scope
+// enforcement for every route is TestScopeEnforcement's).
 func TestSkillsDownload(t *testing.T) {
 	h := Handler(Config{Store: tokenStore{}})
 	get := func(path string, bearer bool) *httptest.ResponseRecorder {
@@ -88,6 +90,23 @@ func TestSkillsDownload(t *testing.T) {
 	for _, p := range []string{"/api/v1/skills", "/api/v1/skills/hello-setup/download"} {
 		if rec := get(p, false); rec.Code != http.StatusUnauthorized {
 			t.Fatalf("GET %s without credentials = %d, want 401", p, rec.Code)
+		}
+	}
+	scoped := Handler(Config{Store: scopeStore{tokens: map[string]auth.Actor{
+		hex.EncodeToString(auth.HashToken("noread")): {UserID: 1, Username: "w", Role: auth.RoleAdmin,
+			Kind: auth.KindPersonalToken, Scopes: auth.Scopes{auth.ScopeSecrets}},
+		hex.EncodeToString(auth.HashToken("read")): {UserID: 2, Username: "r", Role: auth.RoleViewer,
+			Kind: auth.KindPersonalToken, Scopes: auth.Scopes{auth.ScopeRead}},
+	}}})
+	for _, p := range []string{"/api/v1/skills", "/api/v1/skills/hello-setup/download"} {
+		for tok, want := range map[string]int{"noread": http.StatusForbidden, "read": http.StatusOK} {
+			req := httptest.NewRequest(http.MethodGet, p, nil)
+			req.Header.Set("Authorization", "Bearer "+tok)
+			rec := httptest.NewRecorder()
+			scoped.ServeHTTP(rec, req)
+			if rec.Code != want || (want == http.StatusForbidden && !strings.Contains(rec.Body.String(), "insufficient_scope")) {
+				t.Fatalf("GET %s with a %s token = %d %s, want %d", p, tok, rec.Code, rec.Body, want)
+			}
 		}
 	}
 	for _, rt := range Routes() {

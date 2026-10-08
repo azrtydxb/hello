@@ -173,23 +173,23 @@ func (s *server) routes() []route {
 
 		// External AI access (spec ai-external-access). The rows are fixed
 		// here; each stream replaces s.pending with its handler.
-		{"GET", "/api/v1/ai/settings", auth.ScopeRead, auth.RoleViewer, false, s.pending},
-		{"GET", "/api/v1/oauth/requests/{id}", auth.ScopeRead, auth.RoleViewer, false, s.pending},
-		{"POST", "/api/v1/oauth/requests/{id}/approve", auth.ScopeSession, auth.RoleViewer, false, s.pending},
-		{"POST", "/api/v1/oauth/requests/{id}/deny", auth.ScopeSession, auth.RoleViewer, false, s.pending},
-		{"GET", "/api/v1/oauth/grants", auth.ScopeRead, auth.RoleViewer, false, s.pending},
-		{"DELETE", "/api/v1/oauth/grants/{id}", auth.ScopeSession, auth.RoleViewer, false, s.pending},
-		{"GET", "/api/v1/service-accounts", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
-		{"POST", "/api/v1/service-accounts", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
-		{"GET", "/api/v1/service-accounts/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
-		{"PATCH", "/api/v1/service-accounts/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
-		{"DELETE", "/api/v1/service-accounts/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
-		{"POST", "/api/v1/service-accounts/{id}/secrets", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
-		{"DELETE", "/api/v1/service-accounts/{id}/secrets/{secretId}", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
+		{"GET", "/api/v1/ai/settings", auth.ScopeRead, auth.RoleViewer, false, s.aiSettings},
+		{"GET", "/api/v1/oauth/requests/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getOAuthRequest},
+		{"POST", "/api/v1/oauth/requests/{id}/approve", auth.ScopeSession, auth.RoleViewer, false, s.approveOAuthRequest},
+		{"POST", "/api/v1/oauth/requests/{id}/deny", auth.ScopeSession, auth.RoleViewer, false, s.denyOAuthRequest},
+		{"GET", "/api/v1/oauth/grants", auth.ScopeRead, auth.RoleViewer, false, s.listGrants},
+		{"DELETE", "/api/v1/oauth/grants/{id}", auth.ScopeSession, auth.RoleViewer, false, s.deleteGrant},
+		{"GET", "/api/v1/service-accounts", auth.ScopeAdmin, auth.RoleAdmin, false, s.listServiceAccounts},
+		{"POST", "/api/v1/service-accounts", auth.ScopeAdmin, auth.RoleAdmin, false, s.createServiceAccount},
+		{"GET", "/api/v1/service-accounts/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getServiceAccount},
+		{"PATCH", "/api/v1/service-accounts/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updateServiceAccount},
+		{"DELETE", "/api/v1/service-accounts/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteServiceAccount},
+		{"POST", "/api/v1/service-accounts/{id}/secrets", auth.ScopeAdmin, auth.RoleAdmin, false, s.createClientSecret},
+		{"DELETE", "/api/v1/service-accounts/{id}/secrets/{secretId}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteClientSecret},
 		{"GET", "/api/v1/skills", auth.ScopeRead, auth.RoleViewer, false, s.listSkills},
 		{"GET", "/api/v1/skills/{name}/download", auth.ScopeRead, auth.RoleViewer, false, s.downloadSkill},
-		{"GET", "/api/v1/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
-		{"PATCH", "/api/v1/users/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
+		{"GET", "/api/v1/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.listUsers},
+		{"PATCH", "/api/v1/users/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updateUser},
 	}
 }
 

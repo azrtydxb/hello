@@ -29,6 +29,7 @@ import {
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import "./platform/platform.css";
+import { Can } from "../role";
 
 /** System: feature codes and live presence; API tokens live on AI access. */
 export function System() {
@@ -215,13 +216,15 @@ function FeatureCodes({ onSaved }: { onSaved: () => void }) {
                   error={errors[`items[${i}].argument`]}
                   onChange={(e) => setRow(i, { argument: e.target.value })}
                 />
-                <IconButton
-                  icon="x"
-                  label={`Remove code ${r.code || i + 1}`}
-                  onClick={() =>
-                    setRows((prev) => prev.filter((_, j) => j !== i))
-                  }
-                />
+                <Can>
+                  <IconButton
+                    icon="x"
+                    label={`Remove code ${r.code || i + 1}`}
+                    onClick={() =>
+                      setRows((prev) => prev.filter((_, j) => j !== i))
+                    }
+                  />
+                </Can>
               </div>
             ))}
           </div>
@@ -232,22 +235,26 @@ function FeatureCodes({ onSaved }: { onSaved: () => void }) {
             </Alert>
           )}
           <div className="pf-codes__actions">
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="plus"
-              onClick={() =>
-                setRows((prev) => [
-                  ...prev,
-                  { code: "", action: "voicemail", argument: "" },
-                ])
-              }
-            >
-              Add code
-            </Button>
-            <Button type="submit" size="sm" disabled={busy}>
-              Save feature codes
-            </Button>
+            <Can>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="plus"
+                onClick={() =>
+                  setRows((prev) => [
+                    ...prev,
+                    { code: "", action: "voicemail", argument: "" },
+                  ])
+                }
+              >
+                Add code
+              </Button>
+            </Can>
+            <Can>
+              <Button type="submit" size="sm" disabled={busy}>
+                Save feature codes
+              </Button>
+            </Can>
           </div>
         </>
       )}

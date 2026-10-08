@@ -41,6 +41,7 @@ import {
 import { mapFieldErrors } from "../forms";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import "./directory/directory.css";
+import { Can } from "../role";
 
 const NUMBER_HINT = "2 to 10 digits.";
 const EXTERNAL_PATTERN = /^(\+?[0-9]{2,20})?$/;
@@ -242,9 +243,11 @@ export function Extensions() {
         title="Extensions"
         description="Dialable numbers, their devices and call features."
         actions={
-          <Button icon="plus" onClick={() => setCreating(true)}>
-            New extension
-          </Button>
+          <Can>
+            <Button icon="plus" onClick={() => setCreating(true)}>
+              New extension
+            </Button>
+          </Can>
         }
       />
 
@@ -260,9 +263,11 @@ export function Extensions() {
           title="No extensions yet"
           description="An extension is a dialable number. Add one, then give it devices."
           action={
-            <Button icon="plus" onClick={() => setCreating(true)}>
-              New extension
-            </Button>
+            <Can>
+              <Button icon="plus" onClick={() => setCreating(true)}>
+                New extension
+              </Button>
+            </Can>
           }
         />
       )}
@@ -538,21 +543,25 @@ function ExtensionDrawer({
 
   const footer = (
     <>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="dir-danger"
-        disabled={busy}
-        onClick={() => setConfirmDelete(true)}
-      >
-        Delete
-      </Button>
+      <Can>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="dir-danger"
+          disabled={busy}
+          onClick={() => setConfirmDelete(true)}
+        >
+          Delete
+        </Button>
+      </Can>
       <Button variant="secondary" disabled={busy} onClick={onClose}>
         Cancel
       </Button>
-      <Button type="submit" form="extension-form" disabled={busy}>
-        Save
-      </Button>
+      <Can>
+        <Button type="submit" form="extension-form" disabled={busy}>
+          Save
+        </Button>
+      </Can>
     </>
   );
 

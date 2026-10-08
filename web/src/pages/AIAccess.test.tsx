@@ -3,11 +3,16 @@ import { describe, expect, it } from "vitest";
 import { json, mockApi, noContent, renderApp } from "../test/api";
 
 const SETTINGS = {
+  enabled: true,
   publicUrl: "https://pbx.example.net",
+  issuer: "https://pbx.example.net",
+  apiUrl: "https://pbx.example.net/api/v1",
   mcpUrl: "https://pbx.example.net/mcp",
   authorizationServerMetadataUrl:
     "https://pbx.example.net/.well-known/oauth-authorization-server",
-  resourceMetadataUrl:
+  apiMetadataUrl:
+    "https://pbx.example.net/.well-known/oauth-protected-resource/api/v1",
+  mcpMetadataUrl:
     "https://pbx.example.net/.well-known/oauth-protected-resource/mcp",
   protocolVersions: ["2026-07-28", "2025-11-25"],
   dcr: true,
@@ -18,9 +23,13 @@ const SETTINGS = {
 };
 
 const GRANT = {
-  id: "g1",
+  id: 1,
+  userId: 1,
+  username: "pat",
   clientId: "https://agent.example.com/client.json",
   clientName: "Hello Assistant",
+  clientHost: "agent.example.com",
+  verified: true,
   scopes: ["read", "write"],
   resources: ["https://pbx.example.net/mcp"],
   createdAt: "2026-10-01T10:00:00Z",
@@ -28,13 +37,14 @@ const GRANT = {
 };
 
 const ACCOUNT = {
-  id: 4,
-  clientId: "hello_sa_4",
+  id: "hello_sa_4",
   name: "nightly-report",
+  description: "",
   role: "viewer",
   scopes: ["read"],
   enabled: true,
   createdAt: "2026-10-01T10:00:00Z",
+  lastUsedAt: null,
   secrets: [],
 };
 
@@ -99,7 +109,7 @@ describe("AIAccess", () => {
         () => json({ items: [GRANT] }),
         () => json({ items: [] }),
       ],
-      "DELETE /api/v1/oauth/grants/g1": noContent,
+      "DELETE /api/v1/oauth/grants/1": noContent,
     });
     renderApp("/ai");
 
@@ -118,7 +128,7 @@ describe("AIAccess", () => {
     await screen.findByText("No connected apps");
     expect(calls).toContainEqual({
       method: "DELETE",
-      url: "/api/v1/oauth/grants/g1",
+      url: "/api/v1/oauth/grants/1",
       body: undefined,
     });
   });
@@ -145,21 +155,23 @@ describe("AIAccess", () => {
                 secrets: [
                   {
                     id: 11,
-                    prefix: "hello_cs_ab",
                     createdAt: "2026-10-08T09:00:00Z",
+                    expiresAt: null,
+                    lastUsedAt: null,
                   },
                 ],
               },
             ],
           }),
       ],
-      "POST /api/v1/service-accounts/4/secrets": () =>
+      "POST /api/v1/service-accounts/hello_sa_4/secrets": () =>
         json(
           {
             id: 11,
-            prefix: "hello_cs_ab",
-            createdAt: "2026-10-08T09:00:00Z",
+            clientId: "hello_sa_4",
             secret: "hello_cs_abSECRET",
+            createdAt: "2026-10-08T09:00:00Z",
+            expiresAt: null,
           },
           201,
         ),
@@ -186,9 +198,7 @@ describe("AIAccess", () => {
       ).toBeNull(),
     );
     expect(document.body).not.toHaveTextContent("hello_cs_abSECRET");
-    expect(
-      await screen.findByText(/Secret hello_cs_ab… created/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/Secret #11 created/)).toBeInTheDocument();
   });
 
   it("creates a scoped personal token with an expiry and shows it once", async () => {

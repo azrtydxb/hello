@@ -88,6 +88,12 @@ type Options struct {
 // o.Cookies) session cookie, with the actor in its context, and answers 401
 // otherwise. When an Authorization header is present it alone decides; the
 // cookie is not consulted.
+//
+// An OAuth access token is admitted only for a resource in its audience:
+// o.Resource, or, inside an MCP replay (ReplayFrom) by the same client, the
+// MCP resource next to it (spec S-9). The session scope is only ever held
+// by a session (spec S-5). With o.MetadataURL set, every 401 carries the
+// RFC 9728 challenge.
 func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,11 +109,22 @@ func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.H
 					break
 				}
 				a, err = l.TokenActor(r.Context(), HashToken(tok))
+				if err != nil {
+					break
+				}
 				if a.Kind == "" {
 					a.Kind = KindLegacyToken
 				}
 				if a.Kind == KindLegacyToken && a.Scopes == nil {
 					a.Scopes = slices.Clone(AllScopes)
+				}
+				// Only a browser session holds session: no token can
+				// approve consent, whatever was stored for it.
+				a.Scopes = slices.DeleteFunc(slices.Clone(a.Scopes), func(s Scope) bool { return s == ScopeSession })
+				if !o.inAudience(r.Context(), a) {
+					o.challenge(w, `error="invalid_token", error_description="the token is not for this resource", `)
+					WriteError(w, http.StatusUnauthorized, "invalid_token", "the token is not valid for this resource")
+					return
 				}
 			case !o.Cookies:
 				err = ErrNoCredentials
@@ -123,6 +140,7 @@ func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.H
 			}
 			switch {
 			case errors.Is(err, ErrNoCredentials):
+				o.challenge(w, "")
 				WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
 				return
 			case err != nil:
@@ -130,21 +148,82 @@ func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.H
 				WriteError(w, http.StatusInternalServerError, "internal", "internal error")
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), a)))
+			next.ServeHTTP(w, r.WithContext(WithActor(withChallenge(r.Context(), o.MetadataURL), a)))
 		})
 	}
 }
 
+// inAudience reports whether a's credential may be used on o.Resource.
+// Credentials without an audience (sessions, API tokens) may be used
+// anywhere the middleware admits them.
+func (o Options) inAudience(ctx context.Context, a Actor) bool {
+	if a.Kind != KindOAuth && a.Kind != KindService {
+		return true
+	}
+	if o.Resource == "" {
+		return false
+	}
+	if slices.Contains(a.Audience, o.Resource) {
+		return true
+	}
+	rp, ok := ReplayFrom(ctx)
+	if !ok || rp.ClientID != a.ClientID {
+		return false
+	}
+	// The MCP server replays a tool call through the API with the
+	// caller's token; the token is then bound to the MCP resource, which
+	// sits next to the API under the public URL.
+	base, cut := strings.CutSuffix(o.Resource, "/api/v1")
+	return cut && slices.Contains(a.Audience, base+"/mcp")
+}
+
+// challenge sets the WWW-Authenticate challenge of a 401 or 403 when the
+// resource has protected resource metadata (spec S-7): extra is any
+// error parameters, each followed by ", ".
+func (o Options) challenge(w http.ResponseWriter, extra string) {
+	if o.MetadataURL == "" {
+		return
+	}
+	w.Header().Set("WWW-Authenticate", `Bearer `+extra+`resource_metadata="`+o.MetadataURL+`", scope="read"`)
+}
+
+type challengeKey struct{}
+
+func withChallenge(ctx context.Context, metadataURL string) context.Context {
+	if metadataURL == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, challengeKey{}, metadataURL)
+}
+
 // Require admits a request whose actor has at least role minRole and holds
-// scope s, answering 403 forbidden_role or 403 insufficient_scope otherwise.
-// It runs inside Middleware.
-//
-// Contract only: enforcement lands with the authorization server (plan
-// ai-external-access, Task 3); until then it admits every request, so
-// sessions and API tokens behave exactly as before.
+// scope s, answering 403 forbidden_role or 403 insufficient_scope (with the
+// step-up challenge of spec S-5) otherwise. It runs inside Middleware; the
+// role is the one the Lookup read for this request.
 func Require(minRole Role, s Scope) func(http.Handler) http.Handler {
-	_, _ = minRole, s
-	return func(next http.Handler) http.Handler { return next }
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			a, ok := ActorFrom(r.Context())
+			if !ok {
+				WriteError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+				return
+			}
+			if !a.Role.AtLeast(minRole) {
+				WriteError(w, http.StatusForbidden, "forbidden_role", "this needs the "+string(minRole)+" role")
+				return
+			}
+			if !a.Scopes.Has(s) {
+				ch := `Bearer error="insufficient_scope", scope="` + string(s) + `"`
+				if md, _ := r.Context().Value(challengeKey{}).(string); md != "" {
+					ch += `, resource_metadata="` + md + `"`
+				}
+				w.Header().Set("WWW-Authenticate", ch)
+				WriteError(w, http.StatusForbidden, "insufficient_scope", "this needs the "+string(s)+" scope")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // WriteError writes the API's error envelope.

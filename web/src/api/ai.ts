@@ -2,12 +2,12 @@
 // screen, connected apps, service accounts, scoped API tokens, the MCP
 // settings and the skills download. The shared request helpers live in ../api.
 import { list, request, type Id } from "../api";
+import type { Role } from "../role";
+
+export type { Role };
 
 /** An OAuth scope (internal/auth Scope). */
 export type Scope = "read" | "write" | "admin" | "secrets" | "session";
-
-/** A user role (internal/auth Role). */
-export type Role = "viewer" | "operator" | "admin";
 
 /** The scopes a credential can hold, weakest first. */
 export const SCOPES: readonly Scope[] = ["read", "write", "admin", "secrets"];
@@ -43,33 +43,38 @@ export function grantableScopes(role: Role): readonly Scope[] {
   }
 }
 
-/**
- * The signed-in user's role. A server without roles (before
- * migration 00008 every user was an administrator) reports none: admin.
- */
+/** The signed-in user's role (GET /api/v1/auth/me, schema Me). */
 export async function fetchRole(signal?: AbortSignal): Promise<Role> {
-  const me = await request<{ role?: Role }>("GET", "/api/v1/auth/me", {
-    signal,
-  });
-  return me.role ?? "admin";
+  const me = await request<{ username: string; role: Role }>(
+    "GET",
+    "/api/v1/auth/me",
+    { signal },
+  );
+  return me.role;
 }
 
 // --- consent -----------------------------------------------------------------
 
-/** GET /api/v1/oauth/requests/{id}: a pending authorization request. */
+/** GET /api/v1/oauth/requests/{id}: a pending authorization request (schema OAuthRequest). */
 export interface ConsentRequest {
   id: string;
   /** The client id: a metadata document URL, a registered id or a service account. */
   clientId: string;
   /** Self-asserted by the client. */
   clientName: string;
-  clientUri?: string;
+  /** Empty when the client gave none. */
+  clientUri: string;
+  /** The host the client id names, worked out by the server. */
+  clientHost: string;
   redirectUri: string;
+  redirectHost: string;
   /** False for dynamically registered clients. */
   verified: boolean;
   scopes: Scope[];
   resources: string[];
   expiresAt: string;
+  /** The scopes the signed-in user's role may grant. */
+  grantableScopes: Scope[];
 }
 
 export const getConsentRequest = (requestId: string, signal?: AbortSignal) =>
@@ -97,28 +102,18 @@ export const denyConsent = (requestId: string) =>
     `/api/v1/oauth/requests/${encodeURIComponent(requestId)}/deny`,
   );
 
-/** The host the client id names, shown prominently: the name is self-asserted. */
-export function clientHost(clientId: string, clientUri?: string): string {
-  for (const candidate of [clientId, clientUri]) {
-    if (!candidate) continue;
-    try {
-      const u = new URL(candidate);
-      if (u.host) return u.host;
-    } catch {
-      // Not a URL: a registered client id.
-    }
-  }
-  return clientId;
-}
-
 // --- AI settings ---------------------------------------------------------------
 
 /** GET /api/v1/ai/settings */
 export interface AISettings {
+  enabled: boolean;
   publicUrl: string;
+  issuer: string;
+  apiUrl: string;
   mcpUrl: string;
   authorizationServerMetadataUrl: string;
-  resourceMetadataUrl: string;
+  apiMetadataUrl: string;
+  mcpMetadataUrl: string;
   protocolVersions: string[];
   dcr: boolean;
   scopes: { name: Scope; description: string }[];
@@ -129,17 +124,20 @@ export const getAISettings = (signal?: AbortSignal) =>
 
 // --- connected apps --------------------------------------------------------------
 
-/** GET /api/v1/oauth/grants item. */
+/** GET /api/v1/oauth/grants item (schema OAuthGrant). */
 export interface Grant {
-  id: Id;
+  id: number;
+  userId: number;
+  /** The user who approved it (shown to administrators). */
+  username: string;
   clientId: string;
   clientName: string;
-  /** The user who approved it (shown to administrators). */
-  username?: string;
+  clientHost: string;
+  verified: boolean;
   scopes: Scope[];
   resources: string[];
   createdAt: string;
-  lastUsedAt?: string | null;
+  lastUsedAt: string | null;
 }
 
 export const listGrants = (signal?: AbortSignal) =>
@@ -153,34 +151,37 @@ export const revokeGrant = (grantId: Id) =>
 
 // --- service accounts ------------------------------------------------------------
 
-/** A service account's client secret as listed; the secret itself never is. */
+/** A live client secret as listed (schema ClientSecret); the secret itself never is. */
 export interface ServiceSecret {
-  id: Id;
-  /** The first characters, to tell secrets apart. */
-  prefix?: string;
+  id: number;
   createdAt: string;
-  expiresAt?: string | null;
-  lastUsedAt?: string | null;
-  revokedAt?: string | null;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
 }
 
-/** GET /api/v1/service-accounts item. */
+/** GET /api/v1/service-accounts item (schema ServiceAccount). */
 export interface ServiceAccount {
-  id: Id;
-  clientId: string;
+  /** The OAuth client id (hello_sa_...). */
+  id: string;
   name: string;
-  description?: string;
+  description: string;
   role: Role;
   scopes: Scope[];
   enabled: boolean;
   createdAt: string;
-  secrets?: ServiceSecret[];
+  lastUsedAt: string | null;
+  /** Live secrets only. */
+  secrets: ServiceSecret[];
 }
 
-/** POST /api/v1/service-accounts/{id}/secrets response. */
-export interface CreatedServiceSecret extends ServiceSecret {
+/** POST /api/v1/service-accounts/{id}/secrets response (schema CreatedClientSecret). */
+export interface CreatedServiceSecret {
+  id: number;
+  clientId: string;
   /** Shown once; never returned again. */
   secret: string;
+  createdAt: string;
+  expiresAt: string | null;
 }
 
 export const listServiceAccounts = (signal?: AbortSignal) =>

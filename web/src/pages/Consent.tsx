@@ -3,12 +3,10 @@ import { useSearchParams } from "react-router";
 import { errorMessage } from "../api";
 import {
   approveConsent,
-  clientHost,
   type ConsentRequest,
   denyConsent,
   fetchRole,
   getConsentRequest,
-  grantableScopes,
   type Role,
   type Scope,
   SCOPE_TEXT,
@@ -63,7 +61,7 @@ export function Consent() {
       fetchRole(controller.signal),
     ])
       .then(([request, role]) => {
-        const grantable = grantableScopes(role);
+        const grantable = request.grantableScopes;
         // Every requested, grantable scope starts checked except secrets.
         setChecked(
           new Set(
@@ -82,10 +80,10 @@ export function Consent() {
     return () => controller.abort();
   }, [requestId]);
 
-  // Only what the role may grant is ever sent, whatever the boxes say.
+  // Only what the role may grant (as the server says) is ever sent, whatever the boxes say.
   const granted =
     state.status === "ready"
-      ? grantableScopes(state.role).filter((s) => checked.has(s))
+      ? state.request.grantableScopes.filter((s) => checked.has(s))
       : [];
 
   async function decide(approve: boolean) {
@@ -163,8 +161,8 @@ function ConsentForm({
   error: string | null;
   onDecide: (approve: boolean) => void;
 }) {
-  const grantable = grantableScopes(role);
-  const host = clientHost(request.clientId, request.clientUri);
+  const grantable = request.grantableScopes;
+  const host = request.clientHost;
   const scopes = request.scopes.filter((s) => s !== "session");
   return (
     <>

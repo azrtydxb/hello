@@ -38,8 +38,11 @@ type Store interface {
 	CreateSession(ctx context.Context, userID int64, hash []byte, expires time.Time) error
 	DeleteSession(ctx context.Context, hash []byte) error
 
+	ListUsers(ctx context.Context) ([]store.User, error)
+	SetUserRole(ctx context.Context, actor string, id int64, role auth.Role) (store.User, error)
+
 	ListTokens(ctx context.Context, userID int64) ([]store.Token, error)
-	CreateToken(ctx context.Context, actor string, userID int64, name string, hash []byte) (store.Token, error)
+	CreateToken(ctx context.Context, actor string, userID int64, in store.NewToken, hash []byte) (store.Token, error)
 	DeleteToken(ctx context.Context, actor string, userID, id int64) error
 
 	ListExtensions(ctx context.Context) ([]store.Extension, error)
@@ -153,6 +156,10 @@ type Config struct {
 	// the provisioning routes. Prov wires the rest of them.
 	ProvStore ProvStore
 	Prov      ProvConfig
+	// AI is the OAuth authorization server (spec ai-external-access); nil
+	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
+	// routes answer 404 and bearer tokens get no audience check.
+	AI AIAccess
 }
 
 type server struct{ Config }
@@ -167,7 +174,12 @@ func Handler(c Config) http.Handler {
 		c.Router = engineRouter{}
 	}
 	s := &server{c}
-	authed := auth.Middleware(c.Store, auth.Options{Cookies: true}, c.Log)
+	opts := auth.Options{Cookies: true}
+	if c.AI != nil {
+		opts.Resource, _ = c.AI.Resources()
+		opts.MetadataURL = c.AI.MetadataURL(opts.Resource)
+	}
+	authed := auth.Middleware(c.Store, opts, c.Log)
 	mux := http.NewServeMux()
 	for _, rt := range s.routes() {
 		h := http.Handler(rt.H)
@@ -179,8 +191,12 @@ func Handler(c Config) http.Handler {
 	// Reject cross-origin browser requests that change state (CSRF); a
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.
-	return http.NewCrossOriginProtection().Handler(mux)
+	return wrapForTest(http.NewCrossOriginProtection().Handler(mux))
 }
+
+// wrapForTest is the identity; the package tests replace it from TestMain
+// with the OpenAPI conformance validator (spec ai-external-access S-2).
+var wrapForTest = func(h http.Handler) http.Handler { return h }
 
 func (s *server) version(w http.ResponseWriter, r *http.Request) {
 	rev, err := s.Store.ConfigRevision(r.Context())
