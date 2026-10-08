@@ -1,21 +1,17 @@
-# phase 1's `TestRoutesMatchOpenAPI`, `TestOpenAPIConformance`, `TestOpenAPIForTools`, `TestRoleEnforcement` and `TestToolsFromOpenAPI` pass with the new operations. `TestAIOperationsMCP` in `internal/mcp` fails if apply, dismiss, acknowledge, chat or run-now is an MCP tool.
+# phase 1's TestRoutesMatchOpenAPI, TestOpenAPIConformance, TestOpenAPIForTools, TestRoleEnforcement and TestToolsFromOpenAPI pass with the new operations, and TestVoiceOperationsMCP in internal/mcp fails if a credential, transcript, runtime or egress operation is an MCP tool or an agent write is a read tool.
 
 Status: open
 Created: 2026-10-08
-Epic: ai-agent
+Epic: voice-agents
 Sprint: -
 
 ## Description
 
-<!-- The user story: who needs what, and why. What "done" looks like in
-     the reader's terms — a title is not a description. -->
+Implements the acceptance criterion of the voice-agents spec (`.procoder/specs/voice-agents.md`) cited below; the plan task that owns it is in `.procoder/plans/voice-agents.md`.
 
 ## Acceptance criteria
 
-<!-- Each criterion is testable. Check a box ONLY when it is verifiably
-     true — the closer will ask for the evidence. -->
-
-- [ ] phase 1's `TestRoutesMatchOpenAPI`, `TestOpenAPIConformance`, `TestOpenAPIForTools`, `TestRoleEnforcement` and `TestToolsFromOpenAPI` pass with the new operations. `TestAIOperationsMCP` in `internal/mcp` fails if apply, dismiss, acknowledge, chat or run-now is an MCP tool.
+- [ ] [S-31] phase 1's `TestRoutesMatchOpenAPI`, `TestOpenAPIConformance`, `TestOpenAPIForTools`, `TestRoleEnforcement` and `TestToolsFromOpenAPI` pass with the new operations, and `TestVoiceOperationsMCP` in `internal/mcp` fails if a credential, transcript, runtime or egress operation is an MCP tool or an agent write is a read tool.
 
 ## Evidence
 
