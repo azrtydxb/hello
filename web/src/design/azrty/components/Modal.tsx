@@ -1,4 +1,4 @@
-import { useEffect, useId, type ReactNode } from "react";
+import { useLayoutEffect, useId, type ReactNode } from "react";
 import { cx } from "./cx";
 import { IconButton } from "./IconButton";
 
@@ -31,7 +31,8 @@ export function Modal({
   className,
 }: ModalProps) {
   const titleId = useId();
-  useEffect(() => {
+  // Layout effect: the dialog must answer Escape as soon as it is on screen.
+  useLayoutEffect(() => {
     if (!open || inline || !onClose) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();

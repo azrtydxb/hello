@@ -1,4 +1,9 @@
-import { useEffect, useId, type CSSProperties, type ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useId,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { cx } from "./cx";
 import { IconButton } from "./IconButton";
 
@@ -30,7 +35,8 @@ export function Drawer({
   style,
 }: DrawerProps) {
   const titleId = useId();
-  useEffect(() => {
+  // Layout effect: the dialog must answer Escape as soon as it is on screen.
+  useLayoutEffect(() => {
     if (!open || inline || !onClose) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
