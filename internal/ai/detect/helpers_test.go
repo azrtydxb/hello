@@ -85,14 +85,14 @@ func testEnv(t testing.TB) (*Env, *fakeLive) {
 	return &Env{DB: db, Store: store.New(db), Live: live, Cluster: fakeMembers{}, Now: func() time.Time { return t0 }}, live
 }
 
-// valkeyClient is a client on the CI Valkey's database 15 (flushed), or skips.
+// valkeyClient is a client on the CI Valkey's database 14 (flushed), or skips.
 func valkeyClient(t testing.TB) valkey.Client {
 	t.Helper()
 	addr := os.Getenv("HELLO_TEST_VALKEY_ADDR")
 	if addr == "" {
 		t.Skip("HELLO_TEST_VALKEY_ADDR not set")
 	}
-	c, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 15}) // detect's DB (TestValkeyDBsPerPackage)
+	c, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 14}) // detect's DB (TestValkeyDBsPerPackage)
 	if err != nil {
 		t.Fatal(err)
 	}

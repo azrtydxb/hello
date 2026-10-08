@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/ai/aifake"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -27,7 +28,8 @@ func finding(id, sev string) store.AIFindingInput {
 func TestAIFindingsAPI(t *testing.T) {
 	ctx := context.Background()
 	late := &lateFindings{}
-	e := newEnvConfig(t, Config{Findings: late}, nil)
+	agent, _, _ := aifake.Service(t, aifake.Config())
+	e := newEnvConfig(t, Config{Findings: late, AIAgent: agent}, nil)
 	late.AIFindings = e.st
 	if err := e.st.UpsertAIFindings(ctx, time.Now(), []store.AIFindingInput{
 		finding("a", "critical"), finding("b", "warning"), finding("c", "warning"), finding("d", "info")}, nil); err != nil {
