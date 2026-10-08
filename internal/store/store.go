@@ -132,10 +132,16 @@ func insertAudit(ctx context.Context, q interface {
 }
 
 // auditVia is the audit row's via (spec S-6): the OAuth client of the
-// request's actor, or NULL for the console, API tokens and the system.
+// request's actor, the actor's own via (an AI agent), or NULL for the
+// console, API tokens and the system.
 func auditVia(ctx context.Context) any {
-	if a, ok := auth.ActorFrom(ctx); ok && a.ClientID != "" {
-		return a.ClientID
+	if a, ok := auth.ActorFrom(ctx); ok {
+		switch {
+		case a.ClientID != "":
+			return a.ClientID
+		case a.Via != "":
+			return a.Via
+		}
 	}
 	return nil
 }
@@ -394,6 +400,16 @@ func (s *Store) SessionActor(ctx context.Context, hash []byte) (auth.Actor, erro
 	err := s.db.QueryRowContext(ctx, `
 		SELECT u.id, u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = $1 AND s.expires_at > now()`, hash).Scan(&a.UserID, &a.Username, &a.Role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return a, auth.ErrNoCredentials
+	}
+	return a, err
+}
+
+// UserActor implements auth.Lookup for the in-product agent.
+func (s *Store) UserActor(ctx context.Context, id int64) (auth.Actor, error) {
+	a := auth.Actor{UserID: id}
+	err := s.db.QueryRowContext(ctx, `SELECT username, role FROM users WHERE id = $1`, id).Scan(&a.Username, &a.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
 	}

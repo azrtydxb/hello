@@ -298,3 +298,7 @@ func TestUserRoles(t *testing.T) {
 		t.Errorf("%d audit rows for the role change, want 1", n)
 	}
 }
+
+func (roleLookup) UserActor(context.Context, int64) (auth.Actor, error) {
+	return auth.Actor{}, auth.ErrNoCredentials
+}

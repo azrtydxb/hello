@@ -68,7 +68,18 @@ func TestDeviceSecretAndHA1(t *testing.T) {
 type fakeLookup struct {
 	sessions map[string]Actor // keyed by hex hash
 	tokens   map[string]Actor
+	users    map[int64]Actor
 	err      error
+}
+
+func (f fakeLookup) UserActor(_ context.Context, id int64) (Actor, error) {
+	if f.err != nil {
+		return Actor{}, f.err
+	}
+	if a, ok := f.users[id]; ok {
+		return a, nil
+	}
+	return Actor{}, ErrNoCredentials
 }
 
 func (f fakeLookup) find(m map[string]Actor, hash []byte) (Actor, error) {

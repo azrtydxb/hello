@@ -90,6 +90,12 @@ func TestUserRoles(t *testing.T) {
 	}
 	lookupRoles := func() (auth.Role, auth.Role) {
 		t.Helper()
+		if u, err := s.UserActor(ctx, viewer); err != nil || u.Role != roles()[viewer] || u.Username != "viewer" {
+			t.Fatalf("UserActor = %+v, %v; want the user's current role", u, err)
+		}
+		if _, err := s.UserActor(ctx, 1<<40); !errors.Is(err, auth.ErrNoCredentials) {
+			t.Fatalf("UserActor of a missing user = %v, want ErrNoCredentials", err)
+		}
 		a, err := s.SessionActor(ctx, sess)
 		if err != nil {
 			t.Fatal(err)

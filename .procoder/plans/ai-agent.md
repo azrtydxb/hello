@@ -39,17 +39,26 @@ Why tools for reads and structured output for the answer, and why in hello-contr
 6. **Proposal** (`internal/ai/proposal`): `Action{OperationID string; PathParams map[string]string; Body json.RawMessage; Before, After json.RawMessage}`, `Draft{Source, Title, Rationale string; SessionID, FindingID *uuid; Actions []Action}`, `(*Validator).Validate(ctx, ident Identity, d *Draft) error` (fills `Before`/`After`), `Store.Upsert(ctx, Draft) (id, error)` (dedupe, supersede), `Apply(ctx, id, userHeader http.Header) (Proposal, error)`, `Dismiss(ctx, id, userID, reason, text)`.
 7. **Routes** (`internal/api/routes.go`): every operation of the spec's Interfaces section in `routes()` with its scope and role answering `501` through `s.pending` until its stream lands, and in `openapi.json` with descriptions, `x-hello-*` and schemas, so phase 1's sync and conformance tests hold from Task 1 on.
 
+**Deviations recorded by Task 1** (merged contracts; streams build on these, not the lines above where they differ):
+
+- Contract 3: `Request` also has `ClientID` (the OAuth client in the replay marker, empty for the assistant and apply) and `RemoteAddr`; `Do` logs a handler panic through `slog.Default()`; `replay.Withheld`, `Redact` and `Unescape` live in `internal/replay`, and `mcp.Withheld` aliases the constant.
+- Contract 4: also `auth.KindAgent`, `auth.ViaAssistant`, `Actor.Via`, and `auth.WithVia(ctx, via)`/`ViaFrom(ctx)`: the middleware sets `Actor.Via` from the context for any actor, and the store's audit via is `ClientID`, else `Via`. Task 3's apply puts `ai-proposal:<id>` in the context with `auth.WithVia`; nothing else in `auth` changes. `Lookup` gained `UserActor`, implemented by `store.Store`. An agent marker is honoured only when the request has no `Authorization` header.
+- Contract 5: `internal/ai/ai.go` holds only types, error codes and the `Agent` interface; `New`, `Generate`, `DataBlock`, `Tasks.Start` (`TaskFunc`) and `Scheduler.Register` are Task 2's, with the signatures in the package comment. The `Store` interface is Task 2's to define in `internal/ai` beside `Service` (it may add it to a file it owns). Ids are `string` UUIDs.
+- Contract 6: `Validator` and `Store` are interfaces (so Tasks 4 and 6 compile before Task 3 merges); ids are `*string`; `Identity` is an alias of `auth.Agent`. How a finding's proposal gets its read identity is Task 6's decision.
+- Contract 7: operation ids are `getAIStatus`, `listAIFindings`, `getAIFinding`, `acknowledgeAIFinding`, `dismissAIFinding`, `listAIProposals`, `getAIProposal`, `applyAIProposal`, `dismissAIProposal`, `listAISessions`, `createAISession`, `getAISession`, `updateAISession`, `deleteAISession`, `postAIMessage`, `getAITask`, `listAIAgents`, `runAIAgent`. The session writes (create, update, delete) are also `x-hello-mcp` exclusions, as apply, dismiss, acknowledge, post and run-now are; the reads are tools. `getAIStatus` answers `200` with `enabled: false` while AI is off (no `503`). A pending route is skipped by the conformance validator and its documented statuses are not required until its handler replaces `s.pending`.
+- Schema: task statuses `queued|running|succeeded|failed`; `ai_agent_requests.requested_by` and the finding and proposal actor columns reference `users` `ON DELETE SET NULL`; sessions, tasks and messages cascade with the owner.
+
 ## Task 1: Shared contracts (lead, branch ai-agent-contracts)
 
 Files: `migrations/00009_ai_agent.sql`, `internal/config/`, `internal/replay/` (moved), `internal/mcp/replay.go` and `redact.go` (now thin callers), `internal/auth/middleware.go`, `internal/auth/scope.go`, `internal/api/routes.go`, `internal/api/openapi.json`, `internal/ai/ai.go` (types and signatures), `internal/ai/proposal/proposal.go` (types), `go.mod`.
 Interfaces: produces contracts 1–7.
 
-- [ ] Migration up and down; `go test -run Migrate ./test/integration/` → `TestMigrateAIAgentRollback` passes.
-- [ ] Move replay to `internal/replay`, MCP calls it; `go test -race ./internal/mcp/ ./internal/replay/` → phase 1's `TestToolReplay` and `TestResourcesAndPrompts` unchanged and green.
-- [ ] Agent identity in `internal/auth`; `TestAgentIdentity` (the `internal/auth` half: no header sets it, scope is `read` only, deleted user `401`, demotion applies, `via` set).
-- [ ] Config keys with defaults and validation (provider enum, structured-output enum, percent 1–100, positive bounds); `TestLoadAIAgent*`.
-- [ ] Route rows and OpenAPI operations for every new endpoint (`501` pending); `TestRoutesMatchOpenAPI`, `TestOpenAPIForTools`, `TestRoleEnforcement` green.
-- [ ] `go get github.com/azrtydxb/go-ai-sdk@v0.6.0`; `go build ./...`. Commit, PR, merge; streams branch from that main in their own worktrees.
+- [x] Migration up and down; `go test -run Migrate ./test/integration/` → `TestMigrateAIAgentRollback` passes.
+- [x] Move replay to `internal/replay`, MCP calls it; `go test -race ./internal/mcp/ ./internal/replay/` → phase 1's `TestToolReplay` and `TestResourcesAndPrompts` unchanged and green.
+- [x] Agent identity in `internal/auth`; `TestAgentIdentity` (the `internal/auth` half: no header sets it, scope is `read` only, deleted user `401`, demotion applies, `via` set).
+- [x] Config keys with defaults and validation (provider enum, structured-output enum, percent 1–100, positive bounds); `TestLoadAIAgent*`.
+- [x] Route rows and OpenAPI operations for every new endpoint (`501` pending); `TestRoutesMatchOpenAPI`, `TestOpenAPIForTools`, `TestRoleEnforcement` green.
+- [x] `go get github.com/azrtydxb/go-ai-sdk@v0.6.0`; `go build ./...`. Commit, PR, merge; streams branch from that main in their own worktrees.
 
 ## Task 2: AI core (branch ai-agent-core)
 

@@ -37,6 +37,9 @@ type conformance struct {
 	spec *apispec.Spec
 	ops  map[string]apispec.Operation // by "METHOD /pattern"
 	mux  *http.ServeMux               // matches a request to its pattern
+	// pending is the "METHOD /pattern" of every route whose handler has not
+	// landed (answers 501): not validated, and its statuses not required.
+	pending map[string]bool
 
 	mu         sync.Mutex
 	schemas    map[string]*jsonschema.Resolved
@@ -53,6 +56,7 @@ func newConformance(doc []byte) (*conformance, error) {
 		spec:       spec,
 		ops:        map[string]apispec.Operation{},
 		mux:        http.NewServeMux(),
+		pending:    pendingRoutes(),
 		schemas:    map[string]*jsonschema.Resolved{},
 		observed:   map[string]bool{},
 		violations: map[string]bool{},
@@ -102,6 +106,9 @@ func (c *conformance) check(t *testing.T) {
 		return
 	}
 	for _, op := range c.spec.Operations() {
+		if c.pending[op.Method+" "+op.Path] {
+			continue
+		}
 		for status := range c.spec.Responses(op.ID) {
 			key := op.ID + " " + status
 			switch {
@@ -125,9 +132,10 @@ func (c *conformance) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, pattern := c.mux.Handler(r)
 		op, ok := c.ops[pattern]
-		if !ok {
+		if !ok || c.pending[pattern] {
 			// Not a documented operation: the mux answers it (404/405),
-			// or it is a route still pending its stream's handler.
+			// or it is a route still pending its stream's handler, which
+			// answers 501 whatever the document says.
 			next.ServeHTTP(w, r)
 			return
 		}

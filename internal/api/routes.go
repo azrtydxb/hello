@@ -190,6 +190,27 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/skills/{name}/download", auth.ScopeRead, auth.RoleViewer, false, s.downloadSkill},
 		{"GET", "/api/v1/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.listUsers},
 		{"PATCH", "/api/v1/users/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updateUser},
+
+		// The in-product AI agent (spec ai-agent). The rows are fixed here;
+		// each stream replaces s.pending with its handler.
+		{"GET", "/api/v1/ai/status", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"GET", "/api/v1/ai/findings", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"GET", "/api/v1/ai/findings/{id}", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"POST", "/api/v1/ai/findings/{id}/acknowledge", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"POST", "/api/v1/ai/findings/{id}/dismiss", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"GET", "/api/v1/ai/proposals", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"GET", "/api/v1/ai/proposals/{id}", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"POST", "/api/v1/ai/proposals/{id}/apply", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"POST", "/api/v1/ai/proposals/{id}/dismiss", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"GET", "/api/v1/ai/sessions", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"POST", "/api/v1/ai/sessions", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"GET", "/api/v1/ai/sessions/{id}", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"PATCH", "/api/v1/ai/sessions/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"DELETE", "/api/v1/ai/sessions/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"POST", "/api/v1/ai/sessions/{id}/messages", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"GET", "/api/v1/ai/tasks/{id}", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"GET", "/api/v1/ai/agents", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"POST", "/api/v1/ai/agents/{name}/run", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
 	}
 }
 

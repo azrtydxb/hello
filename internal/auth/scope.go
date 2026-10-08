@@ -127,6 +127,8 @@ const (
 	KindPersonalToken Kind = "personal_token"
 	KindOAuth         Kind = "oauth"
 	KindService       Kind = "service"
+	// KindAgent is the in-product AI agent acting for a user (ai-agent S-6).
+	KindAgent Kind = "agent"
 )
 
 // Credential prefixes (spec S-6), so secret scanners and log redaction can
@@ -162,4 +164,43 @@ func WithReplay(ctx context.Context, r Replay) context.Context {
 func ReplayFrom(ctx context.Context) (Replay, bool) {
 	r, ok := ctx.Value(replayKey{}).(Replay)
 	return r, ok
+}
+
+// Agent marks a request the in-product AI agent replays for a user: the
+// user the assistant is chatting with and the task it works for.
+type Agent struct {
+	UserID int64
+	TaskID string
+}
+
+type agentKey struct{}
+
+// WithAgent returns ctx marked as an agent replay. Only the AI package
+// sets it; it never comes from a request.
+func WithAgent(ctx context.Context, a Agent) context.Context {
+	return context.WithValue(ctx, agentKey{}, a)
+}
+
+// AgentFrom returns the agent WithAgent put in ctx.
+func AgentFrom(ctx context.Context) (Agent, bool) {
+	a, ok := ctx.Value(agentKey{}).(Agent)
+	return a, ok
+}
+
+// ViaAssistant is the audit via of a change made under an agent identity.
+const ViaAssistant = "ai-assistant"
+
+type viaKey struct{}
+
+// WithVia returns ctx marking the audit via of the changes its request
+// makes (for example "ai-proposal:<id>" while applying a proposal). Only
+// in-process callers set it; it never comes from a request.
+func WithVia(ctx context.Context, via string) context.Context {
+	return context.WithValue(ctx, viaKey{}, via)
+}
+
+// ViaFrom returns the via WithVia put in ctx.
+func ViaFrom(ctx context.Context) string {
+	v, _ := ctx.Value(viaKey{}).(string)
+	return v
 }

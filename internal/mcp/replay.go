@@ -4,32 +4,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
-	"time"
 	"unicode/utf8"
 
 	"github.com/azrtydxb/hello/internal/apispec"
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/replay"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const (
-	// replayTimeout bounds one tool call (spec S-13).
-	replayTimeout = 30 * time.Second
-	// textCap is the largest text content a tool returns (spec S-15).
-	textCap = 64 << 10
-	// replayBodyCap bounds what a replayed response may buffer.
-	replayBodyCap = 8 << 20
-)
-
-// errNestedReplay refuses a replay started from inside a replay.
-var errNestedReplay = errors.New("a replayed request cannot start another replay")
+// textCap is the largest text content a tool returns (spec S-15).
+const textCap = 64 << 10
 
 // caller is the authenticated /mcp request a tool call or resource read
 // replays as: its Authorization header verbatim and its actor.
@@ -50,113 +39,15 @@ func callerFrom(ctx context.Context) (caller, bool) {
 	return c, ok
 }
 
-// apiResult is a replayed response, or the failure that replaced it.
-type apiResult struct {
-	status int
-	header http.Header
-	body   []byte
-	// fail is "timeout", "internal" or "too_large" when the handler did not
-	// answer normally.
-	fail string
-}
-
-// replay sends one request to the API handler in-process (spec S-15): only
-// the caller's Authorization header is copied, and the replay marker rides
-// in the context, where no external request can set it.
-func (s *server) replay(ctx context.Context, c caller, method, path string, query url.Values, body []byte) (apiResult, error) {
-	if _, nested := auth.ReplayFrom(ctx); nested {
-		return apiResult{}, errNestedReplay
-	}
-	ctx, cancel := context.WithTimeout(auth.WithReplay(ctx, auth.Replay{ClientID: c.actor.ClientID}), replayTimeout)
-	defer cancel()
-	target := "http://hello-control" + path
-	if len(query) > 0 {
-		target += "?" + query.Encode()
-	}
-	req, err := http.NewRequestWithContext(ctx, method, target, bytes.NewReader(body))
-	if err != nil {
-		return apiResult{}, err
-	}
-	req.Header = http.Header{"Authorization": {c.authz}}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.RemoteAddr = c.remoteAddr
-	rec := &recorder{header: http.Header{}}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer func() {
-			if p := recover(); p != nil {
-				s.log.Error("mcp replay panicked", "method", method, "path", path, "panic", fmt.Sprint(p))
-				rec.fail("internal")
-			}
-		}()
-		s.api.ServeHTTP(rec, req)
-	}()
-	select {
-	case <-done:
-	case <-ctx.Done():
-		rec.fail("timeout")
-	}
-	return rec.result(), nil
-}
-
-// recorder buffers a replayed response; it is safe for a handler that keeps
-// writing after a timeout has been answered.
-type recorder struct {
-	mu      sync.Mutex
-	header  http.Header
-	status  int
-	buf     bytes.Buffer
-	failure string
-	closed  bool
-}
-
-func (r *recorder) Header() http.Header { return r.header }
-
-func (r *recorder) WriteHeader(code int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.status == 0 {
-		r.status = code
-	}
-}
-
-func (r *recorder) Write(p []byte) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.status == 0 {
-		r.status = http.StatusOK
-	}
-	if r.closed {
-		return 0, http.ErrHandlerTimeout
-	}
-	if r.buf.Len()+len(p) > replayBodyCap {
-		r.failure = "too_large"
-		r.closed = true
-		return 0, errors.New("mcp: replayed response too large")
-	}
-	return r.buf.Write(p)
-}
-
-func (r *recorder) fail(reason string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.failure == "" {
-		r.failure = reason
-	}
-	r.closed = true
-}
-
-func (r *recorder) result() apiResult {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	status := r.status
-	if status == 0 {
-		status = http.StatusOK
-	}
-	return apiResult{status: status, header: r.header.Clone(), body: bytes.Clone(r.buf.Bytes()), fail: r.failure}
+// replay sends one request to the API handler in-process (spec S-15):
+// only the caller's Authorization header is copied.
+func (s *server) replay(ctx context.Context, c caller, method, path string, query url.Values, body []byte) (replay.Result, error) {
+	return replay.Do(ctx, s.api, replay.Request{
+		Method: method, Path: path, Query: query, Body: body,
+		Header:     http.Header{"Authorization": {c.authz}},
+		ClientID:   c.actor.ClientID,
+		RemoteAddr: c.remoteAddr,
+	})
 }
 
 // request turns tool arguments into the method, path, query and body of
@@ -230,8 +121,8 @@ func scalar(v any) string {
 // toolResult maps a replayed response to a tool result: a 2xx JSON object
 // as structuredContent and text, an error as isError with the API's code,
 // message and fields. Every x-hello-secret value is withheld first.
-func toolResult(res apiResult, secrets []string) *sdk.CallToolResult {
-	switch res.fail {
+func toolResult(res replay.Result, secrets []string) *sdk.CallToolResult {
+	switch res.Fail {
 	case "timeout":
 		return toolError("timeout", "the operation did not finish within 30 s", nil)
 	case "internal":
@@ -239,23 +130,23 @@ func toolResult(res apiResult, secrets []string) *sdk.CallToolResult {
 	case "too_large":
 		return toolError("too_large", "the response is too large; narrow the request or page with limit/before", nil)
 	}
-	if res.status >= 300 {
+	if res.Status >= 300 {
 		return apiError(res)
 	}
-	if len(bytes.TrimSpace(res.body)) == 0 {
-		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: fmt.Sprintf("OK (HTTP %d, no content)", res.status)}}}
+	if len(bytes.TrimSpace(res.Body)) == 0 {
+		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: fmt.Sprintf("OK (HTTP %d, no content)", res.Status)}}}
 	}
-	if !isJSON(res.header) {
+	if !isJSON(res.Header) {
 		if len(secrets) > 0 {
 			return toolError("internal", "a response with secrets was not JSON", nil)
 		}
-		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: capText(string(res.body))}}}
+		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: capText(string(res.Body))}}}
 	}
-	v, err := decode(res.body)
+	v, err := decode(res.Body)
 	if err != nil {
 		return toolError("internal", "the API answered malformed JSON", nil)
 	}
-	redact(v, secrets)
+	replay.Redact(v, secrets)
 	text, _ := json.Marshal(v)
 	out := &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: capText(string(text))}}}
 	if obj, ok := v.(map[string]any); ok {
@@ -265,7 +156,7 @@ func toolResult(res apiResult, secrets []string) *sdk.CallToolResult {
 }
 
 // apiError is the isError result of a non-2xx response.
-func apiError(res apiResult) *sdk.CallToolResult {
+func apiError(res replay.Result) *sdk.CallToolResult {
 	var env struct {
 		Error struct {
 			Code    string `json:"code"`
@@ -273,8 +164,8 @@ func apiError(res apiResult) *sdk.CallToolResult {
 			Fields  any    `json:"fields"`
 		} `json:"error"`
 	}
-	if json.Unmarshal(res.body, &env) != nil || env.Error.Code == "" {
-		return toolError(fmt.Sprintf("http_%d", res.status), http.StatusText(res.status), nil)
+	if json.Unmarshal(res.Body, &env) != nil || env.Error.Code == "" {
+		return toolError(fmt.Sprintf("http_%d", res.Status), http.StatusText(res.Status), nil)
 	}
 	return toolError(env.Error.Code, env.Error.Message, env.Error.Fields)
 }

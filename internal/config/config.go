@@ -76,6 +76,70 @@ type Control struct {
 	Prov Prov
 	// AI is external AI access: OAuth and MCP (spec ai-external-access).
 	AI AI
+	// AIAgent is the in-product AI agent (HELLO_AI_*, spec ai-agent).
+	AIAgent AIAgent
+}
+
+// AIAgent configures the in-product AI agent: an LLM endpoint reached
+// through go-ai-sdk, the bounds of every model call and the background
+// agents. The agent is off unless both BaseURL and Model are set.
+type AIAgent struct {
+	// Provider is HELLO_AI_PROVIDER: "openai" (any OpenAI-compatible
+	// server, the default) or "anthropic".
+	Provider string
+	// BaseURL (HELLO_AI_BASE_URL), Model (HELLO_AI_MODEL) and APIKey
+	// (HELLO_AI_API_KEY, may be empty). The key is never logged.
+	BaseURL, Model, APIKey string
+	// AllowPublic (HELLO_AI_ALLOW_PUBLIC_ENDPOINT) lets the endpoint resolve
+	// to a public address.
+	AllowPublic bool
+	// StructuredOutput (HELLO_AI_STRUCTURED_OUTPUT) is "json_schema" or
+	// "prompt".
+	StructuredOutput string
+	// ValidationAttempts (HELLO_AI_VALIDATION_ATTEMPTS), MaxSteps
+	// (HELLO_AI_MAX_STEPS), MaxConcurrency (HELLO_AI_MAX_CONCURRENCY) and
+	// RequestsPerMinute (HELLO_AI_REQUESTS_PER_MINUTE).
+	ValidationAttempts, MaxSteps, MaxConcurrency, RequestsPerMinute int
+	// Timeout (HELLO_AI_TIMEOUT) bounds one model call.
+	Timeout time.Duration
+	// DailyTokenBudget (HELLO_AI_DAILY_TOKEN_BUDGET) is per UTC day across
+	// replicas; background work stops at BackgroundBudgetPercent
+	// (HELLO_AI_BACKGROUND_BUDGET_PERCENT, 1 to 100) of it.
+	DailyTokenBudget        int64
+	BackgroundBudgetPercent int
+	// AgentStartDelay (HELLO_AI_AGENT_START_DELAY), AIOpsInterval
+	// (HELLO_AI_AIOPS_INTERVAL, 0 disables the agent) and ExplainMinInterval
+	// (HELLO_AI_EXPLAIN_MIN_INTERVAL).
+	AgentStartDelay, AIOpsInterval, ExplainMinInterval time.Duration
+}
+
+// The reasons AIAgent.Enabled gives for being off.
+const (
+	AIReasonNotConfigured   = "not_configured"
+	AIReasonIncompleteSetup = "incomplete_configuration"
+)
+
+// Enabled reports whether the agent runs: both BaseURL and Model are set.
+// Otherwise reason is AIReasonNotConfigured (neither is set) or
+// AIReasonIncompleteSetup (one is).
+func (a AIAgent) Enabled() (enabled bool, reason string) {
+	switch {
+	case a.BaseURL != "" && a.Model != "":
+		return true, ""
+	case a.BaseURL == "" && a.Model == "":
+		return false, AIReasonNotConfigured
+	}
+	return false, AIReasonIncompleteSetup
+}
+
+// LogValue keeps the API key out of logs.
+func (a AIAgent) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("provider", a.Provider),
+		slog.String("base_url", telemetry.RedactURL(a.BaseURL)),
+		slog.String("model", a.Model),
+		slog.Bool("allow_public", a.AllowPublic),
+	)
 }
 
 // AI is the OAuth authorization server and MCP server configuration. An
@@ -289,6 +353,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	}
 	c.Prov = r.prov()
 	c.AI = r.ai()
+	c.AIAgent = r.aiAgent()
 	return c, r.err()
 }
 
@@ -316,6 +381,53 @@ func (r *reader) ai() AI {
 	}
 	if a.RefreshIdle > a.RefreshMax {
 		r.fail("HELLO_OAUTH_REFRESH_TTL", errors.New("must not exceed HELLO_OAUTH_REFRESH_MAX"))
+	}
+	return a
+}
+
+// aiAgent reads the HELLO_AI_* settings.
+func (r *reader) aiAgent() AIAgent {
+	a := AIAgent{
+		Provider:                r.optional("HELLO_AI_PROVIDER", "openai"),
+		BaseURL:                 r.getenv("HELLO_AI_BASE_URL"),
+		Model:                   r.getenv("HELLO_AI_MODEL"),
+		APIKey:                  r.getenv("HELLO_AI_API_KEY"),
+		AllowPublic:             r.boolean("HELLO_AI_ALLOW_PUBLIC_ENDPOINT"),
+		StructuredOutput:        r.optional("HELLO_AI_STRUCTURED_OUTPUT", "json_schema"),
+		ValidationAttempts:      r.positiveInt("HELLO_AI_VALIDATION_ATTEMPTS", 3),
+		MaxSteps:                r.positiveInt("HELLO_AI_MAX_STEPS", 8),
+		MaxConcurrency:          r.positiveInt("HELLO_AI_MAX_CONCURRENCY", 2),
+		RequestsPerMinute:       r.positiveInt("HELLO_AI_REQUESTS_PER_MINUTE", 30),
+		Timeout:                 r.duration("HELLO_AI_TIMEOUT", 180*time.Second),
+		BackgroundBudgetPercent: r.positiveInt("HELLO_AI_BACKGROUND_BUDGET_PERCENT", 80),
+		AgentStartDelay:         r.duration("HELLO_AI_AGENT_START_DELAY", 2*time.Minute),
+		AIOpsInterval:           r.duration("HELLO_AI_AIOPS_INTERVAL", 60*time.Second),
+		ExplainMinInterval:      r.duration("HELLO_AI_EXPLAIN_MIN_INTERVAL", 10*time.Minute),
+		DailyTokenBudget:        2_000_000,
+	}
+	if v := r.getenv("HELLO_AI_DAILY_TOKEN_BUDGET"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			r.fail("HELLO_AI_DAILY_TOKEN_BUDGET", errors.New("must be a positive integer"))
+		}
+		a.DailyTokenBudget = n
+	}
+	if a.Provider != "openai" && a.Provider != "anthropic" {
+		r.fail("HELLO_AI_PROVIDER", errors.New("must be openai or anthropic"))
+	}
+	if a.StructuredOutput != "json_schema" && a.StructuredOutput != "prompt" {
+		r.fail("HELLO_AI_STRUCTURED_OUTPUT", errors.New("must be json_schema or prompt"))
+	}
+	if a.BackgroundBudgetPercent > 100 {
+		r.fail("HELLO_AI_BACKGROUND_BUDGET_PERCENT", errors.New("must be between 1 and 100"))
+	}
+	if a.Timeout == 0 {
+		r.fail("HELLO_AI_TIMEOUT", errors.New("must be positive"))
+	}
+	if a.BaseURL != "" {
+		if u, err := url.Parse(a.BaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
+			r.fail("HELLO_AI_BASE_URL", errors.New("must be an http:// or https:// URL with a host and no credentials"))
+		}
 	}
 	return a
 }
