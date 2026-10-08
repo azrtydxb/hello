@@ -22,7 +22,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	conn, err := net.Dial("udp", os.Args[1])
+	conn, err := net.Dial("udp", os.Args[1]) //nolint:gosec // lab-only probe tool; the address is the test's own argument
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
