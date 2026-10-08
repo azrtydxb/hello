@@ -65,6 +65,12 @@ func checkAccountScopes(role auth.Role, scopes auth.Scopes) error {
 		if sc == auth.ScopeSession {
 			return inputErr("scope session cannot be held by a service account")
 		}
+		if auth.ServiceOnly(sc) {
+			if len(scopes) != 1 {
+				return inputErr("scope " + string(sc) + " cannot be combined with other scopes")
+			}
+			continue
+		}
 		if !g.Has(sc) {
 			return inputErr("role " + string(role) + " cannot hold scope " + string(sc))
 		}

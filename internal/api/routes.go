@@ -211,6 +211,31 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/ai/tasks/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getAITask},
 		{"GET", "/api/v1/ai/agents", auth.ScopeRead, auth.RoleViewer, false, s.listAIAgents},
 		{"POST", "/api/v1/ai/agents/{name}/run", auth.ScopeWrite, auth.RoleOperator, false, s.runAIAgent},
+
+		// Voice agents (spec voice-agents). The rows are fixed here; each
+		// stream replaces s.pending with its handler.
+		{"GET", "/api/v1/voice/agents", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"POST", "/api/v1/voice/agents", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"GET", "/api/v1/voice/agents/{id}", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"PUT", "/api/v1/voice/agents/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"DELETE", "/api/v1/voice/agents/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"GET", "/api/v1/voice/agents/{id}/versions", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"POST", "/api/v1/voice/agents/{id}/versions/{v}/restore", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"PUT", "/api/v1/voice/agents/{id}/tools", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"GET", "/api/v1/voice/agents/{id}/calls", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"GET", "/api/v1/voice/mcp-servers", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"POST", "/api/v1/voice/mcp-servers", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
+		{"GET", "/api/v1/voice/mcp-servers/{id}", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"PUT", "/api/v1/voice/mcp-servers/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
+		{"DELETE", "/api/v1/voice/mcp-servers/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
+		{"POST", "/api/v1/voice/mcp-servers/{id}/discover", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"POST", "/api/v1/voice/mcp-servers/{id}/test", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"GET", "/api/v1/voice/status", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"POST", "/api/v1/voice/secret/rotate", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
+		{"POST", "/api/v1/voice/runtime-account", auth.ScopeAdmin, auth.RoleAdmin, false, s.pending},
+		{"GET", "/api/v1/voice-runtime/agents", auth.ScopeVoiceRuntime, auth.RoleViewer, false, s.pending},
+		{"POST", "/api/v1/voice-runtime/ack", auth.ScopeVoiceRuntime, auth.RoleViewer, false, s.pending},
+		{"POST", "/api/v1/voice-runtime/calls", auth.ScopeVoiceRuntime, auth.RoleViewer, false, s.pending},
 	}
 }
 

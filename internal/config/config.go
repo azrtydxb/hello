@@ -78,6 +78,8 @@ type Control struct {
 	AI AI
 	// AIAgent is the in-product AI agent (HELLO_AI_*, spec ai-agent).
 	AIAgent AIAgent
+	// Voice is the voice agent integration (HELLO_VOICE_*, spec voice-agents).
+	Voice Voice
 }
 
 // AIAgent configures the in-product AI agent: an LLM endpoint reached
@@ -140,6 +142,96 @@ func (a AIAgent) LogValue() slog.Value {
 		slog.String("model", a.Model),
 		slog.Bool("allow_public", a.AllowPublic),
 	)
+}
+
+// Voice configures the talking-agent integration (spec voice-agents S-15 to
+// S-17, S-35). Both hello-control and hello-sip read it; the values must
+// match.
+type Voice struct {
+	// SIPAddress is HELLO_VOICE_SIP_ADDRESS (host:port) of talking-agent.
+	// Empty disables voice agents: the registry still edits, but a route to
+	// an agent fails validation with voice_not_configured.
+	SIPAddress string
+	// Secret is HELLO_VOICE_SIP_SECRET, the HMAC key that signs each call to
+	// an agent; SecretNext (HELLO_VOICE_SIP_SECRET_NEXT) is a second key
+	// talking-agent accepts while the secret is rotated. Neither is logged.
+	Secret, SecretNext string
+	// Tenant is HELLO_VOICE_TENANT, sent as X-Hello-Tenant; it defaults to
+	// HELLO_SIP_DOMAIN.
+	Tenant string
+	// MaxAgents is HELLO_VOICE_MAX_AGENTS; MaxCalls is HELLO_VOICE_MAX_CALLS
+	// (simultaneous calls to agents in total, 0 = unlimited).
+	MaxAgents, MaxCalls int
+	// AllowPublicMCP (HELLO_VOICE_ALLOW_PUBLIC_MCP) lets MCP servers resolve
+	// to public addresses; AllowLoopback (HELLO_VOICE_ALLOW_LOOPBACK) to
+	// loopback ones, for the lab.
+	AllowPublicMCP, AllowLoopback bool
+}
+
+// Enabled reports whether calls can be routed to voice agents.
+func (v Voice) Enabled() bool { return v.SIPAddress != "" }
+
+// LogValue keeps both secrets out of logs.
+func (v Voice) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("sip_address", v.SIPAddress),
+		slog.String("tenant", v.Tenant),
+		slog.Bool("secret_set", v.Secret != ""),
+		slog.Bool("secret_next_set", v.SecretNext != ""),
+		slog.Int("max_agents", v.MaxAgents),
+		slog.Int("max_calls", v.MaxCalls),
+		slog.Bool("allow_public_mcp", v.AllowPublicMCP),
+		slog.Bool("allow_loopback", v.AllowLoopback),
+	)
+}
+
+// voiceTenantRe is the shape of a tenant: it is a field of the signed
+// string, so it cannot hold the separator.
+var voiceTenantRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
+// voice reads the HELLO_VOICE_* settings; the tenant defaults to domain.
+func (r *reader) voice(domain string) Voice {
+	v := Voice{
+		SIPAddress:     r.getenv("HELLO_VOICE_SIP_ADDRESS"),
+		Secret:         r.getenv("HELLO_VOICE_SIP_SECRET"),
+		SecretNext:     r.getenv("HELLO_VOICE_SIP_SECRET_NEXT"),
+		Tenant:         r.optional("HELLO_VOICE_TENANT", domain),
+		MaxAgents:      r.positiveInt("HELLO_VOICE_MAX_AGENTS", 50),
+		MaxCalls:       20,
+		AllowPublicMCP: r.boolean("HELLO_VOICE_ALLOW_PUBLIC_MCP"),
+		AllowLoopback:  r.boolean("HELLO_VOICE_ALLOW_LOOPBACK"),
+	}
+	if s := r.getenv("HELLO_VOICE_MAX_CALLS"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 0 {
+			r.fail("HELLO_VOICE_MAX_CALLS", errors.New("must be zero (unlimited) or a positive integer"))
+		}
+		v.MaxCalls = n
+	}
+	if v.SIPAddress != "" {
+		if host, err := splitHost(v.SIPAddress); err != nil {
+			r.fail("HELLO_VOICE_SIP_ADDRESS", err)
+		} else if host == "" || unspecified(host) {
+			r.fail("HELLO_VOICE_SIP_ADDRESS", errors.New("must name a reachable host and port"))
+		}
+	}
+	if v.Tenant != "" && !voiceTenantRe.MatchString(v.Tenant) {
+		r.fail("HELLO_VOICE_TENANT", errors.New("must be 1 to 64 letters, digits, dot, underscore or hyphen"))
+	}
+	for key, k := range map[string]string{"HELLO_VOICE_SIP_SECRET": v.Secret, "HELLO_VOICE_SIP_SECRET_NEXT": v.SecretNext} {
+		if k != "" && len(k) < 32 {
+			r.fail(key, errors.New("must be at least 32 bytes"))
+		}
+	}
+	switch {
+	case v.SIPAddress != "" && v.Secret == "":
+		r.fail("HELLO_VOICE_SIP_SECRET", errors.New("required when HELLO_VOICE_SIP_ADDRESS is set"))
+	case v.SecretNext != "" && v.Secret == "":
+		r.fail("HELLO_VOICE_SIP_SECRET_NEXT", errors.New("needs HELLO_VOICE_SIP_SECRET"))
+	case v.SecretNext != "" && v.SecretNext == v.Secret:
+		r.fail("HELLO_VOICE_SIP_SECRET_NEXT", errors.New("must differ from HELLO_VOICE_SIP_SECRET"))
+	}
+	return v
 }
 
 // AI is the OAuth authorization server and MCP server configuration. An
@@ -253,6 +345,9 @@ type SIP struct {
 	AuthFailLimit      int
 	AuthFailWindow     time.Duration
 	StateTimeout       time.Duration
+	// Voice is the voice agent integration (HELLO_VOICE_*), the same
+	// values hello-control has.
+	Voice Voice
 	// SecretKey (HELLO_SECRET_KEY) opens trunk passwords sealed by
 	// hello-control.
 	SecretKey      string
@@ -354,6 +449,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.Prov = r.prov()
 	c.AI = r.ai()
 	c.AIAgent = r.aiAgent()
+	c.Voice = r.voice(c.SIPDomain)
 	return c, r.err()
 }
 
@@ -667,6 +763,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
 	r.minio(&c.MinioEndpoint, &c.MinioAccessKey, &c.MinioSecretKey, &c.MinioSecure)
+	c.Voice = r.voice(c.SIPDomain)
 	c.TrustedProxies = r.prefixes("HELLO_SIP_TRUSTED_PROXIES")
 	c.DrainTimeout = r.duration("HELLO_DRAIN_TIMEOUT", 2*time.Hour)
 	if c.DrainTimeout == 0 {

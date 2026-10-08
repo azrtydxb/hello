@@ -1,0 +1,53 @@
+{
+  "version": "v1",
+  "signed": "tenant|agent|sipUser|correlation|ts (ts Unix seconds)",
+  "header": "X-Hello-Auth: v1:<key-id>:<hex HMAC-SHA256>; key id = hex of sha256('hello-voice-key-id|'+secret)[:4]; X-Hello-Caller-Origin is sent but not signed input",
+  "keys": [
+    {
+      "id": "0efef250",
+      "secret": "voice-test-secret-0123456789abcdef"
+    },
+    {
+      "id": "03ba5ec8",
+      "secret": "voice-test-secret-next-0123456789ab"
+    }
+  ],
+  "vectors": [
+    {
+      "tenant": "lab",
+      "agent": "reception",
+      "sipUser": "2201",
+      "correlation": "corr-1",
+      "ts": 1767225600,
+      "keyId": "0efef250",
+      "authHeader": "v1:0efef250:4017da99fe7ab3cd07db58e7f092a87b2ae857d8b079edb9dd4c1d691dfbf71f"
+    },
+    {
+      "tenant": "kw",
+      "agent": "support",
+      "sipUser": "8042",
+      "correlation": "01HQX0A1B2",
+      "ts": 1767225660,
+      "keyId": "0efef250",
+      "authHeader": "v1:0efef250:adc06c2b41ecd39e58f2936249fbeb647df4b6265b364af98cd979e49b8283a5"
+    },
+    {
+      "tenant": "hello.test",
+      "agent": "agent.with.dots",
+      "sipUser": "9100",
+      "correlation": "corr-3",
+      "ts": 0,
+      "keyId": "0efef250",
+      "authHeader": "v1:0efef250:33f6f1025459ac915748fb229035b90938434ffe109e630f2fbffceea7423b5f"
+    },
+    {
+      "tenant": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "agent": "a",
+      "sipUser": "1",
+      "correlation": "c",
+      "ts": 253402300799,
+      "keyId": "0efef250",
+      "authHeader": "v1:0efef250:7307c964d300ab3086773dcfd7bc9191ba6241ebcf8ab5b3d377e11d240a0ad1"
+    }
+  ]
+}
