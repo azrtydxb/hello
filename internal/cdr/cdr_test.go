@@ -178,6 +178,11 @@ func TestWriterPostgres(t *testing.T) {
 	if n != 1 || ring != nil || answer == nil || !answer.Equal(r.AnswerTime) || media != "direct" || side != "caller" || billable != 8000 {
 		t.Fatalf("row: n=%d ring=%v answer=%v media=%s side=%s billable=%d", n, ring, answer, media, side, billable)
 	}
+	var qp, ql *int64
+	var qj *float64
+	if err := pool.QueryRow(ctx, "SELECT rtp_packets, rtp_lost, rtp_jitter_ms FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&qp, &ql, &qj); err != nil || qp != nil || ql != nil || qj != nil {
+		t.Fatalf("unmeasured quality = %v %v %v, %v", qp, ql, qj, err)
+	}
 	var dir string
 	if err := pool.QueryRow(ctx, "SELECT direction FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&dir); err != nil || dir != "internal" {
 		t.Fatalf("default direction = %q, %v", dir, err)
@@ -209,5 +214,44 @@ func TestWriterPostgres(t *testing.T) {
 	if dir != "outbound" || orig != "0501234567" || rewritten != "+971501234567" || route != "UAE Mobile" || trunk != "carrier-backup" ||
 		len(got) != 2 || got[1].N != 2 || got[1].Text != "carrier-backup -> 200 OK" {
 		t.Fatalf("outbound row: %s %s %s %s %s %+v", dir, orig, rewritten, route, trunk, got)
+	}
+}
+
+type argsDB struct{ args []any }
+
+func (a *argsDB) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+	a.args = args
+	return pgconn.NewCommandTag("INSERT 0 1"), nil
+}
+
+// TestCallQualityCDR fails if the three quality columns are not the last
+// insert arguments, carry anything but the record's values, or are non-NULL
+// for a record without quality (directly-media or unanswered call).
+func TestCallQualityCDR(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	base := Record{CorrelationID: "q", StartTime: now, EndTime: now}
+
+	if err := w.write(context.Background(), base); err != nil {
+		t.Fatal(err)
+	}
+	if len(db.args) != 24 {
+		t.Fatalf("insert takes %d arguments, want 24", len(db.args))
+	}
+	for i, a := range db.args[21:] {
+		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
+			t.Fatalf("argument %d = %#v, want a nil pointer", 22+i, a)
+		}
+	}
+
+	p, l, j := int64(1000), int64(12), 37.5
+	base.RTPPackets, base.RTPLost, base.RTPJitterMs = &p, &l, &j
+	if err := w.write(context.Background(), base); err != nil {
+		t.Fatal(err)
+	}
+	gp, gl, gj := db.args[21].(*int64), db.args[22].(*int64), db.args[23].(*float64)
+	if *gp != 1000 || *gl != 12 || *gj != 37.5 {
+		t.Fatalf("quality = %d, %d, %v", *gp, *gl, *gj)
 	}
 }

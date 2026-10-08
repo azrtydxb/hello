@@ -8411,6 +8411,20 @@
           },
           "trunk": {
             "type": "string"
+          },
+          "rtpPackets": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "RTP packets relayed, both directions; null when the call was not anchored or never answered."
+          },
+          "rtpLost": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "RTP packets lost (sequence gaps), both directions; null when not measured."
+          },
+          "rtpJitterMs": {
+            "type": ["number", "null"],
+            "description": "Larger of the two directions' interarrival jitter in ms; null when not measured."
           }
         },
         "description": "Null times are omitted."
