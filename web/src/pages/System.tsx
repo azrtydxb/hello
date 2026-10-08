@@ -1,17 +1,12 @@
 import { useEffect, useState } from "react";
 import {
-  createToken,
-  deleteToken,
   errorMessage,
   FEATURE_CODE_ACTIONS,
   FEATURE_CODE_PATTERN,
   fieldErrors,
   listFeatureCodes,
   listPresence,
-  listTokens,
   updateFeatureCodes,
-  type ApiToken,
-  type CreatedApiToken,
   type DeviceState,
   type FeatureCode,
   type FeatureCodeAction,
@@ -22,13 +17,10 @@ import {
   Badge,
   type BadgeTone,
   Button,
-  ConfirmDialog,
-  EmptyState,
-  Icon,
   IconButton,
   Input,
+  LinkButton,
   LiveTag,
-  Modal,
   PageHeader,
   Select,
   Spinner,
@@ -36,11 +28,10 @@ import {
 } from "../design/azrty/components";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
-import { ago } from "./platform/health";
 import "./platform/platform.css";
-import { Can, useCan } from "../role";
+import { Can } from "../role";
 
-/** System: feature codes, live presence and API tokens. */
+/** System: feature codes and live presence; API tokens live on AI access. */
 export function System() {
   const toast = useToast();
   const showToast = toast.show;
@@ -49,19 +40,13 @@ export function System() {
       <PageHeader
         eyebrow="Platform"
         title="System"
-        description={
-          useCan("admin")
-            ? "Feature codes, live presence and API tokens."
-            : "Feature codes and live presence."
-        }
+        description="Feature codes and live presence."
       />
       <div className="pf-grid2 pf-grid2--wide">
         <FeatureCodes onSaved={() => showToast("Feature codes saved.")} />
         <div className="pf-stack" style={{ minWidth: 0 }}>
           <Presence />
-          <Can min="admin">
-            <Tokens showToast={showToast} />
-          </Can>
+          <TokensMoved />
         </div>
       </div>
       {toast.node}
@@ -347,237 +332,21 @@ function Presence() {
 
 // --- API tokens ----------------------------------------------------------------
 
-/** API tokens: listed by name, created with the token shown once, revoked. */
-function Tokens({ showToast }: { showToast: (message: string) => void }) {
-  const [state, setState] = useState<
-    | { status: "loading" }
-    | { status: "error"; message: string }
-    | { status: "ready"; items: ApiToken[] }
-  >({ status: "loading" });
-  const [generation, setGeneration] = useState(0);
-  const [creating, setCreating] = useState(false);
-  const [created, setCreated] = useState<CreatedApiToken | null>(null);
-  const [revoking, setRevoking] = useState<ApiToken | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    listTokens(controller.signal)
-      .then((items) => setState({ status: "ready", items }))
-      .catch((err: unknown) => {
-        if (!controller.signal.aborted) {
-          setState({ status: "error", message: errorMessage(err) });
-        }
-      });
-    return () => controller.abort();
-  }, [generation]);
-  const reload = () => setGeneration((g) => g + 1);
-  const now = new Date();
-
+/** API tokens moved to the AI access page, with their scopes and expiry. */
+function TokensMoved() {
   return (
     <div className="az-card pf-card pf-card--tight">
       <div className="pf-cardhead">
         <div>
-          <h2 className="pf-h3" id="tokens">
-            API tokens
-          </h2>
-          <p className="pf-head__desc">Tokens are shown once at creation.</p>
+          <h2 className="pf-h3">API tokens</h2>
+          <p className="pf-head__desc">
+            Tokens, with their scopes and expiry, are on AI access.
+          </p>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          icon="plus"
-          onClick={() => setCreating(true)}
-        >
-          New token
-        </Button>
+        <LinkButton to="/ai" size="sm" icon="key-round">
+          Manage tokens
+        </LinkButton>
       </div>
-      {state.status === "loading" && <Spinner label="Loading tokens…" />}
-      {state.status === "error" && (
-        <Alert tone="bad" title="Could not load API tokens">
-          {state.message}
-        </Alert>
-      )}
-      {state.status === "ready" &&
-        (state.items.length === 0 ? (
-          <EmptyState
-            icon="key-round"
-            title="No API tokens"
-            description="Create one for scripts and integrations; it acts with full API access."
-          />
-        ) : (
-          <ul className="pf-tokens" aria-labelledby="tokens">
-            {state.items.map((t) => (
-              <li key={String(t.id)}>
-                <Icon name="key-round" size={15} />
-                <div className="pf-tokens__meta">
-                  <div className="pf-tokens__name">{t.name}</div>
-                  <div className="pf-tokens__when">
-                    Created {new Date(t.createdAt).toLocaleDateString()} · last
-                    used {t.lastUsedAt ? ago(t.lastUsedAt, now) : "never"}
-                  </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="pf-revoke"
-                  aria-label={`Revoke ${t.name}`}
-                  onClick={() => setRevoking(t)}
-                >
-                  Revoke
-                </Button>
-              </li>
-            ))}
-          </ul>
-        ))}
-      {creating && (
-        <NewTokenModal
-          onClose={() => setCreating(false)}
-          onCreated={(t) => {
-            setCreating(false);
-            setCreated(t);
-            reload();
-          }}
-        />
-      )}
-      {created && (
-        <CreatedTokenModal token={created} onClose={() => setCreated(null)} />
-      )}
-      {revoking && (
-        <ConfirmDialog
-          title={`Revoke ${revoking.name}?`}
-          description="Requests with this token are refused from now on."
-          confirmLabel="Revoke token"
-          confirmIcon="key-round"
-          errorTitle="Could not revoke the token"
-          onConfirm={async () => {
-            await deleteToken(revoking.id);
-            showToast(`Token ${revoking.name} revoked.`);
-            setRevoking(null);
-            reload();
-          }}
-          onClose={() => setRevoking(null)}
-        />
-      )}
     </div>
-  );
-}
-
-function NewTokenModal({
-  onClose,
-  onCreated,
-}: {
-  onClose: () => void;
-  onCreated: (t: CreatedApiToken) => void;
-}) {
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  async function submit() {
-    if (name.trim() === "") {
-      setError("Enter a name.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      onCreated(await createToken(name.trim()));
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Modal
-      title="New API token"
-      description="Send it as a Bearer token. It acts with full API access."
-      onClose={onClose}
-      actions={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" form="new-token" disabled={busy}>
-            Create token
-          </Button>
-        </>
-      }
-    >
-      <form
-        id="new-token"
-        noValidate
-        onSubmit={(e) => {
-          e.preventDefault();
-          void submit();
-        }}
-      >
-        <Input
-          label="Name"
-          id="new-token-name"
-          mono
-          autoFocus
-          placeholder="grafana-read"
-          hint="What uses it, so you know what to revoke."
-          value={name}
-          error={error ?? undefined}
-          onChange={(e) => setName(e.target.value)}
-        />
-      </form>
-    </Modal>
-  );
-}
-
-function CreatedTokenModal({
-  token,
-  onClose,
-}: {
-  token: CreatedApiToken;
-  onClose: () => void;
-}) {
-  const [copied, setCopied] = useState<"idle" | "copied" | "unavailable">(
-    "idle",
-  );
-  async function copy() {
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error("no clipboard");
-      await navigator.clipboard.writeText(token.token);
-      setCopied("copied");
-    } catch {
-      setCopied("unavailable");
-    }
-  }
-  return (
-    <Modal
-      title="Token created"
-      description={`API token ${token.name}`}
-      onClose={onClose}
-      actions={<Button onClick={onClose}>Done</Button>}
-    >
-      <Alert tone="warn" title="Shown once">
-        Copy it now. It is stored hashed and cannot be shown again; revoke it
-        and create another if it is lost.
-      </Alert>
-      <div className="pf-secret">
-        <Input
-          label={`API token · ${token.name}`}
-          id="created-token"
-          mono
-          readOnly
-          autoFocus
-          value={token.token}
-          onFocus={(e) => e.currentTarget.select()}
-          hint={
-            copied === "copied"
-              ? "Copied."
-              : copied === "unavailable"
-                ? "Copying is not available here; select the token and copy it."
-                : undefined
-          }
-        />
-        <Button variant="secondary" icon="copy" onClick={() => void copy()}>
-          Copy
-        </Button>
-      </div>
-    </Modal>
   );
 }

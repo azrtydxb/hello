@@ -28,7 +28,6 @@ function setup(extra: Parameters<typeof mockApi>[0] = {}) {
     ...ME,
     "GET /api/v1/feature-codes": () => json({ items: CODES }),
     "GET /api/v1/presence": () => json({ items: PRESENCE }),
-    "GET /api/v1/tokens": () => json({ items: [] }),
     ...extra,
   });
 }
@@ -125,78 +124,11 @@ describe("System", () => {
     expect(reads()).toHaveLength(before + 1);
   });
 
-  it("creates an API token, shows it once, and revokes one after confirming", async () => {
-    const TOKEN = {
-      id: 7,
-      name: "grafana-read",
-      createdAt: "2026-09-12T10:00:00Z",
-      lastUsedAt: null,
-    };
-    const calls = setup({
-      "GET /api/v1/tokens": [
-        () => json({ items: [TOKEN] }),
-        () =>
-          json({
-            items: [TOKEN, { ...TOKEN, id: 8, name: "provisioning-ci" }],
-          }),
-        () => json({ items: [{ ...TOKEN, id: 8, name: "provisioning-ci" }] }),
-      ],
-      "POST /api/v1/tokens": () =>
-        json(
-          { ...TOKEN, id: 8, name: "provisioning-ci", token: "hlo_secret" },
-          201,
-        ),
-      "DELETE /api/v1/tokens/7": noContent,
-    });
+  it("points to AI access for API tokens", async () => {
+    const calls = setup();
     renderApp("/system");
-    const list = await screen.findByRole("list", { name: "API tokens" });
-    expect(list).toHaveTextContent("grafana-read");
-    expect(list).toHaveTextContent("last used never");
-
-    fireEvent.click(screen.getByRole("button", { name: "New token" }));
-    const create = await screen.findByRole("dialog", { name: "New API token" });
-    fireEvent.click(
-      within(create).getByRole("button", { name: "Create token" }),
-    );
-    expect(within(create).getByLabelText("Name")).toHaveAccessibleDescription(
-      "Enter a name.",
-    );
-    fireEvent.change(within(create).getByLabelText("Name"), {
-      target: { value: "provisioning-ci" },
-    });
-    fireEvent.click(
-      within(create).getByRole("button", { name: "Create token" }),
-    );
-
-    const shown = await screen.findByRole("dialog", { name: "Token created" });
-    expect(within(shown).getByLabelText(/API token/)).toHaveValue("hlo_secret");
-    expect(within(shown).getByText("Shown once")).toBeVisible();
-    expect(calls).toContainEqual({
-      method: "POST",
-      url: "/api/v1/tokens",
-      body: { name: "provisioning-ci" },
-    });
-    fireEvent.click(within(shown).getByRole("button", { name: "Done" }));
-    expect(screen.queryByText("hlo_secret")).toBeNull();
-    await screen.findByText("provisioning-ci");
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Revoke grafana-read" }),
-    );
-    const confirm = await screen.findByRole("dialog", {
-      name: "Revoke grafana-read?",
-    });
-    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
-    fireEvent.click(
-      within(confirm).getByRole("button", { name: "Revoke token" }),
-    );
-    expect(
-      await screen.findByText("Token grafana-read revoked."),
-    ).toBeVisible();
-    expect(calls).toContainEqual({
-      method: "DELETE",
-      url: "/api/v1/tokens/7",
-      body: undefined,
-    });
+    const link = await screen.findByRole("link", { name: "Manage tokens" });
+    expect(link).toHaveAttribute("href", "/ai");
+    expect(calls.some((c) => c.url === "/api/v1/tokens")).toBe(false);
   });
 });

@@ -132,25 +132,21 @@ describe("Users (spec S-23)", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows API tokens on System to an admin only", async () => {
+  it("keeps API tokens off System for every role (they live on AI access)", async () => {
     const routes = {
       "GET /api/v1/feature-codes": () => json({ items: [] }),
       "GET /api/v1/presence": () => json({ items: [] }),
       "GET /api/v1/tokens": () => json({ items: [] }),
     };
-    const calls = mockApi({ ...me("operator"), ...routes });
-    const { unmount } = renderApp("/system");
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "System" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "New token" })).toBeNull();
-    expect(calls.some((c) => c.url === "/api/v1/tokens")).toBe(false);
-    unmount();
-
-    mockApi({ ...me("admin"), ...routes });
-    renderApp("/system");
-    expect(
-      await screen.findByRole("button", { name: "New token" }),
-    ).toBeInTheDocument();
+    for (const role of ["operator", "admin"] as const) {
+      const calls = mockApi({ ...me(role), ...routes });
+      const { unmount } = renderApp("/system");
+      expect(
+        await screen.findByRole("heading", { level: 1, name: "System" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "New token" })).toBeNull();
+      expect(calls.some((c) => c.url === "/api/v1/tokens")).toBe(false);
+      unmount();
+    }
   });
 });
