@@ -3,6 +3,7 @@ package sip
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -457,9 +458,12 @@ func TestSIPMetrics(t *testing.T) {
 	// The ACK to the 401 stays in the transaction layer; only the 2xx ACK
 	// reaches the handler.
 	for m, want := range map[string]float64{"INVITE": 2, "ACK": 1, "BYE": 1} {
-		if v := pbx.metric(t, "hello_sip_requests_total", map[string]string{"method": m}); v != want {
-			t.Errorf("requests{%s} = %v, want %v", m, v, want)
-		}
+		// The phones' ACK and BYE are handled on their own goroutines and
+		// counted when the handler starts, so the call can be over (CDR
+		// written) before the counter has seen them: wait for it.
+		eventually(t, "requests{"+m+"} = "+fmt.Sprint(want), func() bool {
+			return pbx.metric(t, "hello_sip_requests_total", map[string]string{"method": m}) == want
+		})
 	}
 	for code, min := range map[string]float64{"200": 4, "401": 3, "180": 1} {
 		if v := pbx.metric(t, "hello_sip_responses_total", map[string]string{"code": code}); v < min {

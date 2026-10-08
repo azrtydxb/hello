@@ -2,6 +2,7 @@ package media
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -252,8 +253,33 @@ func TestRelayMetrics(t *testing.T) {
 	_ = pb
 }
 
+// holdPortPair binds two consecutive UDP ports that nothing else uses and
+// returns the first. The sockets stay open until the test ends, so a relay
+// ranged over exactly this pair finds both ports taken. Fixed ports would
+// collide with the relay tests of other packages running at the same time
+// (go test runs packages in parallel and the SIP tests use 20000-21000).
+func holdPortPair(t *testing.T) int {
+	t.Helper()
+	for range 100 {
+		first, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero})
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := first.LocalAddr().(*net.UDPAddr).Port
+		second, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: port + 1})
+		if err != nil {
+			first.Close()
+			continue
+		}
+		t.Cleanup(func() { first.Close(); second.Close() })
+		return port
+	}
+	t.Fatal("no two consecutive free UDP ports")
+	return 0
+}
+
 // TestRelayPortExhaustion fails if a range too small for a relay, an
-// inverted range, or a range whose only port is already taken does not
+// inverted range, or a range whose ports are all already taken does not
 // fail cleanly (spec failure mode "anchor RTP bind failure").
 func TestRelayPortExhaustion(t *testing.T) {
 	if _, err := NewRelay(20000, 19999); err == nil {
@@ -262,23 +288,21 @@ func TestRelayPortExhaustion(t *testing.T) {
 	if _, err := NewRelay(20000, 20000); err == nil {
 		t.Error("single-port range accepted for a two-leg relay")
 	}
-	// The only port in the range is already bound: the bind must fail and
-	// the error must name the leg.
-	hoard, err := NewRelay(20000, 20001)
+	// Every port in the range is bound by someone else: the bind must fail
+	// and the error must name the leg.
+	p := holdPortPair(t)
+	r, err := NewRelay(p, p+1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := hoard.AddLeg("a"); err != nil {
-		t.Fatal(err)
-	}
-	// Range 20000-20001: port 20000 is taken by leg a. A second relay on
-	// the same single candidate port must fail with a bind error.
-	narrow, err := NewRelay(20000, 20000)
-	_ = narrow
+	defer r.Close()
+	_, err = r.AddLeg("a")
 	if err == nil {
-		t.Skip("single port accepted; exhaustion covered by the range checks")
+		t.Fatal("AddLeg succeeded with every port in the range taken")
 	}
-	hoard.Close()
+	if !strings.Contains(err.Error(), `leg "a"`) {
+		t.Errorf("error %q does not name the leg", err)
+	}
 }
 
 // TestRelayPanicRecovery fails if a panicking session goroutine takes the
