@@ -539,14 +539,19 @@ func TestKamailioBalancesAndPaths(t *testing.T) {
 	nodes := map[string]bool{}
 	var phones []*sipua.Phone
 	var devs []labDevice
-	for range 8 {
+	// Kamailio picks the node by hashing the From user, and the user embeds
+	// a random extension number, so a fixed count of AORs lands on a single
+	// node by chance (2 in 256 for eight). Register at least eight, and go on
+	// until both nodes hold one, so the test checks the balancing and not the
+	// luck of the draw.
+	for n := 0; n < 8 || (len(nodes) < 2 && n < 48); n++ {
 		d := lc.devices("desk")[0]
 		phones = append(phones, kamPhone(t, d))
 		devs = append(devs, d)
 		nodes[lc.nodeOf(d)] = true
 	}
 	if !nodes["hello-sip-1"] || !nodes["hello-sip-2"] {
-		t.Fatalf("8 AORs registered through Kamailio landed on %v, want both nodes", nodes)
+		t.Fatalf("%d AORs registered through Kamailio landed on %v, want both nodes", len(devs), nodes)
 	}
 	// Every binding records Kamailio's Hello-facing address in its Path, so
 	// requests to the phone go back through Kamailio.
