@@ -1,6 +1,10 @@
 package integration
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -11,9 +15,23 @@ import (
 // arrives there as Hello, so it must answer 403 and not process the request.
 func TestHelloSocketRefusesNonHelloSource(t *testing.T) {
 	labUp(t)
+
+	// 5070 is not published to the host, so the probe runs inside the edge
+	// network: a static Go sender copied into the carrier container.
+	bin := filepath.Join(t.TempDir(), "udpsend")
+	build := exec.Command("go", "build", "-o", bin, "./test/udpsend")
+	build.Dir = root
+	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+runtime.GOARCH)
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build udpsend: %v\n%s", err, out)
+	}
+	if out, err := compose("cp", bin, "carrier-primary:/tmp/udpsend").CombinedOutput(); err != nil {
+		t.Fatalf("copy udpsend: %v\n%s", err, out)
+	}
+
 	req := strings.Join([]string{
 		"OPTIONS sip:kamailio@hello.edge SIP/2.0",
-		"Via: SIP/2.0/UDP @IP@:5099;rport;branch=z9hG4bK-nothello",
+		"Via: SIP/2.0/UDP 10.89.53.99:5099;rport;branch=z9hG4bK-nothello",
 		"Max-Forwards: 70",
 		"From: <sip:intruder@hello.lab>;tag=nothello",
 		"To: <sip:kamailio@hello.edge>",
@@ -22,16 +40,12 @@ func TestHelloSocketRefusesNonHelloSource(t *testing.T) {
 		"Content-Length: 0",
 		"", "",
 	}, "\r\n")
-	out, err := compose("exec", "-T", "carrier-primary", "sh", "-c",
-		"printf '%s' \"$0\" | sed \"s/@IP@/$(hostname -i)/\" | nc -u -p 5099 -w 3 "+strings.TrimSuffix(kamailioHelloAddr, ":5070")+" 5070", req).CombinedOutput()
-	// busybox nc exits non-zero when its -w timeout ends the wait; only the
-	// answer matters.
-	if err != nil && len(out) == 0 {
-		t.Fatalf("send to the hello socket: %v (no answer)", err)
-	}
-	if !strings.HasPrefix(string(out), "SIP/2.0 403") {
-		logs, _ := compose("logs", "--no-log-prefix", "--tail", "30", "kamailio").CombinedOutput()
-		t.Logf("kamailio log tail:\n%s", logs)
-		t.Fatalf("hello socket answer to a non-Hello source = %q, want SIP/2.0 403", out)
+	cmd := compose("exec", "-T", "carrier-primary", "/tmp/udpsend", kamailioHelloAddr)
+	cmd.Stdin = strings.NewReader(req)
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.HasPrefix(string(out), "SIP/2.0 403") {
+		logs, _ := compose("logs", "--no-log-prefix", "--since", "30s", "kamailio").CombinedOutput()
+		t.Logf("kamailio log:\n%s", logs)
+		t.Fatalf("hello socket answer to a non-Hello source = %q (%v), want SIP/2.0 403", out, err)
 	}
 }
