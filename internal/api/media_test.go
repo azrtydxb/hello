@@ -9,9 +9,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -469,4 +472,89 @@ func TestVoicemailBoxesList(t *testing.T) {
 	if b["number"] != "102" || b["unheard"] != float64(0) || b["total"] != float64(0) {
 		t.Fatalf("box 102 = %v", b)
 	}
+}
+
+// flakyObjects is memObjects that, once broken, fails every upload and
+// playback the way an unreachable MinIO does.
+type flakyObjects struct {
+	*memObjects
+	broken atomic.Bool
+}
+
+var errObjectStoreDown = errors.New("object store: connection refused")
+
+func (f *flakyObjects) OpenAudio(ctx context.Context, bucket, object string) (*AudioObject, error) {
+	if f.broken.Load() {
+		return nil, errObjectStoreDown
+	}
+	return f.memObjects.OpenAudio(ctx, bucket, object)
+}
+
+func (f *flakyObjects) Put(ctx context.Context, object string, r io.Reader, size int64) error {
+	if f.broken.Load() {
+		return errObjectStoreDown
+	}
+	return f.memObjects.Put(ctx, object, r, size)
+}
+
+func (f *flakyObjects) PutAnnouncement(ctx context.Context, object string, r io.Reader, size int64) error {
+	if f.broken.Load() {
+		return errObjectStoreDown
+	}
+	return f.memObjects.PutAnnouncement(ctx, object, r, size)
+}
+
+// TestObjectStoreFailures fails if a MinIO error on an upload (announcement
+// create and replace, voicemail greeting) or a playback (voicemail message,
+// recording, announcement) answers anything but 502 upstream, or if a
+// recording Range request is not a 206 (spec ai-external-access S-3).
+func TestObjectStoreFailures(t *testing.T) {
+	objs := &flakyObjects{memObjects: newMemObjects()}
+	e := newPBXEnv(t, objs)
+	ctx := context.Background()
+	c := e.login()
+
+	c.header.Set("Content-Type", "multipart/form-data; boundary=BND")
+	ann := c.must(http.StatusCreated, "POST", "/api/v1/announcements", annMultipart("closing", wav)).json(t)
+	c.header.Del("Content-Type")
+	box := c.must(http.StatusOK, "GET", fmt.Sprintf("/api/v1/extensions/%v/voicemail", e.ext101["id"]), nil).json(t)
+	var msgID int64
+	if err := e.db.QueryRowContext(ctx, `INSERT INTO voicemail_messages (box_id, minio_object, caller, duration_ms)
+		VALUES ($1, 'box/x/1760000000-call-abc.wav', '102', 1000) RETURNING id`, box["id"]).Scan(&msgID); err != nil {
+		t.Fatal(err)
+	}
+	if err := objs.PutRecording(ctx, "rec/1760000000-call-abc.wav", bytes.NewReader(wav), int64(len(wav))); err != nil {
+		t.Fatal(err)
+	}
+	seedRecording(t, e, "corr-abc", "rec/1760000000-call-abc.wav", 1000)
+
+	c.header.Set("Range", "bytes=4-7")
+	if r := c.must(http.StatusPartialContent, "GET", "/api/v1/recordings/1/audio", nil); !bytes.Equal(r.body, wav[4:8]) {
+		t.Fatalf("range = %q, want %q", r.body, wav[4:8])
+	}
+	c.header.Del("Range")
+
+	objs.broken.Store(true)
+	upstream := func(method, path string, body any) {
+		t.Helper()
+		r := c.must(http.StatusBadGateway, method, path, body)
+		var got struct {
+			Error struct{ Code string } `json:"error"`
+		}
+		if err := json.Unmarshal(r.body, &got); err != nil || got.Error.Code != "upstream" {
+			t.Fatalf("%s %s = %s, want code upstream", method, path, r.body)
+		}
+	}
+	upstream("GET", fmt.Sprintf("/api/v1/voicemail/messages/%d/audio", msgID), nil)
+	upstream("GET", "/api/v1/recordings/1/audio", nil)
+	upstream("GET", fmt.Sprintf("/api/v1/announcements/%v/audio", ann["id"]), nil)
+	c.header.Set("Content-Type", "multipart/form-data; boundary=BND")
+	upstream("POST", "/api/v1/announcements", annMultipart("opening", wav))
+	upstream("PUT", fmt.Sprintf("/api/v1/announcements/%v", ann["id"]), annMultipart("", wav))
+	upstream("PUT", fmt.Sprintf("/api/v1/extensions/%v/voicemail", e.ext101["id"]),
+		"--BND\r\nContent-Disposition: form-data; name=\"greeting\"; filename=\"g.wav\"\r\n"+
+			"Content-Type: audio/wav\r\n\r\n"+string(wav)+"\r\n--BND--\r\n")
+	c.header.Del("Content-Type")
+	// An unknown extension has no box to change.
+	c.must(http.StatusNotFound, "PUT", "/api/v1/extensions/999999/voicemail", map[string]string{"email": ""})
 }
