@@ -271,7 +271,7 @@ func TestDialogReplication(t *testing.T) {
 		if addr == "" {
 			t.Skip("HELLO_TEST_VALKEY_ADDR not set")
 		}
-		vc, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true})
+		vc, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 7}) // sip's DB (TestValkeyDBsPerPackage)
 		if err != nil {
 			t.Fatal(err)
 		}

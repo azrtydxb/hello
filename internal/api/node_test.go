@@ -130,7 +130,7 @@ func TestControlNodeLifecycle(t *testing.T) {
 		t.Skip("HELLO_TEST_VALKEY_ADDR not set")
 	}
 	// DB 9: other packages flush theirs in parallel (see cluster_test.go).
-	vc, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 9})
+	vc, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

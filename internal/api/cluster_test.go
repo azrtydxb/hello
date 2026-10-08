@@ -62,7 +62,7 @@ func TestClusterAPI(t *testing.T) {
 	if addr == "" {
 		t.Skip("HELLO_TEST_VALKEY_ADDR not set")
 	}
-	vc, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 8}) // DBs per package: livestate 0, api 3/4/8, cluster 5, lifecycle 6, sip 7
+	vc, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 8}) // one DB set per package: TestValkeyDBsPerPackage
 	if err != nil {
 		t.Fatal(err)
 	}

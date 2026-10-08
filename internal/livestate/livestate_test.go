@@ -15,7 +15,7 @@ func store(t *testing.T) *Store {
 	if addr == "" {
 		t.Skip("HELLO_TEST_VALKEY_ADDR not set")
 	}
-	c, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true})
+	c, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 0}) // livestate's DB (TestValkeyDBsPerPackage)
 	if err != nil {
 		t.Fatal(err)
 	}
