@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,7 @@ import (
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/version"
 	"github.com/azrtydxb/hello/internal/vkconn"
+	"github.com/azrtydxb/hello/internal/voice"
 	sipgosip "github.com/emiago/sipgo/sip"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -42,6 +44,75 @@ func main() {
 		fmt.Fprintln(os.Stderr, "hello-sip:", err)
 		os.Exit(1)
 	}
+}
+
+// voiceConfig builds the SIP leg's voice configuration: the signing key
+// from the primary secret (config validation demands it with the address).
+func voiceConfig(v config.Voice) sip.VoiceConfig {
+	sign, _, _ := voice.Keys(v)
+	return sip.VoiceConfig{SIPAddress: v.SIPAddress, Tenant: v.Tenant, Key: sign, MaxCalls: v.MaxCalls}
+}
+
+// voiceLimits caches the registry's max_concurrent per agent (S-2, S-35):
+// the call leg reads it synchronously, so it must never wait on the
+// database. Until the first successful read no agent is capped.
+type voiceLimits struct {
+	db   *sql.DB
+	log  *slog.Logger
+	cur  atomic.Pointer[map[string]int]
+	dash time.Duration
+}
+
+func (l *voiceLimits) AgentMaxConcurrent(agent string) int {
+	if m := l.cur.Load(); m != nil {
+		return (*m)[agent] // 0 when the cache does not know the agent (yet)
+	}
+	return 0
+}
+
+// Run refreshes the cache every 15 seconds until ctx ends; a failed read
+// keeps the last good set, like the configuration snapshot does.
+func (l *voiceLimits) Run(ctx context.Context) {
+	if l.dash == 0 {
+		l.dash = 15 * time.Second
+	}
+	l.refresh()
+	t := time.NewTicker(l.dash)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			l.refresh()
+		}
+	}
+}
+
+func (l *voiceLimits) refresh() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := l.db.QueryContext(ctx, `SELECT name, max_concurrent FROM voice_agents`)
+	if err != nil {
+		if l.cur.Load() == nil {
+			l.log.Warn("voice agent limits not loaded yet", "error", err)
+		}
+		return
+	}
+	defer func() { _ = rows.Close() }()
+	m := map[string]int{}
+	for rows.Next() {
+		var name string
+		var max int
+		if err := rows.Scan(&name, &max); err != nil {
+			return
+		}
+		m[name] = max
+	}
+	if err := rows.Err(); err != nil {
+		return
+	}
+	l.cur.Store(&m)
 }
 
 func run(args []string) error {
@@ -142,6 +213,9 @@ func run(args []string) error {
 		return fmt.Errorf("HELLO_SECRET_KEY: %w", err)
 	}
 	live := livestate.New(vk)
+	// Voice agent capacity (S-35): the agents' max_concurrent from the
+	// registry, refreshed off the call path.
+	limits := &voiceLimits{db: sipDB, log: log.With("component", "voice")}
 	members := cluster.New(vk)
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
 		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev, Revision: configRevision,
@@ -153,6 +227,7 @@ func run(args []string) error {
 	srv, err := sip.New(sip.Config{
 		NodeID: cfg.NodeID, Incarnation: incarnation, Domain: cfg.SIPDomain, AdvertisedAddr: cfg.SIPAdvertisedAddr,
 		NonceSecret: []byte(cfg.NonceSecret), MinExpires: cfg.RegisterMinExpires, MaxExpires: cfg.RegisterMaxExpires,
+		Voice:       voiceConfig(cfg.Voice),
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax,
@@ -167,6 +242,7 @@ func run(args []string) error {
 		Voicemails: voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings,
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
 		HAState: live, Membership: members,
+		VoiceSlots: live, VoiceLimits: limits,
 	})
 	if err != nil {
 		return err
@@ -238,6 +314,8 @@ func run(args []string) error {
 
 	bg, stopBG := context.WithCancel(context.Background())
 	defer stopBG()
+	voiceDone := make(chan struct{})
+	go func() { defer close(voiceDone); limits.Run(bg) }()
 	settingsDone := make(chan struct{})
 	go func() { defer close(settingsDone); settings.Run(bg) }()
 	watchDone := make(chan struct{})
@@ -286,6 +364,7 @@ func run(args []string) error {
 	<-watchDone
 	<-resolveDone
 	<-cdrDone
+	<-voiceDone
 	log.Info("stopped", "error", err, "active_calls_dropped", srv.ActiveCalls())
 	return err
 }

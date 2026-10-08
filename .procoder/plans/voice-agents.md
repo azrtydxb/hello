@@ -79,17 +79,26 @@ Interfaces: produces `voice_agent` as destination everywhere of S-10 to S-13; co
 - [ ] Routing test endpoint shows the step; transfer and feature code reach the agent extension.
 - [ ] Mutation-check the strategy restriction and the disabled-agent validation. Full gate.
 
-## Task 4: The call leg (branch voice-agents-sip, after Tasks 1 and 3)
+Deviations recorded when Task 4 landed (all compatible with Tasks 2, 3, 5-8; ask the lead before relying on more):
+
+- The per-agent `max_concurrent` reaches hello-sip through a cached registry reader (`cmd/hello-sip` polls `voice_agents.name, max_concurrent` every 15 s off the call path; `sip.VoiceLimits`), because contract 3's fixed routing input carries no limits. An agent the cache does not know yet is uncapped until the next refresh. If the routing table later carries limits, drop the poller.
+- Capacity slots live in `internal/livestate/voice.go` (no other stream owns livestate): two scored sets per call, `hello:voiceagent:<name>:calls` and `hello:voiceagents:calls`, acquired, refreshed and released atomically in one script, like the trunk slot sets.
+- S-14 matches the literal `ip:port` of `HELLO_VOICE_SIP_ADDRESS` (talking-agent sends from its SIP socket), not the IP alone: on a loopback test host every caller shares one IP, and a hostname address can never match.
+- The CDR writer resolves `voice_agent_id` by name in the INSERT (`WHERE name = voice_agent_name`), because the fixed `VoiceRef` carries no registry id; a call to an agent deleted before the write stores the name with a NULL id (`ON DELETE SET NULL` covers later deletions).
+- Response mapping follows the existing callee normalisation: `404`, `403`, `503` and a silent agent reach the caller as `480` (as for any callee), `486` as `486`; the agent's own code is on the trace and in `hello_voice_agent_unreachable_total`.
+- `X-Hello-Auth` is redacted from SIP log lines like `Authorization` (S-32).
+
+## Task 4: The call leg (branch voice-leg, after Tasks 1 and 3)
 
 Files: `internal/sip/callflow.go` and `b2bua.go` (the `ringURI` leg), `internal/sip/voice.go`, `internal/cdr/`, `internal/store/cdr.go`, `test/sipua` (fake agent behaviours), tests.
 Interfaces: produces the signed INVITE and the CDR fields; consumes contracts 2, 3, 4.
 
-- [ ] Headers, signature, G.711 offer, stripped caller headers, ring timeout, response mapping; `TestVoiceAgentInvite` against `test/sipua`.
-- [ ] Refuse the agent address as a caller; covered by `TestVoiceAgentInvite`.
-- [ ] Capacity (S-35): per-agent and total caps counted like trunk `max_calls`, busy to the next step or failover, `486` mapped the same, `X-Hello-Caller-Origin` header; `TestVoiceCapacity`.
-- [ ] CDR columns written and filter `voiceAgent` on `listCDRs`; `TestVoiceCDRFields` (integration, in Task 8 if databases are needed).
-- [ ] Metrics `hello_voice_*` for setup and unreachable; `TestVoiceMetrics` (SIP half).
-- [ ] Mutation-check the header strip and the signature input. Full gate; media tests unchanged and green.
+- [x] Headers, signature, G.711 offer, stripped caller headers, ring timeout, response mapping; `TestVoiceAgentInvite` against `test/sipua`.
+- [x] Refuse the agent address as a caller; covered by `TestVoiceAgentInvite` (`TestVoiceAgentRefusedAddress` for INVITE and REGISTER).
+- [x] Capacity (S-35): per-agent and total caps counted like trunk `max_calls`, busy to the next step or failover, `486` mapped the same, `X-Hello-Caller-Origin` header; `TestVoiceCapacity` (the ring group's next step and failure target apply through the normal exhaustion path once Task 3's snapshot wires agent members).
+- [x] CDR columns written and filter `voiceAgent` on `listCDRs`; the writer and store halves here, `TestVoiceCDRFields` itself is Task 8's integration proof (databases).
+- [x] Metrics `hello_voice_*` for setup and unreachable; `TestVoiceMetrics` assertions folded into `TestVoiceAgentInvite`, `TestVoiceAgentResponses` and `TestVoiceCapacity` (SIP half; the runtime half is Task 5).
+- [x] Mutation-check the header strip and the signature input (relaying a caller header is caught by the strip; a changed signed field breaks `TestVoiceAgentInvite`/`TestVoiceCallAuth`). Full gate; media tests unchanged and green.
 
 ## Task 5: Runtime API, ack and call reports (branch voice-agents-runtime, after Tasks 1 and 2)
 

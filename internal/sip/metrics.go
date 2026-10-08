@@ -62,6 +62,15 @@ type Metrics struct {
 	DialogReplicated *prometheus.CounterVec // result
 	DialogTakeovers  prometheus.Counter
 	ZombieCalls      prometheus.Counter
+
+	// Voice agents (spec voice-agents S-32, S-35): this node's calls to
+	// talking-agent. VoiceSetup times INVITE to 200; VoiceUnreachable
+	// counts agent legs that failed by reason (timeout, 403, 404, 486,
+	// 503, capacity, failed); VoiceActive is this node's simultaneous calls
+	// per agent.
+	VoiceSetup       prometheus.Histogram
+	VoiceUnreachable *prometheus.CounterVec // reason
+	VoiceActive      *prometheus.GaugeVec   // agent
 }
 
 // Transfer kinds for hello_transfers_total.
@@ -182,6 +191,17 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.ZombieCalls = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "hello_zombie_calls_total", Help: "Calls lost with no recovery possible (unreplicated or failed takeover).",
 	})
+	m.VoiceSetup = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name: "hello_voice_call_setup_seconds", Help: "INVITE towards a voice agent to its 200 OK.",
+		Buckets: []float64{.05, .1, .25, .5, 1, 2.5, 5, 10, 15},
+	})
+	m.VoiceUnreachable = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_voice_agent_unreachable_total", Help: "Calls not sent to or not answered by a voice agent, by reason.",
+	}, []string{"reason"})
+	m.VoiceActive = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hello_voice_active_calls", Help: "This node's simultaneous calls to a voice agent.",
+	}, []string{"agent"})
+	reg.MustRegister(m.VoiceSetup, m.VoiceUnreachable, m.VoiceActive)
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Forwarded, m.GroupCalls,
