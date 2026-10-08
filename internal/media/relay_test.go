@@ -268,10 +268,10 @@ func holdPortPair(t *testing.T) int {
 		port := first.LocalAddr().(*net.UDPAddr).Port
 		second, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: port + 1})
 		if err != nil {
-			first.Close()
+			_ = first.Close()
 			continue
 		}
-		t.Cleanup(func() { first.Close(); second.Close() })
+		t.Cleanup(func() { _ = first.Close(); _ = second.Close() })
 		return port
 	}
 	t.Fatal("no two consecutive free UDP ports")
