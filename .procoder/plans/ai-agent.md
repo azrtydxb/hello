@@ -93,11 +93,18 @@ Interfaces: produces contract 6 and the proposal routes; consumes contracts 1, 3
 Files: `internal/ai/assistant/` (`tools.go`, `session.go`, `task.go`, `output.go`, tests incl. `injection_test.go`), `internal/store/ai_sessions.go`, `internal/api/ai_sessions.go` and tests.
 Interfaces: produces the session, message and task routes; consumes contracts 3–6.
 
-- [ ] `assistantTools` from `apispec` (fixed list of S-6), each executed by `replay.Do` under `auth.WithAgent`, redacted, capped at 16 KiB with `truncated`, wrapped in `DataBlock`; `TestAssistantTools`.
-- [ ] Sessions and messages (ownership, admin view, 20-message window, title, idle time, one running task per session); `TestAssistantSessions` (store and API).
-- [ ] Message task: `Generate` with tools, `MaxSteps` 8, a 16-call stop condition, output `{answer, citations, proposal?}`, citation and proposal validation, stored tool-call summaries; `TestAssistantSessions` (task half) with `aitest` scripts.
-- [ ] Injection fixtures through tool results and history; `TestInjection` (assistant half).
-- [ ] Mutation-check the read-only tool filter and the call cap. Full gate.
+- [x] `assistantTools` from `apispec` (fixed list of S-6), each executed by `replay.Do` under `auth.WithAgent`, redacted, capped at 16 KiB with `truncated`, wrapped in `DataBlock`; `TestAssistantTools`.
+- [x] Sessions and messages (ownership, admin view, 20-message window, title, idle time, one running task per session); `TestAssistantSessions` (store and API).
+- [x] Message task: `Generate` with tools, `MaxSteps` 8, a 16-call stop condition, output `{answer, citations, proposal?}`, citation and proposal validation, stored tool-call summaries; `TestAssistantSessions` (task half) with `aitest` scripts.
+- [x] Injection fixtures through tool results and history; `TestInjection` (assistant half).
+- [x] Mutation-check the read-only tool filter and the call cap. Full gate.
+
+**Deviations recorded by Task 4:**
+
+- Task 2's `Generate`, `DataBlock` and `Tasks` were not merged when this stream started, so the assistant takes them as `Config.Generate` (`func(ctx, ai.Call[Answer]) (Answer, ai.Usage, error)`, wired as `ai.Generate(ctx, svc, c)`), `Config.DataBlock` (`ai.DataBlock`) and `Config.Tasks` (`*ai.Tasks`); the unit tests drive go-ai-sdk's `GenerateText` with `aitest` scripts through a test stand-in. Wiring in `cmd/hello-control` is left to Task 2/8.
+- The session and message types live in the leaf package `internal/ai/assistant/chat` (aliased in `assistant`): `apispec`'s in-package test imports `internal/api`, so `internal/api` and `internal/store` cannot import a package that imports `apispec`. The store methods are `*AISession`/`AIMessages`/`ActiveAITask`/`PostAIMessage`/`AddAIMessage`/`OpenAIFindings` (the store already has login `CreateSession`/`DeleteSession`).
+- `api.Config` gained `Assistant AIAssistant` (nil → `503` `ai_disabled`), and the `Error` schema's `code` enum in `openapi.json` gained `ai_disabled`, `ai_busy`, `ai_budget_exhausted`, `task_running` and `proposal_not_open` (the conformance validator rejected them; other streams need the same codes).
+- `getAITask` stays Task 2's (it owns `ai_tasks`); `getAISession` reads the session's running task itself. Admins list every session and may read any; only the owner posts (the task reads as the owner). A session with a running task cannot be deleted (`409` `task_running`). The answer is plain text: HTML and Markdown links or images are rejected by the validator and re-asked. An endpoint's `400` naming tools becomes `tools_unsupported` with the provider's message. The 16-call limit is enforced in the tools (a 17th call gets an error telling the model to answer); `hello_ai_tool_calls_total{operation,result}` registers on `Config.Registerer`.
 
 ## Task 5: Call quality in CDRs and media relay (branch ai-agent-quality, after Task 1's migration merges)
 
