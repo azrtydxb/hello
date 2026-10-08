@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/ai"
+	"github.com/azrtydxb/hello/internal/ai/assistant"
 	"github.com/azrtydxb/hello/internal/ai/detect"
 	"github.com/azrtydxb/hello/internal/ai/proposal"
 	"github.com/azrtydxb/hello/internal/api"
@@ -174,7 +175,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	// Proposals (spec ai-agent) exist only while the agent is on; reads in
 	// their validation replay through the API handler built just below.
-	var validator *proposal.SchemaValidator
+	var (
+		validator    *proposal.SchemaValidator
+		assistantAPI lateHandler
+	)
 	if on, _ := agent.Enabled(); on {
 		spec, err := apispec.Load(api.OpenAPI())
 		if err == nil {
@@ -185,8 +189,33 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			return fmt.Errorf("ai proposals: %w", err)
 		}
 		props := proposal.NewStore(db, validator)
+		props.OnStatus = func(source string, st proposal.Status) {
+			agent.Metrics().Proposal(proposalSource(source), string(st))
+		}
 		apiCfg.Proposals = props
 		apiCfg.Findings = st
+		// The chat assistant (spec S-6 to S-9): its tools replay through the
+		// API handler built below, its proposals through the same validator
+		// and store as every other proposal.
+		assist, err := assistant.New(assistant.Config{
+			Store:     st,
+			Tasks:     agent.Tasks,
+			DataBlock: ai.DataBlock,
+			Generate: func(ctx context.Context, c ai.Call[assistant.Answer]) (assistant.Answer, ai.Usage, error) {
+				return ai.Generate(ctx, agent, c)
+			},
+			API:        &assistantAPI,
+			Spec:       spec,
+			Proposals:  &assistant.Proposals{Validator: validator, Store: props},
+			MaxSteps:   cfg.AIAgent.MaxSteps,
+			Log:        log,
+			Registerer: metrics.Registry,
+		})
+		if err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("ai assistant: %w", err)
+		}
+		apiCfg.Assistant = assist
 		// The aiops agent (spec S-17): the detectors run without the model,
 		// and explain findings through it when it answers.
 		if cfg.AIAgent.AIOpsInterval > 0 {
@@ -213,6 +242,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		go pruneOAuth(ctx, as, vk, cfg.NodeID, log)
 	}
 	apiHandler := api.Handler(apiCfg)
+	assistantAPI.Set(apiHandler)
 	if validator != nil {
 		validator.SetHandler(apiHandler)
 	}

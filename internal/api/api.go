@@ -161,6 +161,9 @@ type Config struct {
 	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
 	// routes answer 404 and bearer tokens get no audience check.
 	AI AIAccess
+	// Assistant is the in-product assistant (spec ai-agent S-8); nil while
+	// AI is off, when its routes answer 503 ai_disabled.
+	Assistant AIAssistant
 	// Findings is the AIOps findings store (spec ai-agent); nil is AI off.
 	Findings AIFindings
 	// Proposals serves the AI proposal routes (spec ai-agent); nil answers

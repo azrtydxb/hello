@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/api"
@@ -92,4 +94,31 @@ func pruneOAuth(ctx context.Context, as *oauth.Server, l lease, node string, log
 		case <-t.C:
 		}
 	}
+}
+
+// lateHandler is an http.Handler set after the handler it stands for is
+// built: the assistant's tools replay through an API that itself serves the
+// assistant.
+type lateHandler struct{ h atomic.Pointer[http.Handler] }
+
+// Set installs the handler.
+func (l *lateHandler) Set(h http.Handler) { l.h.Store(&h) }
+
+// ServeHTTP serves through the installed handler, 503 before one is set.
+func (l *lateHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h := l.h.Load()
+	if h == nil {
+		http.Error(w, "starting", http.StatusServiceUnavailable)
+		return
+	}
+	(*h).ServeHTTP(w, r)
+}
+
+// proposalSource is the metric label of a proposal source: "assistant" or
+// "finding" (a detector's name stays out of the label set).
+func proposalSource(source string) string {
+	if strings.HasPrefix(source, "finding") {
+		return "finding"
+	}
+	return source
 }
