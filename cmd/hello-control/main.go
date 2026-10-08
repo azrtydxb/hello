@@ -29,6 +29,7 @@ import (
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/version"
 	"github.com/azrtydxb/hello/internal/vkconn"
+	"github.com/azrtydxb/hello/internal/voice"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/valkey-io/valkey-go"
 )
@@ -159,6 +160,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	apiCfg := api.Config{
 		AIAgent:       agent,
 		Store:         st,
+		Voice:         voice.New(st, box, cfg.Voice, log),
 		Live:          vk,
 		Trunks:        vk,
 		Cluster:       vk,
