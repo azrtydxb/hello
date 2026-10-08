@@ -6,6 +6,7 @@
 package fakellm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -71,7 +72,8 @@ func NewOn(t testing.TB, addr string) *Server {
 	s := &Server{queues: map[string][]Reply{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/chat/completions", s.complete)
-	l, err := net.Listen("tcp", addr)
+	var lc net.ListenConfig
+	l, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		t.Fatalf("fakellm: listen %s: %v", addr, err)
 	}
