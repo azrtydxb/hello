@@ -1,6 +1,6 @@
 # Questions procoder cannot answer for you
 
-Written 2026-10-07 20:23 UTC.
+Written 2026-10-08 06:03 UTC.
 
 Answer each one by writing a line beginning `Answer: ` under it, then
 hand the file back with `procoder ask --file .procoder/ask/QA.md`.
@@ -25,42 +25,6 @@ Answer:
 
 ## Q2: [decision] decisions.md
 
-Key: 803693c6f34d
-Question: AI phase 1: auditing MCP read calls
-
-A user's reads write no audit row today; the decision says every MCP call is audited like a user call (spec ai-external-access, S-15).
-
-- Reads get a log line and metrics; every change writes its normal audit row with the client in `via` (proposed)
-- Every MCP tool call, reads included, writes an audit row
-
-Answer: Reads get a log line and metrics; every change writes its normal audit row with the client in `via` (proposed)
-
-## Q3: [decision] decisions.md
-
-Key: 43202daa3527
-Question: AI phase 1: dynamic client registration on kw
-
-Client ID metadata documents are preferred and DCR is deprecated, but some MCP clients still only register dynamically (spec ai-external-access, S-10).
-
-- On for kw, rate-limited, labelled unverified on the consent screen, unused clients cleaned up (proposed)
-- Off: only client ID metadata documents and service accounts
-
-Answer: On for kw, rate-limited, labelled unverified on the consent screen, unused clients cleaned up (proposed)
-
-## Q4: [decision] decisions.md
-
-Key: 237b6f7b23a7
-Question: AI phase 1: user roles for OAuth consent
-
-Hello has one kind of user, who can do everything, so the role that should bound the scopes a user can grant bounds nothing today (spec ai-external-access, S-5).
-
-- Keep one role in phase 1: every user may grant every scope, `secrets` included; `GrantableScopes` is where a later roles spec plugs in (proposed)
-- Add roles now (for example administrator, operator, read-only), applied to the console and the API as well as to consent
-
-Answer: Add roles now: viewer (read-only), operator (day-to-day configuration writes), admin (users, roles, tokens, secrets, OAuth clients, settings); existing users become admin; the console shows and edits a user's role; the API enforces a minimum role on every route; consent, MCP scopes and service accounts are bounded by role
-
-## Q5: [decision] decisions.md
-
 Key: bb1f0088a82e
 Question: Provisioning contract 4: MarkFetched and PromoteToken race a rotation or re-arm
 
@@ -75,23 +39,23 @@ using. Fixing it changes the fixed prov.Store contract (Task 1).
 
 Answer:
 
-## Q6: [spec] ai-external-access
+## Q3: [spec] ai-agent
 
-Key: 01f93861d03b
-Question: OPEN: Auditing MCP reads. "Every call is audited like a user call": a user's reads write no audit row today. Should MCP read tool calls write audit rows too, or is a log line plus metrics per call (and the normal audit rows for every change) enough? Proposed: log line plus metrics for reads, audit rows for changes, as for users.
+Key: 52c1aa98bde5
+Question: 1. **Call quality detection.** Hello measures RTP loss and jitter only as per-node Prometheus counters (`hello_rtp_loss_total`, `hello_rtp_jitter_ms`) and only for anchored calls; CDRs carry no quality data and directly-media calls are not measured at all. Options: (a) hello-sip writes per-call loss/jitter summaries into the CDR for anchored calls and a `call_quality` detector flags trunks or nodes with degraded calls; (b) hello-control queries the Prometheus on kw; (c) leave call quality out of phase 2.
 
-Answer: Reads get a log line and metrics; every change writes its normal audit row with the client in `via` (proposed)
+Answer: (a) Store per-call quality in CDRs — hello-sip measures and writes loss/jitter to the CDR for each anchored call leg; a `call_quality` detector flags trunks/nodes with loss ≥ 1% or jitter ≥ 100ms in 3+ of last 5 samples (S-5.1, S-19). Add scope item for CDR quality column (migration 00009), relay per-call stats collection in hello-sip, detector, and console call detail exposure (Task 5a).
 
-## Q7: [spec] ai-external-access
+## Q4: [spec] ai-agent
 
-Key: 56930f270aca
-Question: OPEN: Dynamic client registration on kw. Client ID metadata documents are the preferred registration and DCR is deprecated, but some MCP clients still only register dynamically. Should `HELLO_OAUTH_DCR` be on for kw? Proposed: on, so every client works today, with the rate limit, the "unverified" consent label and the cleanup rules of S-10.
+Key: 1ab11704f3b5
+Question: 2. **Public endpoints and personal data.** With `HELLO_AI_ALLOW_PUBLIC_ENDPOINT=true` (for example Anthropic's API), phone numbers, names and User-Agents would leave the network. Should Hello then mask phone numbers and names in `<data>` blocks (consistent tokens per value, unmasked in the console), or send them as is once an administrator opted in?
 
-Answer: On for kw, rate-limited, labelled unverified on the consent screen, unused clients cleaned up (proposed)
+Answer: Never mask — data goes as-is when an administrator explicitly opts in to public endpoints. The private-only default (S-3) is the control; the console renders everything unmasked. No masking code needed (S-3 clarified to state this).
 
-## Q8: [spec] ai-external-access
+## Q5: [spec] ai-agent
 
-Key: b4b673d5b75c
-Question: OPEN: User roles. Hello has one kind of user, who can do everything, so "the user's role bounds the scopes on the consent screen" bounds nothing today. Should phase 1 add roles (for example administrator, operator, read-only, applied to the console and the API too), or keep one role so every user can grant every scope including `secrets`? Proposed: keep one role in phase 1 (`GrantableScopes` is the single place a later roles spec plugs in).
+Key: a2698ff8dc49
+Question: 3. **Allowlist breadth.** The allowlist (S-11) has no deletes; a config smell such as an unreachable route can only be fixed by editing it. Should phase 2 also allow deleting outbound/inbound routes and ring groups as proposals, or stay update-and-create only?
 
-Answer: Add roles now: viewer (read-only), operator (day-to-day configuration writes), admin (users, roles, tokens, secrets, OAuth clients, settings); existing users become admin; the console shows and edits a user's role; the API enforces a minimum role on every route; consent, MCP scopes and service accounts are bounded by role
+Answer: Allow deletes of routes and ring groups — `deleteOutboundRoute`, `deleteInboundRoute`, `deleteRingGroup` added to allowlist (S-11). Deletes are visually marked, require explicit confirmation, and the diff clearly shows what disappears and what references it. Other deletes (secrets, users, tokens, etc.) remain forbidden. Tests: `TestProposalDeleteValidation` on validation and reference display; `TestProposalDeleteUI` on console markup and confirm (Task 6).
