@@ -29,6 +29,11 @@ import {
   pageTitle,
 } from "./nav";
 import { AIAccess } from "./pages/AIAccess";
+import { AIAssistant } from "./pages/AIAssistant";
+import { AIFindings } from "./pages/AIFindings";
+import { AIProposalDetail } from "./pages/AIProposalDetail";
+import { AIProposals } from "./pages/AIProposals";
+import { AIStatus } from "./pages/AIStatus";
 import { CallDetail } from "./pages/CallDetail";
 import { Cluster } from "./pages/Cluster";
 import { Calls } from "./pages/Calls";
@@ -48,6 +53,8 @@ import { ProvTemplates } from "./pages/ProvTemplates";
 import { Placeholder } from "./pages/Placeholder";
 import { Users } from "./pages/Users";
 import { Can } from "./role";
+import { getAIStatus } from "./api/aiagent";
+import { usePolling } from "./usePolling";
 import { usePlatformBadges } from "./pages/platform/ui";
 import { Recordings } from "./pages/Recordings";
 import { Announcements } from "./pages/Announcements";
@@ -79,6 +86,10 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/system": System,
   "/routes/test": RouteTest,
   "/ai": AIAccess,
+  "/ai/assistant": AIAssistant,
+  "/ai/findings": AIFindings,
+  "/ai/proposals": AIProposals,
+  "/ai/status": AIStatus,
   "/users": Users,
 };
 
@@ -94,6 +105,8 @@ function Shell() {
   const location = useLocation();
   const controlPlane = useControlPlane();
   const badges = usePlatformBadges();
+  const aiStatus = usePolling(getAIStatus, 60_000);
+  const aiEnabled = aiStatus.status !== "loading" && !!aiStatus.data?.enabled;
   const reachable = controlPlane.status === "reachable";
   const title = pageTitle(location.pathname);
   // Call detail belongs to Call history in the nav.
@@ -130,6 +143,7 @@ function Shell() {
         <SidebarNav label="Primary">
           {navGroupsFor(
             state.status === "signedIn" ? state.role : undefined,
+            aiEnabled,
           ).map((group) => (
             <SidebarNavGroup key={group.label} label={group.label}>
               {group.items.map((item) => (
@@ -219,6 +233,8 @@ export function App() {
               element={<Navigate to="/routes" replace />}
             />
             <Route path="/history/:id" element={<CallDetail />} />
+            <Route path="/ai/assistant/:id" element={<AIAssistant />} />
+            <Route path="/ai/proposals/:id" element={<AIProposalDetail />} />
             {/* Phones sections; static paths outrank /phones/:id. */}
             <Route path="/phones/templates" element={<ProvTemplates />} />
             <Route path="/phones/firmware" element={<ProvFirmware />} />

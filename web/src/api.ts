@@ -134,6 +134,10 @@ export interface Cdr {
   rewrittenDestination: string;
   route: string;
   trunk: string;
+  /** Call quality from the media relay (S-5.1); null when not measured. */
+  rtpPackets?: number | null;
+  rtpLost?: number | null;
+  rtpJitterMs?: number | null;
 }
 
 /** One line of a routing trace (routing.Step). */

@@ -1,0 +1,156 @@
+/* AI agent console pages. Tokens only, no raw colours. */
+.aix-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.aix-plain {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.aix-inline {
+  display: inline;
+}
+.aix-muted {
+  margin: 0;
+  font-size: 13px;
+  color: var(--az-muted);
+}
+.aix-mono {
+  font-family: var(--az-font-mono);
+  overflow-wrap: anywhere;
+}
+.aix-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.aix-card {
+  border: 1px solid var(--az-border);
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--az-surface);
+}
+.aix-card--delete {
+  border-color: var(--az-bad, currentColor);
+  border-width: 2px;
+}
+.aix-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.aix-card__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.aix-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.aix-diff {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.aix-diff th,
+.aix-diff td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--az-border);
+  vertical-align: top;
+}
+.aix-diff__row--removed td:nth-child(2) {
+  text-decoration: line-through;
+}
+.aix-expl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.aix-expl dt {
+  font-weight: 600;
+}
+.aix-expl dd {
+  margin: 0;
+}
+.aix-chat {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.aix-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.aix-sessions a {
+  padding: 6px 8px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+.aix-sessions a[aria-current="page"] {
+  background: var(--az-surface-2, var(--az-surface));
+  font-weight: 600;
+}
+.aix-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.aix-msg {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--az-border);
+}
+.aix-msg--user {
+  align-self: flex-end;
+  max-width: 80%;
+}
+.aix-msg__role {
+  font-size: 12px;
+  color: var(--az-muted);
+  margin: 0 0 4px;
+}
+.aix-sources {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--az-muted);
+}
+.aix-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.aix-composer textarea {
+  width: 100%;
+  min-height: 80px;
+  font: inherit;
+  padding: 8px;
+}
+.aix-cardlink {
+  text-decoration: none;
+  color: inherit;
+}
+.aix-ops {
+  margin: 0;
+  padding-left: 18px;
+}
+@media (max-width: 800px) {
+  .aix-chat {
+    grid-template-columns: 1fr;
+  }
+}

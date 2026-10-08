@@ -121,6 +121,39 @@ describe("CallDetail", () => {
     expect(screen.getByText("after 0:05")).toBeVisible();
   });
 
+  it("shows packet loss and jitter for an anchored call, and none when unmeasured", async () => {
+    const answered = {
+      ...BASE,
+      finalStatus: 200,
+      answerTime: "2026-10-01T10:00:02Z",
+      failureReason: "",
+      trace: [],
+      explanation: "",
+    };
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/80": () =>
+        json({
+          ...answered,
+          id: 80,
+          mediaMode: "anchored",
+          rtpPackets: 990,
+          rtpLost: 10,
+          rtpJitterMs: 12.34,
+        }),
+      "GET /api/v1/cdrs/81": () => json({ ...answered, id: 81 }),
+    });
+    const first = renderApp("/history/80");
+    expect(await screen.findByText("Packet loss")).toBeVisible();
+    expect(screen.getByText("1.00 % (10 of 1000 packets)")).toBeVisible();
+    expect(screen.getByText("12.3 ms")).toBeVisible();
+    first.unmount();
+    renderApp("/history/81");
+    await screen.findByText("Duration");
+    expect(screen.queryByText("Packet loss")).toBeNull();
+    expect(screen.queryByText("Jitter")).toBeNull();
+  });
+
   it("explains why a call could not load", async () => {
     mockApi({
       ...ME,
