@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -22,7 +23,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	conn, err := net.Dial("udp", os.Args[1]) //nolint:gosec // lab-only probe tool; the address is the test's own argument
+	//nolint:gosec // lab-only probe tool; the address is the test's own argument
+	d := net.Dialer{}
+	conn, err := d.DialContext(context.Background(), "udp", os.Args[1])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
