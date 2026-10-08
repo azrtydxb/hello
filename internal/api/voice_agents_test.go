@@ -276,6 +276,9 @@ func TestVoiceAgentCRUD(t *testing.T) {
 	}
 
 	// A plain delete works and removes the versions with it.
+	if _, err := e.db.ExecContext(ctx, `DELETE FROM ring_groups WHERE name = 'afterhours'`); err != nil {
+		t.Fatal(err)
+	}
 	c.must(http.StatusNoContent, "DELETE", "/api/v1/voice/agents/"+thirdID, nil)
 	c.must(http.StatusNotFound, "GET", "/api/v1/voice/agents/"+thirdID, nil)
 }
