@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -238,9 +239,9 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	} else {
 		c.addTrace(fmt.Sprintf("Media anchored (%s; trigger: %s)", reason, trigger))
 	}
+	c.observeRelay(relay)
 	if m := c.s.deps.Media; m != nil {
 		m.NoteStart()
-		relay.Observe(m.ObserveStats)
 		relay.OnFail(func(string) { m.AnchorFailures.Inc() })
 	}
 	relay.Start()
@@ -318,6 +319,49 @@ func (c *call) isAnchored() bool {
 }
 
 // anchorRelay returns the call's relay under mu (nil when direct).
+// observeRelay registers the stats callback of an anchored call's relay: it
+// feeds the RTP metrics and keeps the latest snapshot for the CDR (spec
+// S-5.1). The callback runs on the relay's stats ticker and at Close, never
+// on the RTP path.
+func (c *call) observeRelay(relay *media.Relay) {
+	m := c.s.deps.Media
+	relay.Observe(func(st media.RelayStats) {
+		if m != nil {
+			m.ObserveStats(st)
+		}
+		c.qmu.Lock()
+		c.quality = &st
+		c.qmu.Unlock()
+	})
+}
+
+// qualityStats reduces the last relay snapshot to the CDR's three numbers:
+// packets and lost summed over both directions, jitter the larger one. ok is
+// false when the call never had a snapshot.
+func (c *call) qualityStats() (packets, lost int64, jitterMs float64, ok bool) {
+	c.qmu.Lock()
+	st := c.quality
+	c.qmu.Unlock()
+	if st == nil {
+		return 0, 0, 0, false
+	}
+	var pk, lo uint64
+	for _, d := range st.Directions {
+		pk += d.Packets
+		lo += d.Lost
+		jitterMs = max(jitterMs, d.JitterMs)
+	}
+	return clampInt64(pk), clampInt64(lo), jitterMs, true
+}
+
+// clampInt64 converts a counter to the column's signed type.
+func clampInt64(v uint64) int64 {
+	if v > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(v)
+}
+
 func (c *call) anchorRelay() *media.Relay {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -424,9 +468,9 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 		c.anchorFailed("re-anchor re-INVITE to the caller", errors.New("no answer"))
 		return false
 	}
+	c.observeRelay(relay)
 	if m := s.deps.Media; m != nil {
 		m.NoteStart()
-		relay.Observe(m.ObserveStats)
 		relay.OnFail(func(string) { m.AnchorFailures.Inc() })
 	}
 	c.mu.Lock()

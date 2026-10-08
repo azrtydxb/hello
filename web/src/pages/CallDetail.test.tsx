@@ -121,37 +121,38 @@ describe("CallDetail", () => {
     expect(screen.getByText("after 0:05")).toBeVisible();
   });
 
-  it("shows packet loss and jitter for an anchored call, and none when unmeasured", async () => {
-    const answered = {
-      ...BASE,
-      finalStatus: 200,
-      answerTime: "2026-10-01T10:00:02Z",
-      failureReason: "",
-      trace: [],
-      explanation: "",
-    };
+  it("shows loss and jitter of an anchored call and not measured otherwise", async () => {
     mockApi({
       ...ME,
       "GET /api/v1/cdrs/80": () =>
         json({
-          ...answered,
+          ...BASE,
           id: 80,
+          finalStatus: 200,
           mediaMode: "anchored",
           rtpPackets: 990,
           rtpLost: 10,
           rtpJitterMs: 12.34,
+          trace: [],
         }),
-      "GET /api/v1/cdrs/81": () => json({ ...answered, id: 81 }),
+      "GET /api/v1/cdrs/81": () =>
+        json({
+          ...BASE,
+          id: 81,
+          finalStatus: 200,
+          rtpPackets: null,
+          rtpLost: null,
+          rtpJitterMs: null,
+          trace: [],
+        }),
     });
     const first = renderApp("/history/80");
-    expect(await screen.findByText("Packet loss")).toBeVisible();
-    expect(screen.getByText("1.00 % (10 of 1000 packets)")).toBeVisible();
-    expect(screen.getByText("12.3 ms")).toBeVisible();
+    expect(
+      await screen.findByText("1.00% loss · 12.3 ms jitter"),
+    ).toBeVisible();
     first.unmount();
     renderApp("/history/81");
-    await screen.findByText("Duration");
-    expect(screen.queryByText("Packet loss")).toBeNull();
-    expect(screen.queryByText("Jitter")).toBeNull();
+    expect(await screen.findByText("not measured")).toBeVisible();
   });
 
   it("explains why a call could not load", async () => {

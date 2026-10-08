@@ -7630,7 +7630,13 @@
                   "render_error",
                   "forbidden_role",
                   "insufficient_scope",
-                  "last_admin"
+                  "last_admin",
+                  "ai_disabled",
+                  "ai_busy",
+                  "ai_budget_exhausted",
+                  "task_running",
+                  "proposal_not_open",
+                  "proposal_stale"
                 ]
               },
               "message": {
@@ -8405,6 +8411,20 @@
           },
           "trunk": {
             "type": "string"
+          },
+          "rtpPackets": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "RTP packets relayed, both directions; null when the call was not anchored or never answered."
+          },
+          "rtpLost": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "RTP packets lost (sequence gaps), both directions; null when not measured."
+          },
+          "rtpJitterMs": {
+            "type": ["number", "null"],
+            "description": "Larger of the two directions' interarrival jitter in ms; null when not measured."
           }
         },
         "description": "Null times are omitted."
@@ -10766,6 +10786,36 @@
           },
           "current": {
             "description": "The target now, read with the caller's identity; only on getAIProposal."
+          },
+          "destructive": {
+            "type": "boolean",
+            "description": "Whether the action deletes a resource; the console marks it and asks for confirmation."
+          },
+          "references": {
+            "type": "array",
+            "description": "For a delete, what it takes with it or leaves dangling: members of a ring group, the inbound routes sending calls to it, a route's trunks and destination.",
+            "items": {
+              "type": "object",
+              "required": ["kind", "id", "name", "detail"],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "description": "extension, inbound_route, trunk, emergency or a destination kind."
+                },
+                "id": {
+                  "type": "string",
+                  "description": "The referenced resource's id."
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Its name or number."
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "How it is connected to the deleted resource."
+                }
+              }
+            }
           }
         }
       },

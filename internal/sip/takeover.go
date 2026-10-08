@@ -731,8 +731,8 @@ func (s *Server) haHome(c *call, st livestate.DialogState, from string, restored
 			go s.haReferFailed(hom.leg(side == "callee"))
 		}
 	}
+	c.observeRelay(c.anchorRelay())
 	if m := s.deps.Media; m != nil {
-		c.anchorRelay().Observe(m.ObserveStats)
 		c.anchorRelay().OnFail(func(string) { m.AnchorFailures.Inc() })
 	}
 }

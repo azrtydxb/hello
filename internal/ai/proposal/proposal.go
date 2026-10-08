@@ -57,6 +57,19 @@ type Action struct {
 	Body        json.RawMessage   `json:"body,omitempty"`
 	Before      json.RawMessage   `json:"before,omitempty"`
 	After       json.RawMessage   `json:"after,omitempty"`
+	// Destructive marks a delete; References lists what points at the
+	// deleted resource, or what the deleted route used, so the diff shows
+	// what disappears with it. Both are filled by Validate.
+	Destructive bool        `json:"destructive,omitempty"`
+	References  []Reference `json:"references,omitempty"`
+}
+
+// Reference is one resource connected to the target of a delete.
+type Reference struct {
+	Kind   string `json:"kind"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Detail string `json:"detail"`
 }
 
 // Draft is a proposal before it is stored: what the assistant or a
@@ -66,7 +79,9 @@ type Draft struct {
 	Source, Title, Rationale string
 	// SessionID or FindingID link the proposal to where it came from.
 	SessionID, FindingID *string
-	Actions              []Action
+	// CreatedBy is the user the proposal was made for; nil for a detector.
+	CreatedBy *int64
+	Actions   []Action
 }
 
 // Failure says why a proposal became failed (spec S-13).

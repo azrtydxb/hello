@@ -58,6 +58,11 @@ type Record struct {
 	Route                string
 	Trunk                string
 	Trace                routing.Trace // never holds secrets
+	// Call quality (spec S-5.1): nil (NULL) for directly-media calls and
+	// calls that never answered.
+	RTPPackets  *int64
+	RTPLost     *int64
+	RTPJitterMs *float64
 }
 
 // Execer is the subset of a pgx pool or connection the writer needs.
@@ -115,9 +120,10 @@ func (w *Writer) Enqueue(r Record) bool {
 const insert = `INSERT INTO cdrs (correlation_id, sip_call_id, source, destination,
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
-    direction, original_destination, rewritten_destination, route_name, trunk_name, trace)
+    direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
+    rtp_packets, rtp_lost, rtp_jitter_ms)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21)
+    $16, $17, $18, $19, $20, $21, $22, $23, $24)
 ON CONFLICT (correlation_id) DO NOTHING`
 
 // Run writes queued records until ctx is cancelled, retrying each with
@@ -198,7 +204,8 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	_, err = w.db.Exec(wctx, insert, r.CorrelationID, r.SIPCallID, r.Source, r.Destination,
 		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
-		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj))
+		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
+		r.RTPPackets, r.RTPLost, r.RTPJitterMs)
 	return err
 }
 

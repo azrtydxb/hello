@@ -26,21 +26,6 @@ type State =
   | { status: "error"; message: string }
   | { status: "ready"; cdr: CallRecord };
 
-/** Packet loss and jitter of an anchored call; nothing when not measured (S-5.1). */
-function qualityFacts(cdr: CallRecord) {
-  const { rtpPackets: sent, rtpLost: lost, rtpJitterMs: jitter } = cdr;
-  if (sent == null || lost == null || jitter == null) return [];
-  const total = sent + lost;
-  const pct = total > 0 ? (lost / total) * 100 : 0;
-  return [
-    {
-      label: "Packet loss",
-      value: `${pct.toFixed(2)} % (${lost} of ${total} packets)`,
-    },
-    { label: "Jitter", value: `${jitter.toFixed(1)} ms` },
-  ];
-}
-
 /** One call's record: timeline, the CDR fields, its routing trace and, if it failed, why. */
 export function CallDetail() {
   const { id = "" } = useParams();
@@ -186,6 +171,15 @@ export function timeline(cdr: CallRecord): Moment[] {
   ];
 }
 
+/** Loss percent and jitter of an anchored call, or "not measured". */
+function qualityText(cdr: CallRecord): string {
+  const { rtpPackets: packets, rtpLost: lost, rtpJitterMs: jitter } = cdr;
+  if (packets == null || lost == null || jitter == null) return "not measured";
+  const total = packets + lost;
+  const loss = total > 0 ? (lost / total) * 100 : 0;
+  return `${loss.toFixed(2)}% loss · ${jitter.toFixed(1)} ms jitter`;
+}
+
 function Detail({ cdr }: { cdr: CallRecord }) {
   const failed = isFailed(cdr);
   const orig = cdr.originalDestination || cdr.destination;
@@ -217,7 +211,7 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     { label: "Billable", value: formatDuration(cdr.billableMs) },
     { label: "SIP node", value: cdr.sipNode || "—", mono: true },
     { label: "Media", value: cdr.mediaMode || "—" },
-    ...qualityFacts(cdr),
+    { label: "Call quality", value: qualityText(cdr) },
     { label: "SIP Call-ID", value: cdr.sipCallId || "—", mono: true },
     { label: "Correlation ID", value: cdr.correlationId || "—", mono: true },
   ];
