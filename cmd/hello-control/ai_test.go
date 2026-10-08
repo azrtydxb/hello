@@ -64,3 +64,11 @@ func TestComposeWithoutPublicURL(t *testing.T) {
 		}
 	}
 }
+
+func TestProposalSource(t *testing.T) {
+	for in, want := range map[string]string{"assistant": "assistant", "finding:cdr_failures": "finding", "finding": "finding"} {
+		if got := proposalSource(in); got != want {
+			t.Errorf("proposalSource(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

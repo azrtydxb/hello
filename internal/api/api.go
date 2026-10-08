@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/routing"
@@ -163,6 +164,14 @@ type Config struct {
 	// Assistant is the in-product assistant (spec ai-agent S-8); nil while
 	// AI is off, when its routes answer 503 ai_disabled.
 	Assistant AIAssistant
+	// Findings is the AIOps findings store (spec ai-agent); nil is AI off.
+	Findings AIFindings
+	// Proposals serves the AI proposal routes (spec ai-agent); nil answers
+	// 503 ai_disabled.
+	Proposals ProposalService
+	// AIAgent is the in-product AI agent (spec ai-agent); nil or off makes
+	// every AI agent operation but getAIStatus answer 503 ai_disabled.
+	AIAgent *ai.Service
 }
 
 type server struct{ Config }
@@ -185,7 +194,7 @@ func Handler(c Config) http.Handler {
 	authed := auth.Middleware(c.Store, opts, c.Log)
 	mux := http.NewServeMux()
 	for _, rt := range s.routes() {
-		h := http.Handler(rt.H)
+		h := s.aiGuard(rt.Pattern, rt.H)
 		if !rt.Public {
 			h = authed(auth.Require(rt.Role, rt.Scope)(h))
 		}

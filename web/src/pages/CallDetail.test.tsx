@@ -121,6 +121,40 @@ describe("CallDetail", () => {
     expect(screen.getByText("after 0:05")).toBeVisible();
   });
 
+  it("shows loss and jitter of an anchored call and not measured otherwise", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/80": () =>
+        json({
+          ...BASE,
+          id: 80,
+          finalStatus: 200,
+          mediaMode: "anchored",
+          rtpPackets: 990,
+          rtpLost: 10,
+          rtpJitterMs: 12.34,
+          trace: [],
+        }),
+      "GET /api/v1/cdrs/81": () =>
+        json({
+          ...BASE,
+          id: 81,
+          finalStatus: 200,
+          rtpPackets: null,
+          rtpLost: null,
+          rtpJitterMs: null,
+          trace: [],
+        }),
+    });
+    const first = renderApp("/history/80");
+    expect(
+      await screen.findByText("1.00% loss · 12.3 ms jitter"),
+    ).toBeVisible();
+    first.unmount();
+    renderApp("/history/81");
+    expect(await screen.findByText("not measured")).toBeVisible();
+  });
+
   it("explains why a call could not load", async () => {
     mockApi({
       ...ME,
