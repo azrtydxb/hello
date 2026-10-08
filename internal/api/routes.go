@@ -186,8 +186,8 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/service-accounts/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteServiceAccount},
 		{"POST", "/api/v1/service-accounts/{id}/secrets", auth.ScopeAdmin, auth.RoleAdmin, false, s.createClientSecret},
 		{"DELETE", "/api/v1/service-accounts/{id}/secrets/{secretId}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteClientSecret},
-		{"GET", "/api/v1/skills", auth.ScopeRead, auth.RoleViewer, false, s.pending},
-		{"GET", "/api/v1/skills/{name}/download", auth.ScopeRead, auth.RoleViewer, false, s.pending},
+		{"GET", "/api/v1/skills", auth.ScopeRead, auth.RoleViewer, false, s.listSkills},
+		{"GET", "/api/v1/skills/{name}/download", auth.ScopeRead, auth.RoleViewer, false, s.downloadSkill},
 		{"GET", "/api/v1/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.listUsers},
 		{"PATCH", "/api/v1/users/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updateUser},
 	}

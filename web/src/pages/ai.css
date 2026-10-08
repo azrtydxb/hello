@@ -1,0 +1,57 @@
+/*
+ * Consent screen and AI access page. Tokens only, no raw colours; the AI
+ * access page otherwise uses the platform classes (pf-*).
+ */
+
+.ai-host {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+.ai-host__label {
+  font-size: 12px;
+  color: var(--az-muted);
+}
+.ai-host__value {
+  font-family: var(--az-font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.ai-h {
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ai-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.ai-mono {
+  font-family: var(--az-font-mono);
+  overflow-wrap: anywhere;
+}
+.ai-scopes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.ai-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.ai-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
