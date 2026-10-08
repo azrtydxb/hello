@@ -44,18 +44,18 @@ Answer:
 Key: 52c1aa98bde5
 Question: 1. **Call quality detection.** Hello measures RTP loss and jitter only as per-node Prometheus counters (`hello_rtp_loss_total`, `hello_rtp_jitter_ms`) and only for anchored calls; CDRs carry no quality data and directly-media calls are not measured at all. Options: (a) hello-sip writes per-call loss/jitter summaries into the CDR for anchored calls and a `call_quality` detector flags trunks or nodes with degraded calls; (b) hello-control queries the Prometheus on kw; (c) leave call quality out of phase 2.
 
-Answer:
+Answer: (a) Store per-call quality in CDRs — hello-sip measures and writes loss/jitter to the CDR for each anchored call leg; a `call_quality` detector flags trunks/nodes with loss ≥ 1% or jitter ≥ 100ms in 3+ of last 5 samples (S-5.1, S-19). Add scope item for CDR quality column (migration 00009), relay per-call stats collection in hello-sip, detector, and console call detail exposure (Task 5a).
 
 ## Q4: [spec] ai-agent
 
 Key: 1ab11704f3b5
 Question: 2. **Public endpoints and personal data.** With `HELLO_AI_ALLOW_PUBLIC_ENDPOINT=true` (for example Anthropic's API), phone numbers, names and User-Agents would leave the network. Should Hello then mask phone numbers and names in `<data>` blocks (consistent tokens per value, unmasked in the console), or send them as is once an administrator opted in?
 
-Answer:
+Answer: Never mask — data goes as-is when an administrator explicitly opts in to public endpoints. The private-only default (S-3) is the control; the console renders everything unmasked. No masking code needed (S-3 clarified to state this).
 
 ## Q5: [spec] ai-agent
 
 Key: a2698ff8dc49
 Question: 3. **Allowlist breadth.** The allowlist (S-11) has no deletes; a config smell such as an unreachable route can only be fixed by editing it. Should phase 2 also allow deleting outbound/inbound routes and ring groups as proposals, or stay update-and-create only?
 
-Answer:
+Answer: Allow deletes of routes and ring groups — `deleteOutboundRoute`, `deleteInboundRoute`, `deleteRingGroup` added to allowlist (S-11). Deletes are visually marked, require explicit confirmation, and the diff clearly shows what disappears and what references it. Other deletes (secrets, users, tokens, etc.) remain forbidden. Tests: `TestProposalDeleteValidation` on validation and reference display; `TestProposalDeleteUI` on console markup and confirm (Task 6).

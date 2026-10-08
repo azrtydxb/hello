@@ -10,8 +10,6 @@ Sprint: -
 <!-- The user story: who needs what, and why. What "done" looks like in
      the reader's terms — a title is not a description. -->
 
-Spec ai-agent S-5, S-6, S-12; plan ai-agent Task 3 and 4. Done when the named check passes and fails on each break it lists, so the behaviour of S-5, S-6, S-12 cannot regress silently.
-
 ## Acceptance criteria
 
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably

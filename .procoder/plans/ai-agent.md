@@ -1,6 +1,6 @@
 # ai-agent — implementation plan
 
-Status: draft (waits for the spec's open questions)
+Status: draft (open questions answered 2026-10-08)
 Spec: .procoder/specs/ai-agent.md
 
 ## Goal
@@ -9,13 +9,14 @@ With `HELLO_AI_BASE_URL` and `HELLO_AI_MODEL` pointing at kw's fastllm, an opera
 
 ## Architecture
 
-All inside hello-control, beside the API:
+All inside hello-control, beside the API, except call quality (Task 5), which hello-sip records into the CDR:
 
 - **`internal/replay`** is phase 1's in-process replay (`internal/mcp/replay.go`) moved out so MCP, the assistant and proposal apply share one function: `Do(ctx, api http.Handler, Request) Result`, copying only the headers the caller passes, refusing nested replays, with phase 1's timeout, body cap and panic recovery; `Redact(v, op)` withholds `x-hello-secret` values. MCP keeps its behaviour and tests.
 - **`internal/ai`** is the bounded service (provider over go-ai-sdk, privacy dialer, limits, usage and budget, `Generate` with validator retry, `DataBlock`), tasks with Valkey heartbeats, the scheduler with advisory locks, prune and metrics.
 - **`internal/ai/proposal`**: allowlist, validation against `apispec`, before/after, fingerprint, store, apply and dismiss.
 - **`internal/ai/assistant`**: sessions, messages, the read-tool adapter (`apispec` operation → go-ai-sdk tool, executed by `replay.Do` under an agent identity), and the message task.
 - **`internal/ai/detect`**: one file per detector, the `aiops` agent, samples, findings lifecycle and the explanation call.
+- **`internal/sip` and `internal/cdr`** (hello-sip) keep each anchored call's last relay stats snapshot and write `rtp_packets`, `rtp_lost`, `rtp_jitter_ms` to its CDR (spec S-5.1).
 - **`internal/api`** gains the `/api/v1/ai/…` handlers (thin: auth, decode, call the packages); `cmd/hello-control` wires the service when AI is enabled. The console gets four pages.
 
 Why tools for reads and structured output for the answer, and why in hello-control: spec S-6 and S-7; the replay and the users, audit and config tables are hello-control's, and a separate service would need credentials in flight.
@@ -26,7 +27,7 @@ Why tools for reads and structured output for the answer, and why in hello-contr
 - No hot-path change: hello-sip, provisioning and config writes are untouched except the replay move.
 - With AI unconfigured, nothing starts and the new operations answer `503` `ai_disabled`.
 - Each task leaves `gofmt`, `go vet ./...`, `golangci-lint run ./...`, `go test -race ./...` (test databases set), `procoder check` 0 blocking, and `procoder test`/`procoder lint` over `web/` (where touched) green; safety branches are mutation-checked (snapshot immediately before, restore immediately after, `cmp`). REVIEW.md applies. CI on the Arc runners; kw via Kuvryn Sync; nothing on the user's Mac.
-- Open questions 1–3 of the spec gate Task 5's quality detector, Task 2's masking and Task 3's allowlist; the rest does not depend on them.
+- Open questions answered: (1) call quality in CDRs (Task 5); (2) never mask on public endpoints (no change); (3) allow deletes of routes and ring groups (Task 3).
 
 ### Shared contracts (fixed; a stream that needs a change asks the lead and never edits another stream's files)
 
@@ -70,8 +71,9 @@ Interfaces: produces contract 5 and `getAIStatus`, `listAIAgents`, `runAIAgent`,
 Files: `internal/ai/proposal/` (`allowlist.go`, `validate.go`, `diff.go`, `fingerprint.go`, `store.go`, `apply.go`, tests incl. `injection_test.go`), `internal/store/ai_proposals.go`, `internal/api/ai_proposals.go` and tests.
 Interfaces: produces contract 6 and the proposal routes; consumes contracts 1, 3, 4, 7 and `apispec`.
 
-- [ ] Allowlist with its document check (exists, `write`, no secret in the response); `TestProposalValidation` (allowlist half).
-- [ ] Validation: body against the request schema (`jsonschema-go`, unknown properties rejected), path parameters through a replayed `GET`, credential properties refused, route dry run through `internal/routing` compile, at most 8 actions; `before` from the `GET`, `after` = body for `PUT`, merge for `PATCH`, body for `POST`; `TestProposalValidation`.
+- [ ] Allowlist with its document check (exists, `write`, no secret in the response): `updateExtension`, `updateDevice`, `createRingGroup`, `updateRingGroup`, `deleteRingGroup`, `putFeatureCodes`, `createOutboundRoute`, `updateOutboundRoute`, `deleteOutboundRoute`, `createInboundRoute`, `updateInboundRoute`, `deleteInboundRoute`, `updateTrunk`, `updatePhone`. Deletes are visually marked and require explicit confirmation. `TestProposalValidation` (allowlist half), `TestProposalDeleteValidation`.
+- [ ] Validation: body against the request schema (`jsonschema-go`, unknown properties rejected), path parameters through a replayed `GET`, credential properties refused, route dry run through `internal/routing` compile, at most 8 actions; `before` from the `GET`, `after` = body for `PUT`, merge for `PATCH`, body for `POST`, empty for `DELETE`; `TestProposalValidation`.
+- [ ] Delete proposals compute `after` as empty, the diff shows what disappears, and references to the deleted resource are listed; `TestProposalDeleteValidation` fails if a delete diff does not show references.
 - [ ] Fingerprint, upsert with refresh, supersede, 7-day dismissed suppression; `TestProposalDedupe`.
 - [ ] Get with live `current`, apply (row lock, staleness by revision then per-target compare, ordered replay with the applier's `Cookie`/`Authorization`, `via` `ai-proposal:<id>`, stop on first failure, `409` → stale), dismiss with reason, audit rows; `TestProposalApply`.
 - [ ] Injection fixtures for proposals; `TestInjection` (proposal half).
@@ -88,39 +90,48 @@ Interfaces: produces the session, message and task routes; consumes contracts 3�
 - [ ] Injection fixtures through tool results and history; `TestInjection` (assistant half).
 - [ ] Mutation-check the read-only tool filter and the call cap. Full gate.
 
-## Task 5: Detectors and findings (branch ai-agent-aiops, after Task 2's scheduler merges)
+## Task 5: Call quality in CDRs and media relay (branch ai-agent-quality, after Task 1's migration merges)
 
-Files: `internal/ai/detect/` (`detect.go` candidate types and the `aiops` agent, `reg_failures.go`, `auth_bruteforce.go`, `trunk_down.go`, `trunk_asr.go`, `node_health.go`, `trunk_capacity.go`, `config_smells.go`, `samples.go`, `findings.go`, `explain.go`, tests, `bench_test.go`), `internal/store/ai_findings.go`, `internal/api/ai_findings.go` and tests.
-Interfaces: produces the findings routes and proposals with source `finding:<type>`; consumes contracts 1, 5, 6, `livestate`, `cluster`, `routing` and the store.
+Files: `migrations/00009_ai_agent.sql` (Task 1 adds the nullable `cdrs` columns `rtp_packets bigint`, `rtp_lost bigint`, `rtp_jitter_ms real`), `internal/sip/media.go` and `internal/sip/takeover.go` (keep the relay's last `RelayStats` snapshot per call), `internal/cdr/cdr.go` (write the three columns), `internal/store/cdr.go` (`RTPPackets *int64`, `RTPLost *int64`, `RTPJitterMs *float64`, JSON `rtpPackets`, `rtpLost`, `rtpJitterMs`), `internal/api/openapi.json` (CDR schema), `web/src/pages/CallDetail.tsx`, tests.
+Interfaces: produces the CDR quality columns the `call_quality` detector (Task 6) reads; consumes `internal/media` `RelayStats`/`DirectionStats` (`Packets`, `Lost`, `JitterMs`) unchanged.
+
+- [ ] The `relay.Observe` callback in `internal/sip/media.go` (and the takeover re-anchor in `takeover.go`) also stores the latest snapshot on the call; at call end the CDR gets `rtp_packets` = sum of `Packets`, `rtp_lost` = sum of `Lost`, `rtp_jitter_ms` = max of `JitterMs` over both directions; directly-media and unanswered calls keep null. `TestCallQualityCDR` in `internal/cdr`.
+- [ ] `store.CDR` scans the columns; the CDR schema in `openapi.json` gains `rtpPackets`, `rtpLost`, `rtpJitterMs` (nullable); `TestOpenAPIMatchesRoutes` stays green.
+- [ ] `CallDetail.tsx` shows loss percent (`rtpLost / (rtpPackets + rtpLost) × 100`) and jitter for anchored calls and "not measured" otherwise; `CallDetail.test.tsx` covers both.
+
+## Task 6: Detectors and findings (branch ai-agent-aiops, after Task 2's scheduler and Task 5's quality merge)
+
+Files: `internal/ai/detect/` (`detect.go` candidate types and the `aiops` agent, `reg_failures.go`, `auth_bruteforce.go`, `trunk_down.go`, `trunk_asr.go`, `node_health.go`, `trunk_capacity.go`, `call_quality.go`, `config_smells.go`, `samples.go`, `findings.go`, `explain.go`, tests, `bench_test.go`), `internal/store/ai_findings.go`, `internal/api/ai_findings.go` and tests.
+Interfaces: produces the findings routes and proposals with source `finding:<type>`; consumes contracts 1, 5, 6, `livestate`, `cluster`, `routing`, call quality from CDRs and the store.
 
 - [ ] One detector at a time, test first, a table per detector at, above and below each threshold of S-19 against PostgreSQL and Valkey; `TestDetectors`.
 - [ ] Samples (member start times and tombstones, trunk active calls, device registered-today) and their reads; part of `TestDetectors`.
 - [ ] Findings upsert, acknowledge, dismiss with 24 h suppression and severity-rise reopen, 30-minute resolve, severity history, health score; `TestFindingsLifecycle`.
 - [ ] Explanation: only on set or severity change and once per interval, background budget, validator (known ids, ranks unique, at most one proposal per finding, validated by contract 6), unexplained fallback; `TestFindingsLifecycle` (model half).
+- [ ] `call_quality` detector: per trunk (`trunk_name`) and node (`sip_node`), the last 5 CDRs with non-null quality ended in the last 60 min; ≥ 3 with loss ≥ 1 % or `rtp_jitter_ms` ≥ 100 → warning; fewer than 5 raise nothing. `TestDetectors` covers the threshold and one just below it.
 - [ ] `TestDetectorLatency` (`HELLO_BENCH=1`) over a generated 1-million-CDR, 10 000-device database; add the indexes it shows are needed to `00009`.
-- [ ] Call quality per the answer to the spec's open question 1 (a CDR column and hello-sip change, a Prometheus reader, or nothing).
 - [ ] Mutation-check each threshold comparison and the suppression window. Full gate.
 
-## Task 6: Console (branch ai-agent-ui)
+## Task 7: Console (branch ai-agent-ui)
 
 Files: `web/src/pages/AIAssistant.tsx`, `AIFindings.tsx`, `AIProposals.tsx`, `AIProposalDetail.tsx`, `AIStatus.tsx` and their `*.test.tsx`, `web/src/components/ai/` (`JsonDiff.tsx`, `ProposalCard.tsx`, `FindingCard.tsx`, `TaskStatus.tsx`, `AIOff.tsx`, `PlainText.tsx`), `web/src/pages/Dashboard.tsx` (AI card), `web/src/nav.ts`, `web/src/App.tsx`, `web/src/api/`.
-Interfaces: consumes the routes of the spec's Interfaces section (mocked until Tasks 2–5 land).
+Interfaces: consumes the routes of the spec's Interfaces section (mocked until Tasks 2–6 land).
 
 - [ ] Assistant: sessions, composer (4000 characters), 2 s task polling, plain-text rendering, data sources per answer, inline proposal card; `AIAssistant.test.tsx`.
 - [ ] Findings: filters, evidence, explanation or "not explained", acknowledge and dismiss; `AIFindings.test.tsx`.
 - [ ] Proposals: inbox by status, detail with the diff (`current` differences marked), apply confirmation listing each operation, dismiss with reason, failure detail naming applied actions; `AIProposals.test.tsx`.
 - [ ] Status page and dashboard card, role-aware controls; `AIStatus.test.tsx`. Full gate including `procoder test` and `procoder lint` over `web/`.
 
-## Task 7: kw, docs and end to end (lead, branch ai-agent-contracts)
+## Task 8: kw, docs and end to end (lead, branch ai-agent-contracts, after Tasks 2, 3, 4, 5 and 6 merge)
 
 Files: `deploy/kuvryn-sync/kw/resources.yaml` (hello-control env from Secret `hello-ai`, optional), `deploy/kuvryn-sync/kw/secret-hello-ai.sops.yaml` (fastllm base URL and model, SOPS-encrypted like the other kw secrets), `test/deploy/` (`TestKwAIAgent`, `TestDocsAIAgent`), `test/integration/ai_agent_test.go`, `test/integration/kw_smoke_ai_test.go`, `docs/ai-agent.md`, `README.md`, `docs/ai-access.md` (link), `internal/mcp/` (`TestAIOperationsMCP`).
 Interfaces: consumes everything above.
 
-- [ ] Merge the core, proposals, assistant, aiops and ui branches (each by its own PR), resolving conflicts hunk by hunk; full gate.
-- [ ] `TestAIAgentEndToEnd` against `test/fakellm`: chat question → tool call replayed as the user → proposal with diff → apply → config changed with audit; seeded REGISTER flood → explained `auth_bruteforce` finding; dismissed proposal not appliable.
+- [ ] Merge the core, proposals, assistant, quality, aiops and ui branches (each by its own PR), resolving conflicts hunk by hunk; full gate.
+- [ ] `TestAIAgentEndToEnd` against `test/fakellm`: chat question → tool call replayed as the user → proposal with diff (including a delete proposal marked and confirmed) → apply → config changed with audit; seeded REGISTER flood → explained `auth_bruteforce` finding; dismissed proposal not appliable.
 - [ ] `TestNoSecretsInLogs` extended with the API key and a prompt marker from the end-to-end run; `TestAIOperationsMCP`.
-- [ ] kw manifest and `TestKwAIAgent`; docs/ai-agent.md with generated tool, allowlist and threshold tables and `TestDocsAIAgent`; README link.
-- [ ] After merge: pin images, Sync to kw, create Secret `hello-ai` for fastllm, run `TestKwSmokeAI` (`HELLO_KW_SMOKE=1`) from the Arc runner, ask the assistant one question and apply one proposal on kw, and record the evidence in the stories.
+- [ ] kw manifest and `TestKwAIAgent`; docs/ai-agent.md with generated tool, allowlist (incl. deletes) and threshold tables and `TestDocsAIAgent`; README link.
+- [ ] After merge: pin images, Sync to kw, create Secret `hello-ai` for fastllm, run `TestKwSmokeAI` (`HELLO_KW_SMOKE=1`) from the Arc runner, ask the assistant one question and apply one proposal (incl. a delete) on kw, and record the evidence in the stories.
 
 ## Acceptance criteria
 
