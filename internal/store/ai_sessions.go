@@ -133,6 +133,14 @@ func scanAIMessage(row interface{ Scan(...any) error }) (chat.Message, error) {
 			return m, err
 		}
 	}
+	// A stored JSON null (a message added with nil slices) is still an
+	// empty array in the API.
+	if m.ToolCalls == nil {
+		m.ToolCalls = []chat.ToolCall{}
+	}
+	if m.Citations == nil {
+		m.Citations = []int{}
+	}
 	return m, nil
 }
 
