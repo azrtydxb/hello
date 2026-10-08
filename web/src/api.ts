@@ -134,6 +134,8 @@ export interface Cdr {
   rewrittenDestination: string;
   route: string;
   trunk: string;
+  /** The voice agent that answered, from the CDR's agent columns (S-23). */
+  voiceAgentName?: string;
   /** Call quality of an anchored call; null when not measured. */
   rtpPackets?: number | null;
   rtpLost?: number | null;
@@ -146,11 +148,26 @@ export interface TraceStep {
   text: string;
 }
 
+/** The agent part of a call detail (spec S-23); present when the call went to an agent. */
+export interface CdrVoiceAgent {
+  name: string;
+  /** The report's outcome; "unreported" when none arrived. */
+  outcome?: string;
+  summary?: string;
+  toolCalls?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  /** True when the agent records transcripts and one may exist. */
+  transcriptAvailable?: boolean;
+}
+
 /** GET /api/v1/cdrs/{id}: the CDR plus its routing trace. */
 export interface CdrDetail extends Cdr {
   trace: TraceStep[];
   /** For failed calls, the reason of the last trace step. */
   explanation?: string;
+  /** The call report of an agent call; joined, not stored in the row. */
+  voiceAgent?: CdrVoiceAgent;
 }
 
 /** A number rewrite (routing.Transform); every field optional, {} is identity. */
@@ -273,7 +290,8 @@ export interface InboundRouteFields {
   headerRegex: string;
   schedule: Schedule | null;
   callerIdTransform: Transform;
-  destinationKind: "extension" | "external" | "sip_uri";
+  /** "voice_agent" sends the call to a voice agent named in `destination`. */
+  destinationKind: "extension" | "external" | "sip_uri" | "voice_agent";
   destination: string;
   enabled: boolean;
 }
@@ -516,6 +534,7 @@ function items<T>(value: unknown, path: string): T[] {
 /** The `items` of a list response, or an error naming the path. */
 export { items as listItems };
 
+/** GET `path` and return its `items`, the shape every Hello list returns. */
 export async function list<T>(
   path: string,
   signal?: AbortSignal,
@@ -956,18 +975,24 @@ export const RING_STRATEGY_LABEL: Record<RingStrategy, string> = {
 };
 
 /** Where a call goes when every member missed it. */
-export type FailureKind = "none" | "voicemail" | "external" | "announcement";
+export type FailureKind =
+  "none" | "voicemail" | "external" | "announcement" | "voice_agent";
 
 export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   none: "Hang up",
   voicemail: "A member's voicemail box",
   external: "An external number",
   announcement: "A named announcement",
+  voice_agent: "A voice agent",
 };
 
-/** One member of a ring group; `position` is 1-based ring order. */
+/** One member of a ring group; `position` is 1-based ring order. Exactly one of extensionId and voiceAgentId is set. */
 export interface RingGroupMember {
-  extensionId: Id;
+  extensionId: Id | null;
+  /** The voice agent taking the call (spec S-12); sequential groups only. */
+  voiceAgentId?: Id | null;
+  /** The agent's name, when the member is an agent (read-only). */
+  voiceAgentName?: string;
   position: number;
   /** For the weighted strategy; 0 never rings first. */
   weight: number;

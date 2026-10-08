@@ -37,6 +37,7 @@ import {
   useRestoreFocus,
   useToast,
 } from "../design/azrty/components";
+import { listVoiceAgents, type VoiceAgent } from "../api/voice";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { UNKNOWN } from "./callflow/format";
 import { FormAlert } from "./callflow/ui";
@@ -49,12 +50,46 @@ type ListState<T> =
   | { status: "error"; message: string }
   | { status: "ready"; items: T[] };
 
-const findExt = (extensionId: Id, extensions: readonly Extension[]) =>
-  extensions.find((e) => String(e.id) === String(extensionId));
+const findExt = (extensionId: Id | null, extensions: readonly Extension[]) =>
+  extensionId === null
+    ? undefined
+    : extensions.find((e) => String(e.id) === String(extensionId));
 
 /** The extension's number, or `#id` when the list has not loaded it. */
-function extLabel(extensionId: Id, extensions: readonly Extension[]): string {
+function extLabel(
+  extensionId: Id | null,
+  extensions: readonly Extension[],
+): string {
   return findExt(extensionId, extensions)?.number ?? `#${String(extensionId)}`;
+}
+
+/** The member's agent, when it is one. */
+const findAgent = (
+  m: { voiceAgentId?: Id | null; voiceAgentName?: string },
+  agents: readonly VoiceAgent[],
+) =>
+  m.voiceAgentId != null
+    ? agents.find((a) => String(a.id) === String(m.voiceAgentId))
+    : undefined;
+
+/** "support" for an agent member, the extension's number otherwise. */
+function memberLabel(
+  m: {
+    extensionId: Id | null;
+    voiceAgentId?: Id | null;
+    voiceAgentName?: string;
+  },
+  extensions: readonly Extension[],
+  agents: readonly VoiceAgent[],
+): string {
+  if (m.voiceAgentId != null) {
+    return (
+      findAgent(m, agents)?.name ??
+      m.voiceAgentName ??
+      `#${String(m.voiceAgentId)}`
+    );
+  }
+  return extLabel(m.extensionId, extensions);
 }
 
 /** "Rings 25 s · respects DND", "Hunt · 5 s between members · rings 60 s". */
@@ -84,6 +119,8 @@ function failureText(g: RingGroup): string {
       return `Announcement ${g.failureTarget || UNKNOWN}`;
     case "external":
       return `External ${g.failureTarget || UNKNOWN}`;
+    case "voice_agent":
+      return `Voice agent ${g.failureTarget || UNKNOWN}`;
     default:
       return "Hang up";
   }
@@ -98,6 +135,8 @@ export function RingGroups() {
   const [extensions, setExtensions] = useState<Extension[]>([]);
   const [extReady, setExtReady] = useState(false);
   const [extError, setExtError] = useState<string | null>(null);
+  const [agents, setAgents] = useState<VoiceAgent[]>([]);
+  const [agentsReady, setAgentsReady] = useState(false);
   const [deleting, setDeleting] = useState<RingGroup | null>(null);
   const [editing, setEditing] = useState<
     { kind: "new" } | { kind: "edit"; group: RingGroup } | null
@@ -127,6 +166,20 @@ export function RingGroups() {
         if (!controller.signal.aborted) {
           setExtError(errorMessage(err));
         }
+      });
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listVoiceAgents(controller.signal)
+      .then((items) => {
+        setAgents(items);
+        setAgentsReady(true);
+      })
+      .catch(() => {
+        // The pickers then offer extensions only.
+        setAgentsReady(true);
       });
     return () => controller.abort();
   }, []);
@@ -202,6 +255,7 @@ export function RingGroups() {
                 key={String(g.id)}
                 group={g}
                 extensions={extensions}
+                agents={agents}
                 onEdit={() => setEditing({ kind: "edit", group: g })}
                 onDelete={() => setDeleting(g)}
               />
@@ -215,6 +269,8 @@ export function RingGroups() {
           key={editing.kind === "edit" ? String(editing.group.id) : "new"}
           group={editing.kind === "edit" ? editing.group : null}
           extensions={extensions}
+          agents={agents}
+          agentsReady={agentsReady}
           extReady={extReady}
           onClose={() => setEditing(null)}
           onSaved={(saved, created) => {
@@ -249,11 +305,13 @@ export function RingGroups() {
 function GroupCard({
   group: g,
   extensions,
+  agents,
   onEdit,
   onDelete,
 }: {
   group: RingGroup;
   extensions: readonly Extension[];
+  agents: readonly VoiceAgent[];
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -282,20 +340,32 @@ function GroupCard({
           {members.map((m, i) => {
             const ext = findExt(m.extensionId, extensions);
             return (
-              <li className="cf-member" key={String(m.extensionId)}>
+              <li
+                className="cf-member"
+                key={String(m.extensionId ?? m.voiceAgentId)}
+              >
                 <span className="cf-member__pos" aria-hidden="true">
                   {i + 1}
                 </span>
                 <span className="cf-member__who">
-                  <Avatar name={ext?.name || ext?.number || "?"} size={26} />
+                  <Avatar
+                    name={
+                      m.voiceAgentId != null
+                        ? memberLabel(m, extensions, agents)
+                        : ext?.name || ext?.number || "?"
+                    }
+                    size={26}
+                  />
                   <span>
                     <span className="cf-mono">
-                      {ext?.number ?? `#${String(m.extensionId)}`}
+                      {memberLabel(m, extensions, agents)}
                     </span>{" "}
                     {ext?.name ?? ""}
                   </span>
                 </span>
-                <span className="cf-member__extra">{memberExtra(g, m)}</span>
+                <span className="cf-member__extra">
+                  {m.voiceAgentId != null ? "voice agent" : memberExtra(g, m)}
+                </span>
               </li>
             );
           })}
@@ -334,7 +404,9 @@ function GroupCard({
 
 /** A member as the form edits it: numbers stay strings while typing. */
 interface MemberDraft {
-  extensionId: Id;
+  extensionId: Id | null;
+  /** The agent's id when this member is a voice agent; null otherwise. */
+  voiceAgentId: Id | null;
   weight: string;
   delay: string;
 }
@@ -366,6 +438,7 @@ function groupDraft(group: RingGroup | null): GroupDraft {
       .sort((a, b) => a.position - b.position)
       .map((m) => ({
         extensionId: m.extensionId,
+        voiceAgentId: m.voiceAgentId ?? null,
         weight: String(m.weight),
         delay: String(m.delay),
       })),
@@ -384,6 +457,7 @@ function groupBody(d: GroupDraft): RingGroupFields {
     failureTarget: d.failureKind === "none" ? "" : d.failureTarget.trim(),
     members: d.members.map((m, i) => ({
       extensionId: m.extensionId,
+      voiceAgentId: m.voiceAgentId,
       position: i + 1,
       weight: Number(m.weight),
       delay: Number(m.delay),
@@ -430,6 +504,10 @@ function validateGroup(d: GroupDraft): Record<string, string> {
   }
   if (d.members.length === 0) e.members = "Add at least one member.";
   d.members.forEach((m, i) => {
+    if (m.voiceAgentId != null && d.strategy !== "sequential") {
+      e.members =
+        "A voice agent as member works only in a sequential group: it answers instantly and would always win.";
+    }
     if (!NATURAL.test(m.weight)) {
       e[`members[${i}].weight`] = "Use a whole number, 0 or more.";
     }
@@ -459,6 +537,9 @@ function validateGroup(d: GroupDraft): Record<string, string> {
         "Use the announcement's name (1-64 of A-Z a-z 0-9 . _ -).";
     }
   }
+  if (d.failureKind === "voice_agent" && d.failureTarget.trim() === "") {
+    e.failureTarget = "Choose the voice agent that takes the call.";
+  }
   return e;
 }
 
@@ -466,12 +547,16 @@ function validateGroup(d: GroupDraft): Record<string, string> {
 function RingGroupDrawer({
   group,
   extensions,
+  agents,
+  agentsReady,
   extReady,
   onClose,
   onSaved,
 }: {
   group: RingGroup | null;
   extensions: Extension[];
+  agents: readonly VoiceAgent[];
+  agentsReady: boolean;
   extReady: boolean;
   onClose: () => void;
   onSaved: (g: RingGroup, created: boolean) => void;
@@ -531,8 +616,12 @@ function RingGroupDrawer({
     );
 
   const available = extensions.filter(
-    (e) => !d.members.some((m) => String(m.extensionId) === String(e.id)),
+    (e) =>
+      !d.members.some(
+        (m) => m.voiceAgentId == null && String(m.extensionId) === String(e.id),
+      ),
   );
+  const sequential = d.strategy === "sequential";
 
   return (
     <Drawer
@@ -635,10 +724,13 @@ function RingGroupDrawer({
           )}
           <ol className="cf-rows">
             {d.members.map((m, i) => {
-              const label = extLabel(m.extensionId, extensions);
+              const label = memberLabel(m, extensions, agents);
               const name = findExt(m.extensionId, extensions)?.name;
               return (
-                <li className="cf-row" key={String(m.extensionId)}>
+                <li
+                  className="cf-row"
+                  key={String(m.extensionId ?? m.voiceAgentId)}
+                >
                   <div className="cf-stack" style={{ gap: 8, minWidth: 0 }}>
                     <span className="cf-row__label">
                       <span className="cf-member__pos">{i + 1}</span>
@@ -708,12 +800,22 @@ function RingGroupDrawer({
               label="Add member"
               size="sm"
               value={pick}
-              disabled={!extReady}
+              disabled={!extReady || !agentsReady}
               options={[
-                { value: "", label: extReady ? "Choose…" : "Loading…" },
+                {
+                  value: "",
+                  label: extReady && agentsReady ? "Choose…" : "Loading…",
+                },
                 ...available.map((e) => ({
-                  value: String(e.id),
+                  value: `ext:${String(e.id)}`,
                   label: e.name ? `${e.number} · ${e.name}` : e.number,
+                })),
+                ...agents.map((a) => ({
+                  value: `agent:${String(a.id)}`,
+                  label: sequential
+                    ? `Voice agent ${a.name}`
+                    : `Voice agent ${a.name} (sequential only)`,
+                  disabled: !sequential || !a.enabled,
                 })),
               ]}
               onChange={(e) => setPick(e.target.value)}
@@ -724,12 +826,31 @@ function RingGroupDrawer({
               icon="plus"
               disabled={pick === ""}
               onClick={() => {
-                const chosen = extensions.find((x) => String(x.id) === pick);
-                if (!chosen) return;
-                set("members", [
-                  ...d.members,
-                  { extensionId: chosen.id, weight: "1", delay: "0" },
-                ]);
+                if (pick.startsWith("agent:")) {
+                  set("members", [
+                    ...d.members,
+                    {
+                      extensionId: null,
+                      voiceAgentId: pick.slice("agent:".length),
+                      weight: "1",
+                      delay: "0",
+                    },
+                  ]);
+                } else {
+                  const chosen = extensions.find(
+                    (x) => String(x.id) === pick.slice("ext:".length),
+                  );
+                  if (!chosen) return;
+                  set("members", [
+                    ...d.members,
+                    {
+                      extensionId: chosen.id,
+                      voiceAgentId: null,
+                      weight: "1",
+                      delay: "0",
+                    },
+                  ]);
+                }
                 setPick("");
               }}
             >
@@ -750,31 +871,50 @@ function RingGroupDrawer({
               { value: "voicemail", label: "Voicemail" },
               { value: "external", label: "External number" },
               { value: "announcement", label: "Announcement" },
+              { value: "voice_agent", label: "Voice agent" },
             ]}
             onChange={(e) => set("failureKind", e.target.value as FailureKind)}
           />
-          {d.failureKind !== "none" && (
-            <Input
+          {d.failureKind === "voice_agent" ? (
+            <Select
               id={fid("failureTarget")}
-              label={
-                d.failureKind === "voicemail"
-                  ? "Box extension"
-                  : d.failureKind === "announcement"
-                    ? "Announcement name"
-                    : "External number"
-              }
-              mono
+              label="Voice agent"
               value={d.failureTarget}
               error={errors.failureTarget}
-              hint={
-                d.failureKind === "voicemail"
-                  ? "The extension whose box takes the call."
-                  : d.failureKind === "announcement"
-                    ? "The uploaded announcement's name."
-                    : "2 to 20 digits, optionally starting with +."
-              }
+              options={[
+                { value: "", label: "Choose…" },
+                ...agents.map((a) => ({
+                  value: a.name,
+                  label: a.enabled ? a.name : `${a.name} (disabled)`,
+                  disabled: !a.enabled,
+                })),
+              ]}
               onChange={(e) => set("failureTarget", e.target.value)}
             />
+          ) : (
+            d.failureKind !== "none" && (
+              <Input
+                id={fid("failureTarget")}
+                label={
+                  d.failureKind === "voicemail"
+                    ? "Box extension"
+                    : d.failureKind === "announcement"
+                      ? "Announcement name"
+                      : "External number"
+                }
+                mono
+                value={d.failureTarget}
+                error={errors.failureTarget}
+                hint={
+                  d.failureKind === "voicemail"
+                    ? "The extension whose box takes the call."
+                    : d.failureKind === "announcement"
+                      ? "The uploaded announcement's name."
+                      : "2 to 20 digits, optionally starting with +."
+                }
+                onChange={(e) => set("failureTarget", e.target.value)}
+              />
+            )
           )}
         </fieldset>
         <FormAlert message={formError} unmatched={unmatched} />

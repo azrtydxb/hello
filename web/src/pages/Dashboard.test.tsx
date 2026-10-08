@@ -188,7 +188,9 @@ describe("Dashboard", () => {
     const values = [...document.querySelectorAll(".az-stat__value")].map(
       (v) => v.textContent,
     );
-    expect(values).toEqual(["1", "1/ 2", "2/ 2", "2/ 2"]);
+    // The last card is the voice agents card; its number depends on the
+    // voice registry, which this test does not mock.
+    expect(values).toEqual(["1", "1/ 2", "2/ 2", "2/ 2", "—"]);
 
     // Trunk card: registered, calls meter, destination latencies.
     expect(screen.getByText("Registered")).toBeVisible();
@@ -279,7 +281,7 @@ describe("Dashboard", () => {
     const values = [...document.querySelectorAll(".az-stat__value")].map(
       (v) => v.textContent,
     );
-    expect(values).toEqual(["—", "—", "—", "—"]);
+    expect(values).toEqual(["—", "—", "—", "—", "—"]);
   });
 });
 

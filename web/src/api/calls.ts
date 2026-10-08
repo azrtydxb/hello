@@ -16,12 +16,15 @@ export interface CdrFilter {
   direction?: Cdr["direction"];
   /** Only calls whose final status is outside 2xx. */
   failed?: boolean;
+  /** Only calls that went to this voice agent (spec S-23). */
+  voiceAgent?: string;
 }
 
 function filterQuery(filter: CdrFilter): URLSearchParams {
   const q = new URLSearchParams();
   if (filter.direction) q.set("direction", filter.direction);
   if (filter.failed) q.set("failed", "true");
+  if (filter.voiceAgent) q.set("voiceAgent", filter.voiceAgent);
   return q;
 }
 
