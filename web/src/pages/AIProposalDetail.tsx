@@ -27,7 +27,9 @@ import {
 import { Can } from "../role";
 import "../components/ai/ai.css";
 
-const isDelete = (op: string) => op.startsWith("delete");
+/** The server marks deletes (destructive); the name is the fallback. */
+const isDelete = (a: AIProposal["actions"][number]) =>
+  a.destructive ?? a.operationId.startsWith("delete");
 const describe = (a: AIProposal["actions"][number]) =>
   `${a.operationId}${
     Object.keys(a.pathParams).length
@@ -147,14 +149,14 @@ function Detail({ id }: { id: string }) {
         {p.actions.map((a, i) => (
           <article
             key={i}
-            className={`aix-card${isDelete(a.operationId) ? " aix-card--delete" : ""}`}
+            className={`aix-card${isDelete(a) ? " aix-card--delete" : ""}`}
             aria-label={`Change ${i + 1}`}
           >
             <div className="aix-card__head">
               <h2 className="aix-card__title">
                 {i + 1}. {describe(a)}
               </h2>
-              {isDelete(a.operationId) && (
+              {isDelete(a) && (
                 <Badge tone="bad" icon="trash-2">
                   Delete
                 </Badge>
@@ -162,10 +164,24 @@ function Detail({ id }: { id: string }) {
             </div>
             <JsonDiff
               before={a.before}
-              after={isDelete(a.operationId) ? undefined : a.after}
+              after={isDelete(a) ? undefined : a.after}
               current={a.current}
               hasCurrent={"current" in a}
             />
+            {isDelete(a) && a.references && a.references.length > 0 && (
+              <div>
+                <p className="aix-muted">Also affected by this delete:</p>
+                <ul aria-label={`References of change ${i + 1}`}>
+                  {a.references.map((r) => (
+                    <li key={`${r.kind}:${r.id}`}>
+                      <PlainText
+                        text={`${r.kind} ${r.name} (${r.id}): ${r.detail}`}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </article>
         ))}
         <Can>
@@ -210,7 +226,7 @@ function Detail({ id }: { id: string }) {
           <ol className="aix-ops">
             {p.actions.map((a, i) => (
               <li key={i}>
-                {isDelete(a.operationId) ? "Delete: " : ""}
+                {isDelete(a) ? "Delete: " : ""}
                 {describe(a)}
               </li>
             ))}

@@ -70,7 +70,13 @@ export interface AIFinding {
   firstSeen: string;
   lastSeen: string;
   occurrences: number;
+  severityHistory: { severity: Severity; at: string }[];
+  acknowledgedBy: number | null;
+  acknowledgedAt: string | null;
+  dismissedBy: number | null;
+  dismissedAt: string | null;
   dismissReason: string | null;
+  resolvedAt: string | null;
   proposalId: string | null;
 }
 
@@ -85,6 +91,14 @@ export const PROPOSAL_STATUSES: readonly ProposalStatus[] = [
   "superseded",
 ];
 
+/** What a delete takes with it or leaves dangling. */
+export interface ProposalReference {
+  kind: string;
+  id: string;
+  name: string;
+  detail: string;
+}
+
 export interface ProposalAction {
   operationId: string;
   pathParams: Record<string, string>;
@@ -93,6 +107,10 @@ export interface ProposalAction {
   after?: unknown;
   /** The target now; only on the detail. */
   current?: unknown;
+  /** The action deletes a resource. */
+  destructive?: boolean;
+  /** For a delete: what refers to the deleted resource. */
+  references?: ProposalReference[];
 }
 
 export interface ProposalFailure {
@@ -114,9 +132,12 @@ export interface AIProposal {
   configRevision: number;
   actions: ProposalAction[];
   hasDelete: boolean;
+  createdBy: number | null;
   createdAt: string;
   updatedAt: string;
+  appliedBy: number | null;
   appliedAt: string | null;
+  dismissedBy: number | null;
   dismissedAt: string | null;
   dismissReason: string | null;
   dismissText: string | null;
@@ -153,8 +174,8 @@ export interface AIMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
-  toolCalls: AIToolCall[] | null;
-  citations: number[] | null;
+  toolCalls: AIToolCall[];
+  citations: number[];
   proposalId: string | null;
   taskId: string | null;
   createdAt: string;
@@ -169,7 +190,10 @@ export interface AITask {
   sessionId: string | null;
   errorCode: string | null;
   errorMessage: string | null;
+  result: Record<string, unknown> | null;
   createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
 }
 
 export interface AISessionDetail {

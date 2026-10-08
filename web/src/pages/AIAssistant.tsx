@@ -170,12 +170,15 @@ function Chat({ id }: { id: string | undefined }) {
       const r = await postMessage(sid, content);
       setTask({
         id: r.taskId,
-        kind: "assistant",
+        kind: "message",
         status: "queued",
         sessionId: sid,
         errorCode: null,
         errorMessage: null,
+        result: null,
         createdAt: new Date().toISOString(),
+        startedAt: null,
+        finishedAt: null,
       });
       if (!id) navigate(`/ai/assistant/${sid}`, { replace: true });
       else void loadSession(sid);

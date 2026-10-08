@@ -109,7 +109,7 @@ describe("AI assistant", () => {
         const status = done ? "succeeded" : "running";
         return json({
           id: "t1",
-          kind: "assistant",
+          kind: "message",
           status,
           sessionId: "s1",
           errorCode: null,
