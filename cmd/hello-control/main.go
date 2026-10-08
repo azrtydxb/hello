@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/ai"
+	"github.com/azrtydxb/hello/internal/ai/detect"
 	"github.com/azrtydxb/hello/internal/ai/proposal"
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/apispec"
@@ -183,7 +184,29 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 			_ = ln.Close()
 			return fmt.Errorf("ai proposals: %w", err)
 		}
-		apiCfg.Proposals = proposal.NewStore(db, validator)
+		props := proposal.NewStore(db, validator)
+		apiCfg.Proposals = props
+		apiCfg.Findings = st
+		// The aiops agent (spec S-17): the detectors run without the model,
+		// and explain findings through it when it answers.
+		if cfg.AIAgent.AIOpsInterval > 0 {
+			env := &detect.Env{
+				DB: db, Store: st, Live: vk, Cluster: vk,
+				VKFunc:        vk.Client,
+				AuthFailLimit: cfg.AuthFailLimit,
+				Log:           log,
+			}
+			agent.Scheduler.Register(detect.NewAIOps(env, detect.Options{
+				Interval:           cfg.AIAgent.AIOpsInterval,
+				ExplainMinInterval: cfg.AIAgent.ExplainMinInterval,
+				Generate: func(ctx context.Context, c ai.Call[detect.Explanations]) (detect.Explanations, ai.Usage, error) {
+					return ai.Generate(ctx, agent, c)
+				},
+				Validator: validator,
+				Proposals: props,
+				Metrics:   agent.Metrics(),
+			}))
+		}
 	}
 	if as != nil {
 		apiCfg.AI = as

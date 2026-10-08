@@ -194,10 +194,10 @@ func (s *server) routes() []route {
 		// The in-product AI agent (spec ai-agent). The rows are fixed here;
 		// each stream replaces s.pending with its handler.
 		{"GET", "/api/v1/ai/status", auth.ScopeRead, auth.RoleViewer, false, s.getAIStatus},
-		{"GET", "/api/v1/ai/findings", auth.ScopeRead, auth.RoleViewer, false, s.pending},
-		{"GET", "/api/v1/ai/findings/{id}", auth.ScopeRead, auth.RoleViewer, false, s.pending},
-		{"POST", "/api/v1/ai/findings/{id}/acknowledge", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
-		{"POST", "/api/v1/ai/findings/{id}/dismiss", auth.ScopeWrite, auth.RoleOperator, false, s.pending},
+		{"GET", "/api/v1/ai/findings", auth.ScopeRead, auth.RoleViewer, false, s.listAIFindings},
+		{"GET", "/api/v1/ai/findings/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getAIFinding},
+		{"POST", "/api/v1/ai/findings/{id}/acknowledge", auth.ScopeWrite, auth.RoleOperator, false, s.acknowledgeAIFinding},
+		{"POST", "/api/v1/ai/findings/{id}/dismiss", auth.ScopeWrite, auth.RoleOperator, false, s.dismissAIFinding},
 		{"GET", "/api/v1/ai/proposals", auth.ScopeRead, auth.RoleViewer, false, s.listAIProposals},
 		{"GET", "/api/v1/ai/proposals/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getAIProposal},
 		{"POST", "/api/v1/ai/proposals/{id}/apply", auth.ScopeWrite, auth.RoleOperator, false, s.applyAIProposal},
