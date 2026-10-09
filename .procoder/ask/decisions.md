@@ -280,3 +280,10 @@ Client ID metadata documents are preferred and DCR is deprecated, but some MCP c
 
 - On for kw, rate-limited, labelled unverified on the consent screen, unused clients cleaned up (proposed)
 - Off: only client ID metadata documents and service accounts
+
+## Pivot: voice agents out of Hello (2026-10-09)
+
+- The call/voice agents leave Hello and become a separate product; Hello talks to it only via SIP trunks.
+- The built-in AI agent (phase 2: assistant, proposals, detectors) STAYS in Hello, as does phase 1 external access (MCP/OAuth/skills) and per-call quality in CDRs.
+- The voice-agent feature is removed from Hello (registry, runtime API, call leg, voice_agent routing/console, voice tables). PR #65 (voice e2e) is closed unmerged.
+- New requirement instead: SIP trunks must be able to reach internal numbers (inbound trunk calls targeting internal extensions), not only the outside world.
