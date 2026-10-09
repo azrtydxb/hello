@@ -90,6 +90,9 @@ func (r *Registry) toStoreServer(in ServerInput) (store.NewVoiceMCPServer, error
 	if err := r.validateServer(&in); err != nil {
 		return store.NewVoiceMCPServer{}, err
 	}
+	if in.TimeoutMS == 0 {
+		in.TimeoutMS = 5000 // the schema's default
+	}
 	return store.NewVoiceMCPServer{
 		Name: in.Name, URL: in.URL, Auth: in.Auth, HeaderName: in.HeaderName, TokenURL: in.TokenURL,
 		ClientID: in.ClientID, Scope: in.Scope, Credential: in.Credential, TimeoutMS: in.TimeoutMS,

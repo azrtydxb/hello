@@ -12859,7 +12859,7 @@
           },
           "timeoutMs": {
             "type": "integer",
-            "description": "The tool call timeout in milliseconds."
+            "description": "The tool call timeout in milliseconds; defaults to 5000."
           },
           "enabled": {
             "type": "boolean",
@@ -12935,7 +12935,7 @@
           },
           "timeoutMs": {
             "type": "integer",
-            "description": "The tool call timeout in milliseconds."
+            "description": "The tool call timeout in milliseconds; defaults to 5000."
           },
           "enabled": {
             "type": "boolean",
