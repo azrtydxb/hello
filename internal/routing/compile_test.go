@@ -163,7 +163,7 @@ func TestCompileValidation(t *testing.T) {
 			fe(I("schedule.timeZone"), `unknown time zone "Nowhere/City"`)}},
 		{"inbound caller-ID transform", in(func(r *InboundRoute) { r.CallerID = Transform{Regex: "^(0)", Template: "${x}"} }), []FieldError{
 			fe(I("callerIdTransform.template"), "references group ${x}, which the regex does not define")}},
-		{"destination kind", in(func(r *InboundRoute) { r.DestinationKind = "voicemail" }), []FieldError{fe(I("destinationKind"), `must be "extension", "external" or "sip_uri"`)}},
+		{"destination kind", in(func(r *InboundRoute) { r.DestinationKind = "voicemail" }), []FieldError{fe(I("destinationKind"), `must be "extension", "external", "sip_uri" or "voice_agent"`)}},
 		{"extension destination must exist", in(func(r *InboundRoute) { r.Destination = "999" }), []FieldError{fe(I("destination"), `extension "999" does not exist`)}},
 		{"external destination must be a number", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "external", "05 01" }), []FieldError{
 			fe(I("destination"), "must be a number (+, digits, * and #)")}},

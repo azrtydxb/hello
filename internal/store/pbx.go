@@ -377,15 +377,18 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 
 // Ring groups.
 
-// RingGroupMember is one extension in a ring/hunt group. Number and Name
-// carry the extension for display; writes use ExtensionID only.
+// RingGroupMember is one extension or voice agent in a ring/hunt group.
+// Number and Name carry the member's number and name for display (an agent
+// member shows the agent name and, when it has one, its extension); writes
+// use ExtensionID or VoiceAgentID, exactly one of the two (spec S-12).
 type RingGroupMember struct {
-	ExtensionID int64  `json:"extensionId"`
-	Number      string `json:"number"`
-	Name        string `json:"name"`
-	Position    int    `json:"position"`
-	Weight      int    `json:"weight"`
-	Delay       int    `json:"delay"`
+	ExtensionID  int64  `json:"extensionId"`
+	VoiceAgentID int64  `json:"voiceAgentId,omitempty"`
+	Number       string `json:"number"`
+	Name         string `json:"name"`
+	Position     int    `json:"position"`
+	Weight       int    `json:"weight"`
+	Delay        int    `json:"delay"`
 }
 
 // RingGroup is a named ring/hunt group with its members in position order.
@@ -444,11 +447,17 @@ func listRingGroups(ctx context.Context, q querier, where string, args ...any) (
 }
 
 // groupMembers returns each group's members in position order, with the
-// extension number and name joined for display.
+// extension number and name joined for display. An agent member joins the
+// voice_agents table instead: its name, and its extension as the number when
+// the agent has one.
 func groupMembers(ctx context.Context, q querier, ids []int64) (map[int64][]RingGroupMember, error) {
 	rows, err := q.QueryContext(ctx, `
-		SELECT m.group_id, m.extension_id, e.number, e.name, m.position, m.weight, m.delay
-		FROM ring_group_members m JOIN extensions e ON e.id = m.extension_id
+		SELECT m.group_id, m.extension_id, m.voice_agent_id,
+		       COALESCE(e.number, va.extension, ''), COALESCE(e.name, va.name, ''),
+		       m.position, m.weight, m.delay
+		FROM ring_group_members m
+		LEFT JOIN extensions e ON e.id = m.extension_id
+		LEFT JOIN voice_agents va ON va.id = m.voice_agent_id
 		WHERE m.group_id = ANY($1) ORDER BY m.group_id, m.position`, ids)
 	if err != nil {
 		return nil, err
@@ -458,9 +467,11 @@ func groupMembers(ctx context.Context, q querier, ids []int64) (map[int64][]Ring
 	for rows.Next() {
 		var groupID int64
 		var m RingGroupMember
-		if err := rows.Scan(&groupID, &m.ExtensionID, &m.Number, &m.Name, &m.Position, &m.Weight, &m.Delay); err != nil {
+		var extID, agentID sql.NullInt64
+		if err := rows.Scan(&groupID, &extID, &agentID, &m.Number, &m.Name, &m.Position, &m.Weight, &m.Delay); err != nil {
 			return nil, err
 		}
+		m.ExtensionID, m.VoiceAgentID = extID.Int64, agentID.Int64
 		out[groupID] = append(out[groupID], m)
 	}
 	return out, rows.Err()
@@ -566,19 +577,48 @@ func getGroupTx(ctx context.Context, tx *sql.Tx, id int64) (RingGroup, error) {
 }
 
 // writeGroupMembers replaces a group's member rows. Positions are unique per
-// group with a deferred constraint, so any order of inserts works.
+// group with a deferred constraint, so any order of inserts works; the
+// target CHECK keeps exactly one of extension_id and voice_agent_id set.
 func writeGroupMembers(ctx context.Context, tx *sql.Tx, id int64, members []RingGroupMember) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM ring_group_members WHERE group_id = $1`, id); err != nil {
 		return err
 	}
 	for _, m := range members {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO ring_group_members (group_id, extension_id, position, weight, delay)
-			VALUES ($1, $2, $3, $4, $5)`, id, m.ExtensionID, m.Position, m.Weight, m.Delay); err != nil {
+			INSERT INTO ring_group_members (group_id, extension_id, voice_agent_id, position, weight, delay)
+			VALUES ($1, NULLIF($2, 0), NULLIF($3, 0), $4, $5, $6)`, id, m.ExtensionID, m.VoiceAgentID, m.Position, m.Weight, m.Delay); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// VoiceAgentRef is the existence and enabled state a ring group's agent
+// member or failure target is checked against (spec S-12).
+type VoiceAgentRef struct {
+	ID      int64
+	Name    string
+	Enabled bool
+}
+
+// ListVoiceAgentRefs returns every agent's id, name and enabled state, for
+// the ring group handlers' reference checks and the console pickers. It is
+// read-only: no audit row, no revision.
+func (s *Store) ListVoiceAgentRefs(ctx context.Context) ([]VoiceAgentRef, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, enabled FROM voice_agents ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []VoiceAgentRef{}
+	for rows.Next() {
+		var r VoiceAgentRef
+		if err := rows.Scan(&r.ID, &r.Name, &r.Enabled); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // Feature codes.

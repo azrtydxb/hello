@@ -29,6 +29,7 @@ import (
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/version"
 	"github.com/azrtydxb/hello/internal/vkconn"
+	"github.com/azrtydxb/hello/internal/voice"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/valkey-io/valkey-go"
 )
@@ -157,21 +158,23 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		log.Info("ai agent off", "reason", reason)
 	}
 	apiCfg := api.Config{
-		AIAgent:       agent,
-		Store:         st,
-		Live:          vk,
-		Trunks:        vk,
-		Cluster:       vk,
-		Valkey:        vk,
-		Objects:       objs,
-		Diagnostics:   vk,
-		AuthFailLimit: cfg.AuthFailLimit,
-		EmailDelivery: cfg.SmtpHost != "",
-		ProvStore:     st,
-		Prov:          provAPI(cfg, settings, deployment, objs, log),
-		SIPDomain:     cfg.SIPDomain,
-		SessionTTL:    cfg.SessionTTL,
-		Log:           log,
+		AIAgent:         agent,
+		Store:           st,
+		Voice:           voice.New(st, box, cfg.Voice, log),
+		Live:            vk,
+		Trunks:          vk,
+		Cluster:         vk,
+		Valkey:          vk,
+		Objects:         objs,
+		Diagnostics:     vk,
+		AuthFailLimit:   cfg.AuthFailLimit,
+		EmailDelivery:   cfg.SmtpHost != "",
+		ProvStore:       st,
+		Prov:            provAPI(cfg, settings, deployment, objs, log),
+		SIPDomain:       cfg.SIPDomain,
+		SessionTTL:      cfg.SessionTTL,
+		VoiceSIPAddress: cfg.Voice.SIPAddress,
+		Log:             log,
 	}
 	// Proposals (spec ai-agent) exist only while the agent is on; reads in
 	// their validation replay through the API handler built just below.
