@@ -133,6 +133,23 @@ func (t *Table) fromExtension(d *Decision, c Call, usable TrunkUsability) {
 		d.Kind, d.Extension, d.CallerID = KindInternal, c.Number, c.FromExtension
 		return
 	}
+	// An agent's extension resolves to the agent (spec S-13), so a transfer
+	// or a feature code that names the number reaches the agent too.
+	name, agent := t.voiceExt[c.Number]
+	if agent {
+		ref, uri, ok := t.voiceRef(name)
+		switch {
+		case !ok:
+			d.reject(codeInternal, fmt.Sprintf("Voice agent %s does not exist", quote(name)))
+		case t.voiceAddr == "":
+			d.reject(codeNoTrunk, "Voice agents are not configured (HELLO_VOICE_SIP_ADDRESS unset); voice agent "+quote(name)+" is unreachable")
+		default:
+			d.Trace.Add(fmt.Sprintf("Internal extension lookup %s -> voice agent %s (%s)", quote(c.Number), quote(ref.Name), uri))
+			d.Kind, d.SIPURI, d.VoiceAgent = KindInbound, uri, &ref
+			d.CallerID = c.FromExtension
+		}
+		return
+	}
 	d.Trace.Add(fmt.Sprintf("Internal extension lookup %s -> no match", quote(c.Number)))
 	t.outboundRoute(d, c.Number, outboundSource{ext: c.FromExtension}, c, usable)
 }
@@ -379,6 +396,14 @@ func (t *Table) fromTrunk(d *Decision, c Call, usable TrunkUsability) {
 	case "sip_uri":
 		d.Trace.Add("Destination: SIP URI " + r.r.Destination)
 		d.Kind, d.SIPURI = KindInbound, r.r.Destination
+	case "voice_agent":
+		ref, uri, ok := t.voiceRef(r.r.Destination)
+		if !ok {
+			d.reject(codeInternal, fmt.Sprintf("Destination: voice agent %s does not exist", quote(r.r.Destination)))
+			return
+		}
+		d.Trace.Add(fmt.Sprintf("Destination: voice agent %s (%s)", quote(ref.Name), uri))
+		d.Kind, d.SIPURI, d.VoiceAgent = KindInbound, uri, &ref
 	case "external":
 		// Routed through outbound routing as a call from the source trunk:
 		// no internal extension lookup (use an "extension" destination for

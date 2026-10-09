@@ -6635,6 +6635,9 @@
               }
             }
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -6786,6 +6789,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -7076,6 +7082,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8385,19 +8394,26 @@
       },
       "RingGroupMember": {
         "type": "object",
-        "required": ["extensionId", "position", "weight", "delay"],
+        "required": ["position", "weight", "delay"],
+        "description": "One member: an extension or a voice agent (spec voice-agents S-12), exactly one of extensionId and voiceAgentId set.",
         "properties": {
           "extensionId": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "The member extension's id; 0 when the member is a voice agent."
+          },
+          "voiceAgentId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The member voice agent's id; absent when the member is an extension. Allowed only in a sequential group."
           },
           "number": {
             "type": "string",
-            "description": "The member extension's number (read-only)."
+            "description": "The member extension's number, or a voice agent member's extension when it has one (read-only)."
           },
           "name": {
             "type": "string",
-            "description": "The member extension's name (read-only)."
+            "description": "The member extension's name, or the voice agent member's name (read-only)."
           },
           "position": {
             "type": "integer",
@@ -8472,7 +8488,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external", "announcement"]
+            "enum": ["none", "voicemail", "external", "voice_agent"]
           },
           "failureTarget": {
             "type": "string"
@@ -8536,12 +8552,12 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external", "announcement"],
+            "enum": ["none", "voicemail", "external", "voice_agent"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
           "failureTarget": {
             "type": "string",
-            "description": "The voicemail extension, external number or announcement id that failureKind names."
+            "description": "The voicemail extension, external number or voice agent name that failureKind names."
           },
           "members": {
             "type": "array",
@@ -8549,12 +8565,19 @@
             "maxItems": 50,
             "items": {
               "type": "object",
-              "required": ["extensionId", "position"],
+              "required": ["position"],
               "additionalProperties": false,
+              "description": "One member: an extension or a voice agent, exactly one of extensionId and voiceAgentId set.",
               "properties": {
                 "extensionId": {
                   "type": "integer",
-                  "format": "int64"
+                  "format": "int64",
+                  "description": "The member extension's id; 0 when the member is a voice agent."
+                },
+                "voiceAgentId": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "The member voice agent's id; absent when the member is an extension. Allowed only in a sequential group."
                 },
                 "position": {
                   "type": "integer",
@@ -8572,7 +8595,7 @@
                 }
               }
             },
-            "description": "The extensions in the group, with their position (and weight)."
+            "description": "The group members (extensions or voice agents), with their position (and weight)."
           }
         }
       },
@@ -8620,12 +8643,12 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external", "announcement"],
+            "enum": ["none", "voicemail", "external", "voice_agent"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
           "failureTarget": {
             "type": "string",
-            "description": "The voicemail extension, external number or announcement id that failureKind names."
+            "description": "The voicemail extension, external number or voice agent name that failureKind names."
           },
           "members": {
             "type": "array",
@@ -8633,12 +8656,19 @@
             "maxItems": 50,
             "items": {
               "type": "object",
-              "required": ["extensionId", "position"],
+              "required": ["position"],
               "additionalProperties": false,
+              "description": "One member: an extension or a voice agent, exactly one of extensionId and voiceAgentId set.",
               "properties": {
                 "extensionId": {
                   "type": "integer",
-                  "format": "int64"
+                  "format": "int64",
+                  "description": "The member extension's id; 0 when the member is a voice agent."
+                },
+                "voiceAgentId": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "The member voice agent's id; absent when the member is an extension. Allowed only in a sequential group."
                 },
                 "position": {
                   "type": "integer",
@@ -8656,7 +8686,7 @@
                 }
               }
             },
-            "description": "The extensions in the group, with their position (and weight)."
+            "description": "The group members (extensions or voice agents), with their position (and weight)."
           }
         }
       },
@@ -8835,7 +8865,13 @@
                   "ai_budget_exhausted",
                   "task_running",
                   "proposal_not_open",
-                  "proposal_stale"
+                  "proposal_stale",
+                  "voice_not_configured",
+                  "voice_agent_limit",
+                  "voice_agent_disabled",
+                  "voice_tool_conflict",
+                  "voice_verification_required",
+                  "mcp_endpoint_not_private"
                 ]
               },
               "message": {
@@ -10462,12 +10498,12 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri"]
+            "enum": ["extension", "external", "sip_uri", "voice_agent"]
           },
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
+            "description": "An extension number, an external number, a sip: URI (sips: is refused: Hello is UDP-only in this phase), or with destinationKind voice_agent the agent's name."
           },
           "enabled": {
             "type": "boolean"
@@ -10537,13 +10573,13 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri"],
+            "enum": ["extension", "external", "sip_uri", "voice_agent"],
             "description": "What destination names: an extension number, an external number or a SIP URI."
           },
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
+            "description": "An extension number, an external number, a sip: URI (sips: is refused: Hello is UDP-only in this phase), or with destinationKind voice_agent the agent's name."
           },
           "enabled": {
             "type": "boolean",
@@ -10614,13 +10650,13 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri"],
+            "enum": ["extension", "external", "sip_uri", "voice_agent"],
             "description": "What destination names: an extension number, an external number or a SIP URI."
           },
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
+            "description": "An extension number, an external number, a sip: URI (sips: is refused: Hello is UDP-only in this phase), or with destinationKind voice_agent the agent's name."
           },
           "enabled": {
             "type": "boolean",
@@ -10721,6 +10757,10 @@
           },
           "sipUri": {
             "type": "string"
+          },
+          "voiceAgent": {
+            "type": "string",
+            "description": "The routed voice agent's name, when the destination is voice_agent."
           },
           "number": {
             "type": "string"
@@ -12572,7 +12612,7 @@
             "description": "The user part of the agent's SIP address, generated on create."
           },
           "extension": {
-            "type": "string",
+            "type": ["string", "null"],
             "description": "The internal extension that reaches the agent, if any."
           },
           "revision": {
@@ -12582,9 +12622,15 @@
         }
       },
       "VoiceAgentList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceAgent"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceAgent"
+            }
+          }
         },
         "description": "Every voice agent."
       },
@@ -12595,6 +12641,11 @@
           "name": {
             "type": "string",
             "description": "The agent's unique name."
+          },
+          "extension": {
+            "type": "string",
+            "description": "The internal extension that reaches the agent, unique across extensions and agents (spec S-3).",
+            "pattern": "^[0-9]{2,10}$"
           },
           "description": {
             "type": "string",
@@ -12693,9 +12744,15 @@
         }
       },
       "VoiceAgentVersionList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceAgentVersion"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceAgentVersion"
+            }
+          }
         },
         "description": "A voice agent's saved personas, newest first."
       },
@@ -12788,9 +12845,15 @@
         }
       },
       "VoiceAgentCallList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceAgentCall"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceAgentCall"
+            }
+          }
         },
         "description": "One call per report, newest first."
       },
@@ -12821,14 +12884,14 @@
           },
           "timeoutMs": {
             "type": "integer",
-            "description": "The tool call timeout in milliseconds."
+            "description": "The tool call timeout in milliseconds; defaults to 5000."
           },
           "enabled": {
             "type": "boolean",
             "description": "False detaches the server from every agent."
           },
           "lastCheckAt": {
-            "type": "string",
+            "type": ["string", "null"],
             "description": "When the console last discovered or tested it."
           },
           "lastCheckStatus": {
@@ -12838,9 +12901,15 @@
         }
       },
       "VoiceMCPServerList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceMCPServer"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceMCPServer"
+            }
+          }
         },
         "description": "Every MCP server."
       },
@@ -12891,7 +12960,7 @@
           },
           "timeoutMs": {
             "type": "integer",
-            "description": "The tool call timeout in milliseconds."
+            "description": "The tool call timeout in milliseconds; defaults to 5000."
           },
           "enabled": {
             "type": "boolean",

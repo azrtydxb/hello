@@ -61,6 +61,9 @@ type Store interface {
 	DeleteVoicemailMessage(ctx context.Context, actor string, id int64) (string, error)
 
 	ListRingGroups(ctx context.Context) ([]store.RingGroup, error)
+	// ListVoiceAgentRefs is the ring group editors' agent reference check
+	// (spec S-12): every agent's id, name and enabled state.
+	ListVoiceAgentRefs(ctx context.Context) ([]store.VoiceAgentRef, error)
 	GetRingGroup(ctx context.Context, id int64) (store.RingGroup, error)
 	CreateRingGroup(ctx context.Context, actor string, in store.RingGroupInput, check store.Check) (store.RingGroup, error)
 	UpdateRingGroup(ctx context.Context, actor string, id int64, in store.RingGroupInput, check store.Check) (store.RingGroup, error)
@@ -132,6 +135,12 @@ type Config struct {
 	SIPDomain  string
 	SessionTTL time.Duration
 	Log        *slog.Logger
+	// VoiceSIPAddress is HELLO_VOICE_SIP_ADDRESS (spec voice-agents S-17):
+	// host:port of talking-agent. It feeds the routing engine's voice agent
+	// validation (SIP URIs are derived from it) and is empty when voice
+	// agents are not configured, which makes every route to an agent a
+	// validation error (voice_not_configured).
+	VoiceSIPAddress string
 	// Router is the routing engine; nil means routing.Compile.
 	Router Router
 	// Trunks reads trunk live state for /trunks/status and the route
@@ -172,6 +181,9 @@ type Config struct {
 	// AIAgent is the in-product AI agent (spec ai-agent); nil or off makes
 	// every AI agent operation but getAIStatus answer 503 ai_disabled.
 	AIAgent *ai.Service
+	// Voice is the voice agent registry (spec voice-agents); nil answers
+	// 503 on the voice routes.
+	Voice Voice
 }
 
 type server struct{ Config }
