@@ -55,9 +55,7 @@ var concreteParams = strings.NewReplacer("{id}", "1", "{vendor}", "snom", "{secr
 // just below the route's is admitted, if the route's own scope (or a
 // higher one) is refused, if the 403 lacks the insufficient_scope
 // challenge, if a bearer token can call a session operation, or if a
-// session or legacy token is refused anything but a session or
-// voice-runtime operation (voice-runtime is service-account only, spec
-// voice-agents S-18).
+// session or legacy token is refused any non-session operation.
 func TestScopeEnforcement(t *testing.T) {
 	const meta = "https://hello.example/.well-known/oauth-protected-resource/api/v1"
 	st := scopeStore{tokens: map[string]auth.Actor{}}
@@ -68,7 +66,7 @@ func TestScopeEnforcement(t *testing.T) {
 		}
 		return name
 	}
-	for _, s := range []auth.Scope{auth.ScopeRead, auth.ScopeWrite, auth.ScopeAdmin, auth.ScopeSecrets, auth.ScopeSession, auth.ScopeVoiceRuntime} {
+	for _, s := range []auth.Scope{auth.ScopeRead, auth.ScopeWrite, auth.ScopeAdmin, auth.ScopeSecrets, auth.ScopeSession} {
 		token("below-"+string(s), auth.KindOAuth, below(s))
 		token("exact-"+string(s), auth.KindOAuth, auth.Scopes{s})
 	}
@@ -110,9 +108,7 @@ func TestScopeEnforcement(t *testing.T) {
 			t.Errorf("%s: challenge %q", op, ch)
 		}
 		session := rt.Scope == auth.ScopeSession
-		// Voice-runtime is service-account only: a user credential (legacy
-		// token, browser session) never carries it (spec voice-agents).
-		usersOnly := session || rt.Scope == auth.ScopeVoiceRuntime
+		usersOnly := session
 		if code, rec := call(rt.Method, rt.Pattern, bearer("exact-"+string(rt.Scope))); refused(code) != session {
 			t.Errorf("%s: a token with exactly %s = %d %s", op, rt.Scope, code, rec.Body)
 		}

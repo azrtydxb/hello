@@ -3,6 +3,8 @@
 Status: approved (spec open questions answered 2026-10-08)
 Spec: .procoder/specs/voice-agents.md
 
+> Cancelled with the pivot recorded in `.procoder/ask/decisions.md`: voice agents leave Hello and become a separate product that connects through SIP trunks. History kept.
+
 ## Goal
 
 An operator creates a voice agent in Hello's console, gives it a persona and MCP tools, and routes an extension, a DID or a ring group's last resort to it. A call reaches the separate talking-agent service over SIP with a signed header set, the persona and tools come from Hello's runtime API with live reload, and the CDR names the agent and carries the call summary. Hello's media path is unchanged. A fake talking-agent in the lab proves it end to end; `TestKwSmokeVoice` proves it on kw once talking-agent's changes land.

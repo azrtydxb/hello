@@ -1,9 +1,11 @@
 # `TestVoiceRuntimeStatus` in `internal/api` passes. It fails if routing, CDRs or registry edits stop while the runtime has not polled (S-22), an ack does not set `last_seen_at`, the revision lag or per-agent state, a seventh ack in a minute is accepted, or status stays green after 2 minutes of silence with an agent routed.
 
-Status: open
+Status: cancelled 2026-10-09 — the voice-agent feature left Hello (decision "Pivot: voice agents out of Hello", .procoder/ask/decisions.md)
 Created: 2026-10-08
 Epic: voice-agents
 Sprint: -
+
+> Cancelled with the pivot recorded in `.procoder/ask/decisions.md`: voice agents leave Hello and become a separate product that connects through SIP trunks. History kept.
 
 ## Description
 

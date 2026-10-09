@@ -1,9 +1,11 @@
 # `TestVoiceAgentCRUD` in `internal/api` passes. It fails if a name outside the pattern, a prompt over 8000 characters, an out-of-range limit, a duplicate extension (agent or extension), or an eleventh version is accepted or kept, if `sip_user` can be edited, if a restore rewrites history instead of adding a revision, or if an audit row holds prompt text.
 
-Status: open
+Status: cancelled 2026-10-09 — the voice-agent feature left Hello (decision "Pivot: voice agents out of Hello", .procoder/ask/decisions.md)
 Created: 2026-10-08
 Epic: voice-agents
 Sprint: -
+
+> Cancelled with the pivot recorded in `.procoder/ask/decisions.md`: voice agents leave Hello and become a separate product that connects through SIP trunks. History kept.
 
 ## Description
 

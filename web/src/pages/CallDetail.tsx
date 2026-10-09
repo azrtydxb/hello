@@ -212,30 +212,12 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     { label: "SIP node", value: cdr.sipNode || "—", mono: true },
     { label: "Media", value: cdr.mediaMode || "—" },
     { label: "Call quality", value: qualityText(cdr) },
-    ...(cdr.voiceAgent
-      ? [{ label: "Voice agent", value: cdr.voiceAgent?.name ?? "" }]
-      : []),
     { label: "SIP Call-ID", value: cdr.sipCallId || "—", mono: true },
     { label: "Correlation ID", value: cdr.correlationId || "—", mono: true },
   ];
 
   return (
     <>
-      {cdr.voiceAgent && (
-        <Alert
-          tone="info"
-          title={`Answered by the voice agent ${cdr.voiceAgent.name} (automated call)`}
-          className="calls-detail-alert"
-        >
-          {cdr.voiceAgent.outcome && (
-            <>
-              Outcome <strong>{cdr.voiceAgent.outcome}</strong>
-              {" · "}
-            </>
-          )}
-          {cdr.voiceAgent.summary || "No summary reported yet."}
-        </Alert>
-      )}
       {failed && explanation && (
         <Alert tone="bad" title="Why it failed" className="calls-detail-alert">
           {explanation}

@@ -25,7 +25,6 @@ import {
   type ConcurrencyRange,
 } from "../api/calls";
 import { AICard } from "../components/ai/AICard";
-import { VoiceCard } from "../components/voice/VoiceCard";
 import {
   Alert,
   Badge,
@@ -228,7 +227,6 @@ export function Dashboard() {
         <DestinationsCard trunks={dataOf(trunks)} statuses={statuses} />
         <NodesCard cluster={dataOf(cluster)} />
         <AICard />
-        <VoiceCard />
       </div>
 
       <div className="calls-grid">
