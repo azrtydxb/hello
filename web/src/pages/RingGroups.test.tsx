@@ -87,7 +87,7 @@ describe("RingGroups", () => {
     // which can lose the race against the form on a loaded CI runner.
     const pick = await screen.findByLabelText("Add member");
     await waitFor(() => expect(pick).toBeEnabled());
-    fireEvent.change(pick, { target: { value: "1" } });
+    fireEvent.change(pick, { target: { value: "ext:1" } });
     fireEvent.click(screen.getByRole("button", { name: /^Add$/ }));
     fireEvent.click(screen.getByRole("button", { name: "Create group" }));
 
@@ -108,7 +108,15 @@ describe("RingGroups", () => {
         ignoreDnd: false,
         failureKind: "external",
         failureTarget: "+97142000100",
-        members: [{ extensionId: 1, position: 1, weight: 1, delay: 0 }],
+        members: [
+          {
+            extensionId: 1,
+            voiceAgentId: null,
+            position: 1,
+            weight: 1,
+            delay: 0,
+          },
+        ],
       },
     });
   });

@@ -117,6 +117,29 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
+    label: "Voice agents",
+    items: [
+      {
+        label: "Voice agents",
+        path: "/voice/agents",
+        phase: 5,
+        icon: "bot",
+      },
+      {
+        label: "Voice MCP servers",
+        path: "/voice/mcp-servers",
+        phase: 5,
+        icon: "wrench",
+      },
+      {
+        label: "Voice runtime",
+        path: "/voice/runtime",
+        phase: 5,
+        icon: "activity",
+      },
+    ],
+  },
+  {
     label: "Platform",
     items: [
       { label: "Cluster", path: "/cluster", phase: 3, icon: "server" },
@@ -167,7 +190,7 @@ export const EXACT_PATHS: ReadonlySet<string> = new Set(
     NAV_ITEMS.some((b) => b !== a && b.path.startsWith(a.path + "/")),
   )
     .map((i) => i.path)
-    .concat("/"),
+    .concat("/", "/voice/agents"),
 );
 
 /** The breadcrumb title for a location (the design's page titles). */
@@ -176,6 +199,7 @@ export function pageTitle(pathname: string): string | null {
   if (exact) return exact.label;
   if (/^\/history\/[^/]+$/.test(pathname)) return "Call detail";
   if (/^\/ai\/proposals\/[^/]+$/.test(pathname)) return "Proposal";
+  if (/^\/voice\/agents\/[^/]+$/.test(pathname)) return "Voice agent";
   const parent = NAV_ITEMS.filter(
     (i) => i.path !== "/" && pathname.startsWith(i.path + "/"),
   ).sort((a, b) => b.path.length - a.path.length)[0];

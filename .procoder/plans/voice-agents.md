@@ -125,10 +125,10 @@ Interfaces: produces the three runtime operations and the status; consumes contr
 Files: `web/src/pages/VoiceAgents.tsx`, `VoiceAgentEdit.tsx`, `VoiceMCPServers.tsx`, `VoiceRuntime.tsx`, their tests, the inbound route, ring group and extension pickers, dashboard card.
 Interfaces: consumes the routes of the spec's Interfaces table.
 
-- [ ] Agents list and wizard, editor tabs with versions, tools checklist and warnings; `VoiceAgents.test.tsx`, `VoiceAgentEdit.test.tsx`.
-- [ ] MCP servers page, role-aware credential field, plain-text discovery output; `VoiceMCPServers.test.tsx`.
-- [ ] Routing pickers and trace; `VoiceRouting.test.tsx`; Test tab following the next CDR; runtime page and card.
-- [ ] `procoder test` and `procoder lint` over `web/` green.
+- [x] Agents list and wizard, editor tabs with versions, tools checklist and warnings; `VoiceAgents.test.tsx`, `VoiceAgentEdit.test.tsx`.
+- [x] MCP servers page, role-aware credential field, plain-text discovery output; `VoiceMCPServers.test.tsx`.
+- [x] Routing pickers and trace; `VoiceRouting.test.tsx`; Test tab following the next CDR; runtime page and card.
+- [x] `procoder test` and `procoder lint` over `web/` green.
 
 ## Task 7: Fake talking-agent and end to end (lead, after Tasks 2-5)
 

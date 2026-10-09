@@ -7,6 +7,8 @@ import { fieldId } from "./Input";
 export interface SelectOption {
   value: string;
   label: string;
+  /** True greys the option out and refuses choosing it. */
+  disabled?: boolean;
 }
 
 /** Props for <Select>. */
@@ -64,7 +66,7 @@ export function Select({
           {...rest}
         >
           {opts.map((o) => (
-            <option key={o.value} value={o.value}>
+            <option key={o.value} value={o.value} disabled={o.disabled}>
               {o.label}
             </option>
           ))}
