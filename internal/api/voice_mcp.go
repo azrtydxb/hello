@@ -204,6 +204,12 @@ func (s *server) testVoiceMCPServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A test of a server that is not there is a 404; a test of one that is
+	// there is a result, whatever the peer did (spec S-9).
+	if _, _, err := s.Voice.MCPServer(r.Context(), id); err != nil {
+		s.voiceError(w, "voice mcp test", err)
+		return
+	}
 	res, err := s.Voice.TestConnection(r.Context(), id)
 	if err != nil {
 		s.voiceError(w, "voice mcp test", err)
