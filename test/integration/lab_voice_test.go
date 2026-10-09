@@ -58,6 +58,7 @@ func (lc *labClient) createVoiceAgent(name string) labVoiceAgent {
 		"name": name, "prompt": "You are the lab's receptionist. Be brief.",
 		"greeting": "Hello, you have reached the automated assistant.",
 		"language": "en", "extension": "8" + randDigits(7), "maxConcurrent": 1,
+		"callerVerification": "none",
 	}, &a, http.StatusCreated)
 	lc.t.Cleanup(func() {
 		_ = lc.do("DELETE", fmt.Sprintf("/api/v1/voice/agents/%d", a.ID), nil, nil, http.StatusNoContent)
@@ -75,6 +76,7 @@ func (lc *labClient) updateAgent(va labVoiceAgent, changes map[string]any) {
 		"name": va.Name, "prompt": "You are the lab's receptionist. Be brief.",
 		"greeting": "Hello, you have reached the automated assistant.",
 		"language": "en", "extension": va.Extension, "maxConcurrent": 1,
+		"callerVerification": "none",
 	}
 	for k, v := range changes {
 		body[k] = v
