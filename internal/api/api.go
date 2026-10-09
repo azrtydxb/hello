@@ -18,6 +18,7 @@ import (
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/version"
+	"github.com/azrtydxb/hello/internal/voice"
 )
 
 //go:embed openapi.json
@@ -61,6 +62,9 @@ type Store interface {
 	DeleteVoicemailMessage(ctx context.Context, actor string, id int64) (string, error)
 
 	ListRingGroups(ctx context.Context) ([]store.RingGroup, error)
+	// ListVoiceAgentRefs is the ring group editors' agent reference check
+	// (spec S-12): every agent's id, name and enabled state.
+	ListVoiceAgentRefs(ctx context.Context) ([]store.VoiceAgentRef, error)
 	GetRingGroup(ctx context.Context, id int64) (store.RingGroup, error)
 	CreateRingGroup(ctx context.Context, actor string, in store.RingGroupInput, check store.Check) (store.RingGroup, error)
 	UpdateRingGroup(ctx context.Context, actor string, id int64, in store.RingGroupInput, check store.Check) (store.RingGroup, error)
@@ -80,6 +84,10 @@ type Store interface {
 	CountCDRs(ctx context.Context) (store.CDRCounts, error)
 	CDRConcurrency(ctx context.Context, from, to time.Time, step time.Duration) ([]store.ConcurrencyPoint, error)
 	GetCDR(ctx context.Context, id int64) (store.CDR, routing.Trace, error)
+	// VoiceAgentCallByCorrelation joins the voice agent's call report of a
+	// CDR routed to an agent (spec voice-agents S-23); store.ErrNotFound
+	// before the report arrives.
+	VoiceAgentCallByCorrelation(ctx context.Context, correlationID string) (store.VoiceAgentCall, error)
 
 	ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]store.Recording, string, error)
 	GetRecording(ctx context.Context, id int64) (store.Recording, error)
@@ -132,6 +140,12 @@ type Config struct {
 	SIPDomain  string
 	SessionTTL time.Duration
 	Log        *slog.Logger
+	// VoiceSIPAddress is HELLO_VOICE_SIP_ADDRESS (spec voice-agents S-17):
+	// host:port of talking-agent. It feeds the routing engine's voice agent
+	// validation (SIP URIs are derived from it) and is empty when voice
+	// agents are not configured, which makes every route to an agent a
+	// validation error (voice_not_configured).
+	VoiceSIPAddress string
 	// Router is the routing engine; nil means routing.Compile.
 	Router Router
 	// Trunks reads trunk live state for /trunks/status and the route
@@ -172,6 +186,13 @@ type Config struct {
 	// AIAgent is the in-product AI agent (spec ai-agent); nil or off makes
 	// every AI agent operation but getAIStatus answer 503 ai_disabled.
 	AIAgent *ai.Service
+	// Voice is the voice agent registry (spec voice-agents); nil answers
+	// 503 on the voice routes.
+	Voice Voice
+	// VoiceRuntime is the voice runtime service (spec voice-agents S-19 to
+	// S-23); nil answers 503 voice_disabled on the voice-runtime operations
+	// and the voice status.
+	VoiceRuntime *voice.Service
 }
 
 type server struct{ Config }

@@ -98,6 +98,10 @@ type Config struct {
 	HATakeoverEnabled bool
 	HATakeoverPoll    time.Duration
 	HATakeoverJitter  time.Duration
+
+	// Voice is the talking-agent call leg (HELLO_VOICE_* via config.SIP,
+	// spec voice-agents S-15 to S-17, S-35); SIPAddress empty disables it.
+	Voice VoiceConfig
 }
 
 // Deps are the Server's collaborators.
@@ -138,6 +142,12 @@ type Deps struct {
 	// Membership reports the cluster's nodes (Phase 3); nil disables
 	// takeover.
 	Membership Membership
+	// VoiceSlots is the shared voice capacity state (S-35); nil disables
+	// capacity counting.
+	VoiceSlots VoiceSlots
+	// VoiceLimits reports agents' max_concurrent (S-2) from a cache
+	// refreshed off the call path; nil means unlimited.
+	VoiceLimits VoiceLimits
 }
 
 // Server is one SIP node.
@@ -170,6 +180,10 @@ type Server struct {
 	trunks   *trunkManager
 	// registrations is the last count of bindings this node registered.
 	registrations atomic.Int64
+	// voiceAddr is the voice agent's SIP address as a literal ip:port
+	// (S-14): the source of a request Hello refuses as a caller. Zero when
+	// voice agents are disabled or the address is a hostname.
+	voiceAddr netip.AddrPort
 	// answerHook, when set (tests only), runs as a call's winning fork is
 	// connected, before the call is marked connected.
 	answerHook atomic.Pointer[func()]
@@ -315,6 +329,16 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		lastEnd:   map[string]time.Time{},
 		digits:    map[*call]*digitBuffer{},
 		haOffline: map[string]*haOfflineNode{}, haLastActive: map[string]int{}, haIncSeen: map[string]haIncWatch{},
+	}
+	setDefault(&cfg.Voice.RingTimeout, 15*time.Second)
+	if cfg.Voice.SIPAddress != "" {
+		if host, port, err := net.SplitHostPort(cfg.Voice.SIPAddress); err == nil {
+			if a, err := netip.ParseAddr(host); err == nil {
+				if p, err := strconv.Atoi(port); err == nil && p > 0 && p < 65536 {
+					s.voiceAddr = netip.AddrPortFrom(a, uint16(p))
+				}
+			}
+		}
 	}
 	setDefault(&cfg.HADialogHeartbeat, 5*time.Second)
 	setDefault(&cfg.HATakeoverPoll, time.Second)

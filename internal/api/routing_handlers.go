@@ -69,9 +69,12 @@ func (s *server) configError(w http.ResponseWriter, what string, err error) {
 }
 
 // check is the whole-configuration validation (stage 2): the configuration
-// as it would be after the change must compile.
+// as it would be after the change must compile. The voice SIP address is
+// deployment configuration, not a database row, so it rides in here (spec
+// S-17: without it, a route to an agent is a validation error).
 func (s *server) check() store.Check {
 	return func(cfg routing.Config) []routing.FieldError {
+		cfg.VoiceSIPAddress = s.VoiceSIPAddress
 		_, errs := s.Router.Compile(cfg)
 		return errs
 	}
