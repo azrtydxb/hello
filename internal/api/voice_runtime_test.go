@@ -356,6 +356,14 @@ func TestVoiceRuntimeStatus(t *testing.T) {
 		t.Fatalf("status agents wrong: %s", rec.Body)
 	}
 
+	// An invalid ack body is 400 (the OpenAPI conformance check requires the
+	// documented 400 to be observed, and validation runs before the rate
+	// limiter, so this does not count against the six).
+	if rec := e.call("POST", "/api/v1/voice-runtime/ack", "runtime-token",
+		`{"revision":5,"agents":[{"name":"support","state":"cooking"}]}`); rec.Code != 400 {
+		t.Fatalf("invalid ack = %d %s, want 400", rec.Code, rec.Body)
+	}
+
 	// The seventh ack in a minute is refused (spec S-20).
 	for i := 0; i < 5; i++ { // the first ack of the minute already went above
 		if rec := e.call("POST", "/api/v1/voice-runtime/ack", "runtime-token", `{"revision":5}`); rec.Code != 204 {

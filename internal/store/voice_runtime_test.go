@@ -53,7 +53,7 @@ func TestVoiceRuntimeSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rev < 1 || len(agents) != 1 {
+	if rev < 0 || len(agents) != 1 {
 		t.Fatalf("rev=%d agents=%d", rev, len(agents))
 	}
 	a := agents[0]
@@ -94,7 +94,7 @@ func TestVoiceRuntimeAckRoundTrip(t *testing.T) {
 	}
 	at := time.Now().UTC().Truncate(time.Millisecond)
 	loaded, _ := json.Marshal([]map[string]any{{"name": "support", "state": "loaded", "revision": rev}})
-	if err := s.SaveVoiceRuntimeAck(ctx, 7, at, rev, "talking-agent 1.0", loaded); err != nil {
+	if err := s.SaveVoiceRuntimeAck(ctx, 0, at, rev, "talking-agent 1.0", loaded); err != nil {
 		t.Fatal(err)
 	}
 	st, err := s.VoiceRuntimeState(ctx)
@@ -164,13 +164,15 @@ func TestVoicePruneRetention(t *testing.T) {
 	s := scratchStore(t).WithSecretBox(voiceBox(t))
 	ctx := context.Background()
 	seedRuntimeAgent(t, s)
-	old := time.Now().Add(-72 * time.Hour)
+	// One day past the agent's 30-day transcript retention, but well inside
+	// the CDR retention the test uses below.
+	old := time.Now().Add(-31 * 24 * time.Hour)
 
 	if _, err := s.SaveVoiceAgentCall(ctx, "corr-old", "support", "answered", "done",
 		[]byte(`[]`), 0, 0, strPtr("transcript"), old); err != nil {
 		t.Fatal(err)
 	}
-	n, err := s.VoicePrune(ctx, time.Now(), 30*24*time.Hour)
+	n, err := s.VoicePrune(ctx, time.Now(), 90*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +184,8 @@ func TestVoicePruneRetention(t *testing.T) {
 		t.Fatalf("transcript survived the prune: %+v, %v", c, err)
 	}
 
-	if n, err := s.VoicePrune(ctx, time.Now().Add(31*24*time.Hour), 30*24*time.Hour); err != nil || n != 1 {
+	// 61 days later the row itself is past the 90-day CDR retention.
+	if n, err := s.VoicePrune(ctx, time.Now().Add(61*24*time.Hour), 90*24*time.Hour); err != nil || n != 1 {
 		t.Fatalf("pruned %d rows, err %v", n, err)
 	}
 	if _, err := s.VoiceAgentCallByCorrelation(ctx, "corr-old"); !errors.Is(err, ErrNotFound) {

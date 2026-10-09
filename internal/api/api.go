@@ -84,6 +84,10 @@ type Store interface {
 	CountCDRs(ctx context.Context) (store.CDRCounts, error)
 	CDRConcurrency(ctx context.Context, from, to time.Time, step time.Duration) ([]store.ConcurrencyPoint, error)
 	GetCDR(ctx context.Context, id int64) (store.CDR, routing.Trace, error)
+	// VoiceAgentCallByCorrelation joins the voice agent's call report of a
+	// CDR routed to an agent (spec voice-agents S-23); store.ErrNotFound
+	// before the report arrives.
+	VoiceAgentCallByCorrelation(ctx context.Context, correlationID string) (store.VoiceAgentCall, error)
 
 	ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]store.Recording, string, error)
 	GetRecording(ctx context.Context, id int64) (store.Recording, error)

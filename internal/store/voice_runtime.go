@@ -127,6 +127,9 @@ func (s *Store) voiceRuntimeServers(ctx context.Context, tx *sql.Tx, agentID int
 		if cred != nil {
 			v.Credential = cred
 		}
+		// The WHERE clause keeps only attachments whose server and
+		// attachment are enabled.
+		v.Enabled = true
 		v.Tools = []VoiceToolAccess{}
 		if err := json.Unmarshal(tools, &v.Tools); err != nil {
 			return nil, fmt.Errorf("store: voice runtime server %d tools: %w", v.ID, err)
@@ -180,7 +183,7 @@ func (s *Store) SaveVoiceRuntimeAck(ctx context.Context, accountID int64, at tim
 			revision = EXCLUDED.revision, last_seen_at = EXCLUDED.last_seen_at,
 			loaded = EXCLUDED.loaded, version = EXCLUDED.version,
 			service_account_id = EXCLUDED.service_account_id`,
-		rev, at, string(loaded), version, accountID)
+		rev, at, string(loaded), version, nullAccountID(accountID))
 	if err != nil {
 		return fmt.Errorf("store: save voice runtime ack: %w", err)
 	}
@@ -213,7 +216,7 @@ func (s *Store) SaveVoiceAgentCall(ctx context.Context, correlationID, agentName
 		VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
 		ON CONFLICT (correlation_id) DO NOTHING
 		RETURNING correlation_id`,
-		correlationID, agentName, outcome, summary, string(toolCalls), tokensIn, tokensOut, transcript, at).Scan(&id)
+		correlationID, agentName, outcome, summary, jsonOrNull(toolCalls), tokensIn, tokensOut, transcript, at).Scan(&id)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -310,7 +313,7 @@ func (s *Store) VoicePrune(ctx context.Context, now time.Time, cdrRetention time
 		UPDATE voice_agent_calls c SET transcript = NULL
 		FROM voice_agents a
 		WHERE a.name = c.agent_name AND c.transcript IS NOT NULL
-		  AND c.reported_at < $1 - (a.transcript_retention_days * interval '1 day')`, now)
+		  AND c.reported_at < $1::timestamptz - (a.transcript_retention_days * interval '1 day')`, now)
 	if err != nil {
 		return 0, fmt.Errorf("store: voice transcript prune: %w", err)
 	}
@@ -322,4 +325,21 @@ func (s *Store) VoicePrune(ctx context.Context, now time.Time, cdrRetention time
 	}
 	m, _ := res.RowsAffected()
 	return n + m, nil
+}
+
+// nullAccountID maps "no account known" to SQL NULL (the service account
+// column is a foreign key; the audit trail keeps what exists).
+func nullAccountID(id int64) any {
+	if id <= 0 {
+		return nil
+	}
+	return id
+}
+
+// jsonOrNull maps an empty JSON payload to SQL NULL ($n::jsonb refuses ”).
+func jsonOrNull(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return string(b)
 }
