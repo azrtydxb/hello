@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-08 14:27 UTC. procoder reads this
+Written 2026-10-09 07:45 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -63,12 +63,19 @@ Question: Phase 3 Valkey high availability
 
 Answer: Valkey Sentinel (primary, replica, three sentinels) in the lab, with automated failover tests
 
-## [spec] voice-agents
+## (no longer asked)
 
 Key: 0dbd568da15e
 Question: 7. **Agents in ring groups.** The spec forbids an agent in `ring-all`/`longest-idle`/`weighted` groups and recommends it as the failure target. Do you also want it as a normal `sequential` member (for example "ring the desk phone, then the assistant"), or only as a failure target?
 
 Answer: Sequential member and failure target both allowed (sequential and round-robin as in the spec).
+
+## [spec] trunk-internal-numbers
+
+Key: 102d6344a840
+Question: **Is a `486`/`404` distinction visible enough for the product?** An unallowed dial gets 404 like any unmatched DID; the product may prefer 403 to distinguish policy from numbering. Traces tell Hello's side; the wire code choice is open.
+
+Answer: 404 Not Found for out-of-policy dials, exactly as the spec is written — no 403 for policy, and traces remain Hello's side of the story.
 
 ## [decision] decisions.md
 
@@ -101,6 +108,13 @@ Question: Phone auto-provisioning: token hand-off for DHCP-discovered phones
 
 Answer: Trust on first use: the first fetch from a pre-registered MAC hands out its token once; an administrator can re-arm
 
+## [spec] trunk-internal-numbers
+
+Key: 1a00991f2313
+Question: **How does the consuming product signal?** The spec assumes IP-authenticated trunking with pinned source CIDRs (what exists; inbound digest for trunk peers stays out of scope). If the product cannot pin IPs — it runs in the same cluster but its egress addresses may not be static — Hello needs inbound digest registration for trunk peers, which is a phase-2 out-of-scope item and a materially larger change. Answer needed before the plan is tasked.
+
+Answer: Pinned IPs — the product's signalling IPs go into the trunk's source CIDR allowlist, exactly as the spec assumes. Digest REGISTER for trunk peers is out of scope (a possible later milestone).
+
 ## [decision] decisions.md
 
 Key: 1a17adfb2c72
@@ -110,6 +124,13 @@ Question: hello-control readiness during a Valkey outage
 - /readyz fails while Valkey is down (all management goes out of rotation)
 
 Answer: Ready stays green; live views return 503 and /readyz reports Valkey as degraded
+
+## [spec] trunk-internal-numbers
+
+Key: 1ab52c582e7f
+Question: **Should extensions be dialable from trunks under their external numbers too** (a DID map inside the `internal` lookup), or is the extension number itself the contract with the product? The spec takes the second: one route, extension numbers only.
+
+Answer: The extension number is the contract: the peer dials `sip:101@hello` and the number is matched against the trunk's allowed patterns; no DID-to-extension map.
 
 ## [decision] decisions.md
 
@@ -121,7 +142,7 @@ Question: UI package manager
 
 Answer: pnpm
 
-## [spec] voice-agents
+## (no longer asked)
 
 Key: 226906a02b58
 Question: 3. **MCP credentials beyond bearer/header.** Real MCP servers use OAuth 2.1. Is a static token or header enough for the servers you will attach (for example Hello's own MCP server, home-automation, calendar), or must a voice agent act through OAuth on behalf of a user (a much bigger design: token refresh, per-user consent, caller identity)?
@@ -140,7 +161,7 @@ Hello has one kind of user, who can do everything, so the role that should bound
 
 Answer: Add roles now: viewer (read-only), operator (day-to-day configuration writes), admin (users, roles, tokens, secrets, OAuth clients, settings); existing users become admin; the console shows and edits a user's role; the API enforces a minimum role on every route; consent, MCP scopes and service accounts are bounded by role
 
-## [spec] voice-agents
+## (no longer asked)
 
 Key: 2567471bf9c0
 Question: 6. **Licence of talking-agent and Breeze.** `LICENSE.md` contains only `ok`; Breeze TTS 2 weights are research-only. Which licence should talking-agent have, and is any commercial or customer use of the lab voice intended before a commercial TTS is chosen?
@@ -174,6 +195,13 @@ Question: Phase 2 media to carriers
 - Pull a minimal media relay forward into Phase 2
 
 Answer: Direct media (phone to carrier) as the roadmap says; anchoring waits for Phase 5
+
+## [spec] trunk-internal-numbers
+
+Key: 3312b6690483
+Question: **Do the product's own identifiers need to reach the phones?** A peer that calls with no caller ID is presented as `<trunk-name>` (S-4). If the phones should instead see the product's per-call agent identity, that is a header-passing feature this spec does not cover.
+
+Answer: The peer identifies itself per call: the trunk's per-call name/number is presented to the phones, and the received → trunk default → `<trunk-name>` ladder of S-4 stays exactly as the fallback. No header-passing feature in this spec.
 
 ## [decision] decisions.md
 
@@ -254,7 +282,7 @@ Question: Phone auto-provisioning: vendor redirect accounts
 
 Answer: Wire and live-test Snom SRAPS, Yealink RPS/YMCS and Grandstream GDMS on kw (credentials arrive later as sops secrets; live tests gated on them existing); Poly and Fanvil stay a manual step
 
-## [spec] voice-agents
+## (no longer asked)
 
 Key: 457b17a5bdc0
 Question: 9. **Where limits are enforced.** Concurrency is enforced by talking-agent (`486`). Should Hello also cap simultaneous agent calls per agent or globally (it knows the calls and could refuse before sending an INVITE), accepting that two sources then hold the number?
@@ -271,7 +299,7 @@ Question: Phase 1 call model
 
 Answer: B2BUA (signaling only, SDP passed through, media direct)
 
-## [spec] voice-agents
+## (no longer asked)
 
 Key: 48b95c74d6ea
 Question: 2. **Transcripts.** Default is summaries only, transcripts off per agent and readable by admins only, 30 days. Is that right for your use, and do you need transcripts at all (recorded-calls law differs by country, and an LLM summary is itself derived personal data)?
@@ -323,7 +351,7 @@ Question: Phase 7 in-call HA scope
 
 Answer: Anchor everything + full HA (all calls anchor, LAN-to-LAN included; reverses Phase 5 conditional anchoring deliberately)
 
-## [spec] voice-agents
+## (no longer asked)
 
 Key: 61c77b143f82
 Question: 8. **Test call.** The spec offers a test extension and CDR following, not a browser or console-originated call. Do you want Hello to originate a call to a chosen phone and connect it to the agent (needs click-to-call, which Hello does not have), or a WebRTC softphone in the console (a new media stack)?
@@ -337,7 +365,7 @@ Question: OPEN: Migration library — goose, or golang-migrate?
 
 Answer: goose
 
-## [spec] voice-agents
+## (no longer asked)
 
 Key: 67129a37407e
 Question: 5. **TLS/SRTP between Hello and talking-agent.** Both sit on the same LAN on kw. Is plaintext SIP/RTP acceptable on kw for phase 3 with the HMAC signature (S-16), or is SIPS/SRTP a requirement before first use?
@@ -373,6 +401,23 @@ Question: Phase 2 number rewriting syntax
 - Only strip-N-digits and prefix fields
 
 Answer: Regex match plus replacement template with capture groups, plus simple strip/prefix fields
+
+## [decision] decisions.md
+
+Key: 70cb4a126627
+Question: AI integration (2026-10-07)
+
+- Order: phase 1 (OpenAPI, MCP server, agent skills), then phase 2 (in-product AI agent), then phase 3 (voice agents)
+- External agent auth: full OAuth 2.1 now; Hello is the authorization server for MCP clients, with protected resource metadata, PKCE and client ID metadata documents
+- MCP writes: governed by token scope; write tools only for write-scoped clients, and every call is audited like a user call
+- MCP protocol: spec 2026-07-28 (falling back to 2025-11-25), official Go SDK github.com/modelcontextprotocol/go-sdk v1.8.x, stateless Streamable HTTP
+- In-product agent: suggest-only like Nexora; every change is a proposal with a before/after diff; an operator applies it, replayed through the API with their permissions
+- LLM: configurable endpoints (OpenAI-compatible or Anthropic), private by default; kw uses the local fastllm for now
+- All AI and LLM connections use our go-ai-sdk (github.com/azrtydxb/go-ai-sdk), never another client library
+- talking-agent stays a separate service and repo; Hello routes calls to it over SIP; it is changed there (personas from Hello, MCP client, auth)
+- TTS: keep Breeze TTS 2 for the lab (research-only weights); make TTS pluggable for a commercial model later
+
+Answer: As recorded — this is the decision of 2026-10-07, already in decisions.md; recording it here confirms it (phases 1 and 2 stay, phase 3 pivot recorded separately).
 
 ## [decision] decisions.md
 
@@ -455,7 +500,7 @@ Question: Phase 3 production SIP load balancer
 
 Answer: Kamailio dispatcher as the SIP-aware balancer, shipped and configured in deploy/ (the user requires a production-grade balancer, not lab tooling)
 
-## [spec] voice-agents
+## (no longer asked)
 
 Key: a9850601d3c6
 Question: 4. **Caller identity and tool authority.** Today a persona runs with the tools' credentials regardless of who calls (caller ID is never identity). Do you want any caller verification (spoken PIN, known-caller list per agent) before mutating tools, or is "confirm aloud" the whole control?
@@ -492,6 +537,22 @@ Answer: Add roles now: viewer (read-only), operator (day-to-day configuration wr
 
 ## [decision] decisions.md
 
+Key: bb1f0088a82e
+Question: Provisioning contract 4: MarkFetched and PromoteToken race a rotation or re-arm
+
+Found in the Task 3 pre-PR review (prov-control). Both update by phone id
+only, so a fetch that passed PhoneByToken just before a re-arm can set
+boot_armed = FALSE after it (undoing the re-arm), and a PromoteToken that
+lands after a concurrent rotate-token clears the token the phone is still
+using. Fixing it changes the fixed prov.Store contract (Task 1).
+
+- Pass the matched token hash to MarkFetched and PromoteToken and condition the updates on it (contract change; Task 2 and Task 3 adapt)
+- Accept the race as documented (an administrator re-arms or rotates again)
+
+Answer: The contract change — pass the matched token hash and condition the updates on it. That is what the merged prov-control code implements (`MarkFetched(ctx, id, hash, st)`, `PromoteToken(ctx, id, hash)` in `internal/prov/store.go`).
+
+## [decision] decisions.md
+
 Key: bc412d83b326
 Question: Phase 2 delivery
 
@@ -520,6 +581,18 @@ Question: Phase 3 delivery
 - Hold for your review first
 
 Answer: Push phase-3-ha and open a PR to main
+
+## [decision] decisions.md
+
+Key: cbda37117ab2
+Question: Pivot: voice agents out of Hello (2026-10-09)
+
+- The call/voice agents leave Hello and become a separate product; Hello talks to it only via SIP trunks.
+- The built-in AI agent (phase 2: assistant, proposals, detectors) STAYS in Hello, as does phase 1 external access (MCP/OAuth/skills) and per-call quality in CDRs.
+- The voice-agent feature is removed from Hello (registry, runtime API, call leg, voice_agent routing/console, voice tables). PR #65 (voice e2e) is closed unmerged.
+- New requirement instead: SIP trunks must be able to reach internal numbers (inbound trunk calls targeting internal extensions), not only the outside world.
+
+Answer: As recorded — the pivot of 2026-10-09 stands; this spec (trunk-internal-numbers) is the new requirement it created.
 
 ## [decision] decisions.md
 
@@ -561,7 +634,7 @@ Question: Merge PR #4
 
 Answer: Squash-merge after CI/Copilot are clean and findings fixed, then start Phase 4 (pre-authorized; no further merge question)
 
-## [spec] voice-agents
+## (no longer asked)
 
 Key: e7214583272b
 Question: 1. **Who is the audience of "tenant"?** Is talking-agent shared by several Hello instances (lab, kw, perhaps a customer), or only by Hello on kw plus its own web UI? This spec supports many Hello tenants with a per-tenant secret and service account; if there is only one, S-16's key ids and the tenant header can collapse to one secret and one account. (Assumed: many, because the decision calls it multi-tenant.)
