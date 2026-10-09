@@ -75,6 +75,12 @@ func seedRouting(t *testing.T, conn *pgx.Conn, box *secret.Box) (good, bad int64
 	_, err = conn.Exec(ctx, `INSERT INTO inbound_routes (position, name, did_kind, did, trunk_id, destination_kind, destination)
 		VALUES (1, 'Main DID', 'exact', '+97140000100', $1, 'extension', '100')`, good)
 	must(err)
+	// One agent with an extension (S-13 dialling), one without; both reach
+	// the routing input regardless of the enabled flag, like the control
+	// plane's own load does.
+	_, err = conn.Exec(ctx, `INSERT INTO voice_agents (name, sip_user, extension) VALUES
+		('support', '2001', '200'), ('billing', '2002', NULL)`)
+	must(err)
 	return good, bad
 }
 
@@ -122,6 +128,12 @@ func TestLoadRouting(t *testing.T) {
 	}
 	if in := c.Inbound[0]; in.TrunkID != good || in.Destination != "100" || in.DIDKind != "exact" {
 		t.Fatalf("inbound = %+v", in)
+	}
+	if len(c.VoiceAgents) != 2 || c.VoiceAgents[0].Name != "billing" || !c.VoiceAgents[1].Enabled || c.VoiceAgents[1].SIPUser != "2001" {
+		t.Fatalf("voice agents = %+v", c.VoiceAgents)
+	}
+	if c.VoiceAgentExtensions["200"] != "support" || len(c.VoiceAgentExtensions) != 1 {
+		t.Fatalf("voice agent extensions = %+v", c.VoiceAgentExtensions)
 	}
 	if why, ok := rs.Misconfigured[bad]; !ok || !strings.Contains(why, "does not open") {
 		t.Fatalf("misconfigured = %v; want trunk %d", rs.Misconfigured, bad)

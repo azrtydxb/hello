@@ -219,7 +219,7 @@ func run(args []string) error {
 	members := cluster.New(vk)
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
 		ReloadFailures: reloadFailures, Box: box, ConfigInvalid: routingInvalid, InvalidRevision: routingInvalidRev, Revision: configRevision,
-		DNSFailures: dnsFailures}
+		DNSFailures: dnsFailures, VoiceSIPAddress: cfg.Voice.SIPAddress}
 	// One incarnation per process: membership and every replicated dialog
 	// carry it, so a crash restarted in place under the same node ID is
 	// recognised and its calls are taken over at once (docs/ha.md).
