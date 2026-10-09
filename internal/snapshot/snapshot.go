@@ -473,11 +473,6 @@ type Watcher struct {
 	// Box opens sealed trunk passwords; without it every trunk with a
 	// password is misconfigured.
 	Box *secret.Box
-	// VoiceSIPAddress is HELLO_VOICE_SIP_ADDRESS (host:port) of the
-	// talking-agent deployment; empty keeps voice_agent destinations a
-	// compile error (spec S-17), like the control plane's whole-configuration
-	// validation.
-	VoiceSIPAddress string
 	// Resolver resolves trunk destinations (net.DefaultResolver); DNS runs
 	// every ResolveInterval (30s) on its own goroutine, never on the call
 	// path.
@@ -637,7 +632,6 @@ func (w *Watcher) loadAll(ctx context.Context, conn Querier) (*Snapshot, error) 
 	if err != nil {
 		return nil, err
 	}
-	cfg.VoiceSIPAddress = w.VoiceSIPAddress
 	var resolved map[string][]string
 	if r := w.resolved.Load(); r != nil {
 		resolved = *r

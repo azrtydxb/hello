@@ -1,9 +1,11 @@
 # `TestVoiceMetrics` in `internal/voice` and `TestNoSecretsInLogs` cover voice. They fail if a call, setup, unreachable reason, runtime check or MCP check does not move its metric, or a prompt, credential, signature or transcript appears in a log line.
 
-Status: open
+Status: cancelled 2026-10-09 — the voice-agent feature left Hello (decision "Pivot: voice agents out of Hello", .procoder/ask/decisions.md)
 Created: 2026-10-08
 Epic: voice-agents
 Sprint: -
+
+> Cancelled with the pivot recorded in `.procoder/ask/decisions.md`: voice agents leave Hello and become a separate product that connects through SIP trunks. History kept.
 
 ## Description
 

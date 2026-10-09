@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -22,7 +21,6 @@ type testDecision struct {
 	Kind       routing.Kind `json:"kind"`
 	Extension  string       `json:"extension"`
 	SIPURI     string       `json:"sipUri"`
-	VoiceAgent string       `json:"voiceAgent,omitempty"`
 	Number     string       `json:"number"`
 	CallerID   string       `json:"callerId"`
 	Route      string       `json:"route"`
@@ -105,7 +103,6 @@ func (s *server) routingTest(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "routing test: load configuration", err)
 		return
 	}
-	snap.Config.VoiceSIPAddress = s.VoiceSIPAddress
 	table, errs := s.Router.Compile(snap.Config)
 	if len(errs) > 0 || table == nil {
 		s.Log.Error("routing test: saved configuration does not compile", "fields", errs)
@@ -135,9 +132,6 @@ func (s *server) routingTest(w http.ResponseWriter, r *http.Request) {
 	out := testDecision{
 		Kind: d.Kind, Extension: d.Extension, SIPURI: d.SIPURI, Number: d.Number, CallerID: d.CallerID,
 		Route: d.Route, Trunks: []string{}, Emergency: d.Emergency, RejectCode: d.RejectCode, Reason: d.Reason,
-	}
-	if d.VoiceAgent != nil {
-		out.VoiceAgent = d.VoiceAgent.Name
 	}
 	for _, c := range d.Candidates {
 		if c.Trunk != nil {
@@ -224,31 +218,11 @@ type cdrDetail struct {
 	Trace       routing.Trace `json:"trace"`
 	Explanation string        `json:"explanation"`
 	Note        string        `json:"note"`
-	// VoiceAgent is the call report joined by correlation id (spec S-23);
-	// nil when the call was not routed to a voice agent.
-	VoiceAgent *cdrVoiceAgent `json:"voiceAgent,omitempty"`
-}
-
-// cdrVoiceAgent is the CDR detail's voiceAgent object (spec S-23): the
-// agent, its outcome and summary, the tool calls and the token counts of
-// the joined report. TranscriptPresent says whether the agent recorded a
-// transcript; the transcript itself follows the runtime's retention, it is
-// not part of the CDR.
-type cdrVoiceAgent struct {
-	Name              string                `json:"name"`
-	Outcome           string                `json:"outcome"`
-	Summary           string                `json:"summary"`
-	ToolCalls         []store.VoiceToolCall `json:"toolCalls"`
-	TokensIn          int64                 `json:"tokensIn"`
-	TokensOut         int64                 `json:"tokensOut"`
-	TranscriptPresent bool                  `json:"transcriptPresent"`
 }
 
 // getCDR is GET /api/v1/cdrs/{id}: the CDR, its routing trace, and for a
 // failed call a one-line explanation (the last trace step), for an
-// answered call that failed over a note saying so. A call routed to a voice
-// agent carries its joined call report; one that has not arrived yet reads
-// as unreported.
+// answered call that failed over a note saying so.
 func (s *server) getCDR(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -260,36 +234,7 @@ func (s *server) getCDR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := cdrDetail{CDR: c, Trace: trace, Explanation: explain(c, trace), Note: note(c, trace)}
-	if c.VoiceAgentName != "" {
-		va, err := s.voiceAgentOf(r.Context(), c)
-		if err != nil {
-			s.internal(w, "cdr voice agent report", err)
-			return
-		}
-		d.VoiceAgent = va
-	}
 	writeJSON(w, http.StatusOK, d)
-}
-
-// voiceAgentOf joins the call report of a CDR routed to a voice agent; a
-// report that has not arrived yet (the report may come after the CDR) reads
-// as unreported.
-func (s *server) voiceAgentOf(ctx context.Context, c store.CDR) (*cdrVoiceAgent, error) {
-	va := &cdrVoiceAgent{Name: c.VoiceAgentName, Outcome: "unreported", ToolCalls: []store.VoiceToolCall{}}
-	rep, err := s.Store.VoiceAgentCallByCorrelation(ctx, c.CorrelationID)
-	if errors.Is(err, store.ErrNotFound) {
-		return va, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	va.Outcome = rep.Outcome
-	va.Summary = rep.Summary
-	va.ToolCalls = rep.ToolCalls
-	va.TokensIn = rep.TokensIn
-	va.TokensOut = rep.TokensOut
-	va.TranscriptPresent = rep.TranscriptPresent
-	return va, nil
 }
 
 func explain(c store.CDR, trace routing.Trace) string {

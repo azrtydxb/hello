@@ -1,9 +1,11 @@
 # `procoder test` and `procoder lint` over `web/` pass. `VoiceAgents.test.tsx`, `VoiceAgentEdit.test.tsx`, `VoiceMCPServers.test.tsx` and `VoiceRouting.test.tsx` fail if a viewer sees an edit control, an operator sees a credential field, a credential value is rendered, discovery output is rendered as HTML, an empty allowlist hides its warning, the routing pickers omit the voice agent, a disabled agent is selectable, or the Test tab does not follow the next CDR.
 
-Status: open
+Status: cancelled 2026-10-09 — the voice-agent feature left Hello (decision "Pivot: voice agents out of Hello", .procoder/ask/decisions.md)
 Created: 2026-10-08
 Epic: voice-agents
 Sprint: -
+
+> Cancelled with the pivot recorded in `.procoder/ask/decisions.md`: voice agents leave Hello and become a separate product that connects through SIP trunks. History kept.
 
 ## Description
 

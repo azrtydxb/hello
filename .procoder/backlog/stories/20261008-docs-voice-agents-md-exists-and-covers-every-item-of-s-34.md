@@ -1,9 +1,11 @@
 # `docs/voice-agents.md` exists and covers every item of S-34; `TestDocsVoiceAgents` in `test/deploy` fails if its operation table or limits differ from the code, or the README does not link it.
 
-Status: open
+Status: cancelled 2026-10-09 — the voice-agent feature left Hello (decision "Pivot: voice agents out of Hello", .procoder/ask/decisions.md)
 Created: 2026-10-08
 Epic: voice-agents
 Sprint: -
+
+> Cancelled with the pivot recorded in `.procoder/ask/decisions.md`: voice agents leave Hello and become a separate product that connects through SIP trunks. History kept.
 
 ## Description
 

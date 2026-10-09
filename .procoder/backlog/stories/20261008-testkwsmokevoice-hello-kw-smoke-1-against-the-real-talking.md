@@ -1,9 +1,11 @@
 # `TestKwSmokeVoice` (`HELLO_KW_SMOKE=1`, against the real talking-agent on kw after its changes land) passes. It fails if a call to a test agent through a kw DID does not answer with the greeting, call one attached MCP tool, appear in the CDRs with its summary, and end cleanly.
 
-Status: open
+Status: cancelled 2026-10-09 — the voice-agent feature left Hello (decision "Pivot: voice agents out of Hello", .procoder/ask/decisions.md)
 Created: 2026-10-08
 Epic: voice-agents
 Sprint: -
+
+> Cancelled with the pivot recorded in `.procoder/ask/decisions.md`: voice agents leave Hello and become a separate product that connects through SIP trunks. History kept.
 
 ## Description
 

@@ -26,29 +26,7 @@ type Table struct {
 	inbound    []compiledInbound  // sorted by Position
 	extensions map[string]string
 	resolved   map[int64][]netip.Addr
-	// voice is every agent by name; voiceExt an agent extension by number.
-	// voiceAddr is Config.VoiceSIPAddress, which derived SIP URIs need at
-	// Decide time (an agent's extension dial resolves there, and the engine
-	// refuses that when voice agents are not configured).
-	voice     map[string]VoiceAgent
-	voiceExt  map[string]string // extension number -> agent name
-	voiceAddr string
 }
-
-// voiceRef is the Decision's agent reference for the agent named name, with
-// its SIP URI towards talking-agent. ok is false when name is not in the
-// Table (Compile guarantees it is for every destination it accepted).
-func (t *Table) voiceRef(name string) (ref VoiceRef, uri string, ok bool) {
-	a, ok := t.voice[name]
-	if !ok {
-		return VoiceRef{}, "", false
-	}
-	return VoiceRef{Name: a.Name, SIPUser: a.SIPUser}, "sip:" + a.SIPUser + "@" + t.voiceAddr, true
-}
-
-// voiceNotConfigured is the compile and Decide reason when
-// HELLO_VOICE_SIP_ADDRESS is unset (spec S-17).
-const voiceNotConfigured = "voice agents are not configured (HELLO_VOICE_SIP_ADDRESS is unset)"
 
 type compiledOutbound struct {
 	r        OutboundRoute
@@ -81,14 +59,10 @@ func Compile(cfg Config) (*Table, []FieldError) {
 		trunkIdx:   make(map[int64]int, len(cfg.Trunks)),
 		extensions: maps.Clone(cfg.Extensions),
 		resolved:   make(map[int64][]netip.Addr, len(cfg.ResolvedIPs)),
-		voice:      make(map[string]VoiceAgent, len(cfg.VoiceAgents)),
-		voiceExt:   make(map[string]string, len(cfg.VoiceAgentExtensions)),
-		voiceAddr:  cfg.VoiceSIPAddress,
 	}
 	if t.extensions == nil {
 		t.extensions = map[string]string{}
 	}
-	t.compileVoiceAgents(cfg.VoiceAgents, cfg.VoiceAgentExtensions, &errs)
 	t.compileTrunks(cfg.Trunks, &errs)
 	t.compileOutbound(cfg.Outbound, &errs)
 	t.compileInbound(cfg.Inbound, &errs)
@@ -108,42 +82,6 @@ func Compile(cfg Config) (*Table, []FieldError) {
 		return nil, errs
 	}
 	return t, nil
-}
-
-// compileVoiceAgents indexes the registry input and validates it: a name
-// and sip user are required, names and extensions are unique, and an agent
-// extension must not collide with an extension-table number (the registry
-// refuses that with 409; Compile is the second net). Errors use
-// voiceAgents[i] paths, which configPath does not map, so such a leftover
-// never blocks an unrelated change twice.
-func (t *Table) compileVoiceAgents(in []VoiceAgent, exts map[string]string, errs *[]FieldError) {
-	for i, a := range in {
-		p := fmt.Sprintf("voiceAgents[%d]", i)
-		if a.Name == "" {
-			addErr(errs, p+".name", "is required")
-			continue
-		}
-		if _, dup := t.voice[a.Name]; dup {
-			addErr(errs, p+".name", fmt.Sprintf("duplicate voice agent name %s", quote(a.Name)))
-			continue
-		}
-		if a.SIPUser == "" {
-			addErr(errs, p+".sipUser", fmt.Sprintf("is required for voice agent %s", quote(a.Name)))
-			continue
-		}
-		t.voice[a.Name] = a
-	}
-	for num, name := range exts {
-		if _, dup := t.voiceExt[num]; dup {
-			addErr(errs, `voiceAgents[?].extension`, fmt.Sprintf("extension %s is claimed by two voice agents", quote(num)))
-			continue
-		}
-		if _, clash := t.extensions[num]; clash {
-			addErr(errs, `voiceAgents[?].extension`, fmt.Sprintf("extension %s is both a voice agent's and an extension-table number", quote(num)))
-			continue
-		}
-		t.voiceExt[num] = name
-	}
 }
 
 func (t *Table) compileTrunks(in []Trunk, errs *[]FieldError) {
@@ -355,18 +293,8 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 		if !validSIPURI(r.Destination) {
 			addErr(errs, p+".destination", "must be a sip: or sips: URI without whitespace")
 		}
-	case "voice_agent":
-		a, ok := t.voice[r.Destination]
-		switch {
-		case !ok:
-			addErr(errs, p+".destination", fmt.Sprintf("voice agent %s does not exist", quote(r.Destination)))
-		case !a.Enabled:
-			addErr(errs, p+".destination", fmt.Sprintf("voice agent %s is disabled", quote(r.Destination)))
-		case t.voiceAddr == "":
-			addErr(errs, p+".destination", voiceNotConfigured)
-		}
 	default:
-		addErr(errs, p+".destinationKind", `must be "extension", "external", "sip_uri" or "voice_agent"`)
+		addErr(errs, p+".destinationKind", `must be "extension", "external" or "sip_uri"`)
 	}
 }
 

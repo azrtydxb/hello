@@ -286,7 +286,7 @@ func (s *Server) clientCredentials(ctx context.Context, r *http.Request, ca clie
 		// The account's scopes, bounded by its role now.
 		allowed := auth.Scopes{}
 		for _, sc := range c.Scopes {
-			if auth.ServiceOnly(sc) || auth.GrantableScopes(c.Role).Has(sc) {
+			if auth.GrantableScopes(c.Role).Has(sc) {
 				allowed = append(allowed, sc)
 			}
 		}

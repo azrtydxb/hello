@@ -891,39 +891,7 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 	if err := rows.Err(); err != nil {
 		return snap, err
 	}
-	if err := s.loadVoiceAgents(ctx, q, cfg); err != nil {
-		return snap, err
-	}
 	return snap, nil
-}
-
-// loadVoiceAgents adds the registry to the routing input: name, sip user and
-// enabled state for the engine's compile-time validation of voice_agent
-// destinations, and every agent's extension for the internal dialling of
-// S-13. The registry tables are part of the routing configuration's
-// consistency: a route may name an agent, so their rows are read in the same
-// repeatable-read transaction.
-func (s *Store) loadVoiceAgents(ctx context.Context, q querier, cfg *routing.Config) error {
-	rows, err := q.QueryContext(ctx, `SELECT name, sip_user, enabled, extension FROM voice_agents ORDER BY name`)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var a routing.VoiceAgent
-		var ext sql.NullString
-		if err := rows.Scan(&a.Name, &a.SIPUser, &a.Enabled, &ext); err != nil {
-			return err
-		}
-		cfg.VoiceAgents = append(cfg.VoiceAgents, a)
-		if ext.Valid {
-			if cfg.VoiceAgentExtensions == nil {
-				cfg.VoiceAgentExtensions = map[string]string{}
-			}
-			cfg.VoiceAgentExtensions[ext.String] = a.Name
-		}
-	}
-	return rows.Err()
 }
 
 // sealedPasswords reads every set password ciphertext. It is used only to

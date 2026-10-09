@@ -63,10 +63,6 @@ import { RouteTest } from "./pages/RouteTest";
 import { RoutesPage } from "./pages/Routes";
 import { RingGroups } from "./pages/RingGroups";
 import { System } from "./pages/System";
-import { VoiceAgentEdit } from "./pages/VoiceAgentEdit";
-import { VoiceAgents } from "./pages/VoiceAgents";
-import { VoiceMCPServers } from "./pages/VoiceMCPServers";
-import { VoiceRuntime } from "./pages/VoiceRuntime";
 import { Trunks } from "./pages/Trunks";
 import { Voicemail } from "./pages/Voicemail";
 import { useControlPlane } from "./useControlPlane";
@@ -95,9 +91,6 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/ai/proposals": AIProposals,
   "/ai/status": AIStatus,
   "/users": Users,
-  "/voice/agents": VoiceAgents,
-  "/voice/mcp-servers": VoiceMCPServers,
-  "/voice/runtime": VoiceRuntime,
 };
 
 const ROLE_LABELS = {
@@ -240,7 +233,6 @@ export function App() {
               element={<Navigate to="/routes" replace />}
             />
             <Route path="/history/:id" element={<CallDetail />} />
-            <Route path="/voice/agents/:id" element={<VoiceAgentEdit />} />
             <Route path="/ai/assistant/:id" element={<AIAssistant />} />
             <Route path="/ai/proposals/:id" element={<AIProposalDetail />} />
             {/* Phones sections; static paths outrank /phones/:id. */}

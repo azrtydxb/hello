@@ -163,128 +163,114 @@ by `go run ./internal/mcp/cmd/doctable` and `TestDocsAIAccess` keeps them
 current.
 
 <!-- doctable:begin -->
+| Tool | Scope | Operation | What it does |
+|---|---|---|---|
+| `listAIAgents` | read | `GET /api/v1/ai/agents` | Background agents |
+| `listAIFindings` | read | `GET /api/v1/ai/findings` | AIOps findings |
+| `getAIFinding` | read | `GET /api/v1/ai/findings/{id}` | One finding |
+| `listAIProposals` | read | `GET /api/v1/ai/proposals` | AI proposals |
+| `getAIProposal` | read | `GET /api/v1/ai/proposals/{id}` | One proposal with its diff |
+| `listAISessions` | read | `GET /api/v1/ai/sessions` | Assistant sessions |
+| `getAISession` | read | `GET /api/v1/ai/sessions/{id}` | One assistant session |
+| `getAISettings` | read | `GET /api/v1/ai/settings` | External AI access settings |
+| `getAIStatus` | read | `GET /api/v1/ai/status` | AI agent status |
+| `getAITask` | read | `GET /api/v1/ai/tasks/{id}` | An AI task |
+| `listAnnouncements` | read | `GET /api/v1/announcements` | List announcements |
+| `deleteAnnouncement` | write | `DELETE /api/v1/announcements/{id}` | Delete an announcement |
+| `getMe` | read | `GET /api/v1/auth/me` | The authenticated user |
+| `listCalls` | read | `GET /api/v1/calls` | Every active call in the cluster (from Valkey) |
+| `listCDRs` | read | `GET /api/v1/cdrs` | Call detail records, newest first |
+| `cdrConcurrency` | read | `GET /api/v1/cdrs/concurrency` | Recorded calls in progress over a time window, by direction |
+| `countCDRs` | read | `GET /api/v1/cdrs/counts` | How many call records exist, and how many failed |
+| `getCDR` | read | `GET /api/v1/cdrs/{id}` | One CDR with its routing trace and failure explanation |
+| `getCluster` | read | `GET /api/v1/cluster` | Cluster members, dependency health and configuration revision |
+| `listClusterNodes` | read | `GET /api/v1/cluster/nodes` | Every member, live and OFFLINE |
+| `drainNode` | admin | `POST /api/v1/cluster/nodes/{id}/drain` | Ask a node to drain |
+| `undrainNode` | admin | `DELETE /api/v1/cluster/nodes/{id}/drain` | Cancel a drain request |
+| `listDevices` | read | `GET /api/v1/devices` | Every device, ordered by SIP username |
+| `createDevice` | write | `POST /api/v1/devices` | Create a device; its SIP secret is returned only in this response |
+| `getDevice` | read | `GET /api/v1/devices/{id}` | One device (never its secret) |
+| `updateDevice` | write | `PATCH /api/v1/devices/{id}` | Enable, disable or move a device |
+| `deleteDevice` | write | `DELETE /api/v1/devices/{id}` | Delete a device |
+| `listAuthFailures` | read | `GET /api/v1/diagnostics/auth-failures` | Source IPs with failed authentications |
+| `clearAuthFailures` | write | `DELETE /api/v1/diagnostics/auth-failures/{ip}` | Unblock a source IP |
+| `getDeviceDiagnostics` | read | `GET /api/v1/diagnostics/devices/{id}` | Why a device is or is not registered |
+| `listExtensions` | read | `GET /api/v1/extensions` | Every extension, ordered by number |
+| `createExtension` | write | `POST /api/v1/extensions` | Create an extension |
+| `getExtension` | read | `GET /api/v1/extensions/{id}` | One extension |
+| `updateExtension` | write | `PATCH /api/v1/extensions/{id}` | Change an extension's number or name |
+| `deleteExtension` | write | `DELETE /api/v1/extensions/{id}` | Delete an extension and its devices |
+| `getExtensionVoicemail` | read | `GET /api/v1/extensions/{id}/voicemail` | One extension's voicemail box |
+| `updateExtensionVoicemail` | write | `PUT /api/v1/extensions/{id}/voicemail` | Change a voicemail box |
+| `listFeatureCodes` | read | `GET /api/v1/feature-codes` | List DTMF feature codes |
+| `putFeatureCodes` | write | `PUT /api/v1/feature-codes` | Replace the DTMF feature codes |
+| `listPhones` | read | `GET /api/v1/phones` | Every provisioned phone, ordered by MAC |
+| `createPhone` | write | `POST /api/v1/phones` | Add a phone; binding an existing device rotates its secret. The provisioning URL with the token is returned only here |
+| `getPhone` | read | `GET /api/v1/phones/{id}` | One phone |
+| `updatePhone` | write | `PATCH /api/v1/phones/{id}` | Change a phone; deviceId null unbinds (and disables) it, a new deviceId or extensionId rebinds it and rotates that device's secret |
+| `deletePhone` | write | `DELETE /api/v1/phones/{id}` | Delete a phone; its device stays without the sealed secret |
+| `listPhoneFetches` | read | `GET /api/v1/phones/{id}/fetches` | The phone's provisioning fetches, newest first |
+| `previewPhoneFile` | read | `GET /api/v1/phones/{id}/preview` | Render a file as the phone would get it, with the SIP secret, admin password and token masked; not a fetch |
+| `listPresence` | read | `GET /api/v1/presence` | Device presence (BLF states) |
+| `listFirmware` | read | `GET /api/v1/prov/firmware` | Uploaded firmware files |
+| `putFirmwarePins` | write | `PUT /api/v1/prov/firmware/pins` | Replace every firmware pin |
+| `deleteFirmware` | write | `DELETE /api/v1/prov/firmware/{id}` | Delete a firmware file; refused while pinned |
+| `listRedirectAccounts` | admin | `GET /api/v1/prov/redirect` | The vendor redirect-service accounts |
+| `putRedirectAccount` | admin | `PUT /api/v1/prov/redirect/{vendor}` | Set a vendor's account; credentials are checked with the vendor, sealed and never returned. Accounts set by the deployment are read-only |
+| `deleteRedirectAccount` | admin | `DELETE /api/v1/prov/redirect/{vendor}` | Remove a vendor's stored account |
+| `checkRedirectAccount` | admin | `POST /api/v1/prov/redirect/{vendor}/check` | Test the vendor's effective credentials |
+| `getProvSettings` | read | `GET /api/v1/prov/settings` | Computed provisioning URLs, CA fingerprint and DHCP option values |
+| `listProvTemplates` | read | `GET /api/v1/prov/templates` | Built-in and stored provisioning templates |
+| `createProvTemplate` | write | `POST /api/v1/prov/templates` | Create a template |
+| `validateProvTemplate` | write | `POST /api/v1/prov/templates/validate` | Validate a template without saving it |
+| `getProvTemplate` | read | `GET /api/v1/prov/templates/{id}` | One template |
+| `updateProvTemplate` | write | `PATCH /api/v1/prov/templates/{id}` | Change a stored template; the previous version is kept |
+| `deleteProvTemplate` | write | `DELETE /api/v1/prov/templates/{id}` | Delete a stored template; refused while a phone overrides with it |
+| `copyProvTemplate` | write | `POST /api/v1/prov/templates/{id}/copy` | Copy a template (built-in or stored) to edit, one priority higher |
+| `listRecordings` | read | `GET /api/v1/recordings` | List call recordings |
+| `deleteRecording` | write | `DELETE /api/v1/recordings/{id}` | Delete a recording |
+| `listRegistrations` | read | `GET /api/v1/registrations` | Every registered contact binding in the cluster (from Valkey) |
+| `listRingGroups` | read | `GET /api/v1/ring-groups` | List ring/hunt groups |
+| `createRingGroup` | write | `POST /api/v1/ring-groups` | Create a ring/hunt group |
+| `getRingGroup` | read | `GET /api/v1/ring-groups/{id}` | One ring/hunt group |
+| `updateRingGroup` | write | `PATCH /api/v1/ring-groups/{id}` | Change a ring/hunt group |
+| `deleteRingGroup` | write | `DELETE /api/v1/ring-groups/{id}` | Delete a ring/hunt group |
+| `listInboundRoutes` | read | `GET /api/v1/routes/inbound` | Every inbound route in position order |
+| `createInboundRoute` | write | `POST /api/v1/routes/inbound` | Append an inbound route |
+| `reorderInboundRoutes` | write | `PUT /api/v1/routes/inbound/order` | Reorder every inbound route at once |
+| `getInboundRoute` | read | `GET /api/v1/routes/inbound/{id}` | One inbound route |
+| `updateInboundRoute` | write | `PATCH /api/v1/routes/inbound/{id}` | Change an inbound route |
+| `deleteInboundRoute` | write | `DELETE /api/v1/routes/inbound/{id}` | Delete an inbound route |
+| `listOutboundRoutes` | read | `GET /api/v1/routes/outbound` | Every outbound route in position order |
+| `createOutboundRoute` | write | `POST /api/v1/routes/outbound` | Append an outbound route |
+| `reorderOutboundRoutes` | write | `PUT /api/v1/routes/outbound/order` | Reorder every outbound route at once |
+| `getOutboundRoute` | read | `GET /api/v1/routes/outbound/{id}` | One outbound route |
+| `updateOutboundRoute` | write | `PATCH /api/v1/routes/outbound/{id}` | Change an outbound route |
+| `deleteOutboundRoute` | write | `DELETE /api/v1/routes/outbound/{id}` | Delete an outbound route |
+| `testRouting` | write | `POST /api/v1/routing/test` | Decide a call against the saved configuration without placing it |
+| `listSkills` | read | `GET /api/v1/skills` | The agent skills this Hello ships |
+| `listTrunks` | read | `GET /api/v1/trunks` | Every trunk (never its password) |
+| `createTrunk` | write | `POST /api/v1/trunks` | Create a trunk |
+| `listTrunkStatus` | read | `GET /api/v1/trunks/status` | Live registration, destination health and active calls of every trunk |
+| `getTrunk` | read | `GET /api/v1/trunks/{id}` | One trunk (never its password) |
+| `updateTrunk` | write | `PATCH /api/v1/trunks/{id}` | Change a trunk |
+| `deleteTrunk` | write | `DELETE /api/v1/trunks/{id}` | Delete a trunk |
+| `getVersion` |  | `GET /api/v1/version` | Build and configuration revision of this control-plane node |
+| `listVoicemailBoxes` | read | `GET /api/v1/voicemail/boxes` | List voicemail boxes |
+| `listVoicemailMessages` | read | `GET /api/v1/voicemail/messages` | List a box's voicemail messages |
+| `deleteVoicemailMessage` | write | `DELETE /api/v1/voicemail/messages/{id}` | Delete a voicemail message |
+| `markVoicemailMessageHeard` | write | `POST /api/v1/voicemail/messages/{id}/heard` | Mark a voicemail message heard |
 
-| Tool                        | Scope | Operation                                             | What it does                                                                                                                             |
-| --------------------------- | ----- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `listAIAgents`              | read  | `GET /api/v1/ai/agents`                               | Background agents                                                                                                                        |
-| `listAIFindings`            | read  | `GET /api/v1/ai/findings`                             | AIOps findings                                                                                                                           |
-| `getAIFinding`              | read  | `GET /api/v1/ai/findings/{id}`                        | One finding                                                                                                                              |
-| `listAIProposals`           | read  | `GET /api/v1/ai/proposals`                            | AI proposals                                                                                                                             |
-| `getAIProposal`             | read  | `GET /api/v1/ai/proposals/{id}`                       | One proposal with its diff                                                                                                               |
-| `listAISessions`            | read  | `GET /api/v1/ai/sessions`                             | Assistant sessions                                                                                                                       |
-| `getAISession`              | read  | `GET /api/v1/ai/sessions/{id}`                        | One assistant session                                                                                                                    |
-| `getAISettings`             | read  | `GET /api/v1/ai/settings`                             | External AI access settings                                                                                                              |
-| `getAIStatus`               | read  | `GET /api/v1/ai/status`                               | AI agent status                                                                                                                          |
-| `getAITask`                 | read  | `GET /api/v1/ai/tasks/{id}`                           | An AI task                                                                                                                               |
-| `listAnnouncements`         | read  | `GET /api/v1/announcements`                           | List announcements                                                                                                                       |
-| `deleteAnnouncement`        | write | `DELETE /api/v1/announcements/{id}`                   | Delete an announcement                                                                                                                   |
-| `getMe`                     | read  | `GET /api/v1/auth/me`                                 | The authenticated user                                                                                                                   |
-| `listCalls`                 | read  | `GET /api/v1/calls`                                   | Every active call in the cluster (from Valkey)                                                                                           |
-| `listCDRs`                  | read  | `GET /api/v1/cdrs`                                    | Call detail records, newest first                                                                                                        |
-| `cdrConcurrency`            | read  | `GET /api/v1/cdrs/concurrency`                        | Recorded calls in progress over a time window, by direction                                                                              |
-| `countCDRs`                 | read  | `GET /api/v1/cdrs/counts`                             | How many call records exist, and how many failed                                                                                         |
-| `getCDR`                    | read  | `GET /api/v1/cdrs/{id}`                               | One CDR with its routing trace and failure explanation                                                                                   |
-| `getCluster`                | read  | `GET /api/v1/cluster`                                 | Cluster members, dependency health and configuration revision                                                                            |
-| `listClusterNodes`          | read  | `GET /api/v1/cluster/nodes`                           | Every member, live and OFFLINE                                                                                                           |
-| `drainNode`                 | admin | `POST /api/v1/cluster/nodes/{id}/drain`               | Ask a node to drain                                                                                                                      |
-| `undrainNode`               | admin | `DELETE /api/v1/cluster/nodes/{id}/drain`             | Cancel a drain request                                                                                                                   |
-| `listDevices`               | read  | `GET /api/v1/devices`                                 | Every device, ordered by SIP username                                                                                                    |
-| `createDevice`              | write | `POST /api/v1/devices`                                | Create a device; its SIP secret is returned only in this response                                                                        |
-| `getDevice`                 | read  | `GET /api/v1/devices/{id}`                            | One device (never its secret)                                                                                                            |
-| `updateDevice`              | write | `PATCH /api/v1/devices/{id}`                          | Enable, disable or move a device                                                                                                         |
-| `deleteDevice`              | write | `DELETE /api/v1/devices/{id}`                         | Delete a device                                                                                                                          |
-| `listAuthFailures`          | read  | `GET /api/v1/diagnostics/auth-failures`               | Source IPs with failed authentications                                                                                                   |
-| `clearAuthFailures`         | write | `DELETE /api/v1/diagnostics/auth-failures/{ip}`       | Unblock a source IP                                                                                                                      |
-| `getDeviceDiagnostics`      | read  | `GET /api/v1/diagnostics/devices/{id}`                | Why a device is or is not registered                                                                                                     |
-| `listExtensions`            | read  | `GET /api/v1/extensions`                              | Every extension, ordered by number                                                                                                       |
-| `createExtension`           | write | `POST /api/v1/extensions`                             | Create an extension                                                                                                                      |
-| `getExtension`              | read  | `GET /api/v1/extensions/{id}`                         | One extension                                                                                                                            |
-| `updateExtension`           | write | `PATCH /api/v1/extensions/{id}`                       | Change an extension's number or name                                                                                                     |
-| `deleteExtension`           | write | `DELETE /api/v1/extensions/{id}`                      | Delete an extension and its devices                                                                                                      |
-| `getExtensionVoicemail`     | read  | `GET /api/v1/extensions/{id}/voicemail`               | One extension's voicemail box                                                                                                            |
-| `updateExtensionVoicemail`  | write | `PUT /api/v1/extensions/{id}/voicemail`               | Change a voicemail box                                                                                                                   |
-| `listFeatureCodes`          | read  | `GET /api/v1/feature-codes`                           | List DTMF feature codes                                                                                                                  |
-| `putFeatureCodes`           | write | `PUT /api/v1/feature-codes`                           | Replace the DTMF feature codes                                                                                                           |
-| `listPhones`                | read  | `GET /api/v1/phones`                                  | Every provisioned phone, ordered by MAC                                                                                                  |
-| `createPhone`               | write | `POST /api/v1/phones`                                 | Add a phone; binding an existing device rotates its secret. The provisioning URL with the token is returned only here                    |
-| `getPhone`                  | read  | `GET /api/v1/phones/{id}`                             | One phone                                                                                                                                |
-| `updatePhone`               | write | `PATCH /api/v1/phones/{id}`                           | Change a phone; deviceId null unbinds (and disables) it, a new deviceId or extensionId rebinds it and rotates that device's secret       |
-| `deletePhone`               | write | `DELETE /api/v1/phones/{id}`                          | Delete a phone; its device stays without the sealed secret                                                                               |
-| `listPhoneFetches`          | read  | `GET /api/v1/phones/{id}/fetches`                     | The phone's provisioning fetches, newest first                                                                                           |
-| `previewPhoneFile`          | read  | `GET /api/v1/phones/{id}/preview`                     | Render a file as the phone would get it, with the SIP secret, admin password and token masked; not a fetch                               |
-| `listPresence`              | read  | `GET /api/v1/presence`                                | Device presence (BLF states)                                                                                                             |
-| `listFirmware`              | read  | `GET /api/v1/prov/firmware`                           | Uploaded firmware files                                                                                                                  |
-| `putFirmwarePins`           | write | `PUT /api/v1/prov/firmware/pins`                      | Replace every firmware pin                                                                                                               |
-| `deleteFirmware`            | write | `DELETE /api/v1/prov/firmware/{id}`                   | Delete a firmware file; refused while pinned                                                                                             |
-| `listRedirectAccounts`      | admin | `GET /api/v1/prov/redirect`                           | The vendor redirect-service accounts                                                                                                     |
-| `putRedirectAccount`        | admin | `PUT /api/v1/prov/redirect/{vendor}`                  | Set a vendor's account; credentials are checked with the vendor, sealed and never returned. Accounts set by the deployment are read-only |
-| `deleteRedirectAccount`     | admin | `DELETE /api/v1/prov/redirect/{vendor}`               | Remove a vendor's stored account                                                                                                         |
-| `checkRedirectAccount`      | admin | `POST /api/v1/prov/redirect/{vendor}/check`           | Test the vendor's effective credentials                                                                                                  |
-| `getProvSettings`           | read  | `GET /api/v1/prov/settings`                           | Computed provisioning URLs, CA fingerprint and DHCP option values                                                                        |
-| `listProvTemplates`         | read  | `GET /api/v1/prov/templates`                          | Built-in and stored provisioning templates                                                                                               |
-| `createProvTemplate`        | write | `POST /api/v1/prov/templates`                         | Create a template                                                                                                                        |
-| `validateProvTemplate`      | write | `POST /api/v1/prov/templates/validate`                | Validate a template without saving it                                                                                                    |
-| `getProvTemplate`           | read  | `GET /api/v1/prov/templates/{id}`                     | One template                                                                                                                             |
-| `updateProvTemplate`        | write | `PATCH /api/v1/prov/templates/{id}`                   | Change a stored template; the previous version is kept                                                                                   |
-| `deleteProvTemplate`        | write | `DELETE /api/v1/prov/templates/{id}`                  | Delete a stored template; refused while a phone overrides with it                                                                        |
-| `copyProvTemplate`          | write | `POST /api/v1/prov/templates/{id}/copy`               | Copy a template (built-in or stored) to edit, one priority higher                                                                        |
-| `listRecordings`            | read  | `GET /api/v1/recordings`                              | List call recordings                                                                                                                     |
-| `deleteRecording`           | write | `DELETE /api/v1/recordings/{id}`                      | Delete a recording                                                                                                                       |
-| `listRegistrations`         | read  | `GET /api/v1/registrations`                           | Every registered contact binding in the cluster (from Valkey)                                                                            |
-| `listRingGroups`            | read  | `GET /api/v1/ring-groups`                             | List ring/hunt groups                                                                                                                    |
-| `createRingGroup`           | write | `POST /api/v1/ring-groups`                            | Create a ring/hunt group                                                                                                                 |
-| `getRingGroup`              | read  | `GET /api/v1/ring-groups/{id}`                        | One ring/hunt group                                                                                                                      |
-| `updateRingGroup`           | write | `PATCH /api/v1/ring-groups/{id}`                      | Change a ring/hunt group                                                                                                                 |
-| `deleteRingGroup`           | write | `DELETE /api/v1/ring-groups/{id}`                     | Delete a ring/hunt group                                                                                                                 |
-| `listInboundRoutes`         | read  | `GET /api/v1/routes/inbound`                          | Every inbound route in position order                                                                                                    |
-| `createInboundRoute`        | write | `POST /api/v1/routes/inbound`                         | Append an inbound route                                                                                                                  |
-| `reorderInboundRoutes`      | write | `PUT /api/v1/routes/inbound/order`                    | Reorder every inbound route at once                                                                                                      |
-| `getInboundRoute`           | read  | `GET /api/v1/routes/inbound/{id}`                     | One inbound route                                                                                                                        |
-| `updateInboundRoute`        | write | `PATCH /api/v1/routes/inbound/{id}`                   | Change an inbound route                                                                                                                  |
-| `deleteInboundRoute`        | write | `DELETE /api/v1/routes/inbound/{id}`                  | Delete an inbound route                                                                                                                  |
-| `listOutboundRoutes`        | read  | `GET /api/v1/routes/outbound`                         | Every outbound route in position order                                                                                                   |
-| `createOutboundRoute`       | write | `POST /api/v1/routes/outbound`                        | Append an outbound route                                                                                                                 |
-| `reorderOutboundRoutes`     | write | `PUT /api/v1/routes/outbound/order`                   | Reorder every outbound route at once                                                                                                     |
-| `getOutboundRoute`          | read  | `GET /api/v1/routes/outbound/{id}`                    | One outbound route                                                                                                                       |
-| `updateOutboundRoute`       | write | `PATCH /api/v1/routes/outbound/{id}`                  | Change an outbound route                                                                                                                 |
-| `deleteOutboundRoute`       | write | `DELETE /api/v1/routes/outbound/{id}`                 | Delete an outbound route                                                                                                                 |
-| `testRouting`               | write | `POST /api/v1/routing/test`                           | Decide a call against the saved configuration without placing it                                                                         |
-| `listSkills`                | read  | `GET /api/v1/skills`                                  | The agent skills this Hello ships                                                                                                        |
-| `listTrunks`                | read  | `GET /api/v1/trunks`                                  | Every trunk (never its password)                                                                                                         |
-| `createTrunk`               | write | `POST /api/v1/trunks`                                 | Create a trunk                                                                                                                           |
-| `listTrunkStatus`           | read  | `GET /api/v1/trunks/status`                           | Live registration, destination health and active calls of every trunk                                                                    |
-| `getTrunk`                  | read  | `GET /api/v1/trunks/{id}`                             | One trunk (never its password)                                                                                                           |
-| `updateTrunk`               | write | `PATCH /api/v1/trunks/{id}`                           | Change a trunk                                                                                                                           |
-| `deleteTrunk`               | write | `DELETE /api/v1/trunks/{id}`                          | Delete a trunk                                                                                                                           |
-| `getVersion`                |       | `GET /api/v1/version`                                 | Build and configuration revision of this control-plane node                                                                              |
-| `listVoiceAgents`           | read  | `GET /api/v1/voice/agents`                            | List voice agents                                                                                                                        |
-| `createVoiceAgent`          | write | `POST /api/v1/voice/agents`                           | Create a voice agent                                                                                                                     |
-| `getVoiceAgent`             | read  | `GET /api/v1/voice/agents/{id}`                       | Show a voice agent                                                                                                                       |
-| `updateVoiceAgent`          | write | `PUT /api/v1/voice/agents/{id}`                       | Update a voice agent                                                                                                                     |
-| `deleteVoiceAgent`          | write | `DELETE /api/v1/voice/agents/{id}`                    | Delete a voice agent                                                                                                                     |
-| `listVoiceAgentCalls`       | read  | `GET /api/v1/voice/agents/{id}/calls`                 | List a voice agent's calls                                                                                                               |
-| `putVoiceAgentTools`        | write | `PUT /api/v1/voice/agents/{id}/tools`                 | Set a voice agent's MCP tools                                                                                                            |
-| `listVoiceAgentVersions`    | read  | `GET /api/v1/voice/agents/{id}/versions`              | List a voice agent's versions                                                                                                            |
-| `restoreVoiceAgentVersion`  | write | `POST /api/v1/voice/agents/{id}/versions/{v}/restore` | Restore a voice agent version                                                                                                            |
-| `listVoiceMCPServers`       | read  | `GET /api/v1/voice/mcp-servers`                       | List MCP servers                                                                                                                         |
-| `getVoiceMCPServer`         | read  | `GET /api/v1/voice/mcp-servers/{id}`                  | Show an MCP server                                                                                                                       |
-| `getVoiceStatus`            | read  | `GET /api/v1/voice/status`                            | Show the voice runtime status                                                                                                            |
-| `listVoicemailBoxes`        | read  | `GET /api/v1/voicemail/boxes`                         | List voicemail boxes                                                                                                                     |
-| `listVoicemailMessages`     | read  | `GET /api/v1/voicemail/messages`                      | List a box's voicemail messages                                                                                                          |
-| `deleteVoicemailMessage`    | write | `DELETE /api/v1/voicemail/messages/{id}`              | Delete a voicemail message                                                                                                               |
-| `markVoicemailMessageHeard` | write | `POST /api/v1/voicemail/messages/{id}/heard`          | Mark a voicemail message heard                                                                                                           |
-
-| Resource                           | Scope | What it holds                                    |
-| ---------------------------------- | ----- | ------------------------------------------------ |
-| `hello://calls`                    | read  | The calls in progress across the cluster.        |
-| `hello://registrations`            | read  | The devices registered now, with their contacts. |
-| `hello://cdrs/recent`              | read  | The last 50 call detail records.                 |
-| `hello://trunks/status`            | read  | Each trunk's registration and reachability.      |
-| `hello://cluster`                  | read  | The cluster's nodes, leases and health.          |
-| `hello://cdrs/{id}`                | read  | One CDR with its trace.                          |
-| `hello://extensions/{id}`          | read  | One extension.                                   |
-| `hello://diagnostics/devices/{id}` | read  | A device's registration attempts and failures.   |
-
+| Resource | Scope | What it holds |
+|---|---|---|
+| `hello://calls` | read | The calls in progress across the cluster. |
+| `hello://registrations` | read | The devices registered now, with their contacts. |
+| `hello://cdrs/recent` | read | The last 50 call detail records. |
+| `hello://trunks/status` | read | Each trunk's registration and reachability. |
+| `hello://cluster` | read | The cluster's nodes, leases and health. |
+| `hello://cdrs/{id}` | read | One CDR with its trace. |
+| `hello://extensions/{id}` | read | One extension. |
+| `hello://diagnostics/devices/{id}` | read | A device's registration attempts and failures. |
 <!-- doctable:end -->
 
 The server also offers three prompts that start common work from these
