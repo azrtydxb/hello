@@ -8849,6 +8849,7 @@
                   "voice_agent_limit",
                   "voice_agent_disabled",
                   "voice_tool_conflict",
+                  "voice_verification_required",
                   "mcp_endpoint_not_private"
                 ]
               },
@@ -12586,7 +12587,7 @@
             "description": "The user part of the agent's SIP address, generated on create."
           },
           "extension": {
-            "type": "string",
+            "type": ["string", "null"],
             "description": "The internal extension that reaches the agent, if any."
           },
           "revision": {
@@ -12865,7 +12866,7 @@
             "description": "False detaches the server from every agent."
           },
           "lastCheckAt": {
-            "type": "string",
+            "type": ["string", "null"],
             "description": "When the console last discovered or tested it."
           },
           "lastCheckStatus": {
