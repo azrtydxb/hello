@@ -219,7 +219,7 @@ func TestVoiceAgentRoutingEndpoint(t *testing.T) {
 		"name": "Agent DID", "didKind": "exact", "did": "97142221000",
 		"destinationKind": "voice_agent", "destination": "no-such-agent",
 	}
-	r := c.do("POST", "/api/v1/inbound-routes", bad)
+	r := c.do("POST", "/api/v1/routes/inbound", bad)
 	if r.code != http.StatusBadRequest || !strings.Contains(string(r.body), "does not exist") {
 		t.Fatalf("route to missing agent = %d %s, want 400", r.code, r.body)
 	}
@@ -230,7 +230,7 @@ func TestVoiceAgentRoutingEndpoint(t *testing.T) {
 		"name": "Agent DID", "didKind": "exact", "did": "97142221000",
 		"destinationKind": "voice_agent", "destination": "support",
 	}
-	if r := r2.do("POST", "/api/v1/inbound-routes", ok); r.code != http.StatusBadRequest || !strings.Contains(string(r.body), "not configured") {
+	if r := r2.do("POST", "/api/v1/routes/inbound", ok); r.code != http.StatusBadRequest || !strings.Contains(string(r.body), "not configured") {
 		t.Fatalf("route to agent without an address = %d %s, want 400 not configured", r.code, r.body)
 	}
 
@@ -238,7 +238,7 @@ func TestVoiceAgentRoutingEndpoint(t *testing.T) {
 	c.must(http.StatusCreated, "POST", "/api/v1/trunks", map[string]any{
 		"name": "peer", "mode": "ip", "destinations": []map[string]any{{"host": "10.0.0.5"}},
 	})
-	c.must(http.StatusCreated, "POST", "/api/v1/inbound-routes", ok)
+	c.must(http.StatusCreated, "POST", "/api/v1/routes/inbound", ok)
 	out := c.must(http.StatusOK, "POST", "/api/v1/routing/test",
 		map[string]any{"from": "trunk:1", "number": "97142221000"}).json(t)
 	decision := out["decision"].(map[string]any)
