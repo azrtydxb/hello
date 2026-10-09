@@ -182,7 +182,7 @@ type Config struct {
 	// AIAgent is the in-product AI agent (spec ai-agent); nil or off makes
 	// every AI agent operation but getAIStatus answer 503 ai_disabled.
 	AIAgent *ai.Service
-// Voice is the voice agent registry (spec voice-agents); nil answers
+	// Voice is the voice agent registry (spec voice-agents); nil answers
 	// 503 on the voice routes.
 	Voice Voice
 	// VoiceRuntime is the voice runtime service (spec voice-agents S-19 to

@@ -224,7 +224,7 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/voice/agents/{id}/versions/{v}/restore", auth.ScopeWrite, auth.RoleOperator, false, s.restoreVoiceAgentVersion},
 		{"PUT", "/api/v1/voice/agents/{id}/tools", auth.ScopeWrite, auth.RoleOperator, false, s.putVoiceAgentTools},
 		{"GET", "/api/v1/voice/agents/{id}/calls", auth.ScopeRead, auth.RoleViewer, false, s.pending},
-{"GET", "/api/v1/voice/mcp-servers", auth.ScopeRead, auth.RoleViewer, false, s.listVoiceMCPServers},
+		{"GET", "/api/v1/voice/mcp-servers", auth.ScopeRead, auth.RoleViewer, false, s.listVoiceMCPServers},
 		{"POST", "/api/v1/voice/mcp-servers", auth.ScopeAdmin, auth.RoleAdmin, false, s.createVoiceMCPServer},
 		{"GET", "/api/v1/voice/mcp-servers/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getVoiceMCPServer},
 		{"PUT", "/api/v1/voice/mcp-servers/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updateVoiceMCPServer},

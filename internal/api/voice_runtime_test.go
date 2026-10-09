@@ -166,8 +166,8 @@ func grant(plain string, scopes auth.Scopes, role auth.Role) *tokenGrant {
 	}}
 }
 
-// voiceEnv is one API with the voice runtime wired.
-type voiceEnv struct {
+// runtimeEnv is one API with the voice runtime wired.
+type runtimeEnv struct {
 	t    *testing.T
 	h    http.Handler
 	src  *voiceSource
@@ -175,7 +175,7 @@ type voiceEnv struct {
 	svc  *voice.Service
 }
 
-func newVoiceEnv(t *testing.T) *voiceEnv {
+func newRuntimeEnv(t *testing.T) *runtimeEnv {
 	t.Helper()
 	src := newVoiceSource()
 	stub := newVoiceStub(
@@ -186,14 +186,14 @@ func newVoiceEnv(t *testing.T) *voiceEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := voice.New(src, box, config.Voice{SIPAddress: "10.1.2.3:5060",
+	svc := voice.NewRuntime(src, box, config.Voice{SIPAddress: "10.1.2.3:5060",
 		Secret: strings.Repeat("test-key-", 4), Tenant: "lab", MaxCalls: 20}, nil, nil)
-	h := Handler(Config{Store: stub, Voice: svc})
-	return &voiceEnv{t: t, h: h, src: src, stub: stub, svc: svc}
+	h := Handler(Config{Store: stub, VoiceRuntime: svc})
+	return &runtimeEnv{t: t, h: h, src: src, stub: stub, svc: svc}
 }
 
 // call does one request with an optional bearer token.
-func (e *voiceEnv) call(method, target, token, body string) *httptest.ResponseRecorder {
+func (e *runtimeEnv) call(method, target, token, body string) *httptest.ResponseRecorder {
 	e.t.Helper()
 	var rd io.Reader
 	if body != "" {
@@ -210,7 +210,7 @@ func (e *voiceEnv) call(method, target, token, body string) *httptest.ResponseRe
 
 func TestVoiceRuntimeAPI(t *testing.T) {
 	t.Parallel()
-	e := newVoiceEnv(t)
+	e := newRuntimeEnv(t)
 
 	t.Run("scope", func(t *testing.T) {
 		// The scope gate: no credentials 401, a read token 403, and a
@@ -300,7 +300,7 @@ func TestVoiceRuntimeAPI(t *testing.T) {
 
 // setAgent puts one enabled agent with a sealed credential in the fake
 // store, at revision 5.
-func (e *voiceEnv) setAgent(t *testing.T) {
+func (e *runtimeEnv) setAgent(t *testing.T) {
 	t.Helper()
 	box, err := secret.New(base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	if err != nil {
@@ -322,7 +322,7 @@ func (e *voiceEnv) setAgent(t *testing.T) {
 
 func TestVoiceRuntimeStatus(t *testing.T) {
 	t.Parallel()
-	e := newVoiceEnv(t)
+	e := newRuntimeEnv(t)
 
 	// The status before any ack: green only when no agent is enabled
 	// (spec S-22, S-30).
@@ -373,7 +373,7 @@ func TestVoiceRuntimeStatus(t *testing.T) {
 
 func TestVoiceCallReport(t *testing.T) {
 	t.Parallel()
-	e := newVoiceEnv(t)
+	e := newRuntimeEnv(t)
 
 	// A report is accepted before its CDR exists and is idempotent on its
 	// correlation id (spec S-21): the fake store reports saved=false the

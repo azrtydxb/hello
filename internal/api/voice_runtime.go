@@ -30,14 +30,14 @@ const maxWait = 30 * time.Second
 // or after wait (spec S-19). A fetch that answers 200 is audited by service
 // account, never by content.
 func (s *server) getVoiceRuntimeAgents(w http.ResponseWriter, r *http.Request) {
-	if s.Voice == nil {
+	if s.VoiceRuntime == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "voice agents are not configured")
 		return
 	}
 	wait, rev, polled := parseWaitRevision(r.URL.Query())
 	imm := r.Header.Get("If-None-Match")
 	if wait > 0 {
-		cur, err := s.Voice.Await(r.Context(), rev, wait)
+		cur, err := s.VoiceRuntime.Await(r.Context(), rev, wait)
 		if err != nil {
 			s.internal(w, "voice runtime long poll", err)
 			return
@@ -51,7 +51,7 @@ func (s *server) getVoiceRuntimeAgents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	view, err := s.Voice.View(r.Context())
+	view, err := s.VoiceRuntime.View(r.Context())
 	if err != nil {
 		s.internal(w, "voice runtime view", err)
 		return
@@ -96,7 +96,7 @@ func auditRuntime(s *server, r *http.Request, action string) {
 // account (spec S-20). The only write a runtime poll loop makes besides the
 // call report.
 func (s *server) ackVoiceRuntime(w http.ResponseWriter, r *http.Request) {
-	if s.Voice == nil {
+	if s.VoiceRuntime == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "voice agents are not configured")
 		return
 	}
@@ -104,7 +104,7 @@ func (s *server) ackVoiceRuntime(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.Voice.Ack(r.Context(), actor(r).UserID, in); err != nil {
+	if err := s.VoiceRuntime.Ack(r.Context(), actor(r).UserID, in); err != nil {
 		switch {
 		case errors.Is(err, voice.ErrRateLimited):
 			// The document's Error schema has no rate-limit code; the
@@ -121,7 +121,7 @@ func (s *server) ackVoiceRuntime(w http.ResponseWriter, r *http.Request) {
 // reportVoiceCall serves POST /api/v1/voice-runtime/calls: talking-agent's
 // report for one call (spec S-21).
 func (s *server) reportVoiceCall(w http.ResponseWriter, r *http.Request) {
-	if s.Voice == nil {
+	if s.VoiceRuntime == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "voice agents are not configured")
 		return
 	}
@@ -129,7 +129,7 @@ func (s *server) reportVoiceCall(w http.ResponseWriter, r *http.Request) {
 	if !decodeReport(w, r, &rep) {
 		return
 	}
-	if err := s.Voice.Report(r.Context(), rep); err != nil {
+	if err := s.VoiceRuntime.Report(r.Context(), rep); err != nil {
 		switch {
 		case errors.Is(err, voice.ErrUnknownAgent):
 			writeError(w, http.StatusBadRequest, "bad_request", "unknown agent")
@@ -150,11 +150,11 @@ func (s *server) reportVoiceCall(w http.ResponseWriter, r *http.Request) {
 // spec S-20 and S-30, red (healthy false) after two minutes of silence
 // while an enabled agent exists.
 func (s *server) getVoiceStatus(w http.ResponseWriter, r *http.Request) {
-	if s.Voice == nil {
+	if s.VoiceRuntime == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "voice agents are not configured")
 		return
 	}
-	st, err := s.Voice.Status(r.Context())
+	st, err := s.VoiceRuntime.Status(r.Context())
 	if err != nil {
 		s.internal(w, "voice status", err)
 		return

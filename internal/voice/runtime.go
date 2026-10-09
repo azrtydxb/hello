@@ -195,9 +195,9 @@ func WithNow(now func() time.Time) Option {
 	return func(s *Service) { s.now = now }
 }
 
-// New builds the runtime service. box unseals MCP credentials for the view
+// NewRuntime builds the runtime service. box unseals MCP credentials for the view
 // and must be the box they were sealed with; reg may be nil.
-func New(src Source, box *secret.Box, cfg config.Voice, log *slog.Logger, reg prometheus.Registerer, opts ...Option) *Service {
+func NewRuntime(src Source, box *secret.Box, cfg config.Voice, log *slog.Logger, reg prometheus.Registerer, opts ...Option) *Service {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}

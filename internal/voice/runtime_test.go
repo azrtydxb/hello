@@ -42,7 +42,7 @@ type pruneCall struct {
 	retention time.Duration
 }
 
-func testBox(t *testing.T) *secret.Box {
+func runtimeBox(t *testing.T) *secret.Box {
 	t.Helper()
 	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
 	b, err := secret.New(key)
@@ -62,7 +62,7 @@ func testConfig() config.Voice {
 func newTestService(t *testing.T, src *fakeSource, opts ...Option) (*Service, *prometheus.Registry) {
 	t.Helper()
 	reg := prometheus.NewPedanticRegistry()
-	svc := New(src, testBox(t), testConfig(), nil, reg, opts...)
+	svc := NewRuntime(src, runtimeBox(t), testConfig(), nil, reg, opts...)
 	return svc, reg
 }
 
@@ -166,7 +166,7 @@ func ptrTime(t time.Time) *time.Time { return &t }
 func TestVoiceRuntimeView(t *testing.T) {
 	t.Parallel()
 	src := newFakeSource()
-	box := testBox(t)
+	box := runtimeBox(t)
 	src.snap = Snapshot{
 		Revision: 7,
 		Agents: []SealedAgent{{
