@@ -6635,6 +6635,9 @@
               }
             }
           },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -6786,6 +6789,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -7076,6 +7082,9 @@
                 }
               }
             }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -8856,7 +8865,13 @@
                   "ai_budget_exhausted",
                   "task_running",
                   "proposal_not_open",
-                  "proposal_stale"
+                  "proposal_stale",
+                  "voice_not_configured",
+                  "voice_agent_limit",
+                  "voice_agent_disabled",
+                  "voice_tool_conflict",
+                  "voice_verification_required",
+                  "mcp_endpoint_not_private"
                 ]
               },
               "message": {
@@ -12597,7 +12612,7 @@
             "description": "The user part of the agent's SIP address, generated on create."
           },
           "extension": {
-            "type": "string",
+            "type": ["string", "null"],
             "description": "The internal extension that reaches the agent, if any."
           },
           "revision": {
@@ -12607,9 +12622,15 @@
         }
       },
       "VoiceAgentList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceAgent"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceAgent"
+            }
+          }
         },
         "description": "Every voice agent."
       },
@@ -12620,6 +12641,11 @@
           "name": {
             "type": "string",
             "description": "The agent's unique name."
+          },
+          "extension": {
+            "type": "string",
+            "description": "The internal extension that reaches the agent, unique across extensions and agents (spec S-3).",
+            "pattern": "^[0-9]{2,10}$"
           },
           "description": {
             "type": "string",
@@ -12718,9 +12744,15 @@
         }
       },
       "VoiceAgentVersionList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceAgentVersion"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceAgentVersion"
+            }
+          }
         },
         "description": "A voice agent's saved personas, newest first."
       },
@@ -12813,9 +12845,15 @@
         }
       },
       "VoiceAgentCallList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceAgentCall"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceAgentCall"
+            }
+          }
         },
         "description": "One call per report, newest first."
       },
@@ -12846,14 +12884,14 @@
           },
           "timeoutMs": {
             "type": "integer",
-            "description": "The tool call timeout in milliseconds."
+            "description": "The tool call timeout in milliseconds; defaults to 5000."
           },
           "enabled": {
             "type": "boolean",
             "description": "False detaches the server from every agent."
           },
           "lastCheckAt": {
-            "type": "string",
+            "type": ["string", "null"],
             "description": "When the console last discovered or tested it."
           },
           "lastCheckStatus": {
@@ -12863,9 +12901,15 @@
         }
       },
       "VoiceMCPServerList": {
-        "type": "array",
-        "items": {
-          "$ref": "#/components/schemas/VoiceMCPServer"
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoiceMCPServer"
+            }
+          }
         },
         "description": "Every MCP server."
       },
@@ -12916,7 +12960,7 @@
           },
           "timeoutMs": {
             "type": "integer",
-            "description": "The tool call timeout in milliseconds."
+            "description": "The tool call timeout in milliseconds; defaults to 5000."
           },
           "enabled": {
             "type": "boolean",

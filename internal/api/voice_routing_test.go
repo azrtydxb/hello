@@ -17,10 +17,10 @@ import (
 
 const testVoiceAddr = "192.0.2.10:5060"
 
-// newVoiceEnv is an env with the talking-agent address configured and two
+// newVoiceRoutingEnv is an env with the talking-agent address configured and two
 // agents in the registry: support (enabled, extension 700) and after-hours
 // (disabled). The registry API is Task 2's, so the rows go in by SQL.
-func newVoiceEnv(t *testing.T, voiceAddr string) *env {
+func newVoiceRoutingEnv(t *testing.T, voiceAddr string) *env {
 	t.Helper()
 	e := newEnvConfig(t, Config{VoiceSIPAddress: voiceAddr}, nil)
 	c := e.login()
@@ -126,7 +126,7 @@ func TestVoiceAgentRingGroupValidation(t *testing.T) {
 }
 
 func TestVoiceAgentRingGroup(t *testing.T) {
-	e := newVoiceEnv(t, testVoiceAddr)
+	e := newVoiceRoutingEnv(t, testVoiceAddr)
 	c := e.login()
 	support := voiceAgentID(t, e, "support")
 	extID := e.ext101["id"]
@@ -210,7 +210,7 @@ func TestVoiceAgentRingGroup(t *testing.T) {
 }
 
 func TestVoiceAgentRoutingEndpoint(t *testing.T) {
-	e := newVoiceEnv(t, testVoiceAddr)
+	e := newVoiceRoutingEnv(t, testVoiceAddr)
 	c := e.login()
 
 	// A route naming a missing agent is refused with the field named, and
@@ -224,7 +224,7 @@ func TestVoiceAgentRoutingEndpoint(t *testing.T) {
 		t.Fatalf("route to missing agent = %d %s, want 400", r.code, r.body)
 	}
 
-	e2 := newVoiceEnv(t, "")
+	e2 := newVoiceRoutingEnv(t, "")
 	r2 := e2.login()
 	ok := map[string]any{
 		"name": "Agent DID", "didKind": "exact", "did": "97142221000",
