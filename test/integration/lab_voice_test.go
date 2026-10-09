@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -32,15 +31,12 @@ const (
 
 func init() { remember(labVoiceSecret) }
 
-// voiceReady skips the test while the voice streams are unmerged: the route
-// table answers 501 (s.pending) for every voice operation until Tasks 2-6
-// land, and the registry's read-only status is the cheapest probe.
+// voiceReady probes the registry's read-only status, the cheapest voice
+// operation, so the test fails with a clear line when the voice stack is
+// not up instead of a confusing error deeper in.
 func voiceReady(t *testing.T, lc *labClient) {
 	t.Helper()
 	if err := lc.do("GET", "/api/v1/voice/status", nil, nil, http.StatusOK); err != nil {
-		if strings.Contains(err.Error(), "= 501") {
-			t.Skip("the voice operations are still s.pending (voice-agents Tasks 2-6 not merged)")
-		}
 		t.Fatalf("voice status probe: %v", err)
 	}
 }
@@ -67,6 +63,23 @@ func (lc *labClient) createVoiceAgent(name string) labVoiceAgent {
 		_ = lc.do("DELETE", fmt.Sprintf("/api/v1/voice/agents/%d", a.ID), nil, nil, http.StatusNoContent)
 	})
 	return a
+}
+
+// updateAgent PUTs an agent's full body: the endpoint replaces every
+// editable field and validates the result, so each edit sends the fields
+// create set plus the change (there is no partial update and no force
+// flag; disabling needs one because only delete checks references).
+func (lc *labClient) updateAgent(va labVoiceAgent, changes map[string]any) {
+	lc.t.Helper()
+	body := map[string]any{
+		"name": va.Name, "prompt": "You are the lab's receptionist. Be brief.",
+		"greeting": "Hello, you have reached the automated assistant.",
+		"language": "en", "extension": va.Extension, "maxConcurrent": 1,
+	}
+	for k, v := range changes {
+		body[k] = v
+	}
+	lc.must("PUT", fmt.Sprintf("/api/v1/voice/agents/%d", va.ID), body, nil, http.StatusOK)
 }
 
 // voiceRuntimeAccount creates the service account the fake agent reads the
@@ -124,12 +137,12 @@ func waitVoiceView(t *testing.T, a *fakeagent.Agent, sipUser string) {
 }
 
 type labVoiceCDR struct {
-	ID                  int64   `json:"id"`
-	Direction           string  `json:"direction"`
-	OriginalDestination string  `json:"originalDestination"`
-	FinalStatus         int     `json:"finalStatus"`
-	VoiceAgentID        *int64  `json:"voiceAgentId"`
-	VoiceAgentName      *string `json:"voiceAgentName"`
+	ID                  int64  `json:"id"`
+	Direction           string `json:"direction"`
+	OriginalDestination string `json:"originalDestination"`
+	FinalStatus         int    `json:"finalStatus"`
+	// The agent name as it was at call time; empty for every other call.
+	VoiceAgent string `json:"voiceAgent"`
 }
 
 // TestVoiceAgentsEndToEnd is the lab proof (the acceptance criteria's
@@ -166,7 +179,7 @@ func TestVoiceAgentsEndToEnd(t *testing.T) {
 
 	// A persona edit propagates within two seconds (S-19 long poll).
 	edited := "Updated greeting for the lab."
-	lc.must("PUT", fmt.Sprintf("/api/v1/voice/agents/%d", va.ID), map[string]any{"greeting": edited}, nil, http.StatusOK)
+	lc.updateAgent(va, map[string]any{"greeting": edited})
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		v := agent.View()
@@ -198,15 +211,15 @@ func TestVoiceAgentsEndToEnd(t *testing.T) {
 	eventually(t, 10*time.Second, "the CDR of the agent call", func() error {
 		return findVoiceCDR(lc, va.Name, did, &cdr)
 	})
-	if cdr.FinalStatus != 200 || cdr.VoiceAgentID == nil || cdr.VoiceAgentName == nil || *cdr.VoiceAgentName != va.Name {
-		t.Fatalf("CDR = %+v, want the agent named", cdr)
+	if cdr.FinalStatus != 200 || cdr.VoiceAgent != va.Name {
+		t.Fatalf("CDR = %+v, want the agent named %s", cdr, va.Name)
 	}
 	var detail struct {
 		VoiceAgent *struct {
-			Name       string  `json:"name"`
-			Outcome    string  `json:"outcome"`
-			Summary    string  `json:"summary"`
-			Transcript *string `json:"transcript"`
+			Name              string `json:"name"`
+			Outcome           string `json:"outcome"`
+			Summary           string `json:"summary"`
+			TranscriptPresent bool   `json:"transcriptPresent"`
 		} `json:"voiceAgent"`
 	}
 	lc.must("GET", fmt.Sprintf("/api/v1/cdrs/%d", cdr.ID), nil, &detail, 200)
@@ -214,8 +227,8 @@ func TestVoiceAgentsEndToEnd(t *testing.T) {
 		detail.VoiceAgent.Summary == "" {
 		t.Fatalf("CDR detail voiceAgent = %+v, want the report joined", detail.VoiceAgent)
 	}
-	if detail.VoiceAgent.Transcript != nil {
-		t.Fatalf("transcript stored though the agent does not record it: %q", *detail.VoiceAgent.Transcript)
+	if detail.VoiceAgent.TranscriptPresent {
+		t.Fatal("transcript present though the agent does not record one")
 	}
 	reportsAfterAnswer := len(agent.Reports())
 
@@ -287,9 +300,9 @@ func TestVoiceAgentsEndToEnd(t *testing.T) {
 	holder := lc.devices("desk")[0]
 	held := phone(t, holder, labSIP1)
 	register(t, held)
+	// The overflow lands in this extension's voicemail box; a fresh
+	// extension has one, and nothing needs to register on it.
 	blocked := lc.devices("desk")[0]
-	blockedPhone := phone(t, blocked, labSIP1)
-	register(t, blockedPhone)
 
 	heldCall, err := held.Dial(ctx, va.Extension, sdpOffer)
 	if err != nil {
@@ -303,25 +316,22 @@ func TestVoiceAgentsEndToEnd(t *testing.T) {
 		t.Fatalf("the fake agent saw %+v, want the extension call to %s", calls, va.SIPUser)
 	}
 	// The group's member is the agent itself; the failure target is the
-	// blocked phone, which takes the overflow.
+	// blocked extension's voicemail box, which answers the overflow (the
+	// merged failure kinds are none, voicemail, external and voice_agent).
 	var full struct{ ID int64 }
 	fullName := "78" + randDigits(6)
 	lc.must("POST", "/api/v1/ring-groups", map[string]any{
 		"name": fullName, "strategy": "sequential", "ringTimeout": 5, "hunt": true,
 		"members":       []map[string]any{{"voiceAgentId": va.ID, "position": 1}},
-		"failureKind":   "extension",
+		"failureKind":   "voicemail",
 		"failureTarget": blocked.Extension,
 	}, &full, 201)
 	lc.t.Cleanup(func() { _ = lc.do("DELETE", fmt.Sprintf("/api/v1/ring-groups/%d", full.ID), nil, nil, 204) })
 	lc.waitSnapshots(10 * time.Second)
 
-	overflow := answerNext(ctx, blockedPhone)
 	out2, err := p.Dial(ctx, fullName, sdpOffer)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if in := <-overflow; in == nil {
-		t.Fatal("the capacity overflow did not reach the failure target")
 	}
 	if out2.Status != 200 {
 		t.Fatalf("overflow call = %d, want the failure target to answer", out2.Status)
@@ -336,10 +346,9 @@ func TestVoiceAgentsEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A disabled agent answers nothing new: the route fails instead (the
-	// force is needed, the route names the agent).
-	lc.must("PUT", fmt.Sprintf("/api/v1/voice/agents/%d", va.ID),
-		map[string]any{"enabled": false, "force": true}, nil, http.StatusOK)
+	// A disabled agent answers nothing new: the route fails instead. No
+	// force is needed; only delete checks references.
+	lc.updateAgent(va, map[string]any{"enabled": false})
 	carrierDo(t, backupHTTP, "POST", "/call", map[string]any{
 		"from": "+97145570001", "to": did, "target": "hello-sip-1:5060",
 	}, &res)
@@ -401,7 +410,7 @@ func TestVoiceCDRFields(t *testing.T) {
 	eventually(t, 10*time.Second, "the plain call's CDR", func() error {
 		return findVoiceCDR(lc, "", callee.Extension, &plainCDR)
 	})
-	if plainCDR.VoiceAgentID != nil || plainCDR.VoiceAgentName != nil {
+	if plainCDR.VoiceAgent != "" {
 		t.Fatalf("a plain call's CDR carries agent fields: %+v", plainCDR)
 	}
 	if err := plain.Hangup(ctx); err != nil {
@@ -421,20 +430,18 @@ func TestVoiceCDRFields(t *testing.T) {
 	eventually(t, 10*time.Second, "the agent call's CDR", func() error {
 		return findVoiceCDR(lc, va.Name, did, &cdr)
 	})
-	if cdr.VoiceAgentID == nil || *cdr.VoiceAgentID != va.ID || cdr.VoiceAgentName == nil || *cdr.VoiceAgentName != va.Name {
-		t.Fatalf("agent call CDR = %+v, want id %d and name %s", cdr, va.ID, va.Name)
+	if cdr.VoiceAgent != va.Name {
+		t.Fatalf("agent call CDR = %+v, want the agent named %s", cdr, va.Name)
 	}
 
-	// Deleting the agent keeps the name on past CDRs and nulls the id. The
-	// cleanup helper deletes it too; the first delete wins, the second is a
-	// 404 that the helper ignores.
+	// Deleting the agent keeps the name on past CDRs. The route must go
+	// first: delete refuses an agent a route still names. The cleanup
+	// helper deletes the agent too; the first delete wins.
+	lc.must("DELETE", fmt.Sprintf("/api/v1/routes/inbound/%d", route.ID), nil, nil, http.StatusNoContent)
 	lc.must("DELETE", fmt.Sprintf("/api/v1/voice/agents/%d", va.ID), nil, nil, http.StatusNoContent)
 	var after labVoiceCDR
 	lc.must("GET", fmt.Sprintf("/api/v1/cdrs/%d", cdr.ID), nil, &after, 200)
-	if after.VoiceAgentID != nil {
-		t.Fatalf("deleted agent's id still on the CDR: %+v", after)
-	}
-	if after.VoiceAgentName == nil || *after.VoiceAgentName != va.Name {
+	if after.VoiceAgent != va.Name {
 		t.Fatalf("deleting the agent erased the name: %+v", after)
 	}
 }
