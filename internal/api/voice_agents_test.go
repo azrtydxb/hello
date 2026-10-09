@@ -190,6 +190,13 @@ func TestVoiceAgentCRUD(t *testing.T) {
 		t.Fatalf("voice revision = %d, want %d", revision(), rev0+3)
 	}
 
+	// The single-agent GET and the 400/404 answers the document promises.
+	c.must(http.StatusOK, "GET", "/api/v1/voice/agents/"+id, nil)
+	c.must(http.StatusBadRequest, "PUT", "/api/v1/voice/agents/"+id, voiceAgentBody("bad name!"))
+	c.must(http.StatusNotFound, "PUT", "/api/v1/voice/agents/999999", voiceAgentBody("absent"))
+	c.must(http.StatusNotFound, "DELETE", "/api/v1/voice/agents/999999", nil)
+	c.must(http.StatusNotFound, "GET", "/api/v1/voice/agents/999999/versions", nil)
+
 	// Versions: 10 more persona edits make 12 versions total, 10 kept.
 	for i := 0; i < 10; i++ {
 		c.must(http.StatusOK, "PUT", "/api/v1/voice/agents/"+id, voiceAgentBody("support", func(m map[string]any) {

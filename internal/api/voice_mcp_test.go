@@ -9,6 +9,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/hello/test/fakemcp"
 )
 
 // TestVoiceCallerVerification is the API half (acceptance S-36): the PIN is
@@ -176,6 +177,35 @@ func TestVoiceMCPServers(t *testing.T) {
 		t.Fatalf("rotated credential = %q, %v", plain, err)
 	}
 
+	// The single-server GET, the name collision, the missing material and
+	// the 404s the document promises.
+	c.must(http.StatusOK, "GET", "/api/v1/voice/mcp-servers/"+sid, nil)
+	c.must(http.StatusConflict, "POST", "/api/v1/voice/mcp-servers", map[string]any{
+		"name": "srv", "url": "http://127.0.0.1:1/mcp", "auth": "none"})
+	c.must(http.StatusCreated, "POST", "/api/v1/voice/mcp-servers", map[string]any{
+		"name": "srv2", "url": "http://127.0.1.1:1/mcp", "auth": "none"})
+	c.must(http.StatusConflict, "PUT", "/api/v1/voice/mcp-servers/"+sid, map[string]any{
+		"name": "srv2", "url": "http://127.0.0.1:1/mcp", "auth": "none"})
+	c.must(http.StatusBadRequest, "PUT", "/api/v1/voice/mcp-servers/"+sid, map[string]any{
+		"name": "srv", "url": "http://127.0.0.1:1/mcp", "auth": "header"})
+	c.must(http.StatusNotFound, "PUT", "/api/v1/voice/mcp-servers/999999", map[string]any{
+		"name": "absent", "url": "http://127.0.0.1:1/mcp", "auth": "none"})
+	c.must(http.StatusNotFound, "DELETE", "/api/v1/voice/mcp-servers/999999", nil)
+	c.must(http.StatusNotFound, "POST", "/api/v1/voice/mcp-servers/999999/discover", nil)
+	c.must(http.StatusNotFound, "POST", "/api/v1/voice/mcp-servers/999999/test", nil)
+
+	// Discovery and the test call need a live MCP server; the fake answers
+	// tools/list, so discover and test both answer 200.
+	fm := fakemcp.New(t)
+	fake := c.must(http.StatusCreated, "POST", "/api/v1/voice/mcp-servers", map[string]any{
+		"name": "fake", "url": fm.URL + "/mcp", "auth": "bearer", "credential": "tok-123", "timeoutMs": 5000}).json(t)
+	fid := fmt.Sprint(fake["id"])
+	found := c.must(http.StatusOK, "POST", "/api/v1/voice/mcp-servers/"+fid+"/discover", nil).json(t)
+	if ts := found["tools"].([]any); len(ts) == 0 {
+		t.Fatal("discovery found no tools")
+	}
+	c.must(http.StatusOK, "POST", "/api/v1/voice/mcp-servers/"+fid+"/test", nil)
+
 	// Attachments: defaults, verification rule, collisions, references.
 	a := c.must(http.StatusCreated, "POST", "/api/v1/voice/agents", voiceAgentBody("tools-agent",
 		func(m map[string]any) { m["callerVerification"] = "pin"; m["pin"] = "5678" })).json(t)
@@ -219,6 +249,10 @@ func TestVoiceMCPServers(t *testing.T) {
 	if got := empty["servers"].([]any)[0].(map[string]any)["tools"].([]any); len(got) != 0 {
 		t.Fatalf("empty allowlist = %v", got)
 	}
+
+	// An attachment without a server id is refused.
+	c.must(http.StatusBadRequest, "PUT", "/api/v1/voice/agents/"+aid+"/tools", map[string]any{
+		"servers": []map[string]any{{"serverId": 0, "tools": []map[string]any{}}}})
 
 	// A server an agent attaches cannot be deleted, and the answer names
 	// the agent.
