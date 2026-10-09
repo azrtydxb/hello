@@ -18,6 +18,7 @@ import (
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/version"
+	"github.com/azrtydxb/hello/internal/voice"
 )
 
 //go:embed openapi.json
@@ -83,6 +84,10 @@ type Store interface {
 	CountCDRs(ctx context.Context) (store.CDRCounts, error)
 	CDRConcurrency(ctx context.Context, from, to time.Time, step time.Duration) ([]store.ConcurrencyPoint, error)
 	GetCDR(ctx context.Context, id int64) (store.CDR, routing.Trace, error)
+	// VoiceAgentCallByCorrelation joins the voice agent's call report of a
+	// CDR routed to an agent (spec voice-agents S-23); store.ErrNotFound
+	// before the report arrives.
+	VoiceAgentCallByCorrelation(ctx context.Context, correlationID string) (store.VoiceAgentCall, error)
 
 	ListRecordings(ctx context.Context, extension string, before int64, limit int) ([]store.Recording, string, error)
 	GetRecording(ctx context.Context, id int64) (store.Recording, error)
@@ -184,6 +189,10 @@ type Config struct {
 	// Voice is the voice agent registry (spec voice-agents); nil answers
 	// 503 on the voice routes.
 	Voice Voice
+	// VoiceRuntime is the voice runtime service (spec voice-agents S-19 to
+	// S-23); nil answers 503 voice_disabled on the voice-runtime operations
+	// and the voice status.
+	VoiceRuntime *voice.Service
 }
 
 type server struct{ Config }

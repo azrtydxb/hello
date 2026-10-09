@@ -366,9 +366,17 @@ func TestCallerIDPolicy(t *testing.T) {
 		}
 		return inv[0].From
 	}
-	if got := call(withExt); got != "+97145550101" {
-		t.Fatalf("caller ID with external number = %q", got)
-	}
+	// The PATCH reaches hello-sip through a snapshot reload, which can land
+	// after the dial: retry until the external number carries the call, so
+	// the test tests the caller ID policy, not the reload race.
+	var got string
+	eventually(t, 20*time.Second, "the external number carries the call", func() error {
+		got = call(withExt)
+		if got != "+97145550101" {
+			return fmt.Errorf("caller ID with external number = %q", got)
+		}
+		return nil
+	})
 	without := lc.devices("desk")[0]
 	if got := call(without); got != "+97145550999" {
 		t.Fatalf("caller ID without external number = %q, want the trunk default", got)

@@ -113,12 +113,12 @@ Interfaces: produces the signed INVITE and the CDR fields; consumes contracts 2,
 Files: `internal/voice/runtime.go`, `report.go`, `prune.go`, `internal/api/voice_runtime.go` and tests.
 Interfaces: produces the three runtime operations and the status; consumes contracts 5, 6.
 
-- [ ] View builder with unsealed credentials, ETag, `304`, long poll that wakes on a revision change (Postgres `LISTEN`/`NOTIFY` or a 500 ms check; the simpler that passes the 2 s criterion); `TestVoiceRuntimeAPI`.
-- [ ] Ack, status states, rate limit, red after 2 minutes; `TestVoiceRuntimeStatus` (includes S-22).
-- [ ] Report: idempotent, early reports, size limits, transcript only when allowed, CDR detail join; `TestVoiceCallReport`.
-- [ ] Prune with advisory lock; `TestVoicePrune`.
-- [ ] Not reachable from MCP, the assistant or proposals; `TestVoiceOperationsMCP`; metrics and logs; `TestVoiceMetrics`, `TestNoSecretsInLogs` extended.
-- [ ] Mutation-check the scope gate, the transcript flag and the credential presence. Full gate.
+- [x] View builder with unsealed credentials, ETag, `304`, long poll that wakes on a revision change (Postgres `LISTEN`/`NOTIFY` or a 500 ms check; the simpler that passes the 2 s criterion); `TestVoiceRuntimeAPI`.
+- [x] Ack, status states, rate limit, red after 2 minutes; `TestVoiceRuntimeStatus` (includes S-22).
+- [x] Report: idempotent, early reports, size limits, transcript only when allowed, CDR detail join; `TestVoiceCallReport`.
+- [x] Prune with advisory lock; `TestVoicePrune`.
+- [x] Not reachable from MCP, the assistant or proposals; `TestVoiceOperationsMCP`; metrics and logs; `TestVoiceMetrics`, `TestNoSecretsInLogs` extended.
+- [x] Mutation-check the scope gate, the transcript flag and the credential presence. Full gate.
 
 ## Task 6: Console (branch voice-agents-ui, after Tasks 2, 3 and 5 contracts are mocked)
 
