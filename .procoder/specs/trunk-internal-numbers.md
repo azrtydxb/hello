@@ -1,8 +1,8 @@
 # trunk-internal-numbers
 
-Status: draft
+Status: approved
 
-Source: the pivot of 2026-10-09 (`.procoder/ask/decisions.md`): the call/voice agents leave Hello and become a separate product that connects to Hello as a SIP trunk, so SIP trunks must be able to reach internal numbers, not only the outside world. Builds on `trunks-routing` (complete). The voice-agent routing of phase 3 (the `voice_agent` destination kind, the registry, the runtime) is being removed; this spec lands on the removal.
+Source: the pivot of 2026-10-09 (`.procoder/ask/decisions.md`): the call/voice agents leave Hello and become a separate product that connects to Hello as a SIP trunk, so SIP trunks must be able to reach internal numbers, not only the outside world. Builds on `trunks-routing` (complete). The voice-agent routing of phase 3 (the `voice_agent` destination kind, the registry, the runtime) is being removed; this spec lands on the removal. Open questions answered 2026-10-09 (`.procoder/ask/answers.md`): IP-pinned trunk auth, per-call caller identity with the S-4 ladder as fallback, the extension number as the dialing contract, 404 for out-of-policy dials.
 
 ## Problem
 
@@ -39,7 +39,7 @@ An inbound trunk call can already reach exactly one thing: the inbound route's f
   - One trunk-to-outbound hop per call: a call that has already been routed from a trunk through outbound routing cannot enter outbound routing again. Today that cannot happen (an inbound route's `external` destination is the only re-entry and it fires once); the engine makes it a stated invariant, rejected with 403 if a future path violates it.
   - Mode `all` is accepted in the API only when the request carries `"confirm": true`, so `all` cannot be set by a stray default in a client.
 
-- [S-4] **Caller ID for trunk-to-internal calls.** When an inbound call rings an internal extension (`extension` or `internal` destination), the presented caller ID is the received caller ID if any; else the source trunk's `default_caller_id` if set; else the source trunk's name in angle brackets (e.g. `<ex-agent>`), so the phone always shows something attributable. The route's caller-ID transform, when one is set, applies to whatever value this produces, as today. The choice is a trace step. Calls to `external` and `sip_uri` destinations keep the current behaviour (received value, transform-normalised).
+- [S-4] **Caller ID for trunk-to-internal calls.** The peer identifies itself per call: the name/number it sends on the INVITE is what the phone shows. When an inbound call rings an internal extension (`extension` or `internal` destination), the presented caller ID is the received caller ID if any; else the source trunk's `default_caller_id` if set; else the source trunk's name in angle brackets (e.g. `<ex-agent>`), so the phone always shows something attributable. The route's caller-ID transform, when one is set, applies to whatever value this produces, as today. The choice is a trace step. Calls to `external` and `sip_uri` destinations keep the current behaviour (received value, transform-normalised).
 
 - [S-5] **CDRs.** Direction stays `inbound` for trunk-to-internal calls. The CDR's `rewritten_destination` records the resolved extension number, `route_name` the inbound route; the trace carries the policy verdict and the caller-ID decision. No new columns and no migration beyond the trunks table.
 
@@ -57,7 +57,7 @@ An inbound trunk call can already reach exactly one thing: the inbound route's f
 
 ## Out of scope
 
-- Inbound digest authentication of trunk peers (Hello accepting REGISTERs from them). A trunk peer authenticates by source IP against the trunk's source CIDRs, as carriers do since phase 2. The consuming product pins its signalling IPs.
+- Inbound digest authentication of trunk peers (Hello accepting REGISTERs from them). A trunk peer authenticates by source IP against the trunk's source CIDRs, as carriers do since phase 2. The consuming product pins its signalling IPs. Digest is a possible later milestone, not this one.
 - Reaching ring groups, queues, voicemail or announcements from trunks — internal numbers means extensions only, until those features exist.
 - Trunk-to-trunk dialing as a feature. A trunk reaching another trunk's numbers only via an explicit `external` destination, with the S-3 guards; no convenience surface.
 - Feature codes, dial-plan rewrites of the Request-URI at the edge, and per-trunk caller-ID transforms (the per-route transform covers it).
@@ -118,7 +118,4 @@ An inbound trunk call can already reach exactly one thing: the inbound route's f
 
 ## Open questions
 
-- **How does the consuming product signal?** The spec assumes IP-authenticated trunking with pinned source CIDRs (what exists; inbound digest for trunk peers stays out of scope). If the product cannot pin IPs — it runs in the same cluster but its egress addresses may not be static — Hello needs inbound digest registration for trunk peers, which is a phase-2 out-of-scope item and a materially larger change. Answer needed before the plan is tasked.
-- **Do the product's own identifiers need to reach the phones?** A peer that calls with no caller ID is presented as `<trunk-name>` (S-4). If the phones should instead see the product's per-call agent identity, that is a header-passing feature this spec does not cover.
-- **Should extensions be dialable from trunks under their external numbers too** (a DID map inside the `internal` lookup), or is the extension number itself the contract with the product? The spec takes the second: one route, extension numbers only.
-- **Is a `486`/`404` distinction visible enough for the product?** An unallowed dial gets 404 like any unmatched DID; the product may prefer 403 to distinguish policy from numbering. Traces tell Hello's side; the wire code choice is open.
+<!-- All resolved 2026-10-09, answered by Pascal, recorded in .procoder/ask/answers.md: (1) pinned IPs, digest REGISTER out of scope — a possible later milestone; (2) the peer's per-call name/number is the caller ID, the ladder of S-4 stays as fallback; (3) the extension number is the contract, no DID map; (4) 404 for out-of-policy dials, as written. -->

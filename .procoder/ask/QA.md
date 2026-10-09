@@ -1,6 +1,6 @@
 # Questions procoder cannot answer for you
 
-Written 2026-10-08 14:27 UTC.
+Written 2026-10-09 07:42 UTC.
 
 Answer each one by writing a line beginning `Answer: ` under it, then
 hand the file back with `procoder ask --file .procoder/ask/QA.md`.
@@ -21,9 +21,23 @@ Question: AI integration (2026-10-07)
 - talking-agent stays a separate service and repo; Hello routes calls to it over SIP; it is changed there (personas from Hello, MCP client, auth)
 - TTS: keep Breeze TTS 2 for the lab (research-only weights); make TTS pluggable for a commercial model later
 
-Answer:
+Answer: As recorded — this is the decision of 2026-10-07, already in decisions.md; recording it here confirms it (phases 1 and 2 stay, phase 3 pivot recorded separately).
 
 ## Q2: [decision] decisions.md
+
+Key: cbda37117ab2
+Question: Pivot: voice agents out of Hello (2026-10-09)
+
+- The call/voice agents leave Hello and become a separate product; Hello talks to it only via SIP trunks.
+- The built-in AI agent (phase 2: assistant, proposals, detectors) STAYS in Hello, as does phase 1 external access (MCP/OAuth/skills) and per-call quality in CDRs.
+- The voice-agent feature is removed from Hello (registry, runtime API, call leg, voice_agent routing/console, voice tables). PR #65 (voice e2e) is closed unmerged.
+- New requirement instead: SIP trunks must be able to reach internal numbers (inbound trunk calls targeting internal extensions), not only the outside world.
+
+Answer: As recorded — the pivot of 2026-10-09 stands; this spec (trunk-internal-numbers) is the new requirement it created.
+
+## Q3: [decision] decisions.md
+
+## Q3: [decision] decisions.md
 
 Key: bb1f0088a82e
 Question: Provisioning contract 4: MarkFetched and PromoteToken race a rotation or re-arm
@@ -37,67 +51,40 @@ using. Fixing it changes the fixed prov.Store contract (Task 1).
 - Pass the matched token hash to MarkFetched and PromoteToken and condition the updates on it (contract change; Task 2 and Task 3 adapt)
 - Accept the race as documented (an administrator re-arms or rotates again)
 
-Answer:
+Answer: The contract change — pass the matched token hash and condition the updates on it. That is what the merged prov-control code implements (`MarkFetched(ctx, id, hash, st)`, `PromoteToken(ctx, id, hash)` in `internal/prov/store.go`).
 
-## Q3: [spec] voice-agents
+## Q4: [spec] trunk-internal-numbers
 
-Key: e7214583272b
-Question: 1. **Who is the audience of "tenant"?** Is talking-agent shared by several Hello instances (lab, kw, perhaps a customer), or only by Hello on kw plus its own web UI? This spec supports many Hello tenants with a per-tenant secret and service account; if there is only one, S-16's key ids and the tenant header can collapse to one secret and one account. (Assumed: many, because the decision calls it multi-tenant.)
+## Q4: [spec] trunk-internal-numbers
 
-Answer: One shared talking-agent for several Hello instances, tenant-scoped (per-tenant secret and service account). Transcripts off by default, opt-in per agent, 30-day retention.
+Key: 3312b6690483
+Question: **Do the product's own identifiers need to reach the phones?** A peer that calls with no caller ID is presented as `<trunk-name>` (S-4). If the phones should instead see the product's per-call agent identity, that is a header-passing feature this spec does not cover.
 
-## Q4: [spec] voice-agents
+Answer: The peer identifies itself per call: the trunk's per-call name/number is presented to the phones, and the received → trunk default → `<trunk-name>` ladder of S-4 stays exactly as the fallback. No header-passing feature in this spec.
 
-Key: 48b95c74d6ea
-Question: 2. **Transcripts.** Default is summaries only, transcripts off per agent and readable by admins only, 30 days. Is that right for your use, and do you need transcripts at all (recorded-calls law differs by country, and an LLM summary is itself derived personal data)?
+## Q5: [spec] trunk-internal-numbers
 
-Answer: Transcripts off by default, opt-in per agent, admin-read only, 30-day retention (see Q3 answer).
+## Q5: [spec] trunk-internal-numbers
 
-## Q5: [spec] voice-agents
+Key: 1a00991f2313
+Question: **How does the consuming product signal?** The spec assumes IP-authenticated trunking with pinned source CIDRs (what exists; inbound digest for trunk peers stays out of scope). If the product cannot pin IPs — it runs in the same cluster but its egress addresses may not be static — Hello needs inbound digest registration for trunk peers, which is a phase-2 out-of-scope item and a materially larger change. Answer needed before the plan is tasked.
 
-Key: 226906a02b58
-Question: 3. **MCP credentials beyond bearer/header.** Real MCP servers use OAuth 2.1. Is a static token or header enough for the servers you will attach (for example Hello's own MCP server, home-automation, calendar), or must a voice agent act through OAuth on behalf of a user (a much bigger design: token refresh, per-user consent, caller identity)?
+Answer: Pinned IPs — the product's signalling IPs go into the trunk's source CIDR allowlist, exactly as the spec assumes. Digest REGISTER for trunk peers is out of scope (a possible later milestone).
 
-Answer: Both: static bearer/header tokens and OAuth 2.1 client-credentials (for example a Hello service account), all credentials sealed in Hello.
+## Q6: [spec] trunk-internal-numbers
 
-## Q6: [spec] voice-agents
+## Q6: [spec] trunk-internal-numbers
 
-Key: a9850601d3c6
-Question: 4. **Caller identity and tool authority.** Today a persona runs with the tools' credentials regardless of who calls (caller ID is never identity). Do you want any caller verification (spoken PIN, known-caller list per agent) before mutating tools, or is "confirm aloud" the whole control?
+Key: 102d6344a840
+Question: **Is a `486`/`404` distinction visible enough for the product?** An unallowed dial gets 404 like any unmatched DID; the product may prefer 403 to distinguish policy from numbering. Traces tell Hello's side; the wire code choice is open.
 
-Answer: talking-agent gets the same licence as Hello (Apache License 2.0, see Hello's LICENSE).
+Answer: 404 Not Found for out-of-policy dials, exactly as the spec is written — no 403 for policy, and traces remain Hello's side of the story.
 
-## Q7: [spec] voice-agents
+## Q7: [spec] trunk-internal-numbers
 
-Key: 67129a37407e
-Question: 5. **TLS/SRTP between Hello and talking-agent.** Both sit on the same LAN on kw. Is plaintext SIP/RTP acceptable on kw for phase 3 with the HMAC signature (S-16), or is SIPS/SRTP a requirement before first use?
+## Q7: [spec] trunk-internal-numbers
 
-Answer: Spoken confirmation PLUS caller verification (known caller ID / allowlist, or a PIN) before any data-changing tool; tools allowlisted per agent.
+Key: 1ab52c582e7f
+Question: **Should extensions be dialable from trunks under their external numbers too** (a DID map inside the `internal` lookup), or is the extension number itself the contract with the product? The spec takes the second: one route, extension numbers only.
 
-## Q8: [spec] voice-agents
-
-Key: 2567471bf9c0
-Question: 6. **Licence of talking-agent and Breeze.** `LICENSE.md` contains only `ok`; Breeze TTS 2 weights are research-only. Which licence should talking-agent have, and is any commercial or customer use of the lab voice intended before a commercial TTS is chosen?
-
-Answer: Plaintext SIP/RTP with the HMAC-signed INVITE is acceptable on kw; TLS/SRTP is a later option.
-
-## Q9: [spec] voice-agents
-
-Key: 0dbd568da15e
-Question: 7. **Agents in ring groups.** The spec forbids an agent in `ring-all`/`longest-idle`/`weighted` groups and recommends it as the failure target. Do you also want it as a normal `sequential` member (for example "ring the desk phone, then the assistant"), or only as a failure target?
-
-Answer: Sequential member and failure target both allowed (sequential and round-robin as in the spec).
-
-## Q10: [spec] voice-agents
-
-Key: 61c77b143f82
-Question: 8. **Test call.** The spec offers a test extension and CDR following, not a browser or console-originated call. Do you want Hello to originate a call to a chosen phone and connect it to the agent (needs click-to-call, which Hello does not have), or a WebRTC softphone in the console (a new media stack)?
-
-Answer: A dialable test extension per agent plus CDR following; no WebRTC and no click-to-call.
-
-## Q11: [spec] voice-agents
-
-Key: 457b17a5bdc0
-Question: 9. **Where limits are enforced.** Concurrency is enforced by talking-agent (`486`). Should Hello also cap simultaneous agent calls per agent or globally (it knows the calls and could refuse before sending an INVITE), accepting that two sources then hold the number?
-
-Answer: Hello caps calls per agent and in total (busy sends the call to the failover destination); talking-agent also refuses with 486 when its speech models are saturated.
+Answer: The extension number is the contract: the peer dials `sip:101@hello` and the number is matched against the trunk's allowed patterns; no DID-to-extension map.
