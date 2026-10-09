@@ -290,7 +290,9 @@ func TestVoiceAgentsEndToEnd(t *testing.T) {
 		t.Fatalf("ring group media: %v", err)
 	}
 	calls = agent.Calls()
-	if len(calls) != 2 || calls[1].Called != groupName || calls[1].Origin != "extension" {
+	// The agent has seen the answered DID call and the refused one; the
+	// failure-target call is the third.
+	if len(calls) != 3 || calls[2].Called != groupName || calls[2].Origin != "extension" {
 		t.Fatalf("the fake agent saw %+v, want the failure-target call dialled %s", calls, groupName)
 	}
 	if err := out.Hangup(ctx); err != nil {
@@ -314,7 +316,7 @@ func TestVoiceAgentsEndToEnd(t *testing.T) {
 		t.Fatalf("call to the agent extension = %d, want 200", heldCall.Status)
 	}
 	calls = agent.Calls()
-	if len(calls) != 3 || calls[2].SIPUser != va.SIPUser || calls[2].Origin != "extension" {
+	if len(calls) != 4 || calls[3].SIPUser != va.SIPUser || calls[3].Origin != "extension" {
 		t.Fatalf("the fake agent saw %+v, want the extension call to %s", calls, va.SIPUser)
 	}
 	// The group's member is the agent itself; the failure target is the
@@ -338,8 +340,8 @@ func TestVoiceAgentsEndToEnd(t *testing.T) {
 	if out2.Status != 200 {
 		t.Fatalf("overflow call = %d, want the failure target to answer", out2.Status)
 	}
-	if got := len(agent.Calls()); got != 3 {
-		t.Fatalf("the agent saw %d calls, want 3: the overflow was invited despite the full capacity", got)
+	if got := len(agent.Calls()); got != 4 {
+		t.Fatalf("the agent saw %d calls, want 4: the overflow was invited despite the full capacity", got)
 	}
 	if err := out2.Hangup(ctx); err != nil {
 		t.Fatal(err)
@@ -408,15 +410,16 @@ func TestVoiceCDRFields(t *testing.T) {
 	if in := <-answered; in == nil {
 		t.Fatal("the plain call did not reach the callee")
 	}
+	// A CDR is written when the call ends, so hang up before waiting for it.
+	if err := plain.Hangup(ctx); err != nil {
+		t.Fatal(err)
+	}
 	var plainCDR labVoiceCDR
 	eventually(t, 10*time.Second, "the plain call's CDR", func() error {
 		return findVoiceCDR(lc, "", callee.Extension, &plainCDR)
 	})
 	if plainCDR.VoiceAgent != "" {
 		t.Fatalf("a plain call's CDR carries agent fields: %+v", plainCDR)
-	}
-	if err := plain.Hangup(ctx); err != nil {
-		t.Fatal(err)
 	}
 
 	// The agent call, routed through the DID.
