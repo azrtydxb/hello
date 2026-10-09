@@ -37,19 +37,23 @@ type CDR struct {
 	RTPPackets           *int64     `json:"rtpPackets"`
 	RTPLost              *int64     `json:"rtpLost"`
 	RTPJitterMs          *float64   `json:"rtpJitterMs"`
+	// VoiceAgent is the name of the agent the call was routed to (spec
+	// voice-agents S-23), empty for every other call.
+	VoiceAgentName string `json:"voiceAgent"`
 }
 
 const cdrCols = `id, correlation_id, sip_call_id, source, destination, start_time, ring_time, answer_time,
 	end_time, duration_ms, billable_ms, sip_node, media_mode, final_status, termination_side, failure_reason,
 	direction, original_destination, rewritten_destination, route_name, trunk_name,
-	rtp_packets, rtp_lost, rtp_jitter_ms`
+	rtp_packets, rtp_lost, rtp_jitter_ms, voice_agent_name`
 
 func scanCDR(r interface{ Scan(...any) error }, extra ...any) (CDR, error) {
 	var c CDR
 	var ring, answer sql.NullTime
 	dest := append([]any{&c.ID, &c.CorrelationID, &c.SIPCallID, &c.Source, &c.Destination, &c.StartTime, &ring, &answer,
 		&c.EndTime, &c.DurationMs, &c.BillableMs, &c.SIPNode, &c.MediaMode, &c.FinalStatus, &c.TerminationSide, &c.FailureReason,
-		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs}, extra...)
+		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs,
+		&c.VoiceAgentName}, extra...)
 	if err := r.Scan(dest...); err != nil {
 		return c, err
 	}
@@ -65,6 +69,9 @@ type CDRFilter struct {
 	// Failed keeps only calls whose final status is outside 2xx, the same
 	// rule the CDR detail's explanation uses.
 	Failed bool
+	// VoiceAgent keeps only calls routed to that voice agent (spec
+	// voice-agents S-23, the listCDRs filter); empty keeps all.
+	VoiceAgent string
 }
 
 // ListCDRs returns up to limit CDRs matching f with id below before (0
@@ -74,7 +81,8 @@ func (s *Store) ListCDRs(ctx context.Context, f CDRFilter, before int64, limit i
 	rows, err := s.db.QueryContext(ctx, `SELECT `+cdrCols+`
 		FROM cdrs WHERE ($1 = 0 OR id < $1) AND ($3::text = '' OR direction = $3::text)
 			AND (NOT $4::boolean OR final_status NOT BETWEEN 200 AND 299)
-		ORDER BY id DESC LIMIT $2`, before, limit+1, f.Direction, f.Failed)
+			AND ($5::text = '' OR voice_agent_name = $5::text)
+		ORDER BY id DESC LIMIT $2`, before, limit+1, f.Direction, f.Failed, f.VoiceAgent)
 	if err != nil {
 		return nil, "", err
 	}

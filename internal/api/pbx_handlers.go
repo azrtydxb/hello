@@ -411,10 +411,11 @@ type ringGroupBody struct {
 }
 
 type ringGroupMemberIn struct {
-	ExtensionID int64 `json:"extensionId"`
-	Position    int   `json:"position"`
-	Weight      *int  `json:"weight"`
-	Delay       *int  `json:"delay"`
+	ExtensionID  int64 `json:"extensionId"`
+	VoiceAgentID int64 `json:"voiceAgentId"`
+	Position     int   `json:"position"`
+	Weight       *int  `json:"weight"`
+	Delay        *int  `json:"delay"`
 }
 
 func (b ringGroupBody) empty() bool { return b == ringGroupBody{} }
@@ -458,7 +459,7 @@ func (b ringGroupBody) toInput(base store.RingGroupInput) (store.RingGroupInput,
 				d = *m.Delay
 			}
 			base.Members = append(base.Members, store.RingGroupMember{
-				ExtensionID: m.ExtensionID, Position: m.Position, Weight: w, Delay: d})
+				ExtensionID: m.ExtensionID, VoiceAgentID: m.VoiceAgentID, Position: m.Position, Weight: w, Delay: d})
 		}
 	}
 	return base, true
@@ -493,25 +494,47 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		if !externalNumRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be 2-32 of 0-9 * # with an optional leading +")
 		}
-	case "announcement":
-		if !usernameRe.MatchString(in.FailureTarget) {
-			f.add("failureTarget", "must be an announcement name (1-64 of A-Z a-z 0-9 . _ -)")
+	case "voice_agent":
+		// The failure target is the agent name; that the agent exists and is
+		// enabled is checked against the registry below (stage 1 has no
+		// database), like the whole-configuration compile checks a route.
+		if !voiceAgentNameRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be a voice agent name (1-64 of A-Z a-z 0-9 . _ -)")
 		}
 	default:
-		f.add("failureKind", `must be "none", "voicemail", "external" or "announcement"`)
+		f.add("failureKind", `must be "none", "voicemail", "external" or "voice_agent"`)
 	}
 	if len(in.Members) == 0 || len(in.Members) > 50 {
 		f.add("members", "must have 1-50 members")
 		return f
 	}
 	seenExt := map[int64]bool{}
+	seenAgent := map[int64]bool{}
 	seenPos := map[int]bool{}
 	for i, m := range in.Members {
 		p := fmt.Sprintf("members[%d]", i)
-		if m.ExtensionID <= 0 || seenExt[m.ExtensionID] {
-			f.add(p+".extensionId", "must be a distinct extension id")
+		// A member is an extension or a voice agent, never both, never
+		// neither (S-12). An agent answers instantly, so it may sit only in
+		// a sequential group, where it cannot beat an extension to a call.
+		switch {
+		case m.ExtensionID > 0 && m.VoiceAgentID > 0:
+			f.add(p, "must name an extension or a voice agent, not both")
+		case m.ExtensionID <= 0 && m.VoiceAgentID <= 0:
+			f.add(p, "must name an extension or a voice agent")
+		case m.VoiceAgentID > 0 && in.Strategy != "sequential":
+			f.add(p+".voiceAgentId", `is only allowed in a sequential group (an agent answers instantly)`)
+		case m.VoiceAgentID > 0 && seenAgent[m.VoiceAgentID]:
+			f.add(p+".voiceAgentId", "must be a distinct voice agent id")
 		}
-		seenExt[m.ExtensionID] = true
+		if m.ExtensionID > 0 {
+			if m.ExtensionID < 0 || seenExt[m.ExtensionID] {
+				f.add(p+".extensionId", "must be a distinct extension id")
+			}
+			seenExt[m.ExtensionID] = true
+		}
+		if m.VoiceAgentID > 0 {
+			seenAgent[m.VoiceAgentID] = true
+		}
 		if m.Position < 1 || m.Position > 50 || seenPos[m.Position] {
 			f.add(p+".position", "must be a distinct position of 1-50")
 		}
@@ -526,6 +549,59 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		}
 	}
 	return f
+}
+
+// checkRingGroupAgents verifies the group's voice agent references against
+// the registry: a member id or a voice_agent failure target must exist and
+// name an enabled agent (spec S-12). It is stage 1's database half, next to
+// the whole-configuration compile the store runs for routes.
+func (s *server) checkRingGroupAgents(ctx context.Context, w http.ResponseWriter, in *store.RingGroupInput) (fieldErrs, bool) {
+	var wantIDs []int64
+	var wantName string
+	if in.FailureKind == "voice_agent" {
+		wantName = in.FailureTarget
+	}
+	for _, m := range in.Members {
+		if m.VoiceAgentID > 0 {
+			wantIDs = append(wantIDs, m.VoiceAgentID)
+		}
+	}
+	if len(wantIDs) == 0 && wantName == "" {
+		return nil, true
+	}
+	refs, err := s.Store.ListVoiceAgentRefs(ctx)
+	if err != nil {
+		s.internal(w, "ring group: list voice agents", err)
+		return nil, false
+	}
+	byID := make(map[int64]store.VoiceAgentRef, len(refs))
+	var failure *store.VoiceAgentRef
+	for i := range refs {
+		byID[refs[i].ID] = refs[i]
+		if wantName != "" && refs[i].Name == wantName {
+			failure = &refs[i]
+		}
+	}
+	var f fieldErrs
+	if wantName != "" && failure == nil {
+		f.add("failureTarget", "voice agent %q does not exist", wantName)
+	}
+	if wantName != "" && failure != nil && !failure.Enabled {
+		f.add("failureTarget", "voice agent %q is disabled", wantName)
+	}
+	for i, m := range in.Members {
+		if m.VoiceAgentID <= 0 {
+			continue
+		}
+		ref, ok := byID[m.VoiceAgentID]
+		switch {
+		case !ok:
+			f.add(fmt.Sprintf("members[%d].voiceAgentId", i), "must be an existing voice agent id")
+		case !ref.Enabled:
+			f.add(fmt.Sprintf("members[%d].voiceAgentId", i), "voice agent %q is disabled", ref.Name)
+		}
+	}
+	return f, true
 }
 
 // defaultsRingGroup is what POST accepts as absent.
@@ -547,6 +623,14 @@ func (s *server) createRingGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	in, _ := b.toInput(defaultsRingGroup())
 	if f := validateRingGroup(&in); len(f) > 0 {
+		writeFields(w, f)
+		return
+	}
+	f, ok := s.checkRingGroupAgents(r.Context(), w, &in)
+	if !ok {
+		return
+	}
+	if len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
@@ -583,6 +667,14 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	in, _ := b.toInput(base)
 	if f := validateRingGroup(&in); len(f) > 0 {
+		writeFields(w, f)
+		return
+	}
+	f, ok := s.checkRingGroupAgents(r.Context(), w, &in)
+	if !ok {
+		return
+	}
+	if len(f) > 0 {
 		writeFields(w, f)
 		return
 	}

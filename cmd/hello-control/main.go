@@ -29,6 +29,7 @@ import (
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/azrtydxb/hello/internal/version"
 	"github.com/azrtydxb/hello/internal/vkconn"
+	"github.com/azrtydxb/hello/internal/voice"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/valkey-io/valkey-go"
 )
@@ -156,22 +157,30 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	} else {
 		log.Info("ai agent off", "reason", reason)
 	}
+	// The voice runtime service (spec voice-agents S-19 to S-23): the view
+	// talking-agent polls, its acks, the call reports and the hourly prune.
+	// Its store half lives in internal/store; the PruneLoop starts with the
+	// other background loops below.
+	runtime := voice.NewRuntime(voice.NewStoreSource(st), box, cfg.Voice, log, metrics.Registry)
 	apiCfg := api.Config{
-		AIAgent:       agent,
-		Store:         st,
-		Live:          vk,
-		Trunks:        vk,
-		Cluster:       vk,
-		Valkey:        vk,
-		Objects:       objs,
-		Diagnostics:   vk,
-		AuthFailLimit: cfg.AuthFailLimit,
-		EmailDelivery: cfg.SmtpHost != "",
-		ProvStore:     st,
-		Prov:          provAPI(cfg, settings, deployment, objs, log),
-		SIPDomain:     cfg.SIPDomain,
-		SessionTTL:    cfg.SessionTTL,
-		Log:           log,
+		AIAgent:         agent,
+		Store:           st,
+		Voice:           voice.New(st, box, cfg.Voice, log),
+		VoiceRuntime:    runtime,
+		Live:            vk,
+		Trunks:          vk,
+		Cluster:         vk,
+		Valkey:          vk,
+		Objects:         objs,
+		Diagnostics:     vk,
+		AuthFailLimit:   cfg.AuthFailLimit,
+		EmailDelivery:   cfg.SmtpHost != "",
+		ProvStore:       st,
+		Prov:            provAPI(cfg, settings, deployment, objs, log),
+		SIPDomain:       cfg.SIPDomain,
+		SessionTTL:      cfg.SessionTTL,
+		VoiceSIPAddress: cfg.Voice.SIPAddress,
+		Log:             log,
 	}
 	// Proposals (spec ai-agent) exist only while the agent is on; reads in
 	// their validation replay through the API handler built just below.
@@ -246,6 +255,11 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	if validator != nil {
 		validator.SetHandler(apiHandler)
 	}
+	// The runtime's hourly prune (spec voice-agents S-23): transcripts past
+	// their agent's retention, reports past the CDR retention. It stops with
+	// the process context, under the hello:voice:prune advisory lock, so a
+	// replica keeps its reports complete.
+	go runtime.PruneLoop(ctx)
 	app, err := composeApp(cfg.AI, apiHandler, as, st, metrics.Registry, log)
 	if err != nil {
 		_ = ln.Close()

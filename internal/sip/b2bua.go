@@ -86,6 +86,12 @@ type call struct {
 	trunkName string
 	trace     routing.Trace
 	slots     []heldSlot // trunk call slots held, released when the attempt ends
+	// voice is the call's voice agent destination (nil otherwise): the CDR
+	// names it, and the capacity slots and hello_voice_* metrics follow it.
+	voice        *voiceRef
+	voiceStart   time.Time   // when the INVITE to the agent went out
+	voiceCounted bool        // VoiceActive was incremented (under mu)
+	voiceSlots   []voiceSlot // capacity slots held (S-35), released at the end
 
 	// Phase 4 call-flow state. stages carries the forwarding/DND context of
 	// the extension being rung (nil for a plain call); mediaMode is the CDR's
@@ -214,8 +220,9 @@ type leg struct {
 	number    string
 	callerID  string
 	uri       *sip.Uri
-	abandoned bool // guarded by c.mu: failed over, may no longer win
-	stage     int  // the forwarding stage this fork belongs to; setup ignores older stages' events
+	voice     *voiceLeg // the signed X-Hello header set of an agent leg (S-15)
+	abandoned bool      // guarded by c.mu: failed over, may no longer win
+	stage     int       // the forwarding stage this fork belongs to; setup ignores older stages' events
 }
 
 func (l *leg) session() *sipgo.DialogClientSession {
@@ -243,6 +250,12 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	if s.refuseIfNotReady(req, tx) {
+		return
+	}
+	if s.fromVoiceAgent(req) {
+		// The voice agent's address is not a trunk and not a phone (S-14);
+		// it never places calls and is counted like any untrusted source.
+		s.authFailed(tx, req, s.clientIP(req), "INVITE from the voice agent's address", false)
 		return
 	}
 	if _, ok := s.lookup(req.CallID().Value()); ok {
@@ -343,7 +356,7 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 		c.ringTarget(req, tx, snap, dec.Extension)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
 		c.considerAnchor(snap, EndpointInfo{}) // external URI: caller-side triggers only
-		c.ringURI(req, tx, dec.SIPURI)
+		c.ringURI(req, tx, dec)
 	default:
 		code, reason := dec.RejectCode, dec.Reason
 		if code < 300 {
@@ -364,9 +377,14 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 	}
 }
 
-// ringURI sends the call to a SIP URI (an inbound route's destination, such
-// as a voice agent).
-func (c *call) ringURI(req *sip.Request, tx sip.ServerTransaction, raw string) {
+// ringURI sends the call to a SIP URI destination; a decision that carries
+// a voice agent takes the signed agent leg instead (S-10, S-15).
+func (c *call) ringURI(req *sip.Request, tx sip.ServerTransaction, dec routing.Decision) {
+	if dec.VoiceAgent != nil {
+		c.ringVoiceAgent(req, tx, dec.VoiceAgent, dec.SIPURI)
+		return
+	}
+	raw := dec.SIPURI
 	var u sip.Uri
 	if err := sip.ParseUri(strings.TrimSuffix(strings.TrimPrefix(raw, "<"), ">"), &u); err != nil {
 		c.s.respond(tx, req, sip.StatusInternalServerError, "Server Internal Error")
@@ -655,6 +673,9 @@ func (c *call) answer(w *leg) {
 	}
 	c.addTrace("Call established")
 	c.publish()
+	if start, ok := c.voiceStartAt(); ok {
+		c.s.m.VoiceSetup.Observe(time.Since(start).Seconds())
+	}
 	// record_default recordings start when the call is answered (spec
 	// S-4); the flow re-anchors when needed, but an anchored-for-recording
 	// call is already set up.
@@ -939,6 +960,7 @@ func (c *call) end(status int, side, reason, result string) {
 			// CDR here would take the correlation id the taker's final
 			// CDR needs (one CDR per call).
 			c.releaseSlots()
+			c.releaseVoiceSlots()
 			return
 		}
 		c.unpublish()
@@ -981,7 +1003,8 @@ func (c *call) release() {
 // record counts the attempt and queues its CDR. An attempt that did not
 // connect ends its trace with the reason, which is the CDR's explanation.
 func (c *call) record(status int, side, reason, result string) {
-	c.releaseSlots() // every way an attempt ends passes here exactly once
+	c.releaseSlots()      // every way an attempt ends passes here exactly once
+	c.releaseVoiceSlots() // ... and every voice capacity slot with it
 	end := time.Now()
 	c.mu.Lock()
 	ring, answer := c.ringTime, c.answerTime
@@ -999,6 +1022,9 @@ func (c *call) record(status int, side, reason, result string) {
 		FinalStatus: status, TerminationSide: side, FailureReason: reason,
 		Direction: c.direction, OriginalDestination: c.dialled, RewrittenDestination: c.rewritten,
 		Route: c.route, Trunk: c.trunkName, Trace: trace,
+	}
+	if c.voice != nil {
+		r.VoiceAgent = c.voice.Name
 	}
 	c.mu.Unlock()
 	if !answer.IsZero() {
@@ -1077,6 +1103,7 @@ func (c *call) heartbeat() {
 		case <-t.C:
 			c.publish()
 			c.refreshSlots()
+			c.refreshVoiceSlots()
 		}
 	}
 }
@@ -1113,6 +1140,8 @@ func (l *leg) run() {
 
 func (l *leg) drive(report func(legEvent)) {
 	s := l.c.s
+	stopRing := l.voiceRingDeadline() // an agent that stays silent fails 408 (S-15)
+	defer stopRing()
 	req, err := l.invite()
 	if err != nil {
 		s.log.Warn("bad binding contact", "contact", l.binding.ContactURI, "error", err)
@@ -1161,6 +1190,16 @@ func (l *leg) drive(report func(legEvent)) {
 		code, reason = de.Res.StatusCode, de.Res.Reason
 	case errors.Is(err, sip.ErrTransactionTimeout):
 		code = sip.StatusRequestTimeout
+	}
+	if l.voice != nil && errors.Is(err, context.DeadlineExceeded) {
+		// The agent ring deadline (S-15), not the agent's own answer.
+		code = sip.StatusRequestTimeout
+	}
+	if l.voice != nil && !errors.Is(err, context.Canceled) {
+		// The agent leg's failure is a mapped response and a metric reason
+		// (S-15, S-32); a caller cancellation is not the agent's fault.
+		l.c.addTrace(fmt.Sprintf("Voice agent %s -> %d %s", l.voice.agent, code, reason))
+		s.m.VoiceUnreachable.WithLabelValues(voiceUnreachableLabel(code, err)).Inc()
 	}
 	report(legEvent{leg: l, kind: evFailed, code: code, reason: reason})
 }
@@ -1218,7 +1257,17 @@ func (l *leg) invite() (*sip.Request, error) {
 	req.AppendHeader(&maxFwd)
 	req.AppendHeader(sip.HeaderClone(&s.contact))
 	req.AppendHeader(sip.NewHeader("Allow", allow))
-	if body := c.inv.Body(); len(body) > 0 {
+	if l.voice != nil {
+		// The agent leg offers the caller's SDP rewritten to G.711 only and
+		// carries the signed X-Hello set, none of it from the caller (S-15).
+		if l.voice.offer != nil {
+			if ct := c.inv.ContentType(); ct == nil {
+				req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+			}
+			req.SetBody(l.voice.offer)
+		}
+		l.applyVoiceHeaders(req)
+	} else if body := c.inv.Body(); len(body) > 0 {
 		if ct := c.inv.ContentType(); ct != nil {
 			req.AppendHeader(sip.HeaderClone(ct))
 		}
@@ -1228,6 +1277,11 @@ func (l *leg) invite() (*sip.Request, error) {
 	// leg-b port, not the caller's SDP (spec S-2).
 	if l.c.isAnchored() {
 		if off, err := media.ParseAudioSDP(c.inv.Body()); err == nil {
+			if l.voice != nil {
+				// S-15: the agent is offered PCMU and PCMA only, no DTMF
+				// event payload (BuildAudioSDP keeps ptime at 20 either way).
+				off.DTMFPayloadType = 0
+			}
 			if body := l.c.anchoredOfferB(off); len(body) > 0 {
 				req.SetBody(body)
 				req.RemoveHeader("Content-Type")

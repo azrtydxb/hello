@@ -62,46 +62,63 @@ Interfaces: produces contracts 1-7.
 Files: `internal/voice/registry.go`, `versions.go`, `mcp.go`, `egress.go`, `internal/store/voice.go`, `internal/api/voice_agents.go`, `voice_mcp.go` and tests, `test/fakemcp/`.
 Interfaces: produces the registry operations, caller verification fields and the `voice_revision` counter; consumes contracts 1, 2, 7 and `internal/secret`.
 
-- [ ] Agent CRUD, limits, generated `sip_user`, extension namespace uniqueness, 10 versions, restore, references on delete (`409`), audit rows without text; `TestVoiceAgentCRUD`.
-- [ ] Caller verification (S-36): modes, allowlist, salted PIN hash, `voice_verification_required` on write tools without it; `TestVoiceCallerVerification`.
-- [ ] MCP servers: bearer, header and OAuth client-credentials auth, sealed credential, write-only, admin-only credential, attachments with allowlists and `confirm` defaults, tool name conflicts; `TestVoiceMCPServers`.
-- [ ] Guarded dialer (token URL too), OAuth client-credentials exchange, discovery and test through the Go SDK client against `test/fakemcp`; `TestVoiceMCPDiscovery`.
-- [ ] Every change bumps `voice_revision` in its own transaction; covered inside `TestVoiceAgentCRUD`.
-- [ ] Mutation-check the credential response filter, the egress check and the admin-only gate. Full gate.
+Deviations recorded when Task 2 landed (all additive; ask the lead before relying on more):
+
+- The generated `sip_user` is numeric (`^[0-9]{3,15}$`, a fixed migration CHECK) instead of the spec's `va-<8 hex>` shape, which the fixed schema cannot store; it still hides the agent's name and extension.
+- The OAuth `audience`/`resource` field of S-5 has no column in the fixed migration, so it is not stored; `scope` is sent as documented, and the field needs a migration of its own if the lead wants it.
+- The Error schema's `code` enum gained the five voice codes of the spec's Interfaces table (Task 1's document omitted them), `VoiceAgentInput` gained `extension` (S-3 is unsettable otherwise), and the three voice GET operations gained their documented `403` (phase 1's role-enforcement probe answers it now that the routes stopped being pending).
+- `api.Config` gained the `Voice` registry field and `cmd/hello-control/main.go` wires `voice.New(st, box, cfg.Voice, log)` — one line each, the same plumbing phase 2 used for its services.
+- Registry reads that are not tool traffic (the agents/servers lists) go through the same configChange machinery, so an agent change also bumps the configuration revision and notifies hello-sip, which Task 4's compiled table wants.
+
+- [x] Agent CRUD, limits, generated `sip_user`, extension namespace uniqueness, 10 versions, restore, references on delete (`409`), audit rows without text; `TestVoiceAgentCRUD`.
+- [x] Caller verification (S-36): modes, allowlist, salted PIN hash, `voice_verification_required` on write tools without it; `TestVoiceCallerVerification`.
+- [x] MCP servers: bearer, header and OAuth client-credentials auth, sealed credential, write-only, admin-only credential, attachments with allowlists and `confirm` defaults, tool name conflicts; `TestVoiceMCPServers`.
+- [x] Guarded dialer (token URL too), OAuth client-credentials exchange, discovery and test through the Go SDK client against `test/fakemcp`; `TestVoiceMCPDiscovery`.
+- [x] Every change bumps `voice_revision` in its own transaction; covered inside `TestVoiceAgentCRUD` and `TestVoiceMCPServers` (store half).
+- [x] Mutation-check the credential response filter, the egress check and the admin-only gate. Full gate green except the database-backed tests, which run in CI (no database on a developer machine).
 
 ## Task 3: Routing and ring groups (branch voice-agents-routing, after Task 1; parallel with Task 2)
 
 Files: `internal/routing/` (types, engine, decide, tests), `internal/store/routing.go` and ring group code, `internal/api` route and ring group handlers and validation, `migrations` follows contract 1.
 Interfaces: produces `voice_agent` as destination everywhere of S-10 to S-13; consumes contracts 1, 3.
 
-- [ ] Compile and validate `voice_agent` for inbound routes and internal extension resolution; trace line; `TestVoiceAgentRouting`.
-- [ ] Ring group member and failure target, `sequential`-only restriction, XOR constraint; `TestVoiceAgentRingGroup` (routing and API halves).
-- [ ] Routing test endpoint shows the step; transfer and feature code reach the agent extension.
-- [ ] Mutation-check the strategy restriction and the disabled-agent validation. Full gate.
+- [x] Compile and validate `voice_agent` for inbound routes and internal extension resolution; trace line; `TestVoiceAgentRouting`.
+- [x] Ring group member and failure target, `sequential`-only restriction, XOR constraint; `TestVoiceAgentRingGroup` (routing and API halves).
+- [x] Routing test endpoint shows the step; transfer and feature code reach the agent extension.
+- [x] Mutation-check the strategy restriction and the disabled-agent validation. Full gate.
 
-## Task 4: The call leg (branch voice-agents-sip, after Tasks 1 and 3)
+Deviations recorded when Task 4 landed (all compatible with Tasks 2, 3, 5-8; ask the lead before relying on more):
+
+- The per-agent `max_concurrent` reaches hello-sip through a cached registry reader (`cmd/hello-sip` polls `voice_agents.name, max_concurrent` every 15 s off the call path; `sip.VoiceLimits`), because contract 3's fixed routing input carries no limits. An agent the cache does not know yet is uncapped until the next refresh. If the routing table later carries limits, drop the poller.
+- Capacity slots live in `internal/livestate/voice.go` (no other stream owns livestate): two scored sets per call, `hello:voiceagent:<name>:calls` and `hello:voiceagents:calls`, acquired, refreshed and released atomically in one script, like the trunk slot sets.
+- S-14 matches the literal `ip:port` of `HELLO_VOICE_SIP_ADDRESS` (talking-agent sends from its SIP socket), not the IP alone: on a loopback test host every caller shares one IP, and a hostname address can never match.
+- The CDR writer resolves `voice_agent_id` by name in the INSERT (`WHERE name = voice_agent_name`), because the fixed `VoiceRef` carries no registry id; a call to an agent deleted before the write stores the name with a NULL id (`ON DELETE SET NULL` covers later deletions).
+- Response mapping follows the existing callee normalisation: `404`, `403`, `503` and a silent agent reach the caller as `480` (as for any callee), `486` as `486`; the agent's own code is on the trace and in `hello_voice_agent_unreachable_total`.
+- `X-Hello-Auth` is redacted from SIP log lines like `Authorization` (S-32).
+
+## Task 4: The call leg (branch voice-leg, after Tasks 1 and 3)
 
 Files: `internal/sip/callflow.go` and `b2bua.go` (the `ringURI` leg), `internal/sip/voice.go`, `internal/cdr/`, `internal/store/cdr.go`, `test/sipua` (fake agent behaviours), tests.
 Interfaces: produces the signed INVITE and the CDR fields; consumes contracts 2, 3, 4.
 
-- [ ] Headers, signature, G.711 offer, stripped caller headers, ring timeout, response mapping; `TestVoiceAgentInvite` against `test/sipua`.
-- [ ] Refuse the agent address as a caller; covered by `TestVoiceAgentInvite`.
-- [ ] Capacity (S-35): per-agent and total caps counted like trunk `max_calls`, busy to the next step or failover, `486` mapped the same, `X-Hello-Caller-Origin` header; `TestVoiceCapacity`.
-- [ ] CDR columns written and filter `voiceAgent` on `listCDRs`; `TestVoiceCDRFields` (integration, in Task 8 if databases are needed).
-- [ ] Metrics `hello_voice_*` for setup and unreachable; `TestVoiceMetrics` (SIP half).
-- [ ] Mutation-check the header strip and the signature input. Full gate; media tests unchanged and green.
+- [x] Headers, signature, G.711 offer, stripped caller headers, ring timeout, response mapping; `TestVoiceAgentInvite` against `test/sipua`.
+- [x] Refuse the agent address as a caller; covered by `TestVoiceAgentInvite` (`TestVoiceAgentRefusedAddress` for INVITE and REGISTER).
+- [x] Capacity (S-35): per-agent and total caps counted like trunk `max_calls`, busy to the next step or failover, `486` mapped the same, `X-Hello-Caller-Origin` header; `TestVoiceCapacity` (the ring group's next step and failure target apply through the normal exhaustion path once Task 3's snapshot wires agent members).
+- [x] CDR columns written and filter `voiceAgent` on `listCDRs`; the writer and store halves here, `TestVoiceCDRFields` itself is Task 8's integration proof (databases).
+- [x] Metrics `hello_voice_*` for setup and unreachable; `TestVoiceMetrics` assertions folded into `TestVoiceAgentInvite`, `TestVoiceAgentResponses` and `TestVoiceCapacity` (SIP half; the runtime half is Task 5).
+- [x] Mutation-check the header strip and the signature input (relaying a caller header is caught by the strip; a changed signed field breaks `TestVoiceAgentInvite`/`TestVoiceCallAuth`). Full gate; media tests unchanged and green.
 
 ## Task 5: Runtime API, ack and call reports (branch voice-agents-runtime, after Tasks 1 and 2)
 
 Files: `internal/voice/runtime.go`, `report.go`, `prune.go`, `internal/api/voice_runtime.go` and tests.
 Interfaces: produces the three runtime operations and the status; consumes contracts 5, 6.
 
-- [ ] View builder with unsealed credentials, ETag, `304`, long poll that wakes on a revision change (Postgres `LISTEN`/`NOTIFY` or a 500 ms check; the simpler that passes the 2 s criterion); `TestVoiceRuntimeAPI`.
-- [ ] Ack, status states, rate limit, red after 2 minutes; `TestVoiceRuntimeStatus` (includes S-22).
-- [ ] Report: idempotent, early reports, size limits, transcript only when allowed, CDR detail join; `TestVoiceCallReport`.
-- [ ] Prune with advisory lock; `TestVoicePrune`.
-- [ ] Not reachable from MCP, the assistant or proposals; `TestVoiceOperationsMCP`; metrics and logs; `TestVoiceMetrics`, `TestNoSecretsInLogs` extended.
-- [ ] Mutation-check the scope gate, the transcript flag and the credential presence. Full gate.
+- [x] View builder with unsealed credentials, ETag, `304`, long poll that wakes on a revision change (Postgres `LISTEN`/`NOTIFY` or a 500 ms check; the simpler that passes the 2 s criterion); `TestVoiceRuntimeAPI`.
+- [x] Ack, status states, rate limit, red after 2 minutes; `TestVoiceRuntimeStatus` (includes S-22).
+- [x] Report: idempotent, early reports, size limits, transcript only when allowed, CDR detail join; `TestVoiceCallReport`.
+- [x] Prune with advisory lock; `TestVoicePrune`.
+- [x] Not reachable from MCP, the assistant or proposals; `TestVoiceOperationsMCP`; metrics and logs; `TestVoiceMetrics`, `TestNoSecretsInLogs` extended.
+- [x] Mutation-check the scope gate, the transcript flag and the credential presence. Full gate.
 
 ## Task 6: Console (branch voice-agents-ui, after Tasks 2, 3 and 5 contracts are mocked)
 
