@@ -153,7 +153,45 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 		cfg.Extensions[n] = ext
 	}
 	rows.Close()
-	return cfg, bad, rows.Err()
+	if err := rows.Err(); err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: external numbers: %w", err)
+	}
+	if err := loadVoiceAgents(ctx, db, &cfg); err != nil {
+		return cfg, nil, err
+	}
+	return cfg, bad, nil
+}
+
+// loadVoiceAgents adds the registry to the routing input (the same rows the
+// control plane's whole-configuration validation compiles against): name,
+// sip user and enabled state for the engine's voice_agent destinations, and
+// every agent's extension for the internal dialling of S-13.
+func loadVoiceAgents(ctx context.Context, db Querier, cfg *routing.Config) error {
+	rows, err := db.Query(ctx, `SELECT name, sip_user, enabled, extension FROM voice_agents ORDER BY name`)
+	if err != nil {
+		return fmt.Errorf("snapshot: voice agents: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			a   routing.VoiceAgent
+			ext *string
+		)
+		if err := rows.Scan(&a.Name, &a.SIPUser, &a.Enabled, &ext); err != nil {
+			return fmt.Errorf("snapshot: scan voice agent: %w", err)
+		}
+		cfg.VoiceAgents = append(cfg.VoiceAgents, a)
+		if ext != nil {
+			if cfg.VoiceAgentExtensions == nil {
+				cfg.VoiceAgentExtensions = map[string]string{}
+			}
+			cfg.VoiceAgentExtensions[*ext] = a.Name
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("snapshot: voice agents: %w", err)
+	}
+	return nil
 }
 
 func loadOutbound(ctx context.Context, db Querier, cfg *routing.Config) error {

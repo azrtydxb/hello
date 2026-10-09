@@ -28,6 +28,11 @@ type Options struct {
 	// ContactHost overrides the host advertised in Contact, for when the
 	// phone is reached through an address other than Listen.
 	ContactHost string
+	// Conn, when set, is served instead of binding Listen: a test that
+	// needs the phone on one exact address (a fake voice agent whose
+	// address the node under test refuses as a caller) reserves the socket
+	// first and hands it over.
+	Conn net.PacketConn
 }
 
 // Phone is one SIP user agent.
@@ -70,9 +75,12 @@ func New(opts Options) (*Phone, error) {
 	if opts.Listen == "" {
 		opts.Listen = "127.0.0.1:0"
 	}
-	conn, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", opts.Listen)
-	if err != nil {
-		return nil, err
+	conn := opts.Conn
+	if conn == nil {
+		var err error
+		if conn, err = (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", opts.Listen); err != nil {
+			return nil, err
+		}
 	}
 	addr := conn.LocalAddr().String()
 	host, portStr, _ := net.SplitHostPort(addr)

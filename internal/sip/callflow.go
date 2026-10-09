@@ -209,7 +209,7 @@ func (c *call) forward(req *sip.Request, tx sip.ServerTransaction, snap *snapsho
 	case dec.Kind == routing.KindInternal && dec.Extension != "":
 		c.ringExtension(req, tx, snap, dec.Extension, visited)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
-		c.ringURI(req, tx, dec.SIPURI)
+		c.ringURI(req, tx, dec)
 	default:
 		code, reason := dec.RejectCode, dec.Reason
 		if code < 300 {
