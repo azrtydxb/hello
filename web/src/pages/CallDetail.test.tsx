@@ -96,6 +96,45 @@ describe("CallDetail", () => {
     ).toHaveAttribute("href", "/routes/test?from=101&number=0501234567");
   });
 
+  it("shows the agent call report of a call a voice agent answered", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/82": () =>
+        json({
+          ...BASE,
+          id: 82,
+          finalStatus: 200,
+          answerTime: "2026-10-01T10:00:02Z",
+          failureReason: "",
+          trace: [],
+          voiceAgent: {
+            name: "support",
+            outcome: "confirmed appointment",
+            summary: "Booked the caller for Tuesday 10:00.",
+            toolCalls: [
+              { tool: "book_slot", ok: true, arguments: { day: "Tuesday" } },
+            ],
+            tokensIn: 120,
+            tokensOut: 45,
+            transcriptPresent: true,
+          },
+        }),
+    });
+    renderApp("/history/82");
+
+    const alert = (
+      await screen.findByText(
+        "Answered by the voice agent support (automated call)",
+      )
+    ).closest(".az-alert") as HTMLElement;
+    expect(alert).toHaveTextContent(
+      "Answered by the voice agent support (automated call)",
+    );
+    expect(alert).toHaveTextContent("confirmed appointment");
+    expect(alert).toHaveTextContent("Booked the caller for Tuesday 10:00.");
+    expect(screen.getByText("support")).toBeVisible();
+  });
+
   it("shows the failover note on an answered call", async () => {
     mockApi({
       ...ME,

@@ -67,6 +67,7 @@ import { useOrderedList } from "../useOrderedList";
 import { formatSchedule, formatTransform } from "./callflow/format";
 import { FormAlert } from "./callflow/ui";
 import { Can } from "../role";
+import { listVoiceAgents, type VoiceAgent } from "../api/voice";
 
 const DEFAULT_FAILOVER = "408, 480, 500, 502, 503, 504";
 const FORM_ID = "route-form";
@@ -405,6 +406,7 @@ const DESTINATION_KIND: Record<
   extension: { label: "Extension", icon: "user-round" },
   external: { label: "External", icon: "phone-forwarded" },
   sip_uri: { label: "SIP URI", icon: "at-sign" },
+  voice_agent: { label: "Voice agent", icon: "bot" },
 };
 
 function Destination({
@@ -1197,6 +1199,7 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   extension: "Extension number",
   external: "External number",
   sip_uri: "SIP URI",
+  voice_agent: "Voice agent",
 };
 
 function InboundDrawer({
@@ -1212,6 +1215,18 @@ function InboundDrawer({
 }) {
   const form = "in";
   const [d, setD] = useState(() => inboundDraft(route));
+  // The destination picker needs the agents; a failure to load keeps the
+  // stored value selectable and lists no new options.
+  const [agents, setAgents] = useState<VoiceAgent[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    listVoiceAgents(controller.signal)
+      .then(setAgents)
+      .catch(() => {
+        // The picker then offers only the stored agent, by name.
+      });
+    return () => controller.abort();
+  }, []);
   const [busy, setBusy] = useState(false);
   const v = useServerErrors();
   const set = <K extends keyof InboundDraft>(k: K, value: InboundDraft[K]) =>
@@ -1331,6 +1346,7 @@ function InboundDrawer({
               { value: "extension", label: "Extension" },
               { value: "external", label: "External number" },
               { value: "sip_uri", label: "SIP URI" },
+              { value: "voice_agent", label: "Voice agent" },
             ]}
             onChange={(e) =>
               set(
@@ -1339,14 +1355,32 @@ function InboundDrawer({
               )
             }
           />
-          <Input
-            id={id("destination")}
-            label={DESTINATION_LABEL[d.destinationKind]}
-            mono
-            value={d.destination}
-            error={v.errors.destination}
-            onChange={(e) => set("destination", e.target.value)}
-          />
+          {d.destinationKind === "voice_agent" ? (
+            <Select
+              id={id("destination")}
+              label="Voice agent"
+              value={d.destination}
+              error={v.errors.destination}
+              options={[
+                { value: "", label: "Choose…" },
+                ...agents.map((a) => ({
+                  value: a.name,
+                  label: a.enabled ? a.name : `${a.name} (disabled)`,
+                  disabled: !a.enabled,
+                })),
+              ]}
+              onChange={(e) => set("destination", e.target.value)}
+            />
+          ) : (
+            <Input
+              id={id("destination")}
+              label={DESTINATION_LABEL[d.destinationKind]}
+              mono
+              value={d.destination}
+              error={v.errors.destination}
+              onChange={(e) => set("destination", e.target.value)}
+            />
+          )}
         </div>
         <fieldset className="cf-form__section">
           <legend className="az-eyebrow">More conditions</legend>
