@@ -9,8 +9,8 @@ import { request, type Id } from "../api";
 const pathId = (value: Id) => encodeURIComponent(String(value));
 
 /**
- * A list response: the contract's bare array, or `{items}` as every other
- * Hello list returns it. Both are accepted while the streams land.
+ * A list response: the spec's *List schemas wrap the rows in `{items}`.
+ * The bare array is still accepted so an older build keeps rendering.
  */
 async function listOf<T>(path: string, signal?: AbortSignal): Promise<T[]> {
   const body = await request<unknown>("GET", path, { signal });

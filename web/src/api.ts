@@ -135,7 +135,7 @@ export interface Cdr {
   route: string;
   trunk: string;
   /** The voice agent that answered, from the CDR's agent columns (S-23). */
-  voiceAgentName?: string;
+  voiceAgent?: string;
   /** Call quality of an anchored call; null when not measured. */
   rtpPackets?: number | null;
   rtpLost?: number | null;
@@ -162,7 +162,7 @@ export interface CdrVoiceAgent {
 }
 
 /** GET /api/v1/cdrs/{id}: the CDR plus its routing trace. */
-export interface CdrDetail extends Cdr {
+export interface CdrDetail extends Omit<Cdr, "voiceAgent"> {
   trace: TraceStep[];
   /** For failed calls, the reason of the last trace step. */
   explanation?: string;
@@ -975,14 +975,12 @@ export const RING_STRATEGY_LABEL: Record<RingStrategy, string> = {
 };
 
 /** Where a call goes when every member missed it. */
-export type FailureKind =
-  "none" | "voicemail" | "external" | "announcement" | "voice_agent";
+export type FailureKind = "none" | "voicemail" | "external" | "voice_agent";
 
 export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   none: "Hang up",
   voicemail: "A member's voicemail box",
   external: "An external number",
-  announcement: "A named announcement",
   voice_agent: "A voice agent",
 };
 
@@ -991,8 +989,10 @@ export interface RingGroupMember {
   extensionId: Id | null;
   /** The voice agent taking the call (spec S-12); sequential groups only. */
   voiceAgentId?: Id | null;
-  /** The agent's name, when the member is an agent (read-only). */
-  voiceAgentName?: string;
+  /** The member extension's number, or an agent member's extension when it has one (read-only). */
+  number?: string;
+  /** The member extension's name, or the agent member's name (read-only). */
+  name?: string;
   position: number;
   /** For the weighted strategy; 0 never rings first. */
   weight: number;

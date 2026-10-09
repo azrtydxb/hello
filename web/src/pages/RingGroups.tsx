@@ -10,7 +10,6 @@ import {
   EXTENSION_NUMBER_PATTERN,
   RING_STRATEGIES,
   RING_STRATEGY_LABEL,
-  SIP_USERNAME_PATTERN,
   type Extension,
   type FailureKind,
   type FieldError,
@@ -65,7 +64,7 @@ function extLabel(
 
 /** The member's agent, when it is one. */
 const findAgent = (
-  m: { voiceAgentId?: Id | null; voiceAgentName?: string },
+  m: { voiceAgentId?: Id | null; name?: string },
   agents: readonly VoiceAgent[],
 ) =>
   m.voiceAgentId != null
@@ -77,17 +76,13 @@ function memberLabel(
   m: {
     extensionId: Id | null;
     voiceAgentId?: Id | null;
-    voiceAgentName?: string;
+    name?: string;
   },
   extensions: readonly Extension[],
   agents: readonly VoiceAgent[],
 ): string {
   if (m.voiceAgentId != null) {
-    return (
-      findAgent(m, agents)?.name ??
-      m.voiceAgentName ??
-      `#${String(m.voiceAgentId)}`
-    );
+    return findAgent(m, agents)?.name ?? m.name ?? `#${String(m.voiceAgentId)}`;
   }
   return extLabel(m.extensionId, extensions);
 }
@@ -115,8 +110,6 @@ function failureText(g: RingGroup): string {
   switch (g.failureKind) {
     case "voicemail":
       return `Voicemail box ${g.failureTarget || UNKNOWN}`;
-    case "announcement":
-      return `Announcement ${g.failureTarget || UNKNOWN}`;
     case "external":
       return `External ${g.failureTarget || UNKNOWN}`;
     case "voice_agent":
@@ -529,14 +522,6 @@ function validateGroup(d: GroupDraft): Record<string, string> {
       e.failureTarget = "Use an extension number (2 to 10 digits).";
     }
   }
-  if (d.failureKind === "announcement") {
-    if (d.failureTarget.trim() === "") {
-      e.failureTarget = "Enter the announcement's name.";
-    } else if (!SIP_USERNAME_PATTERN.test(d.failureTarget.trim())) {
-      e.failureTarget =
-        "Use the announcement's name (1-64 of A-Z a-z 0-9 . _ -).";
-    }
-  }
   if (d.failureKind === "voice_agent" && d.failureTarget.trim() === "") {
     e.failureTarget = "Choose the voice agent that takes the call.";
   }
@@ -870,7 +855,6 @@ function RingGroupDrawer({
               { value: "none", label: "Hang up" },
               { value: "voicemail", label: "Voicemail" },
               { value: "external", label: "External number" },
-              { value: "announcement", label: "Announcement" },
               { value: "voice_agent", label: "Voice agent" },
             ]}
             onChange={(e) => set("failureKind", e.target.value as FailureKind)}
@@ -898,9 +882,7 @@ function RingGroupDrawer({
                 label={
                   d.failureKind === "voicemail"
                     ? "Box extension"
-                    : d.failureKind === "announcement"
-                      ? "Announcement name"
-                      : "External number"
+                    : "External number"
                 }
                 mono
                 value={d.failureTarget}
@@ -908,9 +890,7 @@ function RingGroupDrawer({
                 hint={
                   d.failureKind === "voicemail"
                     ? "The extension whose box takes the call."
-                    : d.failureKind === "announcement"
-                      ? "The uploaded announcement's name."
-                      : "2 to 20 digits, optionally starting with +."
+                    : "2 to 20 digits, optionally starting with +."
                 }
                 onChange={(e) => set("failureTarget", e.target.value)}
               />

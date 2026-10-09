@@ -164,10 +164,10 @@ export function History() {
           <>
             <span className="calls-mono calls-strong">{orig}</span>
             {rew && <small className="calls-mono">→ {rew}</small>}
-            {c.voiceAgentName && (
+            {c.voiceAgent && (
               <small>
                 {" · "}
-                <Icon name="bot" size={12} /> {c.voiceAgentName}
+                <Icon name="bot" size={12} /> {c.voiceAgent}
               </small>
             )}
           </>

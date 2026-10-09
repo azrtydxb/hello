@@ -226,6 +226,17 @@ describe("VoiceRouting", () => {
     const dialog = await screen.findByRole("dialog", {
       name: "New ring group",
     });
+    // Migration 00010 dropped the announcement failure kind: the picker no
+    // longer offers it, so an announcement fallback cannot be configured.
+    const kind = within(dialog).getByLabelText("When no one answers", {
+      selector: "select",
+    }) as HTMLSelectElement;
+    expect([...kind.options].map((o) => o.value)).toEqual([
+      "none",
+      "voicemail",
+      "external",
+      "voice_agent",
+    ]);
     fireEvent.change(within(dialog).getByLabelText("Name"), {
       target: { value: "Front desk" },
     });

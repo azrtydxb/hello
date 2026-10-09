@@ -212,8 +212,8 @@ function Detail({ cdr }: { cdr: CallRecord }) {
     { label: "SIP node", value: cdr.sipNode || "—", mono: true },
     { label: "Media", value: cdr.mediaMode || "—" },
     { label: "Call quality", value: qualityText(cdr) },
-    ...(cdr.voiceAgentName
-      ? [{ label: "Voice agent", value: cdr.voiceAgentName }]
+    ...(cdr.voiceAgent
+      ? [{ label: "Voice agent", value: cdr.voiceAgent?.name ?? "" }]
       : []),
     { label: "SIP Call-ID", value: cdr.sipCallId || "—", mono: true },
     { label: "Correlation ID", value: cdr.correlationId || "—", mono: true },
