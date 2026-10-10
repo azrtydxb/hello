@@ -3,7 +3,7 @@ module github.com/azrtydxb/hello
 go 1.27.1
 
 require (
-	github.com/azrtydxb/go-ai-sdk v0.6.0
+	github.com/azrtydxb/go-ai-sdk v0.8.0
 	github.com/emiago/sipgo v1.6.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/icholy/digest v1.1.0
