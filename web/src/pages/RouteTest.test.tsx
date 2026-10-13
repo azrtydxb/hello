@@ -186,6 +186,143 @@ describe("RouteTest", () => {
     expect(screen.getByLabelText("Called number (DID)")).toHaveValue("");
   });
 
+  it("tests a trunk call dialing an internal number and shows the new trace steps in order", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/extensions": () => json({ items: [] }),
+      "GET /api/v1/trunks": () =>
+        json({ items: [{ id: 4, name: "carrier-primary" }] }),
+      "POST /api/v1/routing/test": () =>
+        json({
+          decision: {
+            kind: "inbound",
+            route: "Internal",
+            extension: "1012",
+            callerId: "<carrier-primary>",
+          },
+          // Shuffled on purpose: the page must render step order by n,
+          // never array position (contract 6).
+          trace: [
+            { n: 6, text: "Internal lookup 1012 -> extension 1012" },
+            { n: 1, text: "Source trunk carrier-primary" },
+            {
+              n: 3,
+              text: "Trunk carrier-primary may dial 1012: pattern 1XX",
+            },
+            { n: 2, text: "Called DID 1012" },
+            {
+              n: 4,
+              text: 'Route "Internal" matched (exact DID 1012)',
+            },
+            { n: 5, text: "Destination: internal" },
+            {
+              n: 7,
+              text: "Caller ID <carrier-primary> (trunk name)",
+            },
+          ],
+        }),
+    });
+    renderApp("/routes/test");
+
+    fireEvent.click(
+      await screen.findByRole("radio", { name: "Trunk (inbound)" }),
+    );
+    await screen.findByRole("option", { name: "carrier-primary" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Trunk" }), {
+      target: { value: "4" },
+    });
+    fireEvent.change(screen.getByLabelText("Called number (DID)"), {
+      target: { value: "1012" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Inbound to 1012" }),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      from: "trunk:4",
+      number: "1012",
+    });
+    // The contract-6 steps, in step order (by n, not array position).
+    const trace = screen.getByRole("list", { name: "Trace" });
+    expect(
+      within(trace)
+        .getAllByRole("listitem")
+        .map((li) => li.lastElementChild?.textContent),
+    ).toEqual([
+      "Source trunk carrier-primary",
+      "Called DID 1012",
+      "Trunk carrier-primary may dial 1012: pattern 1XX",
+      'Route "Internal" matched (exact DID 1012)',
+      "Destination: internal",
+      "Internal lookup 1012 -> extension 1012",
+      "Caller ID <carrier-primary> (trunk name)",
+    ]);
+  });
+
+  it("shows an out-of-policy DID as rejected with the denial traced", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/extensions": () => json({ items: [] }),
+      "GET /api/v1/trunks": () =>
+        json({ items: [{ id: 4, name: "carrier-primary" }] }),
+      "POST /api/v1/routing/test": () =>
+        json({
+          decision: {
+            kind: "reject",
+            rejectCode: 404,
+            reason: "DID 9999 is not allowed for this trunk",
+          },
+          trace: [
+            {
+              n: 3,
+              text: "Trunk carrier-primary may not dial 9999: no pattern matches",
+            },
+            {
+              n: 4,
+              text: 'Route "Internal" skipped: internal dialing to 9999 not allowed on trunk carrier-primary',
+            },
+            { n: 1, text: "Source trunk carrier-primary" },
+            { n: 2, text: "Called DID 9999" },
+            { n: 5, text: "No inbound route matched DID 9999" },
+          ],
+        }),
+    });
+    renderApp("/routes/test");
+
+    fireEvent.click(
+      await screen.findByRole("radio", { name: "Trunk (inbound)" }),
+    );
+    await screen.findByRole("option", { name: "carrier-primary" });
+    fireEvent.change(screen.getByRole("combobox", { name: "Trunk" }), {
+      target: { value: "4" },
+    });
+    fireEvent.change(screen.getByLabelText("Called number (DID)"), {
+      target: { value: "9999" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Rejected · 404 Not Found" }),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      from: "trunk:4",
+      number: "9999",
+    });
+    const trace = screen.getByRole("list", { name: "Trace" });
+    expect(
+      within(trace)
+        .getAllByRole("listitem")
+        .map((li) => li.lastElementChild?.textContent),
+    ).toEqual([
+      "Source trunk carrier-primary",
+      "Called DID 9999",
+      "Trunk carrier-primary may not dial 9999: no pattern matches",
+      'Route "Internal" skipped: internal dialing to 9999 not allowed on trunk carrier-primary',
+      "No inbound route matched DID 9999",
+    ]);
+  });
+
   it("starts a fresh form from the top bar's Test a number", async () => {
     mockApi({
       ...ME,

@@ -403,6 +403,7 @@ const DESTINATION_KIND: Record<
   { label: string; icon: string }
 > = {
   extension: { label: "Extension", icon: "user-round" },
+  internal: { label: "Internal", icon: "arrow-left-right" },
   external: { label: "External", icon: "phone-forwarded" },
   sip_uri: { label: "SIP URI", icon: "at-sign" },
 };
@@ -1195,6 +1196,7 @@ function inboundKeys(d: InboundDraft): string[] {
 
 const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   extension: "Extension number",
+  internal: "Internal (the DID names the extension)",
   external: "External number",
   sip_uri: "SIP URI",
 };

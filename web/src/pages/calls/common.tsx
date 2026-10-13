@@ -158,7 +158,7 @@ export function stepKind(
   if (/^Call not connected|^No route matched|failed\b/i.test(text))
     return "fail";
   if (
-    /-> (?:[3-6]\d\d |no answer)|^Failover permitted|^No failover|: down$|at capacity|cancelled/i.test(
+    /-> (?:[3-6]\d\d |no answer)|^Failover permitted|^No failover|: down$|at capacity|cancelled|may not dial/i.test(
       text,
     )
   )

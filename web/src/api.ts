@@ -182,6 +182,23 @@ export interface TrunkDestination {
   weight: number;
 }
 
+/**
+ * A trunk's internal dialing policy (routing.Dialing): whether, and what, it
+ * may dial in the extension namespace. The zero value is mode "off".
+ */
+export interface InternalDialing {
+  /** "off" (default) | "patterns" | "all". */
+  mode: "off" | "patterns" | "all" | string;
+  /** Non-empty iff mode is "patterns"; each ≤500 chars, at most 100. */
+  patterns: string[];
+}
+
+/**
+ * The policy in a POST/PATCH body: mode "all" without `confirm: true` is a
+ * 400, so the console asks for explicit confirmation first.
+ */
+export type InternalDialingInput = InternalDialing & { confirm?: true };
+
 /** The writable fields of a trunk. */
 export interface TrunkFields {
   name: string;
@@ -199,6 +216,8 @@ export interface TrunkFields {
   defaultCallerId: string;
   enabled: boolean;
   destinations: TrunkDestination[];
+  /** What the trunk may dial in the extension namespace. */
+  internalDialing: InternalDialing;
 }
 
 /** A trunk as returned: the password is never returned, only hasPassword. */
@@ -209,8 +228,14 @@ export interface Trunk extends TrunkFields {
   updatedAt: string;
 }
 
-/** POST/PATCH body: `password` is write-only and sent only when changed. */
-export type TrunkInput = Partial<TrunkFields> & { password?: string };
+/**
+ * POST/PATCH body: `password` is write-only and sent only when changed;
+ * `internalDialing` is sent whole, with `confirm` when its mode is "all".
+ */
+export type TrunkInput = Partial<TrunkFields> & {
+  password?: string;
+  internalDialing?: InternalDialingInput;
+};
 
 /** livestate.TrunkRegistration */
 export interface TrunkRegistration {
@@ -273,7 +298,8 @@ export interface InboundRouteFields {
   headerRegex: string;
   schedule: Schedule | null;
   callerIdTransform: Transform;
-  destinationKind: "extension" | "external" | "sip_uri";
+  /** "internal" looks the DID up in the extension namespace. */
+  destinationKind: "extension" | "internal" | "external" | "sip_uri";
   destination: string;
   enabled: boolean;
 }
