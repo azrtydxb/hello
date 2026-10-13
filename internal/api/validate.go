@@ -377,6 +377,12 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 		if !numberRe.MatchString(in.Destination) {
 			f.add("destination", "must be an extension number (2-10 digits)")
 		}
+	case "internal":
+		// The DID the route matched names the target; the route carries
+		// none of its own, as the engine's compile also requires.
+		if in.Destination != "" {
+			f.add("destination", `must be empty when destinationKind is "internal"`)
+		}
 	case "external":
 		if !externalNumRe.MatchString(in.Destination) {
 			f.add("destination", "must be 2-32 of 0-9 * # with an optional leading +")

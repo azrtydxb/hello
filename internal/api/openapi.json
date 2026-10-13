@@ -19,9 +19,7 @@
         "operationId": "getVersion",
         "summary": "Build and configuration revision of this control-plane node",
         "description": "Returns the build version, commit and current configuration revision of the hello-control node that answered. Use it to check which release is running or whether the configuration changed.",
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "responses": {
           "200": {
             "description": "Version information",
@@ -46,9 +44,7 @@
         "operationId": "getOpenAPI",
         "summary": "This OpenAPI document",
         "description": "Returns this OpenAPI document, which describes every /api/v1 operation.",
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "responses": {
           "200": {
             "description": "OpenAPI 3.1 document",
@@ -72,9 +68,7 @@
         "operationId": "login",
         "summary": "Start a session; sets the hello_session cookie",
         "description": "Starts a browser session for a username and password and sets the hello_session cookie. Used by the console; API clients use bearer tokens instead.",
-        "tags": [
-          "auth"
-        ],
+        "tags": ["auth"],
         "requestBody": {
           "required": true,
           "content": {
@@ -121,9 +115,7 @@
         "operationId": "logout",
         "summary": "End the current session and clear the cookie",
         "description": "Ends the current session and clears the hello_session cookie.",
-        "tags": [
-          "auth"
-        ],
+        "tags": ["auth"],
         "responses": {
           "204": {
             "description": "Logged out"
@@ -150,9 +142,7 @@
         "operationId": "getMe",
         "summary": "The authenticated user",
         "description": "Returns the authenticated user. Use it to check who the credentials belong to.",
-        "tags": [
-          "auth"
-        ],
+        "tags": ["auth"],
         "responses": {
           "200": {
             "description": "Current user",
@@ -184,9 +174,7 @@
         "operationId": "listTokens",
         "summary": "The current user's API tokens",
         "description": "Lists the current user's API tokens (names, creation and last use; never the token values).",
-        "tags": [
-          "tokens"
-        ],
+        "tags": ["tokens"],
         "responses": {
           "200": {
             "description": "Tokens",
@@ -194,9 +182,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -229,9 +215,7 @@
         "operationId": "createToken",
         "summary": "Create an API token; the token is returned only in this response",
         "description": "Creates an API token for the current user. The token value is returned only in this response and only its SHA-256 is stored.",
-        "tags": [
-          "tokens"
-        ],
+        "tags": ["tokens"],
         "requestBody": {
           "required": true,
           "content": {
@@ -278,9 +262,7 @@
         "operationId": "deleteToken",
         "summary": "Revoke an API token",
         "description": "Revokes one of the current user's API tokens; requests with it fail from then on.",
-        "tags": [
-          "tokens"
-        ],
+        "tags": ["tokens"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -315,9 +297,7 @@
         "operationId": "listUsers",
         "summary": "Every management user with their role",
         "description": "Admin only. Users are created and deleted with `hello-control user add`; the console and the API only change roles.",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
@@ -351,9 +331,7 @@
         "operationId": "updateUser",
         "summary": "Change a user's role",
         "description": "Admin only, audited. The new role applies on the user's next request, whatever credential it carries. Demoting the last admin answers 409 last_admin.",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
@@ -418,9 +396,7 @@
         "operationId": "listExtensions",
         "summary": "Every extension, ordered by number",
         "description": "Lists every extension, ordered by number. Use it to find an extension's id from its number before reading or changing it.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "responses": {
           "200": {
             "description": "Extensions",
@@ -428,9 +404,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -461,9 +435,7 @@
         "operationId": "createExtension",
         "summary": "Create an extension",
         "description": "Creates an extension (a dialable number with a name). Devices, voicemail and routes then refer to it by id. A 400 lists each failing field (number, name, externalNumber) in error.fields.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "requestBody": {
           "required": true,
           "content": {
@@ -511,9 +483,7 @@
         "operationId": "getExtension",
         "summary": "One extension",
         "description": "Returns one extension by id.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -551,9 +521,7 @@
         "operationId": "updateExtension",
         "summary": "Change an extension's number or name",
         "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -607,9 +575,7 @@
         "operationId": "deleteExtension",
         "summary": "Delete an extension and its devices",
         "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes.",
-        "tags": [
-          "extensions"
-        ],
+        "tags": ["extensions"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -645,9 +611,7 @@
         "operationId": "listDevices",
         "summary": "Every device, ordered by SIP username",
         "description": "Lists every device (SIP account), ordered by SIP username; secrets are never included.",
-        "tags": [
-          "devices"
-        ],
+        "tags": ["devices"],
         "responses": {
           "200": {
             "description": "Devices",
@@ -655,9 +619,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -688,9 +650,7 @@
         "operationId": "createDevice",
         "summary": "Create a device; its SIP secret is returned only in this response",
         "description": "Creates a device (a SIP account) on an extension. Its SIP secret is generated and returned only in this response.",
-        "tags": [
-          "devices"
-        ],
+        "tags": ["devices"],
         "requestBody": {
           "required": true,
           "content": {
@@ -741,9 +701,7 @@
         "operationId": "getDevice",
         "summary": "One device (never its secret)",
         "description": "Returns one device by id, without its secret.",
-        "tags": [
-          "devices"
-        ],
+        "tags": ["devices"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -781,9 +739,7 @@
         "operationId": "updateDevice",
         "summary": "Enable, disable or move a device",
         "description": "Enables, disables or moves a device to another extension.",
-        "tags": [
-          "devices"
-        ],
+        "tags": ["devices"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -834,9 +790,7 @@
         "operationId": "deleteDevice",
         "summary": "Delete a device",
         "description": "Deletes a device; phones registered with it can no longer register.",
-        "tags": [
-          "devices"
-        ],
+        "tags": ["devices"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -872,9 +826,7 @@
         "operationId": "rotateDeviceSecret",
         "summary": "Replace a device's SIP secret; the new secret is returned only in this response",
         "description": "Replaces a device's SIP secret. The new secret is returned only in this response, and the phone must be reconfigured with it.",
-        "tags": [
-          "devices"
-        ],
+        "tags": ["devices"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -916,9 +868,7 @@
         "operationId": "listRegistrations",
         "summary": "Every registered contact binding in the cluster (from Valkey)",
         "description": "Lists every registered SIP contact binding in the cluster, from the live state. Use it to see which devices are online and where.",
-        "tags": [
-          "live"
-        ],
+        "tags": ["live"],
         "responses": {
           "200": {
             "description": "Bindings",
@@ -926,9 +876,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -964,9 +912,7 @@
         "operationId": "listCalls",
         "summary": "Every active call in the cluster (from Valkey)",
         "description": "Lists every call in progress in the cluster, from the live state.",
-        "tags": [
-          "live"
-        ],
+        "tags": ["live"],
         "responses": {
           "200": {
             "description": "Calls",
@@ -974,9 +920,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -1012,9 +956,7 @@
         "operationId": "listCDRs",
         "summary": "Call detail records, newest first",
         "description": "Lists call detail records, newest first, one page at a time, with optional filters. Use it to look at call history.",
-        "tags": [
-          "history"
-        ],
+        "tags": ["history"],
         "parameters": [
           {
             "name": "before",
@@ -1043,11 +985,7 @@
             "description": "Keep only calls of this direction",
             "schema": {
               "type": "string",
-              "enum": [
-                "internal",
-                "inbound",
-                "outbound"
-              ]
+              "enum": ["internal", "inbound", "outbound"]
             }
           },
           {
@@ -1094,9 +1032,7 @@
         "operationId": "countCDRs",
         "summary": "How many call records exist, and how many failed",
         "description": "Counts call records, in total and failed, for the same filters as the list. Use it for summaries without paging.",
-        "tags": [
-          "history"
-        ],
+        "tags": ["history"],
         "responses": {
           "200": {
             "description": "CDR counts",
@@ -1128,9 +1064,7 @@
         "operationId": "cdrConcurrency",
         "summary": "Recorded calls in progress over a time window, by direction",
         "description": "Returns how many calls were up at once over a time window, in buckets. Use it to size trunks or spot busy hours. Samples, at every step of the window, how many CDRs were in progress (start <= t < end). Calls still in progress have no CDR yet and are not counted; GET /api/v1/calls lists those.",
-        "tags": [
-          "history"
-        ],
+        "tags": ["history"],
         "parameters": [
           {
             "name": "range",
@@ -1138,11 +1072,7 @@
             "description": "Window ending at the last whole step: 1h in 5 min steps, 6h in 15 min steps, 24h in 1 h steps",
             "schema": {
               "type": "string",
-              "enum": [
-                "1h",
-                "6h",
-                "24h"
-              ],
+              "enum": ["1h", "6h", "24h"],
               "default": "6h"
             }
           }
@@ -1181,9 +1111,7 @@
         "operationId": "exportCDRs",
         "summary": "Call detail records as CSV, newest first",
         "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
-        "tags": [
-          "history"
-        ],
+        "tags": ["history"],
         "parameters": [
           {
             "name": "direction",
@@ -1191,11 +1119,7 @@
             "description": "Keep only calls of this direction",
             "schema": {
               "type": "string",
-              "enum": [
-                "internal",
-                "inbound",
-                "outbound"
-              ]
+              "enum": ["internal", "inbound", "outbound"]
             }
           },
           {
@@ -1244,9 +1168,7 @@
         "operationId": "getCDR",
         "summary": "One CDR with its routing trace and failure explanation",
         "description": "Returns one call record with its routing trace and, for a failed call, an explanation. Use it to troubleshoot why a call went where it did.",
-        "tags": [
-          "history"
-        ],
+        "tags": ["history"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1286,9 +1208,7 @@
         "operationId": "listTrunks",
         "summary": "Every trunk (never its password)",
         "description": "Lists every SIP trunk; passwords are never included.",
-        "tags": [
-          "trunks"
-        ],
+        "tags": ["trunks"],
         "responses": {
           "200": {
             "description": "Trunks",
@@ -1296,9 +1216,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -1329,9 +1247,7 @@
         "operationId": "createTrunk",
         "summary": "Create a trunk",
         "description": "Creates a SIP trunk to a carrier, by registration or by IP. The password is sealed and never returned. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
-        "tags": [
-          "trunks"
-        ],
+        "tags": ["trunks"],
         "requestBody": {
           "required": true,
           "content": {
@@ -1379,9 +1295,7 @@
         "operationId": "listTrunkStatus",
         "summary": "Live registration, destination health and active calls of every trunk",
         "description": "Returns each trunk's live health. Use it to troubleshoot calls over trunks. 503 while Valkey is unreachable.",
-        "tags": [
-          "trunks"
-        ],
+        "tags": ["trunks"],
         "responses": {
           "200": {
             "description": "Statuses",
@@ -1389,9 +1303,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -1427,9 +1339,7 @@
         "operationId": "getTrunk",
         "summary": "One trunk (never its password)",
         "description": "Returns one trunk by id; its password is never included.",
-        "tags": [
-          "trunks"
-        ],
+        "tags": ["trunks"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1467,9 +1377,7 @@
         "operationId": "updateTrunk",
         "summary": "Change a trunk",
         "description": "Changes a trunk; only the fields sent change. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields. Destinations and sourceCidrs, when given, replace the lists.",
-        "tags": [
-          "trunks"
-        ],
+        "tags": ["trunks"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1523,9 +1431,7 @@
         "operationId": "deleteTrunk",
         "summary": "Delete a trunk",
         "description": "Deletes a trunk. 409 while an inbound or outbound route names the trunk; the message names the routes.",
-        "tags": [
-          "trunks"
-        ],
+        "tags": ["trunks"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1561,9 +1467,7 @@
         "operationId": "listOutboundRoutes",
         "summary": "Every outbound route in position order",
         "description": "Lists every outbound route in the order they are tried. Use it before adding or reordering routes.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "responses": {
           "200": {
             "description": "Routes",
@@ -1571,9 +1475,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -1604,9 +1506,7 @@
         "operationId": "createOutboundRoute",
         "summary": "Append an outbound route",
         "description": "Creates an outbound route that sends matching dialled numbers to trunks. It is added last in the order. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "requestBody": {
           "required": true,
           "content": {
@@ -1651,9 +1551,7 @@
         "operationId": "reorderOutboundRoutes",
         "summary": "Reorder every outbound route at once",
         "description": "Sets the order outbound routes are tried in; the body lists every route id once. ids must be a full permutation; the order changes atomically.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "requestBody": {
           "required": true,
           "content": {
@@ -1691,9 +1589,7 @@
         "operationId": "getOutboundRoute",
         "summary": "One outbound route",
         "description": "Returns one outbound route by id.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1731,9 +1627,7 @@
         "operationId": "updateOutboundRoute",
         "summary": "Change an outbound route",
         "description": "Changes an outbound route; only the fields sent change. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1784,9 +1678,7 @@
         "operationId": "deleteOutboundRoute",
         "summary": "Delete an outbound route",
         "description": "Deletes an outbound route; numbers it matched fall through to the next route.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1819,9 +1711,7 @@
         "operationId": "listInboundRoutes",
         "summary": "Every inbound route in position order",
         "description": "Lists every inbound route in the order they are tried. Use it before adding or reordering routes.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "responses": {
           "200": {
             "description": "Routes",
@@ -1829,9 +1719,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -1862,9 +1750,7 @@
         "operationId": "createInboundRoute",
         "summary": "Append an inbound route",
         "description": "Creates an inbound route that sends calls arriving from trunks (by DID, trunk, domain or header) to an extension, external number or SIP URI. It is added last in the order. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "requestBody": {
           "required": true,
           "content": {
@@ -1909,9 +1795,7 @@
         "operationId": "reorderInboundRoutes",
         "summary": "Reorder every inbound route at once",
         "description": "Sets the order inbound routes are tried in; the body lists every route id once. ids must be a full permutation; the order changes atomically.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "requestBody": {
           "required": true,
           "content": {
@@ -1949,9 +1833,7 @@
         "operationId": "getInboundRoute",
         "summary": "One inbound route",
         "description": "Returns one inbound route by id.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1989,9 +1871,7 @@
         "operationId": "updateInboundRoute",
         "summary": "Change an inbound route",
         "description": "Changes an inbound route; only the fields sent change. Validated field by field, then as a whole configuration with the routing engine; a 400 lists every failing field in error.fields.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -2042,9 +1922,7 @@
         "operationId": "deleteInboundRoute",
         "summary": "Delete an inbound route",
         "description": "Deletes an inbound route; calls it matched fall through to the next route.",
-        "tags": [
-          "routes"
-        ],
+        "tags": ["routes"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -2077,9 +1955,7 @@
         "operationId": "testRouting",
         "summary": "Decide a call against the saved configuration without placing it",
         "description": "Simulates routing a call through the current configuration without placing it, and returns the decision and its trace. Use it to check a route change before relying on it. Writes nothing. Trunk usability comes from live state; when Valkey is unreachable every enabled trunk counts as usable and the trace says so. Trunk capacity (maxCalls) is not judged from cached counts: hello-sip decides it when the call is placed, and the trace says so for every candidate trunk with a limit.",
-        "tags": [
-          "routing"
-        ],
+        "tags": ["routing"],
         "requestBody": {
           "required": true,
           "content": {
@@ -2124,9 +2000,7 @@
         "operationId": "getCluster",
         "summary": "Cluster members, dependency health and configuration revision",
         "description": "Returns the cluster overview. Answers 200 with a dependency down, reporting it: members are empty while Valkey is unreachable, and the revision and lags are absent while PostgreSQL is.",
-        "tags": [
-          "cluster"
-        ],
+        "tags": ["cluster"],
         "responses": {
           "200": {
             "description": "Cluster view",
@@ -2158,9 +2032,7 @@
         "operationId": "listClusterNodes",
         "summary": "Every member, live and OFFLINE",
         "description": "Lists every cluster member, live and offline, with its state.",
-        "tags": [
-          "cluster"
-        ],
+        "tags": ["cluster"],
         "responses": {
           "200": {
             "description": "Members",
@@ -2168,9 +2040,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -2206,9 +2076,7 @@
         "operationId": "drainNode",
         "summary": "Ask a node to drain",
         "description": "Asks a cluster member to drain. Use it before maintenance. Writes a drain request the node acts on within 5s, and audits it (actor and node; action drain, or drain-force when forced). 409 when draining would leave no READY SIP node, counting nodes with a pending drain request as not READY (repeat with ?force=true), or when the node is OFFLINE.",
-        "tags": [
-          "cluster"
-        ],
+        "tags": ["cluster"],
         "parameters": [
           {
             "name": "id",
@@ -2225,9 +2093,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": [
-                "true"
-              ]
+              "enum": ["true"]
             },
             "description": "Drain even if no READY SIP node would remain"
           }
@@ -2266,9 +2132,7 @@
         "operationId": "undrainNode",
         "summary": "Cancel a drain request",
         "description": "Cancels a drain so the member takes new calls again. Withdraws the drain request and audits it (action undrain). The node is not looked up, so a request for a node whose record has expired can still be withdrawn. 409 when no drain request exists (e.g. a node draining from SIGTERM). A node that has started exiting still exits.",
-        "tags": [
-          "cluster"
-        ],
+        "tags": ["cluster"],
         "parameters": [
           {
             "name": "id",
@@ -2314,9 +2178,7 @@
         "operationId": "getExtensionVoicemail",
         "summary": "One extension's voicemail box",
         "description": "Returns an extension's voicemail box settings; the PIN is never returned. The box is created with the extension; a missing box (an extension that predates it) is 404.",
-        "tags": [
-          "voicemail"
-        ],
+        "tags": ["voicemail"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -2354,9 +2216,7 @@
         "operationId": "updateExtensionVoicemail",
         "summary": "Change a voicemail box",
         "description": "Changes an extension's voicemail box: PIN, notification email and, through the multipart form, greetings. JSON with password and/or email, or multipart/form-data with the same fields plus optional `greeting` and `unreachable` WAV files (PCM, 5 MiB max); greetings land in the hello-voicemail bucket and the previous object is removed. At least one field is required. The password is stored as a hash and never returned.",
-        "tags": [
-          "voicemail"
-        ],
+        "tags": ["voicemail"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -2444,9 +2304,7 @@
         "operationId": "listVoicemailBoxes",
         "summary": "List voicemail boxes",
         "description": "Lists every voicemail box with its message counts. One row per box: the extension's number and name and its unheard and total messages, so a box list needs one request.",
-        "tags": [
-          "voicemail"
-        ],
+        "tags": ["voicemail"],
         "responses": {
           "200": {
             "description": "Every box with its extension and message counts, by extension number",
@@ -2478,9 +2336,7 @@
         "operationId": "listVoicemailMessages",
         "summary": "List a box's voicemail messages",
         "description": "Lists voicemail messages, newest first, optionally for one extension. `box` is a voicemail box id (required); `unheard=true` keeps the messages not played yet.",
-        "tags": [
-          "voicemail"
-        ],
+        "tags": ["voicemail"],
         "responses": {
           "200": {
             "description": "Messages, newest first",
@@ -2515,9 +2371,7 @@
         "operationId": "markVoicemailMessageHeard",
         "summary": "Mark a voicemail message heard",
         "description": "Marks a voicemail message heard, or unheard again. An empty body marks heard; a body of `{\"heard\": false}` marks it unheard again.",
-        "tags": [
-          "voicemail"
-        ],
+        "tags": ["voicemail"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -2570,9 +2424,7 @@
         "operationId": "getVoicemailMessageAudio",
         "summary": "Play a voicemail message",
         "description": "Streams a voicemail message's audio (WAV, Range supported). The message audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. The message must exist before the store is touched: a missing message is 404.",
-        "tags": [
-          "voicemail"
-        ],
+        "tags": ["voicemail"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -2632,9 +2484,7 @@
         "operationId": "deleteVoicemailMessage",
         "summary": "Delete a voicemail message",
         "description": "Deletes a voicemail message and its audio. Removes the row and the audio object in the hello-voicemail bucket.",
-        "tags": [
-          "voicemail"
-        ],
+        "tags": ["voicemail"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -2667,9 +2517,7 @@
         "operationId": "listRecordings",
         "summary": "List call recordings",
         "description": "Lists call recordings, newest first, one page at a time.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "name": "extension",
@@ -2738,9 +2586,7 @@
         "operationId": "deleteRecording",
         "summary": "Delete a recording",
         "description": "Deletes a call recording and its audio. Removes the row and the audio object in the hello-recordings bucket.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -2773,9 +2619,7 @@
         "operationId": "getRecordingAudio",
         "summary": "Play or download a recording",
         "description": "Streams a call recording's audio (WAV, Range supported). The recording audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. The recording must exist before the store is touched: a missing recording is 404.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -2786,12 +2630,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": [
-                "true",
-                "false",
-                "1",
-                "0"
-              ]
+              "enum": ["true", "false", "1", "0"]
             },
             "description": "true or 1 sends the audio as an attachment named recording-<id>.wav (Content-Disposition), so the browser saves it instead of playing it."
           }
@@ -2853,9 +2692,7 @@
         "operationId": "listAnnouncements",
         "summary": "List announcements",
         "description": "Lists the uploaded announcements that ring groups and routes can play.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Announcements ordered by name",
@@ -2885,19 +2722,14 @@
         "operationId": "createAnnouncement",
         "summary": "Upload an announcement",
         "description": "Uploads an announcement (a WAV file and a name). Stores the WAV in the hello-announcements bucket under ann/<name>.wav.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "requestBody": {
           "required": true,
           "content": {
             "multipart/form-data": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name",
-                  "file"
-                ],
+                "required": ["name", "file"],
                 "properties": {
                   "name": {
                     "type": "string",
@@ -2959,9 +2791,7 @@
         "operationId": "replaceAnnouncement",
         "summary": "Replace an announcement's audio",
         "description": "Replaces an announcement's name or audio. Overwrites the audio at ann/<name>.wav in the hello-announcements bucket, validated like the upload, then moves updatedAt; audited, bumps the configuration revision and notifies hello-sip.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -2973,9 +2803,7 @@
             "multipart/form-data": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "file"
-                ],
+                "required": ["file"],
                 "properties": {
                   "name": {
                     "type": "string",
@@ -3035,9 +2863,7 @@
         "operationId": "deleteAnnouncement",
         "summary": "Delete an announcement",
         "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3070,9 +2896,7 @@
         "operationId": "getAnnouncementAudio",
         "summary": "Play an announcement",
         "description": "Streams an announcement's audio (WAV, Range supported). The announcement audio, streamed through hello-control (the object store is not reachable from the browser); Range requests answer 206. A missing announcement is 404.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3132,9 +2956,7 @@
         "operationId": "listRingGroups",
         "summary": "List ring/hunt groups",
         "description": "Lists every ring or hunt group with its members.",
-        "tags": [
-          "ring-groups"
-        ],
+        "tags": ["ring-groups"],
         "responses": {
           "200": {
             "description": "Groups with their members in position order",
@@ -3164,9 +2986,7 @@
         "operationId": "createRingGroup",
         "summary": "Create a ring/hunt group",
         "description": "Creates a ring or hunt group: a number of extensions rung together or in turn, with what happens when nobody answers. Validation failures list each failing field (strategy, failureKind, members' positions, weights) in error.fields.",
-        "tags": [
-          "ring-groups"
-        ],
+        "tags": ["ring-groups"],
         "requestBody": {
           "required": true,
           "content": {
@@ -3214,9 +3034,7 @@
         "operationId": "getRingGroup",
         "summary": "One ring/hunt group",
         "description": "Returns one ring or hunt group by id.",
-        "tags": [
-          "ring-groups"
-        ],
+        "tags": ["ring-groups"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3254,9 +3072,7 @@
         "operationId": "updateRingGroup",
         "summary": "Change a ring/hunt group",
         "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored.",
-        "tags": [
-          "ring-groups"
-        ],
+        "tags": ["ring-groups"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3307,9 +3123,7 @@
         "operationId": "deleteRingGroup",
         "summary": "Delete a ring/hunt group",
         "description": "Deletes a ring or hunt group. The members go with it.",
-        "tags": [
-          "ring-groups"
-        ],
+        "tags": ["ring-groups"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3342,9 +3156,7 @@
         "operationId": "listFeatureCodes",
         "summary": "List DTMF feature codes",
         "description": "Lists the DTMF feature codes (star codes) and the actions they trigger.",
-        "tags": [
-          "feature-codes"
-        ],
+        "tags": ["feature-codes"],
         "responses": {
           "200": {
             "description": "Codes ordered by code",
@@ -3374,9 +3186,7 @@
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
         "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer.",
-        "tags": [
-          "feature-codes"
-        ],
+        "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
           "content": {
@@ -3421,9 +3231,7 @@
         "operationId": "listPresence",
         "summary": "Device presence (BLF states)",
         "description": "Lists every device's live presence state. The dialog state hello-sip publishes per device: idle, ringing, on-call or dnd.",
-        "tags": [
-          "presence"
-        ],
+        "tags": ["presence"],
         "responses": {
           "200": {
             "description": "Every live device state",
@@ -3458,9 +3266,7 @@
         "operationId": "getDeviceDiagnostics",
         "summary": "Why a device is or is not registered",
         "description": "Returns one device's registration diagnostics. Use it to troubleshoot a phone that does not register. The device's current bindings, its recent REGISTER attempts (newest first; hello-sip keeps the last 20 per enabled device for 1 h after the latest) and the failed-auth counter of the last attempt's source IP. verdict explains a missing registration from those facts only, and is null while the device is registered. 503 while live state (Valkey) is unavailable.",
-        "tags": [
-          "diagnostics"
-        ],
+        "tags": ["diagnostics"],
         "parameters": [
           {
             "name": "id",
@@ -3510,9 +3316,7 @@
         "operationId": "listAuthFailures",
         "summary": "Source IPs with failed authentications",
         "description": "Lists source addresses with recent SIP authentication failures. Every source IP with a failed-auth counter in its current window (HELLO_SIP_AUTH_FAIL_WINDOW). blocked is true at or above limit (HELLO_SIP_AUTH_FAIL_LIMIT as hello-control reads it): hello-sip then answers that IP 403 until the window ends.",
-        "tags": [
-          "diagnostics"
-        ],
+        "tags": ["diagnostics"],
         "responses": {
           "200": {
             "description": "The counters",
@@ -3547,9 +3351,7 @@
         "operationId": "clearAuthFailures",
         "summary": "Unblock a source IP",
         "description": "Clears the authentication failures recorded for one source address. Deletes the source's failed-auth counter, so it is no longer throttled. 404 when ip is not an IP address.",
-        "tags": [
-          "diagnostics"
-        ],
+        "tags": ["diagnostics"],
         "parameters": [
           {
             "name": "ip",
@@ -3591,9 +3393,7 @@
         "operationId": "listPhones",
         "summary": "Every provisioned phone, ordered by MAC",
         "description": "Lists every provisioned phone, ordered by MAC address.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "200": {
             "description": "Phones",
@@ -3601,9 +3401,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -3637,9 +3435,7 @@
         "operationId": "createPhone",
         "summary": "Add a phone; binding an existing device rotates its secret. The provisioning URL with the token is returned only here",
         "description": "Adds a phone for auto-provisioning, bound to an extension. The provisioning URL with its token is returned only in this response.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "201": {
             "description": "Created",
@@ -3690,9 +3486,7 @@
         "operationId": "importPhones",
         "summary": "Import phones from CSV (mac,vendor,model,extension[,label][,blf]); dryRun=true only checks. An apply creates every row in one transaction or none (400 with the rows)",
         "description": "Checks or creates phones from a CSV body.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "200": {
             "description": "Rows checked or created",
@@ -3766,9 +3560,7 @@
         "operationId": "getPhone",
         "summary": "One phone",
         "description": "Returns one provisioned phone by id.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "200": {
             "description": "Phone",
@@ -3809,9 +3601,7 @@
         "operationId": "updatePhone",
         "summary": "Change a phone; deviceId null unbinds (and disables) it, a new deviceId or extensionId rebinds it and rotates that device's secret",
         "description": "Changes a provisioned phone; only the fields sent change.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "200": {
             "description": "Phone",
@@ -3868,9 +3658,7 @@
         "operationId": "deletePhone",
         "summary": "Delete a phone; its device stays without the sealed secret",
         "description": "Deletes a provisioned phone; its device stays.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "204": {
             "description": "Deleted"
@@ -3906,9 +3694,7 @@
         "operationId": "rotatePhoneToken",
         "summary": "New provisioning token; the old one stays valid for the grace period unless immediate=true. The URL is returned only here",
         "description": "Issues a new provisioning token for a phone. The URL with the token is returned only in this response.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "200": {
             "description": "Phone with its new URL",
@@ -3964,9 +3750,7 @@
         "operationId": "rearmPhone",
         "summary": "Rotate the token at once and arm the phone for one more DHCP boot hand-off",
         "description": "Rotates a phone's provisioning token at once and arms it for one more boot hand-off. The URL is returned only in this response.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "200": {
             "description": "Phone with its new URL",
@@ -4011,9 +3795,7 @@
         "operationId": "revealPhoneAdminPassword",
         "summary": "Return the phone's web UI admin password; audited",
         "description": "Returns a phone's web UI admin password. Every reveal is audited.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "200": {
             "description": "Admin password",
@@ -4021,9 +3803,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "adminPassword"
-                  ],
+                  "required": ["adminPassword"],
                   "properties": {
                     "adminPassword": {
                       "type": "string",
@@ -4068,9 +3848,7 @@
         "operationId": "rotatePhoneAdminPassword",
         "summary": "Set a new random admin password; the phone takes it at its next fetch",
         "description": "Sets a new random web UI admin password for a phone; the phone takes it at its next fetch.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "204": {
             "description": "Rotated"
@@ -4108,9 +3886,7 @@
         "operationId": "listPhoneFetches",
         "summary": "The phone's provisioning fetches, newest first",
         "description": "Lists a phone's provisioning fetches, newest first, one page at a time. Use it to see whether and when a phone picked up its configuration.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "200": {
             "description": "A page of fetches",
@@ -4118,10 +3894,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items",
-                    "next"
-                  ],
+                  "required": ["items", "next"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -4189,9 +3962,7 @@
         "operationId": "previewPhoneFile",
         "summary": "Render a file as the phone would get it, with the SIP secret, admin password and token masked; not a fetch",
         "description": "Renders one provisioning file as the phone would get it, with secrets masked, without counting as a fetch. Use it to check a template change.",
-        "tags": [
-          "phones"
-        ],
+        "tags": ["phones"],
         "responses": {
           "200": {
             "description": "The rendered file",
@@ -4256,9 +4027,7 @@
         "operationId": "listProvTemplates",
         "summary": "Built-in and stored provisioning templates",
         "description": "Lists the built-in and stored provisioning templates.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "200": {
             "description": "Templates",
@@ -4266,9 +4035,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -4302,9 +4069,7 @@
         "operationId": "createProvTemplate",
         "summary": "Create a template",
         "description": "Creates a stored provisioning template.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "201": {
             "description": "Created",
@@ -4352,9 +4117,7 @@
         "operationId": "validateProvTemplate",
         "summary": "Validate a template without saving it",
         "description": "Checks that a template parses and renders, without saving it.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "200": {
             "description": "Valid",
@@ -4404,9 +4167,7 @@
         "operationId": "getProvTemplate",
         "summary": "One template",
         "description": "Returns one provisioning template by id.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "200": {
             "description": "Template",
@@ -4453,9 +4214,7 @@
         "operationId": "updateProvTemplate",
         "summary": "Change a stored template; the previous version is kept",
         "description": "Changes a stored provisioning template; the previous version is kept.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "200": {
             "description": "Template",
@@ -4518,9 +4277,7 @@
         "operationId": "deleteProvTemplate",
         "summary": "Delete a stored template; refused while a phone overrides with it",
         "description": "Deletes a stored provisioning template.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "204": {
             "description": "Deleted"
@@ -4565,9 +4322,7 @@
         "operationId": "copyProvTemplate",
         "summary": "Copy a template (built-in or stored) to edit, one priority higher",
         "description": "Copies a template, built-in or stored, into a new stored one to edit.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "201": {
             "description": "Created",
@@ -4616,9 +4371,7 @@
         "operationId": "listFirmware",
         "summary": "Uploaded firmware files",
         "description": "Lists the uploaded firmware files.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "200": {
             "description": "Firmware",
@@ -4626,9 +4379,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -4662,9 +4413,7 @@
         "operationId": "uploadFirmware",
         "summary": "Upload a firmware file (up to 512 MiB); the fields vendor, modelGlob, version (and optional filename) precede the file part",
         "description": "Uploads a firmware file for phones to fetch.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "201": {
             "description": "Created",
@@ -4704,12 +4453,7 @@
             "multipart/form-data": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "vendor",
-                  "modelGlob",
-                  "version",
-                  "file"
-                ],
+                "required": ["vendor", "modelGlob", "version", "file"],
                 "properties": {
                   "vendor": {
                     "type": "string",
@@ -4749,9 +4493,7 @@
         "operationId": "putFirmwarePins",
         "summary": "Replace every firmware pin",
         "description": "Replaces every firmware pin.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "200": {
             "description": "The pins",
@@ -4759,9 +4501,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -4813,9 +4553,7 @@
         "operationId": "deleteFirmware",
         "summary": "Delete a firmware file; refused while pinned",
         "description": "Deletes an uploaded firmware file.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "204": {
             "description": "Deleted"
@@ -4854,9 +4592,7 @@
         "operationId": "listRedirectAccounts",
         "summary": "The vendor redirect-service accounts",
         "description": "Lists the vendor redirect-service accounts used to point new phones at Hello; credentials are never returned.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "200": {
             "description": "Accounts",
@@ -4864,9 +4600,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -4902,9 +4636,7 @@
         "operationId": "putRedirectAccount",
         "summary": "Set a vendor's account; credentials are checked with the vendor, sealed and never returned. Accounts set by the deployment are read-only",
         "description": "Sets a vendor's redirect-service account.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "200": {
             "description": "Account",
@@ -4955,13 +4687,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "enum": [
-                "yealink",
-                "poly",
-                "grandstream",
-                "snom",
-                "fanvil"
-              ]
+              "enum": ["yealink", "poly", "grandstream", "snom", "fanvil"]
             },
             "description": "The phone vendor whose redirect-service account to act on."
           }
@@ -4974,9 +4700,7 @@
         "operationId": "deleteRedirectAccount",
         "summary": "Remove a vendor's stored account",
         "description": "Removes a vendor's stored redirect-service account.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "204": {
             "description": "Deleted"
@@ -5007,13 +4731,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "enum": [
-                "yealink",
-                "poly",
-                "grandstream",
-                "snom",
-                "fanvil"
-              ]
+              "enum": ["yealink", "poly", "grandstream", "snom", "fanvil"]
             },
             "description": "The phone vendor whose redirect-service account to act on."
           }
@@ -5028,9 +4746,7 @@
         "operationId": "checkRedirectAccount",
         "summary": "Test the vendor's effective credentials",
         "description": "Checks the vendor's effective redirect-service credentials against the vendor and records the result.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "200": {
             "description": "Account with the check result",
@@ -5068,13 +4784,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "enum": [
-                "yealink",
-                "poly",
-                "grandstream",
-                "snom",
-                "fanvil"
-              ]
+              "enum": ["yealink", "poly", "grandstream", "snom", "fanvil"]
             },
             "description": "The phone vendor whose redirect-service account to check."
           }
@@ -5089,9 +4799,7 @@
         "operationId": "getProvSettings",
         "summary": "Computed provisioning URLs, CA fingerprint and DHCP option values",
         "description": "Returns the computed provisioning settings: URLs, CA fingerprint and DHCP option values. Use it to configure DHCP for phones.",
-        "tags": [
-          "provisioning"
-        ],
+        "tags": ["provisioning"],
         "responses": {
           "200": {
             "description": "Settings",
@@ -5120,9 +4828,7 @@
         "operationId": "getAISettings",
         "summary": "External AI access settings",
         "description": "Returns whether external AI access is enabled (HELLO_PUBLIC_URL), the MCP and API resource URLs, their metadata URLs, the MCP protocol versions, whether dynamic client registration is on, and what each scope allows.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true,
@@ -5154,9 +4860,7 @@
         "operationId": "getOAuthRequest",
         "summary": "A pending authorization request",
         "description": "Returns what the consent screen shows for a pending authorization request: the client, its host, the requested scopes and resources, and the scopes the caller's role may grant. Answers 404 when the request is unknown, expired or already decided, or external AI access is off.",
-        "tags": [
-          "oauth"
-        ],
+        "tags": ["oauth"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
@@ -5204,9 +4908,7 @@
         "operationId": "approveOAuthRequest",
         "summary": "Approve an authorization request",
         "description": "Approves a pending authorization request with the given scopes, which must be a subset of the requested ones and of the caller's role's grantable scopes, and returns the client redirect carrying a single-use code. Only a browser session may call it.",
-        "tags": [
-          "oauth"
-        ],
+        "tags": ["oauth"],
         "x-hello-scope": "session",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
@@ -5230,21 +4932,14 @@
               "schema": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": [
-                  "scopes"
-                ],
+                "required": ["scopes"],
                 "properties": {
                   "scopes": {
                     "type": "array",
                     "description": "The scopes to grant.",
                     "items": {
                       "type": "string",
-                      "enum": [
-                        "read",
-                        "write",
-                        "admin",
-                        "secrets"
-                      ]
+                      "enum": ["read", "write", "admin", "secrets"]
                     }
                   }
                 }
@@ -5259,9 +4954,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "redirect"
-                  ],
+                  "required": ["redirect"],
                   "properties": {
                     "redirect": {
                       "type": "string",
@@ -5296,9 +4989,7 @@
         "operationId": "denyOAuthRequest",
         "summary": "Deny an authorization request",
         "description": "Refuses a pending authorization request and returns the client redirect carrying error=access_denied. Only a browser session may call it.",
-        "tags": [
-          "oauth"
-        ],
+        "tags": ["oauth"],
         "x-hello-scope": "session",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
@@ -5322,9 +5013,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "redirect"
-                  ],
+                  "required": ["redirect"],
                   "properties": {
                     "redirect": {
                       "type": "string",
@@ -5356,9 +5045,7 @@
         "operationId": "listOAuthGrants",
         "summary": "Connected apps",
         "description": "Lists the live OAuth grants (connected apps) of the caller; an admin sees every user's.",
-        "tags": [
-          "oauth"
-        ],
+        "tags": ["oauth"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
@@ -5371,9 +5058,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -5406,9 +5091,7 @@
         "operationId": "revokeOAuthGrant",
         "summary": "Revoke a connected app",
         "description": "Revokes a grant and every token issued under it; the next request with any of them is refused. Users revoke their own grants, admins anyone's.",
-        "tags": [
-          "oauth"
-        ],
+        "tags": ["oauth"],
         "x-hello-scope": "session",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
@@ -5443,9 +5126,7 @@
         "operationId": "listServiceAccounts",
         "summary": "Service accounts",
         "description": "Lists the service accounts with their role, scopes and live client secrets (metadata only; a secret is shown once, when created).",
-        "tags": [
-          "service-accounts"
-        ],
+        "tags": ["service-accounts"],
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
@@ -5458,9 +5139,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -5491,9 +5170,7 @@
         "operationId": "createServiceAccount",
         "summary": "Create a service account",
         "description": "Creates a service account for a headless agent: a name, a role, and the scopes it may hold, bounded by the role. It has no secret until one is created.",
-        "tags": [
-          "service-accounts"
-        ],
+        "tags": ["service-accounts"],
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
@@ -5546,9 +5223,7 @@
         "operationId": "getServiceAccount",
         "summary": "A service account",
         "description": "Returns one service account.",
-        "tags": [
-          "service-accounts"
-        ],
+        "tags": ["service-accounts"],
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
@@ -5594,9 +5269,7 @@
         "operationId": "updateServiceAccount",
         "summary": "Change a service account",
         "description": "Changes a service account's description, role, scopes or enabled state. Changing the role, scopes or enabled state revokes its live tokens.",
-        "tags": [
-          "service-accounts"
-        ],
+        "tags": ["service-accounts"],
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
@@ -5655,9 +5328,7 @@
         "operationId": "deleteServiceAccount",
         "summary": "Delete a service account",
         "description": "Deletes a service account, its secrets and its tokens.",
-        "tags": [
-          "service-accounts"
-        ],
+        "tags": ["service-accounts"],
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
@@ -5698,9 +5369,7 @@
         "operationId": "createServiceAccountSecret",
         "summary": "Create a client secret",
         "description": "Creates a client secret for the service account and returns it once; only its SHA-256 is stored. An account holds at most two live secrets (409 for a third), so secrets can be rotated.",
-        "tags": [
-          "service-accounts"
-        ],
+        "tags": ["service-accounts"],
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
@@ -5726,10 +5395,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "expiresAt": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": ["string", "null"],
                     "format": "date-time",
                     "description": "When the secret stops working; null or absent for never."
                   }
@@ -5775,9 +5441,7 @@
         "operationId": "revokeServiceAccountSecret",
         "summary": "Revoke a client secret",
         "description": "Revokes a client secret and the account's live access tokens; the next request with them is refused.",
-        "tags": [
-          "service-accounts"
-        ],
+        "tags": ["service-accounts"],
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
@@ -5828,9 +5492,7 @@
         "operationId": "listSkills",
         "summary": "The agent skills this Hello ships",
         "description": "Lists the agent skills embedded in hello-control (agentskills.io format), each with its name, description and the Hello API version it targets. Use it to find a skill to install in an MCP client; download one with downloadSkill.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true,
@@ -5841,9 +5503,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "items"
-                  ],
+                  "required": ["items"],
                   "properties": {
                     "items": {
                       "type": "array",
@@ -5873,9 +5533,7 @@
         "operationId": "downloadSkill",
         "summary": "Download one skill as a zip archive",
         "description": "Returns the skill's folder (SKILL.md and references/) as a zip archive whose entries sit under the skill's name, ready to unpack into a client's skills directory. Nothing changes on the server.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": {
@@ -5934,9 +5592,7 @@
         "operationId": "getAIStatus",
         "summary": "AI agent status",
         "description": "Reports whether the AI agent is on and why not, the provider, model and endpoint host, today's token use against the budget, the agents with their last run and next due time, the last call errors, and open finding and proposal counts. It never contains a URL path, key, prompt or response; with AI off it still answers 200 with enabled false.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true,
@@ -5968,9 +5624,7 @@
         "operationId": "listAIFindings",
         "summary": "AIOps findings",
         "description": "Lists the PBX findings the deterministic detectors raised, with the model's explanation when there is one, most severe and best ranked first. Filter by status and severity; the response carries the health score.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true,
@@ -5981,12 +5635,7 @@
             "description": "Keep only findings in this status.",
             "schema": {
               "type": "string",
-              "enum": [
-                "open",
-                "acknowledged",
-                "dismissed",
-                "resolved"
-              ]
+              "enum": ["open", "acknowledged", "dismissed", "resolved"]
             }
           },
           {
@@ -5995,11 +5644,7 @@
             "description": "Keep only findings of this severity.",
             "schema": {
               "type": "string",
-              "enum": [
-                "info",
-                "warning",
-                "critical"
-              ]
+              "enum": ["info", "warning", "critical"]
             }
           },
           {
@@ -6056,9 +5701,7 @@
         "operationId": "getAIFinding",
         "summary": "One finding",
         "description": "Returns one finding with its evidence, explanation, severity history and lifecycle times.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true,
@@ -6101,9 +5744,7 @@
         "operationId": "acknowledgeAIFinding",
         "summary": "Acknowledge a finding",
         "description": "Marks an open finding acknowledged: it stays listed and is not raised again while it persists. Audited.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
@@ -6151,9 +5792,7 @@
         "operationId": "dismissAIFinding",
         "summary": "Dismiss a finding",
         "description": "Dismisses a finding with a reason; it is not raised again for 24 hours unless its severity rises. Audited.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
@@ -6214,9 +5853,7 @@
         "operationId": "listAIProposals",
         "summary": "AI proposals",
         "description": "Lists the configuration changes the AI agent proposed, newest first. A proposal is a suggestion: nothing changes until an operator applies it. Filter by status and source.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true,
@@ -6291,9 +5928,7 @@
         "operationId": "getAIProposal",
         "summary": "One proposal with its diff",
         "description": "Returns one proposal with each action's stored before and after and the target's current state read with the caller's identity, so a change made since the proposal shows as a difference.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true,
@@ -6336,9 +5971,7 @@
         "operationId": "applyAIProposal",
         "summary": "Apply a proposal",
         "description": "Replays an open proposal's actions in order through the API with the caller's own credentials, so role checks, validation and audit are those of a direct call. A proposal whose targets changed since it was made becomes stale and nothing is sent; the first failing action stops it, with the earlier ones listed as applied.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
@@ -6393,9 +6026,7 @@
         "operationId": "dismissAIProposal",
         "summary": "Dismiss a proposal",
         "description": "Dismisses an open proposal with a reason; the same change is not proposed again for 7 days. Audited.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
@@ -6463,9 +6094,7 @@
         "operationId": "listAISessions",
         "summary": "Assistant sessions",
         "description": "Lists the caller's assistant sessions, most recently active first; an admin also sees other users' sessions.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true,
@@ -6511,9 +6140,7 @@
         "operationId": "createAISession",
         "summary": "Start an assistant session",
         "description": "Creates an empty assistant session owned by the caller. The first message names it unless a title is given.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
@@ -6563,9 +6190,7 @@
         "operationId": "getAISession",
         "summary": "One assistant session",
         "description": "Returns a session with its messages, oldest first, and its running task if one exists. Others' sessions answer 404 except to an admin.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true,
@@ -6606,9 +6231,7 @@
         "operationId": "updateAISession",
         "summary": "Rename an assistant session",
         "description": "Changes a session's title. Others' sessions answer 404 except to an admin.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
@@ -6664,9 +6287,7 @@
         "operationId": "deleteAISession",
         "summary": "Delete an assistant session",
         "description": "Deletes a session and its messages. Proposals made in it stay. Others' sessions answer 404 except to an admin.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
@@ -6707,9 +6328,7 @@
         "operationId": "postAIMessage",
         "summary": "Ask the assistant",
         "description": "Posts a question of at most 4000 characters and answers 202 with a task id; the assistant works asynchronously with read-only tools replayed as the caller, so poll getAITask. One task per session runs at a time (409 task_running); a busy or budget-exhausted service answers 429.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
@@ -6780,9 +6399,7 @@
         "operationId": "getAITask",
         "summary": "An AI task",
         "description": "Returns an AI task's status and, when it failed, its error code. Only the requester or an admin may read it; anyone else gets 404.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true,
@@ -6825,9 +6442,7 @@
         "operationId": "listAIAgents",
         "summary": "Background agents",
         "description": "Lists the background agents with their interval, last run and next due time.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
         "x-hello-mcp": true,
@@ -6862,9 +6477,7 @@
         "operationId": "runAIAgent",
         "summary": "Run an agent now",
         "description": "Records a run-now request for a background agent; the scheduler starts it within seconds on one replica, never overlapping a run already in progress.",
-        "tags": [
-          "ai"
-        ],
+        "tags": ["ai"],
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": {
@@ -7051,9 +6664,7 @@
     "schemas": {
       "RedirectStatus": {
         "type": "object",
-        "required": [
-          "state"
-        ],
+        "required": ["state"],
         "properties": {
           "state": {
             "type": "string",
@@ -7111,22 +6722,13 @@
             "type": "integer"
           },
           "deviceId": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": ["integer", "null"]
           },
           "extensionId": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": ["integer", "null"]
           },
           "templateId": {
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": ["integer", "null"]
           },
           "blf": {
             "type": "array",
@@ -7138,17 +6740,11 @@
             "$ref": "#/components/schemas/RedirectStatus"
           },
           "firstFetchAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "lastFetchAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "createdAt": {
@@ -7201,12 +6797,7 @@
       },
       "PhoneCreate": {
         "type": "object",
-        "required": [
-          "mac",
-          "vendor",
-          "model",
-          "extensionId"
-        ],
+        "required": ["mac", "vendor", "model", "extensionId"],
         "properties": {
           "mac": {
             "type": "string",
@@ -7277,17 +6868,11 @@
             "description": "Id of the extension the phone's first line registers to."
           },
           "deviceId": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "description": "Id of an existing device to bind (binding rotates its secret); on update, null unbinds and disables the phone."
           },
           "templateId": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "description": "Id of a template that overrides the automatic choice; null for automatic."
           },
           "blf": {
@@ -7305,10 +6890,7 @@
       },
       "PhoneImportResult": {
         "type": "object",
-        "required": [
-          "rows",
-          "ok"
-        ],
+        "required": ["rows", "ok"],
         "properties": {
           "rows": {
             "type": "array",
@@ -7413,10 +6995,7 @@
             "type": "integer"
           },
           "updatedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           }
         }
@@ -7495,11 +7074,7 @@
       },
       "FirmwarePin": {
         "type": "object",
-        "required": [
-          "vendor",
-          "modelGlob",
-          "firmwareId"
-        ],
+        "required": ["vendor", "modelGlob", "firmwareId"],
         "properties": {
           "vendor": {
             "type": "string"
@@ -7531,10 +7106,7 @@
             "type": "object"
           },
           "lastCheckAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "lastCheckResult": {
@@ -7673,14 +7245,7 @@
       },
       "VoicemailBoxSummary": {
         "type": "object",
-        "required": [
-          "id",
-          "extensionId",
-          "number",
-          "name",
-          "unheard",
-          "total"
-        ],
+        "required": ["id", "extensionId", "number", "name", "unheard", "total"],
         "properties": {
           "id": {
             "type": "integer",
@@ -7710,9 +7275,7 @@
       },
       "VoicemailBoxSummaryList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -7765,9 +7328,7 @@
       },
       "VoicemailMessageList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -7779,10 +7340,7 @@
       },
       "VoicemailMessageHeard": {
         "type": "object",
-        "required": [
-          "id",
-          "heard"
-        ],
+        "required": ["id", "heard"],
         "properties": {
           "id": {
             "type": "integer",
@@ -7795,11 +7353,7 @@
       },
       "RingGroupMember": {
         "type": "object",
-        "required": [
-          "position",
-          "weight",
-          "delay"
-        ],
+        "required": ["position", "weight", "delay"],
         "description": "One ring group member.",
         "properties": {
           "extensionId": {
@@ -7888,11 +7442,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": [
-              "none",
-              "voicemail",
-              "external"
-            ]
+            "enum": ["none", "voicemail", "external"]
           },
           "failureTarget": {
             "type": "string"
@@ -7915,10 +7465,7 @@
       },
       "RingGroupCreate": {
         "type": "object",
-        "required": [
-          "name",
-          "members"
-        ],
+        "required": ["name", "members"],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -7959,11 +7506,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": [
-              "none",
-              "voicemail",
-              "external"
-            ],
+            "enum": ["none", "voicemail", "external"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
           "failureTarget": {
@@ -7976,9 +7519,7 @@
             "maxItems": 50,
             "items": {
               "type": "object",
-              "required": [
-                "position"
-              ],
+              "required": ["position"],
               "additionalProperties": false,
               "description": "One ring group member.",
               "properties": {
@@ -8051,11 +7592,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": [
-              "none",
-              "voicemail",
-              "external"
-            ],
+            "enum": ["none", "voicemail", "external"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
           "failureTarget": {
@@ -8068,9 +7605,7 @@
             "maxItems": 50,
             "items": {
               "type": "object",
-              "required": [
-                "position"
-              ],
+              "required": ["position"],
               "additionalProperties": false,
               "description": "One ring group member.",
               "properties": {
@@ -8101,9 +7636,7 @@
       },
       "RingGroupList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -8115,11 +7648,7 @@
       },
       "FeatureCode": {
         "type": "object",
-        "required": [
-          "code",
-          "action",
-          "argument"
-        ],
+        "required": ["code", "action", "argument"],
         "properties": {
           "code": {
             "type": "string",
@@ -8147,9 +7676,7 @@
       },
       "FeatureCodeList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -8161,9 +7688,7 @@
       },
       "FeatureCodesPut": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "additionalProperties": false,
         "description": "The complete feature-code configuration; codes absent from the list are removed.",
         "properties": {
@@ -8172,10 +7697,7 @@
             "maxItems": 64,
             "items": {
               "type": "object",
-              "required": [
-                "code",
-                "action"
-              ],
+              "required": ["code", "action"],
               "additionalProperties": false,
               "properties": {
                 "code": {
@@ -8209,12 +7731,7 @@
       },
       "DeviceState": {
         "type": "object",
-        "required": [
-          "device",
-          "extension",
-          "state",
-          "updatedAt"
-        ],
+        "required": ["device", "extension", "state", "updatedAt"],
         "properties": {
           "device": {
             "type": "string",
@@ -8225,12 +7742,7 @@
           },
           "state": {
             "type": "string",
-            "enum": [
-              "idle",
-              "ringing",
-              "on-call",
-              "dnd"
-            ]
+            "enum": ["idle", "ringing", "on-call", "dnd"]
           },
           "updatedAt": {
             "type": "string",
@@ -8240,9 +7752,7 @@
       },
       "DeviceStateList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -8254,11 +7764,7 @@
       },
       "Version": {
         "type": "object",
-        "required": [
-          "version",
-          "commit",
-          "configRevision"
-        ],
+        "required": ["version", "commit", "configRevision"],
         "properties": {
           "version": {
             "type": "string",
@@ -8278,16 +7784,11 @@
       },
       "Error": {
         "type": "object",
-        "required": [
-          "error"
-        ],
+        "required": ["error"],
         "properties": {
           "error": {
             "type": "object",
-            "required": [
-              "code",
-              "message"
-            ],
+            "required": ["code", "message"],
             "properties": {
               "code": {
                 "type": "string",
@@ -8328,10 +7829,7 @@
       "LoginRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "username",
-          "password"
-        ],
+        "required": ["username", "password"],
         "properties": {
           "username": {
             "type": "string",
@@ -8346,10 +7844,7 @@
       },
       "Me": {
         "type": "object",
-        "required": [
-          "username",
-          "role"
-        ],
+        "required": ["username", "role"],
         "properties": {
           "username": {
             "type": "string",
@@ -8362,21 +7857,12 @@
       },
       "Role": {
         "type": "string",
-        "enum": [
-          "viewer",
-          "operator",
-          "admin"
-        ],
+        "enum": ["viewer", "operator", "admin"],
         "description": "viewer: every read operation; operator: also every write operation; admin: also every admin and secrets operation"
       },
       "User": {
         "type": "object",
-        "required": [
-          "id",
-          "username",
-          "role",
-          "createdAt"
-        ],
+        "required": ["id", "username", "role", "createdAt"],
         "properties": {
           "id": {
             "type": "integer",
@@ -8396,9 +7882,7 @@
       },
       "UserList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -8410,9 +7894,7 @@
       },
       "UserUpdate": {
         "type": "object",
-        "required": [
-          "role"
-        ],
+        "required": ["role"],
         "additionalProperties": false,
         "properties": {
           "role": {
@@ -8423,9 +7905,7 @@
       "TokenCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "properties": {
           "name": {
             "type": "string",
@@ -8439,19 +7919,11 @@
             "description": "The token's scopes, at most the caller's; absent means read, write and admin (secrets must be named).",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets"
-              ]
+              "enum": ["read", "write", "admin", "secrets"]
             }
           },
           "expiresAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "When the token stops working; absent or null for never."
           }
@@ -8484,37 +7956,23 @@
             "format": "date-time"
           },
           "lastUsedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "kind": {
             "type": "string",
-            "enum": [
-              "legacy",
-              "personal"
-            ],
+            "enum": ["legacy", "personal"],
             "description": "legacy: created before scopes, every scope; personal: hello_pat_ with its scopes."
           },
           "scopes": {
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets"
-              ]
+              "enum": ["read", "write", "admin", "secrets"]
             }
           },
           "expiresAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           }
         }
@@ -8547,37 +8005,23 @@
             "format": "date-time"
           },
           "lastUsedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "kind": {
             "type": "string",
-            "enum": [
-              "legacy",
-              "personal"
-            ],
+            "enum": ["legacy", "personal"],
             "description": "legacy: created before scopes, every scope; personal: hello_pat_ with its scopes."
           },
           "scopes": {
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets"
-              ]
+              "enum": ["read", "write", "admin", "secrets"]
             }
           },
           "expiresAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "token": {
@@ -8662,10 +8106,7 @@
       "ExtensionCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "number",
-          "name"
-        ],
+        "required": ["number", "name"],
         "properties": {
           "number": {
             "type": "string",
@@ -8760,11 +8201,7 @@
           },
           "initiatedBy": {
             "type": "string",
-            "enum": [
-              "dtmf",
-              "default",
-              "api"
-            ]
+            "enum": ["dtmf", "default", "api"]
           },
           "durationMs": {
             "type": "integer",
@@ -8791,10 +8228,7 @@
       },
       "RecordingPage": {
         "type": "object",
-        "required": [
-          "items",
-          "next"
-        ],
+        "required": ["items", "next"],
         "properties": {
           "items": {
             "type": "array",
@@ -8810,12 +8244,7 @@
       },
       "Announcement": {
         "type": "object",
-        "required": [
-          "id",
-          "name",
-          "createdAt",
-          "updatedAt"
-        ],
+        "required": ["id", "name", "createdAt", "updatedAt"],
         "properties": {
           "id": {
             "type": "integer",
@@ -8837,9 +8266,7 @@
       },
       "AnnouncementList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -8939,10 +8366,7 @@
       "DeviceCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "extensionId",
-          "sipUsername"
-        ],
+        "required": ["extensionId", "sipUsername"],
         "properties": {
           "extensionId": {
             "type": "integer",
@@ -9065,10 +8489,7 @@
           },
           "state": {
             "type": "string",
-            "enum": [
-              "ringing",
-              "connected"
-            ]
+            "enum": ["ringing", "connected"]
           },
           "node": {
             "type": "string"
@@ -9079,10 +8500,7 @@
           },
           "ha": {
             "type": "string",
-            "enum": [
-              "owned",
-              "taken-over"
-            ],
+            "enum": ["owned", "taken-over"],
             "description": "In-call HA state: owned while the node that set the call up carries it; taken-over once a surviving node re-homed the call after its owner died"
           },
           "startedAt": {
@@ -9171,22 +8589,14 @@
           },
           "terminationSide": {
             "type": "string",
-            "enum": [
-              "caller",
-              "callee",
-              "system"
-            ]
+            "enum": ["caller", "callee", "system"]
           },
           "failureReason": {
             "type": "string"
           },
           "direction": {
             "type": "string",
-            "enum": [
-              "internal",
-              "inbound",
-              "outbound"
-            ]
+            "enum": ["internal", "inbound", "outbound"]
           },
           "originalDestination": {
             "type": "string"
@@ -9201,26 +8611,17 @@
             "type": "string"
           },
           "rtpPackets": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "format": "int64",
             "description": "RTP packets relayed, both directions; null when the call was not anchored or never answered."
           },
           "rtpLost": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "format": "int64",
             "description": "RTP packets lost (sequence gaps), both directions; null when not measured."
           },
           "rtpJitterMs": {
-            "type": [
-              "number",
-              "null"
-            ],
+            "type": ["number", "null"],
             "description": "Larger of the two directions' interarrival jitter in ms; null when not measured."
           }
         },
@@ -9228,10 +8629,7 @@
       },
       "CDRPage": {
         "type": "object",
-        "required": [
-          "items",
-          "next"
-        ],
+        "required": ["items", "next"],
         "properties": {
           "items": {
             "type": "array",
@@ -9247,10 +8645,7 @@
       },
       "FieldError": {
         "type": "object",
-        "required": [
-          "path",
-          "message"
-        ],
+        "required": ["path", "message"],
         "properties": {
           "path": {
             "type": "string",
@@ -9292,11 +8687,7 @@
       "Window": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "days",
-          "start",
-          "end"
-        ],
+        "required": ["days", "start", "end"],
         "properties": {
           "days": {
             "type": "array",
@@ -9325,10 +8716,7 @@
       "Schedule": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "timeZone",
-          "windows"
-        ],
+        "required": ["timeZone", "windows"],
         "properties": {
           "timeZone": {
             "type": "string",
@@ -9347,9 +8735,7 @@
       "Destination": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "host"
-        ],
+        "required": ["host"],
         "properties": {
           "host": {
             "type": "string",
@@ -9407,10 +8793,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "registration",
-              "ip"
-            ]
+            "enum": ["registration", "ip"]
           },
           "username": {
             "type": "string",
@@ -9483,11 +8866,7 @@
       "TrunkCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name",
-          "mode",
-          "destinations"
-        ],
+        "required": ["name", "mode", "destinations"],
         "properties": {
           "name": {
             "type": "string",
@@ -9497,10 +8876,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "registration",
-              "ip"
-            ],
+            "enum": ["registration", "ip"],
             "description": "registration registers with the carrier using username and password; ip trusts calls from the destinations' addresses."
           },
           "username": {
@@ -9585,10 +8961,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "registration",
-              "ip"
-            ],
+            "enum": ["registration", "ip"],
             "description": "registration registers with the carrier using username and password; ip trusts calls from the destinations' addresses."
           },
           "username": {
@@ -9662,11 +9035,7 @@
       },
       "DestinationHealth": {
         "type": "object",
-        "required": [
-          "destination",
-          "up",
-          "checkedAt"
-        ],
+        "required": ["destination", "up", "checkedAt"],
         "properties": {
           "destination": {
             "type": "string"
@@ -9689,11 +9058,7 @@
       },
       "TrunkRegistration": {
         "type": "object",
-        "required": [
-          "state",
-          "node",
-          "updatedAt"
-        ],
+        "required": ["state", "node", "updatedAt"],
         "properties": {
           "state": {
             "type": "string",
@@ -9723,12 +9088,7 @@
       },
       "TrunkStatus": {
         "type": "object",
-        "required": [
-          "trunkId",
-          "name",
-          "destinations",
-          "activeCalls"
-        ],
+        "required": ["trunkId", "name", "destinations", "activeCalls"],
         "properties": {
           "trunkId": {
             "type": "integer",
@@ -9787,10 +9147,7 @@
           },
           "matchKind": {
             "type": "string",
-            "enum": [
-              "prefix",
-              "regex"
-            ]
+            "enum": ["prefix", "regex"]
           },
           "match": {
             "type": "string",
@@ -9851,12 +9208,7 @@
       "OutboundRouteCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name",
-          "matchKind",
-          "match",
-          "trunks"
-        ],
+        "required": ["name", "matchKind", "match", "trunks"],
         "properties": {
           "name": {
             "type": "string",
@@ -9867,10 +9219,7 @@
           },
           "matchKind": {
             "type": "string",
-            "enum": [
-              "prefix",
-              "regex"
-            ],
+            "enum": ["prefix", "regex"],
             "description": "How match is read: a dialled-number prefix or an RE2 regex."
           },
           "match": {
@@ -9946,10 +9295,7 @@
           },
           "matchKind": {
             "type": "string",
-            "enum": [
-              "prefix",
-              "regex"
-            ],
+            "enum": ["prefix", "regex"],
             "description": "How match is read: a dialled-number prefix or an RE2 regex."
           },
           "match": {
@@ -10046,12 +9392,7 @@
           },
           "didKind": {
             "type": "string",
-            "enum": [
-              "any",
-              "exact",
-              "prefix",
-              "regex"
-            ]
+            "enum": ["any", "exact", "prefix", "regex"]
           },
           "did": {
             "type": "string",
@@ -10095,11 +9436,7 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": [
-              "extension",
-              "external",
-              "sip_uri"
-            ]
+            "enum": ["extension", "external", "sip_uri", "internal"]
           },
           "destination": {
             "type": "string",
@@ -10114,11 +9451,7 @@
       "InboundRouteCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name",
-          "destinationKind",
-          "destination"
-        ],
+        "required": ["name", "destinationKind", "destination"],
         "properties": {
           "name": {
             "type": "string",
@@ -10129,12 +9462,7 @@
           },
           "didKind": {
             "type": "string",
-            "enum": [
-              "any",
-              "exact",
-              "prefix",
-              "regex"
-            ],
+            "enum": ["any", "exact", "prefix", "regex"],
             "description": "How did is matched against the called number: any, exact, prefix or regex."
           },
           "did": {
@@ -10183,12 +9511,8 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": [
-              "extension",
-              "external",
-              "sip_uri"
-            ],
-            "description": "What destination names: an extension number, an external number or a SIP URI."
+            "enum": ["extension", "external", "sip_uri", "internal"],
+            "description": "What destination names: an extension number, an external number, a SIP URI, or the dialled number itself (internal: the DID is looked up in the extension namespace, gated by the trunk's internal dialing policy)."
           },
           "destination": {
             "type": "string",
@@ -10215,12 +9539,7 @@
           },
           "didKind": {
             "type": "string",
-            "enum": [
-              "any",
-              "exact",
-              "prefix",
-              "regex"
-            ],
+            "enum": ["any", "exact", "prefix", "regex"],
             "description": "How did is matched against the called number: any, exact, prefix or regex."
           },
           "did": {
@@ -10269,12 +9588,8 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": [
-              "extension",
-              "external",
-              "sip_uri"
-            ],
-            "description": "What destination names: an extension number, an external number or a SIP URI."
+            "enum": ["extension", "external", "sip_uri", "internal"],
+            "description": "What destination names: an extension number, an external number, a SIP URI, or the dialled number itself (internal: the DID is looked up in the extension namespace, gated by the trunk's internal dialing policy)."
           },
           "destination": {
             "type": "string",
@@ -10290,9 +9605,7 @@
       "RouteOrder": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "ids"
-        ],
+        "required": ["ids"],
         "properties": {
           "ids": {
             "type": "array",
@@ -10306,10 +9619,7 @@
       },
       "TraceStep": {
         "type": "object",
-        "required": [
-          "n",
-          "text"
-        ],
+        "required": ["n", "text"],
         "properties": {
           "n": {
             "type": "integer"
@@ -10322,10 +9632,7 @@
       "RoutingTestRequest": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "from",
-          "number"
-        ],
+        "required": ["from", "number"],
         "properties": {
           "from": {
             "type": "string",
@@ -10381,12 +9688,7 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": [
-              "internal",
-              "outbound",
-              "inbound",
-              "reject"
-            ]
+            "enum": ["internal", "outbound", "inbound", "reject"]
           },
           "extension": {
             "type": "string"
@@ -10424,10 +9726,7 @@
       },
       "RoutingTestResult": {
         "type": "object",
-        "required": [
-          "decision",
-          "trace"
-        ],
+        "required": ["decision", "trace"],
         "properties": {
           "decision": {
             "$ref": "#/components/schemas/RoutingDecision"
@@ -10442,10 +9741,7 @@
       },
       "CDRCounts": {
         "type": "object",
-        "required": [
-          "all",
-          "failed"
-        ],
+        "required": ["all", "failed"],
         "properties": {
           "all": {
             "type": "integer",
@@ -10460,12 +9756,7 @@
       },
       "ConcurrencyPoint": {
         "type": "object",
-        "required": [
-          "at",
-          "inbound",
-          "outbound",
-          "internal"
-        ],
+        "required": ["at", "inbound", "outbound", "internal"],
         "properties": {
           "at": {
             "type": "string",
@@ -10487,20 +9778,11 @@
       },
       "CDRConcurrency": {
         "type": "object",
-        "required": [
-          "range",
-          "stepSeconds",
-          "points",
-          "peak"
-        ],
+        "required": ["range", "stepSeconds", "points", "peak"],
         "properties": {
           "range": {
             "type": "string",
-            "enum": [
-              "1h",
-              "6h",
-              "24h"
-            ]
+            "enum": ["1h", "6h", "24h"]
           },
           "stepSeconds": {
             "type": "integer"
@@ -10519,10 +9801,7 @@
               },
               {
                 "type": "object",
-                "required": [
-                  "calls",
-                  "at"
-                ],
+                "required": ["calls", "at"],
                 "properties": {
                   "calls": {
                     "type": "integer",
@@ -10545,11 +9824,7 @@
           },
           {
             "type": "object",
-            "required": [
-              "trace",
-              "explanation",
-              "note"
-            ],
+            "required": ["trace", "explanation", "note"],
             "properties": {
               "trace": {
                 "type": "array",
@@ -10591,20 +9866,11 @@
           },
           "kind": {
             "type": "string",
-            "enum": [
-              "sip",
-              "control"
-            ]
+            "enum": ["sip", "control"]
           },
           "state": {
             "type": "string",
-            "enum": [
-              "JOINING",
-              "READY",
-              "DRAINING",
-              "UNHEALTHY",
-              "OFFLINE"
-            ]
+            "enum": ["JOINING", "READY", "DRAINING", "UNHEALTHY", "OFFLINE"]
           },
           "reason": {
             "type": "string",
@@ -10652,12 +9918,7 @@
       },
       "ClusterView": {
         "type": "object",
-        "required": [
-          "members",
-          "postgres",
-          "valkey",
-          "configRevision"
-        ],
+        "required": ["members", "postgres", "valkey", "configRevision"],
         "properties": {
           "members": {
             "type": "array",
@@ -10668,9 +9929,7 @@
           },
           "postgres": {
             "type": "object",
-            "required": [
-              "up"
-            ],
+            "required": ["up"],
             "properties": {
               "up": {
                 "type": "boolean"
@@ -10682,20 +9941,14 @@
           },
           "valkey": {
             "type": "object",
-            "required": [
-              "up",
-              "mode"
-            ],
+            "required": ["up", "mode"],
             "properties": {
               "up": {
                 "type": "boolean"
               },
               "mode": {
                 "type": "string",
-                "enum": [
-                  "single",
-                  "sentinel"
-                ]
+                "enum": ["single", "sentinel"]
               },
               "primary": {
                 "type": "string",
@@ -10776,12 +10029,7 @@
       },
       "AuthFailure": {
         "type": "object",
-        "required": [
-          "ip",
-          "failures",
-          "windowEndsAt",
-          "blocked"
-        ],
+        "required": ["ip", "failures", "windowEndsAt", "blocked"],
         "properties": {
           "ip": {
             "type": "string"
@@ -10802,10 +10050,7 @@
       },
       "AuthFailureList": {
         "type": "object",
-        "required": [
-          "items",
-          "limit"
-        ],
+        "required": ["items", "limit"],
         "properties": {
           "items": {
             "type": "array",
@@ -10889,10 +10134,7 @@
             "oneOf": [
               {
                 "type": "object",
-                "required": [
-                  "code",
-                  "message"
-                ],
+                "required": ["code", "message"],
                 "properties": {
                   "code": {
                     "type": "string",
@@ -10987,19 +10229,11 @@
             "description": "The grantable scopes with what each allows.",
             "items": {
               "type": "object",
-              "required": [
-                "name",
-                "description"
-              ],
+              "required": ["name", "description"],
               "properties": {
                 "name": {
                   "type": "string",
-                  "enum": [
-                    "read",
-                    "write",
-                    "admin",
-                    "secrets"
-                  ]
+                  "enum": ["read", "write", "admin", "secrets"]
                 },
                 "description": {
                   "type": "string"
@@ -11058,12 +10292,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets"
-              ]
+              "enum": ["read", "write", "admin", "secrets"]
             }
           },
           "resources": {
@@ -11081,12 +10310,7 @@
             "description": "The scopes the caller's role may grant.",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets"
-              ]
+              "enum": ["read", "write", "admin", "secrets"]
             }
           }
         }
@@ -11134,12 +10358,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets"
-              ]
+              "enum": ["read", "write", "admin", "secrets"]
             }
           },
           "resources": {
@@ -11153,22 +10372,14 @@
             "format": "date-time"
           },
           "lastUsedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           }
         }
       },
       "ClientSecret": {
         "type": "object",
-        "required": [
-          "id",
-          "createdAt",
-          "expiresAt",
-          "lastUsedAt"
-        ],
+        "required": ["id", "createdAt", "expiresAt", "lastUsedAt"],
         "properties": {
           "id": {
             "type": "integer",
@@ -11179,30 +10390,18 @@
             "format": "date-time"
           },
           "expiresAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "lastUsedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           }
         }
       },
       "CreatedClientSecret": {
         "type": "object",
-        "required": [
-          "id",
-          "clientId",
-          "secret",
-          "createdAt",
-          "expiresAt"
-        ],
+        "required": ["id", "clientId", "secret", "createdAt", "expiresAt"],
         "properties": {
           "id": {
             "type": "integer",
@@ -11221,10 +10420,7 @@
             "format": "date-time"
           },
           "expiresAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           }
         }
@@ -11255,22 +10451,13 @@
           },
           "role": {
             "type": "string",
-            "enum": [
-              "viewer",
-              "operator",
-              "admin"
-            ]
+            "enum": ["viewer", "operator", "admin"]
           },
           "scopes": {
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets"
-              ]
+              "enum": ["read", "write", "admin", "secrets"]
             }
           },
           "enabled": {
@@ -11281,10 +10468,7 @@
             "format": "date-time"
           },
           "lastUsedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           },
           "secrets": {
@@ -11299,11 +10483,7 @@
       "ServiceAccountCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name",
-          "role",
-          "scopes"
-        ],
+        "required": ["name", "role", "scopes"],
         "properties": {
           "name": {
             "type": "string",
@@ -11317,11 +10497,7 @@
           },
           "role": {
             "type": "string",
-            "enum": [
-              "viewer",
-              "operator",
-              "admin"
-            ],
+            "enum": ["viewer", "operator", "admin"],
             "description": "The account's role, which bounds its scopes."
           },
           "scopes": {
@@ -11329,12 +10505,7 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets"
-              ]
+              "enum": ["read", "write", "admin", "secrets"]
             }
           },
           "enabled": {
@@ -11353,11 +10524,7 @@
           },
           "role": {
             "type": "string",
-            "enum": [
-              "viewer",
-              "operator",
-              "admin"
-            ],
+            "enum": ["viewer", "operator", "admin"],
             "description": "The account's role."
           },
           "scopes": {
@@ -11365,12 +10532,7 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets"
-              ]
+              "enum": ["read", "write", "admin", "secrets"]
             }
           },
           "enabled": {
@@ -11392,11 +10554,7 @@
       },
       "Skill": {
         "type": "object",
-        "required": [
-          "name",
-          "description",
-          "version"
-        ],
+        "required": ["name", "description", "version"],
         "properties": {
           "name": {
             "type": "string",
@@ -11416,10 +10574,7 @@
       },
       "AIAgentRun": {
         "type": "object",
-        "required": [
-          "startedAt",
-          "tokens"
-        ],
+        "required": ["startedAt", "tokens"],
         "properties": {
           "startedAt": {
             "type": "string",
@@ -11427,18 +10582,12 @@
             "description": "When the run started."
           },
           "finishedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "When it ended; null while it runs."
           },
           "outcome": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "enum": [
               "ok",
               "no_change",
@@ -11455,10 +10604,7 @@
             "description": "Tokens the run used."
           },
           "error": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "description": "The failure, when the outcome is failed."
           }
         }
@@ -11493,10 +10639,7 @@
             "description": "The most recent run, or null if it never ran."
           },
           "nextDueAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "When the agent is next due; null when disabled."
           },
@@ -11508,9 +10651,7 @@
       },
       "AIAgentList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -11547,10 +10688,7 @@
             "description": "Whether the AI agent runs: HELLO_AI_BASE_URL and HELLO_AI_MODEL are set and the endpoint passed the privacy check."
           },
           "reason": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "description": "Why it is off (not_configured, incomplete_configuration, endpoint_not_private); null when enabled."
           },
           "provider": {
@@ -11606,10 +10744,7 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": [
-                "code",
-                "at"
-              ],
+              "required": ["code", "at"],
               "properties": {
                 "code": {
                   "type": "string",
@@ -11627,11 +10762,7 @@
           "openFindings": {
             "type": "object",
             "description": "Open and acknowledged findings by severity.",
-            "required": [
-              "info",
-              "warning",
-              "critical"
-            ],
+            "required": ["info", "warning", "critical"],
             "properties": {
               "info": {
                 "type": "integer"
@@ -11656,11 +10787,7 @@
       },
       "AIFindingExplanation": {
         "type": "object",
-        "required": [
-          "summary",
-          "likelyCause",
-          "nextStep"
-        ],
+        "required": ["summary", "likelyCause", "nextStep"],
         "properties": {
           "summary": {
             "type": "string",
@@ -11729,21 +10856,12 @@
           },
           "severity": {
             "type": "string",
-            "enum": [
-              "info",
-              "warning",
-              "critical"
-            ],
+            "enum": ["info", "warning", "critical"],
             "description": "The current severity."
           },
           "status": {
             "type": "string",
-            "enum": [
-              "open",
-              "acknowledged",
-              "dismissed",
-              "resolved"
-            ],
+            "enum": ["open", "acknowledged", "dismissed", "resolved"],
             "description": "Where it is in its lifecycle."
           },
           "title": {
@@ -11771,10 +10889,7 @@
             "description": "Whether the model explained it."
           },
           "rank": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "description": "The model's rank among open findings, 1 first; null when not ranked."
           },
           "firstSeen": {
@@ -11796,18 +10911,11 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": [
-                "severity",
-                "at"
-              ],
+              "required": ["severity", "at"],
               "properties": {
                 "severity": {
                   "type": "string",
-                  "enum": [
-                    "info",
-                    "warning",
-                    "critical"
-                  ]
+                  "enum": ["info", "warning", "critical"]
                 },
                 "at": {
                   "type": "string",
@@ -11818,55 +10926,34 @@
             "description": "Severity changes."
           },
           "acknowledgedBy": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "description": "The user who acknowledged it."
           },
           "acknowledgedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "When it was acknowledged."
           },
           "dismissedBy": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "description": "The user who dismissed it."
           },
           "dismissedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "When it was dismissed."
           },
           "dismissReason": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "description": "Why it was dismissed."
           },
           "resolvedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "When it resolved."
           },
           "proposalId": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "uuid",
             "description": "The open proposal the explanation made, if any."
           }
@@ -11874,10 +10961,7 @@
       },
       "AIFindingList": {
         "type": "object",
-        "required": [
-          "items",
-          "healthScore"
-        ],
+        "required": ["items", "healthScore"],
         "properties": {
           "items": {
             "type": "array",
@@ -11893,9 +10977,7 @@
       },
       "AIFindingDismiss": {
         "type": "object",
-        "required": [
-          "reason"
-        ],
+        "required": ["reason"],
         "properties": {
           "reason": {
             "type": "string",
@@ -11908,10 +10990,7 @@
       },
       "AIProposalAction": {
         "type": "object",
-        "required": [
-          "operationId",
-          "pathParams"
-        ],
+        "required": ["operationId", "pathParams"],
         "properties": {
           "operationId": {
             "type": "string",
@@ -11945,12 +11024,7 @@
             "description": "For a delete, what it takes with it or leaves dangling: members of a ring group, the inbound routes sending calls to it, a route's trunks and destination.",
             "items": {
               "type": "object",
-              "required": [
-                "kind",
-                "id",
-                "name",
-                "detail"
-              ],
+              "required": ["kind", "id", "name", "detail"],
               "properties": {
                 "kind": {
                   "type": "string",
@@ -11975,13 +11049,7 @@
       },
       "AIProposalFailure": {
         "type": "object",
-        "required": [
-          "index",
-          "status",
-          "code",
-          "message",
-          "applied"
-        ],
+        "required": ["index", "status", "code", "message", "applied"],
         "properties": {
           "index": {
             "type": "integer",
@@ -12043,18 +11111,12 @@
             "description": "assistant or finding:<detector>."
           },
           "sessionId": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "uuid",
             "description": "The session it came from."
           },
           "findingId": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "uuid",
             "description": "The finding it came from."
           },
@@ -12095,10 +11157,7 @@
             "description": "Whether an action deletes a resource; the console marks it and asks for confirmation."
           },
           "createdBy": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "description": "The user the assistant worked for; null for a finding."
           },
           "createdAt": {
@@ -12112,47 +11171,29 @@
             "description": "When it was last refreshed or changed."
           },
           "appliedBy": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "description": "The user who applied it."
           },
           "appliedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "When it was applied."
           },
           "dismissedBy": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "description": "The user who dismissed it."
           },
           "dismissedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "When it was dismissed."
           },
           "dismissReason": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "description": "not_needed, wrong, later or other."
           },
           "dismissText": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "description": "Optional text with the reason."
           },
           "failure": {
@@ -12170,9 +11211,7 @@
       },
       "AIProposalList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -12184,18 +11223,11 @@
       },
       "AIProposalDismiss": {
         "type": "object",
-        "required": [
-          "reason"
-        ],
+        "required": ["reason"],
         "properties": {
           "reason": {
             "type": "string",
-            "enum": [
-              "not_needed",
-              "wrong",
-              "later",
-              "other"
-            ],
+            "enum": ["not_needed", "wrong", "later", "other"],
             "description": "Why it is dismissed."
           },
           "text": {
@@ -12208,13 +11240,7 @@
       },
       "AISession": {
         "type": "object",
-        "required": [
-          "id",
-          "owner",
-          "title",
-          "createdAt",
-          "lastActiveAt"
-        ],
+        "required": ["id", "owner", "title", "createdAt", "lastActiveAt"],
         "properties": {
           "id": {
             "type": "string",
@@ -12244,9 +11270,7 @@
       },
       "AISessionList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -12258,11 +11282,7 @@
       },
       "AIToolCall": {
         "type": "object",
-        "required": [
-          "operationId",
-          "status",
-          "truncated"
-        ],
+        "required": ["operationId", "status", "truncated"],
         "properties": {
           "operationId": {
             "type": "string",
@@ -12303,10 +11323,7 @@
           },
           "role": {
             "type": "string",
-            "enum": [
-              "user",
-              "assistant"
-            ],
+            "enum": ["user", "assistant"],
             "description": "Who wrote it."
           },
           "content": {
@@ -12328,18 +11345,12 @@
             "description": "Positions in toolCalls the answer relies on."
           },
           "proposalId": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "uuid",
             "description": "The proposal the answer made."
           },
           "taskId": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "uuid",
             "description": "The task that produced it."
           },
@@ -12352,11 +11363,7 @@
       },
       "AISessionDetail": {
         "type": "object",
-        "required": [
-          "session",
-          "messages",
-          "task"
-        ],
+        "required": ["session", "messages", "task"],
         "properties": {
           "session": {
             "$ref": "#/components/schemas/AISession"
@@ -12394,9 +11401,7 @@
       },
       "AISessionUpdate": {
         "type": "object",
-        "required": [
-          "title"
-        ],
+        "required": ["title"],
         "properties": {
           "title": {
             "type": "string",
@@ -12409,9 +11414,7 @@
       },
       "AIMessageCreate": {
         "type": "object",
-        "required": [
-          "content"
-        ],
+        "required": ["content"],
         "properties": {
           "content": {
             "type": "string",
@@ -12424,10 +11427,7 @@
       },
       "AIMessageAccepted": {
         "type": "object",
-        "required": [
-          "taskId",
-          "messageId"
-        ],
+        "required": ["taskId", "messageId"],
         "properties": {
           "taskId": {
             "type": "string",
@@ -12467,41 +11467,24 @@
           },
           "status": {
             "type": "string",
-            "enum": [
-              "queued",
-              "running",
-              "succeeded",
-              "failed"
-            ],
+            "enum": ["queued", "running", "succeeded", "failed"],
             "description": "Where it is."
           },
           "sessionId": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "uuid",
             "description": "The session it works for."
           },
           "errorCode": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "description": "invalid_output, timeout, provider_error, endpoint_not_private, budget_exhausted, tools_unsupported or instance_stopped."
           },
           "errorMessage": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "description": "The failure's message, without prompt or response text."
           },
           "result": {
-            "type": [
-              "object",
-              "null"
-            ],
+            "type": ["object", "null"],
             "additionalProperties": true,
             "description": "What it produced, for example the assistant message id."
           },
@@ -12511,18 +11494,12 @@
             "description": "When it was queued."
           },
           "startedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "When it started."
           },
           "finishedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time",
             "description": "When it ended."
           }
@@ -12530,10 +11507,7 @@
       },
       "AIAgentRunRequest": {
         "type": "object",
-        "required": [
-          "agent",
-          "requestedAt"
-        ],
+        "required": ["agent", "requestedAt"],
         "properties": {
           "agent": {
             "type": "string",
