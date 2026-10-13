@@ -9384,7 +9384,6 @@
           "schedule",
           "callerIdTransform",
           "destinationKind",
-          "destination",
           "enabled"
         ],
         "properties": {
@@ -9453,7 +9452,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
+            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean"
@@ -9463,7 +9462,7 @@
       "InboundRouteCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "destinationKind", "destination"],
+        "required": ["name", "destinationKind"],
         "properties": {
           "name": {
             "type": "string",
@@ -9529,7 +9528,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension."
+            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension. Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean",
