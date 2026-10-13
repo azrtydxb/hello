@@ -8779,7 +8779,8 @@
           "maxCalls",
           "defaultCallerId",
           "enabled",
-          "destinations"
+          "destinations",
+          "internalDialing"
         ],
         "properties": {
           "id": {
@@ -8860,6 +8861,9 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "internalDialing": {
+            "$ref": "#/components/schemas/InternalDialing"
           }
         }
       },
@@ -8945,6 +8949,10 @@
             "writeOnly": true,
             "maxLength": 256,
             "description": "Sealed with AES-256-GCM under HELLO_SECRET_KEY and never returned. On PATCH: omitted keeps it, \"\" clears it, a value replaces it."
+          },
+          "internalDialing": {
+            "$ref": "#/components/schemas/InternalDialing",
+            "description": "The trunk's internal-number dialing policy: what it may dial in the extension namespace. Default mode \"off\" dials no internal number, so a new trunk reaches nothing internal. Set whole: a body that carries internalDialing replaces the policy."
           }
         }
       },
@@ -9030,6 +9038,10 @@
             "writeOnly": true,
             "maxLength": 256,
             "description": "Sealed with AES-256-GCM under HELLO_SECRET_KEY and never returned. On PATCH: omitted keeps it, \"\" clears it, a value replaces it."
+          },
+          "internalDialing": {
+            "$ref": "#/components/schemas/InternalDialing",
+            "description": "The trunk's internal-number dialing policy: what it may dial in the extension namespace. Default mode \"off\" dials no internal number, so a new trunk reaches nothing internal. Set whole: a body that carries internalDialing replaces the policy."
           }
         }
       },
@@ -9372,7 +9384,6 @@
           "schedule",
           "callerIdTransform",
           "destinationKind",
-          "destination",
           "enabled"
         ],
         "properties": {
@@ -9441,7 +9452,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
+            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean"
@@ -9451,7 +9462,7 @@
       "InboundRouteCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "destinationKind", "destination"],
+        "required": ["name", "destinationKind"],
         "properties": {
           "name": {
             "type": "string",
@@ -9512,12 +9523,12 @@
           "destinationKind": {
             "type": "string",
             "enum": ["extension", "external", "sip_uri", "internal"],
-            "description": "What destination names: an extension number, an external number, a SIP URI, or the dialled number itself (internal: the DID is looked up in the extension namespace, gated by the trunk's internal dialing policy)."
+            "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
+            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension. Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean",
@@ -9589,12 +9600,12 @@
           "destinationKind": {
             "type": "string",
             "enum": ["extension", "external", "sip_uri", "internal"],
-            "description": "What destination names: an extension number, an external number, a SIP URI, or the dialled number itself (internal: the DID is looked up in the extension namespace, gated by the trunk's internal dialing policy)."
+            "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase)."
+            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension."
           },
           "enabled": {
             "type": "boolean",
@@ -11517,6 +11528,32 @@
             "type": "string",
             "format": "date-time",
             "description": "When the request was recorded."
+          }
+        }
+      },
+      "InternalDialing": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The trunk's internal-number dialing policy: what it may dial in the extension namespace. Default mode \"off\" dials no internal number, so a new trunk reaches nothing internal.",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["off", "patterns", "all"],
+            "description": "off dials no internal numbers; patterns allows exactly the listed patterns; all allows every extension and needs confirm: true."
+          },
+          "patterns": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "maxLength": 500,
+              "example": "1XX"
+            },
+            "description": "Required for mode \"patterns\" and only allowed then: an exact number, an X pattern (each X is any one digit, so 1XX matches 100 to 199) or a Go regular expression; the first match wins."
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Must be true when mode is \"all\"; a guard against opening every extension to the trunk by accident. Not stored, never returned."
           }
         }
       }

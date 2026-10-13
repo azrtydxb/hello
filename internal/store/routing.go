@@ -23,6 +23,18 @@ type querier interface {
 // trunkAAD binds a sealed trunk password to its row (contract 3).
 func trunkAAD(id int64) string { return "trunk:" + strconv.FormatInt(id, 10) }
 
+// Dialing is a trunk's internal-number dialing policy (trunk plan contract
+// 5) as the API shows it and as the internal_dialing column stores it.
+type Dialing struct {
+	Mode     string   `json:"mode"` // "off" (default) | "patterns" | "all"
+	Patterns []string `json:"patterns"`
+}
+
+// dialing returns d as the routing engine sees it.
+func (d Dialing) dialing() routing.Dialing {
+	return routing.Dialing{Mode: d.Mode, Patterns: d.Patterns}
+}
+
 // Trunk is a trunk as the API shows it. The password is never read into
 // this type; HasPassword reports whether one is set.
 type Trunk struct {
@@ -40,6 +52,7 @@ type Trunk struct {
 	DefaultCallerID string                `json:"defaultCallerId"`
 	Enabled         bool                  `json:"enabled"`
 	Destinations    []routing.Destination `json:"destinations"`
+	InternalDialing Dialing               `json:"internalDialing"`
 	CreatedAt       time.Time             `json:"createdAt"`
 	UpdatedAt       time.Time             `json:"updatedAt"`
 }
@@ -58,6 +71,7 @@ type TrunkInput struct {
 	DefaultCallerID string
 	Enabled         bool
 	Destinations    []routing.Destination
+	InternalDialing Dialing
 }
 
 // Input returns t's writable fields.
@@ -67,6 +81,7 @@ func (t Trunk) Input() TrunkInput {
 		RegisterExpires: t.RegisterExpires, OptionsInterval: t.OptionsInterval,
 		SourceCIDRs: slices.Clone(t.SourceCIDRs), MaxCalls: t.MaxCalls, DefaultCallerID: t.DefaultCallerID,
 		Enabled: t.Enabled, Destinations: slices.Clone(t.Destinations),
+		InternalDialing: Dialing{Mode: t.InternalDialing.Mode, Patterns: slices.Clone(t.InternalDialing.Patterns)},
 	}
 }
 
@@ -78,17 +93,30 @@ type PasswordChange struct {
 }
 
 const trunkCols = `id, name, mode, username, password_enc IS NOT NULL, realm, from_domain, register_expires,
-	options_interval, to_json(source_cidrs::text[]), max_calls, default_caller_id, enabled, created_at, updated_at`
+	options_interval, to_json(source_cidrs::text[]), max_calls, default_caller_id, enabled, to_json(internal_dialing),
+	created_at, updated_at`
 
 func scanTrunk(r interface{ Scan(...any) error }) (Trunk, error) {
 	var t Trunk
-	var cidrs []byte
+	var cidrs, dialing []byte
 	if err := r.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &t.HasPassword, &t.Realm, &t.FromDomain, &t.RegisterExpires,
-		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return t, err
 	}
 	t.SourceCIDRs = []string{}
-	return t, json.Unmarshal(cidrs, &t.SourceCIDRs)
+	if err := json.Unmarshal(cidrs, &t.SourceCIDRs); err != nil {
+		return t, err
+	}
+	if err := json.Unmarshal(dialing, &t.InternalDialing); err != nil {
+		return t, fmt.Errorf("store: decode internal_dialing: %w", err)
+	}
+	if t.InternalDialing.Mode == "" {
+		t.InternalDialing.Mode = "off"
+	}
+	if t.InternalDialing.Patterns == nil {
+		t.InternalDialing.Patterns = []string{}
+	}
+	return t, nil
 }
 
 // destinations returns each listed trunk's destinations in saved order.
@@ -206,10 +234,10 @@ func (s *Store) CreateTrunk(ctx context.Context, actor string, in TrunkInput, pa
 	err := s.configChange(ctx, actor, "create", "trunk", check, func(tx *sql.Tx) (int64, error) {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO trunks (name, mode, username, realm, from_domain, register_expires,
-				options_interval, source_cidrs, max_calls, default_caller_id, enabled)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11) RETURNING id`,
+				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb) RETURNING id`,
 			in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires, in.OptionsInterval,
-			nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled).Scan(&id); err != nil {
+			nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled, dialingArg(in.InternalDialing)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := s.setPassword(ctx, tx, id, password); err != nil {
@@ -247,9 +275,10 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE trunks SET name = $2, mode = $3, username = $4, realm = $5,
 				from_domain = $6, register_expires = $7, options_interval = $8, source_cidrs = $9::cidr[],
-				max_calls = $10, default_caller_id = $11, enabled = $12, updated_at = now()
+				max_calls = $10, default_caller_id = $11, enabled = $12, internal_dialing = $13::jsonb, updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires,
-			in.OptionsInterval, nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled); err != nil {
+			in.OptionsInterval, nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled,
+			dialingArg(in.InternalDialing)); err != nil {
 			return id, err
 		}
 		if pw.Set {
@@ -441,6 +470,20 @@ func getOutbound(ctx context.Context, q querier, id int64, suffix string) (Outbo
 		return OutboundRoute{}, ErrNotFound
 	}
 	return os[0], nil
+}
+
+// dialingArg encodes an internal dialing policy for the jsonb column: the
+// mode always present ("off", never ""), patterns a JSON array. Marshalling
+// cannot fail (strings and a string slice only).
+func dialingArg(d Dialing) string {
+	if d.Mode == "" {
+		d.Mode = "off"
+	}
+	if d.Patterns == nil {
+		d.Patterns = []string{}
+	}
+	b, _ := json.Marshal(d)
+	return string(b)
 }
 
 // jsonArg encodes v for a jsonb parameter; a nil pointer is SQL NULL.
@@ -822,30 +865,8 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 	if err != nil {
 		return snap, err
 	}
-	for _, t := range trunks {
-		rt := routing.Trunk{
-			ID: t.ID, Name: t.Name, Mode: t.Mode, Username: t.Username, Realm: t.Realm, FromDomain: t.FromDomain,
-			RegisterExpires: time.Duration(t.RegisterExpires) * time.Second,
-			OptionsInterval: time.Duration(t.OptionsInterval) * time.Second,
-			MaxCalls:        t.MaxCalls, DefaultCallerID: t.DefaultCallerID, Enabled: t.Enabled, Destinations: t.Destinations,
-		}
-		for _, c := range t.SourceCIDRs {
-			p, err := netip.ParsePrefix(c)
-			if err != nil {
-				return snap, fmt.Errorf("store: trunk %d source cidr: %w", t.ID, err)
-			}
-			rt.SourceCIDRs = append(rt.SourceCIDRs, p)
-		}
-		if enc, ok := sealed[t.ID]; ok {
-			if s.box == nil {
-				snap.Misconfigured[t.ID] = true
-			} else if pw, err := s.box.Open(enc, trunkAAD(t.ID)); err != nil {
-				snap.Misconfigured[t.ID] = true
-			} else {
-				rt.Password = pw
-			}
-		}
-		cfg.Trunks = append(cfg.Trunks, rt)
+	if err := routingTrunks(s, trunks, sealed, snap, cfg); err != nil {
+		return snap, err
 	}
 	outbound, err := listOutbound(ctx, q, "", "")
 	if err != nil {
@@ -892,6 +913,45 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 		return snap, err
 	}
 	return snap, nil
+}
+
+// routingTrunks converts the stored trunks to the engine's type. A trunk
+// whose sealed password does not open, or whose stored internal dialing
+// policy does not compile (only reachable by writing the column directly),
+// is misconfigured: routing skips it, and the policy drops to "off" so the
+// rest of the configuration still compiles.
+func routingTrunks(s *Store, trunks []Trunk, sealed map[int64][]byte, snap RoutingSnapshot, cfg *routing.Config) error {
+	for _, t := range trunks {
+		rt := routing.Trunk{
+			ID: t.ID, Name: t.Name, Mode: t.Mode, Username: t.Username, Realm: t.Realm, FromDomain: t.FromDomain,
+			RegisterExpires: time.Duration(t.RegisterExpires) * time.Second,
+			OptionsInterval: time.Duration(t.OptionsInterval) * time.Second,
+			MaxCalls:        t.MaxCalls, DefaultCallerID: t.DefaultCallerID, Enabled: t.Enabled, Destinations: t.Destinations,
+			InternalDialing: t.InternalDialing.dialing(),
+		}
+		if errs := routing.CompileDialing(rt.InternalDialing); len(errs) > 0 {
+			snap.Misconfigured[t.ID] = true
+			rt.InternalDialing = routing.Dialing{Mode: "off"}
+		}
+		for _, c := range t.SourceCIDRs {
+			p, err := netip.ParsePrefix(c)
+			if err != nil {
+				return fmt.Errorf("store: trunk %d source cidr: %w", t.ID, err)
+			}
+			rt.SourceCIDRs = append(rt.SourceCIDRs, p)
+		}
+		if enc, ok := sealed[t.ID]; ok {
+			if s.box == nil {
+				snap.Misconfigured[t.ID] = true
+			} else if pw, err := s.box.Open(enc, trunkAAD(t.ID)); err != nil {
+				snap.Misconfigured[t.ID] = true
+			} else {
+				rt.Password = pw
+			}
+		}
+		cfg.Trunks = append(cfg.Trunks, rt)
+	}
+	return nil
 }
 
 // sealedPasswords reads every set password ciphertext. It is used only to

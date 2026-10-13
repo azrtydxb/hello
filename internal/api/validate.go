@@ -395,7 +395,7 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 			f.add("destination", "must be a sip: URI of at most 255 characters")
 		}
 	default:
-		f.add("destinationKind", `must be "extension", "external" or "sip_uri"`)
+		f.add("destinationKind", `must be "extension", "external", "internal" or "sip_uri"`)
 	}
 	return f
 }
