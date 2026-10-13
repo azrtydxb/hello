@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/test/sipua"
 )
 
@@ -102,5 +103,84 @@ func TestCarrierPlacesCall(t *testing.T) {
 	var out struct{ Status int }
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out.Status != 200 {
 		t.Fatalf("POST /call = %d %+v %v", resp.StatusCode, out, err)
+	}
+}
+
+// TestCarrierPlacesCallWithRTP fails if a call placed with "rtp": true does
+// not carry audio both ways: the peer receives the carrier's G.711 silence
+// and the carrier counts the peer's RTP, reporting both counters.
+func TestCarrierPlacesCallWithRTP(t *testing.T) {
+	_, httpURL := startCarrier(t, "")
+	hello, _ := sipua.New(sipua.Options{User: "hello", Domain: "hello.test"})
+	defer hello.Close()
+
+	// The peer's media: a UDP socket that answers every RTP packet of the
+	// carrier's with one of its own, so the carrier counts something too.
+	mediaConn, err := (&net.ListenConfig{}).ListenPacket(context.Background(), "udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	udp := mediaConn.(*net.UDPConn)
+	t.Cleanup(func() { _ = udp.Close() })
+	mediaAddr := udp.LocalAddr().(*net.UDPAddr)
+
+	var got int
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 1500)
+		for {
+			_ = udp.SetReadDeadline(time.Now().Add(3 * time.Second))
+			n, from, err := udp.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			pkt, ok := media.ParseRTP(buf[:n])
+			if !ok {
+				continue
+			}
+			got++
+			for _, b := range pkt.Payload {
+				if b != 0x55 {
+					t.Errorf("carrier RTP payload byte %#02x, want the silence marker 0x55", b)
+					return
+				}
+			}
+			// The peer's own audio: another SSRC, another payload byte.
+			back := media.BuildRTP(8, 1, 160, 0xdeadbeef, false, bytes.Repeat([]byte{0x2a}, 160))
+			if _, err := udp.WriteTo(back, from); err != nil {
+				t.Errorf("peer RTP back to %s: %v", from, err)
+			}
+		}
+	}()
+
+	// The callee answers with the peer's media address.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	go func() {
+		if in, err := hello.Next(ctx); err == nil {
+			_ = in.Answer(media.BuildAudioSDP("127.0.0.1", mediaAddr.Port, 8, 0, 0))
+		}
+	}()
+	body, _ := json.Marshal(map[string]any{"from": "+97145550000", "to": "+97145551234", "target": hello.Addr(), "rtp": true, "hangupAfterMs": 800})
+	resp, err := http.Post(httpURL+"/call", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out struct {
+		Status      int
+		RTPSent     int `json:"rtpSent"`
+		RTPReceived int `json:"rtpReceived"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if out.Status != 200 || out.RTPSent < 10 || out.RTPReceived < 5 {
+		t.Fatalf("POST /call with rtp = %d, sent %d, received %d; want 200 and audio both ways", out.Status, out.RTPSent, out.RTPReceived)
+	}
+	if got < 5 {
+		t.Fatalf("peer received %d RTP packets, want audio from the carrier", got)
 	}
 }
