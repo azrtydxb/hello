@@ -9,7 +9,17 @@ import (
 // FuzzDecide checks that Decide never panics and always returns a
 // well-formed decision, whatever the call.
 func FuzzDecide(f *testing.F) {
-	tbl := mustCompile(f, fixtureConfig())
+	cfg := fixtureConfig()
+	// Internal dialing (trunk plan Task 1): policies on the trunks and an
+	// any-DID "internal" route, so fuzzing exercises the verdict, the
+	// internal lookup and the loop guard on every input.
+	cfg.Trunks[1].InternalDialing = Dialing{Mode: "patterns", Patterns: []string{"1XX", `^\+9714[0-9]+$`}}
+	cfg.Trunks[0].InternalDialing = Dialing{Mode: "all"}
+	cfg.Inbound = append(cfg.Inbound,
+		InboundRoute{ID: 30, Position: 400, Name: "Any internal", DIDKind: "any", TrunkID: tPrimary,
+			DestinationKind: "internal", Enabled: true},
+	)
+	tbl := mustCompile(f, cfg)
 	f.Add("101", int64(0), "0501234567", "", "", "", int64(1791187200))
 	f.Add("", tPrimary, "+971 4 222 3333", "anonymous", "pbx.example.com", "support", int64(1791230400))
 	f.Add("alice", int64(0), "3000", "", "", "", int64(0))

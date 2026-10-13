@@ -26,6 +26,9 @@ type Table struct {
 	inbound    []compiledInbound  // sorted by Position
 	extensions map[string]string
 	resolved   map[int64][]netip.Addr
+	// dial holds the compiled internal dialing patterns of every trunk
+	// whose policy mode is "patterns" (compileDialing in inbound.go).
+	dial map[int64][]dialPattern
 }
 
 type compiledOutbound struct {
@@ -59,6 +62,7 @@ func Compile(cfg Config) (*Table, []FieldError) {
 		trunkIdx:   make(map[int64]int, len(cfg.Trunks)),
 		extensions: maps.Clone(cfg.Extensions),
 		resolved:   make(map[int64][]netip.Addr, len(cfg.ResolvedIPs)),
+		dial:       make(map[int64][]dialPattern, len(cfg.Trunks)),
 	}
 	if t.extensions == nil {
 		t.extensions = map[string]string{}
@@ -126,6 +130,10 @@ func (t *Table) compileTrunks(in []Trunk, errs *[]FieldError) {
 			if !c.IsValid() {
 				addErr(errs, fmt.Sprintf("%s.sourceCidrs[%d]", p, k), "is not a valid CIDR")
 			}
+		}
+		tr.InternalDialing.Patterns = slices.Clone(tr.InternalDialing.Patterns)
+		if pats := compileDialing(tr.InternalDialing, p+".internalDialing", errs); pats != nil {
+			t.dial[tr.ID] = pats
 		}
 		if len(tr.Destinations) == 0 {
 			addErr(errs, p+".destinations", "at least one destination is required")
@@ -285,6 +293,12 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 		if _, ok := t.extensions[r.Destination]; !ok {
 			addErr(errs, p+".destination", fmt.Sprintf("extension %s does not exist", quote(r.Destination)))
 		}
+	case "internal":
+		// The DID the route matched names the target; the route carries
+		// none of its own.
+		if r.Destination != "" {
+			addErr(errs, p+".destination", `must be empty when destinationKind is "internal"`)
+		}
 	case "external":
 		if !validNumber(r.Destination) {
 			addErr(errs, p+".destination", "must be a number (+, digits, * and #)")
@@ -294,7 +308,7 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 			addErr(errs, p+".destination", "must be a sip: or sips: URI without whitespace")
 		}
 	default:
-		addErr(errs, p+".destinationKind", `must be "extension", "external" or "sip_uri"`)
+		addErr(errs, p+".destinationKind", `must be "extension", "external", "internal" or "sip_uri"`)
 	}
 }
 

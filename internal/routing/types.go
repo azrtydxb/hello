@@ -44,6 +44,17 @@ type Destination struct {
 	Weight   int    `json:"weight"`   // among equal priorities
 }
 
+// Dialing is a trunk's internal dialing policy (spec S-2): whether, and
+// what, the trunk may dial in the extension namespace. The zero value is
+// mode "off". A pattern is an exact number, an X pattern (each X any one
+// digit, so "1XX" matches 100 to 199) or a Go regex tried as given; a
+// leading "+" on either side of a match is ignored, as the inbound DID
+// match does.
+type Dialing struct {
+	Mode     string   // "off" (default) | "patterns" | "all"
+	Patterns []string // non-empty iff Mode is "patterns"
+}
+
 // Trunk is a carrier account or IP peer.
 type Trunk struct {
 	ID              int64
@@ -60,6 +71,9 @@ type Trunk struct {
 	DefaultCallerID string
 	Enabled         bool
 	Destinations    []Destination
+	// InternalDialing gates what the trunk may dial in the extension
+	// namespace (spec S-2); zero value: mode "off".
+	InternalDialing Dialing
 }
 
 // OutboundRoute matches calls from extensions to external numbers.
@@ -92,8 +106,8 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri"
-	Destination     string
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal"
+	Destination     string // empty for "internal" (the DID names the target)
 	Enabled         bool
 }
 

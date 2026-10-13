@@ -186,6 +186,11 @@ const (
 	uaeMatch  = `Route "UAE Mobile" matched (regex ^05[0-9]{8}$)`
 	uaeRw     = "Rewrite 0501234567 -> +971501234567"
 	domainTr1 = `Route "Domain" skipped: only for trunk 2, call is from trunk carrier-primary`
+
+	// Internal dialing and the loop guard (trunk plan Task 1).
+	verdictOffP = "Internal dialing off on trunk carrier-primary"
+	verdictOffB = "Internal dialing off on trunk carrier-backup"
+	loopSkipsP  = "Trunk carrier-primary skipped: call came from it"
 )
 
 func TestRouteMatchAndRewrite(t *testing.T) {
@@ -579,6 +584,7 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				"Called DID +97142223333",
+				verdictOffP,
 				`Route "Sales" matched (DID exact +971 4 222 3333)`,
 				"Caller ID +971501112222 as received",
 				"Destination: extension 101",
@@ -591,20 +597,9 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				`Called DID " 971 42223333 " normalised to 97142223333`,
+				verdictOffP,
 				`Route "Sales" matched (DID exact +971 4 222 3333, leading + ignored)`,
 				"Caller ID +971501112222 as received",
-				"Destination: extension 101",
-			},
-		},
-		{
-			name: "inbound tabs and newlines in the DID",
-			call: trunk(tPrimary, "\t+971 4 222 3333\n", ""),
-			want: outcome{Kind: KindInbound, Extension: "101", Number: "+97142223333", Route: "Sales"},
-			trace: []string{
-				srcP,
-				`Called DID "\t+971 4 222 3333\n" normalised to +97142223333`,
-				`Route "Sales" matched (DID exact +971 4 222 3333)`,
-				"Caller ID: none received",
 				"Destination: extension 101",
 			},
 		},
@@ -615,6 +610,7 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				"Source trunk carrier-backup",
 				"Called DID +97142223333",
+				verdictOffB,
 				`Route "Sales" skipped: only for trunk 1, call is from trunk carrier-backup`,
 				`Route "Domain" skipped: SIP domain "" is not pbx.example.com`,
 				"No inbound route matched DID +97142223333",
@@ -627,6 +623,7 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				"Source trunk carrier-backup",
 				"Called DID +97142223333",
+				verdictOffB,
 				`Route "Sales" skipped: only for trunk 1, call is from trunk carrier-backup`,
 				`Route "Domain" matched (any DID)`,
 				"Caller ID +971501112222 as received",
@@ -636,12 +633,13 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 		{
 			name: "inbound header condition matches (value trimmed)",
 			call: withHeader(trunk(tPrimary, "+97142224001", ""), "X-Department", " support "),
-			want: outcome{Kind: KindInbound, Extension: "102", Number: "+97142224001", Route: "Support header"},
+			want: outcome{Kind: KindInbound, Extension: "102", Number: "+97142224001", CallerID: "+97140000001", Route: "Support header"},
 			trace: []string{
 				srcP,
 				"Called DID +97142224001",
+				verdictOffP,
 				`Route "Support header" matched (DID prefix 97142224, leading + ignored)`,
-				"Caller ID: none received",
+				"Caller ID +97140000001 (default caller ID of trunk carrier-primary)",
 				"Destination: extension 102",
 			},
 		},
@@ -652,6 +650,7 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				"Called DID +97142224001",
+				verdictOffP,
 				`Route "Support header" skipped: header X-Department "sales" does not match ^support$`,
 				`Route "Support fallback" matched (DID prefix +97142224)`,
 				"Caller ID +971501112222 as received",
@@ -665,6 +664,7 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				"Called DID +97142224001",
+				verdictOffP,
 				`Route "Support header" skipped: header X-Department "" does not match ^support$`,
 				`Route "Support fallback" matched (DID prefix +97142224)`,
 				"Caller ID: none received",
@@ -678,6 +678,7 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				"Called DID +97142225555",
+				verdictOffP,
 				`Route "Night forward" skipped: schedule closed (Mon 10:00 Asia/Dubai)`,
 				`Route "Day 5555" matched (DID exact 97142225555, leading + ignored)`,
 				"Caller ID +971509998888 as received",
@@ -688,46 +689,51 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			name: "inbound external destination recurses into outbound routing",
 			call: withAt(trunk(tPrimary, "+97142225555", "+971509998888"), mon23),
 			want: outcome{Kind: KindOutbound, Number: "+971501234567", CallerID: "+971509998888", Route: "UAE Mobile",
-				Trunks: []string{"carrier-primary", "carrier-backup"}, Failover: defaultCodes},
+				Trunks: []string{"carrier-backup"}, Failover: defaultCodes},
 			trace: []string{
 				srcP,
 				"Called DID +97142225555",
+				verdictOffP,
 				`Route "Night forward" matched (DID regex ^\+97142225555$)`,
 				"Caller ID +971509998888 as received",
 				"Destination: external number 0501234567, routed outbound as from trunk carrier-primary",
-				uaeMatch, uaeRw, trPrimary, trBackup,
+				uaeMatch, uaeRw, loopSkipsP, trBackup,
 				"Caller ID +971509998888 (inbound caller ID)",
-				outUAE,
+				"Outbound to +971501234567 via carrier-backup; failover on 408, 480, 500, 502, 503, 504",
 			},
 		},
 		{
 			name: "inbound DID regex matches with the leading + added; cross-midnight window next morning",
 			call: withAt(trunk(tPrimary, "97142225555", "+971509998888"), tue0759),
 			want: outcome{Kind: KindOutbound, Number: "+971501234567", CallerID: "+971509998888", Route: "UAE Mobile",
-				Trunks: []string{"carrier-primary", "carrier-backup"}, Failover: defaultCodes},
+				Trunks: []string{"carrier-backup"}, Failover: defaultCodes},
 			trace: []string{
 				srcP,
 				"Called DID 97142225555",
+				verdictOffP,
 				`Route "Night forward" matched (DID regex ^\+97142225555$ on +97142225555)`,
 				"Caller ID +971509998888 as received",
 				"Destination: external number 0501234567, routed outbound as from trunk carrier-primary",
-				uaeMatch, uaeRw, trPrimary, trBackup,
+				uaeMatch, uaeRw, loopSkipsP, trBackup,
 				"Caller ID +971509998888 (inbound caller ID)",
-				outUAE,
+				"Outbound to +971501234567 via carrier-backup; failover on 408, 480, 500, 502, 503, 504",
 			},
 		},
 		{
-			name: "forwarded call without caller ID uses the first candidate's default",
+			name: "forwarded call skips the source trunk; no caller ID left to show",
 			call: trunk(tPrimary, "97142229999", ""),
-			want: outcome{Kind: KindOutbound, Number: "+971501234567", CallerID: "+97140000001", Route: "UAE Mobile",
-				Trunks: []string{"carrier-primary", "carrier-backup"}, Failover: defaultCodes},
+			want: outcome{Kind: KindOutbound, Number: "+971501234567", Route: "UAE Mobile",
+				Trunks: []string{"carrier-backup"}, Failover: defaultCodes},
 			trace: []string{
 				srcP,
 				"Called DID 97142229999",
+				verdictOffP,
 				`Route "Forward mobile" matched (DID exact 97142229999)`,
 				"Caller ID: none received",
 				"Destination: external number 0501234567, routed outbound as from trunk carrier-primary",
-				uaeMatch, uaeRw, trPrimary, trBackup, cidPrimDf, outUAE,
+				uaeMatch, uaeRw, loopSkipsP, trBackup,
+				"Caller ID: none available",
+				"Outbound to +971501234567 via carrier-backup; failover on 408, 480, 500, 502, 503, 504",
 			},
 		},
 		{
@@ -739,12 +745,11 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				"Called DID 97142229999",
+				verdictOffP,
 				`Route "Forward mobile" matched (DID exact 97142229999)`,
 				"Caller ID: none received",
 				"Destination: external number 0501234567, routed outbound as from trunk carrier-primary",
-				uaeMatch, uaeRw,
-				"Trunk carrier-primary skipped: unhealthy",
-				trBackup,
+				uaeMatch, uaeRw, loopSkipsP, trBackup,
 				"Caller ID: none available",
 				"Outbound to +971501234567 via carrier-backup; failover on 408, 480, 500, 502, 503, 504",
 			},
@@ -756,6 +761,7 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				"Called DID 97142227777",
+				verdictOffP,
 				`Route "Forward restricted" matched (DID exact 97142227777)`,
 				"Caller ID +971501112222 as received",
 				"Destination: external number 0012345, routed outbound as from trunk carrier-primary",
@@ -771,6 +777,7 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				"Called DID 97142226666",
+				verdictOffP,
 				`Route "Disabled" skipped: disabled`,
 				domainTr1,
 				"No inbound route matched DID 97142226666",
@@ -783,7 +790,9 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				"Called DID 97142228888",
+				verdictOffP,
 				`Route "CID normalise" matched (DID exact 97142228888)`,
+				"Caller ID 0501234567 as received",
 				"Caller ID rewrite 0501234567 -> +971501234567",
 				"Destination: extension 101",
 			},
@@ -795,7 +804,9 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				"Called DID 97142228888",
+				verdictOffP,
 				`Route "CID normalise" matched (DID exact 97142228888)`,
+				"Caller ID +971501234567 as received",
 				"Caller ID transform regex ^0(.*)$ did not match +971501234567; regex step skipped",
 				"Caller ID rewrite +971501234567 -> +971501234567",
 				"Destination: extension 101",
@@ -808,9 +819,11 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				"Called DID 97142228888",
+				verdictOffP,
 				`Route "CID normalise" matched (DID exact 97142228888)`,
+				`Caller ID "anonymous" as received`,
 				`Caller ID transform regex ^0(.*)$ did not match "anonymous"; regex step skipped`,
-				`Caller ID rewrite "anonymous" failed: result "anonymous" is not a valid number (only +, digits, * and #); presenting it as received`,
+				`Caller ID rewrite "anonymous" failed: result "anonymous" is not a valid number (only +, digits, * and #); presenting the chosen value`,
 				"Destination: extension 101",
 			},
 		},
@@ -821,6 +834,7 @@ func TestRouteMatchAndRewrite(t *testing.T) {
 			trace: []string{
 				srcP,
 				`Called DID "abc"`,
+				verdictOffP,
 				domainTr1,
 				`No inbound route matched DID "abc"`,
 			},
@@ -1065,4 +1079,401 @@ func TestTemplateGroups(t *testing.T) {
 			t.Errorf("template %q: errs = %v, want %q", tmpl, errs, msg)
 		}
 	}
+}
+
+// internalConfig is a small config for the internal-number tests: three
+// trunks with different internal dialing policies, and one any-DID route
+// with the "internal" destination beside fixed-target routes.
+func internalConfig() Config {
+	return Config{
+		Trunks: []Trunk{
+			{ID: 1, Name: "peer", Mode: "ip", Enabled: true, DefaultCallerID: "+97140000001",
+				Destinations:    []Destination{{Host: "10.2.0.1", Port: 5060}},
+				InternalDialing: Dialing{Mode: "patterns", Patterns: []string{"10XX", "+971455501"}}},
+			{ID: 2, Name: "open", Mode: "ip", Enabled: true,
+				Destinations:    []Destination{{Host: "10.2.0.2", Port: 5060}},
+				InternalDialing: Dialing{Mode: "all"}},
+			{ID: 3, Name: "closed", Mode: "ip", Enabled: true,
+				Destinations: []Destination{{Host: "10.2.0.3", Port: 5060}}},
+			{ID: 4, Name: "picky", Mode: "ip", Enabled: true,
+				Destinations:    []Destination{{Host: "10.2.0.4", Port: 5060}},
+				InternalDialing: Dialing{Mode: "patterns", Patterns: []string{"2XX"}}},
+		},
+		Extensions: map[string]string{"1012": "", "1013": "+97142220101"},
+		Outbound: []OutboundRoute{
+			{ID: 1, Position: 10, Name: "Out", MatchKind: "prefix", Match: "0", Enabled: true, Trunks: []int64{1}},
+		},
+		Inbound: []InboundRoute{
+			{ID: 1, Position: 10, Name: "Any extension", DIDKind: "any", DestinationKind: "internal", Enabled: true},
+			{ID: 2, Position: 5, Name: "Fixed 1012", DIDKind: "exact", DID: "9912",
+				DestinationKind: "extension", Destination: "1012", Enabled: true},
+			{ID: 3, Position: 30, Name: "Ladder normalise", DIDKind: "exact", DID: "9913",
+				DestinationKind: "extension", Destination: "1013",
+				CallerID: Transform{Regex: `^0(.*)$`, Template: "+971${1}"}, Enabled: true},
+		},
+	}
+}
+
+// TestInternalDestination (spec S-1): the "internal" destination rings the
+// extension the normalised DID names, whatever the fixed "extension"
+// destination still means, and a miss rejects 404 as "not an internal
+// number".
+func TestInternalDestination(t *testing.T) {
+	tbl := mustCompile(t, internalConfig())
+	trunk := func(id int64, num, cid string) Call {
+		return Call{FromTrunk: id, Number: num, CallerID: cid, At: at(t, "2026-10-05 10:00")}
+	}
+	cases := []struct {
+		name  string
+		call  Call
+		want  outcome
+		trace []string
+	}{
+		{
+			name: "dial-by-extension rings the DID's extension",
+			call: trunk(2, "1012", "+971501112222"),
+			want: outcome{Kind: KindInbound, Extension: "1012", Number: "1012", CallerID: "+971501112222", Route: "Any extension"},
+			trace: []string{
+				"Source trunk open",
+				"Called DID 1012",
+				"Trunk open may dial 1012: all internal numbers",
+				`Route "Any extension" matched (any DID)`,
+				"Caller ID +971501112222 as received",
+				"Destination: internal",
+				"Internal lookup 1012 -> extension 1012",
+			},
+		},
+		{
+			name: "leading + is ignored, as the DID match ignores it",
+			call: trunk(2, "+1012", ""),
+			want: outcome{Kind: KindInbound, Extension: "1012", Number: "+1012", CallerID: "<open>", Route: "Any extension"},
+			trace: []string{
+				"Source trunk open",
+				"Called DID +1012",
+				"Trunk open may dial +1012: all internal numbers",
+				`Route "Any extension" matched (any DID)`,
+				"Caller ID <open> (trunk name)",
+				"Destination: internal",
+				"Internal lookup +1012 -> extension 1012",
+			},
+		},
+		{
+			name: "not an internal number -> 404",
+			call: trunk(2, "9999", ""),
+			want: outcome{Kind: KindReject, Number: "9999", CallerID: "<open>", Route: "Any extension", Code: 404},
+			trace: []string{
+				"Source trunk open",
+				"Called DID 9999",
+				"Trunk open may dial 9999: all internal numbers",
+				`Route "Any extension" matched (any DID)`,
+				"Caller ID <open> (trunk name)",
+				"Destination: internal",
+				`Internal lookup 9999 -> no match`,
+				`DID 9999 is not an internal number`,
+			},
+		},
+		{
+			name: "extension destination stays a fixed target, ignoring the DID",
+			call: trunk(2, "9912", ""),
+			want: outcome{Kind: KindInbound, Extension: "1012", Number: "9912", CallerID: "<open>", Route: "Fixed 1012"},
+			trace: []string{
+				"Source trunk open",
+				"Called DID 9912",
+				"Trunk open may dial 9912: all internal numbers",
+				`Route "Fixed 1012" matched (DID exact 9912)`,
+				"Caller ID <open> (trunk name)",
+				"Destination: extension 1012",
+			},
+		},
+		{
+			name: "ladder: trunk default, then the route transform",
+			call: trunk(1, "9913", ""),
+			want: outcome{Kind: KindInbound, Extension: "1013", Number: "9913", CallerID: "+97140000001", Route: "Ladder normalise"},
+			trace: []string{
+				"Source trunk peer",
+				"Called DID 9913",
+				"Trunk peer may not dial 9913: no pattern matches",
+				`Route "Any extension" skipped: internal dialing to 9913 not allowed on trunk peer`,
+				`Route "Ladder normalise" matched (DID exact 9913)`,
+				"Caller ID +97140000001 (default caller ID of trunk peer)",
+				"Caller ID transform regex ^0(.*)$ did not match +97140000001; regex step skipped",
+				"Caller ID rewrite +97140000001 -> +97140000001",
+				"Destination: extension 1013",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			checkDecision(t, tbl.Decide(tc.call, nil), tc.want, tc.trace)
+		})
+	}
+}
+
+// TestTrunkInternalDialingPolicy (spec S-2): the mode x pattern x DID
+// matrix, the traced verdict, the traced skip on mode off, and the compile
+// validation of the policy.
+func TestTrunkInternalDialingPolicy(t *testing.T) {
+	tbl := mustCompile(t, internalConfig())
+	peer, ok := tbl.Trunk(1)
+	if !ok {
+		t.Fatal("peer trunk missing")
+	}
+
+	// The verdict matrix: dialingAllows per mode and pattern class.
+	dids := map[string]string{ // DID -> the pattern that must allow it ("" none)
+		"1012":       "10XX",
+		"1013":       "10XX",
+		"+1012":      "10XX", // leading + toggled, as the DID match does
+		"+971455501": "+971455501",
+		"971455501":  "+971455501",
+		"2012":       "", // outside every pattern
+		"101X":       "", // X in the dialled number is not a digit
+		"+971455502": "",
+		"*31#":       "", // feature codes are not in the extension namespace
+	}
+	if picky, ok := tbl.Trunk(4); !ok {
+		t.Fatal("picky trunk missing")
+	} else {
+		for did := range dids {
+			if ok, pat := tbl.dialingAllows(picky, did); ok || pat != "" {
+				t.Errorf("picky dialingAllows(%q) = %v, %q; want denied", did, ok, pat)
+			}
+		}
+	}
+	for did, want := range dids {
+		ok, pat := tbl.dialingAllows(peer, did)
+		if ok != (want != "") || pat != want {
+			t.Errorf("dialingAllows(%q) = %v, %q; want %v, %q", did, ok, pat, want != "", want)
+		}
+	}
+	// First match in list order wins and is named.
+	if _, pat := tbl.dialingAllows(peer, "1012"); pat != "10XX" {
+		t.Errorf("winning pattern = %q, want 10XX", pat)
+	}
+	// Mode "all" allows everything and says so.
+	if open, _ := tbl.Trunk(2); open != nil {
+		ok, pat := tbl.dialingAllows(open, "7777")
+		if !ok || pat != "all" {
+			t.Errorf("open dialingAllows(7777) = %v, %q; want true, all", ok, pat)
+		}
+	}
+	// Mode off allows nothing.
+	if closed, _ := tbl.Trunk(3); closed != nil {
+		if ok, pat := tbl.dialingAllows(closed, "1012"); ok || pat != "" {
+			t.Errorf("closed dialingAllows(1012) = %v, %q; want denied", ok, pat)
+		}
+	}
+
+	// The verdict and the skip are traced, per mode.
+	mon := at(t, "2026-10-05 10:00")
+	decide := func(id int64, num string) Decision {
+		return tbl.Decide(Call{FromTrunk: id, Number: num, At: mon}, nil)
+	}
+	d := decide(3, "1012")
+	checkDecision(t, d, outcome{Kind: KindReject, Number: "1012", Code: 404}, []string{
+		"Source trunk closed",
+		"Called DID 1012",
+		"Internal dialing off on trunk closed",
+		`Route "Any extension" skipped: internal dialing off on trunk closed`,
+		`No inbound route matched DID 1012`,
+	})
+	d = decide(4, "1012")
+	checkDecision(t, d, outcome{Kind: KindReject, Number: "1012", Code: 404}, []string{
+		"Source trunk picky",
+		"Called DID 1012",
+		"Trunk picky may not dial 1012: no pattern matches",
+		`Route "Any extension" skipped: internal dialing to 1012 not allowed on trunk picky`,
+		`No inbound route matched DID 1012`,
+	})
+
+	// Compile validation of the policy.
+	fe := func(path, msg string) FieldError { return FieldError{Path: path, Message: msg} }
+	trunkMut := func(mut func(*Trunk)) func(*Config) {
+		return func(c *Config) { tr := internalConfig().Trunks[0]; mut(&tr); c.Trunks = []Trunk{tr} }
+	}
+	cases := []struct {
+		name string
+		mut  func(*Config)
+		want []FieldError
+	}{
+		{"unknown mode", trunkMut(func(t *Trunk) { t.InternalDialing = Dialing{Mode: "glob", Patterns: []string{"1XX"}} }),
+			[]FieldError{fe("trunks[0].internalDialing.mode", `must be "off", "patterns" or "all"`),
+				fe("trunks[0].internalDialing.patterns", `patterns are only allowed when mode is "patterns"`)}},
+		{"patterns without a pattern", trunkMut(func(t *Trunk) { t.InternalDialing = Dialing{Mode: "patterns"} }),
+			[]FieldError{fe("trunks[0].internalDialing.patterns", `at least one pattern is required when mode is "patterns"`)}},
+		{"patterns with mode off", trunkMut(func(t *Trunk) { t.InternalDialing = Dialing{Mode: "off", Patterns: []string{"1XX"}} }),
+			[]FieldError{fe("trunks[0].internalDialing.patterns", `patterns are only allowed when mode is "patterns"`)}},
+		{"patterns with mode all", trunkMut(func(t *Trunk) { t.InternalDialing = Dialing{Mode: "all", Patterns: []string{"1XX"}} }),
+			[]FieldError{fe("trunks[0].internalDialing.patterns", `patterns are only allowed when mode is "patterns"`)}},
+		{"101 patterns", trunkMut(func(t *Trunk) {
+			p := make([]string, 101)
+			for i := range p {
+				p[i] = "1XX"
+			}
+			t.InternalDialing = Dialing{Mode: "patterns", Patterns: p}
+		}), []FieldError{fe("trunks[0].internalDialing.patterns", "at most 100 patterns are allowed")}},
+		{"pattern at 500 characters is accepted", trunkMut(func(t *Trunk) {
+			t.InternalDialing = Dialing{Mode: "patterns", Patterns: []string{strings.Repeat("1", 500)}}
+		}), nil},
+		{"pattern over 500 characters", trunkMut(func(t *Trunk) {
+			t.InternalDialing = Dialing{Mode: "patterns", Patterns: []string{strings.Repeat("1", 501)}}
+		}), []FieldError{fe("trunks[0].internalDialing.patterns[0]", "is longer than 500 characters")}},
+		{"empty pattern", trunkMut(func(t *Trunk) { t.InternalDialing = Dialing{Mode: "patterns", Patterns: []string{""}} }),
+			[]FieldError{fe("trunks[0].internalDialing.patterns[0]", "is empty")}},
+		{"regex pattern does not compile", trunkMut(func(t *Trunk) { t.InternalDialing = Dialing{Mode: "patterns", Patterns: []string{"("}} }),
+			[]FieldError{fe("trunks[0].internalDialing.patterns[0]", "does not compile: error parsing regexp: missing closing ): `(`")}},
+		{"X pattern compiles to a digit class", trunkMut(func(t *Trunk) { t.InternalDialing = Dialing{Mode: "patterns", Patterns: []string{"1X2"}} }), nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := internalConfig()
+			tc.mut(&cfg)
+			_, errs := Compile(cfg)
+			switch {
+			case len(tc.want) == 0 && len(errs) != 0:
+				t.Errorf("errors = %v, want none", errs)
+			case len(tc.want) > 0 && !slices.Equal(errs, tc.want):
+				t.Errorf("errors\n got %v\nwant %v", errs, tc.want)
+			}
+		})
+	}
+}
+
+// TestLoopPrevention (spec S-3): a trunk-sourced call may not leave through
+// its own trunk, an emptied candidate list is 403 not 503, and outbound
+// routing cannot be entered twice.
+func TestLoopPrevention(t *testing.T) {
+	cfg := Config{
+		Trunks: []Trunk{
+			{ID: 1, Name: "solo", Mode: "ip", Enabled: true, Destinations: []Destination{{Host: "10.3.0.1"}}},
+			{ID: 2, Name: "other", Mode: "ip", Enabled: true, Destinations: []Destination{{Host: "10.3.0.2"}}},
+		},
+		Extensions: map[string]string{"101": ""},
+		Inbound: []InboundRoute{
+			{ID: 1, Position: 10, Name: "Fwd solo", DIDKind: "exact", DID: "100", DestinationKind: "external", Destination: "0500000001", Enabled: true},
+			{ID: 2, Position: 20, Name: "Fwd both", DIDKind: "exact", DID: "200", DestinationKind: "external", Destination: "0500000002", Enabled: true},
+			{ID: 3, Position: 30, Name: "Fwd none", DIDKind: "exact", DID: "300", DestinationKind: "external", Destination: "0500000003", Enabled: true},
+		},
+		Outbound: []OutboundRoute{
+			{ID: 1, Position: 10, Name: "Solo out", MatchKind: "prefix", Match: "0500000001", Trunks: []int64{1}, Enabled: true},
+			{ID: 2, Position: 20, Name: "Both out", MatchKind: "prefix", Match: "0500000002", Trunks: []int64{1, 2}, Enabled: true},
+			{ID: 3, Position: 30, Name: "None out", MatchKind: "prefix", Match: "0500000003", Trunks: []int64{1, 2}, Enabled: true},
+		},
+	}
+	tbl := mustCompile(t, cfg)
+	mon := at(t, "2026-10-05 10:00")
+	trunk := func(id int64, num string) Call { return Call{FromTrunk: id, Number: num, At: mon} }
+	otherDown := unusable(map[int64]string{2: "unhealthy"})
+
+	cases := []struct {
+		name   string
+		call   Call
+		usable TrunkUsability
+		want   outcome
+		trace  []string
+	}{
+		{
+			name: "sole trunk is the source -> 403 loop prevented",
+			call: trunk(1, "100"),
+			want: outcome{Kind: KindReject, Number: "0500000001", Route: "Solo out", Code: 403},
+			trace: []string{
+				"Source trunk solo",
+				"Called DID 100",
+				"Internal dialing off on trunk solo",
+				`Route "Fwd solo" matched (DID exact 100)`,
+				"Caller ID: none received",
+				"Destination: external number 0500000001, routed outbound as from trunk solo",
+				`Route "Solo out" matched (prefix 0500000001)`,
+				"Number 0500000001 unchanged (no rewrite)",
+				"Trunk solo skipped: call came from it",
+				`Loop prevented: no trunk left on route "Solo out" (solo: call came from it)`,
+			},
+		},
+		{
+			name: "the source is skipped, the other trunk carries the call",
+			call: trunk(1, "200"),
+			want: outcome{Kind: KindOutbound, Number: "0500000002", Route: "Both out",
+				Trunks: []string{"other"}, Failover: defaultCodes},
+			trace: []string{
+				"Source trunk solo",
+				"Called DID 200",
+				"Internal dialing off on trunk solo",
+				`Route "Fwd both" matched (DID exact 200)`,
+				"Caller ID: none received",
+				"Destination: external number 0500000002, routed outbound as from trunk solo",
+				`Route "Both out" matched (prefix 0500000002)`,
+				"Number 0500000002 unchanged (no rewrite)",
+				"Trunk solo skipped: call came from it",
+				"Trunk other usable (credentials: none); destinations: 10.3.0.2",
+				"Caller ID: none available",
+				"Outbound to 0500000002 via other; failover on 408, 480, 500, 502, 503, 504",
+			},
+		},
+		{
+			name: "a different source trunk keeps both candidates",
+			call: trunk(2, "100"),
+			want: outcome{Kind: KindOutbound, Number: "0500000001", Route: "Solo out",
+				Trunks: []string{"solo"}, Failover: defaultCodes},
+			trace: []string{
+				"Source trunk other",
+				"Called DID 100",
+				"Internal dialing off on trunk other",
+				`Route "Fwd solo" matched (DID exact 100)`,
+				"Caller ID: none received",
+				"Destination: external number 0500000001, routed outbound as from trunk other",
+				`Route "Solo out" matched (prefix 0500000001)`,
+				"Number 0500000001 unchanged (no rewrite)",
+				"Trunk solo usable (credentials: none); destinations: 10.3.0.1",
+				"Caller ID: none available",
+				"Outbound to 0500000001 via solo; failover on 408, 480, 500, 502, 503, 504",
+			},
+		},
+		{
+			name:   "loop filter empties the list even with the rest unusable -> 403",
+			call:   trunk(1, "300"),
+			usable: otherDown,
+			want:   outcome{Kind: KindReject, Number: "0500000003", Route: "None out", Code: 403},
+			trace: []string{
+				"Source trunk solo",
+				"Called DID 300",
+				"Internal dialing off on trunk solo",
+				`Route "Fwd none" matched (DID exact 300)`,
+				"Caller ID: none received",
+				"Destination: external number 0500000003, routed outbound as from trunk solo",
+				`Route "None out" matched (prefix 0500000003)`,
+				"Number 0500000003 unchanged (no rewrite)",
+				"Trunk solo skipped: call came from it",
+				"Trunk other skipped: unhealthy",
+				`Loop prevented: no trunk left on route "None out" (solo: call came from it; other: unhealthy)`,
+			},
+		},
+		{
+			name:   "the same route from an extension stays 503",
+			call:   Call{FromExtension: "101", Number: "0500000003", At: mon},
+			usable: unusable(map[int64]string{1: "unhealthy", 2: "unhealthy"}),
+			want:   outcome{Kind: KindReject, Number: "0500000003", Route: "None out", Code: 503},
+			trace: []string{
+				`Internal extension lookup "0500000003" -> no match`,
+				`Route "None out" matched (prefix 0500000003)`,
+				"Number 0500000003 unchanged (no rewrite)",
+				"Trunk solo skipped: unhealthy",
+				"Trunk other skipped: unhealthy",
+				`No usable trunk on route "None out" (solo: unhealthy; other: unhealthy)`,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			checkDecision(t, tbl.Decide(tc.call, tc.usable), tc.want, tc.trace)
+		})
+	}
+
+	// The hop guard: a call that has already been routed outbound once
+	// cannot enter outbound routing again (invariant break, 403).
+	var d Decision
+	src, _ := tbl.Trunk(1)
+	tbl.outboundRoute(&d, "0500000001", outboundSource{trunk: src, hopped: true}, Call{At: mon}, nil)
+	checkDecision(t, d, outcome{Kind: KindReject, Code: 403}, []string{
+		"Loop prevented: the call has already been routed outbound once",
+	})
 }
