@@ -8,6 +8,8 @@ import {
   listTrunkStatus,
   updateTrunk,
   type FieldError,
+  type InternalDialing,
+  type InternalDialingInput,
   type Trunk,
   type TrunkInput,
   type TrunkStatus,
@@ -17,6 +19,7 @@ import {
   Badge,
   type BadgeTone,
   Button,
+  Checkbox,
   ConfirmDialog,
   Drawer,
   EmptyState,
@@ -31,6 +34,7 @@ import {
   Select,
   Spinner,
   Switch,
+  SegmentedControl,
   useRestoreFocus,
   useToast,
 } from "../design/azrty/components";
@@ -47,6 +51,22 @@ import { Can } from "../role";
 
 const TRUNK_NAME_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 const FORM_ID = "trunk-form";
+
+/** The internal dialing modes, as the routing engine and the API spell them. */
+type DialingMode = "off" | "patterns" | "all";
+
+/**
+ * One pattern per line: an exact number, an `X` pattern (each X any one
+ * digit, so "1XX" covers 100–199) or a Go regex.
+ */
+const dialingPatterns = (value: string): string[] =>
+  value
+    .split("\n")
+    .map((p) => p.trim())
+    .filter((p) => p !== "");
+
+const MAX_PATTERN_LEN = 500;
+const MAX_PATTERNS = 100;
 
 interface DestinationDraft {
   host: string;
@@ -69,6 +89,12 @@ interface TrunkDraft {
   defaultCallerId: string;
   enabled: boolean;
   destinations: DestinationDraft[];
+  /** What the trunk may dial in the extension namespace. */
+  dialingMode: DialingMode;
+  /** The patterns, one per line; used only in mode "patterns". */
+  dialingPatterns: string;
+  /** The mode-"all" confirmation; sent as internalDialing.confirm. */
+  dialingConfirm: boolean;
 }
 
 const NEW_DESTINATION: DestinationDraft = {
@@ -91,9 +117,13 @@ const NEW_TRUNK: TrunkDraft = {
   defaultCallerId: "",
   enabled: true,
   destinations: [NEW_DESTINATION],
+  dialingMode: "off",
+  dialingPatterns: "",
+  dialingConfirm: false,
 };
 
 function toDraft(t: Trunk): TrunkDraft {
+  const dialing = t.internalDialing;
   return {
     name: t.name,
     mode: t.mode,
@@ -112,10 +142,30 @@ function toDraft(t: Trunk): TrunkDraft {
       priority: String(d.priority),
       weight: String(d.weight),
     })),
+    dialingMode:
+      dialing?.mode === "patterns" || dialing?.mode === "all"
+        ? dialing.mode
+        : "off",
+    dialingPatterns: (dialing?.patterns ?? []).join("\n"),
+    dialingConfirm: false,
   };
 }
 
 const isInt = (v: string) => /^-?[0-9]+$/.test(v.trim());
+
+/** The patterns of a trunk, for the card and the drawer. */
+function dialingLabel(dialing: InternalDialing): string {
+  switch (dialing.mode) {
+    case "all":
+      return "All internal numbers";
+    case "patterns":
+      return `${dialing.patterns.length} pattern${
+        dialing.patterns.length === 1 ? "" : "s"
+      }`;
+    default:
+      return "Off";
+  }
+}
 
 /** Client-side checks; the server validates everything again. */
 function validate(d: TrunkDraft): Record<string, string> {
@@ -137,6 +187,24 @@ function validate(d: TrunkDraft): Record<string, string> {
       if (!isInt(dst[f])) e[`destinations[${i}].${f}`] = "Whole number.";
     }
   });
+  if (d.dialingMode === "patterns") {
+    const patterns = dialingPatterns(d.dialingPatterns);
+    if (patterns.length === 0) {
+      e["internalDialing.patterns"] = "Add at least one pattern.";
+    }
+    if (patterns.length > MAX_PATTERNS) {
+      e["internalDialing.patterns"] = `Use at most ${MAX_PATTERNS} patterns.`;
+    }
+    const long = patterns.findIndex((p) => p.length > MAX_PATTERN_LEN);
+    if (long >= 0) {
+      e["internalDialing.patterns"] =
+        `Pattern ${long + 1} is longer than ${MAX_PATTERN_LEN} characters.`;
+    }
+  }
+  if (d.dialingMode === "all" && !d.dialingConfirm) {
+    e["internalDialing.confirm"] =
+      "Confirm that this trunk may dial every internal number.";
+  }
   return e;
 }
 
@@ -159,7 +227,24 @@ function toInput(d: TrunkDraft): TrunkInput {
       priority: Number(x.priority),
       weight: Number(x.weight),
     })),
+    internalDialing: toDialingInput(d),
   };
+}
+
+/** The internalDialing body field: confirm rides along for mode "all". */
+function toDialingInput(d: TrunkDraft): InternalDialingInput {
+  switch (d.dialingMode) {
+    case "patterns":
+      return {
+        mode: "patterns",
+        patterns: dialingPatterns(d.dialingPatterns),
+      };
+    case "all":
+      // The form requires the checkbox, so confirm is always true here.
+      return { mode: "all", patterns: [], confirm: true };
+    default:
+      return { mode: "off", patterns: [] };
+  }
 }
 
 function knownKeys(d: TrunkDraft): string[] {
@@ -177,6 +262,10 @@ function knownKeys(d: TrunkDraft): string[] {
     "defaultCallerId",
     "enabled",
     "destinations",
+    "internalDialing",
+    "internalDialing.mode",
+    "internalDialing.patterns",
+    "internalDialing.confirm",
     ...d.destinations.flatMap((_, i) => [
       `destinations[${i}]`,
       ...["host", "port", "priority", "weight"].map(
@@ -424,6 +513,10 @@ function TrunkCard({
             value: orUnknown(t.defaultCallerId),
             mono: true,
           },
+          {
+            label: "Internal dialing",
+            value: dialingLabel(t.internalDialing),
+          },
           { label: "Password", value: password },
         ]
       : [
@@ -438,6 +531,10 @@ function TrunkCard({
             label: "Default caller ID",
             value: orUnknown(t.defaultCallerId),
             mono: true,
+          },
+          {
+            label: "Internal dialing",
+            value: dialingLabel(t.internalDialing),
           },
           { label: "Password", value: password },
         ];
@@ -617,6 +714,22 @@ function TrunkDrawer({
   }
 
   const registration = draft.mode === "registration";
+  /**
+   * Live client-side pattern checks: while the user edits the list, an
+   * over-long pattern or too many patterns read as the field's hint, before
+   * any submit.
+   */
+  const liveDialingError = (() => {
+    if (draft.dialingMode !== "patterns") return undefined;
+    const patterns = dialingPatterns(draft.dialingPatterns);
+    if (patterns.length > MAX_PATTERNS) {
+      return `Use at most ${MAX_PATTERNS} patterns.`;
+    }
+    const long = patterns.findIndex((p) => p.length > MAX_PATTERN_LEN);
+    return long >= 0
+      ? `Pattern ${long + 1} is longer than ${MAX_PATTERN_LEN} characters.`
+      : undefined;
+  })();
   return (
     <Drawer
       title={trunk ? `Trunk ${trunk.name}` : "New trunk"}
@@ -791,6 +904,96 @@ function TrunkDrawer({
             checked={draft.enabled}
             onChange={(e) => set("enabled", e.target.checked)}
           />
+        </fieldset>
+
+        <fieldset
+          className="cf-form__section"
+          aria-describedby={
+            errors["internalDialing.patterns"] || errors["internalDialing.mode"]
+              ? `${fid("internalDialing")}-error`
+              : undefined
+          }
+        >
+          <legend className="az-eyebrow">Internal dialing</legend>
+          <p className="cf-form__note">
+            What the trunk may dial in the extension namespace. An allowed
+            number rings the extension; anything else gets "no route matched".
+          </p>
+          {errors["internalDialing.mode"] && (
+            <p
+              id={`${fid("internalDialing")}-error`}
+              className="cf-form__error"
+            >
+              {errors["internalDialing.mode"]}
+            </p>
+          )}
+          <div className="cf-field-group">
+            <span className="az-field__label">Mode</span>
+            <SegmentedControl<DialingMode>
+              aria-label="Internal dialing mode"
+              block
+              value={draft.dialingMode}
+              onChange={(m) => set("dialingMode", m)}
+              options={[
+                { value: "off", label: "Off" },
+                { value: "patterns", label: "Allowed patterns" },
+                { value: "all", label: "All internal numbers" },
+              ]}
+            />
+          </div>
+          {draft.dialingMode === "patterns" && (
+            <div className="az-field">
+              <label
+                className="az-field__label"
+                htmlFor={fid("dialingPatterns")}
+              >
+                Patterns
+              </label>
+              <textarea
+                id={fid("dialingPatterns")}
+                className="az-input az-textarea az-input--mono"
+                rows={4}
+                value={draft.dialingPatterns}
+                aria-invalid={
+                  errors["internalDialing.patterns"] || liveDialingError
+                    ? true
+                    : undefined
+                }
+                aria-describedby={`${fid("dialingPatterns")}-hint`}
+                onChange={(e) => set("dialingPatterns", e.target.value)}
+              />
+              <span
+                className={
+                  errors["internalDialing.patterns"] || liveDialingError
+                    ? "az-field__hint cf-form__error"
+                    : "az-field__hint"
+                }
+                id={`${fid("dialingPatterns")}-hint`}
+              >
+                {errors["internalDialing.patterns"] ??
+                  liveDialingError ??
+                  "One per line: an exact number, or X for any one digit (1XX covers 100–199), or a regex. At most 100, each up to 500 characters."}
+              </span>
+            </div>
+          )}
+          {draft.dialingMode === "all" && (
+            <div className="cf-field-group">
+              <Checkbox
+                label="This trunk may dial every internal number"
+                hint="Out-of-policy DIDs are refused, so no Hello number leaks out."
+                checked={draft.dialingConfirm}
+                onChange={(e) => set("dialingConfirm", e.target.checked)}
+              />
+              {errors["internalDialing.confirm"] && (
+                <p
+                  id={`${fid("internalDialing.confirm")}-error`}
+                  className="cf-form__error"
+                >
+                  {errors["internalDialing.confirm"]}
+                </p>
+              )}
+            </div>
+          )}
         </fieldset>
 
         <fieldset

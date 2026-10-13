@@ -96,7 +96,6 @@ describe("CallDetail", () => {
     ).toHaveAttribute("href", "/routes/test?from=101&number=0501234567");
   });
 
-
   it("shows the failover note on an answered call", async () => {
     mockApi({
       ...ME,
@@ -191,6 +190,104 @@ describe("CallDetail", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText(/Why it failed/)).toBeNull();
     expect(screen.queryByText("Note")).toBeNull();
+  });
+
+  it("renders the internal dialing, ladder and lookup steps of a trunk call, in order", async () => {
+    // Steps shuffled; the page must order them by n and read the policy
+    // verdict, the ladder and the internal lookup by their text.
+    const trace = [
+      { n: 1, text: "Source trunk carrier-primary" },
+      { n: 2, text: "Called DID 1012" },
+      { n: 3, text: "Trunk carrier-primary may dial 1012: pattern 1XX" },
+      { n: 4, text: 'Route "Internal" matched (exact DID 1012)' },
+      { n: 5, text: "Caller ID <carrier-primary> (trunk name)" },
+      { n: 6, text: "Destination: internal" },
+      { n: 7, text: "Internal lookup 1012 -> extension 1012" },
+    ];
+    const shuffled = [
+      trace[3],
+      trace[6],
+      trace[1],
+      trace[5],
+      trace[0],
+      trace[4],
+      trace[2],
+    ];
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/82": () =>
+        json({
+          ...BASE,
+          id: 82,
+          direction: "inbound",
+          source: "+971501112233",
+          originalDestination: "1012",
+          trunk: "carrier-primary",
+          finalStatus: 200,
+          answerTime: "2026-10-01T10:00:02Z",
+          failureReason: "",
+          trace: shuffled,
+          explanation: "",
+        }),
+    });
+    renderApp("/history/82");
+
+    const list = await screen.findByRole("list", { name: "Routing trace" });
+    const items = within(list).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual(
+      trace.map((s, i) => `${i + 1}${s.text}`),
+    );
+    // The internal lookup is a hit; the ladder fallback is a plain fact.
+    expect(items[6]!.querySelector(".icon-check")).not.toBeNull();
+    expect(items[4]!.querySelector(".icon-arrow-right")).not.toBeNull();
+    expect(screen.getByText("1012 → +971501234567")).toBeVisible();
+    expect(screen.getByText("1012")).toBeVisible();
+  });
+
+  it("marks an out-of-policy DID: the verdict warns and the route skip misses", async () => {
+    const trace = [
+      { n: 1, text: "Source trunk carrier-primary" },
+      { n: 2, text: "Called DID 9999" },
+      {
+        n: 3,
+        text: "Trunk carrier-primary may not dial 9999: no pattern matches",
+      },
+      {
+        n: 4,
+        text: 'Route "Internal" skipped: internal dialing to 9999 not allowed on trunk carrier-primary',
+      },
+      { n: 5, text: "No inbound route matched DID 9999" },
+    ];
+    const shuffled = [trace[3], trace[0], trace[4], trace[2], trace[1]];
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/83": () =>
+        json({
+          ...BASE,
+          id: 83,
+          direction: "inbound",
+          source: "+971501112233",
+          originalDestination: "9999",
+          trunk: "carrier-primary",
+          finalStatus: 404,
+          failureReason: "No inbound route matched DID 9999",
+          trace: shuffled,
+          explanation: "No inbound route matched DID 9999",
+        }),
+    });
+    renderApp("/history/83");
+
+    const list = await screen.findByRole("list", { name: "Routing trace" });
+    const items = within(list).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual(
+      trace.map((s, i) => `${i + 1}${s.text}`),
+    );
+    // The policy denial warns; the route skip and the miss are marked as such.
+    expect(items[2]!.querySelector(".icon-triangle-alert")).not.toBeNull();
+    expect(items[3]!.querySelector(".icon-minus")).not.toBeNull();
+    expect(items[4]!.querySelector(".icon-x")).not.toBeNull();
+    const why = screen.getByRole("alert");
+    expect(why).toHaveTextContent("No inbound route matched DID 9999");
   });
 
   it("is reached from a Call History row", async () => {

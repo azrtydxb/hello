@@ -19,6 +19,7 @@ const TRUNK = {
   defaultCallerId: "+97142000000",
   enabled: true,
   destinations: [{ host: "10.0.0.5", port: 5060, priority: 0, weight: 1 }],
+  internalDialing: { mode: "off", patterns: [] },
   createdAt: "2026-10-01T10:00:00Z",
   updatedAt: "2026-10-01T10:00:00Z",
 };
@@ -219,6 +220,7 @@ describe("Trunks", () => {
       within(c).getByText(label).nextElementSibling;
     expect(props("OPTIONS interval")).toHaveTextContent("30 s");
     expect(props("Default caller ID")).toHaveTextContent("+97142000000");
+    expect(props("Internal dialing")).toHaveTextContent("Off");
     expect(props("Realm")).toHaveTextContent("sip.carrier.test");
     expect(
       within(c).getByRole("link", { name: "Test a route" }),
@@ -326,5 +328,164 @@ describe("Trunks", () => {
     expect(await screen.findByText("host does not resolve")).toBeVisible();
     expect(host).toHaveAttribute("aria-invalid", "true");
     expect(host).toHaveAccessibleDescription("host does not resolve");
+  });
+
+  it("saves an internal dialing policy of patterns, validating the list live", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () => json({ items: [] }),
+      "POST /api/v1/trunks": () =>
+        json({
+          ...TRUNK,
+          name: "carrier-x",
+          internalDialing: { mode: "patterns", patterns: ["1XX", "1012"] },
+        }),
+    });
+    renderApp("/trunks");
+
+    await screen.findByText("No trunks yet");
+    fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
+    field("Name", "carrier-x");
+    field("Username", "acct");
+    field("Host 1", "10.0.0.5");
+    fireEvent.click(screen.getByRole("radio", { name: "Allowed patterns" }));
+    const patterns = screen.getByLabelText("Patterns");
+
+    // Live validation: an over-long pattern reads in the field's hint at once.
+    fireEvent.change(patterns, {
+      target: { value: "1XX\n" + "9".repeat(501) },
+    });
+    expect(
+      await screen.findByText(/Pattern 2 is longer than 500 characters/),
+    ).toBeVisible();
+    expect(patterns).toHaveAttribute("aria-invalid", "true");
+
+    // Back under the limit: the hint returns to normal.
+    fireEvent.change(patterns, { target: { value: "1XX\n1012" } });
+    expect(screen.queryByText(/longer than 500 characters/)).toBeNull();
+    expect(patterns).not.toHaveAttribute("aria-invalid");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
+    await screen.findByText("Trunk carrier-x created.");
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+      internalDialing: { mode: "patterns", patterns: ["1XX", "1012"] },
+    });
+    expect(
+      within(screen.getByRole("list", { name: "Trunks" })).getByText(
+        "2 patterns",
+      ),
+    ).toBeVisible();
+  });
+
+  it("refuses an empty or over-long pattern list, and caps the count", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () => json({ items: [] }),
+    });
+    renderApp("/trunks");
+
+    await screen.findByText("No trunks yet");
+    fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
+    field("Name", "carrier-y");
+    field("Host 1", "10.0.0.5");
+    fireEvent.click(screen.getByRole("radio", { name: "Allowed patterns" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
+
+    // Mode "patterns" without any pattern is refused client-side.
+    expect(await screen.findByText("Add at least one pattern.")).toBeVisible();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+
+    // So is a list over the 100-pattern cap.
+    fireEvent.change(screen.getByLabelText("Patterns"), {
+      target: {
+        value: Array.from({ length: 101 }, (_, i) => `1${i}`).join("\n"),
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
+    expect(await screen.findByText(`Use at most 100 patterns.`)).toBeVisible();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("requires the confirmation checkbox for mode all, then sends confirm", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () => json({ items: [] }),
+      "POST /api/v1/trunks": () =>
+        json({
+          ...TRUNK,
+          name: "carrier-all",
+          internalDialing: { mode: "all", patterns: [] },
+        }),
+    });
+    renderApp("/trunks");
+
+    await screen.findByText("No trunks yet");
+    fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
+    field("Name", "carrier-all");
+    field("Host 1", "10.0.0.5");
+    fireEvent.click(
+      screen.getByRole("radio", { name: "All internal numbers" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
+    expect(
+      await screen.findByText(
+        "Confirm that this trunk may dial every internal number.",
+      ),
+    ).toBeVisible();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /may dial every internal number/,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
+    expect(await screen.findByText("Trunk carrier-all created.")).toBeVisible();
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+      internalDialing: { mode: "all", patterns: [], confirm: true },
+    });
+  });
+
+  it("surfaces a server error about a pattern on the patterns field", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () => json({ items: [] }),
+      "POST /api/v1/trunks": () =>
+        json(
+          {
+            error: {
+              code: "bad_request",
+              message: "invalid trunk",
+              fields: [
+                {
+                  path: "internalDialing.patterns[1]",
+                  message: "pattern does not compile",
+                },
+              ],
+            },
+          },
+          400,
+        ),
+    });
+    renderApp("/trunks");
+
+    await screen.findByText("No trunks yet");
+    fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
+    field("Name", "carrier-z");
+    field("Host 1", "10.0.0.5");
+    fireEvent.click(screen.getByRole("radio", { name: "Allowed patterns" }));
+    fireEvent.change(screen.getByLabelText("Patterns"), {
+      target: { value: "1XX\n([bad" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
+
+    const patterns = screen.getByLabelText("Patterns");
+    expect(await screen.findByText("pattern does not compile")).toBeVisible();
+    expect(patterns).toHaveAttribute("aria-invalid", "true");
+    expect(patterns).toHaveAccessibleDescription("pattern does not compile");
   });
 });
