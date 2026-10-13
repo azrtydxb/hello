@@ -34,6 +34,17 @@ func (s *Server) looksLikePhone(req *sip.Request, snap *snapshot.Snapshot) bool 
 	return ok
 }
 
+// trunkNameCallerID reports whether cid is the caller-ID ladder's last rung
+// — the source trunk's name in angle brackets (spec S-4) — returning it for
+// presentation. On a phone leg it is a display name, never a URI user part:
+// "<" and ">" are not user-part characters and would break the URI.
+func trunkNameCallerID(cid string) (string, bool) {
+	if len(cid) > 2 && cid[0] == '<' && cid[len(cid)-1] == '>' {
+		return cid, true
+	}
+	return "", false
+}
+
 // inboundCall routes a call arriving from trunk t: the inbound routes pick
 // an extension (Phase 1 ring-all), an external number (outbound routing as
 // the trunk) or a SIP URI. Carriers are trusted by source address, not by

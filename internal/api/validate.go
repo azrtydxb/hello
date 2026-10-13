@@ -379,7 +379,7 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 		}
 	case "internal":
 		// The DID the route matched names the target; the route carries
-		// none of its own (Task 1's rule).
+		// none of its own, as the engine's compile also requires.
 		if in.Destination != "" {
 			f.add("destination", `must be empty when destinationKind is "internal"`)
 		}

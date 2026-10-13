@@ -340,6 +340,10 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 			c.setupOutbound(dec)
 		}
 	case (dec.Kind == routing.KindInternal || dec.Kind == routing.KindInbound) && dec.Extension != "":
+		// The CDR's rewritten destination is the extension the call
+		// resolved to, not the digits that resolved to it (spec S-5); for
+		// a phone's own call the two are the same.
+		c.rewritten = dec.Extension
 		c.ringTarget(req, tx, snap, dec.Extension)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
 		c.considerAnchor(snap, EndpointInfo{}) // external URI: caller-side triggers only
@@ -1196,6 +1200,13 @@ func (l *leg) invite() (*sip.Request, error) {
 		Params:      sip.HeaderParams{{K: "tag", V: sip.GenerateTagN(16)}},
 	}
 	to := &sip.ToHeader{Address: sip.Uri{Scheme: "sip", User: c.dialled, Host: s.cfg.Domain}}
+	// The caller-ID ladder's trunk-name rung presents as the display name
+	// with no user part (spec S-4): "<" and ">" are not user-part
+	// characters, and the phone must still see something attributable.
+	if name, ok := trunkNameCallerID(c.callerNum); ok {
+		from.DisplayName = name
+		from.Address.User = ""
+	}
 	switch {
 	case l.trunk != nil:
 		// The carrier sees the decision's caller ID in the trunk's domain
