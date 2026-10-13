@@ -10,10 +10,16 @@ import (
 	"testing"
 )
 
+// trunkName hands out a unique trunk name: the server rejects duplicates.
+var trunkName = func() func() string {
+	n := 0
+	return func() string { n++; return fmt.Sprintf("carrier-dialing-%d", n) }
+}()
+
 // trunkWith builds a valid ip trunk body with an internalDialing policy.
 func trunkWith(dialing map[string]any) map[string]any {
 	return map[string]any{
-		"name":            "carrier-dialing",
+		"name":            trunkName(),
 		"mode":            "ip",
 		"destinations":    []map[string]any{{"host": "10.0.0.5"}},
 		"internalDialing": dialing,
