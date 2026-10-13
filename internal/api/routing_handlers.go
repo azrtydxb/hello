@@ -93,6 +93,42 @@ type trunkBody struct {
 	DefaultCallerID *string                `json:"defaultCallerId"`
 	Enabled         *bool                  `json:"enabled"`
 	Destinations    *[]routing.Destination `json:"destinations"`
+	InternalDialing *dialingBody           `json:"internalDialing"`
+}
+
+// dialingBody is an internalDialing request field (trunk plan contract 5).
+// Confirm guards mode "all": without it a typo would open every extension
+// to the trunk.
+type dialingBody struct {
+	Mode     *string  `json:"mode"`
+	Patterns []string `json:"patterns"`
+	Confirm  *bool    `json:"confirm"`
+}
+
+// dialingPolicy validates an internalDialing body and returns the policy to
+// store. The checks are the engine's own (routing.CompileDialing), so a
+// pattern that will not compile is refused here with the same message the
+// whole-configuration compile would give.
+func dialingPolicy(b *dialingBody) (store.Dialing, fieldErrs) {
+	mode := "off"
+	if b.Mode != nil {
+		mode = *b.Mode
+	}
+	var f fieldErrs
+	for _, e := range routing.CompileDialing(routing.Dialing{Mode: mode, Patterns: b.Patterns}) {
+		f.add("internalDialing."+e.Path, "%s", e.Message)
+	}
+	if mode == "all" && (b.Confirm == nil || !*b.Confirm) {
+		f.add("internalDialing.confirm", `must be true when mode is "all"`)
+	}
+	if len(f) > 0 {
+		return store.Dialing{Mode: mode}, f
+	}
+	d := store.Dialing{Mode: mode}
+	if mode == "patterns" {
+		d.Patterns = slices.Clone(b.Patterns)
+	}
+	return d, nil
 }
 
 func (b trunkBody) empty() bool { return b == trunkBody{} }
@@ -146,8 +182,17 @@ func (s *server) createTrunk(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
-	in := store.TrunkInput{RegisterExpires: 3600, OptionsInterval: 30, Enabled: true, SourceCIDRs: []string{}}
+	in := store.TrunkInput{RegisterExpires: 3600, OptionsInterval: 30, Enabled: true, SourceCIDRs: []string{},
+		InternalDialing: store.Dialing{Mode: "off", Patterns: []string{}}}
 	b.applyTo(&in)
+	if b.InternalDialing != nil {
+		d, f := dialingPolicy(b.InternalDialing)
+		if len(f) > 0 {
+			writeFields(w, f)
+			return
+		}
+		in.InternalDialing = d
+	}
 	password := ""
 	setIf(&password, b.Password)
 	f := validateTrunk(&in, password != "")
@@ -188,6 +233,13 @@ func (s *server) updateTrunk(w http.ResponseWriter, r *http.Request) {
 	setIf(&pw.Value, b.Password)
 	t, err := s.Store.UpdateTrunk(r.Context(), actor(r).String(), id, pw, func(in *store.TrunkInput, has bool) []routing.FieldError {
 		b.applyTo(in)
+		if b.InternalDialing != nil {
+			d, f := dialingPolicy(b.InternalDialing)
+			if len(f) > 0 {
+				return f
+			}
+			in.InternalDialing = d
+		}
 		return validateTrunk(in, has)
 	}, s.check())
 	if err != nil {

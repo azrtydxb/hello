@@ -131,6 +131,21 @@ func compileDialing(d Dialing, path string, errs *[]FieldError) []dialPattern {
 	return pats
 }
 
+// CompileDialing validates an internal dialing policy on its own and
+// returns one FieldError per problem, with the path relative to the policy
+// ("mode", "patterns[2]"). The trunk API validates a request body with it,
+// and the snapshot and store mark a trunk whose stored policy does not
+// compile misconfigured with it, instead of failing the whole
+// configuration.
+func CompileDialing(d Dialing) []FieldError {
+	var errs []FieldError
+	compileDialing(d, "", &errs)
+	for i := range errs {
+		errs[i].Path = strings.TrimPrefix(errs[i].Path, ".")
+	}
+	return errs
+}
+
 // dialingAllows reports whether tr may dial the internal number did (the
 // normalised DID), and which pattern allowed it: the first matching pattern
 // in list order, "all" for mode "all", "" when it may not (contract 3).
