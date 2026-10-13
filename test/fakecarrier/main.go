@@ -14,6 +14,17 @@
 //
 // POST /mode {"failWith":code} overrides every outcome with code.
 //
+// POST /call also accepts "rtp": true. The call then carries real RTP: the
+// INVITE's offer names the call target's own address (the SIP node that will
+// anchor the media, resolvable from the carrier's network) on a UDP socket
+// the carrier binds, and once the call is answered the carrier sends G.711
+// silence from that socket to the answer's media address and counts what
+// comes back. The response then reports "rtpSent" and "rtpReceived". This is
+// how the lab proves audio flows both ways on an anchored call; without it
+// the carrier is SIP-only and answers with an unroutable TEST-NET address.
+// The INVITE's Request-URI is "to"@"FAKE_HELLO_DOMAIN", user verbatim — any
+// user part, so a lab can address an internal extension number or any DID.
+//
 // Environment: FAKE_NAME, FAKE_SIP (listen, default 0.0.0.0:5060),
 // FAKE_HTTP (default :8090), FAKE_USER and FAKE_PASSWORD (enable REGISTER
 // digest), FAKE_REALM (default carrier.test), FAKE_INVITE_AUTH ("", "401" or
@@ -22,8 +33,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -38,6 +51,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/test/sipua"
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
@@ -323,15 +337,42 @@ func (c *carrier) onInvite(dlg *sipgo.DialogServerCache, req *sip.Request, tx si
 
 // placeCall places an inbound call to Hello as the carrier would:
 // {"from":"+971...","to":"<DID>","target":"hello-sip-1:5060","hangupAfterMs":1000}
-// and answers {"status":<final code>,"answeredBy":"<sdp o= line>"}.
+// and answers {"status":<final code>}. With "rtp": true the call carries
+// real audio both ways and the answer also reports "rtpSent" and
+// "rtpReceived" (see the package comment).
 func (c *carrier) placeCall(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		From, To, Target string
 		HangupAfterMs    int
+		RTP              bool
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.To == "" || in.Target == "" {
 		http.Error(w, "want {from,to,target}", http.StatusBadRequest)
 		return
+	}
+	var rt *rtpSession
+	offer := sdpAnswer
+	if in.RTP {
+		// The offer names the target host's own address: that is the SIP
+		// node (or, in tests, the peer) whose network the answer's media
+		// address lives in, so it is an address the carrier can send RTP
+		// to. A name resolves here, inside the carrier's network.
+		addr, err := targetMediaAddr(r.Context(), in.Target)
+		if err != nil {
+			http.Error(w, "media address: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if rt, err = newRTPSession(r.Context(), addr); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rt.close()
+		offer = rt.offer
+		// RTP needs an answered call to flow on; the default gives it a
+		// window even without an explicit hangupAfterMs.
+		if in.HangupAfterMs <= 0 {
+			in.HangupAfterMs = 1000
+		}
 	}
 	p, err := sipua.New(sipua.Options{User: in.From, Domain: c.helloDomain, Proxy: in.Target, Listen: "0.0.0.0:0", ContactHost: os.Getenv("FAKE_CONTACT_HOST")})
 	if err != nil {
@@ -341,20 +382,158 @@ func (c *carrier) placeCall(w http.ResponseWriter, r *http.Request) {
 	defer p.Close()
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	out, err := p.Dial(ctx, in.To, sdpAnswer)
+	out, err := p.Dial(ctx, in.To, offer)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
 	resp := map[string]any{"status": out.Status}
 	if out.Status == 200 {
+		if rt != nil {
+			rt.run(out.Response.Body())
+		}
 		if in.HangupAfterMs > 0 {
 			time.Sleep(time.Duration(in.HangupAfterMs) * time.Millisecond)
+		}
+		if rt != nil {
+			sent, got := rt.stop()
+			resp["rtpSent"], resp["rtpReceived"] = sent, got
 		}
 		_ = out.Hangup(ctx)
 	}
 	writeJSON(w, resp)
 }
+
+// targetMediaAddr resolves a call target's host to the IPv4 address the
+// carrier advertises as its own in the SDP offer: the peer's own network,
+// so the answer's media address (the same host when the media anchors) is
+// one the carrier can reach.
+func targetMediaAddr(ctx context.Context, target string) (string, error) {
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		host = target
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if v4 := ip.To4(); v4 != nil {
+			return v4.String(), nil
+		}
+		return ip.String(), nil
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", host, err)
+	}
+	for _, ia := range ips {
+		if v4 := ia.IP.To4(); v4 != nil {
+			return v4.String(), nil
+		}
+	}
+	return "", fmt.Errorf("no IPv4 address for %s", host)
+}
+
+// rtpSession is one placed call's media: a bound UDP socket the offer names,
+// sending G.711 silence (0x55, PCMA's silence byte — the marker a peer can
+// recognise) to the answer's media address and counting the RTP that comes
+// back from any other SSRC.
+type rtpSession struct {
+	conn *net.UDPConn
+	// offer is the SDP offer naming this session's address and port.
+	offer []byte
+
+	ssrc uint32
+	pt   uint8
+	seq  uint16
+	ts   uint32
+
+	mu       sync.Mutex
+	sent     int
+	received int
+	// stopCh ends run's goroutines; nil until run.
+	stopCh chan struct{}
+}
+
+func newRTPSession(ctx context.Context, addr string) (*rtpSession, error) {
+	conn, err := (&net.ListenConfig{}).ListenPacket(ctx, "udp", "0.0.0.0:0")
+	if err != nil {
+		return nil, err
+	}
+	udp, ok := conn.(*net.UDPConn)
+	if !ok {
+		_ = conn.Close()
+		return nil, errors.New("not a UDP socket")
+	}
+	port := udp.LocalAddr().(*net.UDPAddr).Port
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	rt := &rtpSession{conn: udp, ssrc: binary.BigEndian.Uint32(b[:]), pt: 8}
+	rt.offer = media.BuildAudioSDP(addr, port, rt.pt, 0, 0)
+	return rt, nil
+}
+
+// run starts sending to the answered call's media address and counting what
+// arrives; stop ends both and reports the counters. It is called once.
+func (rt *rtpSession) run(answer []byte) {
+	ans, err := media.ParseAudioSDP(answer)
+	if err != nil {
+		return // no media address to aim at; nothing flows
+	}
+	peer := &net.UDPAddr{IP: net.ParseIP(ans.Address), Port: ans.Port}
+	stop := make(chan struct{})
+	go func() { // sender: one 20ms frame of PCMA silence at a time
+		t := time.NewTicker(20 * time.Millisecond)
+		defer t.Stop()
+		payload := bytes.Repeat([]byte{0x55}, 160)
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				rt.seq++
+				rt.ts += 160
+				pkt := media.BuildRTP(rt.pt, rt.seq, rt.ts, rt.ssrc, false, payload)
+				if _, err := rt.conn.WriteToUDP(pkt, peer); err == nil {
+					rt.mu.Lock()
+					rt.sent++
+					rt.mu.Unlock()
+				}
+			}
+		}
+	}()
+	go func() { // receiver: count RTP from any other SSRC
+		buf := make([]byte, 1500)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = rt.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+			n, _, err := rt.conn.ReadFromUDP(buf)
+			if err != nil {
+				continue
+			}
+			if pkt, ok := media.ParseRTP(buf[:n]); ok && pkt.SSRC != rt.ssrc {
+				rt.mu.Lock()
+				rt.received++
+				rt.mu.Unlock()
+			}
+		}
+	}()
+	rt.stopCh = stop
+}
+
+// stop ends run's exchange and reports the counters. It is called once.
+func (rt *rtpSession) stop() (sent, received int) {
+	if rt.stopCh != nil {
+		close(rt.stopCh)
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	return rt.sent, rt.received
+}
+
+// close releases the session's socket.
+func (rt *rtpSession) close() { _ = rt.conn.Close() }
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
