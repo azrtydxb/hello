@@ -1,9 +1,11 @@
 # `TestVoiceMCPDiscovery` in `internal/voice` passes against a fake MCP server (`test/fakemcp`, with a fake token endpoint for client credentials). It fails if an OAuth exchange is not made for a server with that auth, a token is stored or logged, a public or rebinding address is dialled without the opt-in, a redirect is followed, a response over 1 MiB is read, discovery saves anything, or the check result stores a response body.
 
-Status: open
+Status: cancelled 2026-10-09 — the voice-agent feature left Hello (decision "Pivot: voice agents out of Hello", .procoder/ask/decisions.md)
 Created: 2026-10-08
 Epic: voice-agents
 Sprint: -
+
+> Cancelled with the pivot recorded in `.procoder/ask/decisions.md`: voice agents leave Hello and become a separate product that connects through SIP trunks. History kept.
 
 ## Description
 

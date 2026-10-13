@@ -92,18 +92,9 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "voice_agent"
+	DestinationKind string // "extension" | "external" | "sip_uri"
 	Destination     string
 	Enabled         bool
-}
-
-// VoiceAgent is one voice agent of the registry, as routing sees it: the
-// engine knows names and sip users from its input, not from the database
-// (like Extensions, spec Constraints).
-type VoiceAgent struct {
-	Name    string
-	SIPUser string
-	Enabled bool
 }
 
 // Config is the routing input loaded from PostgreSQL.
@@ -114,17 +105,6 @@ type Config struct {
 	// Extensions maps every extension number to its external number ("" if
 	// none); membership means "is an internal extension".
 	Extensions map[string]string
-	// VoiceAgents is every registered voice agent; VoiceSIPAddress is
-	// host:port of talking-agent, empty when voice agents are not configured
-	// (then a route to an agent is a FieldError, reason voice_not_configured,
-	// spec S-17).
-	VoiceAgents     []VoiceAgent
-	VoiceSIPAddress string
-	// VoiceAgentExtensions maps the extension number of every agent that has
-	// one (S-3) to the agent's name, so dialling it from a phone resolves to
-	// the agent (S-13). The registry keeps agent extensions unique across the
-	// extension namespace; Compile refuses a collision that slips through.
-	VoiceAgentExtensions map[string]string
 	// ResolvedIPs maps a trunk ID to the IPs its destination hostnames
 	// resolved to, for source validation. hello-sip fills it off the call
 	// path (DNS); hello-control's route tester may leave it empty.
@@ -171,24 +151,13 @@ type Candidate struct {
 	Destinations []Destination
 }
 
-// VoiceRef names the voice agent a decision routes to: the SIP leg and the
-// CDR read it (Task 4).
-type VoiceRef struct {
-	Name    string
-	SIPUser string
-}
-
 // Decision is the engine's answer; Trace explains it.
 type Decision struct {
 	Kind Kind
 	// Extension is the internal/inbound target extension; SIPURI the
 	// inbound SIP URI.
-	Extension string
-	SIPURI    string
-	// VoiceAgent is set when the destination is a voice agent: the SIP leg
-	// signs and sends the INVITE to talking-agent with it, and the CDR
-	// records it (Task 4).
-	VoiceAgent    *VoiceRef
+	Extension     string
+	SIPURI        string
 	Number        string      // rewritten number sent to the carrier
 	CallerID      string      // caller ID to present
 	Route         string      // name of the matched route

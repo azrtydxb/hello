@@ -141,21 +141,6 @@ describe("Call History", () => {
     ).toBeVisible();
   });
 
-  it("marks the row of a call a voice agent answered", async () => {
-    mockApi({
-      ...ME,
-      "GET /api/v1/cdrs?limit=50": () =>
-        json({
-          items: [{ ...cdr(7, "1007"), voiceAgent: "support" }],
-          next: "",
-        }),
-    });
-    renderApp("/history");
-
-    const row = await screen.findByText("1007");
-    expect(row).toBeVisible();
-    expect(row.closest("tr") ?? row.closest("li")).toHaveTextContent("support");
-  });
 
   it("says so when the history cannot load", async () => {
     mockApi({

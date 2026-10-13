@@ -1,9 +1,11 @@
 # phase 1's `TestRoutesMatchOpenAPI`, `TestOpenAPIConformance`, `TestOpenAPIForTools`, `TestRoleEnforcement` and `TestToolsFromOpenAPI` pass with the new operations, and `TestVoiceOperationsMCP` in `internal/mcp` fails if a credential, transcript, runtime or egress operation is an MCP tool or an agent write is a read tool.
 
-Status: open
+Status: cancelled 2026-10-09 — the voice-agent feature left Hello (decision "Pivot: voice agents out of Hello", .procoder/ask/decisions.md)
 Created: 2026-10-08
 Epic: voice-agents
 Sprint: -
+
+> Cancelled with the pivot recorded in `.procoder/ask/decisions.md`: voice agents leave Hello and become a separate product that connects through SIP trunks. History kept.
 
 ## Description
 
