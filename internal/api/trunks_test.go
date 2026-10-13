@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -72,8 +73,17 @@ func TestTrunkDialingValidation(t *testing.T) {
 	if err := p.db.QueryRow(`SELECT to_json(internal_dialing) FROM trunks WHERE id = $1`, id).Scan(&stored); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stored, `"mode":"patterns"`) || !strings.Contains(stored, `"1XX"`) {
-		t.Fatalf("stored internal_dialing = %s", stored)
+	// jsonb renders with a space after each colon, so parse instead of substring.
+	var storedDialing map[string]any
+	if err := json.Unmarshal([]byte(stored), &storedDialing); err != nil {
+		t.Fatal(err)
+	}
+	if storedDialing["mode"] != "patterns" {
+		t.Fatalf("stored internal_dialing mode = %v, want patterns", storedDialing["mode"])
+	}
+	pats, ok := storedDialing["patterns"].([]any)
+	if !ok || len(pats) != 2 || pats[0] != "1XX" {
+		t.Fatalf("stored internal_dialing patterns = %v, want [1XX ...]", storedDialing["patterns"])
 	}
 	if got := c.must(http.StatusOK, "GET", "/api/v1/trunks/"+id, nil).json(t)["internalDialing"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("GET internalDialing = %v, want %v", got, want)
