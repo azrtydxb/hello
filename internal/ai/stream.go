@@ -12,7 +12,9 @@ import (
 // Stream). The callbacks are optional and run on the goroutine making the
 // call, in order, so they must return quickly.
 //
-// Only the human answer is streamed. The model answers with a JSON object
+// Only the human answer is streamed. A call with tools streams nothing of
+// its tool phase but reasoning: the text comes from the answer phase. The
+// model answers with a JSON object
 // (HELLO_AI_STRUCTURED_OUTPUT json_schema or prompt alike); Field names its
 // string property, and Text receives that property's decoded characters as
 // they arrive. Reasoning is never passed on as text: Thinking says the model
@@ -40,6 +42,9 @@ type fieldStream struct {
 	// the current answer.
 	sent     string
 	thinking bool
+	// quiet is set in the tool phase: its text is never the answer, so it
+	// is not passed on, only that the model is reasoning.
+	quiet bool
 }
 
 func newFieldStream(st *Stream) *fieldStream { return &fieldStream{st: st} }
@@ -47,6 +52,12 @@ func newFieldStream(st *Stream) *fieldStream { return &fieldStream{st: st} }
 // text adds a model text delta.
 func (f *fieldStream) text(d string) {
 	f.buf.WriteString(d)
+	if f.quiet {
+		if raw := f.buf.String(); strings.Contains(raw, "<think>") && !strings.Contains(raw, "</think>") {
+			f.think()
+		}
+		return
+	}
 	val, thinking := extractField(f.buf.String(), f.st.Field)
 	if thinking {
 		f.think()

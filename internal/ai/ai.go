@@ -107,8 +107,14 @@ type Call[T any] struct {
 	Prompt string
 	// Tools are the read-only tools the model may call, at most MaxSteps
 	// steps (default HELLO_AI_MAX_STEPS) in all.
+	// A call with tools runs a tool phase (tools, no structured output),
+	// then an answer phase (structured output, no tools); see Generate.
 	Tools    []aisdk.Tool
 	MaxSteps int
+	// ToolLog, when set, is the list of tool calls made, as the answer
+	// phase shows it to the model for citations (in a data block); it is
+	// called once the tool phase ends. Nil lists the calls of the steps.
+	ToolLog func() any
 	// Validate checks the decoded answer; nil accepts any that decodes.
 	Validate func(context.Context, T) error
 	// Stream, when set, runs the call on the model's streaming API and
