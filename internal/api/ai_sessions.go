@@ -148,6 +148,10 @@ func (s *server) postAIMessage(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
+	if st, ok := s.Assistant.(chat.Streamer); ok && wantsEventStream(r) {
+		s.streamAIMessage(w, r, st, u, r.PathValue("id"), in.Content)
+		return
+	}
 	msgID, taskID, err := s.Assistant.PostMessage(r.Context(), u, r.PathValue("id"), in.Content)
 	if err != nil {
 		s.assistantError(w, "session", err)

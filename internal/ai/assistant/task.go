@@ -9,6 +9,7 @@ import (
 	aisdk "github.com/azrtydxb/go-ai-sdk/ai"
 
 	"github.com/azrtydxb/hello/internal/ai"
+	"github.com/azrtydxb/hello/internal/ai/assistant/chat"
 	"github.com/azrtydxb/hello/internal/ai/proposal"
 	"github.com/azrtydxb/hello/internal/auth"
 )
@@ -38,17 +39,45 @@ type historyEntry struct {
 	At      time.Time `json:"at"`
 }
 
+// answered is what a finished message task produced.
+type answered struct {
+	messageID  int64
+	proposalID *string
+	// message is the stored assistant message; set for a streamed answer.
+	message Message
+	usage   ai.Usage
+}
+
+// result is the task's stored result.
+func (r answered) result() any {
+	return map[string]any{"messageId": r.messageID, "proposalId": r.proposalID}
+}
+
+// done is the stream's final event.
+func (r answered) done(taskID string, userMessageID int64) chat.Done {
+	return chat.Done{TaskID: taskID, MessageID: userMessageID, Message: r.message, ProposalID: r.proposalID,
+		Usage: chat.Usage{InputTokens: r.usage.InputTokens, OutputTokens: r.usage.OutputTokens,
+			ReasoningTokens: r.usage.ReasoningTokens, Calls: r.usage.Calls}}
+}
+
 // answer is the message task: one Generate with the read tools, the answer
 // validated against the calls made, its proposal validated and stored, and
-// the assistant message stored with the calls' summaries.
-func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID string, history []Message) (any, error) {
+// the assistant message stored with the calls' summaries. With a sink it
+// also reports progress to it, and stops when the sink's reader is gone.
+func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID string, history []Message, k *sink) (answered, error) {
 	if len(history) == 0 {
-		return nil, errors.New("assistant: no message to answer")
+		return answered{}, errors.New("assistant: no message to answer")
 	}
 	ident := auth.Agent{UserID: userID, TaskID: taskID}
 	ctx, abort := context.WithCancelCause(ctx)
 	defer abort(nil)
+	if k != nil {
+		defer context.AfterFunc(k.ctx, func() { abort(errClientGone) })()
+	}
 	ts, tools := a.newToolset(ident, abort)
+	if k != nil {
+		ts.onTool = k.tool
+	}
 
 	current := history[len(history)-1]
 	prior := make([]historyEntry, 0, len(history)-1)
@@ -74,15 +103,27 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 		Tools:    tools,
 		MaxSteps: a.cfg.MaxSteps,
 		Validate: a.validator(ident, sessionID, ts, &validated),
+		Stream:   k.stream(),
 	})
-	if cause := context.Cause(ctx); errors.Is(cause, errUserGone) {
-		return nil, errUserGone
+	cause := context.Cause(ctx)
+	if errors.Is(cause, errUserGone) {
+		return answered{}, errUserGone
 	}
 	if err != nil {
-		err = classify(err)
+		if errors.Is(cause, errClientGone) {
+			err = &ai.Error{Code: ai.CodeCanceled, Message: "the answer was stopped", Err: err}
+		} else {
+			err = classify(err)
+		}
 		a.cfg.Log.Info("assistant: message failed", "feature", Feature, "task", taskID,
 			"code", ai.CodeOf(err), "tool_calls", len(ts.Calls()), "duration", time.Since(started))
-		return nil, err
+		return answered{}, err
+	}
+	if k != nil {
+		// The answer exists: storing it must not depend on the reader, so
+		// that a stream dropped now neither loses it nor makes the user ask
+		// again.
+		ctx = context.WithoutCancel(ctx)
 	}
 
 	var proposalID *string
@@ -92,7 +133,7 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 		case errors.Is(err, proposal.ErrSuppressed):
 			// An equal proposal was dismissed recently: not made again.
 		case err != nil:
-			return nil, err
+			return answered{}, err
 		default:
 			proposalID = &id
 		}
@@ -102,7 +143,7 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 	if citations == nil {
 		citations = []int{}
 	}
-	msgID, err := a.cfg.Store.AddAIMessage(ctx, Message{
+	stored := Message{
 		SessionID:  sessionID,
 		Role:       RoleAssistant,
 		Content:    ans.Answer,
@@ -110,13 +151,27 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 		Citations:  citations,
 		ProposalID: proposalID,
 		TaskID:     &taskID,
-	})
+	}
+	msgID, err := a.cfg.Store.AddAIMessage(ctx, stored)
 	if err != nil {
-		return nil, err
+		return answered{}, err
 	}
 	a.cfg.Log.Info("assistant: message answered", "feature", Feature, "task", taskID,
 		"tokens", usage.Total(), "tool_calls", len(calls), "proposal", proposalID != nil, "duration", time.Since(started))
-	return map[string]any{"messageId": msgID, "proposalId": proposalID}, nil
+	out := answered{messageID: msgID, proposalID: proposalID, message: stored, usage: usage}
+	out.message.ID = msgID
+	if k != nil {
+		// The message as the store lists it (its creation time included), so
+		// the final event equals what getAISession shows.
+		if msgs, err := a.cfg.Store.AIMessages(ctx, sessionID); err == nil {
+			for _, m := range msgs {
+				if m.ID == msgID {
+					out.message = m
+				}
+			}
+		}
+	}
+	return out, nil
 }
 
 // classify turns an endpoint's refusal of tool calling (a 400 that names
