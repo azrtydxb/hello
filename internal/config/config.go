@@ -96,6 +96,10 @@ type AIAgent struct {
 	// StructuredOutput (HELLO_AI_STRUCTURED_OUTPUT) is "json_schema" or
 	// "prompt".
 	StructuredOutput string
+	// Thinking (HELLO_AI_THINKING) is false for "off", the default: Hello
+	// asks an OpenAI-compatible server not to let the model reason before
+	// it answers. True for "on".
+	Thinking bool
 	// ValidationAttempts (HELLO_AI_VALIDATION_ATTEMPTS), MaxSteps
 	// (HELLO_AI_MAX_STEPS), MaxConcurrency (HELLO_AI_MAX_CONCURRENCY) and
 	// RequestsPerMinute (HELLO_AI_REQUESTS_PER_MINUTE).
@@ -417,6 +421,13 @@ func (r *reader) aiAgent() AIAgent {
 	}
 	if a.StructuredOutput != "json_schema" && a.StructuredOutput != "prompt" {
 		r.fail("HELLO_AI_STRUCTURED_OUTPUT", errors.New("must be json_schema or prompt"))
+	}
+	switch thinking := r.optional("HELLO_AI_THINKING", "off"); thinking {
+	case "off":
+	case "on":
+		a.Thinking = true
+	default:
+		r.fail("HELLO_AI_THINKING", errors.New("must be off or on"))
 	}
 	if a.BackgroundBudgetPercent > 100 {
 		r.fail("HELLO_AI_BACKGROUND_BUDGET_PERCENT", errors.New("must be between 1 and 100"))

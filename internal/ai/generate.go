@@ -139,6 +139,7 @@ func generate[T any](ctx context.Context, s *Service, call Call[T]) (any, Usage,
 		mt := maxTokens
 		opts := aisdk.GenerateTextOpts{
 			System: system, Messages: msgs, Tools: tools, MaxSteps: max(stepsLeft, 1), MaxTokens: &mt,
+			ProviderOptions: s.providerOptions(),
 		}
 		var a attemptResult
 		if fs != nil {
@@ -188,6 +189,22 @@ func generate[T any](ctx context.Context, s *Service, call Call[T]) (any, Usage,
 		msgs = append(transcript(msgs, a.steps, raw, true), provider.UserText(
 			"Your answer was rejected: "+verr.Error()+"\nReply again with a corrected answer in the required JSON format."))
 	}
+}
+
+// providerOptions is what every model call adds to the request body. With
+// HELLO_AI_THINKING=off and an OpenAI-compatible provider it is
+// chat_template_kwargs.enable_thinking=false, which vLLM hands to the chat
+// template of a reasoning model (Qwen3) and which templates without that
+// switch ignore. It is never sent to another provider, and no
+// reasoning_effort is sent: a server that validates that field strictly
+// would reject it.
+func (s *Service) providerOptions() map[string]any {
+	if s.cfg.Thinking || (s.cfg.Provider != "" && s.cfg.Provider != "openai") {
+		return nil
+	}
+	return map[string]any{"openai": map[string]any{
+		"chat_template_kwargs": map[string]any{"enable_thinking": false},
+	}}
 }
 
 func outputOf[T any]() aisdk.Output { return aisdk.OutputObject[T]() }
