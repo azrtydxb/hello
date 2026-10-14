@@ -287,3 +287,12 @@ Client ID metadata documents are preferred and DCR is deprecated, but some MCP c
 - The built-in AI agent (phase 2: assistant, proposals, detectors) STAYS in Hello, as does phase 1 external access (MCP/OAuth/skills) and per-call quality in CDRs.
 - The voice-agent feature is removed from Hello (registry, runtime API, call leg, voice_agent routing/console, voice tables). PR #65 (voice e2e) is closed unmerged.
 - New requirement instead: SIP trunks must be able to reach internal numbers (inbound trunk calls targeting internal extensions), not only the outside world.
+
+## Re-verify the fastllm-backed checks after the trunk rollout? (2026-10-14)
+
+The phase-2 built-in agent is live, but the assistant-reply and tool-calling checks never completed because fastllm (vLLM) was down when work paused; the check cron was cancelled.
+
+- Yes: re-run one assistant reply and one tool call through the deployed stack once the trunk rollout lands.
+- No: leave the checks unverified until the next fastllm change.
+
+  Decision: yes — verify right after the trunk rollout (2026-10-14).
