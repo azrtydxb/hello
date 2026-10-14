@@ -212,7 +212,7 @@ func (e env) helmUpgrade(t *testing.T, c *client, ext string, sets ...string) (n
 	t.Helper()
 	args := []string{"upgrade", e.release, e.chart, "-n", e.namespace, "--reuse-values", "--wait", "--timeout", "20m"}
 	for _, s := range sets {
-		args = append(args, "--set", s)
+		args = append(args, "--set-string", s)
 	}
 	done := make(chan error, 1)
 	go func() {

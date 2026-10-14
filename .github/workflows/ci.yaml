@@ -299,7 +299,7 @@ jobs:
             --set kamailio.publicHost=127.0.0.1 \
             --set kamailio.publicPort=30508 \
             --set kamailio.phonesPort=5060 \
-            --set kamailio.nodeSelector.hello-edge=true \
+            --set-string kamailio.nodeSelector.hello-edge=true \
             --set control.service.type=NodePort \
             --set control.service.nodePort=30081 \
             --wait --timeout 10m
