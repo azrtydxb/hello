@@ -6,24 +6,27 @@ Hello can reason about itself. The agent is suggest-only: an assistant in the co
 
 The agent is on only when both `HELLO_AI_BASE_URL` and `HELLO_AI_MODEL` are set on hello-control; the API key may be empty. Otherwise `GET /api/v1/ai/status` reports `enabled: false` with `not_configured` or `incomplete_configuration`, no model connection opens, detectors do not run, every other AI operation answers `503` `ai_disabled`, and the console hides the assistant.
 
-| Variable                             | Default       | Meaning                                                          |
-| ------------------------------------ | ------------- | ---------------------------------------------------------------- |
-| `HELLO_AI_PROVIDER`                  | `openai`      | `openai` (any OpenAI-compatible server) or `anthropic`           |
-| `HELLO_AI_BASE_URL`                  | unset         | the endpoint, for example `http://host:8000/v1`                  |
-| `HELLO_AI_MODEL`                     | unset         | the model name                                                   |
-| `HELLO_AI_API_KEY`                   | empty         | the key; never stored, logged or shown                           |
-| `HELLO_AI_ALLOW_PUBLIC_ENDPOINT`     | `false`       | allow an endpoint that resolves to a public address              |
-| `HELLO_AI_STRUCTURED_OUTPUT`         | `json_schema` | `json_schema`, or `prompt` for servers without `response_format` |
-| `HELLO_AI_VALIDATION_ATTEMPTS`       | `3`           | asks again this often when an answer is invalid                  |
-| `HELLO_AI_MAX_STEPS`                 | `8`           | model steps per assistant message (and at most 16 tool calls)    |
-| `HELLO_AI_MAX_CONCURRENCY`           | `2`           | model calls in flight per replica                                |
-| `HELLO_AI_REQUESTS_PER_MINUTE`       | `30`          | model calls started per minute per replica                       |
-| `HELLO_AI_TIMEOUT`                   | `180s`        | one model call                                                   |
-| `HELLO_AI_DAILY_TOKEN_BUDGET`        | `2000000`     | tokens per UTC day across replicas                               |
-| `HELLO_AI_BACKGROUND_BUDGET_PERCENT` | `80`          | background work stops at this share of the budget                |
-| `HELLO_AI_AGENT_START_DELAY`         | `2m`          | first run of an agent after start                                |
-| `HELLO_AI_AIOPS_INTERVAL`            | `60s`         | the detector agent; `0` disables it                              |
-| `HELLO_AI_EXPLAIN_MIN_INTERVAL`      | `10m`         | the model explains the open findings at most this often          |
+| Variable                             | Default       | Meaning                                                             |
+| ------------------------------------ | ------------- | ------------------------------------------------------------------- |
+| `HELLO_AI_PROVIDER`                  | `openai`      | `openai` (any OpenAI-compatible server) or `anthropic`              |
+| `HELLO_AI_BASE_URL`                  | unset         | the endpoint, for example `http://host:8000/v1`                     |
+| `HELLO_AI_MODEL`                     | unset         | the model name                                                      |
+| `HELLO_AI_API_KEY`                   | empty         | the key; never stored, logged or shown                              |
+| `HELLO_AI_ALLOW_PUBLIC_ENDPOINT`     | `false`       | allow an endpoint that resolves to a public address                 |
+| `HELLO_AI_STRUCTURED_OUTPUT`         | `json_schema` | `json_schema`, or `prompt` for servers without `response_format`    |
+| `HELLO_AI_THINKING`                  | `off`         | `off` asks the model not to reason before answering; `on` allows it |
+| `HELLO_AI_VALIDATION_ATTEMPTS`       | `3`           | asks again this often when an answer is invalid                     |
+| `HELLO_AI_MAX_STEPS`                 | `8`           | model steps per assistant message (and at most 16 tool calls)       |
+| `HELLO_AI_MAX_CONCURRENCY`           | `2`           | model calls in flight per replica                                   |
+| `HELLO_AI_REQUESTS_PER_MINUTE`       | `30`          | model calls started per minute per replica                          |
+| `HELLO_AI_TIMEOUT`                   | `180s`        | one model call                                                      |
+| `HELLO_AI_DAILY_TOKEN_BUDGET`        | `2000000`     | tokens per UTC day across replicas                                  |
+| `HELLO_AI_BACKGROUND_BUDGET_PERCENT` | `80`          | background work stops at this share of the budget                   |
+| `HELLO_AI_AGENT_START_DELAY`         | `2m`          | first run of an agent after start                                   |
+| `HELLO_AI_AIOPS_INTERVAL`            | `60s`         | the detector agent; `0` disables it                                 |
+| `HELLO_AI_EXPLAIN_MIN_INTERVAL`      | `10m`         | the model explains the open findings at most this often             |
+
+`HELLO_AI_THINKING=off` applies to every model call (assistant answers, streaming, detector explanations) with provider `openai`: Hello adds `chat_template_kwargs: {"enable_thinking": false}` to the request body, which vLLM passes to the chat template of reasoning models such as Qwen3, and which other templates ignore. Reasoning tokens are never shown to users, and a model that reasons past `max_tokens` ends on `length` and costs a retry at double size, so off keeps answers to seconds. Servers that reject unknown request fields need `on`. The setting is not sent to provider `anthropic`. Hello does not send `reasoning_effort`.
 
 On kw the connection settings come from Secret `hello-ai` (`provider`, `base-url`, `model`, `api-key`, SOPS-encrypted in `deploy/kuvryn-sync/kw/secret-hello-ai.sops.yaml`), referenced optionally by hello-control, so without the Secret the agent stays off. kw uses the local fastllm proxy (`qwen3-6-35b-a3b`), private only.
 

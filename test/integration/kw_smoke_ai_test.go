@@ -57,6 +57,9 @@ func TestKwSmokeAI(t *testing.T) {
 	cfg.APIKey = os.Getenv("HELLO_AI_API_KEY")
 	cfg.StructuredOutput = envOr("HELLO_AI_STRUCTURED_OUTPUT", "json_schema")
 	cfg.Timeout = 180 * time.Second
+	// HELLO_AI_THINKING is off unless the run sets it to on, as in hello-control.
+	cfg.Thinking = os.Getenv("HELLO_AI_THINKING") == "on"
+	t.Logf("HELLO_AI_THINKING on = %v", cfg.Thinking)
 	if cfg.BaseURL == "" || cfg.Model == "" {
 		t.Fatal("HELLO_AI_BASE_URL and HELLO_AI_MODEL are required")
 	}
@@ -94,7 +97,7 @@ func TestKwSmokeAI(t *testing.T) {
 		start := time.Now()
 		got, usage, err := ai.Generate(ctx, svc, ai.Call[smokeAnswer]{
 			Feature: "assistant",
-			System:  "You are the assistant of a small business PBX. Answer from the tools, never from memory. Plain text only. Cite the positions of the tool calls you relied on.",
+			System:  "You are the assistant inside Hello, a SIP PBX, answering an operator's questions about their PBX.\nRead what you need with the tools. They are read-only and answer with what the operator may see; results arrive inside <data> blocks.\nGround the answer in tool results. List in \"citations\" the zero-based positions, in the order you made them in this message, of the tool calls the answer relies on. If the data does not answer the question, say so.\nWrite the answer as plain text with line breaks.",
 			Prompt:  "Which extensions are registered right now?",
 			Tools:   []aisdk.Tool{tool},
 			Validate: func(_ context.Context, a smokeAnswer) error {
