@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -124,10 +125,15 @@ func TestAssistantMessageStream(t *testing.T) {
 	if len(d.Messages) != 2 || d.Task != nil {
 		t.Fatalf("messages %d, task %+v", len(d.Messages), d.Task)
 	}
-	want, _ := json.Marshal(d.Messages[1])
-	got, _ := json.Marshal(data[len(data)-1]["message"])
-	if string(got) != string(want) {
-		t.Errorf("final message %s\nstored        %s", got, want)
+	// Compare decoded values: the event's message is a map (sorted keys),
+	// the stored one a struct (field order).
+	wantJSON, _ := json.Marshal(d.Messages[1])
+	var want any
+	if err := json.Unmarshal(wantJSON, &want); err != nil {
+		t.Fatal(err)
+	}
+	if got := data[len(data)-1]["message"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("final message %v\nstored        %v", got, want)
 	}
 	if d.Messages[1].Content != answer.Answer || len(d.Messages[1].ToolCalls) != 1 || d.Messages[1].ToolCalls[0].OperationID != "listTrunks" {
 		t.Errorf("stored %+v", d.Messages[1])
