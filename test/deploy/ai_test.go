@@ -269,7 +269,10 @@ func TestDocsAIAgent(t *testing.T) {
 	}
 	var have strings.Builder
 	for _, section := range strings.Split(guide, "\n\n") {
-		if strings.HasPrefix(section, "|") && (strings.HasPrefix(section, "| Tool |") || strings.HasPrefix(section, "| Operation | Request") || strings.HasPrefix(section, "| Detector |")) {
+		// Recognised by the header row with the formatter's column padding
+		// removed, so a formatted guide is found as well.
+		head := mdTable(section)
+		if strings.HasPrefix(section, "|") && (strings.HasPrefix(head, "Tool|") || strings.HasPrefix(head, "Operation|Request") || strings.HasPrefix(head, "Detector|")) {
 			have.WriteString(section + "\n\n")
 		}
 	}
