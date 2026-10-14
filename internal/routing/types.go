@@ -44,6 +44,17 @@ type Destination struct {
 	Weight   int    `json:"weight"`   // among equal priorities
 }
 
+// Dialing is a trunk's internal dialing policy (spec S-2): whether, and
+// what, the trunk may dial in the extension namespace. The zero value is
+// mode "off". A pattern is an exact number, an X pattern (each X any one
+// digit, so "1XX" matches 100 to 199) or a Go regex tried as given; a
+// leading "+" on either side of a match is ignored, as the inbound DID
+// match does.
+type Dialing struct {
+	Mode     string   // "off" (default) | "patterns" | "all"
+	Patterns []string // non-empty iff Mode is "patterns"
+}
+
 // Trunk is a carrier account or IP peer.
 type Trunk struct {
 	ID              int64
@@ -60,6 +71,9 @@ type Trunk struct {
 	DefaultCallerID string
 	Enabled         bool
 	Destinations    []Destination
+	// InternalDialing gates what the trunk may dial in the extension
+	// namespace (spec S-2); zero value: mode "off".
+	InternalDialing Dialing
 }
 
 // OutboundRoute matches calls from extensions to external numbers.
@@ -92,18 +106,9 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "voice_agent"
-	Destination     string
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal"
+	Destination     string // empty for "internal" (the DID names the target)
 	Enabled         bool
-}
-
-// VoiceAgent is one voice agent of the registry, as routing sees it: the
-// engine knows names and sip users from its input, not from the database
-// (like Extensions, spec Constraints).
-type VoiceAgent struct {
-	Name    string
-	SIPUser string
-	Enabled bool
 }
 
 // Config is the routing input loaded from PostgreSQL.
@@ -114,17 +119,6 @@ type Config struct {
 	// Extensions maps every extension number to its external number ("" if
 	// none); membership means "is an internal extension".
 	Extensions map[string]string
-	// VoiceAgents is every registered voice agent; VoiceSIPAddress is
-	// host:port of talking-agent, empty when voice agents are not configured
-	// (then a route to an agent is a FieldError, reason voice_not_configured,
-	// spec S-17).
-	VoiceAgents     []VoiceAgent
-	VoiceSIPAddress string
-	// VoiceAgentExtensions maps the extension number of every agent that has
-	// one (S-3) to the agent's name, so dialling it from a phone resolves to
-	// the agent (S-13). The registry keeps agent extensions unique across the
-	// extension namespace; Compile refuses a collision that slips through.
-	VoiceAgentExtensions map[string]string
 	// ResolvedIPs maps a trunk ID to the IPs its destination hostnames
 	// resolved to, for source validation. hello-sip fills it off the call
 	// path (DNS); hello-control's route tester may leave it empty.
@@ -171,24 +165,13 @@ type Candidate struct {
 	Destinations []Destination
 }
 
-// VoiceRef names the voice agent a decision routes to: the SIP leg and the
-// CDR read it (Task 4).
-type VoiceRef struct {
-	Name    string
-	SIPUser string
-}
-
 // Decision is the engine's answer; Trace explains it.
 type Decision struct {
 	Kind Kind
 	// Extension is the internal/inbound target extension; SIPURI the
 	// inbound SIP URI.
-	Extension string
-	SIPURI    string
-	// VoiceAgent is set when the destination is a voice agent: the SIP leg
-	// signs and sends the INVITE to talking-agent with it, and the CDR
-	// records it (Task 4).
-	VoiceAgent    *VoiceRef
+	Extension     string
+	SIPURI        string
 	Number        string      // rewritten number sent to the carrier
 	CallerID      string      // caller ID to present
 	Route         string      // name of the matched route

@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -149,6 +150,66 @@ func TestKwKamailioConfigChecksum(t *testing.T) {
 	if got := dep.Spec.Template.Metadata.Annotations[configChecksumAnnotation]; got != want {
 		t.Fatalf("Deployment kamailio pod template annotation %s = %q, want %q (sha256 of the hello-kamailio kamailio.cfg + dispatcher.list)", configChecksumAnnotation, got, want)
 	}
+}
+
+// TestKamailioTrunkURI guards spec S-7 of the trunk-internal-numbers plan:
+// a trunk's INVITE is forwarded to the hello-sip nodes with the Request-URI
+// untouched — the R-URI user is the dialled number (an internal extension
+// number among others), so a rewrite here would break trunk-to-internal
+// dialing and every DID-keyed behaviour. The trunk path is route[FROM_PHONE]
+// (phones and trunk peers share it: peers are trusted by source, not by a
+// different route) through route[TO_HELLO]; the whole cfg is scanned too, so
+// no rewrite can creep in elsewhere on the path a trunk INVITE takes.
+func TestKamailioTrunkURI(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kamailio", "kamailio.cfg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := string(b)
+
+	// Nothing on this edge ever rewrites a URI: no assignment to the
+	// Request-URI pseudo-variable and no rewriting function anywhere in the
+	// cfg the trunk INVITE travels through.
+	for _, forbidden := range []string{"uac_replace", "rewriteuri", "subst_uri", "subst_user"} {
+		if strings.Contains(cfg, forbidden) {
+			t.Errorf("kamailio.cfg uses %s: the trunk path must forward the Request-URI unchanged", forbidden)
+		}
+	}
+	ruriAssign := regexp.MustCompile(`(?m)^\s*\$(ru|rU)\s*=`)
+	if loc := ruriAssign.FindStringIndex(cfg); loc != nil {
+		line := strings.Count(cfg[:loc[0]], "\n") + 1
+		t.Errorf("kamailio.cfg line %d assigns the Request-URI (%s): the trunk path must forward it unchanged", line, strings.TrimSpace(ruriAssign.FindString(cfg)))
+	}
+
+	// The trunk path itself: FROM_PHONE relays initial dialog-forming
+	// requests to a hello-sip node through TO_HELLO, neither touching the
+	// R-URI. A route that starts rewriting there is drift.
+	for _, route := range []string{"FROM_PHONE", "TO_HELLO"} {
+		body, ok := kamailioRoute(cfg, route)
+		if !ok {
+			t.Fatalf("route[%s] not found in kamailio.cfg", route)
+		}
+		if ruriAssign.MatchString(body) || strings.Contains(body, "uac_replace") {
+			t.Errorf("route[%s] rewrites the Request-URI; the trunk path must forward it unchanged:\n%s", route, body)
+		}
+	}
+	if body, _ := kamailioRoute(cfg, "FROM_PHONE"); !strings.Contains(body, "route(TO_HELLO)") {
+		t.Error("route[FROM_PHONE] does not relay initial requests through route(TO_HELLO)")
+	}
+}
+
+// kamailioRoute extracts a named route's body (route[NAME] { ... }) from a
+// kamailio.cfg.
+func kamailioRoute(cfg, name string) (string, bool) {
+	start := strings.Index(cfg, "route["+name+"] {")
+	if start < 0 {
+		return "", false
+	}
+	body := cfg[start+len("route["+name+"] {"):]
+	if end := strings.Index(body, "\nroute["); end >= 0 {
+		body = body[:end]
+	}
+	return body, true
 }
 
 // TestKamailioHelloSocketVetsSource guards the trust boundary of the hello

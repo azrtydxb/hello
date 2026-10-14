@@ -32,13 +32,6 @@ func cdrFilter(w http.ResponseWriter, r *http.Request) (store.CDRFilter, bool) {
 		badRequest(w, `failed must be "true" or "false"`)
 		return f, false
 	}
-	if va := q.Get("voiceAgent"); va != "" {
-		if !voiceAgentNameRe.MatchString(va) {
-			badRequest(w, "voiceAgent must be an agent name")
-			return f, false
-		}
-		f.VoiceAgent = va
-	}
 	return f, true
 }
 

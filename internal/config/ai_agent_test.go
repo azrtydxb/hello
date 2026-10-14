@@ -49,7 +49,7 @@ func TestLoadAIAgentSet(t *testing.T) {
 		"HELLO_AI_VALIDATION_ATTEMPTS": "5", "HELLO_AI_MAX_STEPS": "4", "HELLO_AI_MAX_CONCURRENCY": "6",
 		"HELLO_AI_REQUESTS_PER_MINUTE": "100", "HELLO_AI_TIMEOUT": "30s", "HELLO_AI_DAILY_TOKEN_BUDGET": "5000000000",
 		"HELLO_AI_BACKGROUND_BUDGET_PERCENT": "100", "HELLO_AI_AGENT_START_DELAY": "0s", "HELLO_AI_AIOPS_INTERVAL": "0s",
-		"HELLO_AI_EXPLAIN_MIN_INTERVAL": "1m",
+		"HELLO_AI_EXPLAIN_MIN_INTERVAL": "1m", "HELLO_AI_THINKING": "on",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestLoadAIAgentSet(t *testing.T) {
 	want := AIAgent{Provider: "anthropic", BaseURL: "https://api.example", Model: "m1", APIKey: "sk-secret-key",
 		AllowPublic: true, StructuredOutput: "prompt", ValidationAttempts: 5, MaxSteps: 4, MaxConcurrency: 6,
 		RequestsPerMinute: 100, Timeout: 30 * time.Second, DailyTokenBudget: 5_000_000_000,
-		BackgroundBudgetPercent: 100, ExplainMinInterval: time.Minute}
+		BackgroundBudgetPercent: 100, ExplainMinInterval: time.Minute, Thinking: true}
 	if c.AIAgent != want {
 		t.Fatalf("AIAgent = %+v, want %+v", c.AIAgent, want)
 	}
@@ -78,6 +78,7 @@ func TestLoadAIAgentRejects(t *testing.T) {
 	for key, vals := range map[string][]string{
 		"HELLO_AI_PROVIDER":                  {"gemini", "OpenAI"},
 		"HELLO_AI_STRUCTURED_OUTPUT":         {"json", "tools"},
+		"HELLO_AI_THINKING":                  {"true", "ON", "1"},
 		"HELLO_AI_BACKGROUND_BUDGET_PERCENT": {"0", "101", "-5", "x"},
 		"HELLO_AI_VALIDATION_ATTEMPTS":       {"0", "-1", "x"},
 		"HELLO_AI_MAX_STEPS":                 {"0", "x"},

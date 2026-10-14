@@ -24,6 +24,13 @@ func latencyConfig() Config {
 				{Host: fmt.Sprintf("10.0.%d.3", id), Port: 5060, Priority: 1, Weight: 1},
 			}})
 	}
+	// Internal dialing (trunk plan Task 1): a policy and an any-DID
+	// "internal" route, so trunk-sourced decisions pay the same costs.
+	cfg.Trunks[0].InternalDialing = Dialing{Mode: "patterns", Patterns: []string{"1XXX", "05X", `^\+9714[0-9]+$`}}
+	cfg.Inbound = append(cfg.Inbound,
+		InboundRoute{ID: 30, Position: 400, Name: "Internal any", DIDKind: "any", TrunkID: 1,
+			DestinationKind: "internal", Enabled: true},
+	)
 	sched := &Schedule{TimeZone: "Asia/Dubai", Windows: []Window{{Days: []time.Weekday{0, 1, 2, 3, 4}, Start: "08:00", End: "18:00"}}}
 	for i := range 98 {
 		r := OutboundRoute{ID: int64(i + 1), Position: i, Name: fmt.Sprintf("r%02d", i), Enabled: true, Trunks: []int64{1, 2, 3}}
@@ -55,6 +62,21 @@ func latencyCalls(t testing.TB, n int) []Call {
 	calls := make([]Call, n)
 	for i := range calls {
 		calls[i] = Call{FromExtension: "101", Number: fmt.Sprintf("05%08d", i*7919%100000000), At: mon}
+	}
+	return calls
+}
+
+// latencyTrunkCalls are trunk-sourced: internal hits on the 1XXX pattern
+// and policy misses that fall through to 404.
+func latencyTrunkCalls(t testing.TB, n int) []Call {
+	mon := at(t, "2026-10-05 10:00")
+	calls := make([]Call, n)
+	for i := range calls {
+		num := fmt.Sprintf("%04d", i*7919%10000)
+		if i%2 == 0 {
+			num = "9" + num[1:] // outside every pattern
+		}
+		calls[i] = Call{FromTrunk: 1, Number: num, At: mon}
 	}
 	return calls
 }
@@ -103,6 +125,17 @@ func TestRoutingDecisionLatency(t *testing.T) {
 func BenchmarkDecide(b *testing.B) {
 	tbl := mustCompile(b, latencyConfig())
 	calls := latencyCalls(b, 1024)
+	b.ReportAllocs()
+	i := 0
+	for b.Loop() {
+		tbl.Decide(calls[i%len(calls)], latencyUsable)
+		i++
+	}
+}
+
+func BenchmarkDecideTrunkInternal(b *testing.B) {
+	tbl := mustCompile(b, latencyConfig())
+	calls := latencyTrunkCalls(b, 1024)
 	b.ReportAllocs()
 	i := 0
 	for b.Loop() {

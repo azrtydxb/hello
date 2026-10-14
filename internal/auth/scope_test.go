@@ -104,32 +104,3 @@ func TestPrefixedAndReplay(t *testing.T) {
 		t.Fatalf("service actor = %q", got)
 	}
 }
-
-// TestVoiceRuntimeScope fails if voice-runtime grants anything but itself,
-// is implied by any other scope, is grantable to a user role (and so to
-// consent or a personal token), or cannot be parsed for a service account.
-func TestVoiceRuntimeScope(t *testing.T) {
-	held := Scopes{ScopeVoiceRuntime}
-	for _, s := range []Scope{ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeSession} {
-		if held.Has(s) {
-			t.Errorf("voice-runtime grants %s", s)
-		}
-	}
-	if !held.Has(ScopeVoiceRuntime) {
-		t.Error("voice-runtime does not grant itself")
-	}
-	if (Scopes{ScopeAdmin, ScopeSecrets, ScopeSession, ScopeWrite}).Has(ScopeVoiceRuntime) || AllScopes.Has(ScopeVoiceRuntime) {
-		t.Error("another scope implies voice-runtime")
-	}
-	for _, r := range []Role{RoleViewer, RoleOperator, RoleAdmin} {
-		if GrantableScopes(r).Has(ScopeVoiceRuntime) {
-			t.Errorf("role %s may grant voice-runtime", r)
-		}
-	}
-	if ss, err := ParseScopes("voice-runtime"); err != nil || !ss.Has(ScopeVoiceRuntime) || ss.String() != "voice-runtime" {
-		t.Errorf("ParseScopes = %v, %v", ss, err)
-	}
-	if !ServiceOnly(ScopeVoiceRuntime) || ServiceOnly(ScopeAdmin) {
-		t.Error("ServiceOnly wrong")
-	}
-}

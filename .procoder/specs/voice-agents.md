@@ -28,6 +28,8 @@ Verified against talking-agent at commit `0ba7185` (`deploy/sip/README.md`, `dep
 - tools run through `tools.Executor` (`Execute(ctx, Definition, Request, telemetry.Sink) Result`), today an `HTTPExecutor`
 - licence file is `LICENSE.md` (see Open questions)
 
+> Cancelled with the pivot recorded in `.procoder/ask/decisions.md`: voice agents leave Hello and become a separate product that connects through SIP trunks. History kept.
+
 ## Problem
 
 Hello routes a call to a person, a ring group or a trunk. An operator who wants a voice assistant today must run talking-agent, open its separate settings UI, type persona numbers there, and add a Hello inbound route with a raw `sip_uri` to it. Two consoles, two sources of truth for numbers, no CDR link between the call and the persona that answered, no way to give each persona its own tools, and nothing in Hello that says an agent exists. The vision is that an operator creates a voice agent with a persona in Hello's console in a few minutes, attaches the MCP servers it may use, and then treats it like any phone: an extension, a DID, a ring group member or last resort, a route destination, a line in the CDRs.

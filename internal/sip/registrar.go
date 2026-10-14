@@ -31,11 +31,6 @@ func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
 	if s.refuseIfNotReady(req, tx) {
 		return
 	}
-	if s.fromVoiceAgent(req) {
-		// The voice agent's address never registers either (S-14).
-		s.respond(tx, req, sip.StatusForbidden, "Forbidden")
-		return
-	}
 	dev, _, ok := s.authenticate(req, tx)
 	if !ok {
 		return

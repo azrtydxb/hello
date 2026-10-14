@@ -8,14 +8,12 @@ import (
 
 // TestRoutesTable fails if a route is listed twice, a private route lacks a
 // scope or carries a role other than its scope's (read and session →
-// viewer, write → operator, admin and secrets → admin, voice-runtime →
-// viewer: the scope alone gates it, a service account's minimum), a public
+// viewer, write → operator, admin and secrets → admin), a public
 // route carries either, or the secrets scope drifts from spec S-5's list.
 func TestRoutesTable(t *testing.T) {
 	roleOf := map[auth.Scope]auth.Role{
 		auth.ScopeRead: auth.RoleViewer, auth.ScopeSession: auth.RoleViewer,
 		auth.ScopeWrite: auth.RoleOperator, auth.ScopeAdmin: auth.RoleAdmin, auth.ScopeSecrets: auth.RoleAdmin,
-		auth.ScopeVoiceRuntime: auth.RoleViewer,
 	}
 	secrets := map[string]bool{
 		"POST /api/v1/devices/{id}/rotate-secret":        true,

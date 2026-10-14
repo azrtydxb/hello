@@ -133,37 +133,30 @@ func (t *Table) fromExtension(d *Decision, c Call, usable TrunkUsability) {
 		d.Kind, d.Extension, d.CallerID = KindInternal, c.Number, c.FromExtension
 		return
 	}
-	// An agent's extension resolves to the agent (spec S-13), so a transfer
-	// or a feature code that names the number reaches the agent too.
-	name, agent := t.voiceExt[c.Number]
-	if agent {
-		ref, uri, ok := t.voiceRef(name)
-		switch {
-		case !ok:
-			d.reject(codeInternal, fmt.Sprintf("Voice agent %s does not exist", quote(name)))
-		case t.voiceAddr == "":
-			d.reject(codeNoTrunk, "Voice agents are not configured (HELLO_VOICE_SIP_ADDRESS unset); voice agent "+quote(name)+" is unreachable")
-		default:
-			d.Trace.Add(fmt.Sprintf("Internal extension lookup %s -> voice agent %s (%s)", quote(c.Number), quote(ref.Name), uri))
-			d.Kind, d.SIPURI, d.VoiceAgent = KindInbound, uri, &ref
-			d.CallerID = c.FromExtension
-		}
-		return
-	}
 	d.Trace.Add(fmt.Sprintf("Internal extension lookup %s -> no match", quote(c.Number)))
 	t.outboundRoute(d, c.Number, outboundSource{ext: c.FromExtension}, c, usable)
 }
 
 // outboundSource is who an outbound call is from: an extension, or (for an
 // inbound route with an external destination) a trunk and the caller ID the
-// inbound route produced.
+// inbound route produced. hopped marks a call that has already been routed
+// outbound once; a second pass is an invariant break (spec S-3), rejected
+// 403.
 type outboundSource struct {
 	ext      string
 	trunk    *Trunk
 	callerID string
+	hopped   bool
 }
 
 func (t *Table) outboundRoute(d *Decision, number string, src outboundSource, c Call, usable TrunkUsability) {
+	if src.hopped {
+		// Unreachable today: an inbound route's external destination is
+		// the only re-entry and it fires once. Stated so a future path
+		// that walks outbound routing twice fails closed, not open.
+		d.reject(codeForbidden, loopReentry)
+		return
+	}
 	r := t.matchOutbound(&d.Trace, number, src, c.At)
 	if r == nil {
 		d.reject(codeNotFound, fmt.Sprintf("No outbound route matched %s", quote(number)))
@@ -183,8 +176,17 @@ func (t *Table) outboundRoute(d *Decision, number string, src outboundSource, c 
 	}
 	d.Number = out
 
-	if skipped := t.candidates(d, r, number, usable); len(d.Candidates) == 0 {
-		d.reject(codeNoTrunk, fmt.Sprintf("No usable trunk on route %s (%s)", strconv.Quote(r.r.Name), strings.Join(skipped, "; ")))
+	skipped, looped := t.candidates(d, r, number, src, usable)
+	if len(d.Candidates) == 0 {
+		switch {
+		case looped:
+			// The loop guard emptied the candidate list: 403, not 503
+			// (spec S-3).
+			d.reject(codeForbidden, fmt.Sprintf("Loop prevented: no trunk left on route %s (%s)",
+				strconv.Quote(r.r.Name), strings.Join(skipped, "; ")))
+		default:
+			d.reject(codeNoTrunk, fmt.Sprintf("No usable trunk on route %s (%s)", strconv.Quote(r.r.Name), strings.Join(skipped, "; ")))
+		}
 		return
 	}
 	cid, failed := t.outboundCallerID(&d.Trace, r, src, d.Candidates[0].Trunk)
@@ -238,12 +240,21 @@ func (t *Table) matchOutbound(tr *Trace, number string, src outboundSource, at t
 
 // candidates appends the route's usable trunks, in route order, to
 // d.Candidates, each with its destinations in try order, and returns
-// "name: reason" for each skipped trunk.
-func (t *Table) candidates(d *Decision, r *compiledOutbound, number string, usable TrunkUsability) (skipped []string) {
+// "name: reason" for each skipped trunk. A trunk-sourced call never leaves
+// through the trunk it arrived on (spec S-3): the source trunk is filtered
+// from the candidates with a traced skip, and loopFiltered reports that it
+// was.
+func (t *Table) candidates(d *Decision, r *compiledOutbound, number string, src outboundSource, usable TrunkUsability) (skipped []string, loopFiltered bool) {
 	for _, id := range r.r.Trunks {
 		tr, _ := t.Trunk(id)
 		if tr == nil {
 			continue // Compile guarantees every trunk exists
+		}
+		if src.trunk != nil && tr.ID == src.trunk.ID {
+			d.Trace.Add(fmt.Sprintf("Trunk %s skipped: %s", tr.Name, loopSkipReason))
+			skipped = append(skipped, tr.Name+": "+loopSkipReason)
+			loopFiltered = true
+			continue
 		}
 		reason := ""
 		switch {
@@ -270,7 +281,7 @@ func (t *Table) candidates(d *Decision, r *compiledOutbound, number string, usab
 		d.Trace.Add(fmt.Sprintf("Trunk %s usable (credentials: %s); destinations: %s", tr.Name, creds, joinDestinations(dsts)))
 		d.Candidates = append(d.Candidates, Candidate{Trunk: tr, Destinations: dsts})
 	}
-	return skipped
+	return skipped, loopFiltered
 }
 
 // outboundCallerID picks and rewrites the caller ID (spec S-10): the
@@ -360,6 +371,12 @@ func (t *Table) fromTrunk(d *Decision, c Call, usable TrunkUsability) {
 	}
 	d.Number = did
 
+	// The trunk's internal dialing policy, checked once per call (spec
+	// S-2): verdict traced before the route walk, enforced on the walk's
+	// "internal" destinations.
+	allowed, pat := t.dialingAllows(src, did)
+	d.Trace.Add(dialingVerdict(src, did, allowed, pat))
+
 	var r *compiledInbound
 	var how string
 	for i := range t.inbound {
@@ -373,6 +390,10 @@ func (t *Table) fromTrunk(d *Decision, c Call, usable TrunkUsability) {
 			d.Trace.Add(fmt.Sprintf("Route %s skipped: %s", name, reason))
 			continue
 		}
+		if cand.r.DestinationKind == "internal" && !allowed {
+			d.Trace.Add(fmt.Sprintf("Route %s skipped: %s", name, dialingSkip(src, did)))
+			continue
+		}
 		r, how = cand, desc
 		break
 	}
@@ -383,27 +404,39 @@ func (t *Table) fromTrunk(d *Decision, c Call, usable TrunkUsability) {
 	d.Trace.Add(fmt.Sprintf("Route %s matched (%s)", strconv.Quote(r.r.Name), how))
 	d.Route = r.r.Name
 
-	// Caller ID as received; the route's transform normalises it. Inbound,
-	// a transform that fails (e.g. "anonymous") keeps the received value:
-	// rejecting a carrier's call over its caller ID would lose the call.
-	cid := inboundCallerID(&d.Trace, &r.callerID, c.CallerID)
+	// Caller ID: for a call ringing an internal extension ("extension" or
+	// "internal" destination) the ladder of spec S-4 — received, else the
+	// trunk's default, else the trunk name in angle brackets; for the
+	// other destinations the received value, as before. The route's
+	// transform applies afterwards, as today. Inbound, a transform that
+	// fails keeps the chosen value: rejecting a carrier's call over its
+	// caller ID would lose the call.
+	var cid string
+	switch r.r.DestinationKind {
+	case "extension", "internal":
+		cid = normaliseCallerID(&d.Trace, &r.callerID, internalCallerID(&d.Trace, src, c.CallerID))
+	default:
+		cid = inboundCallerID(&d.Trace, &r.callerID, c.CallerID)
+	}
 	d.CallerID = cid
 
 	switch r.r.DestinationKind {
 	case "extension":
 		d.Trace.Add("Destination: extension " + show(r.r.Destination))
 		d.Kind, d.Extension = KindInbound, r.r.Destination
+	case "internal":
+		d.Trace.Add("Destination: internal")
+		ext, ok := t.extensionFor(did)
+		if !ok {
+			d.Trace.Add(fmt.Sprintf("Internal lookup %s -> no match", show(did)))
+			d.reject(codeNotFound, fmt.Sprintf("DID %s is not an internal number", show(did)))
+			return
+		}
+		d.Trace.Add(fmt.Sprintf("Internal lookup %s -> extension %s", show(did), show(ext)))
+		d.Kind, d.Extension = KindInbound, ext
 	case "sip_uri":
 		d.Trace.Add("Destination: SIP URI " + r.r.Destination)
 		d.Kind, d.SIPURI = KindInbound, r.r.Destination
-	case "voice_agent":
-		ref, uri, ok := t.voiceRef(r.r.Destination)
-		if !ok {
-			d.reject(codeInternal, fmt.Sprintf("Destination: voice agent %s does not exist", quote(r.r.Destination)))
-			return
-		}
-		d.Trace.Add(fmt.Sprintf("Destination: voice agent %s (%s)", quote(ref.Name), uri))
-		d.Kind, d.SIPURI, d.VoiceAgent = KindInbound, uri, &ref
 	case "external":
 		// Routed through outbound routing as a call from the source trunk:
 		// no internal extension lookup (use an "extension" destination for

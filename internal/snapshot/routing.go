@@ -58,33 +58,43 @@ func (s *Snapshot) WithRouting(r *RoutingState) *Snapshot {
 	return s
 }
 
-// loadRouting reads trunks, destinations, routes and external numbers. A
-// password that does not open marks its trunk misconfigured (logged); it is
-// never dropped silently and never logged itself.
-func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Logger) (routing.Config, map[int64]string, error) {
-	cfg := routing.Config{Extensions: map[string]string{}, ResolvedIPs: map[int64][]netip.Addr{}}
-	bad := map[int64]string{}
-
+// loadTrunks reads every trunk and marks one bad whose password does not
+// open or whose stored internal dialing policy does not compile; the
+// destinations are attached later. A bad trunk is logged, never dropped
+// silently, and never logged itself (only its ID and reason are).
+func loadTrunks(ctx context.Context, db Querier, box *secret.Box, log *slog.Logger, cfg *routing.Config, bad map[int64]string) error {
 	rows, err := db.Query(ctx, `SELECT id, name, mode, username, password_enc, realm, from_domain, register_expires,
-		options_interval, source_cidrs, max_calls, default_caller_id, enabled FROM trunks ORDER BY id`)
+		options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing FROM trunks ORDER BY id`)
 	if err != nil {
-		return cfg, nil, fmt.Errorf("snapshot: trunks: %w", err)
+		return fmt.Errorf("snapshot: trunks: %w", err)
 	}
+	defer rows.Close()
 	for rows.Next() {
 		var (
 			t         routing.Trunk
 			sealed    []byte
+			dialing   []byte
 			reg, opts int32
 			maxCalls  int32
 		)
 		if err := rows.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &sealed, &t.Realm, &t.FromDomain, &reg,
-			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled); err != nil {
-			rows.Close()
-			return cfg, nil, fmt.Errorf("snapshot: scan trunk: %w", err)
+			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled, &dialing); err != nil {
+			return fmt.Errorf("snapshot: scan trunk: %w", err)
 		}
 		t.RegisterExpires = time.Duration(reg) * time.Second
 		t.OptionsInterval = time.Duration(opts) * time.Second
 		t.MaxCalls = int(maxCalls)
+		if err := json.Unmarshal(dialing, &t.InternalDialing); err != nil {
+			return fmt.Errorf("snapshot: decode trunk %d internal_dialing: %w", t.ID, err)
+		}
+		if why := checkDialing(&t); why != "" {
+			// Only reachable by writing the column directly: a stored
+			// policy that does not compile makes the trunk misconfigured,
+			// like a password that does not open — routing skips it, and
+			// dropping the policy to "off" keeps the rest of the
+			// configuration compiling.
+			bad[t.ID] = why
+		}
 		if sealed != nil {
 			if box == nil {
 				bad[t.ID] = "no secret key to open the trunk password"
@@ -96,21 +106,33 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 		}
 		cfg.Trunks = append(cfg.Trunks, t)
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
-		return cfg, nil, fmt.Errorf("snapshot: trunks: %w", err)
+		return fmt.Errorf("snapshot: trunks: %w", err)
 	}
 	for id, why := range bad {
 		if log != nil {
 			log.Error("trunk misconfigured: it will not be registered or used", "trunk_id", id, "reason", why)
 		}
 	}
+	return nil
+}
+
+// loadRouting reads trunks, destinations, routes and external numbers. A
+// password that does not open marks its trunk misconfigured (logged); it is
+// never dropped silently and never logged itself.
+func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Logger) (routing.Config, map[int64]string, error) {
+	cfg := routing.Config{Extensions: map[string]string{}, ResolvedIPs: map[int64][]netip.Addr{}}
+	bad := map[int64]string{}
+
+	if err := loadTrunks(ctx, db, box, log, &cfg, bad); err != nil {
+		return cfg, nil, err
+	}
 
 	byID := map[int64]*routing.Trunk{}
 	for i := range cfg.Trunks {
 		byID[cfg.Trunks[i].ID] = &cfg.Trunks[i]
 	}
-	rows, err = db.Query(ctx, `SELECT trunk_id, host, port, priority, weight FROM trunk_destinations ORDER BY trunk_id, priority, id`)
+	rows, err := db.Query(ctx, `SELECT trunk_id, host, port, priority, weight FROM trunk_destinations ORDER BY trunk_id, priority, id`)
 	if err != nil {
 		return cfg, nil, fmt.Errorf("snapshot: destinations: %w", err)
 	}
@@ -156,42 +178,7 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 	if err := rows.Err(); err != nil {
 		return cfg, nil, fmt.Errorf("snapshot: external numbers: %w", err)
 	}
-	if err := loadVoiceAgents(ctx, db, &cfg); err != nil {
-		return cfg, nil, err
-	}
 	return cfg, bad, nil
-}
-
-// loadVoiceAgents adds the registry to the routing input (the same rows the
-// control plane's whole-configuration validation compiles against): name,
-// sip user and enabled state for the engine's voice_agent destinations, and
-// every agent's extension for the internal dialling of S-13.
-func loadVoiceAgents(ctx context.Context, db Querier, cfg *routing.Config) error {
-	rows, err := db.Query(ctx, `SELECT name, sip_user, enabled, extension FROM voice_agents ORDER BY name`)
-	if err != nil {
-		return fmt.Errorf("snapshot: voice agents: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			a   routing.VoiceAgent
-			ext *string
-		)
-		if err := rows.Scan(&a.Name, &a.SIPUser, &a.Enabled, &ext); err != nil {
-			return fmt.Errorf("snapshot: scan voice agent: %w", err)
-		}
-		cfg.VoiceAgents = append(cfg.VoiceAgents, a)
-		if ext != nil {
-			if cfg.VoiceAgentExtensions == nil {
-				cfg.VoiceAgentExtensions = map[string]string{}
-			}
-			cfg.VoiceAgentExtensions[*ext] = a.Name
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("snapshot: voice agents: %w", err)
-	}
-	return nil
 }
 
 func loadOutbound(ctx context.Context, db Querier, cfg *routing.Config) error {

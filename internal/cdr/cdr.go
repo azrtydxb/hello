@@ -63,9 +63,6 @@ type Record struct {
 	RTPPackets  *int64
 	RTPLost     *int64
 	RTPJitterMs *float64
-	// VoiceAgent is the name of the voice agent the call was routed to
-	// (spec voice-agents S-23), empty for every other call.
-	VoiceAgent string
 }
 
 // Execer is the subset of a pgx pool or connection the writer needs.
@@ -127,20 +124,6 @@ const insert = `INSERT INTO cdrs (correlation_id, sip_call_id, source, destinati
     rtp_packets, rtp_lost, rtp_jitter_ms)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18, $19, $20, $21, $22, $23, $24)
-ON CONFLICT (correlation_id) DO NOTHING`
-
-// insertVoice adds the voice agent columns (spec voice-agents S-23): the
-// name as it was at call time, and the agent's id resolved by name — the
-// SIP node knows the name from the routing decision, not the registry's
-// id. An agent deleted before the write leaves the id NULL.
-const insertVoice = `INSERT INTO cdrs (correlation_id, sip_call_id, source, destination,
-    start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
-    sip_node, media_mode, final_status, termination_side, failure_reason,
-    direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
-    rtp_packets, rtp_lost, rtp_jitter_ms, voice_agent_id, voice_agent_name)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24,
-    CASE WHEN $25 = '' THEN NULL ELSE (SELECT id FROM voice_agents WHERE name = $25) END, $25)
 ON CONFLICT (correlation_id) DO NOTHING`
 
 // Run writes queued records until ctx is cancelled, retrying each with
@@ -216,14 +199,6 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	}
 	tj, err := json.Marshal(trace)
 	if err != nil {
-		return err
-	}
-	if r.VoiceAgent != "" {
-		_, err = w.db.Exec(wctx, insertVoice, r.CorrelationID, r.SIPCallID, r.Source, r.Destination,
-			r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
-			r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
-			direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
-			r.RTPPackets, r.RTPLost, r.RTPJitterMs, r.VoiceAgent)
 		return err
 	}
 	_, err = w.db.Exec(wctx, insert, r.CorrelationID, r.SIPCallID, r.Source, r.Destination,

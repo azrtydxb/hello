@@ -29,9 +29,8 @@ type Options struct {
 	// phone is reached through an address other than Listen.
 	ContactHost string
 	// Conn, when set, is served instead of binding Listen: a test that
-	// needs the phone on one exact address (a fake voice agent whose
-	// address the node under test refuses as a caller) reserves the socket
-	// first and hands it over.
+	// needs the phone on one exact address reserves the socket first and
+	// hands it over.
 	Conn net.PacketConn
 }
 

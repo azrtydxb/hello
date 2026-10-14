@@ -173,8 +173,9 @@ func TestCallSimultaneous2xx(t *testing.T) {
 		p.register(t)
 	}
 	go1 := make(chan struct{})
-	b1.setCallee(answerAfter(go1))
-	b2.setCallee(answerAfter(go1))
+	ans1, ans2 := make(chan bool, 1), make(chan bool, 1)
+	b1.setCallee(answerReporting(go1, ans1))
+	b2.setCallee(answerReporting(go1, ans2))
 	res := dial(t.Context(), a, "200")
 	waitReq(t, b1.invites, "b1 INVITE")
 	waitReq(t, b2.invites, "b2 INVITE")
@@ -182,6 +183,39 @@ func TestCallSimultaneous2xx(t *testing.T) {
 	r := waitCall(t, res)
 	if r.err != nil {
 		t.Fatal(r.err)
+	}
+	sent := func(ch chan bool, what string) bool {
+		t.Helper()
+		select {
+		case v := <-ch:
+			return v
+		case <-time.After(10 * time.Second):
+			t.Fatalf("timed out waiting for %s to finish answering", what)
+			return false
+		}
+	}
+	s1, s2 := sent(ans1, "b1"), sent(ans2, "b2")
+	if !s1 && !s2 {
+		t.Fatal("call connected but neither fork sent a 200")
+	}
+	if !s1 || !s2 {
+		// The winner's CANCEL beat the other phone's 200 to it: that phone
+		// answered 487, so there is no second 2xx and nothing to BYE. (A
+		// 2xx crossing a CANCEL is TestCallCancelRacing200's scenario.)
+		winner, loser := b1, b2
+		if s2 {
+			winner, loser = b2, b1
+		}
+		waitReq(t, winner.acks, "ACK to the winner")
+		noReq(t, loser.byes, 200*time.Millisecond, "BYE to a fork whose 200 never went out")
+		noReq(t, winner.byes, 200*time.Millisecond, "BYE to the winner")
+		hangup(t, r.dcs)
+		waitReq(t, winner.byes, "BYE to the winner after hangup")
+		if cd := pbx.nextCDR(t); cd.FinalStatus != 200 {
+			t.Fatalf("CDR = %+v", cd)
+		}
+		pbx.noCDR(t, 100*time.Millisecond)
+		return
 	}
 	// Both 2xx are answered with the anchor's SDP either way (spec S-7):
 	// the loser is whichever fork the node sends the losing-leg BYE to.

@@ -126,6 +126,10 @@ func generate[T any](ctx context.Context, s *Service, call Call[T]) (any, Usage,
 	}
 	maxTokens, lengthRetried := defaultMaxTokens, false
 	attempts := max(s.cfg.ValidationAttempts, 1)
+	var fs *fieldStream
+	if call.Stream != nil {
+		fs = newFieldStream(call.Stream)
+	}
 
 	for attempt := 1; ; {
 		tools := call.Tools
@@ -133,9 +137,17 @@ func generate[T any](ctx context.Context, s *Service, call Call[T]) (any, Usage,
 			tools = nil
 		}
 		mt := maxTokens
-		a := runOnce(ctx, s, aisdk.GenerateTextOpts{
+		opts := aisdk.GenerateTextOpts{
 			System: system, Messages: msgs, Tools: tools, MaxSteps: max(stepsLeft, 1), MaxTokens: &mt,
-		}, useOutput, outputOf[T])
+			ProviderOptions: s.providerOptions(),
+		}
+		var a attemptResult
+		if fs != nil {
+			fs.reset() // a new attempt voids any text the last one streamed
+			a = streamOnce(ctx, s, opts, useOutput, outputOf[T], fs)
+		} else {
+			a = runOnce(ctx, s, opts, useOutput, outputOf[T])
+		}
 		u = u.add(stepUsage(a.steps))
 		var noObject *aisdk.NoObjectGeneratedError
 		if a.err != nil && !errors.As(a.err, &noObject) {
@@ -179,6 +191,22 @@ func generate[T any](ctx context.Context, s *Service, call Call[T]) (any, Usage,
 	}
 }
 
+// providerOptions is what every model call adds to the request body. With
+// HELLO_AI_THINKING=off and an OpenAI-compatible provider it is
+// chat_template_kwargs.enable_thinking=false, which vLLM hands to the chat
+// template of a reasoning model (Qwen3) and which templates without that
+// switch ignore. It is never sent to another provider, and no
+// reasoning_effort is sent: a server that validates that field strictly
+// would reject it.
+func (s *Service) providerOptions() map[string]any {
+	if s.cfg.Thinking || (s.cfg.Provider != "" && s.cfg.Provider != "openai") {
+		return nil
+	}
+	return map[string]any{"openai": map[string]any{
+		"chat_template_kwargs": map[string]any{"enable_thinking": false},
+	}}
+}
+
 func outputOf[T any]() aisdk.Output { return aisdk.OutputObject[T]() }
 
 // runOnce runs GenerateText once, capturing every finished step.
@@ -190,6 +218,46 @@ func runOnce(ctx context.Context, s *Service, opts aisdk.GenerateTextOpts, useOu
 	}
 	opts.OnStepFinish = func(st aisdk.Step) { a.steps = append(a.steps, st) }
 	a.res, a.err = aisdk.GenerateText(ctx, opts)
+	return a
+}
+
+// streamOnce is runOnce on the model's streaming API: the same steps and
+// result, with the answer field and the model's reasoning reported to fs as
+// they arrive.
+func streamOnce(ctx context.Context, s *Service, opts aisdk.GenerateTextOpts, useOutput bool, out func() aisdk.Output, fs *fieldStream) attemptResult {
+	var a attemptResult
+	opts.Model = s.model
+	if useOutput {
+		opts.Output = out()
+	}
+	opts.OnStepFinish = func(st aisdk.Step) { a.steps = append(a.steps, st) }
+	ts, err := aisdk.StreamText(ctx, opts)
+	if err != nil {
+		a.err = err
+		return a
+	}
+	defer func() { _ = ts.Close() }()
+	for p := range ts.Parts() {
+		switch part := p.(type) {
+		case provider.TextDelta:
+			fs.text(part.Text)
+		case provider.ReasoningDelta:
+			fs.reasoning()
+		case provider.FinishPart:
+			fs.endStep(part.Reason)
+		}
+	}
+	if a.err = ts.Err(); a.err != nil {
+		return a
+	}
+	if useOutput {
+		v, err := ts.Output()
+		if err != nil {
+			a.err = err
+			return a
+		}
+		a.res = &aisdk.GenerateTextResult{Output: v}
+	}
 	return a
 }
 

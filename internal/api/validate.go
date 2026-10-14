@@ -21,16 +21,15 @@ import (
 const maxRegexLen = 500
 
 var (
-	trunkNameRe      = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
-	voiceAgentNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
-	digitsRe         = regexp.MustCompile(`^[0-9+*#]{0,32}$`)
-	didRe            = regexp.MustCompile(`^\+?[0-9*#]{1,32}$`)
-	externalNumRe    = regexp.MustCompile(`^\+?[0-9*#]{2,32}$`)
-	callerIDRe       = regexp.MustCompile(`^(\+?[0-9]{2,20})?$`)
-	headerNameRe     = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
-	timeZoneRe       = regexp.MustCompile(`^[A-Za-z0-9_+/-]{1,64}$`)
-	hhmmRe           = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
-	hostLabelRe      = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+	trunkNameRe   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+	digitsRe      = regexp.MustCompile(`^[0-9+*#]{0,32}$`)
+	didRe         = regexp.MustCompile(`^\+?[0-9*#]{1,32}$`)
+	externalNumRe = regexp.MustCompile(`^\+?[0-9*#]{2,32}$`)
+	callerIDRe    = regexp.MustCompile(`^(\+?[0-9]{2,20})?$`)
+	headerNameRe  = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+	timeZoneRe    = regexp.MustCompile(`^[A-Za-z0-9_+/-]{1,64}$`)
+	hhmmRe        = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+	hostLabelRe   = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
 )
 
 type fieldErrs []routing.FieldError
@@ -378,6 +377,12 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 		if !numberRe.MatchString(in.Destination) {
 			f.add("destination", "must be an extension number (2-10 digits)")
 		}
+	case "internal":
+		// The DID the route matched names the target; the route carries
+		// none of its own, as the engine's compile also requires.
+		if in.Destination != "" {
+			f.add("destination", `must be empty when destinationKind is "internal"`)
+		}
 	case "external":
 		if !externalNumRe.MatchString(in.Destination) {
 			f.add("destination", "must be 2-32 of 0-9 * # with an optional leading +")
@@ -389,16 +394,8 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 		case !validSIPURI(in.Destination):
 			f.add("destination", "must be a sip: URI of at most 255 characters")
 		}
-	case "voice_agent":
-		// Stage 1 checks the shape only: the agent's existence, enabled
-		// state and the configured talking-agent address are the
-		// whole-configuration compile (stage 2), which answers
-		// voice_not_configured and names the route (spec S-10).
-		if !voiceAgentNameRe.MatchString(in.Destination) {
-			f.add("destination", "must be a voice agent name (1-64 of A-Z a-z 0-9 . _ -)")
-		}
 	default:
-		f.add("destinationKind", `must be "extension", "external", "sip_uri" or "voice_agent"`)
+		f.add("destinationKind", `must be "extension", "external", "internal" or "sip_uri"`)
 	}
 	return f
 }

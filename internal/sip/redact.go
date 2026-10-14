@@ -15,17 +15,11 @@ var authHeader = regexp.MustCompile(`(?im)^([ \t]*(?:proxy-)?authorization[ \t]*
 // lets a peer node reach a phone, so it is kept out of logs.
 var flowParam = regexp.MustCompile(`(?i)(\bhflow=)[^;>,\s"]*`)
 
-// voiceAuthHeader matches an X-Hello-Auth header with its folded
-// continuation lines: the call signature (spec voice-agents S-32) is kept
-// out of logs like any credential.
-var voiceAuthHeader = regexp.MustCompile(`(?im)^([ \t]*x-hello-auth[ \t]*:)[^\r\n]*(?:\r?\n[ \t][^\r\n]*)*`)
-
 // RedactSIP strips the values of Authorization and Proxy-Authorization
 // headers, folded or not, and of hflow flow tokens from a raw SIP message,
 // so it can be logged.
 func RedactSIP(msg string) string {
 	msg = authHeader.ReplaceAllString(msg, "${1} REDACTED")
-	msg = voiceAuthHeader.ReplaceAllString(msg, "${1} REDACTED")
 	return flowParam.ReplaceAllString(msg, "${1}REDACTED")
 }
 

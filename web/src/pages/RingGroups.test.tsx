@@ -111,7 +111,6 @@ describe("RingGroups", () => {
         members: [
           {
             extensionId: 1,
-            voiceAgentId: null,
             position: 1,
             weight: 1,
             delay: 0,

@@ -1,9 +1,11 @@
 # `TestVoiceCapacity` in `internal/sip` passes against `test/sipua`. It fails if an INVITE is sent after an agent's `max_concurrent` or `HELLO_VOICE_MAX_CALLS` is reached, the busy call does not take the next ring group step, failure target or route failover, the count does not drop when a call ends, or a `486` from the agent is mapped differently from Hello's own busy.
 
-Status: open
+Status: cancelled 2026-10-09 — the voice-agent feature left Hello (decision "Pivot: voice agents out of Hello", .procoder/ask/decisions.md)
 Created: 2026-10-08
 Epic: voice-agents
 Sprint: -
+
+> Cancelled with the pivot recorded in `.procoder/ask/decisions.md`: voice agents leave Hello and become a separate product that connects through SIP trunks. History kept.
 
 ## Description
 

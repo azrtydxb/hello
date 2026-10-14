@@ -55,7 +55,48 @@ your DID rather than the extension number.
 Open **Routes → Inbound** and map your DID (`exact`, for example `+97145551234`)
 from the trunk to an extension.
 
-## 5. The manual check
+## 5. Let a trunk dial internal numbers
+
+A trunk peer can reach your extensions by number: an inbound call whose
+dialled number is an extension rings it, without a DID map for every phone.
+What each trunk may dial is its own decision, made deliberately:
+
+- Open the trunk and set **Internal dialing** to `patterns`, then list what
+  the trunk may dial — an exact number (`1012`), an `X` pattern where each
+  `X` stands for any digit (`1XX` is every 100-block, `10XX` is 1000–1099),
+  or an anchored Go regex (`^101[2-9]$`). Patterns are checked top to
+  bottom, and the first match wins; the call's trace names the pattern that
+  let it through.
+- `all` opens every extension to the trunk. Because that is a toll-fraud
+  surface, the API and the form require a `confirm: true` beside it: the
+  trunk is not opened to every extension by a stray default in a client.
+- The default is `off`: an existing trunk gains no reach by an upgrade.
+
+A route with the **Internal** destination serves every extension: it looks
+the dialled number up in the extension list and rings what it finds, so one
+route (`DID: any`) covers the whole namespace. The policy is checked before
+the routes; a DID that matches no pattern skips the internal route (a traced
+skip, visible in Call History), and if no other route takes the call the
+peer hears **404** — a reject is a reject, never a silent failover.
+
+What the phone shows: the caller ID as the peer sent it, else the trunk's
+default caller ID, else the trunk's name in angle brackets (`<carrier-x>`),
+so a trunk-to-internal call is always attributable. The route's caller-ID
+transform applies to whatever the ladder produced, as with any call.
+
+Loop guards, because a trunk is untrusted routing input: a call that came
+from a trunk never leaves through that same trunk (it is removed from the
+candidates, and the trace says "call came from it"), and a call is routed
+outbound from a trunk at most once — a second attempt is rejected 403
+"loop prevented". Feature codes and every destination kind other than
+internal stay out of reach for trunk peers; this gate covers extensions
+only.
+
+Before going live, prove the reach in **Routes → Test** with `from:
+trunk:<id>`: the trace shows the policy verdict and the internal lookup
+exactly as a real call would see them.
+
+## 6. The manual check
 
 1. Call an external mobile from your extension. It rings, answers, and both
    sides hear audio.
