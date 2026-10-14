@@ -1,1 +1,3 @@
 pnpm-lock.yaml
+# Helm templates are Go templates, not YAML.
+deploy/helm/hello/templates/

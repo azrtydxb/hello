@@ -141,6 +141,181 @@ jobs:
           HELLO_LAB_CONTACT_HOST: 10.89.53.1
         run: go test -count=1 -timeout 50m -v ./test/integration/
 
+  chart:
+    # The Helm chart (deploy/helm/hello) rendered and checked: lint, the
+    # kubeconform schema check, and the test/deploy invariants. helm and
+    # kubeconform are tools here, not services: nothing is installed into a
+    # cluster (kind-upgrade does that).
+    runs-on: arc-azrtydxb
+    timeout-minutes: 20
+    container:
+      image: golang:1.27-bookworm
+    env:
+      HELM_VERSION: v4.1.1
+      KUBECONFORM_VERSION: v0.8.0
+      # A missing helm must fail test/deploy here, not skip.
+      HELLO_REQUIRE_HELM: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Trust the mounted workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install helm and kubeconform
+        run: |
+          arch=$(uname -m); case $arch in
+            x86_64) a=amd64 ;;
+            aarch64|arm64) a=arm64 ;;
+            *) echo "unsupported arch $arch"; exit 1 ;;
+          esac
+          cd "$(mktemp -d)"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz" -o helm.tgz
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz.sha256sum" -o helm.sha
+          echo "$(cut -d' ' -f1 helm.sha)  helm.tgz" | sha256sum -c -
+          tar -xzf helm.tgz "linux-${a}/helm"
+          install "linux-${a}/helm" /usr/local/bin/helm
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-${a}.tar.gz" -o kc.tgz
+          tar -xzf kc.tgz kubeconform
+          install kubeconform /usr/local/bin/kubeconform
+          helm version --short
+          kubeconform -v
+      - name: helm lint
+        run: |
+          helm lint --strict deploy/helm/hello -f deploy/helm/hello/values-eval.yaml
+          helm lint --strict deploy/helm/hello -f deploy/helm/hello/values-ha.yaml
+      - name: Chart invariants and kubeconform
+        run: go test -count=1 -v -run 'TestChart|TestKubernetesGuide' ./test/deploy/
+
+  kind-upgrade:
+    # Rolling upgrade with an active call (docs/kubernetes.md, "Upgrades"):
+    # builds the images from this commit, creates a kind cluster, installs
+    # the chart, registers two phones through Kamailio and connects a call,
+    # then `helm upgrade`s Hello's pods and Kamailio and requires the call to
+    # survive and hang up cleanly. Needs the runner's Docker daemon (as the
+    # lab job does), kind, kubectl and helm on the runner itself.
+    needs: [go]
+    runs-on: arc-azrtydxb
+    timeout-minutes: 60
+    env:
+      KIND_VERSION: v0.30.0
+      KUBECTL_VERSION: v1.34.0
+      HELM_VERSION: v4.1.1
+      HELLO_KIND_PASSWORD: kind-admin-password
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Tools on the runner
+        run: |
+          docker version
+          arch=$(uname -m); case $arch in
+            x86_64) a=amd64 ;;
+            aarch64|arm64) a=arm64 ;;
+            *) echo "unsupported arch $arch"; exit 1 ;;
+          esac
+          mkdir -p "$HOME/bin"
+          curl -fsSL "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${a}" -o "$HOME/bin/kind"
+          curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${a}/kubectl" -o "$HOME/bin/kubectl"
+          chmod +x "$HOME/bin/kind" "$HOME/bin/kubectl"
+          d=$(mktemp -d)
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz" -o "$d/helm.tgz"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz.sha256sum" -o "$d/helm.sha"
+          echo "$(cut -d' ' -f1 "$d/helm.sha")  $d/helm.tgz" | sha256sum -c -
+          tar -xzf "$d/helm.tgz" -C "$d" "linux-${a}/helm"
+          install "$d/linux-${a}/helm" "$HOME/bin/helm"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - name: Build the images from this commit
+        run: |
+          docker build --target hello-control -t hello.local/hello-control:ci .
+          docker build --target hello-sip -t hello.local/hello-sip:ci .
+          docker build -t hello.local/hello-ui:ci -f web/Dockerfile web
+          docker build -t hello.local/kamailio:ci docker/kamailio
+          # The upgrade changes the image tag: the same bits under a new name.
+          for i in hello-control hello-sip hello-ui kamailio; do
+            docker tag hello.local/$i:ci hello.local/$i:ci-upgrade
+          done
+      - name: Create the kind cluster
+        run: |
+          cat > kind.yaml <<'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+            - role: worker
+              kubeadmConfigPatches:
+                - |
+                  kind: JoinConfiguration
+                  nodeRegistration:
+                    kubeletExtraArgs:
+                      node-labels: "hello-edge=true"
+              extraPortMappings:
+                - { containerPort: 30508, hostPort: 30508, protocol: UDP }
+                - { containerPort: 30508, hostPort: 30508, protocol: TCP }
+                - { containerPort: 30081, hostPort: 30081, protocol: TCP }
+            - role: worker
+            - role: worker
+          EOF
+          kind create cluster --name hello --config kind.yaml --wait 5m
+          for i in hello-control hello-sip hello-ui kamailio; do
+            kind load docker-image --name hello hello.local/$i:ci hello.local/$i:ci-upgrade
+          done
+          kubectl get nodes -o wide
+      - name: Install the chart
+        run: |
+          kubectl create namespace hello
+          kubectl -n hello create secret generic hello-credentials \
+            --from-literal=dsn='postgres://hello:kind-pg-pass@hello-postgresql:5432/hello?sslmode=disable' \
+            --from-literal=secretKey="$(openssl rand -base64 32)" \
+            --from-literal=nonceSecret="$(openssl rand -base64 48)" \
+            --from-literal=bootstrapPassword="$HELLO_KIND_PASSWORD" \
+            --from-literal=minioAccessKey=hello \
+            --from-literal=minioSecretKey=kind-minio-pass \
+            --from-literal=postgresUser=hello \
+            --from-literal=postgresPassword=kind-pg-pass
+          helm install hello deploy/helm/hello -n hello \
+            -f deploy/helm/hello/values-eval.yaml \
+            --set global.imageRegistry=hello.local \
+            --set global.imageTag=ci \
+            --set global.sipDomain=hello.kind \
+            --set sip.hostNetwork=false \
+            --set sip.mediaAnchorHost=podIP \
+            --set sip.trustedProxies=10.0.0.0/8 \
+            --set kamailio.hostNetwork=false \
+            --set kamailio.service.type=NodePort \
+            --set kamailio.service.nodePort=30508 \
+            --set kamailio.publicHost=127.0.0.1 \
+            --set kamailio.publicPort=30508 \
+            --set kamailio.phonesPort=5060 \
+            --set kamailio.nodeSelector.hello-edge=true \
+            --set control.service.type=NodePort \
+            --set control.service.nodePort=30081 \
+            --wait --timeout 10m
+          kubectl -n hello get pods -o wide
+      - name: Rolling upgrade with an active call
+        env:
+          HELLO_KIND: "1"
+        run: |
+          gw=$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}' | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          echo "docker network gateway: $gw"
+          export HELLO_KIND_CONTACT_HOST="$gw"
+          export HELLO_KIND_API=http://127.0.0.1:30081
+          export HELLO_KIND_SIP=127.0.0.1:30508
+          export HELLO_KIND_ADMIN_PASSWORD="$HELLO_KIND_PASSWORD"
+          export HELLO_KIND_CHART="$PWD/deploy/helm/hello"
+          export HELLO_KIND_TAG=ci
+          export HELLO_KIND_UPGRADE_TAG=ci-upgrade
+          go test -count=1 -timeout 45m -v ./test/kindupgrade/
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl -n hello get pods -o wide || true
+          kubectl -n hello describe pods || true
+          for p in $(kubectl -n hello get pods -o name); do
+            echo "=== $p"; kubectl -n hello logs --all-containers --tail=200 "$p" || true
+          done
+      - name: Remove the cluster
+        if: always()
+        run: kind delete cluster --name hello || true
+
   publish:
     # Only what lands on main becomes an image; a pull request is tested and
     # nothing more.

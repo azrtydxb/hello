@@ -1,0 +1,243 @@
+{{- $full := include "hello.fullname" . -}}
+{{- /* Bundled single-instance state services: for evaluation only. They are
+neither replicated nor backed up. Production values point at highly
+available external services (docs/kubernetes.md). */ -}}
+{{- if .Values.postgresql.enabled }}
+{{- $ctx := dict "root" . "component" "postgresql" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-postgresql
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      protocol: TCP
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $full }}-postgresql
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  serviceName: {{ $full }}-postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hello.selectorLabels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        # The postgres alpine image's user.
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: {{ .Values.postgresql.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: POSTGRES_DB
+              value: hello
+            {{- include "hello.secretEnv" (dict "root" . "env" "POSTGRES_USER" "key" "postgresUser") | nindent 12 }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "POSTGRES_PASSWORD" "key" "postgresPassword") | nindent 12 }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d hello
+            periodSeconds: 5
+            failureThreshold: 12
+          resources:
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      {{- if not .Values.postgresql.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if .Values.postgresql.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.postgresql.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgresql.persistence.size }}
+  {{- end }}
+---
+{{- end }}
+{{- if .Values.valkey.enabled }}
+{{- $ctx := dict "root" . "component" "valkey" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-valkey
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: valkey
+      port: 6379
+      protocol: TCP
+      targetPort: valkey
+---
+# Hello keeps registrations, dialog state and membership in Valkey; all of it
+# is rebuilt by the nodes, so the evaluation instance needs no volume.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-valkey
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hello.selectorLabels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          image: {{ .Values.valkey.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: [valkey-server, --save, "", --appendonly, "no"]
+          ports:
+            - name: valkey
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: [valkey-cli, ping]
+            periodSeconds: 2
+            failureThreshold: 30
+          resources:
+            {{- toYaml .Values.valkey.resources | nindent 12 }}
+          securityContext:
+            {{- include "hello.containerSecurity" . | nindent 12 }}
+---
+{{- end }}
+{{- if .Values.minio.enabled }}
+{{- $ctx := dict "root" . "component" "minio" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-minio
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: api
+      port: 9000
+      protocol: TCP
+      targetPort: api
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $full }}-minio
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  serviceName: {{ $full }}-minio
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hello.selectorLabels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: minio
+          image: {{ .Values.minio.image }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: [server, /data]
+          env:
+            {{- include "hello.secretEnv" (dict "root" . "env" "MINIO_ROOT_USER" "key" "minioAccessKey") | nindent 12 }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "MINIO_ROOT_PASSWORD" "key" "minioSecretKey") | nindent 12 }}
+          ports:
+            - name: api
+              containerPort: 9000
+          readinessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: api
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      {{- if not .Values.minio.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if .Values.minio.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.minio.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.minio.persistence.size }}
+  {{- end }}
+{{- end }}
