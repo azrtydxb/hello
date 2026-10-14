@@ -255,6 +255,11 @@ jobs:
           # Evidence first: what the runner's Docker daemon is.
           docker info --format 'server={{.ServerVersion}} cgroup={{.CgroupVersion}}/{{.CgroupDriver}} rootless={{.SecurityOptions}} cpus={{.NCPU}} mem={{.MemTotal}}'
           nproc; free -m || true; cat /proc/self/cgroup | head -5
+          # kind's kubelets need more inotify instances than the default 128
+          # ("too many open files" from kubelet start otherwise). The limits
+          # are kernel-wide, so they are raised from a privileged container
+          # on the runner's Docker daemon; harmless if already high.
+          docker run --rm --privileged alpine:3.22 sh -c 'sysctl fs.inotify.max_user_instances fs.inotify.max_user_watches; sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576' || echo "could not raise the inotify limits"
           kind create cluster --name hello --config kind.yaml --wait 5m --retain || {
             docker ps -a
             for n in hello-control-plane hello-worker hello-worker2; do
