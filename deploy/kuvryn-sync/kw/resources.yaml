@@ -869,7 +869,7 @@ spec:
           # kamailio/Dockerfile), pinned to the tag it published for
           # commit 1c3fe03 (the full sha tag; the registry keeps no short
           # tags). Later: an immutable repository@sha256:... digest.
-          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-2b0a11ec74e98904915d4246fd250d7456aac012
+          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-ac7635dc5923523cfb22e5ce8ca6aa900d16615d
           imagePullPolicy: IfNotPresent
           securityContext:
             # uid/gid of the image's kamailio user (read from the image).
@@ -1025,7 +1025,7 @@ spec:
       terminationGracePeriodSeconds: 120 # a drain must finish (lab: 2h, capped here)
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-2b0a11ec74e98904915d4246fd250d7456aac012
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-ac7635dc5923523cfb22e5ce8ca6aa900d16615d
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1237,7 +1237,7 @@ spec:
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-2b0a11ec74e98904915d4246fd250d7456aac012
+          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-ac7635dc5923523cfb22e5ce8ca6aa900d16615d
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1443,7 +1443,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-2b0a11ec74e98904915d4246fd250d7456aac012
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-ac7635dc5923523cfb22e5ce8ca6aa900d16615d
           command:
             - sh
             - -c
@@ -1490,7 +1490,7 @@ spec:
               value: "false"
       containers:
         - name: hello-control
-          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-2b0a11ec74e98904915d4246fd250d7456aac012
+          image: 192.168.10.131:5000/azrtydxb/hello-control:sha-ac7635dc5923523cfb22e5ce8ca6aa900d16615d
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1782,7 +1782,7 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-2b0a11ec74e98904915d4246fd250d7456aac012
+          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-ac7635dc5923523cfb22e5ce8ca6aa900d16615d
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
