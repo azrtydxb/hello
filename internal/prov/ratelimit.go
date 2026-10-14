@@ -52,6 +52,7 @@ type Limiter struct {
 	prefix  string
 	seq     atomic.Uint64
 	degrade atomic.Bool
+	timeout time.Duration // bound on each Valkey call; valkeyTimeout unless a test widens it
 }
 
 // NewLimiter returns a limiter on c (nil for memory only).
@@ -62,7 +63,7 @@ func NewLimiter(c valkey.Client, lim Limits, log *slog.Logger) *Limiter {
 // NewLazyLimiter returns a limiter on the client get returns at each call:
 // nil while Valkey is still connecting, which limits in memory meanwhile.
 func NewLazyLimiter(get func() valkey.Client, lim Limits, log *slog.Logger) *Limiter {
-	return &Limiter{client: get, lim: lim, log: log, mem: newMemLimiter(), prefix: rand.Text()[:8]}
+	return &Limiter{client: get, lim: lim, log: log, mem: newMemLimiter(), prefix: rand.Text()[:8], timeout: valkeyTimeout}
 }
 
 // slideLua is a sliding-window log: it drops entries older than the
@@ -102,7 +103,7 @@ func (l *Limiter) exec(ctx context.Context, s *valkey.Lua, keys, args []string) 
 	if c == nil {
 		return false, false
 	}
-	ctx, cancel := context.WithTimeout(ctx, valkeyTimeout)
+	ctx, cancel := context.WithTimeout(ctx, l.timeout)
 	defer cancel()
 	n, err := s.Exec(ctx, c, keys, args).AsInt64()
 	if err != nil {
@@ -134,7 +135,7 @@ func (l *Limiter) Request(ctx context.Context, ip netip.Addr) bool {
 func (l *Limiter) blocked(ctx context.Context, ip netip.Addr) bool {
 	k := ip.String()
 	if c := l.client(); c != nil {
-		ctx, cancel := context.WithTimeout(ctx, valkeyTimeout)
+		ctx, cancel := context.WithTimeout(ctx, l.timeout)
 		defer cancel()
 		n, err := c.Do(ctx, c.B().Exists().Key(keyBlock+k).Build()).AsInt64()
 		if err == nil {
