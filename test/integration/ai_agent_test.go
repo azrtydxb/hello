@@ -142,6 +142,7 @@ func TestAIAgentEndToEnd(t *testing.T) {
 	remember(d.Secret)
 	llm.Queue("assistant",
 		fakellm.Reply{ToolCalls: []fakellm.ToolCall{{ID: "call_1", Name: "listExtensions", Args: map[string]any{}}}},
+		fakellm.Reply{Content: "Extension " + d.Extension + " exists."},
 		fakellm.JSON(map[string]any{"answer": "Extension " + d.Extension + " exists.", "citations": []int{0}}))
 	sid := lc.askAssistant("Which extensions exist? " + marker)
 	answer, calls, _ := lc.lastAssistantMessage(sid)
@@ -156,7 +157,8 @@ func TestAIAgentEndToEnd(t *testing.T) {
 	lc.must("POST", "/api/v1/ring-groups", map[string]any{"name": "ai-keep-" + randDigits(6), "strategy": "ring-all", "members": member}, &keep, 201)
 	lc.must("POST", "/api/v1/ring-groups", map[string]any{"name": "ai-drop-" + randDigits(6), "strategy": "ring-all", "members": member}, &drop, 201)
 	propose := func(actions []map[string]any) aiProposal {
-		llm.Queue("assistant", fakellm.JSON(map[string]any{
+		// The tool phase ends in prose; the answer phase drafts the proposal.
+		llm.Queue("assistant", fakellm.Reply{Content: "The ring groups can be tidied."}, fakellm.JSON(map[string]any{
 			"answer": "Here is the change.", "citations": []int{},
 			"proposal": map[string]any{"title": "Tidy ring groups", "rationale": "One group is unused.", "actions": actions},
 		}))

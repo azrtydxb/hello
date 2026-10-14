@@ -78,10 +78,11 @@ func TestGenerateStream(t *testing.T) {
 		}
 	})
 
-	t.Run("a tool-calling step's text is voided", func(t *testing.T) {
+	t.Run("the tool phase's text is never streamed", func(t *testing.T) {
 		step1 := append([]provider.StreamPart{provider.TextDelta{Text: `{"answer":"Let me look`}},
 			aifake.StreamToolCall("c1", "lookup", map[string]any{})...)
-		s, _ := streamService(t, aifake.Config(), step1, aifake.StreamJSON(answer{Answer: "Looked up."}, 5))
+		s, _ := streamService(t, aifake.Config(), step1,
+			aifake.StreamJSON(answer{Answer: "TOOL-PHASE"}, 5), aifake.StreamJSON(answer{Answer: "Looked up."}, 5))
 		var rec streamRecorder
 		calls := 0
 		lookup := aisdk.NewTool("lookup", "Looks something up.", func(context.Context, struct{}) (any, error) {
@@ -93,7 +94,7 @@ func TestGenerateStream(t *testing.T) {
 		if err != nil || got.Answer != "Looked up." {
 			t.Fatalf("Generate = %+v, %v", got, err)
 		}
-		if rec.text.String() != "Looked up." || rec.resets != 1 || calls != 1 {
+		if rec.text.String() != "Looked up." || rec.resets != 0 || calls != 1 {
 			t.Errorf("streamed %q, resets %d, tool calls %d", rec.text.String(), rec.resets, calls)
 		}
 	})
