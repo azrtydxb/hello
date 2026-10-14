@@ -267,6 +267,27 @@ func TestPhoneAdminPassword(t *testing.T) {
 		t.Fatalf("audit rows after two reveals = %s", audits())
 	}
 	c.must(http.StatusNotFound, "POST", "/api/v1/phones/999999/admin-password/reveal", nil)
+
+	// Every built-in template sets the password on the phone: each vendor's
+	// device file carries it (the boot bodies, by design, never do).
+	for _, b := range prov.Builtins() {
+		sets := false
+		for _, f := range b.Files {
+			sets = sets || strings.Contains(f.Body, ".Phone.AdminPassword")
+		}
+		if !sets {
+			t.Errorf("built-in %s template does not set the admin password", b.BuiltinRef)
+		}
+	}
+
+	// A preview of a template that renders the password never shows it,
+	// the current one or the one before the rotation.
+	c.must(http.StatusCreated, "POST", "/api/v1/prov/templates", previewTemplate)
+	cur := c.must(http.StatusOK, "POST", path+"/admin-password/reveal", nil).json(t)["adminPassword"].(string)
+	pv := c.must(http.StatusOK, "GET", path+"/preview?file=0015650000aa.cfg", nil)
+	if bytes.Contains(pv.body, []byte(cur)) || bytes.Contains(pv.body, []byte(pw)) {
+		t.Fatalf("preview shows the admin password: %s", pv.body)
+	}
 }
 
 // TestPhoneTokenRotation fails if rotation does not keep the old token
