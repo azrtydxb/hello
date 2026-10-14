@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"strings"
 	"testing"
@@ -213,6 +214,12 @@ func TestProvRateLimit(t *testing.T) {
 		// Two handler instances (two replicas), each with its own memory,
 		// alternate; only Valkey can make them agree.
 		a, b := NewLimiter(c, testLimits, log), NewLimiter(c, testLimits, log)
+		// The 50 ms production bound is for a healthy cluster. On a loaded CI
+		// runner with -race, a call that exceeds it falls back to the
+		// replica's own memory, the request is not counted in Valkey, and the
+		// sixth request is let through. This test asserts the shared window,
+		// not Valkey latency, so it must never take the fallback.
+		a.timeout, b.timeout = 10*time.Second, 10*time.Second
 		n := 0
 		checkLimits(t, func(*slog.Logger) *Limiter {
 			n++
@@ -221,11 +228,55 @@ func TestProvRateLimit(t *testing.T) {
 			}
 			return b
 		})
+		for name, l := range map[string]*Limiter{"a": a, "b": b} {
+			l.mem.mu.Lock()
+			used := len(l.mem.windows) + len(l.mem.blocks)
+			l.mem.mu.Unlock()
+			if used != 0 || l.degrade.Load() {
+				t.Fatalf("limiter %s fell back to memory: the shared window was not exercised", name)
+			}
+		}
 		ttl, err := c.Do(ctx, c.B().Pttl().Key(keyBlock+"192.168.10.70").Build()).AsInt64()
 		if err != nil || ttl <= 0 || ttl > BlockFor.Milliseconds() {
 			t.Fatalf("block key ttl %d (%v)", ttl, err)
 		}
 	})
+}
+
+// TestLimiterFallbackIsPerReplica fails if the Valkey call bound is not
+// configurable per limiter, or if the fallback stops being per replica. It
+// records why the shared-Valkey test of TestProvRateLimit widens the bound:
+// a call that times out is counted only in one replica's memory, so with
+// requests alternating over two replicas six requests all pass a limit of
+// five. It needs no Valkey (the client points at a closed port).
+func TestLimiterFallbackIsPerReplica(t *testing.T) {
+	log := slog.New(slog.DiscardHandler)
+	c, _ := vkconn.New(context.Background(), vkconn.Config{Addr: "127.0.0.1:1"}, log)
+	if c == nil {
+		t.Fatal("no client")
+	}
+	defer c.Close()
+	a, b := NewLimiter(c, testLimits, log), NewLimiter(c, testLimits, log)
+	if a.timeout != valkeyTimeout {
+		t.Fatalf("default Valkey bound = %s, want %s", a.timeout, valkeyTimeout)
+	}
+	ip := netip.MustParseAddr("192.168.10.61")
+	for n := range 6 {
+		l := a
+		if n%2 == 1 {
+			l = b
+		}
+		if !l.Request(t.Context(), ip) {
+			t.Fatalf("request %d refused: each replica has seen at most 3 of the 6", n+1)
+		}
+	}
+	// One replica alone enforces the limit in memory (never fails open).
+	for range 5 {
+		a.Request(t.Context(), ip)
+	}
+	if a.Request(t.Context(), ip) {
+		t.Fatal("a single replica's memory fallback did not enforce the limit")
+	}
 }
 
 // checkLimits drives two handler instances over one store, alternating

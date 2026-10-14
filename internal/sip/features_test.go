@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -894,6 +896,13 @@ func TestPresenceBLF(t *testing.T) {
 	a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
 	a.register(t)
 	b.register(t)
+	// A REGISTER publishes the device's idle state from a goroutine and then
+	// NOTIFYs the extension's subscribers. Let b's publish land before a
+	// subscribes, or its late fan-out reaches a as a spurious extra NOTIFY.
+	eventually(t, "b's registration published idle", func() bool {
+		st, ok := pbx.fake.DeviceState("b1")
+		return ok && st.State == StateIdle
+	})
 	// a subscribes to extension 200 (b's).
 	if res := a.subscribe(t, "200", 120); res.StatusCode != 200 {
 		t.Fatalf("SUBSCRIBE = %d", res.StatusCode)
@@ -910,25 +919,19 @@ func TestPresenceBLF(t *testing.T) {
 	b.setCallee(answerAfter(answer))
 	ch := dial(t.Context(), a, "200")
 	waitReq(t, b.invites, "INVITE to b")
-	ring := waitReq(t, a.notifies, "ringing NOTIFY")
-	if !strings.Contains(string(ring.Body()), "<state>early</state>") {
-		t.Fatalf("ringing NOTIFY = %q", ring.Body())
-	}
+	// b's REGISTER published idle from a goroutine; if that fan-out ran after
+	// a subscribed, a duplicate idle NOTIFY is queued ahead of the ringing
+	// one. Wait for the NOTIFY that carries the state, not the next one.
+	waitDialogState(t, a.notifies, "early", "ringing NOTIFY")
 	close(answer)
 	r := waitCall(t, ch)
 	if r.err != nil {
 		t.Fatalf("call: %v", r.err)
 	}
 	waitReq(t, b.acks, "ACK")
-	confirm := waitReq(t, a.notifies, "on-call NOTIFY")
-	if !strings.Contains(string(confirm.Body()), "<state>confirmed</state>") {
-		t.Fatalf("on-call NOTIFY = %q", confirm.Body())
-	}
+	waitDialogState(t, a.notifies, "confirmed", "on-call NOTIFY")
 	hangup(t, r.dcs)
-	idle := waitReq(t, a.notifies, "idle NOTIFY after hangup")
-	if !strings.Contains(string(idle.Body()), "<state>terminated</state>") {
-		t.Fatalf("idle NOTIFY = %q", idle.Body())
-	}
+	waitDialogState(t, a.notifies, "terminated", "idle NOTIFY after hangup")
 	// The published device state followed the call too.
 	st, ok := pbx.fake.DeviceState("b1")
 	if !ok || st.Extension != "200" || st.State != StateIdle {
@@ -949,6 +952,31 @@ func TestPresenceBLF(t *testing.T) {
 		return pbx.metric(t, "hello_presence_subscriptions", nil) == 1
 	})
 }
+
+// waitDialogState reads NOTIFYs until one carries the dialog state want and
+// returns it. Earlier NOTIFYs of another state are skipped (a presence
+// fan-out from a previous step may still be in flight), but the dialog-info
+// version must strictly increase, so a reordered or repeated NOTIFY fails.
+func waitDialogState(t *testing.T, ch chan *sip.Request, want, what string) *sip.Request {
+	t.Helper()
+	var last uint64
+	for {
+		n := waitReq(t, ch, what+" (dialog state "+want+")")
+		body := string(n.Body())
+		if m := dialogVersionRE.FindStringSubmatch(body); m != nil {
+			v, _ := strconv.ParseUint(m[1], 10, 64)
+			if v <= last {
+				t.Fatalf("%s: dialog-info version %d after %d", what, v, last)
+			}
+			last = v
+		}
+		if strings.Contains(body, "<state>"+want+"</state>") {
+			return n
+		}
+	}
+}
+
+var dialogVersionRE = regexp.MustCompile(`version="(\d+)"`)
 
 // featureSnapshot seeds the default code set the control plane writes.
 func featureSnapshot(s *snapshot.Snapshot) {
