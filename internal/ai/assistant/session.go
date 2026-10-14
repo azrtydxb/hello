@@ -216,6 +216,11 @@ func (a *Assistant) DeleteSession(ctx context.Context, u User, id string) error 
 // PostMessage stores the user's question and starts the task answering it.
 // Only the session's owner may post, admin or not: the task reads as them.
 func (a *Assistant) PostMessage(ctx context.Context, u User, sessionID, content string) (messageID int64, taskID string, err error) {
+	return a.post(ctx, u, sessionID, content, nil)
+}
+
+// post is PostMessage; with a sink the task also streams its progress.
+func (a *Assistant) post(ctx context.Context, u User, sessionID, content string, k *sink) (messageID int64, taskID string, err error) {
 	content = strings.TrimSpace(content)
 	if content == "" || utf8.RuneCountInString(content) > MaxMessageLen {
 		return 0, "", fmt.Errorf("%w: content must have 1 to %d characters", ErrInvalid, MaxMessageLen)
@@ -229,7 +234,14 @@ func (a *Assistant) PostMessage(ctx context.Context, u User, sessionID, content 
 	}
 	start := func(ctx context.Context, msgID int64, history []Message) (string, error) {
 		return a.cfg.Tasks.Start(ctx, TaskKind, u.ID, sessionID, func(ctx context.Context, taskID string) (any, error) {
-			return a.answer(ctx, u.ID, sessionID, taskID, history)
+			if k != nil {
+				return a.answerStreamed(ctx, u.ID, sessionID, taskID, msgID, history, k)
+			}
+			out, err := a.answer(ctx, u.ID, sessionID, taskID, history, nil)
+			if err != nil {
+				return nil, err
+			}
+			return out.result(), nil
 		})
 	}
 	return a.cfg.Store.PostAIMessage(ctx, sessionID, content, autoTitle(content), HistoryWindow, start)

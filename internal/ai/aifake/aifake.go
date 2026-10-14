@@ -317,3 +317,52 @@ func (s *Store) AgentRuns() []ai.AgentRun {
 	defer s.mu.Unlock()
 	return append([]ai.AgentRun(nil), s.Runs...)
 }
+
+// finishStop ends a streamed step.
+func finishStop() provider.FinishPart {
+	return provider.FinishPart{Reason: provider.FinishStop, Usage: provider.Usage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15}}
+}
+
+// StreamText is a streamed model step whose text arrives as deltas, set as
+// a mock model's Streams entry.
+func StreamText(deltas ...string) []provider.StreamPart {
+	parts := make([]provider.StreamPart, 0, len(deltas)+1)
+	for _, d := range deltas {
+		parts = append(parts, provider.TextDelta{Text: d})
+	}
+	return append(parts, finishStop())
+}
+
+// StreamJSON is a streamed step whose text is v as JSON, cut into deltas of
+// size bytes (a delta may end inside a multi-byte character or an escape,
+// as a real stream's can).
+func StreamJSON(v any, size int) []provider.StreamPart {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	var deltas []string
+	for len(b) > size {
+		deltas, b = append(deltas, string(b[:size])), b[size:]
+	}
+	return StreamText(append(deltas, string(b))...)
+}
+
+// StreamReasoning is a streamed step that reasons first, then continues
+// with after (a step such as StreamJSON's); the reasoning is not part of
+// the text.
+func StreamReasoning(reasoning string, after []provider.StreamPart) []provider.StreamPart {
+	return append([]provider.StreamPart{provider.ReasoningDelta{Text: reasoning}}, after...)
+}
+
+// StreamToolCall is a streamed step that calls tool name with args.
+func StreamToolCall(id, name string, args any) []provider.StreamPart {
+	b, err := json.Marshal(args)
+	if err != nil {
+		panic(err)
+	}
+	return []provider.StreamPart{
+		provider.ToolCallEnd{Call: provider.ToolCallPart{ID: id, Name: name, Args: b}},
+		provider.FinishPart{Reason: provider.FinishToolCalls, Usage: provider.Usage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15}},
+	}
+}

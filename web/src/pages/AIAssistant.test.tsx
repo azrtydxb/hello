@@ -87,7 +87,7 @@ describe("AI assistant", () => {
     ).toBeVisible();
   });
 
-  it("posts a message, polls the task every 2 s and shows the answer", async () => {
+  it("falls back to polling the task every 2 s when the server does not stream", async () => {
     let done = false;
     const calls = mockApi({
       ...me("operator"),
@@ -130,11 +130,9 @@ describe("AI assistant", () => {
     expect(calls.find((c) => c.url.endsWith("/s1/messages"))?.body).toEqual({
       content: "Why did calls fail?",
     });
-    expect(
-      await screen
-        .findByText("The assistant is working…", {}, { timeout: 100 })
-        .catch(() => null),
-    ).toBeDefined();
+    // The server answered 202, not a stream: the task is polled.
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText("Waiting to start…")).toBeVisible();
 
     await act(() => vi.advanceTimersByTimeAsync(2000));
     expect(calls.filter((c) => c.url === "/api/v1/ai/tasks/t1")).toHaveLength(

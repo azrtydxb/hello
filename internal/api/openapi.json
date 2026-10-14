@@ -6327,7 +6327,7 @@
       "post": {
         "operationId": "postAIMessage",
         "summary": "Ask the assistant",
-        "description": "Posts a question of at most 4000 characters and answers 202 with a task id; the assistant works asynchronously with read-only tools replayed as the caller, so poll getAITask. One task per session runs at a time (409 task_running); a busy or budget-exhausted service answers 429.",
+        "description": "Posts a question of at most 4000 characters and answers 202 with a task id; the assistant works asynchronously with read-only tools replayed as the caller, so poll getAITask. With Accept: text/event-stream the same call answers 200 with a server-sent event stream instead and the answer is generated while the stream is open: the events are started, thinking, tool, delta, reset and exactly one last done or error, described in docs/ai-agent.md. Closing the stream before it ends stops the work and stores no answer. One task per session runs at a time (409 task_running); a busy or budget-exhausted service answers 429 before any event.",
         "tags": ["ai"],
         "x-hello-scope": "write",
         "x-hello-role": "operator",
@@ -6350,6 +6350,16 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "The event stream, only for Accept: text/event-stream. Each event is a named SSE event whose data is one JSON object; the stream ends after done (the stored assistant message, its task and message ids and its token usage) or error (code and message of the failed task). Comment lines keep an idle stream open.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "202": {
             "description": "Accepted",
             "content": {
@@ -11488,7 +11498,7 @@
           },
           "errorCode": {
             "type": ["string", "null"],
-            "description": "invalid_output, timeout, provider_error, endpoint_not_private, budget_exhausted, tools_unsupported or instance_stopped."
+            "description": "invalid_output, timeout, provider_error, endpoint_not_private, budget_exhausted, tools_unsupported, canceled (the streamed answer was stopped) or instance_stopped."
           },
           "errorMessage": {
             "type": ["string", "null"],
