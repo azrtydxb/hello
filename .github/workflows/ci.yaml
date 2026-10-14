@@ -191,7 +191,6 @@ jobs:
     # then `helm upgrade`s Hello's pods and Kamailio and requires the call to
     # survive and hang up cleanly. Needs the runner's Docker daemon (as the
     # lab job does), kind, kubectl and helm on the runner itself.
-    needs: [go]
     runs-on: arc-azrtydxb
     timeout-minutes: 60
     env:
@@ -252,9 +251,19 @@ jobs:
                 - { containerPort: 30508, hostPort: 30508, protocol: TCP }
                 - { containerPort: 30081, hostPort: 30081, protocol: TCP }
             - role: worker
-            - role: worker
           EOF
-          kind create cluster --name hello --config kind.yaml --wait 5m
+          # Evidence first: what the runner's Docker daemon is.
+          docker info --format 'server={{.ServerVersion}} cgroup={{.CgroupVersion}}/{{.CgroupDriver}} rootless={{.SecurityOptions}} cpus={{.NCPU}} mem={{.MemTotal}}'
+          nproc; free -m || true; cat /proc/self/cgroup | head -5
+          kind create cluster --name hello --config kind.yaml --wait 5m --retain || {
+            docker ps -a
+            for n in hello-control-plane hello-worker hello-worker2; do
+              echo "=== $n"; docker logs "$n" 2>&1 | tail -40
+            done
+            kind export logs --name hello ./kind-logs || true
+            tail -n 60 ./kind-logs/*/journal.log 2>/dev/null || true
+            exit 1
+          }
           for i in hello-control hello-sip hello-ui kamailio; do
             kind load docker-image --name hello hello.local/$i:ci hello.local/$i:ci-upgrade
           done
