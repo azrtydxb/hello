@@ -727,6 +727,27 @@ func answerAfter(ch <-chan struct{}) calleeFn {
 	}
 }
 
+// answerReporting is answerAfter that also reports, once, whether its 200
+// actually went out. When the other fork wins first, Hello's CANCEL can
+// reach this phone before its 200: the phone's own stack then answers 487
+// and the 200 is refused (sip.ErrTransactionCanceled), so no dialog exists
+// for Hello to BYE. That outcome is correct and must not look like a lost
+// BYE, so the test needs to know which one happened.
+func answerReporting(ch <-chan struct{}, answered chan<- bool) calleeFn {
+	return func(p *phone, req *sip.Request, _ sip.ServerTransaction, dss *sipgo.DialogServerSession) {
+		_ = dss.Respond(180, "Ringing", nil)
+		select {
+		case <-ch:
+		case <-dss.Context().Done():
+			push(p.cancels, req)
+			answered <- false
+			return
+		}
+		err := dss.RespondSDP([]byte(p.sdp))
+		answered <- !errors.Is(err, sip.ErrTransactionCanceled)
+	}
+}
+
 func busy() calleeFn {
 	return func(_ *phone, _ *sip.Request, _ sip.ServerTransaction, dss *sipgo.DialogServerSession) {
 		_ = dss.Respond(486, "Busy Here", nil)
