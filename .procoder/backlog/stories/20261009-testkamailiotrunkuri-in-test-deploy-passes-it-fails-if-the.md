@@ -23,3 +23,4 @@ As an operator, I need Kamailio to leave the Request-URI user untouched on the t
 
 - test/deploy/kamailio_drift_test.go:163 TestKamailioTrunkURI; passes locally (-v PASS). main CI run 38615122909 go job: `ok  	github.com/azrtydxb/hello/test/deploy	5.146s`.
 
+- Per-condition audit 2026-10-15: R-URI user rewritten on the trunk path -> test/deploy/kamailio_drift_test.go:173 (forbidden rewrite functions; added seturi/setuser/rewriteuser/rewriteuserpass/prefix/strip/strip_tail), :180 ($ru/$rU assignment, now matched anywhere on a line, not only at line start), :189-198 (route[FROM_PHONE] and route[TO_HELLO] bodies), :199-201 (FROM_PHONE relays via TO_HELLO). Mutation-checked locally: injecting `$rU = "x"; strip(1);` into route[TO_HELLO] fails the test on all three checks. The kw ConfigMap copy is held equal to this cfg by TestKwKamailioConfigMatchesSource.

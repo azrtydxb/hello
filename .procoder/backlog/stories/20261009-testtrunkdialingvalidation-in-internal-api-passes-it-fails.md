@@ -23,3 +23,4 @@ As an administrator, I need the API to refuse invalid internal dialing settings 
 
 - internal/api/trunks_test.go:45 TestTrunkDialingValidation (DB-backed via newP2Env; runs in CI with HELLO_TEST_DATABASE_URL). main CI run 38615122909 go job: `ok  	github.com/azrtydxb/hello/internal/api	302.708s`.
 
+- Per-condition audit 2026-10-15: unknown mode accepted -> internal/api/trunks_test.go:50; uncompilable pattern -> :64; oversized (>500) pattern -> :56; more than 100 patterns -> :62; patterns with mode off -> :52; mode all saved without confirm -> :54 (absent), :55 (false) on POST and added :112-118 (PATCH to mode all without confirm is refused 400 on internalDialing.confirm and GET shows mode still off). refusedDialing -> fieldPaths (routing_test.go:191) fails unless the response is 400 bad_request and names the field. DB-backed (newP2Env): skips locally, runs in CI.

@@ -21,5 +21,6 @@ As an operator, I need a trunk-to-internal call's CDR to record the direction, t
 <!-- Filled at close time: the commands run and what their output proved,
      one line per criterion. Empty evidence keeps the story open. -->
 
-- internal/sip/trunk_internal_test.go:161 TestTrunkInternalCDR asserts direction inbound, rewritten destination 1012, route name, policy and caller-ID trace steps. main CI run 38615122909 go job: `ok  	github.com/azrtydxb/hello/internal/sip	84.695s`. The story named test/integration; the test lives in internal/sip, criterion corrected.
+- internal/sip/trunk_internal_test.go:169 TestTrunkInternalCDR asserts direction inbound, rewritten destination 1012, route name, policy and caller-ID trace steps. main CI run 38615122909 go job: `ok  	github.com/azrtydxb/hello/internal/sip	84.695s`. The story named test/integration; the test lives in internal/sip, criterion corrected.
 
+- Per-condition audit 2026-10-15: direction inbound -> internal/sip/trunk_internal_test.go:179 and :195; resolved extension as rewritten_destination -> :179 (1012) and :195 (+1012 resolved to 1012); route name -> :179 (`Any extension`); policy verdict step -> :183 (`Trunk peer may dial 1012: all internal numbers`) and :199; caller-ID step -> :183 (`as received`) and :199 (`<peer> (trunk name)`). Criterion edit test/integration -> internal/sip only relocates: the CDR is the one hello-sip writes for a real SIP call to a registered phone.
