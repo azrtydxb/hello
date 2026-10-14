@@ -26,6 +26,7 @@ func TestFakeLLM(t *testing.T) {
 	}
 	llm.Queue("assistant",
 		fakellm.Reply{ToolCalls: []fakellm.ToolCall{{ID: "c1", Name: "listTrunks", Args: map[string]any{}}}},
+		fakellm.Reply{Content: "There is one trunk, carrier."},
 		fakellm.JSON(map[string]any{"answer": "one trunk"}))
 	llm.Queue("aiops_explain", fakellm.JSON(map[string]any{"answer": "explained"}))
 
@@ -38,7 +39,7 @@ func TestFakeLLM(t *testing.T) {
 		Answer string `json:"answer"`
 	}
 	got, u, err := ai.Generate(context.Background(), s, ai.Call[out]{Feature: "assistant", Prompt: "trunks?", Tools: []aisdk.Tool{tool}})
-	if err != nil || got.Answer != "one trunk" || ran != 1 || u.Calls != 2 {
+	if err != nil || got.Answer != "one trunk" || ran != 1 || u.Calls != 3 {
 		t.Fatalf("assistant = %+v, %+v, %v (tool ran %d)", got, u, err, ran)
 	}
 	got, _, err = ai.Generate(context.Background(), s, ai.Call[out]{Feature: "aiops_explain", Prompt: "explain", Background: true})
@@ -46,11 +47,18 @@ func TestFakeLLM(t *testing.T) {
 		t.Fatalf("explain = %+v, %v", got, err)
 	}
 	reqs := llm.Requests()
-	if len(reqs) != 3 || reqs[0].Feature != "assistant" || reqs[2].Feature != "aiops_explain" {
+	if len(reqs) != 4 || reqs[0].Feature != "assistant" || reqs[3].Feature != "aiops_explain" {
 		t.Fatalf("requests = %+v", reqs)
 	}
-	if reqs[0].Body["response_format"] == nil || reqs[0].Body["tools"] == nil {
-		t.Errorf("first request lacks response_format or tools: %v", reqs[0].Body)
+	// The tool phase offers tools without a response format; the answer
+	// phase asks for the format without tools.
+	for i, r := range reqs[:2] {
+		if r.Body["response_format"] != nil || r.Body["tools"] == nil {
+			t.Errorf("tool phase request %d: response_format %v, tools %v", i, r.Body["response_format"], r.Body["tools"] != nil)
+		}
+	}
+	if reqs[2].Body["response_format"] == nil || reqs[2].Body["tools"] != nil {
+		t.Errorf("answer phase request: response_format %v, tools %v", reqs[2].Body["response_format"], reqs[2].Body["tools"])
 	}
 	if _, _, err := ai.Generate(context.Background(), s, ai.Call[out]{Feature: "unscripted", Prompt: "x"}); ai.CodeOf(err) != ai.CodeProviderError {
 		t.Errorf("unscripted feature: %v", err)

@@ -31,6 +31,9 @@ Write the answer as plain text with line breaks. Never use Markdown links, Markd
 You cannot change anything. Only when the operator asks for a change, add one "proposal": allowlisted operations (operation id, path parameters and body) that a human reviews as a diff and applies. Never put a password or other secret in a proposal.
 The earlier messages of this conversation are under "history" in the data, and the PBX's open findings under "findings".`
 
+// SystemPrompt is systemPrompt, for the kw smoke test.
+const SystemPrompt = systemPrompt
+
 // historyEntry is a prior message as the model sees it (data, never
 // instructions).
 type historyEntry struct {
@@ -102,6 +105,7 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 		Prompt:   current.Content,
 		Tools:    tools,
 		MaxSteps: a.cfg.MaxSteps,
+		ToolLog:  ts.log,
 		Validate: a.validator(ident, sessionID, ts, &validated),
 		Stream:   k.stream(),
 	})

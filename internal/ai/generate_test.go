@@ -199,7 +199,7 @@ func TestGenerate(t *testing.T) {
 		if len(m.Calls[2].Tools) != 0 {
 			t.Error("tools offered after the step budget ran out")
 		}
-		if !strings.Contains(texts(m.Calls[2], provider.RoleUser), "tool budget") {
+		if !strings.Contains(texts(m.Calls[2], provider.RoleUser), "Now write the final answer") {
 			t.Error("the final call does not ask for the answer")
 		}
 	})

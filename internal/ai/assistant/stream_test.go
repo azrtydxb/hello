@@ -96,8 +96,13 @@ func TestPostMessageStream(t *testing.T) {
 		const secretArg = "ext-SECRET-ARGUMENT"
 		answer := Answer{Answer: "Extension 201 is registered.\nSecond line.", Citations: []int{0}}
 		m.Streams = [][]provider.StreamPart{
+			// The tool phase: a call, then plain text that is never streamed.
 			aifake.StreamReasoning("I should look.", aifake.StreamToolCall("c1", "getExtension", map[string]string{"id": secretArg})),
+			aifake.StreamText("TOOL-PHASE-PROSE: 201 is registered."),
+			// The answer phase.
 			aifake.StreamReasoning("Now answer.", aifake.StreamJSON(answer, 7)),
+			// The next message: plain text, then its answer.
+			aifake.StreamText("202 too."),
 			aifake.StreamJSON(Answer{Answer: "And 202 too.", Citations: []int{}}, 7),
 		}
 		r := newStreamRig(t, realGenerate(svc))
@@ -134,6 +139,8 @@ func TestPostMessageStream(t *testing.T) {
 					firstDelta = i
 				}
 				text.WriteString(e.Data.(chat.Delta).Text)
+			case chat.EventReset:
+				t.Errorf("reset at %d: the tool phase streamed text; %v", i, names(evs))
 			case chat.EventDone, chat.EventError:
 				if i != len(evs)-1 {
 					t.Errorf("terminal event %q at %d of %d", e.Name, i, len(evs))
@@ -168,7 +175,7 @@ func TestPostMessageStream(t *testing.T) {
 		if done.Message.Content != answer.Answer || len(done.Message.Citations) != 1 || len(done.Message.ToolCalls) != 1 {
 			t.Errorf("final message %+v", done.Message)
 		}
-		if done.TaskID != evs[0].Data.(chat.Started).TaskID || done.MessageID != 1 || done.Usage.Calls != 2 || done.Usage.InputTokens == 0 {
+		if done.TaskID != evs[0].Data.(chat.Started).TaskID || done.MessageID != 1 || done.Usage.Calls != 3 || done.Usage.InputTokens == 0 {
 			t.Errorf("done = %+v", done)
 		}
 		if n := len(r.store.assistantMessages()); n != 1 {
@@ -208,6 +215,7 @@ func TestPostMessageStream(t *testing.T) {
 	t.Run("an invalid answer asks again and voids the streamed text", func(t *testing.T) {
 		svc, m, _ := aifake.Service(t, aifake.Config())
 		m.Streams = [][]provider.StreamPart{
+			aifake.StreamText("Hello there."),
 			aifake.StreamJSON(Answer{Answer: "Cites a call that was never made.", Citations: []int{3}}, 9),
 			aifake.StreamJSON(Answer{Answer: "Fixed.", Citations: []int{}}, 9),
 		}
