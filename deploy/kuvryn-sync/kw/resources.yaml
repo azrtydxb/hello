@@ -862,6 +862,54 @@ spec:
         # /run/kamailio is an emptyDir the kamailio user (102) must write its
         # ctl socket and RPC FIFO into; group ownership via fsGroup.
         fsGroup: 102
+      initContainers:
+        # Kamailio's dispatcher (ds_load_mode 1) resolves every destination
+        # name at startup and exits 255 if one does not resolve. The
+        # hello-sip-N Services are headless and their Deployments Recreate,
+        # so during a rollout a name has no DNS record until its new pod is
+        # ready; without this wait Kamailio crash-loops (CrashLoopBackOff)
+        # until both exist. Waits for every host in dispatcher.list, bounded
+        # (covers hello-sip-2's preStop stagger and drain), logged, and then
+        # starts Kamailio regardless: a node that stays gone still fails
+        # loudly there rather than silently running without it.
+        - name: wait-dispatcher
+          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-2b0a11ec74e98904915d4246fd250d7456aac012
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 102
+            runAsGroup: 102
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          command:
+            - sh
+            - -c
+            - |
+              limit=300
+              start=$(date +%s)
+              for h in $(sed -n 's/^[0-9][0-9]*[[:space:]][[:space:]]*sip:\([^:;>[:space:]]*\).*/\1/p' /etc/kamailio/dispatcher.list); do
+                until getent hosts "$h" >/dev/null; do
+                  if [ $(( $(date +%s) - start )) -ge "$limit" ]; then
+                    echo "wait-dispatcher: $h still unresolved after ${limit}s, starting kamailio anyway"
+                    exit 0
+                  fi
+                  echo "wait-dispatcher: waiting for $h"
+                  sleep 2
+                done
+                echo "wait-dispatcher: $h resolves"
+              done
+          volumeMounts:
+            - name: config
+              mountPath: /etc/kamailio
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 8Mi
+            limits:
+              memory: 32Mi
       containers:
         - name: kamailio
           # The official ghcr image is amd64-only and the kw nodes are
