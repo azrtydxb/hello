@@ -19,6 +19,32 @@ server {
     # and a name resolved once at startup would keep pointing at a dead one.
     resolver ${HELLO_DNS_RESOLVER} valid=10s ipv6=off;
 
+    # The assistant's streamed answers (docs/ai-agent.md, "Streaming
+    # answers"): POST .../messages with Accept: text/event-stream is an event
+    # stream that must reach the browser as it is written. Nothing here or in
+    # front of it may buffer it: no response buffering or caching, no
+    # compression, X-Accel-Buffering for the ingress controller (nginx hides
+    # that header of hello-control's, so it is set again), and a read timeout
+    # above the model timeout; hello-control sends a keepalive comment every
+    # 15 s, so the connection is never idle for long. The same location
+    # answers the JSON call, which is unaffected.
+    location ~ ^/api/v1/ai/sessions/[^/]+/messages$ {
+        set $hello_control ${HELLO_CONTROL_UPSTREAM};
+        proxy_pass $hello_control;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $hello_forwarded_proto;
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        add_header X-Accel-Buffering "no" always;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+
     location /api/ {
         set $hello_control ${HELLO_CONTROL_UPSTREAM};
         proxy_pass $hello_control;

@@ -34,6 +34,9 @@ const (
 	CodeEndpointNotPublic = "endpoint_not_private"
 	CodeToolsUnsupported  = "tools_unsupported"
 	CodeInstanceStopped   = "instance_stopped"
+	// CodeCanceled is a task its requester walked away from: the console's
+	// streamed answer was stopped or its connection dropped.
+	CodeCanceled = "canceled"
 )
 
 // Error is an AI failure with a stable code; its message never contains a
@@ -108,6 +111,10 @@ type Call[T any] struct {
 	MaxSteps int
 	// Validate checks the decoded answer; nil accepts any that decodes.
 	Validate func(context.Context, T) error
+	// Stream, when set, runs the call on the model's streaming API and
+	// reports the answer text as it is generated. The result, usage and
+	// validation are the same as without it.
+	Stream *Stream
 }
 
 // Outcome is how an agent run ended (spec S-17), as stored in

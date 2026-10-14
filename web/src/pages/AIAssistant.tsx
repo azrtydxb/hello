@@ -9,7 +9,6 @@ import {
   getTask,
   listSessions,
   MESSAGE_LIMIT,
-  postMessage,
   TASK_POLL_MS,
   type AIMessage,
   type AIProposal,
@@ -17,10 +16,12 @@ import {
   type AISessionDetail,
   type AITask,
 } from "../api/aiagent";
+import { streamMessage, type StreamEvent } from "../api/aistream";
 import { AIGate } from "../components/ai/AIGate";
 import { PlainText } from "../components/ai/PlainText";
 import { ProposalCard } from "../components/ai/ProposalCard";
 import { TaskStatus } from "../components/ai/TaskStatus";
+import { TypingIndicator } from "../components/ai/TypingIndicator";
 import {
   Alert,
   Badge,
@@ -80,6 +81,16 @@ function Message({ m }: { m: AIMessage }) {
   );
 }
 
+/** What the indicator says before the assistant reports a step. */
+const WORKING = "The assistant is working…";
+const THINKING = "Thinking…";
+
+/** The answer being generated: the step it is on and the text so far. */
+interface Live {
+  step: string;
+  text: string;
+}
+
 function Chat({ id }: { id: string | undefined }) {
   const navigate = useNavigate();
   const [sessions, setSessions] = useState<AISession[]>([]);
@@ -89,11 +100,16 @@ function Chat({ id }: { id: string | undefined }) {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [live, setLive] = useState<Live | null>(null);
+  const [stopped, setStopped] = useState(false);
   const alive = useRef(true);
+  const streaming = useRef<AbortController | null>(null);
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
+      // Leaving the page stops the answer being generated.
+      streaming.current?.abort();
     };
   }, []);
 
@@ -138,8 +154,12 @@ function Chat({ id }: { id: string | undefined }) {
     return () => c.abort();
   }, [id]);
 
-  // Poll a running task every 2 s; on completion reload the session.
-  const taskId = task?.id;
+  // Poll a running task every 2 s; on completion reload the session. Only
+  // for a server that does not stream: a streamed answer reports itself.
+  const taskId =
+    task?.status === "queued" || task?.status === "running"
+      ? task.id
+      : undefined;
   useEffect(() => {
     if (!taskId || !id) return;
     const timer = setInterval(() => {
@@ -159,36 +179,137 @@ function Chat({ id }: { id: string | undefined }) {
     return () => clearInterval(timer);
   }, [taskId, id, loadSession, refreshSessions]);
 
+  /** Applies one event of the streamed answer. */
+  function onEvent(ev: StreamEvent) {
+    if (!alive.current) return;
+    switch (ev.type) {
+      case "started":
+        setLive((l) => l && { ...l, step: WORKING });
+        break;
+      case "thinking":
+        setLive((l) => l && { ...l, step: THINKING });
+        break;
+      case "tool":
+        setLive((l) => l && { ...l, step: ev.label });
+        break;
+      case "delta":
+        setLive((l) => l && { ...l, text: l.text + ev.text });
+        break;
+      case "reset":
+        setLive((l) => l && { step: THINKING, text: "" });
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** After a stream ends without an answer: show the stored question. */
+  function showStored(sid: string) {
+    if (!id) navigate(`/ai/assistant/${sid}`, { replace: true });
+    else void loadSession(sid);
+    void refreshSessions();
+  }
+
   async function send() {
     const content = draft.trim();
     if (!content) return;
     setError(null);
+    setTask(null);
+    setStopped(false);
+    let sid = id;
     try {
-      const sid = id ?? (await createSession()).id;
-      setPending(content);
-      setDraft("");
-      const r = await postMessage(sid, content);
-      setTask({
-        id: r.taskId,
-        kind: "message",
-        status: "queued",
-        sessionId: sid,
-        errorCode: null,
-        errorMessage: null,
-        result: null,
-        createdAt: new Date().toISOString(),
-        startedAt: null,
-        finishedAt: null,
-      });
-      if (!id) navigate(`/ai/assistant/${sid}`, { replace: true });
-      else void loadSession(sid);
+      sid ??= (await createSession()).id;
     } catch (e) {
-      setPending(null);
       setError(errorMessage(e));
+      return;
+    }
+    const ctl = new AbortController();
+    streaming.current = ctl;
+    setPending(content);
+    setDraft("");
+    setLive({ step: WORKING, text: "" });
+    try {
+      const out = await streamMessage(sid, content, onEvent, ctl.signal);
+      if (!alive.current) return;
+      switch (out.kind) {
+        case "done": {
+          // Swap the growing text for the stored message, with its sources
+          // and proposal; then reconcile with the server.
+          const m = out.event;
+          const asked: AIMessage = {
+            id: m.messageId,
+            role: "user",
+            content,
+            toolCalls: [],
+            citations: [],
+            proposalId: null,
+            taskId: m.taskId,
+            createdAt: new Date().toISOString(),
+          };
+          setDetail((d) =>
+            d ? { ...d, messages: [...d.messages, asked, m.message] } : d,
+          );
+          setPending(null);
+          if (id) void loadSession(sid);
+          else navigate(`/ai/assistant/${sid}`, { replace: true });
+          void refreshSessions();
+          break;
+        }
+        case "error":
+          setTask({
+            id: out.event.code,
+            kind: "message",
+            status: "failed",
+            sessionId: sid,
+            errorCode: out.event.code,
+            errorMessage: out.event.message,
+            result: null,
+            createdAt: new Date().toISOString(),
+            startedAt: null,
+            finishedAt: null,
+          });
+          showStored(sid);
+          break;
+        case "dropped":
+          setError(
+            "The connection closed before the answer was complete. Ask again.",
+          );
+          showStored(sid);
+          break;
+        case "accepted":
+          setTask({
+            id: out.taskId,
+            kind: "message",
+            status: "queued",
+            sessionId: sid,
+            errorCode: null,
+            errorMessage: null,
+            result: null,
+            createdAt: new Date().toISOString(),
+            startedAt: null,
+            finishedAt: null,
+          });
+          if (!id) navigate(`/ai/assistant/${sid}`, { replace: true });
+          else void loadSession(sid);
+          break;
+      }
+    } catch (e) {
+      if (!alive.current) return;
+      if (ctl.signal.aborted) {
+        setStopped(true);
+        showStored(sid);
+      } else {
+        setPending(null);
+        setError(errorMessage(e));
+      }
+    } finally {
+      if (streaming.current === ctl) streaming.current = null;
+      if (alive.current) setLive(null);
     }
   }
 
-  const busy = task?.status === "queued" || task?.status === "running";
+  const busy =
+    live !== null || task?.status === "queued" || task?.status === "running";
   return (
     <div className="aix-chat">
       <nav aria-label="Chats" className="aix-sessions">
@@ -230,6 +351,24 @@ function Chat({ id }: { id: string | undefined }) {
               <PlainText text={pending} />
             </div>
           )}
+          {live && live.text === "" && <TypingIndicator label={live.step} />}
+          {live && live.text !== "" && (
+            // Not announced token by token: the stored message that replaces
+            // it is.
+            <div
+              className="aix-msg aix-msg--live"
+              aria-live="off"
+              aria-busy="true"
+            >
+              <p className="aix-msg__role">Assistant</p>
+              <PlainText text={live.text} />
+            </div>
+          )}
+          {stopped && (
+            <p className="aix-muted">
+              Stopped. The answer was discarded; your question was kept.
+            </p>
+          )}
           {task && <TaskStatus task={task} />}
         </div>
         <form
@@ -256,6 +395,16 @@ function Chat({ id }: { id: string | undefined }) {
             >
               Send
             </Button>
+            {live && (
+              <Button
+                type="button"
+                variant="secondary"
+                icon="circle-stop"
+                onClick={() => streaming.current?.abort()}
+              >
+                Stop
+              </Button>
+            )}
             <Badge tone="outline">
               {draft.length} / {MESSAGE_LIMIT}
             </Badge>

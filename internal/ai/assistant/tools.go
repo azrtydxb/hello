@@ -154,6 +154,8 @@ type toolset struct {
 	hook      func(operation, result string)
 	// abort ends the task (a read answered 401: the user was deleted).
 	abort context.CancelCauseFunc
+	// onTool, when set, is told of each call as it starts.
+	onTool func(operationID string)
 
 	mu    sync.Mutex
 	calls []ToolCall
@@ -207,6 +209,9 @@ func (t *readTool) Execute(ctx context.Context, args json.RawMessage) (any, erro
 	}
 	ts.tries++
 	ts.mu.Unlock()
+	if ts.onTool != nil {
+		ts.onTool(t.def.op.ID)
+	}
 
 	call := ToolCall{OperationID: t.def.op.ID, Arguments: compactArgs(args)}
 	record := func() {
