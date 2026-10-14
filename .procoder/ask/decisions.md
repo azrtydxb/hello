@@ -296,3 +296,14 @@ The phase-2 built-in agent is live, but the assistant-reply and tool-calling che
 - No: leave the checks unverified until the next fastllm change.
 
   Decision: yes — verify right after the trunk rollout (2026-10-14).
+
+## How to stop the assistant's reasoning overruns (2026-10-14)
+
+The go-ai-sdk v0.6.0 → v0.8.0 commits do not explain the slow answers. The cause is the reasoning model sometimes thinking past Hello's 8192 `max_tokens`: the call ends on length and Hello retries it at double the budget, so the user waits for both attempts (seen: 1m17s, 2m19s; normal 2–17s).
+
+- Limit the model's thinking for the assistant (reasoning effort / thinking budget sent per request), keeping 8192 max_tokens.
+- Raise the first-attempt budget to 16384 so an overrun rarely needs a retry (no change to thinking).
+- Both.
+- Leave as is.
+
+Decision: turn thinking off for Hello's model calls (2026-10-14).
