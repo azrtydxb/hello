@@ -179,6 +179,25 @@ func (ts *toolset) Calls() []ToolCall {
 	return append([]ToolCall(nil), ts.calls...)
 }
 
+// loggedCall is a call as the answer phase lists it for citations.
+type loggedCall struct {
+	Position    int             `json:"position"`
+	OperationID string          `json:"operationId"`
+	Arguments   json.RawMessage `json:"arguments,omitempty"`
+	Status      int             `json:"status,omitempty"`
+}
+
+// log is the calls made so far by their positions, the ones the answer's
+// citations name (ai.Call.ToolLog).
+func (ts *toolset) log() any {
+	calls := ts.Calls()
+	out := make([]loggedCall, len(calls))
+	for i, c := range calls {
+		out[i] = loggedCall{Position: i, OperationID: c.OperationID, Arguments: c.Arguments, Status: c.Status}
+	}
+	return out
+}
+
 // readTool is one read operation as a go-ai-sdk tool.
 type readTool struct {
 	def toolDef
