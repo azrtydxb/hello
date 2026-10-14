@@ -307,3 +307,13 @@ The go-ai-sdk v0.6.0 → v0.8.0 commits do not explain the slow answers. The cau
 - Leave as is.
 
 Decision: turn thinking off for Hello's model calls (2026-10-14).
+
+## Thinking off makes the assistant skip its tools (2026-10-14)
+
+Live on kw with thinking off: answers start in ~1s and finish in ~6s (0 reasoning tokens), but the model often says "I will check the registrations" and never calls the tool, so answers miss live data. Likely cause: in prompt structured-output mode the "answer as JSON" instruction is present on every step, and without thinking the model answers instead of calling tools.
+
+- Split the answer: let the model call tools with no JSON instruction, and ask for the structured answer only in a final step. Keeps thinking off.
+- Turn thinking back on: reliable tool use, occasional 1–2 min answers.
+- Turn thinking back on for the assistant only; keep it off for detector explanations (no tools there).
+
+Decision: split tool calling from the structured answer, thinking stays off (2026-10-14).
