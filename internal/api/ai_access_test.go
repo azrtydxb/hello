@@ -181,11 +181,11 @@ func TestTokenLifecycle(t *testing.T) {
 	}
 }
 
-// TestServiceAccountsAPI (the API half of TestServiceAccounts) fails if a
+// TestServiceAccounts (the API half; the OAuth half is in internal/oauth) fails if a
 // secret is returned other than once, a third live secret is allowed, a
 // service account's role is not enforced, or a disabled account still
 // works on the next request.
-func TestServiceAccountsAPI(t *testing.T) {
+func TestServiceAccounts(t *testing.T) {
 	e := newAIEnv(t)
 	c := e.login()
 	c.must(http.StatusBadRequest, "POST", "/api/v1/service-accounts", map[string]any{"name": "ci", "role": "viewer", "scopes": []string{"write"}})

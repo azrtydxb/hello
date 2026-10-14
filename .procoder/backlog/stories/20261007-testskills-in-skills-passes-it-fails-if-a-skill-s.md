@@ -1,6 +1,6 @@
 # `TestSkills` in `skills` passes. It fails if a skill's frontmatter is missing or invalid, its name differs from its folder, `SKILL.md` exceeds 500 lines, a relative link is broken, or a camelCase inline-code identifier is not an exposed MCP tool.
 
-Status: open
+Status: done 2026-10-14
 Created: 2026-10-07
 Epic: ai-external-access
 Sprint: -
@@ -20,3 +20,4 @@ Agents that connect to Hello's MCP server need workflow guidance that never drif
 
 - `go test -race ./skills/` ok (2026-10-08, branch ai-console): TestSkills checks all three skills and, through fstest cases, that the checker reports each fault (missing/invalid frontmatter, name differs, >500 lines, no references/, broken link, unknown camelCase tool).
 - Mutation: `testRouting` renamed to `routingTest` in hello-routing/SKILL.md (snapshot, edit, run, restore, `cmp`) -> FAIL "`routingTest` is not a tool the MCP server exposes".
+- Main CI run 38615122909 (ci.yaml, sha 3861512), go job green: go test -race ./... reported ok for skills with HELLO_TEST_DATABASE_URL and HELLO_TEST_VALKEY_ADDR set (DB and Valkey tests not skipped); the test at skills/skills_test.go:151 TestSkills asserts each failure the criterion lists.
