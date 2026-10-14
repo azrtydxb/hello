@@ -873,7 +873,7 @@ spec:
         # starts Kamailio regardless: a node that stays gone still fails
         # loudly there rather than silently running without it.
         - name: wait-dispatcher
-          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-2b0a11ec74e98904915d4246fd250d7456aac012
+          image: 192.168.10.131:5000/azrtydxb/kamailio:sha-ac7635dc5923523cfb22e5ce8ca6aa900d16615d
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 102
