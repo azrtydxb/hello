@@ -25,3 +25,4 @@ As a maintainer of Hello's external AI access (OAuth 2.1, MCP, roles and the Ope
      one line per criterion. Empty evidence keeps the story open. -->
 
 - Main CI run 38615122909 (ci.yaml, sha 3861512), go job green: go test -race ./... reported ok for internal/api with HELLO_TEST_DATABASE_URL and HELLO_TEST_VALKEY_ADDR set (DB and Valkey tests not skipped); the test at internal/api/users_test.go:86 TestRoleEnforcement asserts each failure the criterion lists.
+- Per-condition audit 2026-10-15: below-minimum admitted or minimum refused with a session, personal token, OAuth token and service account on every route -> internal/api/users_test.go:118, plus minted real credentials; demotion on the next request -> internal/api/users_test.go:133,177; route role differs from x-hello-role -> internal/api/users_test.go:196. All asserted; no change.

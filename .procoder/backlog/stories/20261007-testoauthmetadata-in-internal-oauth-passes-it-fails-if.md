@@ -25,3 +25,4 @@ As a maintainer of Hello's external AI access (OAuth 2.1, MCP, roles and the Ope
      one line per criterion. Empty evidence keeps the story open. -->
 
 - Main CI run 38615122909 (ci.yaml, sha 3861512), go job green: go test -race ./... reported ok for internal/oauth with HELLO_TEST_DATABASE_URL and HELLO_TEST_VALKEY_ADDR set (DB and Valkey tests not skipped); the test at internal/oauth/oauth_test.go:236 TestOAuthMetadata asserts each failure the criterion lists.
+- Per-condition audit 2026-10-15: S-7 fields and issuer -> internal/oauth/oauth_test.go:279,288; resource metadata fields and resource -> internal/oauth/oauth_test.go:304; 401 from /mcp or /api/v1 lacks resource_metadata -> internal/oauth/oauth_test.go:320; any OAuth or MCP path not 404 without HELLO_PUBLIC_URL -> cmd/hello-control/ai_test.go:56 (TestComposeWithoutPublicURL, all eight paths; named by the test's comment). All asserted; no change.

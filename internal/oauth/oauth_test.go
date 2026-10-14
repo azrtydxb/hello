@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -91,7 +92,23 @@ func newHarness(t *testing.T, mod func(*Options)) *harness {
 	e.cimd = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "max-age=60")
-		_ = json.NewEncoder(w).Encode(e.doc)
+		// Faulty documents, one per path, for TestAuthorizeAndConsent.
+		doc := map[string]any{"client_id": "https://" + r.Host + r.URL.Path, "client_name": "Faulty", "redirect_uris": []string{e.redirect}}
+		switch r.URL.Path {
+		case "/cimd-redirect.json":
+			http.Redirect(w, r, "/client.json", http.StatusFound)
+		case "/cimd-huge.json":
+			doc["client_name"] = strings.Repeat("x", 70<<10)
+			_ = json.NewEncoder(w).Encode(doc)
+		case "/cimd-slow.json":
+			time.Sleep(500 * time.Millisecond)
+			_ = json.NewEncoder(w).Encode(doc)
+		case "/cimd-other.json":
+			doc["client_id"] = e.clientID
+			_ = json.NewEncoder(w).Encode(doc)
+		default:
+			_ = json.NewEncoder(w).Encode(e.doc)
+		}
 	}))
 	t.Cleanup(e.cimd.Close)
 	e.clientID = e.cimd.URL + "/client.json"
@@ -330,6 +347,30 @@ func TestAuthorizeAndConsent(t *testing.T) {
 			!strings.Contains(rec.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
 			t.Errorf("%s: %d Location=%q, want the error page", name, rec.Code, rec.Header().Get("Location"))
 		}
+	}
+
+	// A client ID metadata document that redirects, exceeds 64 KiB, times
+	// out or names another client_id is refused on Hello's error page.
+	e.srv.cimd.client.Timeout = 200 * time.Millisecond
+	for fault, reason := range map[string]string{
+		"redirect": "redirects are not followed", "huge": "exceeds 64 KiB", "slow": "timed out", "other": "names another client_id",
+	} {
+		id := e.cimd.URL + "/cimd-" + fault + ".json"
+		rec := e.get(e.authorizeQuery(map[string]string{"client_id": id}))
+		if rec.Code != http.StatusBadRequest || rec.Header().Get("Location") != "" || !strings.Contains(e.logs.String(), reason) {
+			t.Errorf("%s metadata document: %d Location=%q, want the error page (refused: %s)", fault, rec.Code, rec.Header().Get("Location"), reason)
+		}
+		if _, err := e.st.Client(context.Background(), id); err == nil {
+			t.Errorf("%s metadata document was saved as a client", fault)
+		}
+	}
+	// One whose host resolves to a private address (the loopback test
+	// server, through the guarded dialer) is refused too.
+	guarded := newHarness(t, func(o *Options) { o.Client, o.CIMDAllowPrivate = nil, false })
+	guarded.srv.cimd.client.Transport.(*http.Transport).TLSClientConfig = guarded.cimd.Client().Transport.(*http.Transport).TLSClientConfig
+	if rec := guarded.get(guarded.authorizeQuery(nil)); rec.Code != http.StatusBadRequest || rec.Header().Get("Location") != "" ||
+		!strings.Contains(guarded.logs.String(), "private address") {
+		t.Errorf("private-address metadata document: %d Location=%q, want refused as private", rec.Code, rec.Header().Get("Location"))
 	}
 
 	// After it, errors go back to the client with state and iss.
@@ -669,10 +710,18 @@ func throttleLimiters(t *testing.T) map[string]Limiter {
 	t.Helper()
 	log := slog.New(slog.DiscardHandler)
 	out := map[string]Limiter{"memory": NewLimiter(nil, log)}
-	down, _ := vkconn.New(context.Background(), vkconn.Config{Addr: "127.0.0.1:1"}, log)
-	if down != nil {
+	// The "Valkey stopped" leg always runs: a client on a closed port when
+	// one can be made, otherwise a client whose every call is refused.
+	down, err := vkconn.New(context.Background(), vkconn.Config{Addr: "127.0.0.1:1"}, log)
+	if err == nil && down != nil {
 		t.Cleanup(down.Close)
 		out["valkey down"] = NewLimiter(func() valkey.Client { return down }, log)
+	} else {
+		refused := NewLimiter(func() valkey.Client { return stubClient{} }, log).(*valkeyLimiter)
+		refused.run = func(context.Context, valkey.Client, string, int, time.Duration, string) (int64, error) {
+			return 0, errors.New("dial tcp 127.0.0.1:6379: connect: connection refused")
+		}
+		out["valkey down"] = refused
 	}
 	if addr := os.Getenv("HELLO_TEST_VALKEY_ADDR"); addr != "" {
 		c, err := valkey.NewClient(valkey.ClientOption{InitAddress: []string{addr}, ForceSingleClient: true, SelectDB: 12}) // oauth's own DB: other packages FLUSHDB theirs in parallel (TestValkeyDBsPerPackage)
@@ -700,6 +749,12 @@ func TestGrantsAndRevocation(t *testing.T) {
 	}
 	if e.admitted(tok["access_token"].(string), api, nil) {
 		t.Fatal("revoking the refresh token left the access token working")
+	}
+	if rec := e.post("/oauth/token", url.Values{"grant_type": {"refresh_token"}, "refresh_token": {tok["refresh_token"].(string)}, "client_id": {e.clientID}}); rec.Code == http.StatusOK {
+		t.Fatal("a revoked refresh token still refreshes")
+	}
+	if !slices.ContainsFunc(e.st.audit, func(s string) bool { return strings.HasPrefix(s, "oauth:"+e.clientID+" revoke oauth_token") }) {
+		t.Fatalf("token revocation wrote no audit row: %v", e.st.audit)
 	}
 	// Unknown tokens are not an error (RFC 7009); an access token alone.
 	if rec := e.post("/oauth/revoke", url.Values{"token": {"nope"}, "client_id": {e.clientID}}); rec.Code != http.StatusOK {
@@ -749,6 +804,9 @@ func TestGrantsAndRevocation(t *testing.T) {
 	}
 	if e.admitted(aliceTok["access_token"].(string), api, nil) {
 		t.Fatal("deleting a grant left its token working")
+	}
+	if rec := e.post("/oauth/token", url.Values{"grant_type": {"refresh_token"}, "refresh_token": {aliceTok["refresh_token"].(string)}, "client_id": {e.clientID}}); rec.Code == http.StatusOK {
+		t.Fatal("deleting a grant left its refresh token working")
 	}
 	if len(e.st.audit) == before || !strings.Contains(e.st.audit[len(e.st.audit)-1], "revoke oauth_grant") {
 		t.Fatalf("grant revocation wrote no audit row: %v", e.st.audit[before:])
@@ -860,7 +918,7 @@ func TestServiceAccounts(t *testing.T) {
 // TestDynamicRegistration fails if /oauth/register registers a
 // confidential client or accepts a non-loopback http redirect, or if a
 // registered client is not marked unverified. (Its absence with DCR off is
-// in TestOAuthMetadata; the cleanup rules are store.TestOAuthStore.)
+// in TestOAuthMetadata; the cleanup rules are api.TestGrantsAPI, over PostgreSQL.)
 func TestDynamicRegistration(t *testing.T) {
 	e := newHarness(t, func(o *Options) { o.DCR = true })
 	reg := func(body string) *httptest.ResponseRecorder {

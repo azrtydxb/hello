@@ -25,3 +25,4 @@ As a maintainer of Hello's external AI access (OAuth 2.1, MCP, roles and the Ope
      one line per criterion. Empty evidence keeps the story open. -->
 
 - Main CI run 38615122909 (ci.yaml, sha 3861512), web job green: pnpm lint and pnpm test over web/ including web/src/pages/Users.test.tsx; re-run locally 2026-10-15: pnpm test 38 files / 280 tests pass, pnpm lint clean.
+- Per-condition audit 2026-10-15: non-admin sees the Users page -> Users.test.tsx 'hides the Users page from a viewer/operator'; a role change does not call PATCH /api/v1/users/{id} -> 'changes a role' (exact call and body); a viewer shown write actions -> 'shows a viewer no write actions'. All asserted; no change.

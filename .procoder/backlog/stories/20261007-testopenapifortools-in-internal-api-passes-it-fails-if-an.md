@@ -25,3 +25,4 @@ As a maintainer of Hello's external AI access (OAuth 2.1, MCP, roles and the Ope
      one line per criterion. Empty evidence keeps the story open. -->
 
 - Main CI run 38615122909 (ci.yaml, sha 3861512), go job green: go test -race ./... reported ok for internal/api with HELLO_TEST_DATABASE_URL and HELLO_TEST_VALKEY_ADDR set (DB and Valkey tests not skipped); the test at internal/api/openapi_test.go:90 TestOpenAPIForTools asserts each failure the criterion lists.
+- Per-condition audit 2026-10-15: summary -> internal/api/openapi_test.go:110; one-sentence description -> :113; parameter description -> :117; top-level body property description -> :124; x-hello-scope -> :133; x-hello-mcp -> :136; credential response property without x-hello-secret -> :160. All asserted; no change.

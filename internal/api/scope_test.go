@@ -122,7 +122,7 @@ func TestScopeEnforcement(t *testing.T) {
 		}
 		if code, rec := call(rt.Method, rt.Pattern, func(r *http.Request) {
 			r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: "sess"})
-		}); refused(code) && !usersOnly {
+		}); refused(code) {
 			t.Errorf("%s: a session = %d %s", op, code, rec.Body)
 		}
 	}

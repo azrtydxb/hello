@@ -137,6 +137,12 @@ func TestTokenLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.must(http.StatusUnauthorized, "GET", "/api/v1/auth/me", nil)
+	revoked := c.must(http.StatusCreated, "POST", "/api/v1/tokens", map[string]any{"name": "revoked", "scopes": []string{"read"}}).json(t)
+	rv := e.client()
+	rv.bearer = revoked["token"].(string)
+	rv.must(http.StatusOK, "GET", "/api/v1/auth/me", nil)
+	c.must(http.StatusNoContent, "DELETE", "/api/v1/tokens/"+fmt.Sprint(revoked["id"]), nil)
+	rv.must(http.StatusUnauthorized, "GET", "/api/v1/auth/me", nil)
 
 	// A legacy token keeps every scope.
 	var uid int64

@@ -25,3 +25,4 @@ As a maintainer of Hello's external AI access (OAuth 2.1, MCP, roles and the Ope
      one line per criterion. Empty evidence keeps the story open. -->
 
 - Main CI run 38615122909 (ci.yaml, sha 3861512), go job green: go test -race ./... reported ok for internal/api with HELLO_TEST_DATABASE_URL and HELLO_TEST_VALKEY_ADDR set (DB and Valkey tests not skipped); the test at internal/api/openapi_test.go:42 TestRoutesMatchOpenAPI asserts each failure the criterion lists.
+- Per-condition audit 2026-10-15: routed but undocumented -> internal/api/openapi_test.go:62; documented but unrouted -> :74; scope or role drift -> :66,69. FIXED a loophole: routes still on s.pending were exempt from 'route has no operation'; none remain, so internal/api/openapi_test.go:51 now fails if any route is pending.
