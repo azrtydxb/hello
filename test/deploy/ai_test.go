@@ -259,6 +259,30 @@ func TestDocsAIAgent(t *testing.T) {
 			t.Errorf("the guide lacks %q", name)
 		}
 	}
+	// Every HELLO_AI_ setting the configuration reads and every AI error
+	// code is in the guide, so a new one cannot ship undocumented.
+	for _, src := range []struct {
+		file string
+		re   *regexp.Regexp
+	}{
+		{filepath.Join("internal", "config", "config.go"), regexp.MustCompile(`"(HELLO_AI_[A-Z_]+)"`)},
+		{filepath.Join("internal", "ai", "ai.go"), regexp.MustCompile(`Code\w+\s*=\s*"([a-z_]+)"`)},
+		{filepath.Join("internal", "ai", "tasks.go"), regexp.MustCompile(`Code\w+\s*=\s*"([a-z_]+)"`)},
+	} {
+		b, err := os.ReadFile(filepath.Join(root, src.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := src.re.FindAllStringSubmatch(string(b), -1)
+		if len(found) == 0 {
+			t.Fatalf("%s: no names found; update the pattern", src.file)
+		}
+		for _, m := range found {
+			if !strings.Contains(guide, "`"+m[1]+"`") {
+				t.Errorf("the guide lacks `%s` (from %s)", m[1], src.file)
+			}
+		}
+	}
 	spec, err := apispec.Load(api.OpenAPI())
 	if err != nil {
 		t.Fatal(err)

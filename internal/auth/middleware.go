@@ -99,8 +99,9 @@ type Options struct {
 // o.Resource, or, inside an MCP replay (ReplayFrom) by the same client, the
 // MCP resource next to it (spec S-9). The session scope is only ever held
 // by a session (spec S-5). A request without credentials whose context
-// holds an agent (AgentFrom) is that user, read only. With o.MetadataURL set, every 401 carries the
-// RFC 9728 challenge.
+// holds an agent (AgentFrom) is that user, read only, and is logged with
+// via=ai-assistant. With o.MetadataURL set, every 401 carries the RFC 9728
+// challenge.
 func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +165,13 @@ func Middleware(l Lookup, o Options, log *slog.Logger) func(http.Handler) http.H
 			}
 			if a.Via == "" {
 				a.Via = ViaFrom(r.Context())
+			}
+			if a.Kind == KindAgent {
+				// Every read made for the assistant is logged as the user
+				// it works for, with the assistant's via (spec ai-agent
+				// S-7). The path only: a query may carry data.
+				log.Info("agent read", "method", r.Method, "path", r.URL.Path, "actor", a.String(),
+					"task", ag.TaskID, "via", a.Via)
 			}
 			next.ServeHTTP(w, r.WithContext(WithActor(withChallenge(r.Context(), o.MetadataURL), a)))
 		})
