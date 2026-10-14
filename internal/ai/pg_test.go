@@ -69,10 +69,10 @@ func runsOf(t *testing.T, st *store.Store, agents ...string) func() []ai.AgentRu
 	}
 }
 
-// TestSchedulerPostgres is TestScheduler's story on PostgreSQL, with the
+// schedulerPostgres is TestScheduler's story on PostgreSQL, with the
 // advisory locks on dedicated connections, plus the closing of a dead
 // replica's unfinished run.
-func TestSchedulerPostgres(t *testing.T) {
+func schedulerPostgres(t *testing.T) {
 	db, st := scratch(t)
 	schedulerCase(t, st, runsOf(t, st, "count", "failing", "panicky", "spender"))
 

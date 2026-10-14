@@ -60,7 +60,12 @@ const DELETE = {
       after: null,
       current: { name: "old-route", pattern: "^9" },
       references: [
-        { kind: "trunk", id: "3", name: "carrier-a", detail: "used by the route" },
+        {
+          kind: "trunk",
+          id: "3",
+          name: "carrier-a",
+          detail: "used by the route",
+        },
       ],
     },
   ],

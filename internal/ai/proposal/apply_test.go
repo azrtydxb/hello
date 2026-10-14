@@ -84,7 +84,12 @@ func TestProposalApply(t *testing.T) {
 		if want := fmt.Sprintf("token:%d", toks[0].ID); actor != want || !via.Valid || via.String != "ai-proposal:"+pid {
 			t.Errorf("config audit = %q %v, want the operator's token and via ai-proposal:%s", actor, via, pid)
 		}
+		// Each action is its own change with its own audit row naming the
+		// proposal, not only the last one.
 		var n int
+		if err := e.db.QueryRow(`SELECT count(*) FROM audit_events WHERE resource = 'extension' AND via = $1`, "ai-proposal:"+pid).Scan(&n); err != nil || n != 2 {
+			t.Errorf("config audit rows via ai-proposal:%s = %d %v, want one per action (2)", pid, n, err)
+		}
 		if err := e.db.QueryRow(`SELECT count(*) FROM audit_events WHERE resource = 'ai_proposal' AND resource_id = $1 AND actor LIKE 'token:%'`, pid).Scan(&n); err != nil || n != 1 {
 			t.Errorf("proposal audit rows = %d %v", n, err)
 		}

@@ -136,6 +136,15 @@ func TestAIAgentEndToEnd(t *testing.T) {
 		t.Fatalf("AI status = %+v (reason %v), want enabled with the lab model", status, deref(status.Reason))
 	}
 
+	// A tool result carries this extension's name (listExtensions) and a
+	// model response carries responseMarker (the explanation below):
+	// TestNoSecretsInLogs fails if either reaches a log line. The extension
+	// has no device, so no SIP traffic carries its name.
+	toolMarker := "TOOL-RESULT-MARKER-" + randDigits(12)
+	responseMarker := "RESPONSE-MARKER-" + randDigits(12)
+	remember(toolMarker, responseMarker)
+	lc.must("POST", "/api/v1/extensions", map[string]string{"number": "7" + randDigits(7), "name": toolMarker}, nil, 201)
+
 	// A read question: the model calls listExtensions, the call is replayed
 	// as the asking user and the answer cites it.
 	d := lc.createExtension("desk")[0]
@@ -259,7 +268,7 @@ func TestAIAgentEndToEnd(t *testing.T) {
 	// the finding ids: the explanation is stored per finding id.
 	var entries []map[string]any
 	entries = append(entries, map[string]any{"id": brute.ID, "rank": 1, "summary": "Someone is guessing REGISTER credentials.",
-		"likelyCause": "A scanner from one source.", "nextStep": "Block the source at the firewall."})
+		"likelyCause": "A scanner from one source. " + responseMarker, "nextStep": "Block the source at the firewall."})
 	rank := 2
 	for _, f := range findings() {
 		if f.Status == "open" && f.ID != brute.ID {

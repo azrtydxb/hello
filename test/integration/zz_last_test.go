@@ -9,7 +9,8 @@ import (
 )
 
 // labAIKey is the lab's HELLO_AI_API_KEY (compose.yaml). TestAIAgentEndToEnd
-// also remembers a marker it puts in a prompt: neither may reach a log.
+// also remembers markers it puts in a prompt, a tool result and a model
+// response: none may reach a log (spec ai-agent S-25).
 const labAIKey = "lab-ai-api-key-0123456789abcdef"
 
 // TestNoSecretsInLogs checks every service's log for any

@@ -5,9 +5,10 @@ import (
 	"testing"
 )
 
-// TestPickHeaders: apply copies only the applier's Cookie and
-// Authorization; nothing else of the caller's request reaches the replay.
-func TestPickHeaders(t *testing.T) {
+// TestProposalApplyHeaders (the header half of TestProposalApply): apply
+// copies only the applier's Cookie and Authorization; nothing else of the
+// caller's request reaches the replay.
+func TestProposalApplyHeaders(t *testing.T) {
 	in := http.Header{
 		"Cookie": {"s=1"}, "Authorization": {"Bearer x"},
 		"X-Forwarded-For": {"1.2.3.4"}, "Origin": {"https://evil"}, "Sec-Fetch-Site": {"cross-site"},
