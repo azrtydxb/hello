@@ -139,7 +139,11 @@ func generate[T any](ctx context.Context, s *Service, call Call[T]) (any, Usage,
 		}
 		var schema []byte
 		if s.cfg.StructuredOutput == "prompt" {
-			_, schema = schemaFor[T]()
+			_, sj, err := schemaFor[T]()
+			if err != nil {
+				return nil, u, noSchema(s, call.Feature, err)
+			}
+			schema = sj
 		}
 		msgs = append(msgs, provider.UserText(answerRequest(log, schema)))
 	}
@@ -155,7 +159,8 @@ const (
 		"When you have what you need, reply in plain text with what you found. Do not write JSON now: the final structured answer is asked for afterwards."
 	nudgeInstruction = "You described a tool call in text instead of making it. Call the tool through the tool-calling interface now. " +
 		"If you need no tool, reply in plain text with what you know."
-	answerInstruction = "Now write the final answer to the question from the conversation above and the tool results, without calling any tool."
+	answerInstruction = "Now write the final answer to the question from the conversation above and the tool results, without calling any tool. " +
+		"Your replies above are not shown to the user: the JSON object holds the whole answer, not only the citations."
 )
 
 // answerRequest is the user turn that opens the answer phase: what to do,
@@ -281,7 +286,10 @@ func describesToolCall(text string, tools []aisdk.Tool, noCalls bool) bool {
 // structured answer from msgs, without tools, validated and retried.
 func answer[T any](ctx context.Context, s *Service, call Call[T], msgs []provider.Message, fs *fieldStream) (any, Usage, error) {
 	var u Usage
-	resolved, schemaJSON := schemaFor[T]()
+	resolved, schemaJSON, err := schemaFor[T]()
+	if err != nil {
+		return nil, u, noSchema(s, call.Feature, err)
+	}
 	useOutput := s.cfg.StructuredOutput != "prompt"
 	system := header(call.Feature)
 	if call.System != "" {
@@ -323,11 +331,17 @@ func answer[T any](ctx context.Context, s *Service, call Call[T], msgs []provide
 		v, decErr := decode[T](raw, resolved)
 		verr := decErr
 		if verr == nil && call.Validate != nil {
-			verr = call.Validate(ctx, v)
+			if verr = call.Validate(ctx, v); verr != nil {
+				verr = asRejected(verr)
+			}
 		}
 		if verr == nil {
 			return v, u, nil
 		}
+		class, reason := rejection(verr)
+		s.log.Warn("ai: answer rejected", "feature", call.Feature, "task_id", taskIDFrom(ctx), "attempt", attempt,
+			"of", attempts, "class", class, "reason", reason, "finish", string(last.FinishReason),
+			"output_tokens", last.Usage.OutputTokens)
 		if decErr != nil && last.FinishReason == provider.FinishLength && !lengthRetried {
 			lengthRetried, maxTokens = true, min(2*maxTokens, maxTokensCap)
 			continue
@@ -500,18 +514,87 @@ func stripAnswer(text string) string {
 var rawMessageSchema = map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[json.RawMessage](): {}}
 
 // schemaFor is T's JSON schema, resolved for validation, and its JSON for
-// the prompt mode; nil when T has no schema (then only decoding checks it).
-func schemaFor[T any]() (*jsonschema.Resolved, []byte) {
+// the prompt mode. It fails when T has no usable schema (a malformed
+// jsonschema tag, for one): the model would otherwise be asked for an
+// object without being told its properties.
+func schemaFor[T any]() (*jsonschema.Resolved, []byte, error) {
 	sc, err := jsonschema.For[T](&jsonschema.ForOptions{IgnoreInvalidTypes: true, TypeSchemas: rawMessageSchema})
 	if err != nil {
-		return nil, []byte(`{"type":"object"}`)
+		return nil, nil, err
 	}
-	b, _ := json.Marshal(sc)
+	b, err := json.Marshal(sc)
+	if err != nil {
+		return nil, nil, err
+	}
 	r, err := sc.Resolve(nil)
 	if err != nil {
-		return nil, b
+		return nil, nil, err
 	}
-	return r, b
+	return r, b, nil
+}
+
+// CheckSchema reports whether T, the answer type of a Generate call, has a
+// JSON schema; callers check their types at start, so a malformed tag
+// fails there instead of on every call.
+func CheckSchema[T any]() error {
+	if _, _, err := schemaFor[T](); err != nil {
+		return fmt.Errorf("ai: the answer type %s has no JSON schema: %w", reflect.TypeFor[T](), err)
+	}
+	return nil
+}
+
+// noSchema is the failure of a call whose answer type has no JSON schema,
+// logged at error: only a code change fixes it.
+func noSchema(s *Service, feature string, err error) error {
+	s.log.Error("ai: the answer type has no JSON schema", "feature", feature, "error", err)
+	return &Error{Code: CodeInvalidOutput, Message: "the answer type has no JSON schema", Err: err}
+}
+
+// Rejected is a Validate error with a reason: a short fixed label, such as
+// citation_out_of_range, logged with each rejected answer. Its message is
+// what the model is told.
+type Rejected struct {
+	Reason string
+	Err    error
+}
+
+func (e *Rejected) Error() string { return e.Err.Error() }
+func (e *Rejected) Unwrap() error { return e.Err }
+
+// Reject labels a Validate error with reason for the log.
+func Reject(reason string, err error) error { return &Rejected{Reason: reason, Err: err} }
+
+// decodeError is a decode failure with its class for the log: empty,
+// not_json or schema.
+type decodeError struct {
+	class string
+	err   error
+}
+
+func (e *decodeError) Error() string { return e.err.Error() }
+func (e *decodeError) Unwrap() error { return e.err }
+
+// asRejected labels a Validate error that carries no reason.
+func asRejected(err error) error {
+	if r := (*Rejected)(nil); errors.As(err, &r) {
+		return err
+	}
+	return &Rejected{Reason: "unlabelled", Err: err}
+}
+
+// rejection is a rejected answer's class (empty, not_json, schema or
+// validator) and reason for the log: fixed labels, never the answer's or
+// the user's text.
+func rejection(err error) (class, reason string) {
+	var d *decodeError
+	if errors.As(err, &d) {
+		return d.class, d.class
+	}
+	var r *Rejected
+	if errors.As(err, &r) {
+		return "validator", r.Reason
+	}
+	return "validator", "unlabelled"
 }
 
 // decode parses raw as T, checking it against T's schema first, so an
@@ -519,21 +602,21 @@ func schemaFor[T any]() (*jsonschema.Resolved, []byte) {
 func decode[T any](raw string, resolved *jsonschema.Resolved) (T, error) {
 	var v T
 	if raw == "" {
-		return v, errors.New("the answer is empty; reply with a JSON object")
+		return v, &decodeError{"empty", errors.New("the answer is empty; reply with a JSON object")}
 	}
 	var inst any
 	if err := json.Unmarshal([]byte(raw), &inst); err != nil {
-		return v, fmt.Errorf("the answer is not valid JSON: %w", err)
+		return v, &decodeError{"not_json", fmt.Errorf("the answer is not valid JSON: %w", err)}
 	}
 	if resolved != nil {
 		if err := resolved.Validate(inst); err != nil {
-			return v, fmt.Errorf("the answer does not match the schema: %w", err)
+			return v, &decodeError{"schema", fmt.Errorf("the answer does not match the schema: %w", err)}
 		}
 	}
 	dec := json.NewDecoder(bytes.NewReader([]byte(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&v); err != nil {
-		return v, fmt.Errorf("the answer does not match the schema: %w", err)
+		return v, &decodeError{"schema", fmt.Errorf("the answer does not match the schema: %w", err)}
 	}
 	return v, nil
 }
