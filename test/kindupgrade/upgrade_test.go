@@ -205,17 +205,6 @@ func register(t *testing.T, p *sipua.Phone) {
 	t.Fatalf("register: %s", last)
 }
 
-func run(t *testing.T, name string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command(name, args...)
-	out, err := cmd.CombinedOutput()
-	t.Logf("$ %s %s\n%s", name, strings.Join(args, " "), out)
-	if err != nil {
-		t.Fatalf("%s failed: %v", name, err)
-	}
-	return string(out)
-}
-
 // helmUpgrade runs helm upgrade with the given extra --set arguments while
 // polling the call: it must stay listed (possibly on another node) for the
 // whole rollout.
