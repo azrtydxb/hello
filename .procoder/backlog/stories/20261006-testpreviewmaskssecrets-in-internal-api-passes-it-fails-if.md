@@ -21,4 +21,5 @@ Phone auto-provisioning deliverable; see .procoder/specs/phone-auto-provisioning
 <!-- Filled at close time: the commands run and what their output proved,
      one line per criterion. Empty evidence keeps the story open. -->
 
-- internal/api/prov_test.go:371 TestPreviewMasksSecrets asserts secret, upper-cased secret, admin password and token are absent, the body equals the served body with masks, and prov_fetches stays empty. Green on main CI run 38615122909, go job (database env set).
+- internal/api/prov_test.go:493 TestPreviewMasksSecrets asserts secret, upper-cased secret, admin password and token are absent, the body equals the served body with masks, and prov_fetches stays empty. Green on main CI run 38615122909, go job (database env set).
+- Per-condition audit 2026-10-15: preview contains the secret or token → internal/api/prov_test.go:511-517; differs from the served body other than in the masks → internal/api/prov_test.go:518-522; writes a fetch record → internal/api/prov_test.go:523-528 (prov_fetches empty; gap fixed: the phone's own fetch state, first/last_fetch_at and boot_armed, must also stay untouched).

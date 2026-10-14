@@ -5,13 +5,17 @@ import (
 	"context"
 	"crypto/md5" //nolint:gosec // RFC 3261 digest HA1 is defined over MD5.
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +26,7 @@ import (
 	"github.com/azrtydxb/hello/internal/prov/redirect"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const testPublicURL = "https://prov.hello.test"
@@ -36,12 +41,18 @@ type provEnv struct {
 
 func newProvEnv(t *testing.T, pc ProvConfig) *provEnv {
 	t.Helper()
+	return newProvEnvLog(t, pc, nil)
+}
+
+// newProvEnvLog is newProvEnv with the API logging to log.
+func newProvEnvLog(t *testing.T, pc ProvConfig, log *slog.Logger) *provEnv {
+	t.Helper()
 	box := testBox(t)
 	pc.Settings = store.ProvSettings{
 		PublicURL: testPublicURL, SIPServer: "192.0.2.10:5060", Domain: testDomain, Expiry: time.Hour,
 		Resync: 24 * time.Hour, Timezone: "UTC", NTP: "pool.ntp.org", TokenGrace: 7 * 24 * time.Hour,
 	}
-	e := newEnvConfig(t, Config{Prov: pc}, box)
+	e := newEnvConfig(t, Config{Prov: pc, Log: log}, box)
 	c := e.login()
 	e.ext101 = c.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]string{"number": "101", "name": "Sales"}).json(t)
 	e.ext102 = c.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]string{"number": "102", "name": "Support"}).json(t)
@@ -106,9 +117,29 @@ func TestPhoneCRUD(t *testing.T) {
 		c.must(http.StatusBadRequest, "POST", "/api/v1/phones", bad)
 	}
 
-	// Fetch state is not writable.
-	for _, f := range []string{"lastFetchAt", "lastFetchIp", "firstFetchAt", "firmwareSeen", "tokenExposed", "bootArmed", "mac"} {
-		c.must(http.StatusBadRequest, "PATCH", path, map[string]any{f: "x"})
+	// Fetch state is not writable, on create or update. Each value is
+	// well-typed, so a 400 is the field being refused, not a type error.
+	fetchState := map[string]any{
+		"firstFetchAt": "2026-01-02T03:04:05Z", "lastFetchAt": "2026-01-02T03:04:05Z", "lastFetchIp": "192.0.2.99",
+		"lastFetchUa": "Yealink SIP-T54W", "lastFetchFile": "805ec0aabb01.cfg", "firmwareSeen": "96.86.0.70",
+		"tokenExposed": true, "uaMismatch": true, "bootArmed": false, "bootReclaimed": true, "renderError": true,
+		"mac": "805ec0aabb09",
+	}
+	for f, v := range fetchState {
+		c.must(http.StatusBadRequest, "PATCH", path, map[string]any{f: v})
+		if f != "mac" {
+			c.must(http.StatusBadRequest, "POST", "/api/v1/phones", map[string]any{
+				"mac": "805ec0aabb03", "vendor": "yealink", "model": "T54W", "extensionId": p.ext101["id"], f: v})
+		}
+	}
+	if g := c.must(http.StatusOK, "GET", path, nil).json(t); g["firstFetchAt"] != nil || g["lastFetchAt"] != nil ||
+		g["lastFetchIp"] != "" || g["lastFetchUa"] != "" || g["lastFetchFile"] != "" || g["firmwareSeen"] != "" ||
+		g["tokenExposed"] != false || g["uaMismatch"] != false || g["bootArmed"] != true || g["bootReclaimed"] != false ||
+		g["renderError"] != false || g["mac"] != "805ec0aabb01" {
+		t.Fatalf("a refused write changed the fetch state: %v", g)
+	}
+	if n := p.scalar(`SELECT count(*) FROM phones WHERE mac = '805ec0aabb03'`); n != "0" {
+		t.Fatal("a create with fetch state stored the phone")
 	}
 
 	got := c.must(http.StatusOK, "GET", path, nil).json(t)
@@ -178,8 +209,18 @@ func TestPhoneDeviceSecretSealed(t *testing.T) {
 		t.Fatal("sealed secret opens for another device")
 	}
 	id := fmt.Sprint(created["id"])
-	for _, path := range []string{"/api/v1/phones", "/api/v1/phones/" + id, "/api/v1/devices", fmt.Sprintf("/api/v1/devices/%d", devID)} {
-		if r := c.must(http.StatusOK, "GET", path, nil); bytes.Contains(r.body, []byte(sec)) || bytes.Contains(r.body, []byte("secret_enc")) {
+	// Neither the secret nor its sealed bytes (as JSON would carry them)
+	// are in the binding answer or any read.
+	sealedB64 := []byte(base64.StdEncoding.EncodeToString(enc))
+	createdJSON, _ := json.Marshal(created)
+	if bytes.Contains(createdJSON, []byte(sec)) || bytes.Contains(createdJSON, sealedB64) || bytes.Contains(createdJSON, []byte("secretEnc")) {
+		t.Fatalf("the binding answer reveals the secret: %s", createdJSON)
+	}
+	for _, path := range []string{"/api/v1/phones", "/api/v1/phones/" + id, "/api/v1/devices", fmt.Sprintf("/api/v1/devices/%d", devID),
+		"/api/v1/phones/" + id + "/fetches", "/api/v1/extensions"} {
+		r := c.must(http.StatusOK, "GET", path, nil)
+		if bytes.Contains(r.body, []byte(sec)) || bytes.Contains(r.body, sealedB64) ||
+			bytes.Contains(r.body, []byte("secret_enc")) || bytes.Contains(r.body, []byte("secretEnc")) {
 			t.Fatalf("GET %s reveals the secret", path)
 		}
 	}
@@ -206,6 +247,24 @@ func TestPhoneDeviceSecretSealed(t *testing.T) {
 		t.Fatal("unbinding left secret_enc set or cleared the HA1")
 	}
 
+	// Rotate, seal and HA1 are one transaction with the binding: a bind
+	// whose phone row then fails (a model past the CHECK's 64 characters,
+	// written after the seal) leaves the device exactly as it was.
+	ha1Before := p.scalar(`SELECT ha1_md5 || '/' || ha1_sha256 FROM devices WHERE id = $1`, devID)
+	audBefore := p.scalar(`SELECT count(*) FROM audit_events WHERE action = 'bind-rotate-secret' AND resource_id = $1`, fmt.Sprint(devID))
+	if _, err := p.st.CreatePhone(context.Background(), "test", store.PhoneInput{
+		MAC: "0004f2000099", Vendor: prov.Yealink, Model: strings.Repeat("M", 65), ExtensionID: int64(p.ext101["id"].(float64)),
+		DeviceID: devID, Realm: testDomain, Enabled: true,
+	}); !errors.As(err, new(*pgconn.PgError)) || !strings.Contains(err.Error(), "phones_model_check") {
+		// Any other failure may come before the seal and prove nothing.
+		t.Fatalf("bind with a 65-character model = %v, want the phones_model_check violation", err)
+	}
+	if p.scalar(`SELECT ha1_md5 || '/' || ha1_sha256 FROM devices WHERE id = $1`, devID) != ha1Before ||
+		p.scalar(`SELECT count(*) FROM devices WHERE id = $1 AND secret_enc IS NULL`, devID) != "1" ||
+		p.scalar(`SELECT count(*) FROM audit_events WHERE action = 'bind-rotate-secret' AND resource_id = $1`, fmt.Sprint(devID)) != audBefore {
+		t.Fatal("a failed bind left the device's secret rotated, sealed or its HA1 changed")
+	}
+
 	// A created device is <ext>-<last 6 MAC hex>, sealed; deleting the
 	// phone unbinds it.
 	c2 := p.phone("0004f2abcdef", nil)
@@ -224,10 +283,13 @@ func TestPhoneDeviceSecretSealed(t *testing.T) {
 }
 
 // TestPhoneAdminPassword fails if a new phone has no sealed random admin
-// password, if it appears in a list or get response, or if a reveal does
-// not write an audit row.
+// password, if any built-in template does not set it, if it appears on the
+// boot path, in a preview, in a list or get response or in a log, or if a
+// reveal does not write an audit row.
 func TestPhoneAdminPassword(t *testing.T) {
-	p := newProvEnv(t, ProvConfig{})
+	logs := &syncBuffer{}
+	log := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	p := newProvEnvLog(t, ProvConfig{}, log)
 	c := p.c
 	created := p.phone("0015650000aa", nil)
 	other := p.phone("0015650000bb", nil)
@@ -268,12 +330,23 @@ func TestPhoneAdminPassword(t *testing.T) {
 	}
 	c.must(http.StatusNotFound, "POST", "/api/v1/phones/999999/admin-password/reveal", nil)
 
-	// Every built-in template sets the password on the phone: each vendor's
-	// device file carries it (the boot bodies, by design, never do).
-	for _, b := range prov.Builtins() {
+	// Every built-in template sets the password on the phone: rendered for
+	// a phone of its vendor, one of its files carries it (the boot bodies,
+	// by design, never do).
+	builtins := prov.Builtins()
+	if len(builtins) < 5 {
+		t.Fatalf("%d built-in templates, want one per first-class vendor", len(builtins))
+	}
+	const probe = "Adm1nProbe7x"
+	for _, b := range builtins {
+		ph := prov.Phone{MAC: "0015650000ee", MACUpper: "0015650000EE", Vendor: b.Vendor, Model: "M1", AdminPassword: probe}
 		sets := false
 		for _, f := range b.Files {
-			sets = sets || strings.Contains(f.Body, ".Phone.AdminPassword")
+			out, err := prov.Render(context.Background(), b, prov.ExpandPattern(f.Pattern, ph), prov.RenderData{Phone: ph})
+			if err != nil {
+				t.Fatalf("built-in %s %s: %v", b.BuiltinRef, f.Pattern, err)
+			}
+			sets = sets || bytes.Contains(out, []byte(probe))
 		}
 		if !sets {
 			t.Errorf("built-in %s template does not set the admin password", b.BuiltinRef)
@@ -287,6 +360,34 @@ func TestPhoneAdminPassword(t *testing.T) {
 	pv := c.must(http.StatusOK, "GET", path+"/preview?file=0015650000aa.cfg", nil)
 	if bytes.Contains(pv.body, []byte(cur)) || bytes.Contains(pv.body, []byte(pw)) {
 		t.Fatalf("preview shows the admin password: %s", pv.body)
+	}
+
+	// The boot path, served from this database: the common body and the
+	// armed phone's one-time hand-off carry its URL but never the password.
+	pub, _ := url.Parse(testPublicURL)
+	boot := httptest.NewServer(prov.NewHandler(p.st,
+		prov.NewLimiter(nil, prov.Limits{IPPerMin: 1000, DeniedPer10Min: 1000, PhonePerHour: 1000}, log), nil,
+		prov.Options{PublicURL: pub, Resync: time.Hour, Log: log}))
+	t.Cleanup(boot.Close)
+	for _, name := range []string{"y000000000096.cfg", "0015650000aa.cfg"} {
+		resp, err := http.Get(boot.URL + "/p/boot/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || !bytes.Contains(body, []byte("/p/")) {
+			t.Fatalf("boot %s = %d %q", name, resp.StatusCode, body)
+		}
+		if bytes.Contains(body, []byte(cur)) || bytes.Contains(body, []byte(pw)) {
+			t.Fatalf("boot %s shows the admin password: %s", name, body)
+		}
+	}
+
+	// Nothing logged it, at any level: not the API through create, reads,
+	// reveals, rotation and preview, not the provisioning handler.
+	if l := logs.String(); strings.Contains(l, cur) || strings.Contains(l, pw) {
+		t.Fatalf("the log holds the admin password:\n%s", l)
 	}
 }
 
@@ -421,6 +522,9 @@ func TestPreviewMasksSecrets(t *testing.T) {
 	}
 	if n := p.scalar(`SELECT count(*) FROM prov_fetches`); n != "0" {
 		t.Fatalf("preview wrote %s fetch rows", n)
+	}
+	if n := p.scalar(`SELECT count(*) FROM phones WHERE id = $1 AND first_fetch_at IS NULL AND last_fetch_at IS NULL AND boot_armed`, id); n != "1" {
+		t.Fatal("preview recorded a fetch on the phone")
 	}
 	c.must(http.StatusNotFound, "GET", fmt.Sprintf("/api/v1/phones/%d/preview?file=other.cfg", id), nil)
 	c.must(http.StatusBadRequest, "GET", fmt.Sprintf("/api/v1/phones/%d/preview?file=../x", id), nil)
@@ -636,8 +740,8 @@ func TestProvSettings(t *testing.T) {
 
 // TestFirmwareHosting fails if an uploaded firmware is not stored with its
 // SHA-256 under <vendor>/<sha256>/<filename>, cannot be read back with a
-// seek (Range), if a pinned version is missing from the render data, or if
-// deleting a pinned file is allowed. Serving it under a token, and never
+// seek (Range), if a pinned version is missing from the render data or the
+// rendered config, or if deleting a pinned file is allowed. Serving it under a token, and never
 // on /p/boot/, is the handler's TestFirmwareHosting half (internal/prov).
 func TestFirmwareHosting(t *testing.T) {
 	if testMinioEndpoint == "" {
@@ -696,9 +800,14 @@ func TestFirmwareHosting(t *testing.T) {
 	p.c.must(http.StatusOK, "PUT", "/api/v1/prov/firmware/pins", []map[string]any{{"vendor": "yealink", "modelGlob": "T5*", "firmwareId": id}})
 	p.c.must(http.StatusBadRequest, "PUT", "/api/v1/prov/firmware/pins", []map[string]any{{"vendor": "snom", "modelGlob": "D*", "firmwareId": id}})
 	phone := p.phone("805ec0000009", nil)
-	d, _, err := p.st.RenderInputs(ctx, int64(phone["id"].(float64)))
-	if (err != nil && !errors.Is(err, prov.ErrNoTemplate)) || d.Firmware == nil || !strings.HasSuffix(d.Firmware.URL, "/fw/T54W-96.86.0.70.rom") {
+	d, tpl, err := p.st.RenderInputs(ctx, int64(phone["id"].(float64)))
+	if err != nil || d.Firmware == nil || !strings.HasSuffix(d.Firmware.URL, "/fw/T54W-96.86.0.70.rom") {
 		t.Fatalf("render firmware = %+v, %v", d.Firmware, err)
+	}
+	// The config the phone is served (the built-in Yealink one) names it.
+	cfg, err := prov.Render(ctx, tpl, "805ec0000009.cfg", d)
+	if err != nil || !bytes.Contains(cfg, []byte("static.firmware.url = "+d.Firmware.URL)) {
+		t.Fatalf("rendered config does not carry the pinned firmware (%v):\n%s", err, cfg)
 	}
 	p.c.must(http.StatusConflict, "DELETE", fmt.Sprint("/api/v1/prov/firmware/", id), nil)
 	p.c.must(http.StatusOK, "PUT", "/api/v1/prov/firmware/pins", []map[string]any{})
