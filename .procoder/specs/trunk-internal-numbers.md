@@ -15,7 +15,7 @@ An inbound trunk call can already reach exactly one thing: the inbound route's f
 ## Users
 
 - **Administrators:**
-  - on each trunk, decide whether it may dial internal numbers, and which: a mode (`off` by default, patterns, or all), with patterns like `1XX` or `+9714555[0-9]{3}`
+  - on each trunk, decide whether it may dial internal numbers, and which: a mode (`off` by default, patterns, or all), with patterns like `1XX` or `^\+9714555[0-9]{3}$`
   - read in the routing trace exactly why a trunk call reached, or did not reach, an internal number
 - **Trunk peers (the consuming product, carriers):**
   - dial `sip:1012@hello` with no DID provisioning per extension and ring extension 1012, subject to the trunk's policy
@@ -28,7 +28,7 @@ An inbound trunk call can already reach exactly one thing: the inbound route's f
 
 - [S-2] **Per-trunk internal dialing policy.** Each trunk gains `internal_dialing`:
   - `mode`: `off` (default), `patterns`, or `all`
-  - `patterns`: a list of patterns checked against the DID after normalisation: an exact number, or a pattern with `X` as any digit (`1XX`, `05X`), or a Go regex anchored as given (`+9714555[0-9]{3}`). Empty with mode `patterns` is a validation error.
+  - `patterns`: a list of patterns checked against the DID after normalisation: an exact number, or a pattern with `X` as any digit (`1XX`, `05X`), or a Go regex anchored as given (`^\+9714555[0-9]{3}$`). Empty with mode `patterns` is a validation error.
 
   With mode `off`, an `internal` destination is unreachable for that trunk: routes with such a destination are skipped for it (a traced skip, not a silent one), and a call that no route then takes gets the last route's rejection as today. The policy is checked once per call, after DID normalisation and before the route walk, and the verdict is a trace step ("trunk X may dial 1012: pattern 1XX" / "…: internal dialing off").
 
@@ -110,8 +110,8 @@ An inbound trunk call can already reach exactly one thing: the inbound route's f
 - [ ] [S-2] `TestTrunkInternalDialingPolicy` in `internal/routing` passes. It fails if any cell of the mode × pattern × DID matrix gives another verdict than the table, if the trace does not name the winning pattern, if mode `off` does not skip the route with a traced reason, or if a feature code becomes reachable.
 - [ ] [S-2] [S-6] `TestTrunkDialingValidation` in `internal/api` passes. It fails if an unknown mode, an uncompilable or oversized pattern, more than 100 patterns, or `patterns` set with mode `off` is accepted, or if mode `all` is saved without `"confirm": true`.
 - [ ] [S-3] `TestLoopPrevention` in `internal/routing` passes. It fails if a trunk-sourced external route still selects the source trunk without a trace step, if a sole-trunk case answers 503 instead of 403 "loop prevented", or if outbound routing can be re-entered twice on one call.
-- [ ] [S-4] `TestInternalCallerIDLadder` in `test/integration` passes. It fails if a phone sees, for a trunk call with a number, without a number, and without either default, something other than the received caller ID, the trunk's default caller ID, and the bracketed trunk name respectively, or if the route transform is not applied to the produced value.
-- [ ] [S-5] `TestTrunkInternalCDR` in `test/integration` passes. It fails if a trunk-to-internal call's CDR lacks direction `inbound`, the resolved extension as `rewritten_destination`, the route name, or the policy and caller-ID steps in the trace.
+- [ ] [S-4] `TestInternalCallerIDLadder` in `internal/sip` passes. It fails if a phone sees, for a trunk call with a number, without a number, and without either default, something other than the received caller ID, the trunk's default caller ID, and the bracketed trunk name respectively, or if the route transform is not applied to the produced value.
+- [ ] [S-5] `TestTrunkInternalCDR` in `internal/sip` passes. It fails if a trunk-to-internal call's CDR lacks direction `inbound`, the resolved extension as `rewritten_destination`, the route name, or the policy and caller-ID steps in the trace.
 - [ ] [S-6] `TestRoutingTestFromTrunk` in `internal/api` passes. It fails if `"from": "trunk:<id>"` gives a trace that differs from a real call with the same input, or if it writes anything.
 - [ ] [S-8] `TestTrunkInternalLab` in `test/integration` (`HELLO_DOCKER=1`) passes. It fails if a fakecarrier INVITE to `sip:1012@…` on a trunk with pattern `1XX` does not ring extension 1012 and carry audio both ways, if a DID outside the pattern is not rejected, or if the trace lacks the verdict.
 - [ ] [S-7] `TestKamailioTrunkURI` in `test/deploy` passes. It fails if the kamailio configuration rewrites the Request-URI user on the trunk path (drift test against the shipped cfg).

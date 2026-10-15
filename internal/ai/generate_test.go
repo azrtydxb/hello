@@ -3,6 +3,7 @@ package ai_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -176,6 +177,14 @@ func TestGenerate(t *testing.T) {
 			if d.ReasoningTokens != 20 {
 				t.Errorf("stored reasoning tokens = %d", d.ReasoningTokens)
 			}
+		}
+		// Reasoning is counted, never kept: nothing the service stored
+		// carries its text.
+		if stored := fmt.Sprintf("%+v", st); strings.Contains(stored, "REASONING") {
+			t.Errorf("reasoning text was stored: %s", stored)
+		}
+		if strings.Contains(got.Answer, "REASONING") {
+			t.Errorf("reasoning text reached the answer: %q", got.Answer)
 		}
 	})
 

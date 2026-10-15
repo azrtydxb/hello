@@ -456,6 +456,10 @@ type Watcher struct {
 	// doubles up to PollInterval and resets after a session that loaded.
 	InitialBackoff time.Duration
 
+	// onRetry, when set (tests), sees every reconnect delay before it is
+	// waited, and whether the failed session had loaded.
+	onRetry func(loaded bool, delay time.Duration)
+
 	// ConfigInvalid, when set, is 1 while the current revision's routing
 	// does not compile and routing runs on the last good table;
 	// InvalidRevision holds that revision (0 when routing is current).
@@ -556,6 +560,9 @@ func (w *Watcher) Run(ctx context.Context) {
 			backoff = w.initialBackoff()
 		}
 		w.fail("snapshot watcher disconnected", err)
+		if w.onRetry != nil {
+			w.onRetry(loaded, backoff)
+		}
 		select {
 		case <-ctx.Done():
 			return

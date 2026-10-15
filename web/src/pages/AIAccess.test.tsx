@@ -81,16 +81,22 @@ function setup(role: string, extra = {}) {
 
 describe("AIAccess", () => {
   it("shows the MCP URL that GET /ai/settings returns, the scopes and the skills", async () => {
-    setup("viewer");
+    // An MCP URL that cannot be derived from publicUrl or apiUrl: the page
+    // must show the one the settings return.
+    setup("viewer", {
+      "GET /api/v1/ai/settings": () =>
+        json({ ...SETTINGS, mcpUrl: "https://mcp.example.org/hello/mcp" }),
+    });
     renderApp("/ai");
 
-    const url = await screen.findByText("https://pbx.example.net/mcp");
+    const url = await screen.findByText("https://mcp.example.org/hello/mcp");
     expect(url.closest(".az-code")).toHaveTextContent("MCP server URL");
     expect(
       screen.getByText(
-        "claude mcp add --transport http hello https://pbx.example.net/mcp",
+        "claude mcp add --transport http hello https://mcp.example.org/hello/mcp",
       ),
     ).toBeInTheDocument();
+    expect(screen.queryByText("https://pbx.example.net/mcp")).toBeNull();
     const scopes = screen.getByRole("list", { name: "What each scope allows" });
     expect(scopes).toHaveTextContent("Change configuration.");
 

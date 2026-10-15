@@ -1,6 +1,6 @@
 # Trunk calls reach internal numbers
 
-Status: open
+Status: done 2026-10-14
 Created: 2026-10-09
 
 ## Goal

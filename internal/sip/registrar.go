@@ -252,17 +252,22 @@ type registerAttemptRecorder interface {
 type recordingTx struct {
 	sip.ServerTransaction
 	res *sip.Response
+	at  time.Time // when the final response was handed to the transport
 }
 
 func (t *recordingTx) Respond(res *sip.Response) error {
 	if res.StatusCode >= 200 {
 		t.res = res
+		t.at = time.Now().UTC()
 	}
 	return t.ServerTransaction.Respond(res)
 }
 
 // recordRegisterAttempt stores the REGISTER's final response, after it was
-// sent, for the AOR's device. Only enabled devices of the snapshot are
+// sent, for the AOR's device. The record is stamped with the moment the
+// response was sent, not the moment this goroutine got to write it: the
+// next REGISTER is handled concurrently and may be stored first, so the
+// timestamp is what orders the attempts. Only enabled devices of the snapshot are
 // recorded, so the keyspace is bounded by configuration, not by what
 // clients send; a failed write is logged and never affects the response.
 func (s *Server) recordRegisterAttempt(rec registerAttemptRecorder, req *sip.Request, tx *recordingTx) {
@@ -285,7 +290,7 @@ func (s *Server) recordRegisterAttempt(rec registerAttemptRecorder, req *sip.Req
 	ctx, cancel := s.stateCtx()
 	defer cancel()
 	err := rec.RecordRegisterAttempt(ctx, livestate.RegisterAttempt{
-		At: time.Now().UTC(), Device: user, Source: s.clientSource(req), IP: s.clientIP(req), Node: s.cfg.NodeID, UserAgent: ua,
+		At: tx.at, Device: user, Source: s.clientSource(req), IP: s.clientIP(req), Node: s.cfg.NodeID, UserAgent: ua,
 		Credentials: req.GetHeader("Authorization") != nil, Code: tx.res.StatusCode, Reason: tx.res.Reason, Stale: stale,
 	})
 	if err != nil {

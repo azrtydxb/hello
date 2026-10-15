@@ -17,7 +17,9 @@ for phones, [docs/provisioning.md](docs/provisioning.md) for configuring
 them automatically, [docs/trunks.md](docs/trunks.md) for trunks, and
 [docs/ai-access.md](docs/ai-access.md) for connecting AI agents over MCP and
 [docs/ai-agent.md](docs/ai-agent.md) for the in-product AI agent (assistant,
-findings and proposals).
+findings and proposals). To run Hello on Kubernetes (Helm chart, SIP
+networking, highly available state, rolling upgrades) see
+[docs/kubernetes.md](docs/kubernetes.md).
 
 ## Layout
 
