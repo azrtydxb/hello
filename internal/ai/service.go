@@ -41,6 +41,9 @@ type Service struct {
 	limits  *limits
 	metrics *Metrics
 	errs    recentErrors
+	// noRequired is set once the endpoint refused tool_choice "required":
+	// Call.RequireTool then relies on the nudge alone.
+	noRequired atomic.Bool
 
 	// Tasks runs interactive work (spec S-15); Scheduler the background
 	// agents (S-17).
