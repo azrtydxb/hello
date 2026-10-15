@@ -100,9 +100,14 @@ sip:
   # must stay below terminationGracePeriodSeconds.
   drainTimeoutSeconds: 90
   terminationGracePeriodSeconds: 150
-  # A replaced node must be ready this long before the next one is replaced,
-  # so Kamailio's probing has marked it active again.
-  minReadySeconds: 15
+  # A replaced node must be ready this long before the next one is replaced.
+  # Kamailio learns a replaced pod's new address from cluster DNS: answers are
+  # cached for the record's TTL (CoreDNS's default is 30 s; kw's cluster uses
+  # 5 s) and refreshed every 5 s, and until then it neither trusts requests
+  # from the new address nor probes it. The next node's drain must not hand
+  # its calls to a node Kamailio cannot yet reach, so this is above TTL plus
+  # refresh plus a probe interval. Lower it only with a cluster DNS TTL to match.
+  minReadySeconds: 45
   recordingNotice: true
   # required | preferred | none. required: one node per Kubernetes node,
   # which hostNetwork needs (the ports would collide).

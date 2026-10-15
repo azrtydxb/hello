@@ -291,8 +291,14 @@ store's own durability (erasure coding or replication across zones).
 hello-sip is a StatefulSet with `podManagementPolicy: OrderedReady` and the
 `RollingUpdate` strategy, so `helm upgrade` replaces one node at a time,
 highest ordinal first, and does not touch the next until the replaced node
-is ready and has stayed ready for `sip.minReadySeconds` (long enough for
-Kamailio's probing to mark it active). Each node receives SIGTERM, drains
+is ready and has stayed ready for `sip.minReadySeconds` (default 45 s). That
+wait is not cosmetic: Kamailio learns a replaced pod's new address from
+cluster DNS, whose answers CoreDNS caches for 30 s by default and Kamailio
+refreshes every 5 s, and until then it neither trusts requests from the new
+address nor sends to it. A drain that hands its calls over earlier hands them
+to a node Kamailio cannot yet reach, and the call is lost (the kind job
+failed exactly this way at a 15 s wait). If your cluster DNS uses a shorter
+TTL you may lower it. Each node receives SIGTERM, drains
 and hands its calls to a node that is ready, exits, and its replacement
 joins. With two or more nodes there is always a ready survivor; a single
 node has none, and its calls end during an upgrade.

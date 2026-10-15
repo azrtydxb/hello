@@ -313,9 +313,6 @@ jobs:
             f="$RUNNER_TEMP/podlogs/$(basename "$n").log"
             setsid nohup bash -c "while true; do kubectl -n hello logs -f --tail=-1 $n >> '$f' 2>&1; sleep 1; done" >/dev/null 2>&1 &
           done
-          # Kamailio's script logs at its default level; more detail while
-          # the handoffs run.
-          kubectl -n hello exec deploy/hello-kamailio -- kamcmd cfg.set_now_int core debug 3 || true
       - name: Rolling upgrade with an active call
         env:
           HELLO_KIND: "1"
@@ -339,7 +336,7 @@ jobs:
             echo "=== $p"; kubectl -n hello logs --all-containers --tail=200 "$p" || true
           done
           for f in "$RUNNER_TEMP"/podlogs/*.log; do
-            echo "=== followed log $f"; grep -v 'wait-dispatcher' "$f" | tail -n 400
+            echo "=== followed log $f"; grep -v 'wait-dispatcher' "$f" | grep -v ' DEBUG:' | tail -n 300
           done
           kubectl -n hello exec deploy/hello-kamailio -- kamcmd dispatcher.list || true
       - name: Remove the cluster

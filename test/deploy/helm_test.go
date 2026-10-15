@@ -569,8 +569,10 @@ func TestChartUpgradeOrdering(t *testing.T) {
 	if got := str(dig(sip, "spec", "updateStrategy", "rollingUpdate", "maxUnavailable")); got != "" {
 		t.Errorf("hello-sip rollingUpdate.maxUnavailable = %q: nodes must update strictly one at a time", got)
 	}
-	if got := intOf(t, dig(sip, "spec", "minReadySeconds")); got < 5 {
-		t.Errorf("hello-sip minReadySeconds = %d: Kamailio's probing needs time to mark a replaced node active before the next goes", got)
+	// Kamailio refreshes a replaced pod's address every 5s from cluster DNS,
+	// whose default answer TTL is 30s: the next node's drain must wait that out.
+	if got := intOf(t, dig(sip, "spec", "minReadySeconds")); got < 35 {
+		t.Errorf("hello-sip minReadySeconds = %d: below the 30s DNS TTL plus Kamailio's 5s refresh, a drain can hand its calls to a node Kamailio cannot reach yet", got)
 	}
 	grace := intOf(t, dig(podSpec(sip), "terminationGracePeriodSeconds"))
 	drain := envOf(containerNamed(t, sip, false, "hello-sip"))["HELLO_DRAIN_TIMEOUT"]["value"]
