@@ -216,9 +216,9 @@ func TestPrivacyGuard(t *testing.T) {
 }
 
 // TestAIEnablement (spec S-1) fails if AI turns on without both the base URL
-// and the model, starts anything while off, or reports another reason; and
-// (with TestAIMetrics) if the API key reaches the status, a log line or a
-// metric.
+// and the model, starts anything while off, or reports another reason, or
+// if the API key reaches the status, a log line or a metric. The 503
+// ai_disabled half is TestAIEnablement in internal/api.
 func TestAIEnablement(t *testing.T) {
 	cases := []struct {
 		url, model string
@@ -267,6 +267,15 @@ func TestAIEnablement(t *testing.T) {
 		}
 		if strings.Contains(logs.String(), "sk-NEVER") {
 			t.Errorf("the key is logged: %s", logs.String())
+		}
+		mfs, err := reg.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, mf := range mfs {
+			if strings.Contains(mf.String(), "sk-NEVER") {
+				t.Errorf("metric %s carries the key", mf.GetName())
+			}
 		}
 	}
 	if _, err := ai.New(config.AIAgent{Provider: "other", BaseURL: "http://127.0.0.1/v1", Model: "m"}, aifake.NewStore(), nil, nil, nil); err == nil ||

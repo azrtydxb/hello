@@ -45,6 +45,11 @@ func TestRoutesMatchOpenAPI(t *testing.T) {
 		ops[op.Method+" "+op.Path] = op
 	}
 	pending := pendingRoutes()
+	// Every stream of ai-external-access has landed its handlers, so no
+	// route may hide from the document behind s.pending.
+	for key := range pending {
+		t.Errorf("%s is still routed to s.pending", key)
+	}
 	routed := map[string]bool{}
 	for _, r := range Routes() {
 		key := r.Method + " " + r.Pattern

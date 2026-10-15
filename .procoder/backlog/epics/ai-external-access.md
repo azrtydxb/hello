@@ -1,6 +1,6 @@
 # AI external access
 
-Status: open
+Status: done 2026-10-14
 Created: 2026-10-07
 Milestone: ai-external-access
 Spec: ai-external-access @ 326b11cde45f

@@ -40,6 +40,15 @@ var conformanceExempt = func() map[string]string {
 	return m
 }()
 
+// conformanceBodies are request body forms the suite must send and the API
+// accept, as "operationId content-type" (spec S-2): both forms of the
+// voicemail PUT and the heard body.
+var conformanceBodies = []string{
+	"updateExtensionVoicemail application/json",
+	"updateExtensionVoicemail multipart/form-data",
+	"markVoicemailMessageHeard application/json",
+}
+
 // conformance validates every request the package suite sends through
 // Handler, and every response, against openapi.json (spec S-2).
 type conformance struct {
@@ -53,6 +62,7 @@ type conformance struct {
 	mu         sync.Mutex
 	schemas    map[string]*jsonschema.Resolved
 	observed   map[string]bool // "operationId status"
+	bodies     map[string]bool // "operationId content-type" of accepted bodies
 	violations map[string]bool
 }
 
@@ -68,6 +78,7 @@ func newConformance(doc []byte) (*conformance, error) {
 		pending:    pendingRoutes(),
 		schemas:    map[string]*jsonschema.Resolved{},
 		observed:   map[string]bool{},
+		bodies:     map[string]bool{},
 		violations: map[string]bool{},
 	}
 	for _, op := range spec.Operations() {
@@ -126,6 +137,11 @@ func (c *conformance) check(t *testing.T) {
 			case !c.observed[key]:
 				t.Errorf("%s %s (%s): documented %s never observed", op.Method, op.Path, op.ID, status)
 			}
+		}
+	}
+	for _, b := range conformanceBodies {
+		if !c.bodies[b] {
+			t.Errorf("%s: no accepted request body of this form was observed", b)
 		}
 	}
 }
@@ -194,6 +210,9 @@ func (c *conformance) checkRequest(op apispec.Operation, contentType string, sen
 		c.violate("%s: request content type %q is not documented (%s)", op.ID, mt, strings.Join(sortedKeys(content), ", "))
 		return
 	}
+	c.mu.Lock()
+	c.bodies[op.ID+" "+mt] = true
+	c.mu.Unlock()
 	switch mt {
 	case "application/json":
 		var v any

@@ -177,9 +177,13 @@ func schedulerCase(t *testing.T, st ai.Store, runs func() []ai.AgentRun) {
 
 // TestScheduler (spec S-17) fails if two replicas run one agent at once, a
 // restart re-runs an agent before its interval, run-now does not run once,
-// a disabled agent is due, or a run row lacks its outcome — in memory here
-// and against PostgreSQL in TestSchedulerPostgres.
+// a disabled agent is due, or a run row lacks its outcome: in memory, and
+// against PostgreSQL with the advisory locks on dedicated connections
+// (skipped without HELLO_TEST_DATABASE_URL, which CI's go job sets).
 func TestScheduler(t *testing.T) {
-	st := aifake.NewStore()
-	schedulerCase(t, st, st.AgentRuns)
+	t.Run("memory", func(t *testing.T) {
+		st := aifake.NewStore()
+		schedulerCase(t, st, st.AgentRuns)
+	})
+	t.Run("postgres", schedulerPostgres)
 }

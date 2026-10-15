@@ -200,6 +200,15 @@ func TestTasksAndLimits(t *testing.T) {
 		waitTask(t, st, panicked, ai.TaskFailed)
 	})
 
+	t.Run("production heartbeat and stale window", func(t *testing.T) {
+		// The Valkey case below runs on shortened timing; these are what a
+		// deployment uses: a beat every 5 s, a task failed instance_stopped
+		// once its replica's heartbeat is older than 15 s (spec S-15).
+		if ai.DefaultHeartbeat != 5*time.Second || ai.DefaultStale != 15*time.Second {
+			t.Errorf("heartbeat %v, stale window %v, want 5s and 15s", ai.DefaultHeartbeat, ai.DefaultStale)
+		}
+	})
+
 	t.Run("stopped replica's tasks fail (Valkey)", func(t *testing.T) {
 		addr := os.Getenv("HELLO_TEST_VALKEY_ADDR")
 		if addr == "" {
