@@ -191,14 +191,17 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        fsGroup: 1000
+        fsGroup: {{ .Values.minio.fsGroup }}
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: minio
           image: {{ .Values.minio.image }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-          args: [server, /data]
+          {{- with .Values.minio.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             {{- include "hello.secretEnv" (dict "root" . "env" "MINIO_ROOT_USER" "key" "minioAccessKey") | nindent 12 }}
             {{- include "hello.secretEnv" (dict "root" . "env" "MINIO_ROOT_PASSWORD" "key" "minioSecretKey") | nindent 12 }}
@@ -221,7 +224,7 @@ spec:
             {{- toYaml .Values.minio.resources | nindent 12 }}
           volumeMounts:
             - name: data
-              mountPath: /data
+              mountPath: {{ .Values.minio.dataPath }}
       {{- if not .Values.minio.persistence.enabled }}
       volumes:
         - name: data

@@ -206,7 +206,15 @@ valkey:
 
 minio:
   enabled: false
-  image: quay.io/minio/minio:latest
+  # The upstream minio/minio image is no longer served from Docker Hub and is
+  # private on quay.io, so the evaluation default is the frozen Bitnami legacy
+  # image this project's CI also uses. It starts its server itself (no args),
+  # keeps data under /bitnami/minio/data and runs as uid 1001. Production
+  # points external.endpoint at a real S3 service instead.
+  image: bitnamilegacy/minio:latest
+  args: []
+  dataPath: /bitnami/minio/data
+  fsGroup: 1001
   persistence:
     enabled: true
     size: 5Gi
