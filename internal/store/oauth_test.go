@@ -57,6 +57,21 @@ func TestTokenLifecycle(t *testing.T) {
 	if _, err := s.TokenActor(ctx, auth.HashToken(pat)); !errors.Is(err, auth.ErrNoCredentials) {
 		t.Fatalf("expired personal token = %v", err)
 	}
+	// A revoked personal token is refused on the next lookup.
+	rev, rh := auth.NewPrefixed(auth.PrefixPersonal)
+	revTok, err := s.CreateToken(ctx, "test", uid, NewToken{Name: "revoked", Scopes: auth.Scopes{auth.ScopeRead}}, rh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TokenActor(ctx, auth.HashToken(rev)); err != nil {
+		t.Fatalf("live personal token = %v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE api_tokens SET revoked_at = now() WHERE id = $1`, revTok.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TokenActor(ctx, auth.HashToken(rev)); !errors.Is(err, auth.ErrNoCredentials) {
+		t.Fatalf("revoked personal token = %v", err)
+	}
 
 	// An OAuth grant through the store: request, consent, code, tokens.
 	octx := auth.WithActor(ctx, auth.Actor{ClientID: "hello_dcr_a"})
