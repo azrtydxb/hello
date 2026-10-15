@@ -342,7 +342,7 @@ jobs:
             echo "=== followed log $f"; grep -v 'wait-dispatcher' "$f" | grep -v ' DEBUG:' | tail -n 150
           done
           grep -h 'takeover re-INVITE' "$RUNNER_TEMP"/podlogs/hello-sip-*.log | sed -n 's/.*"call_id":"\([^"]*\)".*/\1/p' | sort -u | while read -r id; do
-            echo "=== kamailio lines for call $id"; grep -h "$id" "$RUNNER_TEMP/podlogs/hello-kamailio.log" | cut -c1-300 | head -120
+            echo "=== kamailio lines for call $id"; grep -h "$id" "$RUNNER_TEMP/podlogs/hello-kamailio.log" | grep -E 'received sip message|t_relay|selected|set send socket|uri_add_rcv|WARN|ERROR|send|resolve' | cut -c1-260 | head -150
           done
           grep -hE 'WARNING|refused|rerouted|ERROR' "$RUNNER_TEMP/podlogs/hello-kamailio.log" | grep -v 'could not resolve\|failed to resolve\|no socket found\|unable to ping' | tail -n 60
           kubectl -n hello exec deploy/hello-kamailio -- kamcmd dispatcher.list || true
