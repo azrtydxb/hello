@@ -1,23 +1,22 @@
 # `TestPrune` in `internal/ai` passes. It fails if any table keeps rows past its retention, prunes inside it, or two replicas prune at once.
 
-Status: open
+Status: done 2026-10-14
 Created: 2026-10-08
 Epic: ai-agent
 Sprint: -
 
 ## Description
 
-<!-- The user story: who needs what, and why. What "done" looks like in
-     the reader's terms — a title is not a description. -->
+An operator of a long-running cluster needs the AI tables to stay bounded and predictable (spec S-26): every table pruned at its retention, nothing pruned early, and only one replica pruning at a time. Done when a test proves each retention boundary and the lock.
 
 ## Acceptance criteria
 
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
      true — the closer will ask for the evidence. -->
 
-- [ ] `TestPrune` in `internal/ai` passes. It fails if any table keeps rows past its retention, prunes inside it, or two replicas prune at once.
+- [x] `TestPrune` in `internal/ai` passes. It fails if any table keeps rows past its retention, prunes inside it, or two replicas prune at once.
 
 ## Evidence
 
-<!-- Filled at close time: the commands run and what their output proved,
-     one line per criterion. Empty evidence keeps the story open. -->
+- `TestPrune` (internal/ai/pg_test.go:150, PostgreSQL via the go job's HELLO_TEST_DATABASE_URL): each AI table gets one row just past and one just inside its retention; prune refuses while another replica holds the `hello:ai:prune` advisory lock, then leaves exactly the inside rows plus open findings/proposals. `ok internal/ai` in main CI run 38615122909 (go + lab green, `gh run view 38615122909`) and PR #90 CI run 38635554426 (go + web + lab green, `gh run view 38635554426`).
+- Per-condition audit 2026-10-15: gap fixed: TestPrune only counted rows per table, so pruning the inside row and keeping the expired one passed; it now checks that each past-retention row is gone and each inside row remains. The lock condition was already asserted.
