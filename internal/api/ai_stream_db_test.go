@@ -83,8 +83,13 @@ func TestAssistantMessageStream(t *testing.T) {
 
 	answer := assistant.Answer{Answer: "No trunks are configured.\nNothing to check.", Citations: []int{0}}
 	model.Streams = [][]provider.StreamPart{
+		// The tool phase: a call, then plain text that is never streamed.
 		aifake.StreamReasoning("Look at the trunks.", aifake.StreamToolCall("c1", "listTrunks", map[string]any{})),
+		aifake.StreamText("TOOL-PHASE-PROSE: no trunks are configured."),
+		// The answer phase.
 		aifake.StreamReasoning("Answer.", aifake.StreamJSON(answer, 6)),
+		// The second message: no tool, plain text, then its answer.
+		aifake.StreamText("Still none."),
 		aifake.StreamJSON(assistant.Answer{Answer: "Still none.", Citations: []int{}}, 6),
 	}
 	oscar.header.Set("Accept", "text/event-stream")
@@ -109,6 +114,8 @@ func TestAssistantMessageStream(t *testing.T) {
 			streamed.WriteString(data[i]["text"].(string))
 		case "error":
 			t.Errorf("error event %v", data[i])
+		case "reset":
+			t.Errorf("reset event at %d: the tool phase streamed text", i)
 		}
 	}
 	if tools != 1 || streamed.String() != answer.Answer {

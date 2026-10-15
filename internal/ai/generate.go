@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -40,6 +41,14 @@ func header(feature string) string {
 // all, then the call fails invalid_output. A length finish that does not
 // decode is retried once with double max_tokens. Reasoning is dropped and
 // only its tokens counted. The usage is recorded whatever the outcome.
+//
+// A call with tools runs in two phases. The tool phase offers the tools
+// with no structured-output instruction and no response format: the model
+// gathers what it needs and replies in plain text, at most MaxSteps steps,
+// nudged once when it describes a tool call in text instead of making it.
+// The answer phase then turns the conversation so far into T in one call
+// without tools, with the structured-output mode and validation above.
+// Streamed, only the answer phase's text reaches Stream.Text.
 func Generate[T any](ctx context.Context, s *Service, call Call[T]) (T, Usage, error) {
 	var zero T
 	if s == nil || !s.enabled {
@@ -105,9 +114,183 @@ type attemptResult struct {
 }
 
 func generate[T any](ctx context.Context, s *Service, call Call[T]) (any, Usage, error) {
+	turn := call.Prompt
+	if call.Data != nil {
+		turn = DataBlock(call.Data) + "\n\n" + call.Prompt
+	}
+	msgs := []provider.Message{provider.UserText(turn)}
+	var fs *fieldStream
+	if call.Stream != nil {
+		fs = newFieldStream(call.Stream)
+	}
 	var u Usage
-	resolved, schemaJSON := schemaFor[T]()
-	useOutput := s.cfg.StructuredOutput != "prompt" && (len(call.Tools) == 0 || s.model.Capabilities().NativeJSON)
+	if len(call.Tools) > 0 {
+		var steps []aisdk.Step
+		var err error
+		msgs, steps, u, err = gather(ctx, s, call.Feature, call.System, call.Tools, call.MaxSteps, msgs, fs)
+		if err != nil {
+			return nil, u, err
+		}
+		var log any
+		if call.ToolLog != nil {
+			log = call.ToolLog()
+		} else {
+			log = stepCalls(steps)
+		}
+		var schema []byte
+		if s.cfg.StructuredOutput == "prompt" {
+			_, sj, err := schemaFor[T]()
+			if err != nil {
+				return nil, u, noSchema(s, call.Feature, err)
+			}
+			schema = sj
+		}
+		msgs = append(msgs, provider.UserText(answerRequest(log, schema)))
+	}
+	v, au, err := answer(ctx, s, call, msgs, fs)
+	return v, u.add(au), err
+}
+
+// The tool phase's instructions and the answer phase's request (spec
+// S-4): no JSON while tools are offered, the structured answer is asked for
+// afterwards.
+const (
+	gatherInstruction = "First gather what you need with the tools: call them through the tool-calling interface, as many as the question needs. " +
+		"When you have what you need, reply in plain text with what you found. Do not write JSON now: the final structured answer is asked for afterwards."
+	nudgeInstruction = "You described a tool call in text instead of making it. Call the tool through the tool-calling interface now. " +
+		"If you need no tool, reply in plain text with what you know."
+	answerInstruction = "Now write the final answer to the question from the conversation above and the tool results, without calling any tool. " +
+		"Your replies above are not shown to the user: the JSON object holds the whole answer, not only the citations."
+)
+
+// answerRequest is the user turn that opens the answer phase: what to do,
+// and the tool calls the answer may cite, by zero-based position, as data.
+// In the prompt mode it repeats the schema next to the request, where the
+// model reads it last.
+func answerRequest(log any, schema []byte) string {
+	req := answerInstruction + " The tool calls made for this question, by zero-based position:\n" + DataBlock(log) +
+		"\nList in \"citations\" the position of every call above whose result your answer uses: an answer from tool results cites them."
+	if schema != nil {
+		return req + "\nReply with a single JSON object and nothing else, using exactly the properties of this JSON schema:\n" + string(schema)
+	}
+	return req + "\nAnswer in the required JSON format."
+}
+
+// toolCallEntry is one call in the answer phase's list of calls.
+type toolCallEntry struct {
+	Position  int             `json:"position"`
+	Tool      string          `json:"tool"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+// stepCalls lists the steps' tool calls in the order they were made.
+func stepCalls(steps []aisdk.Step) []toolCallEntry {
+	out := []toolCallEntry{}
+	for _, st := range steps {
+		for _, c := range st.ToolCalls {
+			e := toolCallEntry{Position: len(out), Tool: c.Name}
+			if len(c.Args) > 0 && json.Valid(c.Args) {
+				e.Arguments = c.Args
+			}
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// gather is the tool phase: the model calls tools, at most maxSteps steps
+// in all (HELLO_AI_MAX_STEPS when 0), and ends in plain text. A last step
+// that describes a tool call instead of making one is nudged once while
+// steps remain. It returns msgs followed by the phase's transcript, and
+// every step it ran. Streamed, it reports reasoning and never text.
+func gather(ctx context.Context, s *Service, feature, instructions string, tools []aisdk.Tool, maxSteps int,
+	msgs []provider.Message, fs *fieldStream) ([]provider.Message, []aisdk.Step, Usage, error) {
+	var u Usage
+	system := header(feature)
+	if instructions != "" {
+		system += "\n\n" + instructions
+	}
+	system += "\n\n" + gatherInstruction
+	stepsLeft := maxSteps
+	if stepsLeft <= 0 {
+		stepsLeft = max(s.cfg.MaxSteps, 1)
+	}
+	var all []aisdk.Step
+	nudged := false
+	for {
+		mt := defaultMaxTokens
+		opts := aisdk.GenerateTextOpts{
+			System: system, Messages: msgs, Tools: tools, MaxSteps: stepsLeft, MaxTokens: &mt,
+			ProviderOptions: s.providerOptions(),
+		}
+		var a attemptResult
+		if fs != nil {
+			fs.quiet = true
+			a = streamOnce(ctx, s, opts, false, nil, fs)
+		} else {
+			a = runOnce(ctx, s, opts, false, nil)
+		}
+		u = u.add(stepUsage(a.steps))
+		if a.err != nil {
+			return nil, all, u, classify(ctx, a.err, true)
+		}
+		if len(a.steps) == 0 {
+			return nil, all, u, &Error{Code: CodeProviderError, Message: "the model returned no answer"}
+		}
+		all = append(all, a.steps...)
+		stepsLeft -= len(a.steps)
+		msgs = transcript(msgs, a.steps, "", false)
+		last := a.steps[len(a.steps)-1]
+		if !nudged && stepsLeft > 0 && len(last.ToolCalls) == 0 && describesToolCall(last.Text, tools, len(stepCalls(all)) == 0) {
+			nudged = true
+			msgs = append(msgs, provider.UserText(nudgeInstruction))
+			continue
+		}
+		return msgs, all, u, nil
+	}
+}
+
+// toolCallMarkers are text forms of a tool call a model may write instead
+// of making it: chat-template tags and OpenAI-style JSON.
+var toolCallMarkers = []string{"<tool_call", "<function=", "<function_call", "<|tool_call", "[tool_calls]", `"tool_calls"`, `"function_call"`}
+
+// intentToCall matches a model announcing a lookup it then does not make,
+// such as "Now I will check the current SIP registrations."
+var intentToCall = regexp.MustCompile(`(?i)\b(let me|let's|i will|i'll|i need to|i am going to|i'm going to|i should)\s+(now\s+|first\s+)?(check|look|call|query|fetch|read|retrieve|use|get|list|search|inspect|verify)\b`)
+
+// describesToolCall reports whether text, a step that ended without a tool
+// call, obviously describes one: a tool-call tag or JSON, a tool's name
+// written as a call or as a JSON string, or, before any call was made, an
+// announced lookup.
+func describesToolCall(text string, tools []aisdk.Tool, noCalls bool) bool {
+	t := stripAnswer(text)
+	if t == "" {
+		return false
+	}
+	lower := strings.ToLower(t)
+	for _, m := range toolCallMarkers {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	for _, tl := range tools {
+		n := tl.Name()
+		if strings.Contains(t, n+"(") || strings.Contains(t, `"`+n+`"`) {
+			return true
+		}
+	}
+	return noCalls && intentToCall.MatchString(t)
+}
+
+// answer is the answer phase, and the whole of a call without tools: one
+// structured answer from msgs, without tools, validated and retried.
+func answer[T any](ctx context.Context, s *Service, call Call[T], msgs []provider.Message, fs *fieldStream) (any, Usage, error) {
+	var u Usage
+	resolved, schemaJSON, err := schemaFor[T]()
+	if err != nil {
+		return nil, u, noSchema(s, call.Feature, err)
+	}
+	useOutput := s.cfg.StructuredOutput != "prompt"
 	system := header(call.Feature)
 	if call.System != "" {
 		system += "\n\n" + call.System
@@ -115,34 +298,18 @@ func generate[T any](ctx context.Context, s *Service, call Call[T]) (any, Usage,
 	if !useOutput {
 		system += "\n\nAnswer with a single JSON object and nothing else. It must validate against this JSON schema:\n" + string(schemaJSON)
 	}
-	turn := call.Prompt
-	if call.Data != nil {
-		turn = DataBlock(call.Data) + "\n\n" + call.Prompt
-	}
-	msgs := []provider.Message{provider.UserText(turn)}
-	stepsLeft := call.MaxSteps
-	if stepsLeft <= 0 {
-		stepsLeft = max(s.cfg.MaxSteps, 1)
-	}
 	maxTokens, lengthRetried := defaultMaxTokens, false
 	attempts := max(s.cfg.ValidationAttempts, 1)
-	var fs *fieldStream
-	if call.Stream != nil {
-		fs = newFieldStream(call.Stream)
-	}
 
 	for attempt := 1; ; {
-		tools := call.Tools
-		if stepsLeft <= 0 {
-			tools = nil
-		}
 		mt := maxTokens
 		opts := aisdk.GenerateTextOpts{
-			System: system, Messages: msgs, Tools: tools, MaxSteps: max(stepsLeft, 1), MaxTokens: &mt,
+			System: system, Messages: msgs, MaxSteps: 1, MaxTokens: &mt,
 			ProviderOptions: s.providerOptions(),
 		}
 		var a attemptResult
 		if fs != nil {
+			fs.quiet = false
 			fs.reset() // a new attempt voids any text the last one streamed
 			a = streamOnce(ctx, s, opts, useOutput, outputOf[T], fs)
 		} else {
@@ -151,21 +318,12 @@ func generate[T any](ctx context.Context, s *Service, call Call[T]) (any, Usage,
 		u = u.add(stepUsage(a.steps))
 		var noObject *aisdk.NoObjectGeneratedError
 		if a.err != nil && !errors.As(a.err, &noObject) {
-			return nil, u, classify(ctx, a.err, len(tools) > 0)
+			return nil, u, classify(ctx, a.err, false)
 		}
 		if len(a.steps) == 0 {
 			return nil, u, &Error{Code: CodeProviderError, Message: "the model returned no answer"}
 		}
-		stepsLeft -= len(a.steps)
 		last := a.steps[len(a.steps)-1]
-		if len(last.ToolCalls) > 0 {
-			// The step budget ran out while the model still called tools:
-			// ask for the final answer without tools.
-			msgs = append(transcript(msgs, a.steps, "", false), provider.UserText(
-				"The tool budget for this question is spent. Answer now from what the tools returned, in the required JSON format."))
-			stepsLeft = 0
-			continue
-		}
 		raw := answerText(a.res, last.Text)
 		if raw == "" && noObject != nil {
 			raw = stripAnswer(noObject.RawText)
@@ -173,11 +331,17 @@ func generate[T any](ctx context.Context, s *Service, call Call[T]) (any, Usage,
 		v, decErr := decode[T](raw, resolved)
 		verr := decErr
 		if verr == nil && call.Validate != nil {
-			verr = call.Validate(ctx, v)
+			if verr = call.Validate(ctx, v); verr != nil {
+				verr = asRejected(verr)
+			}
 		}
 		if verr == nil {
 			return v, u, nil
 		}
+		class, reason := rejection(verr)
+		s.log.Warn("ai: answer rejected", "feature", call.Feature, "task_id", taskIDFrom(ctx), "attempt", attempt,
+			"of", attempts, "class", class, "reason", reason, "finish", string(last.FinishReason),
+			"output_tokens", last.Usage.OutputTokens)
 		if decErr != nil && last.FinishReason == provider.FinishLength && !lengthRetried {
 			lengthRetried, maxTokens = true, min(2*maxTokens, maxTokensCap)
 			continue
@@ -350,18 +514,87 @@ func stripAnswer(text string) string {
 var rawMessageSchema = map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[json.RawMessage](): {}}
 
 // schemaFor is T's JSON schema, resolved for validation, and its JSON for
-// the prompt mode; nil when T has no schema (then only decoding checks it).
-func schemaFor[T any]() (*jsonschema.Resolved, []byte) {
+// the prompt mode. It fails when T has no usable schema (a malformed
+// jsonschema tag, for one): the model would otherwise be asked for an
+// object without being told its properties.
+func schemaFor[T any]() (*jsonschema.Resolved, []byte, error) {
 	sc, err := jsonschema.For[T](&jsonschema.ForOptions{IgnoreInvalidTypes: true, TypeSchemas: rawMessageSchema})
 	if err != nil {
-		return nil, []byte(`{"type":"object"}`)
+		return nil, nil, err
 	}
-	b, _ := json.Marshal(sc)
+	b, err := json.Marshal(sc)
+	if err != nil {
+		return nil, nil, err
+	}
 	r, err := sc.Resolve(nil)
 	if err != nil {
-		return nil, b
+		return nil, nil, err
 	}
-	return r, b
+	return r, b, nil
+}
+
+// CheckSchema reports whether T, the answer type of a Generate call, has a
+// JSON schema; callers check their types at start, so a malformed tag
+// fails there instead of on every call.
+func CheckSchema[T any]() error {
+	if _, _, err := schemaFor[T](); err != nil {
+		return fmt.Errorf("ai: the answer type %s has no JSON schema: %w", reflect.TypeFor[T](), err)
+	}
+	return nil
+}
+
+// noSchema is the failure of a call whose answer type has no JSON schema,
+// logged at error: only a code change fixes it.
+func noSchema(s *Service, feature string, err error) error {
+	s.log.Error("ai: the answer type has no JSON schema", "feature", feature, "error", err)
+	return &Error{Code: CodeInvalidOutput, Message: "the answer type has no JSON schema", Err: err}
+}
+
+// Rejected is a Validate error with a reason: a short fixed label, such as
+// citation_out_of_range, logged with each rejected answer. Its message is
+// what the model is told.
+type Rejected struct {
+	Reason string
+	Err    error
+}
+
+func (e *Rejected) Error() string { return e.Err.Error() }
+func (e *Rejected) Unwrap() error { return e.Err }
+
+// Reject labels a Validate error with reason for the log.
+func Reject(reason string, err error) error { return &Rejected{Reason: reason, Err: err} }
+
+// decodeError is a decode failure with its class for the log: empty,
+// not_json or schema.
+type decodeError struct {
+	class string
+	err   error
+}
+
+func (e *decodeError) Error() string { return e.err.Error() }
+func (e *decodeError) Unwrap() error { return e.err }
+
+// asRejected labels a Validate error that carries no reason.
+func asRejected(err error) error {
+	if r := (*Rejected)(nil); errors.As(err, &r) {
+		return err
+	}
+	return &Rejected{Reason: "unlabelled", Err: err}
+}
+
+// rejection is a rejected answer's class (empty, not_json, schema or
+// validator) and reason for the log: fixed labels, never the answer's or
+// the user's text.
+func rejection(err error) (class, reason string) {
+	var d *decodeError
+	if errors.As(err, &d) {
+		return d.class, d.class
+	}
+	var r *Rejected
+	if errors.As(err, &r) {
+		return "validator", r.Reason
+	}
+	return "validator", "unlabelled"
 }
 
 // decode parses raw as T, checking it against T's schema first, so an
@@ -369,21 +602,21 @@ func schemaFor[T any]() (*jsonschema.Resolved, []byte) {
 func decode[T any](raw string, resolved *jsonschema.Resolved) (T, error) {
 	var v T
 	if raw == "" {
-		return v, errors.New("the answer is empty; reply with a JSON object")
+		return v, &decodeError{"empty", errors.New("the answer is empty; reply with a JSON object")}
 	}
 	var inst any
 	if err := json.Unmarshal([]byte(raw), &inst); err != nil {
-		return v, fmt.Errorf("the answer is not valid JSON: %w", err)
+		return v, &decodeError{"not_json", fmt.Errorf("the answer is not valid JSON: %w", err)}
 	}
 	if resolved != nil {
 		if err := resolved.Validate(inst); err != nil {
-			return v, fmt.Errorf("the answer does not match the schema: %w", err)
+			return v, &decodeError{"schema", fmt.Errorf("the answer does not match the schema: %w", err)}
 		}
 	}
 	dec := json.NewDecoder(bytes.NewReader([]byte(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&v); err != nil {
-		return v, fmt.Errorf("the answer does not match the schema: %w", err)
+		return v, &decodeError{"schema", fmt.Errorf("the answer does not match the schema: %w", err)}
 	}
 	return v, nil
 }
