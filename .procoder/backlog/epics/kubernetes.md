@@ -1,6 +1,6 @@
 # kubernetes
 
-Status: open
+Status: done 2026-10-15
 Created: 2026-10-14
 Milestone: phase-6-kubernetes
 Spec: kubernetes @ cec22f769685

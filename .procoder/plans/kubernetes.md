@@ -1,6 +1,6 @@
 # kubernetes — implementation plan
 
-Status: draft
+Status: complete
 Spec: .procoder/specs/kubernetes.md
 
 ## Goal

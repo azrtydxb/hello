@@ -1,6 +1,6 @@
 # kubernetes
 
-Status: approved
+Status: complete
 
 Source: `hello-pbx-spec.md` §28 Phase 6 (Kubernetes), §18 (deployment), §30 (engineering rules); milestone `phase-6-kubernetes`. Scope decided by the lead overnight, 2026-10-15 (`.procoder/ask/decisions.md`, "Phase 6 scope"). Builds on `ha` and `incall-ha` (both complete): the cluster already survives node loss and drains with live calls; this spec is how an operator gets that onto a Kubernetes cluster that is not kw.
 
