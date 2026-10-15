@@ -292,12 +292,11 @@ hello-sip is a StatefulSet with `podManagementPolicy: OrderedReady` and the
 `RollingUpdate` strategy, so `helm upgrade` replaces one node at a time,
 highest ordinal first, and does not touch the next until the replaced node
 is ready and has stayed ready for `sip.minReadySeconds` (default 45 s). That
-wait is not cosmetic: Kamailio learns a replaced pod's new address from
-cluster DNS, whose answers CoreDNS caches for 30 s by default and Kamailio
-refreshes every 5 s, and until then it neither trusts requests from the new
-address nor sends to it. A drain that hands its calls over earlier hands them
-to a node Kamailio cannot yet reach, and the call is lost (the kind job
-failed exactly this way at a 15 s wait). If your cluster DNS uses a shorter
+wait is deliberately conservative: Kamailio learns a replaced pod's new
+address from cluster DNS, whose answers CoreDNS caches for 30 s by default
+and Kamailio refreshes every 5 s, so for that long it may neither trust
+requests from the new address nor send to it, and a drain that hands its
+calls over earlier could hand them to a node Kamailio cannot yet reach. If your cluster DNS uses a shorter
 TTL you may lower it. Each node receives SIGTERM, drains
 and hands its calls to a node that is ready, exits, and its replacement
 joins. With two or more nodes there is always a ready survivor; a single
@@ -328,7 +327,14 @@ node has none, and its calls end during an upgrade.
    (anchored RTP is carried by the hello-sip nodes); in-dialog requests
    made while it is down (a hangup, a hold) fail or retry, and a handoff
    in progress at that moment would fail too, which is why this step is not
-   combined with step 2. The wait-dispatcher init container makes the new
+   combined with step 2. Kamailio's Record-Route for the hello nodes carries
+   its own pod address, so on the pod network (hostNetwork off) a replaced
+   Kamailio has a new address, and requests that hello-sip originates inside
+   calls set up before the roll (a hangup by the far side, a re-INVITE) go to
+   the old one and are lost; the kind job shows this, and only a phone's own
+   hangup still works. With hostNetwork the address is the node's and survives
+   the roll, which is one more reason it is the recommended mode. The
+   wait-dispatcher init container makes the new
    Kamailio wait (bounded) until the nodes' names resolve, instead of
    crash-looping.
 4. Verify: the Cluster page shows every node READY on the new version, the
