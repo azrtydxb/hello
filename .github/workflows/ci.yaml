@@ -275,6 +275,15 @@ jobs:
           kubectl get nodes -o wide
       - name: Install the chart
         run: |
+          # Phones reach Kamailio on the edge node's own address. Going
+          # through the Docker published port (127.0.0.1) puts docker-proxy
+          # between them, which rewrites the source port: Kamailio then takes
+          # the phone for NAT'd and aliases its Contact to a proxy port that
+          # expires after a minute, so later in-dialog requests (the handoff's
+          # re-INVITE) never reach the phone.
+          edge=$(docker inspect -f '{{(index .NetworkSettings.Networks "kind").IPAddress}}' hello-worker)
+          echo "edge node address: $edge"
+          echo "KIND_EDGE_IP=$edge" >> "$GITHUB_ENV"
           kubectl create namespace hello
           kubectl -n hello create secret generic hello-credentials \
             --from-literal=dsn='postgres://hello:kind-pg-pass@hello-postgresql:5432/hello?sslmode=disable' \
@@ -296,7 +305,7 @@ jobs:
             --set kamailio.hostNetwork=false \
             --set kamailio.service.type=NodePort \
             --set kamailio.service.nodePort=30508 \
-            --set kamailio.publicHost=127.0.0.1 \
+            --set kamailio.publicHost="$edge" \
             --set kamailio.publicPort=30508 \
             --set kamailio.phonesPort=5060 \
             --set-string kamailio.nodeSelector.hello-edge=true \
@@ -323,8 +332,8 @@ jobs:
           gw=$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}' | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
           echo "docker network gateway: $gw"
           export HELLO_KIND_CONTACT_HOST="$gw"
-          export HELLO_KIND_API=http://127.0.0.1:30081
-          export HELLO_KIND_SIP=127.0.0.1:30508
+          export HELLO_KIND_API="http://$KIND_EDGE_IP:30081"
+          export HELLO_KIND_SIP="$KIND_EDGE_IP:30508"
           export HELLO_KIND_ADMIN_PASSWORD="$HELLO_KIND_PASSWORD"
           export HELLO_KIND_CHART="$PWD/deploy/helm/hello"
           export HELLO_KIND_TAG=ci
