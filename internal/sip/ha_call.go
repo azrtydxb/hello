@@ -663,10 +663,13 @@ func (s *Server) handoffMark() {
 		if _, ok := c.haState(); !ok {
 			continue // not recoverable (yet): ringing, unreplicated
 		}
+		// The trace line goes in before the mark: any record that carries
+		// the mark (a concurrent replicate can write one) must also carry
+		// the line, since a survivor claims a marked record at once.
+		c.addTrace("Node draining: call handed off for takeover")
 		c.mu.Lock()
 		c.haHandoff, c.haHandoffWritten = true, false
 		c.mu.Unlock()
-		c.addTrace("Node draining: call handed off for takeover")
 		c.replicate()
 	}
 }
