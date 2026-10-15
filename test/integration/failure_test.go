@@ -214,9 +214,17 @@ func goneBy(t *testing.T, lc *labClient, node string, deadline time.Time) {
 	})
 }
 
-// kill kills a SIP node and returns when it was killed.
+// killCommandStart is when the latest kill() began its `docker compose
+// kill`. The lab tests run serially, so one value serves them all.
+var killCommandStart time.Time
+
+// kill kills a SIP node and returns when the kill command returned. The
+// node died somewhere inside the command, which on a loaded runner takes
+// seconds (compose start-up, API round trips), so the returned time is an
+// upper bound of the death; killCommandStart is the lower bound.
 func kill(t *testing.T, node string) time.Time {
 	t.Helper()
+	killCommandStart = time.Now()
 	labCompose(t, "kill", node)
 	return time.Now()
 }
@@ -901,8 +909,15 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	// both endpoints re-homed) within 3s (spec S-4), and the media gap
 	// measured honestly from the dead owner's last heartbeat - which
 	// includes the time until its death was noticed, so it is at least
-	// the takeover and at most the kill-to-re-home time plus one
-	// replication heartbeat (1s) and slack (spec S-6, docs/ha.md).
+	// the takeover and at most the outage plus one replication heartbeat
+	// (1s) and slack (spec S-6, docs/ha.md).
+	//
+	// The outage is bounded from the START of the kill command, not from
+	// its return: the node dies somewhere inside `docker compose kill`,
+	// which takes seconds on a loaded runner, so rehomed-killed can be
+	// shorter than the 4s membership TTL that detection physically needs
+	// (CI saw a 1.0s "kill to re-home" beside a 3.96s gap). The 1s slack
+	// covers a stalled last heartbeat write.
 	took, gap, ok := takeoverGap(lc.cdrTrace(closed.ID))
 	if !ok {
 		t.Fatalf("CDR %d trace lacks the takeover mark: %v", closed.ID, lc.cdrTrace(closed.ID))
@@ -911,8 +926,10 @@ func takeoverAssertions(t *testing.T, lc *labClient, a, b *sipua.Phone, in *sipu
 	if took > 3*time.Second {
 		t.Fatalf("takeover %s > 3s", took)
 	}
-	if gap < took || gap > rehomed.Sub(killed)+2*time.Second {
-		t.Fatalf("media gap %s is not the outage: takeover %s, kill to re-home %s", gap, took, rehomed.Sub(killed))
+	outage := rehomed.Sub(killCommandStart)
+	if gap < took || gap > outage+livestate.HAHeartbeat+time.Second {
+		t.Fatalf("media gap %s is not the outage: takeover %s, kill command to re-home %s (command returned after %s)",
+			gap, took, outage, killed.Sub(killCommandStart))
 	}
 	m := nodeMetrics(t, taker)
 	if m["hello_dialog_takeovers_total"] < 1 {

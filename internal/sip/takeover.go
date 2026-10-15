@@ -1033,7 +1033,7 @@ func (s *Server) haNewCall(st livestate.DialogState, from string, a, b *haLeg, t
 
 // haGap is a takeover's media gap, measured honestly: from the owner's
 // last sign of life - its last replication write, which a crashed owner
-// made at most one heartbeat (5s) before it died - to both endpoints
+// made at most one heartbeat (1s) before it died - to both endpoints
 // re-homed (restored). It is an upper bound of the audio the call lost,
 // at most a heartbeat over it, and includes the time it took to notice
 // the owner was gone (membership's OFFLINE, or the restarted process).
