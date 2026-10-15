@@ -317,3 +317,17 @@ Live on kw with thinking off: answers start in ~1s and finish in ~6s (0 reasonin
 - Turn thinking back on for the assistant only; keep it off for detector explanations (no tools there).
 
 Decision: split tool calling from the structured answer, thinking stays off (2026-10-14).
+
+## Dependabot PRs #92–#95 (asked 2026-10-15)
+
+The overnight merge queue was not allowed to auto-merge bot PRs, so these four dependency bumps are still open (gomod, npm, GitHub Actions, alpine 3.22 → 3.24).
+
+- Merge them through the queue once CI is green (recommended)
+- Leave them for a manual review
+
+## Guard CI against GitHub action-download outages (asked 2026-10-15)
+
+On 2026-10-15 from 04:50 to 05:35 UTC, codeload returned 404 for the pinned setup-go v7.0.0 archive, and every lab job failed. The merge queue now waits and reruns on that error. A lasting fix would be outside this repo.
+
+- Keep the queue retry only (recommended for now)
+- Add an action archive cache (`ACTIONS_RUNNER_ACTION_ARCHIVE_CACHE`) to the Arc runner image
