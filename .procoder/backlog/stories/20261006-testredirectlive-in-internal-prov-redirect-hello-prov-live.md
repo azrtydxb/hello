@@ -20,3 +20,5 @@ Phone auto-provisioning deliverable; see .procoder/specs/phone-auto-provisioning
 
 <!-- Filled at close time: the commands run and what their output proved,
      one line per criterion. Empty evidence keeps the story open. -->
+
+- 2026-10-15: BLOCKED, left open on purpose. TestRedirectLive (HELLO_PROV_LIVE_REDIRECT=1) needs the vendor redirect credentials (Snom SRAPS, Yealink RPS/YMCS, Grandstream GDMS) in the kw secret hello-prov-redirect. The user has not supplied them yet, so the test cannot pass and is not faked. Close this story, then the epic phone-auto-provisioning-service and the milestone phone-auto-provisioning, once the credentials exist and the live run is green.
