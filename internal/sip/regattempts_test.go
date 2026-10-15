@@ -2,6 +2,7 @@ package sip
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -52,6 +53,9 @@ func TestRegisterAttemptsRecorded(t *testing.T) {
 	for deadline := time.Now().Add(2 * time.Second); len(got) < 4 && time.Now().Before(deadline); got = st.recorded() {
 		time.Sleep(5 * time.Millisecond)
 	}
+	// Records are written after the response is sent, so the next REGISTER's
+	// handler can store its record first; At (the send time) is the order.
+	sort.SliceStable(got, func(i, j int) bool { return got[i].At.Before(got[j].At) })
 	// unauthenticated 401, credentials 401 (wrong password), unauthenticated 401, credentials 200
 	want := []struct {
 		code  int

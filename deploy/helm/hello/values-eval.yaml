@@ -1,0 +1,19 @@
+# Evaluation: everything bundled, single instances, no replication or backup.
+# Do not run production on this. Create the credentials Secret first
+# (docs/kubernetes.md, "Install").
+global:
+  sipDomain: hello.example.com
+
+secrets:
+  existingSecret: hello-credentials
+
+kamailio:
+  # Set to an address phones can reach: the node Kamailio runs on.
+  publicHost: 192.0.2.10
+
+postgresql:
+  enabled: true
+valkey:
+  enabled: true
+minio:
+  enabled: true
