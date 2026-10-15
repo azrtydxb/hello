@@ -215,8 +215,10 @@ minio:
   # private on quay.io, so the evaluation default is the frozen Bitnami legacy
   # image this project's CI also uses. It starts its server itself (no args),
   # keeps data under /bitnami/minio/data and runs as uid 1001. Production
-  # points external.endpoint at a real S3 service instead.
-  image: bitnamilegacy/minio:latest
+  # points external.endpoint at a real S3 service instead. Pinned: this tag
+  # is the image "latest" pointed at when CI first ran the chart (Docker Hub
+  # digest sha256:451fe685...); "latest" itself could move under an install.
+  image: bitnamilegacy/minio:2025.5.24-debian-12-r5
   args: []
   dataPath: /bitnami/minio/data
   fsGroup: 1001

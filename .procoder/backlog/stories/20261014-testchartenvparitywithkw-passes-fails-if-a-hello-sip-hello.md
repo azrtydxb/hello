@@ -25,3 +25,4 @@ As an operator installing Hello on Kubernetes I need the chart and guide to hold
      one line per criterion. Empty evidence keeps the story open. -->
 
 - `TestChartEnvParityWithKw` (test/deploy/helm_test.go) passed in the CI job chart, which installs helm and kubeconform and sets HELLO_REQUIRE_HELM=1: https://github.com/azrtydxb/hello/actions/runs/38671536846/job/116215638964. Also run locally: HELLO_REQUIRE_HELM=1 go test ./test/deploy -run 'TestChart|TestKubernetesGuide'.
+- Per-condition audit 2026-10-15: `TestChartEnvParityWithKw` is in test/deploy and fails when any env var of the kw hello-sip, hello-control (and migrate), Kamailio or hello-ui containers is missing from the chart, except the eight HELLO_AI_* tuning vars listed with reasons in `kwOnlyEnv` (confirmed by deleting HELLO_MEDIA_FORCE_ANCHOR from the chart).

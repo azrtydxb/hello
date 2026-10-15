@@ -25,3 +25,4 @@ As an operator installing Hello on Kubernetes I need the chart and guide to hold
      one line per criterion. Empty evidence keeps the story open. -->
 
 - `TestChartUpgradeOrdering` (test/deploy/helm_test.go) passed in the CI job chart, which installs helm and kubeconform and sets HELLO_REQUIRE_HELM=1: https://github.com/azrtydxb/hello/actions/runs/38671536846/job/116215638964. Also run locally: HELLO_REQUIRE_HELM=1 go test ./test/deploy -run 'TestChart|TestKubernetesGuide'.
+- Per-condition audit 2026-10-15: `TestChartUpgradeOrdering` is in test/deploy and fails on a hello-sip rollingUpdate.maxUnavailable or non-OrderedReady policy, a grace period not above HELLO_DRAIN_TIMEOUT, and a Kamailio without Recreate or wait-dispatcher in the HA (hostNetwork) render (all four confirmed by breaking the chart locally).

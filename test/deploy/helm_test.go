@@ -249,6 +249,27 @@ func TestChartDefaultRender(t *testing.T) {
 			t.Errorf("%s has no resource requests and limits", c["name"])
 		}
 	}
+	// Every image names an explicit tag, and none is "latest": an install
+	// must not change under a pod restart. (Hello's own images default to
+	// "main", which the guide requires production to pin to sha-<commit>.)
+	for _, o := range objs {
+		if podSpec(o) == nil {
+			continue
+		}
+		for _, key := range []string{"initContainers", "containers"} {
+			for _, c := range list(dig(podSpec(o), key)) {
+				img := str(dig(c, "image"))
+				ref := img[strings.LastIndex(img, "/")+1:]
+				tag, ok := "", strings.Contains(ref, ":")
+				if ok {
+					tag = ref[strings.LastIndex(ref, ":")+1:]
+				}
+				if !ok || tag == "" || tag == "latest" {
+					t.Errorf("%s/%s %s: image %q is not pinned by tag", o["kind"], dig(o, "metadata", "name"), dig(c, "name"), img)
+				}
+			}
+		}
+	}
 	// The UI Ingress is opt-in; the HA layout turns it on.
 	if hasObj(objs, "Ingress", "hello") {
 		t.Error("the default render must not create an Ingress")
@@ -785,6 +806,18 @@ func TestChartKubeconform(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Errorf("%s render: kubeconform: %v\n%s", name, err, out)
+		}
+	}
+}
+
+// TestChartLint fails if `helm lint --strict` rejects the chart with either
+// values file.
+func TestChartLint(t *testing.T) {
+	helm := requireTool(t, "helm")
+	for _, f := range []string{"values-eval.yaml", "values-ha.yaml"} {
+		out, err := exec.Command(helm, "lint", "--strict", chartDir(t), "-f", valuesFile(t, f)).CombinedOutput()
+		if err != nil {
+			t.Errorf("helm lint --strict -f %s: %v\n%s", f, err, out)
 		}
 	}
 }

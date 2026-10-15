@@ -75,7 +75,7 @@ None. The chart creates no schema; `hello-control migrate up` runs as the init c
 - [ ] [S-4] `TestChartUpgradeOrdering` passes: fails if hello-sip can update more than one node at a time, its grace period does not exceed the drain timeout, or Kamailio lacks Recreate and the wait-dispatcher init container under hostNetwork.
 - [ ] [S-5] `TestChartStateServices` passes: fails if the default render omits the bundled services, the production render still bundles them, or a missing external value renders instead of failing.
 - [ ] [S-6] `TestKubernetesGuideCoversTopics` passes: fails if docs/kubernetes.md lacks any of hostNetwork, NodePort, the RTP range, anti-affinity, CloudNativePG, Sentinel or the upgrade procedure.
-- [ ] [S-7] `TestChartKamailioConfigMatchesSource` passes: fails if the chart's Kamailio config differs from deploy/kamailio/kamailio.cfg; helm lint --strict and kubeconform pass on both renders.
+- [ ] [S-7] `TestChartKamailioConfigMatchesSource` passes: fails if the chart's Kamailio config differs from deploy/kamailio/kamailio.cfg; `TestChartLint` and `TestChartKubeconform` (test/deploy) pass: fail if helm lint --strict or kubeconform rejects either render.
 - [ ] [S-8] `TestKindRollingUpgrade` in test/kindupgrade, run by the kind-upgrade job in .github/workflows/ci.yaml, passes: fails if the call placed before helm upgrade is lost, cannot be hung up, or leaves a zombie, or (if kind cannot run) the PR states exactly why the job is dispatch-only.
 
 <!-- Decided overnight, recorded in decisions.md: hello-sip as a StatefulSet; separate Services per node by pod name; Secret layout; kind job on the Arc runners with a workflow_dispatch fallback. -->

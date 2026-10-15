@@ -38,6 +38,7 @@ spec:
         {{- include "hello.selectorLabels" $ctx | nindent 8 }}
     spec:
       automountServiceAccountToken: false
+      {{- include "hello.pullSecrets" . | nindent 6 }}
       securityContext:
         # The postgres alpine image's user.
         fsGroup: 70
@@ -129,6 +130,7 @@ spec:
         {{- include "hello.selectorLabels" $ctx | nindent 8 }}
     spec:
       automountServiceAccountToken: false
+      {{- include "hello.pullSecrets" . | nindent 6 }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 999
@@ -190,6 +192,7 @@ spec:
         {{- include "hello.selectorLabels" $ctx | nindent 8 }}
     spec:
       automountServiceAccountToken: false
+      {{- include "hello.pullSecrets" . | nindent 6 }}
       securityContext:
         fsGroup: {{ .Values.minio.fsGroup }}
         seccompProfile:

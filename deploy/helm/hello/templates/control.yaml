@@ -81,6 +81,8 @@ spec:
               value: hello-migrate
           securityContext:
             {{- include "hello.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.control.resources | nindent 12 }}
       containers:
         - name: hello-control
           image: {{ include "hello.image" (dict "root" . "name" .Values.control.image.name "tag" .Values.control.image.tag) }}

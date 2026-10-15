@@ -14,5 +14,7 @@ The bundled PostgreSQL is for evaluation. Its DSN for the "dsn" key of {{ .Value
   postgres://<postgresUser>:<postgresPassword>@{{ include "hello.fullname" . }}-postgresql:5432/hello?sslmode=disable
 {{- end }}
 
-Upgrade: helm upgrade {{ .Release.Name }} <chart> --reuse-values --set global.imageTag=<tag>
-See docs/kubernetes.md, "Upgrades".
+Upgrade in two steps (docs/kubernetes.md, "Upgrades"): first Hello's pods with
+Kamailio's tag held where it is,
+  helm upgrade {{ .Release.Name }} <chart> --reuse-values --set global.imageTag=<new tag> --set kamailio.image.tag=<current tag>
+then Kamailio on its own, so a node's call handoff never meets a restarting Kamailio.

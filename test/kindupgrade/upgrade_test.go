@@ -3,7 +3,7 @@
 // builds the images, creates a kind cluster, installs the chart and starts
 // this test, which registers two phones through Kamailio, connects a call,
 // runs `helm upgrade` twice (Hello's own pods, then Kamailio) and checks the
-// call is still up and can be hung up from either side.
+// call is still up, the caller can hang it up, and it closes with a CDR.
 package kindupgrade
 
 import (
@@ -251,9 +251,9 @@ func (e env) helmUpgrade(t *testing.T, c *client, ext string, sets ...string) (n
 }
 
 // TestKindRollingUpgrade fails if the call placed before `helm upgrade` is
-// lost in either rollout (Hello's own pods, then Kamailio), is no longer
-// live afterwards, cannot be hung up from both sides, or leaves no CDR
-// closed by that hangup.
+// lost in either rollout (Hello's own pods, then Kamailio): a phone's dialog
+// ends or the call is no longer live afterwards; if the caller cannot hang it
+// up; or if it stays in the live view (a zombie) or leaves no answered CDR.
 func TestKindRollingUpgrade(t *testing.T) {
 	e := loadEnv(t)
 	jar, _ := cookiejar.New(nil)
@@ -344,6 +344,13 @@ func TestKindRollingUpgrade(t *testing.T) {
 	e.helmUpgrade(t, c, callee.Extension, "kamailio.podAnnotations.hello-kind-rollout=2")
 	if _, err := c.callTo(callee.Extension); err != nil {
 		t.Fatalf("the call is not live after the Kamailio rollout: %v", err)
+	}
+	select {
+	case <-in.Ended():
+		t.Fatal("the callee's dialog ended during the Kamailio rollout")
+	case <-out.Ended():
+		t.Fatal("the caller's dialog ended during the Kamailio rollout")
+	default:
 	}
 
 	// The call is still a call: the caller hangs up through the new
