@@ -89,6 +89,12 @@ func TestProposalDedupe(t *testing.T) {
 	if _, err := e.ps.Upsert(ctx, e.draft("assistant", &sess, rename("B"))); !errors.Is(err, proposal.ErrSuppressed) {
 		t.Fatalf("dismissed fingerprint: err = %v, want ErrSuppressed", err)
 	}
+	if _, err := e.db.Exec(`UPDATE ai_proposals SET dismissed_at = now() - interval '7 days' + interval '1 hour' WHERE id = $1`, idNew); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.ps.Upsert(ctx, e.draft("assistant", &sess, rename("B"))); !errors.Is(err, proposal.ErrSuppressed) {
+		t.Fatalf("dismissed 7 days less an hour ago: err = %v, want ErrSuppressed", err)
+	}
 	if _, err := e.db.Exec(`UPDATE ai_proposals SET dismissed_at = now() - interval '8 days' WHERE id = $1`, idNew); err != nil {
 		t.Fatal(err)
 	}
