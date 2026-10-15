@@ -59,6 +59,14 @@ const DELETE = {
       before: { name: "old-route", pattern: "^9" },
       after: null,
       current: { name: "old-route", pattern: "^9" },
+      references: [
+        {
+          kind: "trunk",
+          id: "3",
+          name: "carrier-a",
+          detail: "used by the route",
+        },
+      ],
     },
   ],
 };
@@ -225,6 +233,13 @@ describe("TestProposalDeleteUI", () => {
     // What disappears is in the diff.
     expect(within(change).getAllByText("removed").length).toBeGreaterThan(0);
     expect(within(change).getAllByText("old-route").length).toBeGreaterThan(0);
+    // What references the deleted resource is listed beside the diff.
+    const refs = within(change).getByRole("list", {
+      name: "References of change 1",
+    });
+    expect(
+      within(refs).getByText("trunk carrier-a (3): used by the route"),
+    ).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     const dialog = screen.getByRole("dialog");

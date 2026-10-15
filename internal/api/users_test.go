@@ -222,6 +222,25 @@ func TestUserRoles(t *testing.T) {
 
 	e := newEnv(t, nil)
 	ctx := context.Background()
+
+	// A service account never holds a scope outside its role: every
+	// role/scope pair beyond GrantableScopes is refused, on the real store.
+	authSrv, err := oauth.New(oauth.Options{Store: e.st, PublicURL: "http://localhost"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := auth.Actor{Username: testUser, Role: auth.RoleAdmin, Kind: auth.KindSession}
+	for _, role := range []auth.Role{auth.RoleViewer, auth.RoleOperator, auth.RoleAdmin} {
+		for _, scope := range append(slices.Clone(auth.AllScopes), auth.ScopeSession) {
+			fits := auth.GrantableScopes(role).Has(scope) && scope != auth.ScopeSession
+			sa, err := authSrv.CreateServiceAccount(ctx, admin, oauth.NewServiceAccount{
+				Name: "sa-" + string(role) + "-" + string(scope), Role: role, Scopes: auth.Scopes{scope}, Enabled: true})
+			if (err == nil) != fits {
+				t.Errorf("service account %s with %s: %+v, %v; want accepted = %v", role, scope, sa, err, fits)
+			}
+		}
+	}
+
 	hash, err := auth.HashPassword(testPassword)
 	if err != nil {
 		t.Fatal(err)
