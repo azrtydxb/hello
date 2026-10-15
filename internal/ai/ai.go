@@ -111,6 +111,13 @@ type Call[T any] struct {
 	// then an answer phase (structured output, no tools); see Generate.
 	Tools    []aisdk.Tool
 	MaxSteps int
+	// RequireTool makes the tool phase start with a tool call: its first
+	// step is sent with tool_choice "required", later steps with "auto".
+	// The tools offered gain NoDataTool, the way out for a question that
+	// needs no data. An endpoint that refuses "required" is asked again
+	// without it, and a tool phase that ends without any call is nudged
+	// once to make one.
+	RequireTool bool
 	// ToolLog, when set, is the list of tool calls made, as the answer
 	// phase shows it to the model for citations (in a data block); it is
 	// called once the tool phase ends. Nil lists the calls of the steps.

@@ -46,6 +46,7 @@ func header(feature string) string {
 // with no structured-output instruction and no response format: the model
 // gathers what it needs and replies in plain text, at most MaxSteps steps,
 // nudged once when it describes a tool call in text instead of making it.
+// With RequireTool its first step must call a tool (see Call.RequireTool).
 // The answer phase then turns the conversation so far into T in one call
 // without tools, with the structured-output mode and validation above.
 // Streamed, only the answer phase's text reaches Stream.Text.
@@ -127,7 +128,7 @@ func generate[T any](ctx context.Context, s *Service, call Call[T]) (any, Usage,
 	if len(call.Tools) > 0 {
 		var steps []aisdk.Step
 		var err error
-		msgs, steps, u, err = gather(ctx, s, call.Feature, call.System, call.Tools, call.MaxSteps, msgs, fs)
+		msgs, steps, u, err = gather(ctx, s, call.Feature, call.System, call.Tools, call.MaxSteps, call.RequireTool, msgs, fs)
 		if err != nil {
 			return nil, u, err
 		}
@@ -159,6 +160,9 @@ const (
 		"When you have what you need, reply in plain text with what you found. Do not write JSON now: the final structured answer is asked for afterwards."
 	nudgeInstruction = "You described a tool call in text instead of making it. Call the tool through the tool-calling interface now. " +
 		"If you need no tool, reply in plain text with what you know."
+	requireInstruction = "Start with a tool call. If answering needs no data from the tools, call " + NoDataTool + " instead of a data tool."
+	requireNudge       = "You answered without calling a tool. Call the tools that read the data the question is about now, " +
+		"or " + NoDataTool + " if it needs no data."
 	answerInstruction = "Now write the final answer to the question from the conversation above and the tool results, without calling any tool. " +
 		"Your replies above are not shown to the user: the JSON object holds the whole answer, not only the citations."
 )
@@ -188,6 +192,9 @@ func stepCalls(steps []aisdk.Step) []toolCallEntry {
 	out := []toolCallEntry{}
 	for _, st := range steps {
 		for _, c := range st.ToolCalls {
+			if c.Name == NoDataTool {
+				continue
+			}
 			e := toolCallEntry{Position: len(out), Tool: c.Name}
 			if len(c.Args) > 0 && json.Valid(c.Args) {
 				e.Arguments = c.Args
@@ -198,12 +205,49 @@ func stepCalls(steps []aisdk.Step) []toolCallEntry {
 	return out
 }
 
+// NoDataTool is the tool a RequireTool call adds to its tools: the call a
+// question that needs no data makes when a tool call is required. It reads
+// nothing, and is left out of the calls the answer may cite.
+const NoDataTool = "no_data_needed"
+
+// noDataTool is NoDataTool. Its result sends a model that took it for a
+// question about the system back to the data tools.
+var noDataTool = aisdk.NewTool(NoDataTool,
+	"Call this only when answering needs no data from the other tools: a greeting, a question about what you can do, or general knowledge. "+
+		"Never call it for a question about this system's configuration, state or history: call the tools that read those.",
+	func(context.Context, struct{}) (any, error) {
+		return "No data read. If the question asks about this system's configuration, state or history, call the tools that read it now; " +
+			"otherwise reply in plain text.", nil
+	})
+
+// requireFirst is the PrepareStep of a tool phase that must start with a
+// tool call: tool_choice "required" on its first step; the later steps keep
+// the call's "auto".
+func requireFirst(step int, p aisdk.StepPlan) (aisdk.StepPlan, bool) {
+	if step != 0 {
+		return p, false
+	}
+	p.Call.ToolChoice = &provider.ToolChoice{Mode: provider.ToolChoiceRequired}
+	return p, true
+}
+
+// refusedRequired reports whether err is the endpoint refusing the request,
+// as one without support for tool_choice "required" answers it.
+func refusedRequired(err error) bool {
+	var api *aisdk.APICallError
+	return errors.As(err, &api) && (api.StatusCode == 400 || api.StatusCode == 422)
+}
+
 // gather is the tool phase: the model calls tools, at most maxSteps steps
 // in all (HELLO_AI_MAX_STEPS when 0), and ends in plain text. A last step
 // that describes a tool call instead of making one is nudged once while
-// steps remain. It returns msgs followed by the phase's transcript, and
-// every step it ran. Streamed, it reports reasoning and never text.
-func gather(ctx context.Context, s *Service, feature, instructions string, tools []aisdk.Tool, maxSteps int,
+// steps remain. With require, the tools gain NoDataTool, the first step is
+// sent with tool_choice "required" (the rest "auto"), and a phase that made
+// no call at all is nudged once; an endpoint that refuses "required" is
+// asked again without it, and once that succeeds is not asked with it
+// again. It returns msgs followed by the phase's transcript, and every step
+// it ran. Streamed, it reports reasoning and never text.
+func gather(ctx context.Context, s *Service, feature, instructions string, tools []aisdk.Tool, maxSteps int, require bool,
 	msgs []provider.Message, fs *fieldStream) ([]provider.Message, []aisdk.Step, Usage, error) {
 	var u Usage
 	system := header(feature)
@@ -211,17 +255,28 @@ func gather(ctx context.Context, s *Service, feature, instructions string, tools
 		system += "\n\n" + instructions
 	}
 	system += "\n\n" + gatherInstruction
+	if require {
+		tools = append(append([]aisdk.Tool(nil), tools...), noDataTool)
+		system += " " + requireInstruction
+	}
 	stepsLeft := maxSteps
 	if stepsLeft <= 0 {
 		stepsLeft = max(s.cfg.MaxSteps, 1)
 	}
 	var all []aisdk.Step
 	nudged := false
+	force, refused := require && !s.noRequired.Load(), false
 	for {
 		mt := defaultMaxTokens
 		opts := aisdk.GenerateTextOpts{
 			System: system, Messages: msgs, Tools: tools, MaxSteps: stepsLeft, MaxTokens: &mt,
 			ProviderOptions: s.providerOptions(),
+		}
+		if require {
+			opts.ToolChoice = &provider.ToolChoice{Mode: provider.ToolChoiceAuto}
+		}
+		if force {
+			opts.PrepareStep = requireFirst
 		}
 		var a attemptResult
 		if fs != nil {
@@ -231,8 +286,19 @@ func gather(ctx context.Context, s *Service, feature, instructions string, tools
 			a = runOnce(ctx, s, opts, false, nil)
 		}
 		u = u.add(stepUsage(a.steps))
+		if a.err != nil && force && len(a.steps) == 0 && refusedRequired(a.err) {
+			force, refused = false, true
+			continue
+		}
+		force = false
 		if a.err != nil {
 			return nil, all, u, classify(ctx, a.err, true)
+		}
+		if refused {
+			refused = false
+			s.noRequired.Store(true)
+			s.log.Warn("ai: the endpoint refuses tool_choice required; the tool phase is nudged instead",
+				"feature", feature, "task_id", taskIDFrom(ctx))
 		}
 		if len(a.steps) == 0 {
 			return nil, all, u, &Error{Code: CodeProviderError, Message: "the model returned no answer"}
@@ -241,13 +307,32 @@ func gather(ctx context.Context, s *Service, feature, instructions string, tools
 		stepsLeft -= len(a.steps)
 		msgs = transcript(msgs, a.steps, "", false)
 		last := a.steps[len(a.steps)-1]
-		if !nudged && stepsLeft > 0 && len(last.ToolCalls) == 0 && describesToolCall(last.Text, tools, len(stepCalls(all)) == 0) {
-			nudged = true
-			msgs = append(msgs, provider.UserText(nudgeInstruction))
-			continue
+		if !nudged && stepsLeft > 0 && len(last.ToolCalls) == 0 {
+			nudge := ""
+			switch {
+			case describesToolCall(last.Text, tools, len(stepCalls(all)) == 0):
+				nudge = nudgeInstruction
+			case require && !anyToolCall(all):
+				nudge = requireNudge
+			}
+			if nudge != "" {
+				nudged = true
+				msgs = append(msgs, provider.UserText(nudge))
+				continue
+			}
 		}
 		return msgs, all, u, nil
 	}
+}
+
+// anyToolCall reports whether a step made a tool call, NoDataTool included.
+func anyToolCall(steps []aisdk.Step) bool {
+	for _, st := range steps {
+		if len(st.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // toolCallMarkers are text forms of a tool call a model may write instead
