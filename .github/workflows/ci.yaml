@@ -313,6 +313,9 @@ jobs:
             f="$RUNNER_TEMP/podlogs/$(basename "$n").log"
             setsid nohup bash -c "while true; do kubectl -n hello logs -f --tail=-1 $n >> '$f' 2>&1; sleep 1; done" >/dev/null 2>&1 &
           done
+          # Kamailio at debug level while the handoffs run: the failure report
+          # greps it for the calls that were taken over.
+          kubectl -n hello exec deploy/hello-kamailio -- kamcmd cfg.set_now_int core debug 3 || true
       - name: Rolling upgrade with an active call
         env:
           HELLO_KIND: "1"
@@ -336,8 +339,12 @@ jobs:
             echo "=== $p"; kubectl -n hello logs --all-containers --tail=200 "$p" || true
           done
           for f in "$RUNNER_TEMP"/podlogs/*.log; do
-            echo "=== followed log $f"; grep -v 'wait-dispatcher' "$f" | grep -v ' DEBUG:' | tail -n 300
+            echo "=== followed log $f"; grep -v 'wait-dispatcher' "$f" | grep -v ' DEBUG:' | tail -n 150
           done
+          grep -h 'takeover re-INVITE' "$RUNNER_TEMP"/podlogs/hello-sip-*.log | sed -n 's/.*"call_id":"\([^"]*\)".*/\1/p' | sort -u | while read -r id; do
+            echo "=== kamailio lines for call $id"; grep -h "$id" "$RUNNER_TEMP/podlogs/hello-kamailio.log" | cut -c1-300 | head -120
+          done
+          grep -hE 'WARNING|refused|rerouted|ERROR' "$RUNNER_TEMP/podlogs/hello-kamailio.log" | grep -v 'could not resolve\|failed to resolve\|no socket found\|unable to ping' | tail -n 60
           kubectl -n hello exec deploy/hello-kamailio -- kamcmd dispatcher.list || true
       - name: Remove the cluster
         if: always()
