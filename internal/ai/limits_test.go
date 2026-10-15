@@ -223,7 +223,9 @@ func TestTasksAndLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 		st := aifake.NewStore()
-		short := ai.WithTiming(ai.Options{}, 100*time.Millisecond, time.Second, time.Hour, time.Hour)
+		// A 3 s stale window: the heartbeat's TTL must outlast the gap between
+		// a.Beat and b.FailStale on a loaded CI runner (1 s did not).
+		short := ai.WithTiming(ai.Options{}, 100*time.Millisecond, 3*time.Second, time.Hour, time.Hour)
 		oa, ob := short, short
 		oa.Replica, ob.Replica = "a", "b"
 		a := service(t, aifake.Config(), newBlocking(), st, oa)
@@ -243,13 +245,13 @@ func TestTasksAndLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 		a.Beat(ctx)
-		time.Sleep(1100 * time.Millisecond) // older than the stale window
+		time.Sleep(3100 * time.Millisecond) // older than the stale window
 		a.Beat(ctx)
 		b.FailStale(ctx)
 		if got := st.Task(id).Status; got == ai.TaskFailed {
-			t.Fatal("a task of a live replica was failed")
+			t.Fatalf("a task of a live replica was failed: %+v", st.Task(id))
 		}
-		time.Sleep(1100 * time.Millisecond) // a's heartbeat expires
+		time.Sleep(3100 * time.Millisecond) // a's heartbeat expires
 		b.FailStale(ctx)
 		if tk := st.Task(id); tk.Status != ai.TaskFailed || tk.ErrorCode != ai.CodeInstanceStopped {
 			t.Fatalf("stopped replica's task = %+v", tk)
