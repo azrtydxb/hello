@@ -99,15 +99,16 @@ func (a *Assistant) answer(ctx context.Context, userID int64, sessionID, taskID 
 	var validated *proposal.Draft
 	started := time.Now()
 	ans, usage, err := a.cfg.Generate(ctx, ai.Call[Answer]{
-		Feature:  Feature,
-		System:   systemPrompt,
-		Data:     map[string]any{"history": prior, "findings": findings},
-		Prompt:   current.Content,
-		Tools:    tools,
-		MaxSteps: a.cfg.MaxSteps,
-		ToolLog:  ts.log,
-		Validate: a.validator(ident, sessionID, ts, &validated),
-		Stream:   k.stream(),
+		Feature:     Feature,
+		System:      systemPrompt,
+		Data:        map[string]any{"history": prior, "findings": findings},
+		Prompt:      current.Content,
+		Tools:       tools,
+		MaxSteps:    a.cfg.MaxSteps,
+		RequireTool: true,
+		ToolLog:     ts.log,
+		Validate:    a.validator(ident, sessionID, ts, &validated),
+		Stream:      k.stream(),
 	})
 	cause := context.Cause(ctx)
 	if errors.Is(cause, errUserGone) {

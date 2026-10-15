@@ -154,6 +154,9 @@ func TestAssistantTools(t *testing.T) {
 		if len(r.calls) == 0 || r.calls[0].MaxSteps != DefaultMaxSteps {
 			t.Fatalf("MaxSteps not passed to Generate")
 		}
+		if !r.calls[0].RequireTool {
+			t.Error("the assistant's tool phase does not require a tool call")
+		}
 		// mockGenerate makes up to 3 attempts of at most MaxSteps steps.
 		if n := len(r.model.RecordedCalls()); n < DefaultMaxSteps || n > 3*DefaultMaxSteps {
 			t.Errorf("%d model steps, want the first attempt's %d and at most %d", n, DefaultMaxSteps, 3*DefaultMaxSteps)
