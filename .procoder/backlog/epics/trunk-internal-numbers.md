@@ -1,6 +1,6 @@
 # trunk-internal-numbers
 
-Status: open
+Status: done 2026-10-14
 Created: 2026-10-09
 Milestone: trunk-internal-numbers
 Spec: trunk-internal-numbers @ 3320ecebae3c
