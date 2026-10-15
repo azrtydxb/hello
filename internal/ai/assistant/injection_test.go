@@ -40,6 +40,10 @@ func TestInjection(t *testing.T) {
 			toolResp(call("c1", "listRegistrations", `{}`)),
 			toolResp(call("c2", "createOutboundRoute", `{"body":{"pattern":"+900"}}`)),
 		}},
+		{"calls a read outside assistantTools", []*provider.Response{
+			toolResp(call("c1", "listRegistrations", `{}`)),
+			toolResp(call("c2", "listUsers", `{}`), call("c3", "listTokens", `{}`)),
+		}},
 		{"proposes an operation outside the allowlist", repeat(3, textResp(Answer{Answer: "Done.", Citations: []int{},
 			Proposal: &ProposalOut{Title: "Admin", Actions: []ActionOut{{OperationID: "updateUserRole", PathParams: map[string]string{"id": "5"}, Body: []byte(`{"role":"admin"}`)}}}}))},
 		{"proposes a credential", repeat(3, textResp(Answer{Answer: "Done.", Citations: []int{},
@@ -134,12 +138,41 @@ func repeat(n int, r *provider.Response) []*provider.Response {
 	return out
 }
 
+// toolPath reports whether path is served by an operation of
+// assistantTools, a {param} segment matching any one segment.
+func toolPath(tools []toolDef, path string) bool {
+	got := strings.Split(strings.Trim(path, "/"), "/")
+	for _, d := range tools {
+		if !slices.Contains(assistantTools, d.op.ID) {
+			continue
+		}
+		want := strings.Split(strings.Trim(d.op.Path, "/"), "/")
+		if len(want) != len(got) {
+			continue
+		}
+		match := true
+		for i, w := range want {
+			if !strings.HasPrefix(w, "{") && w != got[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
+}
+
 // checkInjection fails on any effect an injection must never have.
 func checkInjection(t *testing.T, r *rig) {
 	t.Helper()
 	for _, q := range r.api.seen() {
 		if q.Method != http.MethodGet {
 			t.Errorf("replayed %s %s", q.Method, q.Path)
+		}
+		if !toolPath(r.a.tools, q.Path) {
+			t.Errorf("replayed %s, which no operation of assistantTools serves", q.Path)
 		}
 	}
 	for _, d := range r.props.storedDrafts() {

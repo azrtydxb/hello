@@ -27,3 +27,7 @@ func (s *Service) FailStale(ctx context.Context) { s.failStale(ctx) }
 
 // StripAnswer is stripAnswer.
 var StripAnswer = stripAnswer
+
+// DefaultHeartbeat and DefaultStale are the production heartbeat period and
+// stale window.
+var DefaultHeartbeat, DefaultStale = defaultTiming.heartbeat, defaultTiming.stale
