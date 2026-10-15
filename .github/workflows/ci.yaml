@@ -180,6 +180,224 @@ jobs:
           HELLO_LAB_CONTACT_HOST: 10.89.53.1
         run: go test -count=1 -timeout 50m -v ./test/integration/
 
+  chart:
+    # The Helm chart (deploy/helm/hello) rendered and checked: lint, the
+    # kubeconform schema check, and the test/deploy invariants. helm and
+    # kubeconform are tools here, not services: nothing is installed into a
+    # cluster (kind-upgrade does that).
+    runs-on: arc-azrtydxb
+    timeout-minutes: 20
+    container:
+      image: golang:1.27-bookworm
+    env:
+      HELM_VERSION: v4.1.1
+      KUBECONFORM_VERSION: v0.8.0
+      # A missing helm must fail test/deploy here, not skip.
+      HELLO_REQUIRE_HELM: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Trust the mounted workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install helm and kubeconform
+        run: |
+          arch=$(uname -m); case $arch in
+            x86_64) a=amd64 ;;
+            aarch64|arm64) a=arm64 ;;
+            *) echo "unsupported arch $arch"; exit 1 ;;
+          esac
+          cd "$(mktemp -d)"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz" -o helm.tgz
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz.sha256sum" -o helm.sha
+          echo "$(cut -d' ' -f1 helm.sha)  helm.tgz" | sha256sum -c -
+          tar -xzf helm.tgz "linux-${a}/helm"
+          install "linux-${a}/helm" /usr/local/bin/helm
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-${a}.tar.gz" -o kc.tgz
+          tar -xzf kc.tgz kubeconform
+          install kubeconform /usr/local/bin/kubeconform
+          helm version --short
+          kubeconform -v
+      - name: helm lint
+        run: |
+          helm lint --strict deploy/helm/hello -f deploy/helm/hello/values-eval.yaml
+          helm lint --strict deploy/helm/hello -f deploy/helm/hello/values-ha.yaml
+      - name: Chart invariants and kubeconform
+        run: go test -count=1 -v -run 'TestChart|TestKubernetesGuide' ./test/deploy/
+
+  kind-upgrade:
+    # Rolling upgrade with an active call (docs/kubernetes.md, "Upgrades"):
+    # builds the images from this commit, creates a kind cluster, installs
+    # the chart, registers two phones through Kamailio and connects a call,
+    # then `helm upgrade`s Hello's pods and Kamailio and requires the call to
+    # survive and hang up cleanly. Needs the runner's Docker daemon (as the
+    # lab job does), kind, kubectl and helm on the runner itself.
+    runs-on: arc-azrtydxb
+    timeout-minutes: 60
+    env:
+      KIND_VERSION: v0.30.0
+      KUBECTL_VERSION: v1.34.0
+      HELM_VERSION: v4.1.1
+      HELLO_KIND_PASSWORD: kind-admin-password
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Tools on the runner
+        run: |
+          docker version
+          arch=$(uname -m); case $arch in
+            x86_64) a=amd64 ;;
+            aarch64|arm64) a=arm64 ;;
+            *) echo "unsupported arch $arch"; exit 1 ;;
+          esac
+          mkdir -p "$HOME/bin"
+          curl -fsSL "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${a}" -o "$HOME/bin/kind"
+          curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${a}/kubectl" -o "$HOME/bin/kubectl"
+          chmod +x "$HOME/bin/kind" "$HOME/bin/kubectl"
+          d=$(mktemp -d)
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz" -o "$d/helm.tgz"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz.sha256sum" -o "$d/helm.sha"
+          echo "$(cut -d' ' -f1 "$d/helm.sha")  $d/helm.tgz" | sha256sum -c -
+          tar -xzf "$d/helm.tgz" -C "$d" "linux-${a}/helm"
+          install "$d/linux-${a}/helm" "$HOME/bin/helm"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - name: Build the images from this commit
+        run: |
+          docker build --target hello-control -t hello.local/hello-control:ci .
+          docker build --target hello-sip -t hello.local/hello-sip:ci .
+          docker build -t hello.local/hello-ui:ci -f web/Dockerfile web
+          docker build -t hello.local/kamailio:ci docker/kamailio
+          # The upgrade changes the image tag: the same bits under a new name.
+          for i in hello-control hello-sip hello-ui kamailio; do
+            docker tag hello.local/$i:ci hello.local/$i:ci-upgrade
+          done
+      - name: Create the kind cluster
+        run: |
+          cat > kind.yaml <<'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+            - role: worker
+              kubeadmConfigPatches:
+                - |
+                  kind: JoinConfiguration
+                  nodeRegistration:
+                    kubeletExtraArgs:
+                      node-labels: "hello-edge=true"
+              extraPortMappings:
+                - { containerPort: 30508, hostPort: 30508, protocol: UDP }
+                - { containerPort: 30508, hostPort: 30508, protocol: TCP }
+                - { containerPort: 30081, hostPort: 30081, protocol: TCP }
+            - role: worker
+          EOF
+          # Evidence first: what the runner's Docker daemon is.
+          docker info --format 'server={{.ServerVersion}} cgroup={{.CgroupVersion}}/{{.CgroupDriver}} rootless={{.SecurityOptions}} cpus={{.NCPU}} mem={{.MemTotal}}'
+          nproc; free -m || true; cat /proc/self/cgroup | head -5
+          # kind's kubelets need more inotify instances than the default 128
+          # ("too many open files" from kubelet start otherwise). The limits
+          # are kernel-wide, so they are raised from a privileged container
+          # on the runner's Docker daemon; harmless if already high.
+          docker run --rm --privileged alpine:3.22 sh -c 'sysctl fs.inotify.max_user_instances fs.inotify.max_user_watches; sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576' || echo "could not raise the inotify limits"
+          kind create cluster --name hello --config kind.yaml --wait 5m --retain || {
+            docker ps -a
+            for n in hello-control-plane hello-worker hello-worker2; do
+              echo "=== $n"; docker logs "$n" 2>&1 | tail -40
+            done
+            kind export logs --name hello ./kind-logs || true
+            tail -n 60 ./kind-logs/*/journal.log 2>/dev/null || true
+            exit 1
+          }
+          for i in hello-control hello-sip hello-ui kamailio; do
+            kind load docker-image --name hello hello.local/$i:ci hello.local/$i:ci-upgrade
+          done
+          kubectl get nodes -o wide
+      - name: Install the chart
+        run: |
+          # Phones reach Kamailio on the edge node's own address. Going
+          # through the Docker published port (127.0.0.1) puts docker-proxy
+          # between them, which rewrites the source port: Kamailio then takes
+          # the phone for NAT'd and aliases its Contact to a proxy port that
+          # expires after a minute, so later in-dialog requests (the handoff's
+          # re-INVITE) never reach the phone.
+          edge=$(docker inspect -f '{{(index .NetworkSettings.Networks "kind").IPAddress}}' hello-worker)
+          echo "edge node address: $edge"
+          echo "KIND_EDGE_IP=$edge" >> "$GITHUB_ENV"
+          kubectl create namespace hello
+          kubectl -n hello create secret generic hello-credentials \
+            --from-literal=dsn='postgres://hello:kind-pg-pass@hello-postgresql:5432/hello?sslmode=disable' \
+            --from-literal=secretKey="$(openssl rand -base64 32)" \
+            --from-literal=nonceSecret="$(openssl rand -base64 48)" \
+            --from-literal=bootstrapPassword="$HELLO_KIND_PASSWORD" \
+            --from-literal=minioAccessKey=hello \
+            --from-literal=minioSecretKey=kind-minio-pass \
+            --from-literal=postgresUser=hello \
+            --from-literal=postgresPassword=kind-pg-pass
+          helm install hello deploy/helm/hello -n hello \
+            -f deploy/helm/hello/values-eval.yaml \
+            --set global.imageRegistry=hello.local \
+            --set global.imageTag=ci \
+            --set global.sipDomain=hello.kind \
+            --set sip.hostNetwork=false \
+            --set sip.mediaAnchorHost=podIP \
+            --set sip.trustedProxies=10.0.0.0/8 \
+            --set kamailio.hostNetwork=false \
+            --set kamailio.service.type=NodePort \
+            --set kamailio.service.nodePort=30508 \
+            --set kamailio.publicHost="$edge" \
+            --set kamailio.publicPort=30508 \
+            --set kamailio.phonesPort=5060 \
+            --set-string kamailio.nodeSelector.hello-edge=true \
+            --set control.service.type=NodePort \
+            --set control.service.nodePort=30081 \
+            --wait --timeout 10m
+          kubectl -n hello get pods -o wide
+      - name: Follow the pod logs across the rollout
+        run: |
+          # Pods are replaced during the upgrade, taking their logs with
+          # them: keep following each name for the failure report.
+          mkdir -p "$RUNNER_TEMP/podlogs"
+          for n in pod/hello-sip-0 pod/hello-sip-1 deploy/hello-kamailio; do
+            f="$RUNNER_TEMP/podlogs/$(basename "$n").log"
+            setsid nohup bash -c "while true; do kubectl -n hello logs -f --tail=-1 $n >> '$f' 2>&1; sleep 1; done" >/dev/null 2>&1 &
+          done
+          # Kamailio at debug level while the handoffs run: the failure report
+          # greps it for the calls that were taken over.
+          kubectl -n hello exec deploy/hello-kamailio -- kamcmd cfg.set_now_int core debug 3 || true
+      - name: Rolling upgrade with an active call
+        env:
+          HELLO_KIND: "1"
+        run: |
+          gw=$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Gateway}} {{end}}' | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          echo "docker network gateway: $gw"
+          export HELLO_KIND_CONTACT_HOST="$gw"
+          export HELLO_KIND_API="http://$KIND_EDGE_IP:30081"
+          export HELLO_KIND_SIP="$KIND_EDGE_IP:30508"
+          export HELLO_KIND_ADMIN_PASSWORD="$HELLO_KIND_PASSWORD"
+          export HELLO_KIND_CHART="$PWD/deploy/helm/hello"
+          export HELLO_KIND_TAG=ci
+          export HELLO_KIND_UPGRADE_TAG=ci-upgrade
+          go test -count=1 -timeout 45m -v ./test/kindupgrade/
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl -n hello get pods -o wide || true
+          kubectl -n hello describe pods || true
+          for p in $(kubectl -n hello get pods -o name); do
+            echo "=== $p"; kubectl -n hello logs --all-containers --tail=200 "$p" || true
+          done
+          for f in "$RUNNER_TEMP"/podlogs/*.log; do
+            echo "=== followed log $f"; grep -v 'wait-dispatcher' "$f" | grep -v ' DEBUG:' | tail -n 150
+          done
+          grep -h 'takeover re-INVITE' "$RUNNER_TEMP"/podlogs/hello-sip-*.log | sed -n 's/.*"call_id":"\([^"]*\)".*/\1/p' | sort -u | while read -r id; do
+            echo "=== kamailio lines for call $id"; grep -h "$id" "$RUNNER_TEMP/podlogs/hello-kamailio.log" | grep -E 'received sip message|t_relay|selected|set send socket|uri_add_rcv|WARN|ERROR|send|resolve' | cut -c1-260 | head -150
+          done
+          grep -hE 'WARNING|refused|rerouted|ERROR' "$RUNNER_TEMP/podlogs/hello-kamailio.log" | grep -v 'could not resolve\|failed to resolve\|no socket found\|unable to ping' | tail -n 60
+          kubectl -n hello exec deploy/hello-kamailio -- kamcmd dispatcher.list || true
+      - name: Remove the cluster
+        if: always()
+        run: kind delete cluster --name hello || true
+
   publish:
     # Only what lands on main becomes an image; a pull request is tested and
     # nothing more.

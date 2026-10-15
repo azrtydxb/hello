@@ -1,0 +1,237 @@
+# Hello on Kubernetes. docs/kubernetes.md explains every choice below.
+#
+# Required (the chart refuses to render without them):
+#   global.sipDomain          the SIP domain phones register to
+#   kamailio.publicHost       the address phones reach Kamailio at
+#   secrets.existingSecret    a Secret you create (see docs/kubernetes.md)
+# and a Valkey and a MinIO: bundled (evaluation) or external (production).
+
+global:
+  # Images are <imageRegistry>/<name>:<tag>. Pin an immutable tag
+  # (sha-<commit>) for anything but evaluation; "main" moves.
+  imageRegistry: 192.168.10.131:5000/azrtydxb
+  imageTag: main
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+  clusterDomain: cluster.local
+  # The SIP domain (HELLO_SIP_DOMAIN): the host part of the phones' AOR.
+  sipDomain: ""
+  # Public HTTPS URL of the console and API (HELLO_PUBLIC_URL); enables
+  # the OAuth/MCP issuer. Empty leaves it unset.
+  publicUrl: ""
+
+secrets:
+  # The chart never creates credentials. This Secret must hold:
+  #   dsn                PostgreSQL connection string (HELLO_DATABASE_URL)
+  #   secretKey          openssl rand -base64 32 (HELLO_SECRET_KEY)
+  #   nonceSecret        at least 32 bytes (HELLO_SIP_NONCE_SECRET)
+  #   bootstrapPassword  first admin's password (HELLO_BOOTSTRAP_ADMIN_PASSWORD)
+  #   minioAccessKey / minioSecretKey
+  # and, when postgresql.enabled: postgresUser, postgresPassword.
+  # Optional keys (control reads them with optional: true): provider,
+  # base-url, model, api-key (the AI agent).
+  existingSecret: ""
+  # Vendor redirect-service credentials for phone provisioning, a Secret
+  # with the keys documented in docs/provisioning.md. Empty: unconfigured.
+  provRedirectSecret: ""
+
+control:
+  replicas: 2
+  image:
+    name: hello-control
+    tag: ""
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 256Mi }
+  # Phone provisioning listener (:8083). Enabled when provisioning.publicUrl is set.
+  provisioning:
+    publicUrl: ""
+    # Where provisioned phones register; default <kamailio.publicHost>:<kamailio.publicPort>.
+    sipServer: ""
+    # Proxies whose X-Forwarded-* is believed (the ingress controller's pods).
+    trustedProxies: ""
+    # Secret holding ca.crt (cert-manager writes it next to the certificate);
+    # mounted and served at /p/ca.crt. Empty: no CA is served.
+    caSecret: ""
+    ingress:
+      enabled: false
+      className: nginx
+      host: ""
+      tlsSecretName: ""
+      annotations:
+        nginx.ingress.kubernetes.io/ssl-redirect: "false"
+        nginx.ingress.kubernetes.io/enable-access-log: "false"
+  oauthDynamicClientRegistration: false
+  # The API's Service. ClusterIP unless something outside the cluster
+  # (a test harness, a load balancer) must reach the API directly.
+  service:
+    type: ClusterIP
+    nodePort: null
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  topologySpreadConstraints: []
+  # preferred | required | none. Replicas are interchangeable, so spreading
+  # is preferred: a one-node cluster must still run.
+  antiAffinity: preferred
+  podAnnotations: {}
+
+sip:
+  # Number of hello-sip nodes (a StatefulSet: hello-sip-0 ... N-1). Two is the
+  # minimum for calls to survive an upgrade or a node loss.
+  nodes: 2
+  image:
+    name: hello-sip
+    tag: ""
+  # hostNetwork binds SIP (UDP 5060), HTTP 8082 and the RTP range on the node
+  # address: the recommended mode, since anchored media needs a routable
+  # address and no Service maps a port range. One pod per node then.
+  hostNetwork: true
+  rtpPortMin: 20000
+  rtpPortMax: 21000
+  # The IPv4 stamped into anchored SDP: "hostIP" (the node the pod runs on),
+  # "podIP" (a routable pod network), or a literal IPv4 address.
+  mediaAnchorHost: hostIP
+  # Kamailio's addresses: only these may set Path/X-Hello-Client. Narrow it
+  # to your pod CIDR (and node CIDR when Kamailio is on the host network).
+  trustedProxies: "10.0.0.0/8"
+  ringTimeout: 30s
+  # A drain gives its calls to a ready survivor before the node exits. It
+  # must stay below terminationGracePeriodSeconds.
+  drainTimeoutSeconds: 90
+  terminationGracePeriodSeconds: 150
+  # A replaced node must be ready this long before the next one is replaced.
+  # Kamailio learns a replaced pod's new address from cluster DNS: answers are
+  # cached for the record's TTL (CoreDNS's default is 30 s; kw's cluster uses
+  # 5 s) and refreshed every 5 s, and until then it neither trusts requests
+  # from the new address nor probes it. The next node's drain must not hand
+  # its calls to a node Kamailio cannot yet reach, so this is above TTL plus
+  # refresh plus a probe interval. Lower it only with a cluster DNS TTL to match.
+  minReadySeconds: 45
+  recordingNotice: true
+  # required | preferred | none. required: one node per Kubernetes node,
+  # which hostNetwork needs (the ports would collide).
+  antiAffinity: required
+  resources:
+    requests: { cpu: 100m, memory: 64Mi }
+    limits: { memory: 256Mi }
+  extraEnv: []
+  nodeSelector: {}
+  tolerations: []
+  topologySpreadConstraints: []
+  podAnnotations: {}
+
+kamailio:
+  image:
+    name: kamailio
+    tag: ""
+  # hostNetwork binds the phones' port on the node address, so phones reach
+  # Kamailio with no NAT and Kamailio sees their real source address. Pin the
+  # pod to the node whose address is publicHost with nodeSelector.
+  hostNetwork: true
+  # Where phones reach Kamailio (REQUIRED): a node address, VIP or DNS name.
+  publicHost: ""
+  # The port phones use, as advertised in Via and Record-Route.
+  publicPort: 5060
+  # The port Kamailio binds (UDP and TCP) on its pod address. With
+  # hostNetwork it is the node port, so equals publicPort; behind a
+  # NodePort or LoadBalancer it may differ.
+  phonesPort: 5060
+  metricsPort: 9090
+  # Above sip.ringTimeout, in milliseconds.
+  inviteTimeout: 45000
+  # Phones' Service when hostNetwork is off.
+  service:
+    type: LoadBalancer
+    # Local keeps the phone's source address (no SNAT) and the node that
+    # holds the pod answers.
+    externalTrafficPolicy: Local
+    nodePort: null
+    loadBalancerIP: ""
+    annotations: {}
+  resources:
+    requests: { cpu: 50m, memory: 32Mi }
+    limits: { memory: 128Mi }
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podAnnotations: {}
+
+ui:
+  replicas: 1
+  image:
+    name: hello-ui
+    tag: ""
+  # nginx re-resolves hello-control at request time and applies no search
+  # domains: the cluster DNS Service address (kubectl -n kube-system get svc kube-dns).
+  dnsResolver: 10.96.0.10
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { memory: 128Mi }
+  ingress:
+    enabled: false
+    className: nginx
+    host: ""
+    tlsSecretName: ""
+    annotations:
+      # Firmware uploads go up to 512 MB.
+      nginx.ingress.kubernetes.io/proxy-body-size: "520m"
+      nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+  nodeSelector: {}
+  tolerations: []
+
+# Bundled single-instance state services, for evaluation only. Production
+# points at highly available external services (valkey.external, minio.external,
+# and the dsn in the credentials Secret).
+postgresql:
+  enabled: false
+  image: postgres:18-alpine
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+
+valkey:
+  enabled: false
+  image: valkey/valkey:9-alpine
+  resources:
+    requests: { cpu: 50m, memory: 32Mi }
+    limits: { memory: 128Mi }
+  external:
+    # host:port of one Valkey ...
+    addr: ""
+    # ... or Sentinels (host:port each) and the master set name.
+    sentinels: []
+    master: ""
+
+minio:
+  enabled: false
+  # The upstream minio/minio image is no longer served from Docker Hub and is
+  # private on quay.io, so the evaluation default is the frozen Bitnami legacy
+  # image this project's CI also uses. It starts its server itself (no args),
+  # keeps data under /bitnami/minio/data and runs as uid 1001. Production
+  # points external.endpoint at a real S3 service instead. Pinned: this tag
+  # is the image "latest" pointed at when CI first ran the chart (Docker Hub
+  # digest sha256:451fe685...); "latest" itself could move under an install.
+  image: bitnamilegacy/minio:2025.5.24-debian-12-r5
+  args: []
+  dataPath: /bitnami/minio/data
+  fsGroup: 1001
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  external:
+    endpoint: ""
+    secure: true
+
+podDisruptionBudget:
+  enabled: true

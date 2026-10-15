@@ -1,0 +1,65 @@
+# A highly available production layout: pass with -f. Nothing is bundled;
+# PostgreSQL, Valkey (Sentinel) and MinIO are external and highly available
+# themselves (docs/kubernetes.md, "Highly available state"). Replace the
+# example names; every one of them is site-specific.
+global:
+  # An immutable tag: pin the commit you intend to run.
+  imageTag: sha-0000000000000000000000000000000000000000
+  sipDomain: hello.example.com
+  publicUrl: https://hello.example.com
+
+secrets:
+  # Holds dsn (postgres://...@hello-pg-rw.databases:5432/hello?sslmode=require
+  # for CloudNativePG), secretKey, nonceSecret, bootstrapPassword,
+  # minioAccessKey and minioSecretKey.
+  existingSecret: hello-credentials
+
+control:
+  replicas: 3
+  antiAffinity: required
+
+sip:
+  # Three nodes: one can be down for an upgrade or a failure while two still
+  # share the load and either can take the other's calls.
+  nodes: 3
+  hostNetwork: true
+  mediaAnchorHost: hostIP
+  # Your pod CIDR and the node CIDR (Kamailio is on the host network).
+  trustedProxies: "10.244.0.0/16,192.168.10.0/24"
+  antiAffinity: required
+
+kamailio:
+  hostNetwork: true
+  # The address of the node Kamailio is pinned to (or a VIP that moves with it).
+  publicHost: 192.168.10.101
+  publicPort: 5060
+  phonesPort: 5060
+  nodeSelector:
+    kubernetes.io/hostname: edge-1
+
+ui:
+  replicas: 2
+  dnsResolver: 10.96.0.10
+  ingress:
+    enabled: true
+    className: nginx
+    host: hello.example.com
+    tlsSecretName: hello-tls
+
+postgresql:
+  enabled: false
+
+valkey:
+  enabled: false
+  external:
+    sentinels:
+      - valkey-sentinel-0.valkey-sentinel.databases:26379
+      - valkey-sentinel-1.valkey-sentinel.databases:26379
+      - valkey-sentinel-2.valkey-sentinel.databases:26379
+    master: hello
+
+minio:
+  enabled: false
+  external:
+    endpoint: minio.databases:9000
+    secure: false
