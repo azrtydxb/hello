@@ -127,6 +127,14 @@ func TestInternalCallerIDLadder(t *testing.T) {
 			wantUser: "0501112222", wantName: "ExPeer",
 			trace: "Caller ID rewrite +971501112222 -> 0501112222",
 		},
+		{
+			name:      "the route transform applies to the trunk's default too",
+			defCID:    "+97140000001",
+			transform: &routing.Transform{Regex: `^\+971(.*)$`, Template: "0${1}"},
+			fromUser:  "", fromName: "ExPeer",
+			wantUser: "040000001", wantName: "ExPeer",
+			trace: "Caller ID rewrite +97140000001 -> 040000001",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"fmt"
 	"net/netip"
 	"slices"
 	"strings"
@@ -1158,6 +1159,20 @@ func TestInternalDestination(t *testing.T) {
 			},
 		},
 		{
+			name: "whitespace is stripped, as the DID match strips it",
+			call: trunk(2, "10 12", ""),
+			want: outcome{Kind: KindInbound, Extension: "1012", Number: "1012", CallerID: "<open>", Route: "Any extension"},
+			trace: []string{
+				"Source trunk open",
+				`Called DID "10 12" normalised to 1012`,
+				"Trunk open may dial 1012: all internal numbers",
+				`Route "Any extension" matched (any DID)`,
+				"Caller ID <open> (trunk name)",
+				"Destination: internal",
+				"Internal lookup 1012 -> extension 1012",
+			},
+		},
+		{
 			name: "not an internal number -> 404",
 			call: trunk(2, "9999", ""),
 			want: outcome{Kind: KindReject, Number: "9999", CallerID: "<open>", Route: "Any extension", Code: 404},
@@ -1285,6 +1300,79 @@ func TestTrunkInternalDialingPolicy(t *testing.T) {
 		`Route "Any extension" skipped: internal dialing to 1012 not allowed on trunk picky`,
 		`No inbound route matched DID 1012`,
 	})
+	// An allowed call's trace names the winning pattern.
+	checkDecision(t, decide(1, "1012"), outcome{Kind: KindInbound, Extension: "1012", Number: "1012",
+		CallerID: "+97140000001", Route: "Any extension"}, []string{
+		"Source trunk peer",
+		"Called DID 1012",
+		"Trunk peer may dial 1012: pattern 10XX",
+		`Route "Any extension" matched (any DID)`,
+		"Caller ID +97140000001 (default caller ID of trunk peer)",
+		"Destination: internal",
+		"Internal lookup 1012 -> extension 1012",
+	})
+
+	// The pattern classes beside X patterns and exact numbers: a Go regex as
+	// given, overlapping patterns where list order picks the winner (and the
+	// trace names it), and a pattern that names a feature code.
+	ipTrunk := func(id int64, name string, pats ...string) Trunk {
+		return Trunk{ID: id, Name: name, Mode: "ip", Enabled: true,
+			Destinations:    []Destination{{Host: fmt.Sprintf("10.4.0.%d", id), Port: 5060}},
+			InternalDialing: Dialing{Mode: "patterns", Patterns: pats}}
+	}
+	ov := mustCompile(t, Config{
+		Trunks: []Trunk{
+			ipTrunk(1, "x-first", "1XXX", "10[12]2"),
+			ipTrunk(2, "re-first", "10[12]2", "1XXX"),
+			ipTrunk(3, "regex", `^\+9714555[0-9]{3}$`),
+			ipTrunk(4, "codes", "*31#"),
+			{ID: 5, Name: "all", Mode: "ip", Enabled: true,
+				Destinations: []Destination{{Host: "10.4.0.5", Port: 5060}}, InternalDialing: Dialing{Mode: "all"}},
+			{ID: 6, Name: "off", Mode: "ip", Enabled: true,
+				Destinations: []Destination{{Host: "10.4.0.6", Port: 5060}}},
+		},
+		Extensions: map[string]string{"1012": ""},
+		Inbound: []InboundRoute{
+			{ID: 1, Position: 10, Name: "Any extension", DIDKind: "any", DestinationKind: "internal", Enabled: true},
+		},
+	})
+	for _, c := range []struct {
+		trunk int64
+		did   string
+		want  string // the winning pattern, "" for denied
+	}{
+		{1, "1012", "1XXX"},
+		{2, "1012", "10[12]2"},
+		{2, "1013", "1XXX"},
+		{3, "+9714555123", `^\+9714555[0-9]{3}$`},
+		{3, "9714555123", `^\+9714555[0-9]{3}$`}, // leading + toggled
+		{3, "+97145551234", ""},
+		{3, "+9714556123", ""},
+		{4, "*31#", "*31#"},
+	} {
+		tr, _ := ov.Trunk(c.trunk)
+		if ok, pat := ov.dialingAllows(tr, c.did); ok != (c.want != "") || pat != c.want {
+			t.Errorf("%s dialingAllows(%q) = %v, %q; want %v, %q", tr.Name, c.did, ok, pat, c.want != "", c.want)
+		}
+	}
+	for id, verdict := range map[int64]string{
+		1: "Trunk x-first may dial 1012: pattern 1XXX",
+		2: "Trunk re-first may dial 1012: pattern 10[12]2",
+	} {
+		d := ov.Decide(Call{FromTrunk: id, Number: "1012", At: mon}, nil)
+		if d.Kind != KindInbound || d.Extension != "1012" || len(d.Trace) < 3 || d.Trace[2].Text != verdict {
+			t.Errorf("trunk %d dialing 1012: kind %s ext %q trace %v; want inbound 1012 with verdict %q", id, d.Kind, d.Extension, d.Trace, verdict)
+		}
+	}
+	// A feature code stays unreachable from a trunk whatever the mode: even
+	// where the policy lets the DID through, it is not in the extension
+	// namespace, so the call is rejected 404 and never becomes a feature.
+	for _, id := range []int64{4, 5, 6} {
+		d := ov.Decide(Call{FromTrunk: id, Number: "*31#", At: mon}, nil)
+		if d.Kind != KindReject || d.RejectCode != 404 || d.Extension != "" {
+			t.Errorf("trunk %d dialing *31#: kind %s code %d ext %q, want a 404 reject\n%v", id, d.Kind, d.RejectCode, d.Extension, d.Trace)
+		}
+	}
 
 	// Compile validation of the policy.
 	fe := func(path, msg string) FieldError { return FieldError{Path: path, Message: msg} }
