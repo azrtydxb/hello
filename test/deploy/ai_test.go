@@ -216,8 +216,18 @@ func TestKwAIAgent(t *testing.T) {
 	}
 	data, _ := doc["data"].(map[string]any)
 	for _, k := range []string{"provider", "base-url", "model", "api-key"} {
-		if s, _ := data[k].(string); !strings.HasPrefix(s, "ENC[") {
-			t.Errorf("data.%s is not SOPS-encrypted", k)
+		if _, ok := data[k]; !ok {
+			t.Errorf("data.%s is missing", k)
+		}
+	}
+	// Every value, in data or stringData, is encrypted: no key is
+	// committed in the clear.
+	stringData, _ := doc["stringData"].(map[string]any)
+	for field, m := range map[string]map[string]any{"data": data, "stringData": stringData} {
+		for k, v := range m {
+			if s, _ := v.(string); !strings.HasPrefix(s, "ENC[") {
+				t.Errorf("%s.%s is not SOPS-encrypted", field, k)
+			}
 		}
 	}
 }

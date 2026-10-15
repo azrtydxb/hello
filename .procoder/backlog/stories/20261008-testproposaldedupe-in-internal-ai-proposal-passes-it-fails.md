@@ -19,3 +19,4 @@ An operator reviewing proposals needs no duplicates, newer proposals to replace 
 ## Evidence
 
 - `TestProposalDedupe` (internal/ai/proposal/dedupe_test.go:26, PostgreSQL): identical open proposal refreshed not duplicated, newer proposal on the same target supersedes the older, a dismissed fingerprint suppressed for 7 days and allowed after. `ok internal/ai/proposal` in main CI run 38615122909 (go + lab green, `gh run view 38615122909`) and PR #90 CI run 38635554426 (go + web + lab green, `gh run view 38635554426`).
+- Per-condition audit 2026-10-15: every condition asserted by TestProposalDedupe (internal/ai/proposal); suppression is now also checked one hour inside the 7-day edge, not only at day 0 and day 8.

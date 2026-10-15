@@ -19,3 +19,4 @@ A multi-replica cluster needs background agents to run on time, once, never conc
 ## Evidence
 
 - `TestScheduler` (internal/ai/scheduler_test.go:183) now runs the same story in memory and against PostgreSQL (subtest `postgres`, advisory locks on dedicated connections): two replicas never run one agent at once, a restart keeps the interval, run-now runs once, every run row has its outcome, a dead replica's run is closed instance_stopped. `ok internal/ai` in PR #90 CI run 38635554426 (go + web + lab green, `gh run view 38635554426`); the PostgreSQL case also ran in main CI run 38615122909 (go + lab green, `gh run view 38615122909`) as TestSchedulerPostgres.
+- Per-condition audit 2026-10-15: every condition asserted by TestScheduler (internal/ai, memory and PostgreSQL): no overlap across replicas, restart keeps the interval, run-now once, every run row has its outcome; no gap.

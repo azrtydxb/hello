@@ -19,3 +19,4 @@ Every AI feature depends on one structured model call that marks untrusted data,
 ## Evidence
 
 - `TestGenerate` (internal/ai/generate_test.go:50): feature line and untrusted-data notice in the system prompt, invalid answers retried with the error and no fourth attempt, a length finish retried once at double max_tokens, reasoning neither in the answer, the retry transcript nor anything the store holds (new check), `TestDataBlock` for DataBlock escaping. `ok internal/ai` in main CI run 38615122909 (go + lab green, `gh run view 38615122909`) and PR #90 CI run 38635554426 (go + web + lab green, `gh run view 38635554426`).
+- Per-condition audit 2026-10-15: every condition asserted by TestGenerate (internal/ai): feature line and notice, invalid answers retried with no fourth attempt, one length retry at double max_tokens, reasoning neither stored nor returned, a `</data>` in Data escaped in the user turn (TestDataBlock also covers keys and nesting); no gap.

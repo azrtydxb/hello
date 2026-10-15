@@ -19,3 +19,4 @@ An operator asking the assistant needs it to read only what they could read them
 ## Evidence
 
 - `TestAssistantTools` (internal/ai/assistant/tools_test.go:23): `ok internal/ai/assistant` in main CI run 38615122909 (go + lab green, `gh run view 38615122909`) and PR #90 CI run 38635554426 (go + web + lab green, `gh run view 38635554426`). Subtests check every listed tool is a GET, read-scoped, MCP-exposed operation of the document; the read-only filter refuses writes and exclusions; results withhold x-hello-secret values and are capped at 16 KiB; a message stops at 8 steps (DefaultMaxSteps) and 16 tool calls (MaxToolCalls).
+- Per-condition audit 2026-10-15: every condition asserted by TestAssistantTools (internal/ai/assistant): tools in the document as GET, read and MCP-exposed, x-hello-secret withheld, 16 KiB cap, 8 steps and 16 calls; no gap.

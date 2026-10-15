@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 
@@ -150,16 +151,23 @@ func TestProposalApply(t *testing.T) {
 		pid := e.propose("assistant", rename(ext1, "Race"))
 		var wg sync.WaitGroup
 		codes := make([]int, 2)
+		bodies := make([]string, 2)
 		for i := range codes {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				codes[i] = e.do("operator", "POST", "/api/v1/ai/proposals/"+pid+"/apply", nil).code
+				r := e.do("operator", "POST", "/api/v1/ai/proposals/"+pid+"/apply", nil)
+				codes[i], bodies[i] = r.code, string(r.body)
 			}()
 		}
 		wg.Wait()
 		if (codes[0] != 200 || codes[1] != 409) && (codes[0] != 409 || codes[1] != 200) {
 			t.Fatalf("codes = %v, want one 200 and one 409", codes)
+		}
+		for i, c := range codes {
+			if c == 409 && !strings.Contains(bodies[i], `"proposal_not_open"`) {
+				t.Errorf("the losing apply = %s, want proposal_not_open", bodies[i])
+			}
 		}
 		if e.status(pid) != "applied" {
 			t.Fatalf("status = %s", e.status(pid))

@@ -19,3 +19,4 @@ An operator of a long-running cluster needs the AI tables to stay bounded and pr
 ## Evidence
 
 - `TestPrune` (internal/ai/pg_test.go:150, PostgreSQL via the go job's HELLO_TEST_DATABASE_URL): each AI table gets one row just past and one just inside its retention; prune refuses while another replica holds the `hello:ai:prune` advisory lock, then leaves exactly the inside rows plus open findings/proposals. `ok internal/ai` in main CI run 38615122909 (go + lab green, `gh run view 38615122909`) and PR #90 CI run 38635554426 (go + web + lab green, `gh run view 38635554426`).
+- Per-condition audit 2026-10-15: gap fixed: TestPrune only counted rows per table, so pruning the inside row and keeping the expired one passed; it now checks that each past-retention row is gone and each inside row remains. The lock condition was already asserted.

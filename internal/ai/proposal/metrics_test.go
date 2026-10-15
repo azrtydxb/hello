@@ -12,11 +12,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// TestAIMetricsProposals (the proposal half of TestAIMetrics, spec S-25)
+// TestAIMetrics (proposal half, spec S-25)
 // wires the store's status hook to the service's metrics as hello-control
 // does. It fails if storing, applying or dismissing a proposal does not
 // move hello_ai_proposals_total for its source kind and new status.
-func TestAIMetricsProposals(t *testing.T) {
+func TestAIMetrics(t *testing.T) {
 	e := newEnv(t)
 	s := e.seed()
 	reg := prometheus.NewRegistry()

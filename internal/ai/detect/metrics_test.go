@@ -13,12 +13,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// TestAIMetricsFindings (the detector half of TestAIMetrics, spec S-25)
+// TestAIMetrics (detector half, spec S-25)
 // runs the aiops agent with the service's metrics against PostgreSQL. It
 // fails if a run does not observe hello_ai_detector_seconds for every
 // detector, or a finding appearing or resolving does not move
 // hello_ai_findings.
-func TestAIMetricsFindings(t *testing.T) {
+func TestAIMetrics(t *testing.T) {
 	env, live := testEnv(t)
 	reg := prometheus.NewRegistry()
 	svc, err := ai.New(config.AIAgent{}, aifake.NewStore(), nil, reg, nil)

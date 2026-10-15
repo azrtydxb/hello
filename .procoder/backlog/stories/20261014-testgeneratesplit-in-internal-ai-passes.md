@@ -19,3 +19,4 @@ An operator asking the assistant with model thinking off needs the model to actu
 ## Evidence
 
 - `TestGenerateSplit` (internal/ai/split_test.go:63, added by PR #85) covers both `json_schema` and `prompt` modes, the one-nudge rule, the step budget, citations by position and the streamed phases. `ok internal/ai` in PR #85 CI run 38630616864 (go + web + lab green, `gh run view 38630616864`) and in the rebased PR #90 CI; locally `go test -count=1 -run TestGenerateSplit ./internal/ai/` passes.
+- Per-condition audit 2026-10-15: every condition asserted by TestGenerateSplit (internal/ai): no JSON or response_format with tools, no tools in the answer phase, citations listed, one nudge, step budget, structured mode and retries in the answer phase, streamed answer-only deltas; no gap.

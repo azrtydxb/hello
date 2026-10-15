@@ -32,6 +32,16 @@ func TestProposalValidation(t *testing.T) {
 	if err := proposal.CheckDocument(loadSpec(t)); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("the document check refuses a read or a secret-returning operation", func(t *testing.T) {
+		saved := proposal.Allowlist
+		t.Cleanup(func() { proposal.Allowlist = saved })
+		for id, want := range map[string]string{"listExtensions": "not write", "createDevice": "returns a secret"} {
+			proposal.Allowlist = append(append([]string(nil), saved...), id)
+			if err := proposal.CheckDocument(loadSpec(t)); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("allowlisting %s: err = %v, want %q", id, err, want)
+			}
+		}
+	})
 	e := newEnv(t)
 	s := e.seed()
 	ext := map[string]string{"id": s.ext1}

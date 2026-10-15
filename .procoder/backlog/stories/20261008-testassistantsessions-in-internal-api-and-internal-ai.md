@@ -19,3 +19,4 @@ An operator chatting with the assistant needs private sessions, one answer at a 
 ## Evidence
 
 - `TestAssistantSessions` in internal/ai/assistant/session_test.go:20 (ownership, one task per session, 20-message window as data, uncited calls rejected, proposals validated before storing) and internal/api/ai_sessions_test.go:60 (PostgreSQL over HTTP: viewer 403, other operator 404, 409 task_running, 20 messages reach the model, answer stored with its task). `ok internal/ai/assistant`, `ok internal/api` in main CI run 38615122909 (go + lab green, `gh run view 38615122909`) and PR #90 CI run 38635554426 (go + web + lab green, `gh run view 38635554426`).
+- Per-condition audit 2026-10-15: every condition asserted by both halves of TestAssistantSessions (internal/ai/assistant, internal/api): viewer 403, other user 404, 409 task_running, 20-message window, uncited calls never stored, proposals validated before storing; no gap.

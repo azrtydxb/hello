@@ -158,6 +158,21 @@ func TestAIAgentEndToEnd(t *testing.T) {
 	if len(calls) != 1 || calls[0] != "listExtensions" || !strings.Contains(answer, d.Extension) {
 		t.Fatalf("answer %q with tool calls %v, want one listExtensions call and the extension in the answer", answer, calls)
 	}
+	// The read ran as the asking user: auth logs it with that actor and
+	// the assistant's via (spec ai-agent S-7).
+	eventually(t, 10*time.Second, "the agent read log line", func() error {
+		out, err := compose("logs", "--no-color", "hello-control-1", "hello-control-2").CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("compose logs: %w", err)
+		}
+		for l := range strings.SplitSeq(string(out), "\n") {
+			if strings.Contains(l, `"msg":"agent read"`) && strings.Contains(l, `"path":"/api/v1/extensions"`) &&
+				strings.Contains(l, `"actor":"user:`+labAdmin+`"`) && strings.Contains(l, `"via":"ai-assistant"`) {
+				return nil
+			}
+		}
+		return fmt.Errorf("no agent read of /api/v1/extensions as user:%s via ai-assistant in the control logs", labAdmin)
+	})
 
 	// A change: update one ring group and delete another in one proposal.
 	ext := lc.extensionID(d.Extension)

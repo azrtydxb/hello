@@ -19,3 +19,4 @@ The kw deployment needs the AI connection settings to come from an optional, SOP
 ## Evidence
 
 - `TestKwAIAgent` (test/deploy/ai_test.go:172): the kw hello-control reads provider, base URL, model and key from Secret hello-ai with optional: true and no literal value, and secret-hello-ai.sops.yaml is SOPS-encrypted (every data value ENC[...]). `ok test/deploy` in main CI run 38615122909 (go + lab green, `gh run view 38615122909`) and PR #90 CI run 38635554426 (go + web + lab green, `gh run view 38635554426`).
+- Per-condition audit 2026-10-15: gap fixed: TestKwAIAgent only checked the four data values, so a plaintext stringData or extra data key would pass; every data and stringData value must now be ENC[...]. The optional secretKeyRef on hello-control was already asserted.

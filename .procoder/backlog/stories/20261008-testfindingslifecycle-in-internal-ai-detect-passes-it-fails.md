@@ -19,3 +19,4 @@ An operator reading findings needs one finding per problem that resolves on its 
 ## Evidence
 
 - `TestFindingsLifecycle` (internal/ai/detect/findings_test.go:45) passes against PostgreSQL: one live finding per candidate, resolve after 30 min absent, 24 h dismissal unless the severity rises, model called only on change and at most once per interval, unexplained findings stored with explained false. `ok internal/ai/detect` in main CI run 38615122909 (go + lab green, `gh run view 38615122909`) and PR #90 CI run 38635554426 (go + web + lab green, `gh run view 38635554426`).
+- Per-condition audit 2026-10-15: every condition asserted by TestFindingsLifecycle (internal/ai/detect): unique live finding, resolve after 30 min not 29, 24 h dismissal and severity-rise reopen, model only on change and once per interval, unexplained stored explained=false; no gap.
