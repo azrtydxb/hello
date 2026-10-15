@@ -206,7 +206,7 @@ valkey:
 
 minio:
   enabled: false
-  image: minio/minio:latest
+  image: quay.io/minio/minio:latest
   persistence:
     enabled: true
     size: 5Gi
