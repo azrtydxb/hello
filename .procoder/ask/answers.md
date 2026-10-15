@@ -1,6 +1,6 @@
 # What a human decided
 
-Written 2026-10-09 07:45 UTC. procoder reads this
+Written 2026-10-15 06:23 UTC. procoder reads this
 file to avoid asking a question twice; edit an answer here to change what
 it believes. Reword the question and it will be asked again.
 
@@ -70,7 +70,7 @@ Question: 7. **Agents in ring groups.** The spec forbids an agent in `ring-all`/
 
 Answer: Sequential member and failure target both allowed (sequential and round-robin as in the spec).
 
-## [spec] trunk-internal-numbers
+## (no longer asked)
 
 Key: 102d6344a840
 Question: **Is a `486`/`404` distinction visible enough for the product?** An unallowed dial gets 404 like any unmatched DID; the product may prefer 403 to distinguish policy from numbering. Traces tell Hello's side; the wire code choice is open.
@@ -108,7 +108,7 @@ Question: Phone auto-provisioning: token hand-off for DHCP-discovered phones
 
 Answer: Trust on first use: the first fetch from a pre-registered MAC hands out its token once; an administrator can re-arm
 
-## [spec] trunk-internal-numbers
+## (no longer asked)
 
 Key: 1a00991f2313
 Question: **How does the consuming product signal?** The spec assumes IP-authenticated trunking with pinned source CIDRs (what exists; inbound digest for trunk peers stays out of scope). If the product cannot pin IPs — it runs in the same cluster but its egress addresses may not be static — Hello needs inbound digest registration for trunk peers, which is a phase-2 out-of-scope item and a materially larger change. Answer needed before the plan is tasked.
@@ -125,7 +125,7 @@ Question: hello-control readiness during a Valkey outage
 
 Answer: Ready stays green; live views return 503 and /readyz reports Valkey as degraded
 
-## [spec] trunk-internal-numbers
+## (no longer asked)
 
 Key: 1ab52c582e7f
 Question: **Should extensions be dialable from trunks under their external numbers too** (a DID map inside the `internal` lookup), or is the extension number itself the contract with the product? The spec takes the second: one route, extension numbers only.
@@ -196,7 +196,7 @@ Question: Phase 2 media to carriers
 
 Answer: Direct media (phone to carrier) as the roadmap says; anchoring waits for Phase 5
 
-## [spec] trunk-internal-numbers
+## (no longer asked)
 
 Key: 3312b6690483
 Question: **Do the product's own identifiers need to reach the phones?** A peer that calls with no caller ID is presented as `<trunk-name>` (S-4). If the phones should instead see the product's per-call agent identity, that is a header-passing feature this spec does not cover.
@@ -491,6 +491,22 @@ Answer: On-demand: DTMF (*1) and per-extension API toggle; recordings to MinIO
 
 ## [decision] decisions.md
 
+Key: a01db5934cd6
+Question: How to stop the assistant's reasoning overruns (2026-10-14)
+
+The go-ai-sdk v0.6.0 → v0.8.0 commits do not explain the slow answers. The cause is the reasoning model sometimes thinking past Hello's 8192 `max_tokens`: the call ends on length and Hello retries it at double the budget, so the user waits for both attempts (seen: 1m17s, 2m19s; normal 2–17s).
+
+- Limit the model's thinking for the assistant (reasoning effort / thinking budget sent per request), keeping 8192 max_tokens.
+- Raise the first-attempt budget to 16384 so an overrun rarely needs a retry (no change to thinking).
+- Both.
+- Leave as is.
+
+Decision: turn thinking off for Hello's model calls (2026-10-14).
+
+Answer: Turn thinking off for Hello's model calls (user, 2026-10-14).
+
+## [decision] decisions.md
+
 Key: a29492463871
 Question: Phase 3 production SIP load balancer
 
@@ -674,6 +690,20 @@ Answer: Use the kw Arc runners (the user directs CI there; labels self-hosted/li
 
 ## [decision] decisions.md
 
+Key: f50182032be6
+Question: Re-verify the fastllm-backed checks after the trunk rollout? (2026-10-14)
+
+The phase-2 built-in agent is live, but the assistant-reply and tool-calling checks never completed because fastllm (vLLM) was down when work paused; the check cron was cancelled.
+
+- Yes: re-run one assistant reply and one tool call through the deployed stack once the trunk rollout lands.
+- No: leave the checks unverified until the next fastllm change.
+
+  Decision: yes — verify right after the trunk rollout (2026-10-14).
+
+Answer: Yes, verify right after the trunk rollout (user, 2026-10-14).
+
+## [decision] decisions.md
+
 Key: f9afd6b87078
 Question: Phase 1 cross-node delivery to NAT'd phones
 
@@ -681,3 +711,18 @@ Question: Phase 1 cross-node delivery to NAT'd phones
 - Test only without NAT (test phones inside the compose network); defer to Phase 3
 
 Answer: Route via the registering node (Path + flow token, RFC 3327/5626 style)
+
+## [decision] decisions.md
+
+Key: feef6f80a909
+Question: Thinking off makes the assistant skip its tools (2026-10-14)
+
+Live on kw with thinking off: answers start in ~1s and finish in ~6s (0 reasoning tokens), but the model often says "I will check the registrations" and never calls the tool, so answers miss live data. Likely cause: in prompt structured-output mode the "answer as JSON" instruction is present on every step, and without thinking the model answers instead of calling tools.
+
+- Split the answer: let the model call tools with no JSON instruction, and ask for the structured answer only in a final step. Keeps thinking off.
+- Turn thinking back on: reliable tool use, occasional 1–2 min answers.
+- Turn thinking back on for the assistant only; keep it off for detector explanations (no tools there).
+
+Decision: split tool calling from the structured answer, thinking stays off (2026-10-14).
+
+Answer: Split tool calling from the structured answer; thinking stays off (user, 2026-10-14).
