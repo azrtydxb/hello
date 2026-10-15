@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
       -ldflags "-s -w -X github.com/azrtydxb/hello/internal/version.Version=${VERSION} -X github.com/azrtydxb/hello/internal/version.Commit=${COMMIT}" \
       -o /out/ ./cmd/... ./test/fakecarrier
 
-FROM alpine:3.22 AS runtime
+FROM alpine:3.24 AS runtime
 RUN apk add --no-cache ca-certificates && adduser -D -H -u 65532 hello
 USER 65532:65532
 

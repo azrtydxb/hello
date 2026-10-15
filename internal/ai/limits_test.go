@@ -200,6 +200,15 @@ func TestTasksAndLimits(t *testing.T) {
 		waitTask(t, st, panicked, ai.TaskFailed)
 	})
 
+	t.Run("production heartbeat and stale window", func(t *testing.T) {
+		// The Valkey case below runs on shortened timing; these are what a
+		// deployment uses: a beat every 5 s, a task failed instance_stopped
+		// once its replica's heartbeat is older than 15 s (spec S-15).
+		if ai.DefaultHeartbeat != 5*time.Second || ai.DefaultStale != 15*time.Second {
+			t.Errorf("heartbeat %v, stale window %v, want 5s and 15s", ai.DefaultHeartbeat, ai.DefaultStale)
+		}
+	})
+
 	t.Run("stopped replica's tasks fail (Valkey)", func(t *testing.T) {
 		addr := os.Getenv("HELLO_TEST_VALKEY_ADDR")
 		if addr == "" {
@@ -214,7 +223,9 @@ func TestTasksAndLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 		st := aifake.NewStore()
-		short := ai.WithTiming(ai.Options{}, 100*time.Millisecond, time.Second, time.Hour, time.Hour)
+		// A 3 s stale window: the heartbeat's TTL must outlast the gap between
+		// a.Beat and b.FailStale on a loaded CI runner (1 s did not).
+		short := ai.WithTiming(ai.Options{}, 100*time.Millisecond, 3*time.Second, time.Hour, time.Hour)
 		oa, ob := short, short
 		oa.Replica, ob.Replica = "a", "b"
 		a := service(t, aifake.Config(), newBlocking(), st, oa)
@@ -234,13 +245,13 @@ func TestTasksAndLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 		a.Beat(ctx)
-		time.Sleep(1100 * time.Millisecond) // older than the stale window
+		time.Sleep(3100 * time.Millisecond) // older than the stale window
 		a.Beat(ctx)
 		b.FailStale(ctx)
 		if got := st.Task(id).Status; got == ai.TaskFailed {
-			t.Fatal("a task of a live replica was failed")
+			t.Fatalf("a task of a live replica was failed: %+v", st.Task(id))
 		}
-		time.Sleep(1100 * time.Millisecond) // a's heartbeat expires
+		time.Sleep(3100 * time.Millisecond) // a's heartbeat expires
 		b.FailStale(ctx)
 		if tk := st.Task(id); tk.Status != ai.TaskFailed || tk.ErrorCode != ai.CodeInstanceStopped {
 			t.Fatalf("stopped replica's task = %+v", tk)

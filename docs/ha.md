@@ -396,8 +396,7 @@ the node dies is abandoned, as in the table.
     (a registration or call state written just before the primary died).
 - **PostgreSQL:** Hello tolerates PostgreSQL outages for telephony; for
   management availability run PostgreSQL with automatic failover (an operator
-  such as CloudNativePG, or Patroni). Phase 6 covers this in the Kubernetes
-  guidance.
+  such as CloudNativePG, or Patroni). [docs/kubernetes.md](kubernetes.md) covers this for Kubernetes.
 
 ## Kamailio loss
 

@@ -1,9 +1,9 @@
 # AI agent
 
-Status: open
+Status: done 2026-10-14
 Created: 2026-10-08
 Milestone: ai-agent
-Spec: ai-agent @ 5c12b32ed878
+Spec: ai-agent @ 22d32cdeedb7
 
 ## Description
 

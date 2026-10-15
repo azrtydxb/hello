@@ -32,6 +32,10 @@ func TestRoutingTestFromTrunk(t *testing.T) {
 	a := c.must(http.StatusCreated, "POST", "/api/v1/trunks", map[string]any{
 		"name": "a", "mode": "ip", "destinations": []map[string]any{{"host": "10.0.0.5"}},
 	}).json(t)["id"].(float64)
+	b := c.must(http.StatusCreated, "POST", "/api/v1/trunks", map[string]any{
+		"name": "b", "mode": "ip", "destinations": []map[string]any{{"host": "10.0.0.6"}},
+		"internalDialing": map[string]any{"mode": "patterns", "patterns": []string{"1XX"}},
+	}).json(t)["id"].(float64)
 	c.must(http.StatusCreated, "POST", "/api/v1/routes/inbound", map[string]any{
 		"name": "Main DID", "didKind": "exact", "did": "212345",
 		"destinationKind": "extension", "destination": "101",
@@ -72,11 +76,11 @@ func TestRoutingTestFromTrunk(t *testing.T) {
 
 	// The same decision, made directly on the saved configuration with the
 	// same usability, gives the same trace: the tester is the engine.
-	engineTrace(t, p, int64(a), r.Trace, at)
+	engineTrace(t, p, int64(a), "212345", "+971501112222", r.Trace, at)
 
-	// The policy verdict also gates: with internal dialing off (the only
-	// policy this branch's API can save), an internal route is skipped with
-	// its traced reason, and the DID falls through to 404.
+	// The policy verdict also gates: with internal dialing off, an internal
+	// route is skipped with its traced reason, and the DID falls through to
+	// 404 — again exactly the engine's trace.
 	r = run(map[string]any{"from": fmt.Sprint("trunk:", a), "number": "1012", "at": at})
 	if r.Decision.Kind != routing.KindReject || r.Decision.RejectCode != 404 {
 		t.Fatalf("out-of-policy DID = %+v", r.Decision)
@@ -84,17 +88,24 @@ func TestRoutingTestFromTrunk(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(r.Trace), `Route "Any internal" skipped: internal dialing off on trunk a`) {
 		t.Fatalf("trace %v lacks the internal skip", r.Trace)
 	}
+	engineTrace(t, p, int64(a), "1012", "", r.Trace, at)
 
-	// The policy verdict also gates: with internal dialing off (the only
-	// policy this branch's API can save), an internal route is skipped with
-	// its traced reason, and the DID falls through to 404.
-	r = run(map[string]any{"from": fmt.Sprint("trunk:", a), "number": "1012", "at": at})
+	// A patterns policy: the verdict names the pattern, the internal route
+	// rings the extension the DID names, and the trace is the engine's for
+	// the same call; a DID outside the pattern is 404, also the engine's.
+	r = run(map[string]any{"from": fmt.Sprint("trunk:", b), "number": "101", "at": at})
+	if r.Decision.Kind != routing.KindInbound || r.Decision.Extension != "101" || r.Decision.Route != "Any internal" {
+		t.Fatalf("in-policy internal DID = %+v", r.Decision)
+	}
+	if !strings.Contains(fmt.Sprint(r.Trace), "Trunk b may dial 101: pattern 1XX") {
+		t.Fatalf("trace %v lacks the pattern verdict", r.Trace)
+	}
+	engineTrace(t, p, int64(b), "101", "", r.Trace, at)
+	r = run(map[string]any{"from": fmt.Sprint("trunk:", b), "number": "1012", "at": at})
 	if r.Decision.Kind != routing.KindReject || r.Decision.RejectCode != 404 {
-		t.Fatalf("out-of-policy DID = %+v", r.Decision)
+		t.Fatalf("out-of-pattern DID = %+v", r.Decision)
 	}
-	if !strings.Contains(fmt.Sprint(r.Trace), `Route "Any internal" skipped: internal dialing off on trunk a`) {
-		t.Fatalf("trace %v lacks the internal skip", r.Trace)
-	}
+	engineTrace(t, p, int64(b), "1012", "", r.Trace, at)
 
 	// A malformed from is a 400 naming the field.
 	for _, bad := range []string{"trunk:0", "trunk:x", "trunk:", "nobody", ""} {
@@ -113,7 +124,7 @@ func TestRoutingTestFromTrunk(t *testing.T) {
 // the engine's on the saved configuration: a direct Decide with the same
 // call and usability (the state-unavailable note prepended, as the tester
 // prints it) must read the same.
-func engineTrace(t *testing.T, p *p2Env, trunkID int64, got []routing.Step, at string) {
+func engineTrace(t *testing.T, p *p2Env, trunkID int64, number, callerID string, got []routing.Step, at string) {
 	t.Helper()
 	ctx := context.Background()
 	snap, err := p.st.RoutingConfig(ctx)
@@ -130,7 +141,7 @@ func engineTrace(t *testing.T, p *p2Env, trunkID int64, got []routing.Step, at s
 	}
 	s := &server{Config: Config{Trunks: p.live, Log: slog.New(slog.DiscardHandler)}}
 	usable, note := s.usability(ctx, snap)
-	d := tbl.Decide(routing.Call{FromTrunk: trunkID, Number: "212345", CallerID: "+971501112222",
+	d := tbl.Decide(routing.Call{FromTrunk: trunkID, Number: number, CallerID: callerID,
 		SIPDomain: testDomain, Header: func(string) string { return "" }, At: atAt}, usable)
 	want := routing.Trace{}
 	if note != "" {

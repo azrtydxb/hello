@@ -18,7 +18,9 @@ import (
 
 // TestAIMetrics (core half of spec S-25) fails if a call, a refused call,
 // tokens or an agent run do not move their metric, or if the API key, a
-// prompt, data or a response appears in a log line or a metric.
+// prompt, data or a response appears in a log line or a metric. The finding
+// and proposal halves are TestAIMetrics in internal/ai/detect and
+// internal/ai/proposal; real tool calls are counted in TestAssistantTools.
 func TestAIMetrics(t *testing.T) {
 	ctx := context.Background()
 	reg := prometheus.NewRegistry()

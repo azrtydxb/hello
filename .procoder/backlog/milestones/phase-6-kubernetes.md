@@ -1,6 +1,6 @@
 # Phase 6 — Kubernetes
 
-Status: open
+Status: done 2026-10-15
 Created: 2026-10-02
 
 ## Goal

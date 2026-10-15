@@ -127,6 +127,9 @@ func New(cfg Config) (*Assistant, error) {
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
+	if err := ai.CheckSchema[Answer](); err != nil {
+		return nil, err
+	}
 	defs, err := toolDefs(cfg.Spec)
 	if err != nil {
 		return nil, err

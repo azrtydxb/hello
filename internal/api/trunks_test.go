@@ -109,6 +109,14 @@ func TestTrunkDialingValidation(t *testing.T) {
 	if got := patched["internalDialing"].(map[string]any)["mode"]; got != "off" {
 		t.Fatalf("PATCHed mode = %v, want off", got)
 	}
+	// A PATCH to mode all without confirm is refused and saves nothing.
+	if got := fieldPaths(t, c.do("PATCH", "/api/v1/trunks/"+id,
+		map[string]any{"internalDialing": map[string]any{"mode": "all"}})); !slices.Contains(got, "internalDialing.confirm") {
+		t.Fatalf("PATCH to mode all without confirm: fields %v lack internalDialing.confirm", got)
+	}
+	if got := c.must(http.StatusOK, "GET", "/api/v1/trunks/"+id, nil).json(t)["internalDialing"].(map[string]any)["mode"]; got != "off" {
+		t.Fatalf("refused PATCH to mode all left mode %v, want off", got)
+	}
 	kept := c.must(http.StatusOK, "PATCH", "/api/v1/trunks/"+allID, map[string]any{"maxCalls": 7}).json(t)
 	if got := kept["internalDialing"].(map[string]any)["mode"]; got != "all" {
 		t.Fatalf("PATCH of another field changed the policy: %v", got)
