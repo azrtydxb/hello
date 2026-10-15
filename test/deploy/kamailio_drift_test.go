@@ -170,12 +170,14 @@ func TestKamailioTrunkURI(t *testing.T) {
 	// Nothing on this edge ever rewrites a URI: no assignment to the
 	// Request-URI pseudo-variable and no rewriting function anywhere in the
 	// cfg the trunk INVITE travels through.
-	for _, forbidden := range []string{"uac_replace", "rewriteuri", "subst_uri", "subst_user"} {
+	for _, forbidden := range []string{"uac_replace", "rewriteuri", "subst_uri", "subst_user",
+		"seturi(", "setuser(", "rewriteuser(", "rewriteuserpass(", "prefix(", "strip(", "strip_tail("} {
 		if strings.Contains(cfg, forbidden) {
 			t.Errorf("kamailio.cfg uses %s: the trunk path must forward the Request-URI unchanged", forbidden)
 		}
 	}
-	ruriAssign := regexp.MustCompile(`(?m)^\s*\$(ru|rU)\s*=`)
+	// An assignment to $ru or $rU anywhere on a line (a comparison is ==).
+	ruriAssign := regexp.MustCompile(`\$(ru|rU)\s*=($|[^=])`)
 	if loc := ruriAssign.FindStringIndex(cfg); loc != nil {
 		line := strings.Count(cfg[:loc[0]], "\n") + 1
 		t.Errorf("kamailio.cfg line %d assigns the Request-URI (%s): the trunk path must forward it unchanged", line, strings.TrimSpace(ruriAssign.FindString(cfg)))
