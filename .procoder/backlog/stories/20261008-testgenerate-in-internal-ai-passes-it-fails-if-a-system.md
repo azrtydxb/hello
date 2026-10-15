@@ -1,23 +1,22 @@
 # `TestGenerate` in `internal/ai` passes. It fails if a system prompt lacks the feature line or the untrusted-data notice, an invalid answer is stored instead of retried, a fourth attempt is made, a `length` finish is not retried once with double tokens, reasoning text is stored, or `DataBlock` lets a string close the block.
 
-Status: open
+Status: done 2026-10-14
 Created: 2026-10-08
 Epic: ai-agent
 Sprint: -
 
 ## Description
 
-<!-- The user story: who needs what, and why. What "done" looks like in
-     the reader's terms — a title is not a description. -->
+Every AI feature depends on one structured model call that marks untrusted data, validates and retries answers within bounds, and never keeps model reasoning (spec S-4, S-5). Done when the shared Generate path is tested for prompts, retries, length handling, reasoning and data-block escaping.
 
 ## Acceptance criteria
 
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
      true — the closer will ask for the evidence. -->
 
-- [ ] `TestGenerate` in `internal/ai` passes. It fails if a system prompt lacks the feature line or the untrusted-data notice, an invalid answer is stored instead of retried, a fourth attempt is made, a `length` finish is not retried once with double tokens, reasoning text is stored, or `DataBlock` lets a string close the block.
+- [x] `TestGenerate` in `internal/ai` passes. It fails if a system prompt lacks the feature line or the untrusted-data notice, an invalid answer is stored instead of retried, a fourth attempt is made, a `length` finish is not retried once with double tokens, reasoning text is stored, or `DataBlock` lets a string close the block.
 
 ## Evidence
 
-<!-- Filled at close time: the commands run and what their output proved,
-     one line per criterion. Empty evidence keeps the story open. -->
+- `TestGenerate` (internal/ai/generate_test.go:50): feature line and untrusted-data notice in the system prompt, invalid answers retried with the error and no fourth attempt, a length finish retried once at double max_tokens, reasoning neither in the answer, the retry transcript nor anything the store holds (new check), `TestDataBlock` for DataBlock escaping. `ok internal/ai` in main CI run 38615122909 (go + lab green, `gh run view 38615122909`) and PR #90 CI run 38635554426 (go + web + lab green, `gh run view 38635554426`).
+- Per-condition audit 2026-10-15: every condition asserted by TestGenerate (internal/ai): feature line and notice, invalid answers retried with no fourth attempt, one length retry at double max_tokens, reasoning neither stored nor returned, a `</data>` in Data escaped in the user turn (TestDataBlock also covers keys and nesting); no gap.

@@ -1,29 +1,22 @@
 # `TestInjection` in `internal/ai/assistant` and `internal/ai/proposal` passes. Fixtures put instructions in User-Agents, caller names, dialled numbers and tool results; it fails if any fixture yields a stored proposal outside the allowlist, a body with a credential property, a tool call outside `assistantTools`, or an assistant message containing HTML or a Markdown link the console would render.
 
-Status: open
+Status: done 2026-10-14
 Created: 2026-10-08
 Epic: ai-agent
 Sprint: -
 
 ## Description
 
-<!-- The user story: who needs what, and why. What "done" looks like in
-     the reader's terms — a title is not a description. -->
+An admin running Hello on untrusted SIP traffic needs text from callers and phones (User-Agents, caller names, dialled numbers) to stay data: it must never make the assistant change configuration, call a forbidden tool or render links in the console (spec S-5, S-6, S-12). Done when injection fixtures cannot produce any of those effects.
 
 ## Acceptance criteria
 
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
      true — the closer will ask for the evidence. -->
 
-- [ ] `TestInjection` in `internal/ai/assistant` and `internal/ai/proposal` passes. Fixtures put instructions in User-Agents, caller names, dialled numbers and tool results; it fails if any fixture yields a stored proposal outside the allowlist, a body with a credential property, a tool call outside `assistantTools`, or an assistant message containing HTML or a Markdown link the console would render.
+- [x] `TestInjection` in `internal/ai/assistant` and `internal/ai/proposal` passes. Fixtures put instructions in User-Agents, caller names, dialled numbers and tool results; it fails if any fixture yields a stored proposal outside the allowlist, a body with a credential property, a tool call outside `assistantTools`, or an assistant message containing HTML or a Markdown link the console would render.
 
 ## Evidence
 
-<!-- Filled at close time: the commands run and what their output proved,
-     one line per criterion. Empty evidence keeps the story open. -->
-
-Fingerprint: sha256:b711f42043bc1b7eb73ffba5a85ceee604fe5137d067e24b9d3e2026dc203099
-Produced: 1131 bytes, exit 0
-Command: go test -race -count=1 -run ^TestInjection$ -v ./internal/ai/assistant/
-
-Assistant half (Task 4): injections in User-Agents, caller names, dialled numbers, tool results and history never yield a non-GET replay, a stored proposal outside the allowlist or with a credential, a call outside assistantTools, or a stored HTML/Markdown-link answer; tool results reach the model as one closed data block. The proposal half is Task 3; open until it lands.
+- `TestInjection` in internal/ai/assistant/injection_test.go:34 (User-Agent, caller name, dialled number, history and tool-result fixtures; checks no non-GET replay, no tool outside assistantTools, no stored HTML/Markdown link or image, untrusted text only inside one closed data block) and internal/ai/proposal/injection_test.go:17 (against PostgreSQL: only the allowlisted route to +900 is stored, no credential property, injected text stays data). Both packages `ok` in main CI run 38615122909 (go + lab green, `gh run view 38615122909`) and PR #90 CI run 38635554426 (go + web + lab green, `gh run view 38635554426`); the proposal half needs HELLO_TEST_DATABASE_URL, which the go job sets.
+- Per-condition audit 2026-10-15: gap fixed: the assistant half only checked that replays were GETs, so a read outside assistantTools (listUsers, listTokens) would pass; a fixture now calls them and every replayed path must belong to an assistantTools operation. Allowlist, credential and markup checks were already asserted in both packages.

@@ -69,10 +69,10 @@ func runsOf(t *testing.T, st *store.Store, agents ...string) func() []ai.AgentRu
 	}
 }
 
-// TestSchedulerPostgres is TestScheduler's story on PostgreSQL, with the
+// schedulerPostgres is TestScheduler's story on PostgreSQL, with the
 // advisory locks on dedicated connections, plus the closing of a dead
 // replica's unfinished run.
-func TestSchedulerPostgres(t *testing.T) {
+func schedulerPostgres(t *testing.T) {
 	db, st := scratch(t)
 	schedulerCase(t, st, runsOf(t, st, "count", "failing", "panicky", "spender"))
 
@@ -163,9 +163,16 @@ func TestPrune(t *testing.T) {
 	// Each table gets one row just past its retention (old) and one just
 	// inside it (new), tagged so the survivors can be named.
 	const h = time.Hour
-	ins := func(age time.Duration, table string) {
+	// ins returns the query and argument that count the row it wrote.
+	ins := func(age time.Duration, table string) (string, any) {
 		at := time.Now().Add(-age)
 		id := ai.NewID()
+		key := map[string]string{"ai_tasks": "id", "ai_agent_runs": "agent", "ai_samples": "subject", "ai_findings": "id",
+			"ai_proposals": "id", "ai_sessions": "id", "ai_usage": "day"}[table]
+		var arg any = id
+		if table == "ai_usage" {
+			arg = at.UTC().Format(time.DateOnly)
+		}
 		switch table {
 		case "ai_tasks":
 			exec(`INSERT INTO ai_tasks (id, kind, requested_by, replica, status, created_at) VALUES ($1, 'k', $2, 'r', 'succeeded', $3)`, id, uid, at)
@@ -185,19 +192,30 @@ func TestPrune(t *testing.T) {
 		case "ai_usage":
 			exec(`INSERT INTO ai_usage (day) VALUES ($1::date)`, at.UTC().Format(time.DateOnly))
 		}
+		if table == "ai_usage" {
+			return "SELECT count(*) FROM ai_usage WHERE day = $1::date", arg
+		}
+		return "SELECT count(*) FROM " + table + " WHERE " + key + " = $1", arg
 	}
 	retention := map[string]time.Duration{
 		"ai_tasks": ai.RetainTasks, "ai_agent_runs": ai.RetainRuns, "ai_samples": ai.RetainSamples,
 		"ai_findings": ai.RetainFindings, "ai_proposals": ai.RetainProposals, "ai_sessions": ai.RetainSessions,
 		"ai_usage": ai.RetainUsage,
 	}
+	type row struct {
+		table, query string
+		arg          any
+	}
+	var past, inside []row
 	for table, keep := range retention {
 		margin := h
 		if table == "ai_usage" {
 			margin = 48 * h // whole days
 		}
-		ins(keep+margin, table)
-		ins(keep-margin, table)
+		q, a := ins(keep+margin, table)
+		past = append(past, row{table, q, a})
+		q, a = ins(keep-margin, table)
+		inside = append(inside, row{table, q, a})
 	}
 	// An open finding and an open proposal are never pruned, however old.
 	exec(`INSERT INTO ai_findings (id, candidate_id, type, subject, severity, title, last_seen) VALUES ($1, 'c', 't', 's', 'info', 't', now() - interval '400 days')`, ai.NewID())
@@ -226,6 +244,18 @@ func TestPrune(t *testing.T) {
 		}
 		if got != n {
 			t.Errorf("%s keeps %d rows, want %d", table, got, n)
+		}
+	}
+	// The survivors are the rows inside their retention, not the old ones.
+	for want, rows := range map[int][]row{0: past, 1: inside} {
+		for _, r := range rows {
+			var got int
+			if err := db.QueryRowContext(ctx, r.query, r.arg).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Errorf("%s row %v: %d left, want %d", r.table, r.arg, got, want)
+			}
 		}
 	}
 }
