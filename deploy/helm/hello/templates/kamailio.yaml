@@ -1,0 +1,240 @@
+{{- $full := include "hello.fullname" . -}}
+{{- $ctx := dict "root" . "component" "edge" -}}
+{{- $k := .Values.kamailio -}}
+{{- $publicHost := required "kamailio.publicHost is required: the address phones reach Kamailio at" $k.publicHost -}}
+{{- $list := include "hello.dispatcherList" . -}}
+{{- if le (int .Values.sip.nodes) 0 }}{{ fail "sip.nodes must be at least 1" }}{{ end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $full }}-kamailio
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+data:
+  # A copy of deploy/kamailio/kamailio.cfg; a test keeps them equal.
+  kamailio.cfg: |
+    {{- .Files.Get "files/kamailio.cfg" | nindent 4 }}
+  dispatcher.list: |
+    {{- $list | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-kamailio
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  # The new pod binds the same ports as the old one under hostNetwork, and
+  # two Kamailios must not answer one phone population at once: the old one
+  # goes first.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hello.selectorLabels" $ctx | nindent 8 }}
+      annotations:
+        # sha256 of kamailio.cfg followed by dispatcher.list. Kamailio reads
+        # its configuration only at startup, so a change rolls the pod.
+        hello.watteel.com/kamailio-config-sha256: {{ print (.Files.Get "files/kamailio.cfg") $list | sha256sum }}
+        {{- with $k.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ $full }}
+      automountServiceAccountToken: false
+      {{- include "hello.pullSecrets" . | nindent 6 }}
+      {{- if $k.hostNetwork }}
+      # Phones must reach Kamailio with no NAT in between: through a NodePort
+      # the CNI may SNAT them, Kamailio records the translated address as the
+      # phone's, and later INVITEs to it are lost.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      {{- with $k.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $k.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $k.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        # /run/kamailio is an emptyDir the kamailio user (102) must write its
+        # ctl socket and RPC FIFO into.
+        fsGroup: 102
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Kamailio's dispatcher (ds_load_mode 1) resolves every destination
+        # name at startup and exits if one does not resolve. During a rollout
+        # a hello-sip pod name has no DNS record until the pod is ready;
+        # without this wait Kamailio crash-loops until every node exists.
+        # Bounded, logged, and then Kamailio starts regardless: a node that
+        # stays gone still fails loudly there rather than silently running
+        # without it.
+        - name: wait-dispatcher
+          image: {{ include "hello.image" (dict "root" . "name" $k.image.name "tag" $k.image.tag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            runAsUser: 102
+            runAsGroup: 102
+            runAsNonRoot: true
+            {{- include "hello.containerSecurity" . | nindent 12 }}
+          command:
+            - sh
+            - -c
+            - |
+              limit=300
+              start=$(date +%s)
+              for h in $(sed -n 's/^[0-9][0-9]*[[:space:]][[:space:]]*sip:\([^:;>[:space:]]*\).*/\1/p' /etc/kamailio/dispatcher.list); do
+                until getent hosts "$h" >/dev/null; do
+                  if [ $(( $(date +%s) - start )) -ge "$limit" ]; then
+                    echo "wait-dispatcher: $h still unresolved after ${limit}s, starting kamailio anyway"
+                    exit 0
+                  fi
+                  echo "wait-dispatcher: waiting for $h"
+                  sleep 2
+                done
+                echo "wait-dispatcher: $h resolves"
+              done
+          volumeMounts:
+            - name: config
+              mountPath: /etc/kamailio
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 8Mi
+            limits:
+              memory: 32Mi
+      containers:
+        - name: kamailio
+          image: {{ include "hello.image" (dict "root" . "name" $k.image.name "tag" $k.image.tag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          securityContext:
+            runAsUser: 102
+            runAsGroup: 102
+            runAsNonRoot: true
+            {{- include "hello.containerSecurity" . | nindent 12 }}
+          env:
+            - name: KAMAILIO_LISTEN_IP
+              # The pod address: the "hello" socket (5070) carries it to the
+              # hello-sip nodes, and the phones sockets bind it.
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: KAMAILIO_PUBLIC_HOST
+              value: {{ $publicHost | quote }}
+            - name: KAMAILIO_PUBLIC_PORT
+              value: {{ $k.publicPort | quote }}
+            - name: KAMAILIO_PHONES_PORT
+              value: {{ $k.phonesPort | quote }}
+            - name: KAMAILIO_METRICS_PORT
+              value: {{ $k.metricsPort | quote }}
+            - name: KAMAILIO_INVITE_TIMEOUT
+              value: {{ $k.inviteTimeout | quote }}
+          ports:
+            - name: phones
+              containerPort: {{ $k.phonesPort }}
+              protocol: UDP
+            - name: phones-tcp
+              containerPort: {{ $k.phonesPort }}
+              protocol: TCP
+            - name: hello
+              containerPort: 5070
+              protocol: UDP
+            - name: metrics
+              containerPort: {{ $k.metricsPort }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            periodSeconds: 20
+            failureThreshold: 3
+          volumeMounts:
+            - name: config
+              mountPath: /etc/kamailio
+              readOnly: true
+            - name: run
+              mountPath: /run/kamailio
+          resources:
+            {{- toYaml $k.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $full }}-kamailio
+            defaultMode: 420
+        - name: run
+          emptyDir: {}
+---
+# In-cluster only: metrics.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-kamailio
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ $k.metricsPort }}
+      protocol: TCP
+      targetPort: metrics
+{{- if not $k.hostNetwork }}
+---
+# The phones' entry point when Kamailio is not on the host network.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-kamailio-phones
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+  {{- with $k.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $k.service.type }}
+  {{- if ne $k.service.type "ClusterIP" }}
+  externalTrafficPolicy: {{ $k.service.externalTrafficPolicy }}
+  {{- end }}
+  {{- if and (eq $k.service.type "LoadBalancer") $k.service.loadBalancerIP }}
+  loadBalancerIP: {{ $k.service.loadBalancerIP }}
+  {{- end }}
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: phones
+      port: {{ $k.publicPort }}
+      protocol: UDP
+      targetPort: phones
+      {{- if and $k.service.nodePort (ne $k.service.type "ClusterIP") }}
+      nodePort: {{ $k.service.nodePort }}
+      {{- end }}
+    - name: phones-tcp
+      port: {{ $k.publicPort }}
+      protocol: TCP
+      targetPort: phones-tcp
+      {{- if and $k.service.nodePort (ne $k.service.type "ClusterIP") }}
+      nodePort: {{ $k.service.nodePort }}
+      {{- end }}
+{{- end }}

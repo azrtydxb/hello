@@ -88,7 +88,8 @@ func TestAssistantMessageStream(t *testing.T) {
 		aifake.StreamText("TOOL-PHASE-PROSE: no trunks are configured."),
 		// The answer phase.
 		aifake.StreamReasoning("Answer.", aifake.StreamJSON(answer, 6)),
-		// The second message: no tool, plain text, then its answer.
+		// The second message: no data needed, plain text, then its answer.
+		aifake.StreamToolCall("n1", ai.NoDataTool, struct{}{}),
 		aifake.StreamText("Still none."),
 		aifake.StreamJSON(assistant.Answer{Answer: "Still none.", Citations: []int{}}, 6),
 	}

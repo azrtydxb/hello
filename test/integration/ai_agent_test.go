@@ -181,11 +181,14 @@ func TestAIAgentEndToEnd(t *testing.T) {
 	lc.must("POST", "/api/v1/ring-groups", map[string]any{"name": "ai-keep-" + randDigits(6), "strategy": "ring-all", "members": member}, &keep, 201)
 	lc.must("POST", "/api/v1/ring-groups", map[string]any{"name": "ai-drop-" + randDigits(6), "strategy": "ring-all", "members": member}, &drop, 201)
 	propose := func(actions []map[string]any) aiProposal {
-		// The tool phase ends in prose; the answer phase drafts the proposal.
-		llm.Queue("assistant", fakellm.Reply{Content: "The ring groups can be tidied."}, fakellm.JSON(map[string]any{
-			"answer": "Here is the change.", "citations": []int{},
-			"proposal": map[string]any{"title": "Tidy ring groups", "rationale": "One group is unused.", "actions": actions},
-		}))
+		// The tool phase's required first call reads nothing (the ids are
+		// known) and it ends in prose; the answer phase drafts the proposal.
+		llm.Queue("assistant",
+			fakellm.Reply{ToolCalls: []fakellm.ToolCall{{ID: "call_n", Name: "no_data_needed", Args: map[string]any{}}}},
+			fakellm.Reply{Content: "The ring groups can be tidied."}, fakellm.JSON(map[string]any{
+				"answer": "Here is the change.", "citations": []int{},
+				"proposal": map[string]any{"title": "Tidy ring groups", "rationale": "One group is unused.", "actions": actions},
+			}))
 		_, _, pid := lc.lastAssistantMessage(lc.askAssistant("Please tidy the ring groups"))
 		if pid == "" {
 			t.Fatal("the answer made no proposal")

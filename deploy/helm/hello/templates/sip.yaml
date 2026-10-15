@@ -1,0 +1,166 @@
+{{- $full := include "hello.fullname" . -}}
+{{- $ctx := dict "root" . "component" "sip" -}}
+{{- $sip := .Values.sip -}}
+{{- if lt (int $sip.nodes) 1 }}{{ fail "sip.nodes must be at least 1" }}{{ end }}
+{{- if ge (int $sip.drainTimeoutSeconds) (int $sip.terminationGracePeriodSeconds) }}
+{{- fail "sip.drainTimeoutSeconds must be below sip.terminationGracePeriodSeconds, or Kubernetes kills a node mid-drain" }}
+{{- end }}
+# hello-sip nodes. A StatefulSet gives each node a stable identity (pod name
+# = HELLO_NODE_ID = the dispatcher's duid and DNS name) and updates them one
+# at a time, highest ordinal first, waiting for each to be ready: with the
+# drain on SIGTERM a node's calls move to a ready survivor, and there is
+# always one, because the next node is not touched until this one is back.
+# Under hostNetwork the replacement needs the old pod's ports, which a
+# StatefulSet satisfies by deleting before creating.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-sip
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  # Headless: the pod names resolve straight to the pod (host network: the
+  # node) address. Through a ClusterIP, socket-LB based CNIs terminate
+  # Kamailio's listening UDP socket when the backend pod goes (kw, Cilium).
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: sip
+      port: 5060
+      protocol: UDP
+      targetPort: sip
+    - name: http
+      port: 8082
+      protocol: TCP
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $full }}-sip
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  serviceName: {{ $full }}-sip
+  replicas: {{ $sip.nodes }}
+  # OrderedReady: pods are replaced one at a time, never in parallel.
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  minReadySeconds: {{ $sip.minReadySeconds }}
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hello.selectorLabels" $ctx | nindent 8 }}
+      {{- with $sip.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $full }}
+      automountServiceAccountToken: false
+      {{- include "hello.pullSecrets" . | nindent 6 }}
+      {{- if $sip.hostNetwork }}
+      # Anchored media needs a LAN-reachable RTP address: with the host
+      # network the SIP listener and the relay's RTP range bind the node
+      # address directly (see mediaAnchorHost).
+      hostNetwork: true
+      # Keep cluster DNS on a host-networked pod.
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $sip.terminationGracePeriodSeconds }}
+      {{- if ne $sip.antiAffinity "none" }}
+      affinity:
+        {{- if eq $sip.antiAffinity "required" }}
+        {{- include "hello.requireSpread" $ctx | nindent 8 }}
+        {{- else }}
+        {{- include "hello.preferSpread" $ctx | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      {{- with $sip.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $sip.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $sip.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: hello-sip
+          image: {{ include "hello.image" (dict "root" . "name" $sip.image.name "tag" $sip.image.tag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: HELLO_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- include "hello.commonEnv" . | nindent 12 }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_SIP_NONCE_SECRET" "key" "nonceSecret") | nindent 12 }}
+            - name: HELLO_SIP_RING_TIMEOUT
+              value: {{ $sip.ringTimeout | quote }}
+            - name: HELLO_SIP_TRUSTED_PROXIES
+              value: {{ $sip.trustedProxies | quote }}
+            - name: HELLO_SIP_ADVERTISED_ADDR
+              # What the node tells Kamailio and phones it is: its stable
+              # pod DNS name, as the dispatcher list names it.
+              value: "$(HELLO_NODE_ID).{{ $full }}-sip.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}:5060"
+            - name: HELLO_DRAIN_TIMEOUT
+              value: {{ printf "%ds" (int $sip.drainTimeoutSeconds) | quote }}
+            - name: HELLO_RTP_PORT_MIN
+              value: {{ $sip.rtpPortMin | quote }}
+            - name: HELLO_RTP_PORT_MAX
+              value: {{ $sip.rtpPortMax | quote }}
+            {{- if eq $sip.mediaAnchorHost "hostIP" }}
+            - name: HELLO_MEDIA_ANCHOR_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            {{- else if eq $sip.mediaAnchorHost "podIP" }}
+            - name: HELLO_MEDIA_ANCHOR_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            {{- else if $sip.mediaAnchorHost }}
+            - name: HELLO_MEDIA_ANCHOR_HOST
+              value: {{ $sip.mediaAnchorHost | quote }}
+            {{- end }}
+            - name: HELLO_MEDIA_FORCE_ANCHOR
+              value: "false"
+            - name: HELLO_MEDIA_RECORDING_NOTICE
+              value: {{ $sip.recordingNotice | quote }}
+            {{- with $sip.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8082
+            - name: sip
+              containerPort: 5060
+              protocol: UDP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            {{- toYaml $sip.resources | nindent 12 }}
+          securityContext:
+            {{- include "hello.containerSecurity" . | nindent 12 }}

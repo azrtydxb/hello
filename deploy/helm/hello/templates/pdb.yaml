@@ -1,0 +1,47 @@
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- $full := include "hello.fullname" . }}
+{{- if gt (int .Values.sip.nodes) 1 }}
+# At most one hello-sip node is voluntarily disrupted at a time (a node
+# drain, an eviction): the other is the survivor the first hands its calls to.
+# Omitted for a single node, where it would block every drain forever.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $full }}-sip
+  labels:
+    {{- include "hello.labels" (dict "root" . "component" "sip") | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" (dict "root" . "component" "sip") | nindent 6 }}
+---
+{{- end }}
+{{- if gt (int .Values.control.replicas) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $full }}-control
+  labels:
+    {{- include "hello.labels" (dict "root" . "component" "control") | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" (dict "root" . "component" "control") | nindent 6 }}
+---
+{{- end }}
+{{- if gt (int .Values.ui.replicas) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $full }}-ui
+  labels:
+    {{- include "hello.labels" (dict "root" . "component" "ui") | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" (dict "root" . "component" "ui") | nindent 6 }}
+{{- end }}
+{{- end }}

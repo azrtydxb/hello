@@ -1,0 +1,241 @@
+{{- $full := include "hello.fullname" . -}}
+{{- $ctx := dict "root" . "component" "control" -}}
+{{- $prov := .Values.control.provisioning -}}
+{{- $provOn := ne $prov.publicUrl "" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $full }}
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-control
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ .Values.control.replicas }}
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" $ctx | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "hello.selectorLabels" $ctx | nindent 8 }}
+      {{- with .Values.control.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ $full }}
+      automountServiceAccountToken: false
+      {{- include "hello.pullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      {{- if ne .Values.control.antiAffinity "none" }}
+      affinity:
+        {{- if eq .Values.control.antiAffinity "required" }}
+        {{- include "hello.requireSpread" $ctx | nindent 8 }}
+        {{- else }}
+        {{- include "hello.preferSpread" $ctx | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.control.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.control.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.control.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        # The migration as an init container (what kw does): the retry loop
+        # absorbs PostgreSQL and Valkey still coming up. Concurrent replicas
+        # serialise on the migration lock.
+        - name: migrate
+          image: {{ include "hello.image" (dict "root" . "name" .Values.control.image.name "tag" .Values.control.image.tag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          command:
+            - sh
+            - -c
+            - >-
+              until hello-control migrate up; do
+              echo 'waiting for postgres/valkey'; sleep 3; done
+          env:
+            {{- include "hello.commonEnv" . | nindent 12 }}
+            - name: HELLO_NODE_ID
+              value: hello-migrate
+          securityContext:
+            {{- include "hello.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.control.resources | nindent 12 }}
+      containers:
+        - name: hello-control
+          image: {{ include "hello.image" (dict "root" . "name" .Values.control.image.name "tag" .Values.control.image.tag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: HELLO_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- include "hello.commonEnv" . | nindent 12 }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_BOOTSTRAP_ADMIN_PASSWORD" "key" "bootstrapPassword") | nindent 12 }}
+            # In-product AI agent (docs/ai-agent.md): off unless the Secret
+            # carries these keys.
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_PROVIDER" "key" "provider" "optional" true) | nindent 12 }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_BASE_URL" "key" "base-url" "optional" true) | nindent 12 }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_MODEL" "key" "model" "optional" true) | nindent 12 }}
+            {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_API_KEY" "key" "api-key" "optional" true) | nindent 12 }}
+            {{- with .Values.global.publicUrl }}
+            - name: HELLO_PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.control.oauthDynamicClientRegistration }}
+            - name: HELLO_OAUTH_DCR
+              value: "true"
+            {{- end }}
+            {{- if $provOn }}
+            - name: HELLO_PROV_PUBLIC_URL
+              value: {{ $prov.publicUrl | quote }}
+            - name: HELLO_PROV_SIP_SERVER
+              value: {{ default (printf "%s:%v" (required "kamailio.publicHost is required" .Values.kamailio.publicHost) .Values.kamailio.publicPort) $prov.sipServer | quote }}
+            {{- with $prov.trustedProxies }}
+            - name: HELLO_PROV_TRUSTED_PROXIES
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if $prov.caSecret }}
+            - name: HELLO_PROV_CA_CERT
+              value: /etc/hello/prov/ca.crt
+            {{- end }}
+            {{- range $env, $key := dict "HELLO_PROV_SNOM_KEY_ID" "snomSrapsAccessKeyId" "HELLO_PROV_SNOM_KEY_SECRET" "snomSrapsAccessKeySecret" "HELLO_PROV_YEALINK_KEY" "yealinkRpsAccessKey" "HELLO_PROV_YEALINK_SECRET" "yealinkRpsAccessSecret" "HELLO_PROV_YMCS_CLIENT_ID" "yealinkYmcsClientId" "HELLO_PROV_YMCS_CLIENT_SECRET" "yealinkYmcsClientSecret" "HELLO_PROV_YMCS_REGION" "yealinkYmcsRegion" "HELLO_PROV_GDMS_CLIENT_ID" "gdmsClientId" "HELLO_PROV_GDMS_CLIENT_SECRET" "gdmsClientSecret" "HELLO_PROV_GDMS_USERNAME" "gdmsUsername" "HELLO_PROV_GDMS_PASSWORD" "gdmsPassword" "HELLO_PROV_GDMS_REGION" "gdmsRegion" "HELLO_PROV_GDMS_SITE_ID" "gdmsSiteId" }}
+            {{- if $.Values.secrets.provRedirectSecret }}
+            {{- include "hello.secretEnv" (dict "root" $ "env" $env "key" $key "optional" true "secret" $.Values.secrets.provRedirectSecret) | nindent 12 }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.control.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if and $provOn $prov.caSecret }}
+          volumeMounts:
+            - name: prov-ca
+              mountPath: /etc/hello/prov
+              readOnly: true
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8081
+            {{- if $provOn }}
+            - name: prov
+              containerPort: 8083
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            {{- include "hello.containerSecurity" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.control.resources | nindent 12 }}
+      {{- if and $provOn $prov.caSecret }}
+      volumes:
+        - name: prov-ca
+          secret:
+            secretName: {{ $prov.caSecret }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-control
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  type: {{ .Values.control.service.type }}
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 8081
+      protocol: TCP
+      targetPort: http
+      {{- if and .Values.control.service.nodePort (ne .Values.control.service.type "ClusterIP") }}
+      nodePort: {{ .Values.control.service.nodePort }}
+      {{- end }}
+{{- if $provOn }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-prov
+  labels:
+    {{- include "hello.labels" (dict "root" . "component" "prov") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: prov
+      port: 8083
+      protocol: TCP
+      targetPort: prov
+{{- end }}
+{{- if and $provOn $prov.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $full }}-prov
+  labels:
+    {{- include "hello.labels" (dict "root" . "component" "prov") | nindent 4 }}
+  {{- with $prov.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $prov.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if $prov.ingress.tlsSecretName }}
+  tls:
+    - hosts:
+        - {{ required "control.provisioning.ingress.host is required" $prov.ingress.host }}
+      secretName: {{ $prov.ingress.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ required "control.provisioning.ingress.host is required" $prov.ingress.host }}
+      http:
+        paths:
+          - path: /p/
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $full }}-prov
+                port:
+                  number: 8083
+{{- end }}

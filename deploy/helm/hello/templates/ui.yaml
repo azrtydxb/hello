@@ -1,0 +1,115 @@
+{{- $full := include "hello.fullname" . -}}
+{{- $ctx := dict "root" . "component" "ui" -}}
+{{- $ui := .Values.ui -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-ui
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $ui.replicas }}
+  selector:
+    matchLabels:
+      {{- include "hello.selectorLabels" $ctx | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "hello.selectorLabels" $ctx | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $full }}
+      automountServiceAccountToken: false
+      {{- include "hello.pullSecrets" . | nindent 6 }}
+      {{- with $ui.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $ui.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: hello-ui
+          image: {{ include "hello.image" (dict "root" . "name" $ui.image.name "tag" $ui.image.tag) }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          env:
+            - name: HELLO_CONTROL_UPSTREAM
+              # Fully qualified: nginx's runtime resolver applies no search
+              # domains, so the short name never resolves (502).
+              value: {{ printf "http://%s:8081" (include "hello.svcFQDN" (dict "root" . "name" (printf "%s-control" $full))) | quote }}
+            - name: HELLO_DNS_RESOLVER
+              value: {{ $ui.dnsResolver | quote }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            {{- toYaml $ui.resources | nindent 12 }}
+          securityContext:
+            {{- include "hello.containerSecurity" . | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-ui
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      protocol: TCP
+      targetPort: http
+{{- if $ui.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $full }}
+  labels:
+    {{- include "hello.labels" $ctx | nindent 4 }}
+  {{- with $ui.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $ui.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if $ui.ingress.tlsSecretName }}
+  tls:
+    - hosts:
+        - {{ required "ui.ingress.host is required" $ui.ingress.host }}
+      secretName: {{ $ui.ingress.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ required "ui.ingress.host is required" $ui.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $full }}-ui
+                port:
+                  number: 8080
+{{- end }}

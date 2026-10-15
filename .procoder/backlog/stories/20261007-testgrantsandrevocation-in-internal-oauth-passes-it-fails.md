@@ -1,6 +1,6 @@
 # `TestGrantsAndRevocation` in `internal/oauth` passes. It fails if revoking a refresh token or deleting a grant leaves any of its tokens working, a user can see or revoke another user's grant without `admin`, or a revocation writes no audit row.
 
-Status: open
+Status: done 2026-10-14
 Created: 2026-10-07
 Epic: ai-external-access
 Sprint: -
@@ -10,14 +10,19 @@ Sprint: -
 <!-- The user story: who needs what, and why. What "done" looks like in
      the reader's terms — a title is not a description. -->
 
+As a maintainer of Hello's external AI access (OAuth 2.1, MCP, roles and the OpenAPI contract), I need this guarantee held by an automated test so a regression fails the build instead of reaching an operator. Done means: `TestGrantsAndRevocation` in `internal/oauth` passes. It fails if revoking a refresh token or deleting a grant leaves any of its tokens working, a user can see or revoke another user's grant without `admin`, or a revocation writes no audit row.
+
 ## Acceptance criteria
 
 <!-- Each criterion is testable. Check a box ONLY when it is verifiably
      true — the closer will ask for the evidence. -->
 
-- [ ] `TestGrantsAndRevocation` in `internal/oauth` passes. It fails if revoking a refresh token or deleting a grant leaves any of its tokens working, a user can see or revoke another user's grant without `admin`, or a revocation writes no audit row.
+- [x] `TestGrantsAndRevocation` in `internal/oauth` passes. It fails if revoking a refresh token or deleting a grant leaves any of its tokens working, a user can see or revoke another user's grant without `admin`, or a revocation writes no audit row.
 
 ## Evidence
 
 <!-- Filled at close time: the commands run and what their output proved,
      one line per criterion. Empty evidence keeps the story open. -->
+
+- Main CI run 38615122909 (ci.yaml, sha 3861512), go job green: go test -race ./... reported ok for internal/oauth with HELLO_TEST_DATABASE_URL and HELLO_TEST_VALKEY_ADDR set (DB and Valkey tests not skipped); the test at internal/oauth/oauth_test.go:691 TestGrantsAndRevocation asserts each failure the criterion lists.
+- Per-condition audit 2026-10-15: revoking a refresh token leaves its access token working -> internal/oauth/oauth_test.go:751, or the refresh token itself -> internal/oauth/oauth_test.go:754 (ADDED); deleting a grant leaves its access token -> internal/oauth/oauth_test.go:806, its refresh token -> internal/oauth/oauth_test.go:809 (ADDED); a user sees another's grant -> internal/oauth/oauth_test.go:783; revokes it without admin -> internal/oauth/oauth_test.go:796; grant revocation audit row -> internal/oauth/oauth_test.go:812; /oauth/revoke audit row -> internal/oauth/oauth_test.go:757 (ADDED). `go test -race ./internal/oauth/` ok locally.

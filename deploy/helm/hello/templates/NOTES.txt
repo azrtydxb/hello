@@ -1,0 +1,20 @@
+Hello {{ .Chart.AppVersion }} is installed as release "{{ .Release.Name }}".
+
+SIP: phones register to {{ .Values.kamailio.publicHost }}:{{ .Values.kamailio.publicPort }} (domain {{ .Values.global.sipDomain }}).
+{{- if .Values.kamailio.hostNetwork }}
+Kamailio runs on the host network: it binds the node whose address is {{ .Values.kamailio.publicHost }}
+(pin it with kamailio.nodeSelector) and UDP/TCP {{ .Values.kamailio.phonesPort }} must be reachable on it.
+{{- else }}
+Kamailio is exposed by the Service {{ include "hello.fullname" . }}-kamailio-phones ({{ .Values.kamailio.service.type }}).
+{{- end }}
+Each hello-sip node needs UDP {{ .Values.sip.rtpPortMin }}-{{ .Values.sip.rtpPortMax }} open on {{ if .Values.sip.hostNetwork }}its node{{ else }}the address in sip.mediaAnchorHost{{ end }}.
+{{- if .Values.postgresql.enabled }}
+
+The bundled PostgreSQL is for evaluation. Its DSN for the "dsn" key of {{ .Values.secrets.existingSecret }}:
+  postgres://<postgresUser>:<postgresPassword>@{{ include "hello.fullname" . }}-postgresql:5432/hello?sslmode=disable
+{{- end }}
+
+Upgrade in two steps (docs/kubernetes.md, "Upgrades"): first Hello's pods with
+Kamailio's tag held where it is,
+  helm upgrade {{ .Release.Name }} <chart> --reuse-values --set global.imageTag=<new tag> --set kamailio.image.tag=<current tag>
+then Kamailio on its own, so a node's call handoff never meets a restarting Kamailio.

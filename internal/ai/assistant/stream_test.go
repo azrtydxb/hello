@@ -101,7 +101,8 @@ func TestPostMessageStream(t *testing.T) {
 			aifake.StreamText("TOOL-PHASE-PROSE: 201 is registered."),
 			// The answer phase.
 			aifake.StreamReasoning("Now answer.", aifake.StreamJSON(answer, 7)),
-			// The next message: plain text, then its answer.
+			// The next message: no data needed, plain text, then its answer.
+			aifake.StreamToolCall("n1", ai.NoDataTool, struct{}{}),
 			aifake.StreamText("202 too."),
 			aifake.StreamJSON(Answer{Answer: "And 202 too.", Citations: []int{}}, 7),
 		}
@@ -215,6 +216,7 @@ func TestPostMessageStream(t *testing.T) {
 	t.Run("an invalid answer asks again and voids the streamed text", func(t *testing.T) {
 		svc, m, _ := aifake.Service(t, aifake.Config())
 		m.Streams = [][]provider.StreamPart{
+			aifake.StreamToolCall("n1", ai.NoDataTool, struct{}{}),
 			aifake.StreamText("Hello there."),
 			aifake.StreamJSON(Answer{Answer: "Cites a call that was never made.", Citations: []int{3}}, 9),
 			aifake.StreamJSON(Answer{Answer: "Fixed.", Citations: []int{}}, 9),
