@@ -318,9 +318,11 @@ Live on kw with thinking off: answers start in ~1s and finish in ~6s (0 reasonin
 
 Decision: split tool calling from the structured answer, thinking stays off (2026-10-14).
 
-## Phase 6 scope (decided by the lead overnight, 2026-10-15, for review)
+## Phase 6 scope (decided by the lead overnight, 2026-10-15)
 
 Phase 6 was never built; the user was asleep and asked for everything to be finished, so these judgement calls were made without asking. Each is reversible and listed so the review can overturn it.
+
+Review (2026-10-16, handed to the lead by the user): accepted as listed. Follow-ups: `ui.dnsResolver` stops defaulting to a cluster-specific address and comes from the pod's resolv.conf unless set (branch `chart-dns-resolver`), and the call-survival wording now matches the kind test (the caller hangs up).
 
 - **kw is unchanged.** kw keeps running from Kuvryn Sync raw manifests; the Helm chart is the install path for other clusters. The chart is tested against the kw manifests (environment, probes, ports) so the two cannot drift silently. Nothing under `deploy/kuvryn-sync/` changed.
 - **hello-sip is a StatefulSet, not N named Deployments.** kw's two Deployments plus the preStop stagger exist to get one-node-at-a-time rollouts and a stable node name. A StatefulSet with `OrderedReady` and `RollingUpdate` gives both natively (pod name is the node identity, and the next pod is not replaced until the last is ready for `minReadySeconds`), and scales to any N. The cost is a different shape from kw; `docs/kubernetes.md` has the comparison table.
@@ -333,7 +335,7 @@ Phase 6 was never built; the user was asleep and asked for everything to be fini
 - **Kamailio has no PodDisruptionBudget and one replica** (a budget on a single replica blocks node drains); Kamailio redundancy stays the documented Phase 7 limitation. A single hello-sip node gets no budget for the same reason.
 - **Upgrades are two steps:** Hello's pods first with Kamailio's image tag pinned, Kamailio second. Rolling both at once would let a hello-sip handoff's re-INVITE hit a restarting Kamailio. The kind test does exactly this and holds one call through both.
 - **The kind rolling-upgrade test runs in normal CI on the Arc runner** (it needs the runner's Docker daemon, like the lab job), built from the PR's own sources; no registry is involved (`kind load`). If the runners turn out unable to run kind, the job becomes `workflow_dispatch`-only and the PR says why. The Kamailio phones port is published through a kind port mapping; phones run on the runner and use the Docker network gateway as their Contact host, the lab's trick.
-- **The call-survival assertion is signalling-level**, not RTP: the call must stay in the live view, remain a connected call, and be hung up cleanly from the far side with an answered CDR. Media continuity during handoffs is already proven by the Phase 7 lab tests; the kind test proves the chart's rollout ordering keeps a survivor available.
+- **The call-survival assertion is signalling-level**, not RTP: the call must stay in the live view, remain a connected call, and be hung up cleanly by the caller with an answered CDR. Media continuity during handoffs is already proven by the Phase 7 lab tests; the kind test proves the chart's rollout ordering keeps a survivor available.
 - **Kamailio on the pod network cannot keep far-side requests of established calls across its own roll** (found by the kind job): its hello-facing Record-Route is its pod address, which changes when it is replaced. The kind job therefore asserts only that the call stays live and the caller can hang up after the Kamailio roll; hostNetwork (stable node address) is the recommended mode and the guide says so.
 
 ## Dependabot PRs #92–#95 (asked 2026-10-15)
@@ -360,4 +362,10 @@ With thinking off, the model answers about 2–3 of 10 factual PBX questions wit
 
 Fallbacks either way: an endpoint that rejects "required" (400/422) is asked again without it and is never asked with it again, and a tool phase that ends with no call at all is nudged once.
 
-Decision: lead decision (2026-10-15), pending user review: force a tool call on the first step, use the `no_data_needed` no-op tool, and keep both fallbacks.
+Decision: force a tool call on the first step, use the `no_data_needed` no-op tool, and keep both fallbacks (lead decision 2026-10-15; the user handed the review to the lead on 2026-10-16). Verified live on kw at sha-6516af0: `TestKwSmokeAI` passes (2 tool calls before the answer) and the assistant stream calls `listRegistrations` and `listAIFindings` before it answers.
+
+## Defer the work that needs outside resources (2026-10-16)
+
+Three items cannot be finished without something from outside the project: the vendor redirect services need real account credentials (Secret `hello-prov-redirect`) for `TestRedirectLive`, a real carrier trunk is needed to prove calls against a production carrier, and a load test needs an agreed window on kw.
+
+Decision: deferred by the user on 2026-10-16. The `TestRedirectLive` story, the phone-auto-provisioning-service epic and the phone-auto-provisioning milestone are marked deferred; the carrier trunk and the load test have no backlog items and are recorded here. Pick them up when the credentials, the trunk or the window exist.
