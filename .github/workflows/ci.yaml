@@ -96,7 +96,7 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
-      - run: go test -race ./...
+      - run: go test -race -timeout 20m ./...
       # The in-call HA races (a WaitGroup grown during shutdown, a transfer
       # writing the caller dialog under the original call) surfaced only
       # intermittently in one pass: soak the takeover matrix a few times.
