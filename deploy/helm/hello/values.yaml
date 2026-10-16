@@ -162,9 +162,11 @@ ui:
   image:
     name: hello-ui
     tag: ""
-  # nginx re-resolves hello-control at request time and applies no search
-  # domains: the cluster DNS Service address (kubectl -n kube-system get svc kube-dns).
-  dnsResolver: 10.96.0.10
+  # nginx re-resolves hello-control at request time through this resolver.
+  # Empty (default): the UI container uses the first nameserver in its
+  # /etc/resolv.conf, which is the cluster DNS on any cluster. Set it only to
+  # force a specific resolver (an IPv6 address needs brackets: "[fd00::a]").
+  dnsResolver: ""
   resources:
     requests: { cpu: 10m, memory: 32Mi }
     limits: { memory: 128Mi }
