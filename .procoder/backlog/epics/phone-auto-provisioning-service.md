@@ -1,6 +1,6 @@
 # Phone auto-provisioning service
 
-Status: open
+Status: deferred 2026-10-16 — needs the vendor redirect credentials (Secret `hello-prov-redirect`); decision "Defer the work that needs outside resources", .procoder/ask/decisions.md
 Created: 2026-10-05
 Milestone: phone-auto-provisioning
 Spec: phone-auto-provisioning-service @ 38d6a327ab40
