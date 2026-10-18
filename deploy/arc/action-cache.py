@@ -17,7 +17,7 @@ Keep actions.txt in step with the SHAs pinned in .github/workflows.
 
 Helm replaces lists, so this script merges into the release's current
 values rather than layering a second values file. Apply to both releases
-(arc-azrtydxb, arc-azrtydxb-publish; chart gha-runner-scale-set 0.14.2):
+(arc-azrtydxb, arc-azrtydxb-amd64; chart gha-runner-scale-set 0.14.2):
 
   helm get values $R -n arc-runners -o yaml > cur.yaml
   python3 action-cache.py cur.yaml actions.txt new.yaml

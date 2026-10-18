@@ -324,7 +324,7 @@ jobs:
             [registry."192.168.10.131:5000"]
               insecure = true
             [registry."docker.io"]
-              mirrors = ["192.168.10.131"]
+              mirrors = ["ant.azrty.com"]
       # Only a push to main writes the cache, so an untrusted pull request can
       # never poison the layers main builds from. Pull requests read it
       # anonymously and need no secrets.
@@ -510,7 +510,7 @@ jobs:
     # nothing more.
     if: github.event_name == 'push'
     needs: [go, web]
-    runs-on: arc-azrtydxb-publish
+    runs-on: arc-azrtydxb
     timeout-minutes: 30
     permissions:
       contents: read
@@ -548,7 +548,7 @@ jobs:
             [registry."192.168.10.131:5000"]
               insecure = true
             [registry."docker.io"]
-              mirrors = ["192.168.10.131"]
+              mirrors = ["ant.azrty.com"]
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
