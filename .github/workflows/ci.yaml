@@ -100,12 +100,17 @@ jobs:
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
-      - run: go test -race -timeout 20m ./...
+      # Unit tier (PR): plain tests only. `-race` is the full/integration signal
+      # and is too slow for the 5-minute PR budget, so it runs off the PR path
+      # (see the race step below) instead of timing out the required `go` check.
+      - run: go test -timeout 20m ./...
+      - name: go test -race
+        if: github.event_name != 'pull_request'
+        run: go test -race -timeout 20m ./...
       # The in-call HA races (a WaitGroup grown during shutdown, a transfer
       # writing the caller dialog under the original call) surfaced only
       # intermittently in one pass: soak the takeover matrix a few times.
-      # Main only: a pull request still runs the same tests once under -race
-      # above, and a race the soak catches on main is fixed forward.
+      # Main only: a race the soak catches on main is fixed forward.
       - name: In-call HA race soak
         if: github.event_name == 'push'
         run: go test -race -count=3 -run 'TestTakeoverScenarioMatrix|TestBackgroundWorkDuringShutdown|TestTakeoverKeepsClaimUntilRecorded' ./internal/sip/
