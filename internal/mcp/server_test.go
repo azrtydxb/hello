@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -71,21 +72,27 @@ func TestMCPTransport(t *testing.T) {
 		}
 	})
 	t.Run("body cap", func(t *testing.T) {
-		var n atomic.Int64
-		body := &countingReader{n: &n, left: 4 << 20}
-		req, _ := http.NewRequest(http.MethodPost, ts.URL, body)
-		req.Header.Set("Authorization", "Bearer "+tokRead)
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json, text/event-stream")
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode != http.StatusRequestEntityTooLarge {
-				t.Fatalf("4 MiB body = %d, want 413", resp.StatusCode)
-			}
+		// Count on the server side, not on the request reader: the kernel's
+		// send buffer can absorb the whole 4 MiB before the 413 comes back, so
+		// a client-side counter reached 4 MiB on a fast runner and the test
+		// went red. What matters is how much the handler pulled.
+		var read atomic.Int64
+		srv, err := newServer(Options{API: echoAPI(), PublicURL: testPublic,
+			AllowedOrigins: []string{"https://console.test"}, Lookup: fakeLookup{}, MetadataURL: testMetadata}, fixtureOps())
+		if err != nil {
+			t.Fatal(err)
 		}
-		if got := n.Load(); got >= 4<<20 {
-			t.Fatalf("the server read the whole %d-byte body", got)
+		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = &countReadCloser{rc: r.Body, n: &read}
+			srv.ServeHTTP(w, r)
+		}))
+		t.Cleanup(hs.Close)
+		resp, _ := post(t, hs.URL, strings.Repeat("a", 4<<20), map[string]string{"Authorization": "Bearer " + tokRead})
+		if resp.StatusCode != http.StatusRequestEntityTooLarge {
+			t.Fatalf("4 MiB body = %d, want 413", resp.StatusCode)
+		}
+		if got := read.Load(); got > maxBody+1 {
+			t.Fatalf("the server read %d bytes, want at most %d", got, maxBody+1)
 		}
 	})
 	t.Run("GET and DELETE", func(t *testing.T) {
@@ -105,26 +112,16 @@ func TestMCPTransport(t *testing.T) {
 	})
 }
 
-// countingReader yields left bytes of a JSON string, counting what is read.
-type countingReader struct {
-	n    *atomic.Int64
-	left int
-	open bool
+// countReadCloser tallies the bytes the handler reads from the request body.
+type countReadCloser struct {
+	rc io.ReadCloser
+	n  *atomic.Int64
 }
 
-func (c *countingReader) Read(p []byte) (int, error) {
-	if c.left <= 0 {
-		return 0, io.EOF
-	}
-	k := min(len(p), c.left)
-	for i := range k {
-		p[i] = 'a'
-	}
-	if !c.open {
-		copy(p, `{"x":"`)
-		c.open = true
-	}
-	c.left -= k
-	c.n.Add(int64(k))
-	return k, nil
+func (c *countReadCloser) Read(p []byte) (int, error) {
+	n, err := c.rc.Read(p)
+	c.n.Add(int64(n))
+	return n, err
 }
+
+func (c *countReadCloser) Close() error { return c.rc.Close() }

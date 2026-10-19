@@ -127,6 +127,12 @@ func (m *memObjects) has(object string) bool {
 // running instance instead.
 func startMinio(t *testing.T) *MinioObjects {
 	t.Helper()
+	if os.Getenv("HELLO_TEST_DATABASE_URL") == "" {
+		// Every caller is a DB-backed test: without a database the MinIO
+		// container would start only to be unused, and the unit tier must
+		// not need docker.
+		t.Skip("HELLO_TEST_DATABASE_URL not set")
+	}
 	if ep := testMinioEndpoint; ep != "" {
 		u, p := minioCreds()
 		o, err := NewMinioObjects(ep, u, p, false)
