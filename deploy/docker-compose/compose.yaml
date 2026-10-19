@@ -169,9 +169,11 @@ services:
 
   # The voicemail audio store (contract 6). Health is the S3 liveness
   # endpoint: MinIO answers 200 only once it serves requests.
+  # minio/minio is no longer served from Docker Hub; this is the frozen Bitnami
+  # legacy build the chart and the CI service container use. It starts its
+  # server from the root-user environment (no args) and serves /minio/health/live.
   minio:
-    image: minio/minio:latest
-    command: server /data
+    image: bitnamilegacy/minio:2025.5.24-debian-12-r5
     environment:
       MINIO_ROOT_USER: hello-minio
       MINIO_ROOT_PASSWORD: lab-only-minio-secret
