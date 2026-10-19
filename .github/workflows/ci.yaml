@@ -8,9 +8,11 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
-  # Integration tier: the nightly cron (plus a manual dispatch) runs the heavy
-  # jobs — kind-upgrade and lab — off the pull request path. Publish stays on
-  # push to main and v* tags; bench stays dispatch-only.
+  # Three tiers: the unit job goes on every pull request and push; the
+  # integration tier — the database-backed suites, the race detector and the
+  # HA soak — runs on the nightly cron, a manual dispatch and v* tags; the
+  # full tier (kind-upgrade, lab) stays off the pull request path. Publish
+  # stays on push to main and v* tags; bench stays dispatch-only.
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
@@ -30,20 +32,77 @@ env:
 
 jobs:
   go:
+    # Unit tier: hermetic tests only, on the PR and push-to-main path. The
+    # database-backed suites run in the `integration` job (nightly and v*
+    # tags), so this job needs no service containers and stays inside the
+    # five-minute PR budget. Tests that need a database, Valkey or MinIO skip
+    # when their HELLO_TEST_* variable is unset; `integration` sets them and
+    # runs the same `go test ./...`.
     if: github.event_name != 'workflow_dispatch'
     runs-on: arc-azrtydxb
-    timeout-minutes: 30
+    timeout-minutes: 20
     container:
       # The Go toolchain comes from the same base the Dockerfile builds
       # with, so CI and the image agree on the compiler.
       image: golang:1.27-bookworm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Go refuses to stamp VCS info for a workspace owned by another uid.
+      - name: Trust the mounted workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      # The job container is not set up by setup-go, so the module and build
+      # caches are restored by hand. Paths are the golang image's: GOPATH is
+      # /go and the build cache lives under root's home. The key ends in the
+      # commit so main saves a fresh build cache on every push; a pull request
+      # restores the newest one for its go.sum (or any, after a dependency
+      # bump) and never saves, so it cannot overwrite what main relies on.
+      # Go checks every cache entry against its inputs, so a stale entry costs
+      # a recompile, never a wrong build.
+      - name: Restore the Go caches
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /go/pkg/mod
+            /root/.cache/go-build
+          key: go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-
+            go-${{ runner.arch }}-golang1.27-
+      - run: go build ./...
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0
+      # Unit tier: hermetic tests only. The database-backed suites and the
+      # race detector run in `integration`, off the PR and push-to-main path.
+      - run: go test -timeout 10m ./...
+      - name: Save the Go caches
+        if: github.event_name == 'push'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /go/pkg/mod
+            /root/.cache/go-build
+          key: go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-${{ github.sha }}
+
+  integration:
+    # Integration tier: the database-backed suites (PostgreSQL, Valkey, MinIO)
+    # plus the race detector and the HA soak. Off the PR and push-to-main
+    # path — the nightly cron, a manual dispatch, and v* tags (the full tier)
+    # run it. The unit job skips these tests, so this job is what actually
+    # proves the database code works.
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/v')
+    runs-on: arc-azrtydxb
+    timeout-minutes: 40
+    container:
+      image: golang:1.27-bookworm
     env:
-      # The database-backed tests read these; without them they skip and
-      # say so, which would make a green run meaningless.
+      # The database-backed tests read these; without them they skip.
       HELLO_TEST_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
       HELLO_TEST_VALKEY_ADDR: valkey:6379
-      # The voicemail MinIO tests reuse this endpoint instead of starting
-      # their own container; the user is the tests' fixed "hello".
       HELLO_TEST_MINIO_ENDPOINT: minio:9000
       HELLO_TEST_MINIO_PASS: hello-voicemail-secret
     services:
@@ -74,17 +133,8 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Go refuses to stamp VCS info for a workspace owned by another uid.
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      # The job container is not set up by setup-go, so the module and build
-      # caches are restored by hand. Paths are the golang image's: GOPATH is
-      # /go and the build cache lives under root's home. The key ends in the
-      # commit so main saves a fresh build cache on every push; a pull request
-      # restores the newest one for its go.sum (or any, after a dependency
-      # bump) and never saves, so it cannot overwrite what main relies on.
-      # Go checks every cache entry against its inputs, so a stale entry costs
-      # a recompile, never a wrong build.
       - name: Restore the Go caches
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -95,33 +145,17 @@ jobs:
           restore-keys: |
             go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-
             go-${{ runner.arch }}-golang1.27-
-      - run: go build ./...
-      - run: go vet ./...
-      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.14.0
-      # Unit tier (PR): plain tests only. `-race` is the full/integration signal
-      # and is too slow for the 5-minute PR budget, so it runs off the PR path
-      # (see the race step below) instead of timing out the required `go` check.
-      - run: go test -timeout 20m ./...
+      # Everything with the services up: the database-backed tests run here
+      # (the unit job skips them), and the race detector is affordable once a
+      # night rather than on every push.
+      - run: go test -timeout 30m ./...
       - name: go test -race
-        if: github.event_name != 'pull_request'
-        run: go test -race -timeout 20m ./...
+        run: go test -race -timeout 30m ./...
       # The in-call HA races (a WaitGroup grown during shutdown, a transfer
       # writing the caller dialog under the original call) surfaced only
       # intermittently in one pass: soak the takeover matrix a few times.
-      # Main only: a race the soak catches on main is fixed forward.
       - name: In-call HA race soak
-        if: github.event_name == 'push'
         run: go test -race -count=3 -run 'TestTakeoverScenarioMatrix|TestBackgroundWorkDuringShutdown|TestTakeoverKeepsClaimUntilRecorded' ./internal/sip/
-      - name: Save the Go caches
-        if: github.event_name == 'push'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            /go/pkg/mod
-            /root/.cache/go-build
-          key: go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-${{ github.sha }}
 
   web:
     if: github.event_name != 'workflow_dispatch'
