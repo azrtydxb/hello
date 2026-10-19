@@ -51,6 +51,7 @@ jobs:
       image: golang:1.27-bookworm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
       # Go refuses to stamp VCS info for a workspace owned by another uid.
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -137,6 +138,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Restore the Go caches
@@ -172,6 +174,7 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
       # node:26 no longer bundles corepack, so pnpm comes from npm.
       - run: npm install -g pnpm@10
       - run: pnpm install --frozen-lockfile
@@ -209,6 +212,7 @@ jobs:
           --health-cmd "valkey-cli ping" --health-interval 5s --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Detector latency over 1 000 000 CDRs
@@ -228,6 +232,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
       # Evidence first: what the runner actually has decides whether this
       # job can work here at all.
       - name: Docker and compose on the runner
@@ -278,6 +283,7 @@ jobs:
       HELLO_REQUIRE_HELM: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install helm and kubeconform
