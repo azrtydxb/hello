@@ -51,7 +51,7 @@ jobs:
       image: golang:1.27-bookworm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
+      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
       # Go refuses to stamp VCS info for a workspace owned by another uid.
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -138,7 +138,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
+      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Restore the Go caches
@@ -174,7 +174,7 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
+      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
       # node:26 no longer bundles corepack, so pnpm comes from npm.
       - run: npm install -g pnpm@10
       - run: pnpm install --frozen-lockfile
@@ -212,7 +212,7 @@ jobs:
           --health-cmd "valkey-cli ping" --health-interval 5s --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
+      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Detector latency over 1 000 000 CDRs
@@ -232,7 +232,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
+      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
       # Evidence first: what the runner actually has decides whether this
       # job can work here at all.
       - name: Docker and compose on the runner
@@ -283,7 +283,7 @@ jobs:
       HELLO_REQUIRE_HELM: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
+      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install helm and kubeconform
@@ -371,14 +371,16 @@ jobs:
               mirrors = ["ant.azrty.com"]
       # Only a push to main writes the cache, so an untrusted pull request can
       # never poison the layers main builds from.
-      # Kuvryn Ant (GitHub OIDC): main gets a publish token for the cache write;
-      # scheduled and manual runs on main read the cache with the same login.
-      - name: Log in to Kuvryn Ant (build cache)
-        uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
+      # Kuvryn Ant buildcache feed (GitHub OIDC): cache-write is off outside push events.
+      - id: ant-cache-1
+        uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
         with:
-          docker-login: "true"
-          required: ${{ github.event_name == 'push' }}
+          build-cache: "true"
+          cache-name: control
+          cache-write: ${{ github.event_name == 'push' }}
+          sccache: "false"
           go: "false"
+          npm: "false"
           cargo: "false"
           pip: "false"
       # load: true puts each image in the runner's Docker daemon, where
@@ -390,8 +392,19 @@ jobs:
           target: hello-control
           load: true
           tags: hello.local/hello-control:ci
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/azrtydxb/hello-buildcache:hello-control
-          cache-to: ${{ github.event_name == 'push' && format('type=registry,ref={0}/azrtydxb/hello-buildcache:hello-control,mode=max,image-manifest=true,ignore-error=true', env.REGISTRY) || '' }}
+          cache-from: ${{ steps.ant-cache-1.outputs.cache-from }}
+          cache-to: ${{ steps.ant-cache-1.outputs.cache-to }}
+      - id: ant-cache-2
+        uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+        with:
+          build-cache: "true"
+          cache-name: sip
+          cache-write: ${{ github.event_name == 'push' }}
+          sccache: "false"
+          go: "false"
+          npm: "false"
+          cargo: "false"
+          pip: "false"
       - name: Build hello-sip
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -399,8 +412,19 @@ jobs:
           target: hello-sip
           load: true
           tags: hello.local/hello-sip:ci
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/azrtydxb/hello-buildcache:hello-sip
-          cache-to: ${{ github.event_name == 'push' && format('type=registry,ref={0}/azrtydxb/hello-buildcache:hello-sip,mode=max,image-manifest=true,ignore-error=true', env.REGISTRY) || '' }}
+          cache-from: ${{ steps.ant-cache-2.outputs.cache-from }}
+          cache-to: ${{ steps.ant-cache-2.outputs.cache-to }}
+      - id: ant-cache-3
+        uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+        with:
+          build-cache: "true"
+          cache-name: ui
+          cache-write: ${{ github.event_name == 'push' }}
+          sccache: "false"
+          go: "false"
+          npm: "false"
+          cargo: "false"
+          pip: "false"
       - name: Build hello-ui
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -408,16 +432,27 @@ jobs:
           file: web/Dockerfile
           load: true
           tags: hello.local/hello-ui:ci
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/azrtydxb/hello-buildcache:hello-ui
-          cache-to: ${{ github.event_name == 'push' && format('type=registry,ref={0}/azrtydxb/hello-buildcache:hello-ui,mode=max,image-manifest=true,ignore-error=true', env.REGISTRY) || '' }}
+          cache-from: ${{ steps.ant-cache-3.outputs.cache-from }}
+          cache-to: ${{ steps.ant-cache-3.outputs.cache-to }}
+      - id: ant-cache-4
+        uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+        with:
+          build-cache: "true"
+          cache-name: kamailio
+          cache-write: ${{ github.event_name == 'push' }}
+          sccache: "false"
+          go: "false"
+          npm: "false"
+          cargo: "false"
+          pip: "false"
       - name: Build kamailio
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: docker/kamailio
           load: true
           tags: hello.local/kamailio:ci
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/azrtydxb/hello-buildcache:kamailio
-          cache-to: ${{ github.event_name == 'push' && format('type=registry,ref={0}/azrtydxb/hello-buildcache:kamailio,mode=max,image-manifest=true,ignore-error=true', env.REGISTRY) || '' }}
+          cache-from: ${{ steps.ant-cache-4.outputs.cache-from }}
+          cache-to: ${{ steps.ant-cache-4.outputs.cache-to }}
       - name: Tag the upgrade images
         run: |
           # The upgrade changes the image tag: the same bits under a new name.
@@ -596,7 +631,7 @@ jobs:
               insecure = true
             [registry."docker.io"]
               mirrors = ["ant.azrty.com"]
-      - uses: azrtydxb/ant-setup-action@7c6f1b8ca34a0a127b43040f4e16bbafdbd83791 # v1
+      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
         with:
           docker-login: "true"
           required: "true"
