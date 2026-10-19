@@ -19,6 +19,8 @@ on:
 
 permissions:
   contents: read
+  # GitHub OIDC for the Kuvryn Ant docker login (azrtydxb/ant-setup-action).
+  id-token: write
 
 # A newer push to a pull request supersedes the run in progress; on main
 # every commit runs to the end, because publish builds the image of that
@@ -28,7 +30,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  REGISTRY: 192.168.10.131:5000
+  # Authoritative Kuvryn Ant (OKE); kw replicates oci-hosted and its nodes serve
+  # the old 192.168.10.131/azrtydxb/<image> names from that replica.
+  REGISTRY: ant.azrty.com/oci-hosted
 
 jobs:
   go:
@@ -360,15 +364,17 @@ jobs:
             [registry."docker.io"]
               mirrors = ["ant.azrty.com"]
       # Only a push to main writes the cache, so an untrusted pull request can
-      # never poison the layers main builds from. Pull requests read it
-      # anonymously and need no secrets.
-      - name: Log in to Nexus (cache write)
-        if: github.event_name == 'push'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      # never poison the layers main builds from.
+      # Kuvryn Ant (GitHub OIDC): main gets a publish token for the cache write;
+      # scheduled and manual runs on main read the cache with the same login.
+      - name: Log in to Kuvryn Ant (build cache)
+        uses: azrtydxb/ant-setup-action@543d780ae8e4ff1fe0473a4778f18edceb995768 # v1
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.NEXUS_USER }}
-          password: ${{ secrets.NEXUS_PASSWORD }}
+          docker-login: "true"
+          required: ${{ github.event_name == 'push' }}
+          go: "false"
+          cargo: "false"
+          pip: "false"
       # load: true puts each image in the runner's Docker daemon, where
       # `kind load` picks it up as it did after docker build.
       - name: Build hello-control
@@ -548,6 +554,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      id-token: write
     strategy:
       matrix:
         image:
@@ -583,11 +590,13 @@ jobs:
               insecure = true
             [registry."docker.io"]
               mirrors = ["ant.azrty.com"]
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: azrtydxb/ant-setup-action@543d780ae8e4ff1fe0473a4778f18edceb995768 # v1
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.NEXUS_USER }}
-          password: ${{ secrets.NEXUS_PASSWORD }}
+          docker-login: "true"
+          required: "true"
+          go: "false"
+          cargo: "false"
+          pip: "false"
       - name: Build and push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -601,4 +610,3 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/azrtydxb/${{ matrix.image.name }}:sha-${{ github.sha }}
-            ${{ env.REGISTRY }}/azrtydxb/${{ matrix.image.name }}:main
