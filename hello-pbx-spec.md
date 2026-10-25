@@ -1,4 +1,5 @@
 # Hello
+
 ## Modern SIP-Only Highly Available IP PBX
 
 **Project:** Hello  
@@ -46,13 +47,15 @@ Hello is not intended to reproduce every historical feature of Asterisk or FreeS
 
 # 3. Non-Goals
 
-Initial releases do not need analog FXS/FXO, ISDN/PRI, telephony cards, proprietary phone protocols, Asterisk compatibility, every legacy PBX feature, full carrier-SBC functionality, WebRTC, large-scale conferencing, or mandatory transcoding.
+Initial releases do not need analog FXS/FXO, ISDN/PRI, telephony cards, proprietary phone protocols, Asterisk compatibility, every legacy PBX feature, full carrier-SBC functionality, large-scale conferencing, or mandatory transcoding.
+
+WebRTC and video calls are no longer non-goals (amended 2026-10-25): a browser softphone and video relayed without transcoding are in scope as specified in `.procoder/specs/clients-webrtc-mobile-video.md`.
 
 Hello is a **SIP PBX**, not a universal legacy telephony platform.
 
 # 4. Design Principles
 
-1. **SIP first.** UDP/TCP/TLS initially; WSS/WebRTC later.
+1. **SIP first.** UDP/TCP/TLS first; WSS/WebRTC follows once TLS and SRTP are in place (amended 2026-10-25, see `.procoder/specs/clients-webrtc-mobile-video.md`).
 2. **Container native.** Fast startup, graceful shutdown, health endpoints, structured logs, and no required local persistent state.
 3. **Active/active.** No idle PBX standby architecture.
 4. **Stateless where possible.** PostgreSQL for durable configuration and appropriate distributed storage for ephemeral state.
@@ -130,7 +133,6 @@ Do not build an entire RTP engine simply for ownership. Define an interface capa
 ## 6.4 hello-ui
 
 React + TypeScript application for administration, provisioning, routing, monitoring, active calls, HA, CDRs, audit, and diagnostics. The UI consumes the public management API.
-
 
 # 7. Data Architecture
 
@@ -424,7 +426,6 @@ Phone A ---- RTP ---- hello-media ---- RTP ---- Phone B
 
 Media nodes advertise health, address, capabilities, current sessions, and capacity.
 
-
 # 17. High Availability
 
 HA is a **core product capability**, not a deployment afterthought and not something Hello gets merely because it runs on Kubernetes.
@@ -651,7 +652,6 @@ otel-collector
 ```
 
 A developer must be able to launch a complete two-SIP-node Hello lab with one command.
-
 
 # 21. Web UI
 
@@ -918,7 +918,6 @@ Measure:
 - Routing latency
 
 **Every HA promise must have an automated failure test.**
-
 
 # 28. Implementation Phases
 
