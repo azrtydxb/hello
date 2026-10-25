@@ -20,7 +20,7 @@ func provider(db *sql.DB) (*goose.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	return goose.NewProvider(goose.DialectPostgres, db, migrations.FS, goose.WithSessionLocker(locker))
+	return goose.NewProvider(goose.DialectPostgres, db, migrations.FS, goose.WithSessionLocker(locker), goose.WithAllowOutofOrder(true))
 }
 
 // Up applies every pending migration and returns how many it applied.

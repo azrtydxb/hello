@@ -54,7 +54,7 @@ type NewServiceAccount struct {
 // checkAccountScopes holds a service account to the scopes its role may
 // hold (spec S-11, S-23).
 func checkAccountScopes(role auth.Role, scopes auth.Scopes) error {
-	if _, err := auth.ParseRole(string(role)); err != nil {
+	if _, err := auth.ParseRole(string(role)); err != nil || role == auth.RoleUser {
 		return inputErr("role must be viewer, operator or admin")
 	}
 	if len(scopes) == 0 {

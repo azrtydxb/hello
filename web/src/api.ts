@@ -13,11 +13,38 @@ export interface VersionInfo {
   configRevision: number;
 }
 
+/** What happens to a voicemail message once it was emailed. */
+export type VoicemailEmailAfter = "none" | "mark_read" | "delete";
+
+/** A user's voicemail-to-email options. */
+export interface VoicemailEmailPrefs {
+  notify: boolean;
+  attach: boolean;
+  after: VoicemailEmailAfter;
+}
+
+/** An extension as the signed-in user's profile lists it. */
+export interface MeExtension {
+  id: Id;
+  number: string;
+  name: string;
+}
+
 /** GET /api/v1/auth/me */
 export interface Me {
   username: string;
   /** The caller's role (spec S-23); read fresh on every request. */
-  role: "viewer" | "operator" | "admin";
+  role: "user" | "viewer" | "operator" | "admin";
+  displayName?: string;
+  email?: string;
+  authMethod?: string;
+  /** An administrator set the password: nothing else works until it is changed. */
+  mustChangePassword?: boolean;
+  /** The extensions the user manages. */
+  extensions?: MeExtension[];
+  voicemailEmail?: VoicemailEmailPrefs;
+  /** Whether the system can send email at all. */
+  emailDelivery?: boolean;
 }
 
 /** An API token as listed; the token itself is never returned. */
@@ -913,7 +940,7 @@ export interface VoicemailMessage {
   caller: string;
   durationMs: number;
   heard: boolean;
-  /** pending | sent | failed, when the server reports it. */
+  /** pending | queued | sent | failed | skipped, when the server reports it. */
   emailStatus?: string;
   createdAt: string;
 }

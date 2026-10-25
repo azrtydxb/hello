@@ -98,6 +98,7 @@ asking you to approve more).
 
 | Role       | May grant                           |
 | ---------- | ----------------------------------- |
+| `user`     | `read`, `write` (own extensions only) |
 | `viewer`   | `read`                              |
 | `operator` | `read`, `write`                     |
 | `admin`    | `read`, `write`, `admin`, `secrets` |

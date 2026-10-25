@@ -34,6 +34,10 @@ type Actor struct {
 	Audience []string
 	// ServiceName is the service account's name for KindService.
 	ServiceName string
+	// MustChangePassword is set while the user has to choose a new password
+	// (an admin set the current one); the API admits nothing but the
+	// password change, /auth/me and logout meanwhile.
+	MustChangePassword bool
 	// Via is how the change was made when not through a client: the audit
 	// via of an agent request (ViaAssistant), else empty.
 	Via string
@@ -280,7 +284,7 @@ func Bootstrap(ctx context.Context, s FirstUserCreator, password string, log *sl
 	if err != nil || n > 0 {
 		return err
 	}
-	hash, err := HashPassword(password)
+	hash, err := HashUserPassword(password)
 	if err != nil {
 		return err
 	}
