@@ -55,7 +55,7 @@ type Extension struct {
 	// already records them (migration 00005; spec S-4).
 	RecordDefault bool
 	// AllowIntercom lets an intercom call auto-answer on the extension
-	// (migration 00012, spec P-13); false rings it normally.
+	// (migration 00013, spec P-13); false rings it normally.
 	AllowIntercom bool
 }
 
@@ -85,7 +85,7 @@ type RingGroupMember struct {
 	Delay       int // this member's extra delay in seconds
 }
 
-// PagingGroup is a server paging group (migration 00012, spec P-12): dialling
+// PagingGroup is a server paging group (migration 00013, spec P-12): dialling
 // Code pages every member at once. Members and Callers are extension numbers;
 // no Callers means any internal extension may page. Priority is "normal" or
 // "emergency".

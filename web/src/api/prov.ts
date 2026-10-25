@@ -67,6 +67,8 @@ export interface Phone {
   extensionNumber: string;
   /** The template override; null resolves by vendor and model. */
   templateId: Id | null;
+  /** The phone group, which decides its address books; null for none. */
+  groupId?: Id | null;
   /** BLF keys: extension numbers, in key order. */
   blf: string[];
   enabled: boolean;
@@ -103,13 +105,17 @@ export interface PhoneInput {
   label: string;
   extensionId: Id;
   deviceId?: Id;
+  groupId?: Id;
   blf: string[];
   enabled: boolean;
 }
 
 /** PATCH /api/v1/phones/{id} body; fetch state is not writable. */
 export type PhonePatch = Partial<
-  Omit<PhoneInput, "mac"> & { templateId: Id | null }
+  Omit<PhoneInput, "mac" | "groupId"> & {
+    templateId: Id | null;
+    groupId: Id | null;
+  }
 >;
 
 /** One provisioning request a phone made (prov_fetches, token redacted). */

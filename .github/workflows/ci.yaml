@@ -638,6 +638,34 @@ jobs:
           go: "false"
           cargo: "false"
           pip: "false"
+      # kamailio also gets a content-addressed tag, kc-<git tree hash of
+      # docker/kamailio>. The image is built from that directory alone (the
+      # config is the hello-kamailio ConfigMap, not baked in), so the tag is
+      # the same on every commit that leaves it untouched, and pinning it in
+      # deploy/kuvryn-sync keeps Sync from restarting the edge pod on
+      # releases that do not change it. A tag is never overwritten: when it
+      # is already in the registry the image is not pushed again (an
+      # unpinned apt install would otherwise change what the tag means).
+      - name: Content tag
+        id: content
+        env:
+          NAME: ${{ matrix.image.name }}
+        run: |
+          tags="${REGISTRY}/azrtydxb/${NAME}:sha-${GITHUB_SHA}"
+          if [ "$NAME" = kamailio ]; then
+            kc="kc-$(git rev-parse HEAD:docker/kamailio | cut -c1-16)"
+            if docker buildx imagetools inspect "${REGISTRY}/azrtydxb/${NAME}:${kc}" >/dev/null 2>&1; then
+              echo "${kc} already published; not retagging"
+            else
+              tags="${tags}"$'\n'"${REGISTRY}/azrtydxb/${NAME}:${kc}"
+              echo "publishing ${kc}"
+            fi
+          fi
+          {
+            echo 'tags<<EOF'
+            echo "$tags"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
       - name: Build and push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -649,5 +677,4 @@ jobs:
           build-args: |
             COMMIT=${{ github.sha }}
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/azrtydxb/${{ matrix.image.name }}:sha-${{ github.sha }}
+          tags: ${{ steps.content.outputs.tags }}

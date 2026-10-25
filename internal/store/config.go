@@ -25,7 +25,7 @@ type Extension struct {
 	VoicemailEnabled bool   `json:"voicemailEnabled"`
 	RecordDefault    bool   `json:"recordDefault"`
 	// AllowIntercom lets an intercom call auto-answer on this extension
-	// (migration 00012); false rings it normally.
+	// (migration 00013); false rings it normally.
 	AllowIntercom bool `json:"allowIntercom"`
 	// DirectoryHidden keeps the extension out of the automatic extensions
 	// book (spec P-1).

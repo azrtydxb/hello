@@ -19,13 +19,34 @@ that apply here too.
 ## Release a change
 
 1. Merge to `main`. `.github/workflows/ci.yaml` builds and pushes
-   `192.168.10.131:5000/azrtydxb/hello-control`, `hello-sip` and `hello-ui`
-   with the immutable tag `sha-<full sha>` (plus `main`; the registry keeps
-   no short tags). The job proves the `:443` pull name resolves before it
-   succeeds.
-2. Update the intended container references in `kw/resources.yaml` to that
-   `sha-` tag (later: an immutable `repository@sha256:...` digest). Merging
-   application code alone does not promote an image.
+   `192.168.10.131:5000/azrtydxb/hello-control`, `hello-sip`, `hello-ui`
+   and `kamailio` with the immutable tag `sha-<full sha>` (plus `main`; the
+   registry keeps no short tags). `kamailio` also gets a content tag,
+   `kc-<16 hex>`: the tree hash of `docker/kamailio`, the only input of that
+   image (its config is the `hello-kamailio` ConfigMap). The tag is
+   published once, never overwritten, and identical on every commit that
+   leaves `docker/kamailio` alone. The job proves the `:443` pull name
+   resolves before it succeeds.
+2. Update the intended container references in `kw/resources.yaml`
+   (later: an immutable `repository@sha256:...` digest). Merging
+   application code alone does not promote an image. There are seven image
+   lines, of two kinds:
+
+   - five `sha-<full sha>` pins: `hello-sip` (hello-sip-1, hello-sip-2),
+     `hello-control` (init container and main) and `hello-ui`;
+   - two `kc-<hash>` pins: `kamailio` (init container and main, always the
+     same tag).
+
+   Move the kamailio tag only when `docker/kamailio` changed (the new tag
+   is `kc-` plus the first 16 characters of `git rev-parse
+origin/main:docker/kamailio`). Kamailio carries every active call's
+   signalling (takeover re-INVITEs and BYEs route through it), so a deploy
+   that does not change it must not restart it. The config side already
+   behaves: the pod-template annotation
+   `hello.watteel.com/kamailio-config-sha256` hashes the ConfigMap content
+   (enforced by `test/deploy`), so it changes only when `kamailio.cfg` or
+   `dispatcher.list` do, not with each pin.
+
 3. Edit configuration in `kw/`. For credentials, the `secret-*.sops.yaml`
    files encrypt to the hello namespace age recipient via the repo-root
    `.sops.yaml` creation rule; edit them like this (never commit a decrypted
@@ -79,13 +100,13 @@ Confirmed against the cluster during the first-sync bootstrap:
 
 ## Secrets
 
-| File                                  | Secret            | Keys                          | Consumed by                                                       |
-| ------------------------------------- | ----------------- | ----------------------------- | ----------------------------------------------------------------- |
-| `kw/secret-hello-store.sops.yaml`     | `hello-store`     | `username`, `password`, `dsn` | postgres (`username`/`password`), hello-control/hello-sip (`dsn`) |
-| `kw/secret-hello-app.sops.yaml`       | `hello-app`       | `secretKey`                   | hello-control/hello-sip (`HELLO_SECRET_KEY`)                      |
-| `kw/secret-hello-nonce.sops.yaml`     | `hello-nonce`     | `nonceSecret`                 | hello-sip-1/2 (`HELLO_SIP_NONCE_SECRET`)                          |
-| `kw/secret-hello-bootstrap.sops.yaml` | `hello-bootstrap` | `password`                    | hello-control (`HELLO_BOOTSTRAP_ADMIN_PASSWORD`)                  |
-| `kw/secret-hello-ai.sops.yaml` | `hello-ai` | `provider`, `base-url`, `model`, `api-key` | hello-control (`HELLO_AI_*`, optional, see docs/ai-agent.md) |
+| File                                  | Secret            | Keys                                       | Consumed by                                                       |
+| ------------------------------------- | ----------------- | ------------------------------------------ | ----------------------------------------------------------------- |
+| `kw/secret-hello-store.sops.yaml`     | `hello-store`     | `username`, `password`, `dsn`              | postgres (`username`/`password`), hello-control/hello-sip (`dsn`) |
+| `kw/secret-hello-app.sops.yaml`       | `hello-app`       | `secretKey`                                | hello-control/hello-sip (`HELLO_SECRET_KEY`)                      |
+| `kw/secret-hello-nonce.sops.yaml`     | `hello-nonce`     | `nonceSecret`                              | hello-sip-1/2 (`HELLO_SIP_NONCE_SECRET`)                          |
+| `kw/secret-hello-bootstrap.sops.yaml` | `hello-bootstrap` | `password`                                 | hello-control (`HELLO_BOOTSTRAP_ADMIN_PASSWORD`)                  |
+| `kw/secret-hello-ai.sops.yaml`        | `hello-ai`        | `provider`, `base-url`, `model`, `api-key` | hello-control (`HELLO_AI_*`, optional, see docs/ai-agent.md)      |
 
 Optional, not yet supplied: `kw/secret-hello-prov-redirect.sops.yaml`
 (`hello-prov-redirect`), the phone vendors' redirect-service credentials.

@@ -403,7 +403,7 @@ These items are checked on hardware (two WP836 on 1.0.1.44 and 1.0.1.80, upgrade
 
 ## Acceptance criteria
 
-- [ ] [S-1] `TestMessageSummarySubscribe` in `internal/sip` passes. It fails if:
+- [x] [S-1] `TestMessageSummarySubscribe` in `internal/sip` passes. It fails if:
   - a message-summary SUBSCRIBE from the mailbox's own device is not answered 200 with an immediate NOTIFY carrying the current counts;
   - a change does not NOTIFY every subscription;
   - another extension's device can subscribe;

@@ -56,6 +56,8 @@ export interface Extension {
   voicemailEnabled?: boolean;
   /** Calls are recorded by default; `*1` toggles recording mid-call either way. */
   recordDefault?: boolean;
+  /** Left out of the automatic extensions address book; false by default. */
+  directoryHidden?: boolean;
   /** The extension's voicemail box, when it has one. */
   voicemailBoxId?: Id | null;
   createdAt: string;
@@ -638,6 +640,7 @@ export const updateExtension = (
     forwardNoAnswer?: string;
     voicemailEnabled?: boolean;
     recordDefault?: boolean;
+    directoryHidden?: boolean;
   },
 ) =>
   request<Extension>("PATCH", `/api/v1/extensions/${id(extensionId)}`, {

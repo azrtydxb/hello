@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<YealinkIPPhoneDirectory>
+  <DirectoryEntry>
+    <Name>Acme &lt;Corp&gt;</Name>
+    <Telephone>02 555 00 00</Telephone>
+  </DirectoryEntry>
+  <DirectoryEntry>
+    <Name>Bob Adams</Name>
+    <Telephone>1003</Telephone>
+  </DirectoryEntry>
+  <DirectoryEntry>
+    <Name>Zoë Müller</Name>
+    <Telephone>+32 2 555 01 02</Telephone>
+  </DirectoryEntry>
+  <DirectoryEntry>
+    <Name>Tom Smith &amp; Sons (R&amp;D)</Name>
+    <Telephone>1001</Telephone>
+    <Telephone>+32470123456</Telephone>
+    <Telephone>0471 22 33 44</Telephone>
+  </DirectoryEntry>
+  <DirectoryEntry>
+    <Name>Ann ÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜ</Name>
+    <Telephone>1002</Telephone>
+  </DirectoryEntry>
+</YealinkIPPhoneDirectory>

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -211,11 +212,15 @@ func (s *server) createPhone(w http.ResponseWriter, r *http.Request) {
 		TemplateID  *int64      `json:"templateId"`
 		BLF         []string    `json:"blf"`
 		Enabled     *bool       `json:"enabled"`
+		GroupID     *int64      `json:"groupId"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	var f fieldErrs
+	if in.GroupID != nil && *in.GroupID <= 0 {
+		f.add("groupId", "must be a phone group id or null")
+	}
 	mac, err := prov.NormalizeMAC(in.MAC)
 	if err != nil {
 		f.add("mac", "must be 12 hex digits, optionally separated by : - or .")
@@ -238,7 +243,7 @@ func (s *server) createPhone(w http.ResponseWriter, r *http.Request) {
 	c, err := s.ProvStore.CreatePhone(r.Context(), actor(r).String(), store.PhoneInput{
 		MAC: mac, Serial: in.Serial, Vendor: in.Vendor, Model: in.Model, Label: in.Label,
 		ExtensionID: in.ExtensionID, DeviceID: dev, BLF: in.BLF, Enabled: in.Enabled == nil || *in.Enabled,
-		TemplateID: in.TemplateID, Realm: s.SIPDomain,
+		TemplateID: in.TemplateID, GroupID: in.GroupID, Realm: s.SIPDomain,
 	})
 	if err != nil {
 		s.provError(w, "phone", err)
@@ -482,6 +487,16 @@ func maskSecrets(d *prov.RenderData) {
 	d.Line.Password = mask
 	d.Phone.AdminPassword = mask
 	d.Prov.URL = tokenInPathRe.ReplaceAllString(d.Prov.URL, "/p/"+mask+"/")
+	if d.Book != nil {
+		b := *d.Book
+		b.URL = tokenInPathRe.ReplaceAllString(b.URL, "/p/"+mask+"/")
+		b.HostPath = tokenInPathRe.ReplaceAllString(b.HostPath, "/p/"+mask+"/")
+		b.Sources = slices.Clone(b.Sources)
+		for i := range b.Sources {
+			b.Sources[i].URL = tokenInPathRe.ReplaceAllString(b.Sources[i].URL, "/p/"+mask+"/")
+		}
+		d.Book = &b
+	}
 	if d.Firmware != nil {
 		fw := *d.Firmware
 		fw.URL = tokenInPathRe.ReplaceAllString(fw.URL, "/p/"+mask+"/")

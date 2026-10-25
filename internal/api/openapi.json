@@ -7989,6 +7989,10 @@
           "enabled": {
             "type": "boolean",
             "description": "Whether the phone is served its configuration."
+          },
+          "groupId": {
+            "type": ["integer", "null"],
+            "description": "Id of a phone group, which decides the address books the phone is delivered; null or absent for none."
           }
         }
       },

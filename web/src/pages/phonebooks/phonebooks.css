@@ -1,0 +1,60 @@
+/* Phonebooks and Phone groups pages: layout around the Azrty components,
+   tokens only. */
+.pb-bookbar {
+  align-items: flex-end;
+}
+.pb-toolbar {
+  justify-content: space-between;
+  align-items: flex-end;
+}
+.pb-toolbar__buttons {
+  margin-left: auto;
+}
+a.az-btn {
+  text-decoration: none;
+}
+.pb-numbers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pb-numbers-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.pb-number-row {
+  display: grid;
+  grid-template-columns: 140px 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+.pb-warnings {
+  margin: 0;
+  padding-left: 18px;
+}
+.pb-books {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pb-books__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--az-border-strong);
+  border-radius: var(--az-radius-md);
+  background: var(--az-input-bg);
+}
+.pb-books__tools {
+  display: flex;
+  gap: 4px;
+}
