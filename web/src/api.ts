@@ -1307,6 +1307,16 @@ export interface Announcement {
   name: string;
   createdAt: string;
   updatedAt?: string;
+  /** The authored text-to-speech prompt; "" for an uploaded recording. */
+  sourceText?: string;
+  voiceId?: string;
+  modelId?: string;
+  /** When audio was last generated from the text; null/absent when never. */
+  generatedAt?: string | null;
+  /** Whether the stored audio was generated from text. */
+  generated?: boolean;
+  /** The text, voice or model changed since the audio was generated. */
+  textEdited?: boolean;
 }
 
 /** GET /api/v1/announcements. */

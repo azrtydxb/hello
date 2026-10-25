@@ -15,7 +15,14 @@ import {
   wasReplaced,
 } from "../api/media";
 import {
+  createGeneratedAnnouncement,
+  generateAnnouncement,
+  MAX_TTS_CHARS,
+  saveAnnouncementPrompt,
+} from "../api/tts";
+import {
   Alert,
+  Badge,
   Button,
   ConfirmDialog,
   EmptyState,
@@ -31,6 +38,7 @@ import {
 import { formatTime } from "../format";
 import { mapFieldErrors } from "../forms";
 import { checkWav, NowPlaying, usePlayback, WavDrop } from "./media/MediaParts";
+import { ModelVoiceFields, useTtsModels } from "./media/TtsParts";
 import { Can } from "../role";
 
 const NAME_HINT =
@@ -52,6 +60,8 @@ export function Announcements() {
   const [list, setList] = useState<ListState>({ status: "loading" });
   const [replacing, setReplacing] = useState<Announcement | null>(null);
   const [deleting, setDeleting] = useState<Announcement | null>(null);
+  // The text prompt editor: "new" for a prompt from text, or the announcement.
+  const [prompting, setPrompting] = useState<Announcement | "new" | null>(null);
   const toast = useToast();
   const showToast = toast.show;
   const playback = usePlayback((name) => `Could not play ${name}`);
@@ -138,11 +148,30 @@ export function Announcements() {
       render: (a) => (wasReplaced(a) ? formatTime(a.updatedAt) : "—"),
     },
     {
+      key: "source",
+      label: "Source",
+      render: (a) =>
+        a.textEdited ? (
+          <Badge tone="warn">Text edited</Badge>
+        ) : a.generated ? (
+          <Badge tone="info">Generated</Badge>
+        ) : (
+          <Badge tone="outline">Uploaded</Badge>
+        ),
+    },
+    {
       key: "actions",
       label: <span className="visually-hidden">Actions</span>,
       align: "right",
       render: (a) => (
         <div className="media-actions">
+          <Can>
+            <IconButton
+              icon="wand-sparkles"
+              label={`Edit the text of ${a.name}`}
+              onClick={() => setPrompting(a)}
+            />
+          </Can>
           <Can>
             <IconButton
               icon="replace"
@@ -167,7 +196,18 @@ export function Announcements() {
       <PageHeader
         eyebrow="Media"
         title="Announcements"
-        description="Named prompts that ring groups and routes can play. WAV, up to 10 MB."
+        description="Named prompts that ring groups and routes can play. Upload a WAV (up to 10 MB), or write the text and generate it once; either plays from storage."
+        actions={
+          <Can>
+            <Button
+              variant="secondary"
+              icon="wand-sparkles"
+              onClick={() => setPrompting("new")}
+            >
+              New prompt from text
+            </Button>
+          </Can>
+        }
       />
       <div className="ann-grid">
         <Can>
@@ -223,6 +263,18 @@ export function Announcements() {
             setReplacing(null);
             if (String(playback.playing) === String(a.id)) playback.stop();
             showToast(`Audio of ${a.name} replaced.`);
+          }}
+        />
+      )}
+      {prompting && (
+        <PromptEditor
+          announcement={prompting === "new" ? null : prompting}
+          onClose={() => setPrompting(null)}
+          onDone={(a, message) => {
+            upsert(a);
+            setPrompting(null);
+            if (String(playback.playing) === String(a.id)) playback.stop();
+            showToast(message);
           }}
         />
       )}
@@ -389,6 +441,235 @@ function ReplaceAudio({
         <WavDrop file={file} onFile={setFile} error={error} disabled={busy} />
         {formError && (
           <Alert tone="bad" title="Could not replace the audio">
+            {formError}
+          </Alert>
+        )}
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * The text prompt editor: write the text, pick a voice, and generate the audio
+ * once. The audio is stored and played from storage afterwards; saving the
+ * text alone never calls the provider, and generating needs a click.
+ */
+function PromptEditor({
+  announcement,
+  onClose,
+  onDone,
+}: {
+  announcement: Announcement | null;
+  onClose: () => void;
+  onDone: (a: Announcement, message: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [text, setText] = useState(announcement?.sourceText ?? "");
+  const [modelId, setModelId] = useState(announcement?.modelId ?? "");
+  const [voiceId, setVoiceId] = useState(announcement?.voiceId ?? "");
+  const [errors, setErrors] = useState<{ name?: string; text?: string }>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { models, error: modelsError } = useTtsModels();
+  const formId = `ann-prompt-${String(announcement?.id ?? "new")}`;
+
+  const generated = announcement?.generated === true;
+  // Edited in this form, or saved earlier and not generated since.
+  const dirty =
+    announcement !== null &&
+    generated &&
+    (announcement.textEdited === true ||
+      text.trim() !== (announcement.sourceText ?? "") ||
+      modelId !== (announcement.modelId ?? "") ||
+      voiceId !== (announcement.voiceId ?? ""));
+  const prompt = {
+    text: text.trim(),
+    voiceId: voiceId || undefined,
+    modelId: modelId || undefined,
+  };
+
+  function validate(): boolean {
+    const found: { name?: string; text?: string } = {};
+    if (!announcement && !SIP_USERNAME_PATTERN.test(name.trim())) {
+      found.name = "Enter a name of 1-64 of A-Z a-z 0-9 . _ -.";
+    }
+    if (prompt.text === "") found.text = "Write the text to speak.";
+    else if ([...prompt.text].length > MAX_TTS_CHARS) {
+      found.text = `At most ${String(MAX_TTS_CHARS)} characters.`;
+    }
+    setErrors(found);
+    return !found.name && !found.text;
+  }
+
+  async function run(action: () => Promise<void>) {
+    setFormError(null);
+    if (!validate()) return;
+    setBusy(true);
+    try {
+      await action();
+    } catch (err: unknown) {
+      const mapped = mapFieldErrors(fieldErrors(err), ["name", "text"]);
+      setErrors(mapped.byKey);
+      setFormError(errorMessage(err));
+      setBusy(false);
+    }
+  }
+
+  const onSave = () =>
+    run(async () => {
+      if (!announcement) return;
+      onDone(
+        await saveAnnouncementPrompt(announcement.id, prompt),
+        `Text of ${announcement.name} saved; generate it to hear the change.`,
+      );
+    });
+
+  const onGenerate = () =>
+    run(async () => {
+      if (!announcement) {
+        const res = await createGeneratedAnnouncement(name.trim(), prompt);
+        onDone(
+          res.announcement,
+          `Announcement ${res.announcement.name} generated.`,
+        );
+        return;
+      }
+      // An explicit click on an unchanged prompt means "again".
+      const res = await generateAnnouncement(announcement.id, {
+        ...prompt,
+        force: generated && !dirty,
+      });
+      onDone(
+        res.announcement,
+        res.regenerated
+          ? `Audio of ${announcement.name} generated.`
+          : `${announcement.name} is already generated from this text.`,
+      );
+    });
+
+  return (
+    <Modal
+      title={
+        announcement ? `Text of ${announcement.name}` : "New prompt from text"
+      }
+      description="The audio is generated once through OpenRouter and stored; calls play the stored audio and never reach the provider."
+      onClose={busy ? undefined : onClose}
+      actions={
+        <>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Cancel
+          </Button>
+          {announcement && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => void onSave()}
+            >
+              Save text
+            </Button>
+          )}
+          <Button
+            size="sm"
+            icon="wand-sparkles"
+            disabled={busy}
+            onClick={() => void onGenerate()}
+          >
+            {!announcement
+              ? "Generate announcement"
+              : generated
+                ? "Regenerate"
+                : "Generate"}
+          </Button>
+        </>
+      }
+    >
+      <form
+        id={formId}
+        className="media-modal-form"
+        onSubmit={(e) => e.preventDefault()}
+        noValidate
+      >
+        {!announcement && (
+          <Input
+            id={`${formId}-name`}
+            label="Prompt name"
+            mono
+            placeholder="support-closed"
+            value={name}
+            error={errors.name}
+            hint={NAME_HINT}
+            onChange={(e) => setName(e.target.value)}
+          />
+        )}
+        <div className={errors.text ? "az-field az-field--error" : "az-field"}>
+          <label className="az-field__label" htmlFor={`${formId}-text`}>
+            Text to speak
+          </label>
+          <textarea
+            id={`${formId}-text`}
+            className="az-input media-textarea"
+            rows={5}
+            value={text}
+            aria-invalid={errors.text ? true : undefined}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <span className="az-field__hint">
+            {errors.text ??
+              `${String([...text].length)} / ${String(MAX_TTS_CHARS)} characters`}
+          </span>
+        </div>
+        <ModelVoiceFields
+          idPrefix={formId}
+          models={models}
+          modelId={modelId}
+          voiceId={voiceId}
+          onModel={setModelId}
+          onVoice={setVoiceId}
+          disabled={busy}
+        />
+        {modelsError && (
+          <Alert tone="warn" title="Could not load the voice list">
+            {modelsError}
+          </Alert>
+        )}
+        {announcement && (
+          <div className="media-prompt-status">
+            {dirty ? (
+              <Badge tone="warn">Text edited since the last generation</Badge>
+            ) : generated ? (
+              <Badge tone="info">
+                Generated
+                {announcement.generatedAt
+                  ? ` ${formatTime(announcement.generatedAt)}`
+                  : ""}
+              </Badge>
+            ) : (
+              <Badge tone="outline">Not generated from text</Badge>
+            )}
+            {!generated && (
+              <span className="media-hint">
+                Generating replaces the current audio.
+              </span>
+            )}
+          </div>
+        )}
+        {announcement && (
+          <audio
+            className="media-audio"
+            controls
+            preload="none"
+            aria-label={`Preview of ${announcement.name}`}
+            src={`${announcementAudioPath(announcement.id)}?v=${encodeURIComponent(announcement.updatedAt ?? "")}`}
+          />
+        )}
+        {formError && (
+          <Alert tone="bad" title="Could not generate the prompt">
             {formError}
           </Alert>
         )}
