@@ -232,8 +232,15 @@ with `{mac}`, which the phone fills in with its MAC on every re-check.
 
 ### Fanvil
 
-X series. The model's common file (`F0V00X5U0000.cfg` for the X5U) and
-`<mac>.cfg` with the account.
+X series. The model's common file (`F0V0X5U00000.cfg` for the X5U,
+`F0V00X600000.cfg` for the X6; the low-end X, H and i models use
+`f0<model>hw1.100.cfg`) and `<mac>.cfg` with the account. The phone's
+auto-provision settings take the server and the path apart: `Flash Server IP`
+is the bare host, `Flash File Name` the path ending in `$mac.cfg`, `Flash
+Protocol` `5` for HTTPS, and `Flash Mode` `2` makes it re-check every `Flash
+Interval` hours. A pinned firmware goes in `Auto Image Url`, the file's full
+URL. These key names follow Fanvil's X-series configuration files; they are
+unconfirmed on a phone, so verify them.
 
 ## Redirect services
 
@@ -278,8 +285,10 @@ Templates see only these values:
 | `.Firmware` | `URL` (the file), `Dir` (its directory, no trailing slash), `Version`, `Via` (1 HTTP, 2 HTTPS), or nil when no firmware is pinned |
 | `.Time`     | `Zone`, `NTP`                                                                                                                     |
 
-Functions: `xml` (escape), `upper`, `lower`, `default`, `add`, `div`. For
-example, a key/value phone:
+Functions: `xml` (escape), `upper`, `lower`, `default`, `add`, `mul`, `div`,
+`urlhost` (`https://h:8/p/x/` gives `h:8`) and `urlpath` (the same gives
+`p/x/`, no leading slash), for a phone that takes the server and the path in
+separate settings. For example, a key/value phone:
 
 ```text
 sip.server = {{.Server.Host}}:{{.Server.Port}}
@@ -297,6 +306,41 @@ Saving validates the template: it must parse, use only these values, and
 render a sample phone within 100 ms and 256 KiB; errors name the file and
 line. **Preview** on a phone shows exactly what it would get, with the
 secrets and the token masked.
+
+## Phone emulator: adding a URL-bearing setting
+
+Every setting that carries a URL, path, server, file name or scheme code is a
+chance for a phone to build a request Hello does not serve. Grandstream's
+P192 is a firmware _directory_ the phone appends its own file name to, so a
+full file URL made it ask for `fw/wp810fw.bin/wp810fw.bin`; a trailing slash
+made another phone ask for `/p/boot//cfg<mac>.xml`. Both rendered valid files.
+
+`internal/prov/phone_emulator_test.go` guards this. For each vendor it holds a
+small model of how the phone derives requests from its rendered config (the
+base, the file names it appends, the scheme setting, the enum codes, per the
+vendor's documentation, cited in the comments). `TestPhoneEmulator` boots a
+phone of each vendor through the real handler: the DHCP boot path, the
+hand-off, the per-device files, the pinned firmware and the CA, with and
+without a pinned firmware, and asserts every URL the phone derives answers
+`200` with the right content. `TestPhoneEmulatorCatchesKnownBugs` proves it
+fails on the old Grandstream firmware setting and similar.
+
+When you add or change a built-in setting that carries a URL, path, server, file
+name or scheme code (a phonebook URL, a ringtone, a wallpaper, a language file,
+a syslog server):
+
+1. Put it in the vendor's template, with the vendor document it comes from.
+2. Add what the phone does with it to that vendor's `emu<Vendor>` function:
+   fetch the URL it builds with `must`, `get` or `firmware`, and check the body.
+   Say in the comment whether the phone appends a file name, a prefix or a
+   suffix, and whether the value takes a scheme.
+3. If its name does not match the vendor's pattern in `urlKey`, extend the
+   pattern. A flagged setting that no step takes fails the test with
+   "does not model", so a new one cannot ship unchecked.
+4. Add a file name the phone requests to `TestPhoneEmulatorFileNames`.
+
+Mark what no document confirms as "verify" in the comment and in this
+chapter's vendor notes; do not guess.
 
 ## Token rotation and "token exposed"
 

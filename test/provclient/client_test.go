@@ -58,7 +58,7 @@ func TestSequences(t *testing.T) {
 	polyDevice := `<polycomConfig><reg reg.1.address="101"/></polycomConfig>`
 	gs := "<gs_provision><mac>" + mac + "</mac><config><P35>101</P35></config></gs_provision>"
 	snom := `<settings><phone-settings><user_name idx="1" perm="R">101</user_name></phone-settings></settings>`
-	fanvil := "<<VOIP CONFIG FILE>>Version:2.0002\n<SIP CONFIG MODULE>\nSIP1 PhoneNumber       :101\n<<END OF FILE>>\n"
+	fanvil := "<<VOIP CONFIG FILE>>Version:2.0002\n<SIP CONFIG MODULE>\nSIP1 Phone Number       :101\n<<END OF FILE>>\n"
 	upper := strings.ToUpper(mac)
 	cases := []struct {
 		vendor string
@@ -75,7 +75,7 @@ func TestSequences(t *testing.T) {
 		{"grandstream", false, map[string]string{"cfg" + mac + ".xml": gs}, []string{"GET cfg" + mac, "GET cfg" + mac + ".bin", "GET cfg" + mac + ".xml", "GET cfggrp2614.xml", "GET cfg.xml"}, true},
 		{"snom", true, map[string]string{"snomD785-" + upper + ".htm": snom}, []string{"GET snomD785.htm", "GET snomD785-" + upper + ".htm"}, false},
 		{"snom", false, map[string]string{upper: snom}, []string{"GET " + upper}, false},
-		{"fanvil", false, map[string]string{mac + ".cfg": fanvil}, []string{"GET F0V00X5U0000.cfg", "GET " + mac + ".cfg"}, true},
+		{"fanvil", false, map[string]string{mac + ".cfg": fanvil}, []string{"GET F0V0X5U00000.cfg", "GET " + mac + ".cfg"}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.vendor, func(t *testing.T) {

@@ -60,7 +60,7 @@ func TestVendorFileSets(t *testing.T) {
 		{Snom, "D785", strings.ToUpper(other), ""},
 		// Fanvil: the model common file, per-MAC .cfg in either case.
 		{Fanvil, "X6", "F0V00X600000.cfg", KindCommon},
-		{Fanvil, "X5U", "F0V00X5U0000.cfg", KindCommon},
+		{Fanvil, "X5U", "F0V0X5U00000.cfg", KindCommon},
 		{Fanvil, "X5U", mac + ".cfg", KindDevice},
 		{Fanvil, "X5U", upper + ".cfg", KindDevice},
 		{Fanvil, "X5U", other + ".cfg", ""},

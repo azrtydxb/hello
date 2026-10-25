@@ -368,7 +368,7 @@ func TestBootTrustOnFirstUse(t *testing.T) {
 		{Poly, "VVX 450", "0004f2000002", "000000000000.cfg", "0004f2000002-hello.cfg", []string{"0004f2000002.cfg"}},
 		{Grandstream, "GRP2614", "000b82000003", "cfg.xml", "cfg000b82000003.xml", nil},
 		{Snom, "D785", "000413000004", "snomD785.htm", "snomD785-000413000004.htm", nil},
-		{Fanvil, "X5U", "0c383e000005", "F0V00X5U0000.cfg", "0c383e000005.cfg", nil},
+		{Fanvil, "X5U", "0c383e000005", "F0V0X5U00000.cfg", "0c383e000005.cfg", nil},
 	}
 	for _, vd := range vendors {
 		p, tok := e.s.addPhone(vd.v, vd.model, vd.mac)
@@ -393,7 +393,11 @@ func TestBootTrustOnFirstUse(t *testing.T) {
 		}
 		w = e.do(req{path: "/p/boot/" + vd.claim, proto: "http"})
 		body := w.Body.String()
-		if w.Code != 200 || !strings.Contains(body, "https://prov.hello.test/p/"+tok+"/") || !strings.Contains(body, "http://prov.hello.test/p/ca.crt") {
+		own := "https://prov.hello.test/p/" + tok + "/"
+		if vd.v == Fanvil { // Flash Server IP is the host alone, Flash File Name the path
+			own = "p/" + tok + "/$mac.cfg"
+		}
+		if w.Code != 200 || !strings.Contains(body, own) || !strings.Contains(body, "http://prov.hello.test/p/ca.crt") {
 			t.Fatalf("%s hand-off: %d %q", vd.v, w.Code, body)
 		}
 		if vd.v == Snom && !strings.Contains(body, tok+"/{mac}") {

@@ -350,7 +350,7 @@ func TestBootBodiesHandOff(t *testing.T) {
 	}{
 		{Grandstream, []string{"<P237>", "<P145>", "<P212>"}, []string{"<P237>" + own + "</P237>", "<P212>2</P212>", "<P145>0</P145>"}},
 		{Yealink, []string{"auto_provision.server.url", "dhcp_option"}, []string{"static.auto_provision.server.url = " + own, "static.auto_provision.dhcp_option.enable = 0"}},
-		{Fanvil, []string{"FlashServerIP"}, []string{"FlashServerIP      :" + own}},
+		{Fanvil, []string{"Flash Server IP"}, []string{"Flash Server IP    :prov.hello.test", "Flash File Name    :p/TOKEN/$mac.cfg", "Flash Protocol     :5"}},
 		{Poly, nil, []string{`device.prov.serverName="` + own + `"`, `device.dhcp.bootSrvUseOpt="2"`}},
 	}
 	for _, c := range cases {

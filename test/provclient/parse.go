@@ -263,12 +263,19 @@ func ParseFanvil(b []byte) (Config, error) {
 		k, v, _ := strings.Cut(line, ":")
 		kv[strings.TrimSpace(k)] = v
 	}
-	c := Config{
-		Server: kv["SIP1 RegisterAddr"], User: kv["SIP1 PhoneNumber"], AuthUser: kv["SIP1 RegisterUser"],
-		Password: kv["SIP1 RegisterPswd"], DisplayName: kv["SIP1 DisplayName"], ProvURL: kv["FlashServerIP"],
-		CAURL: kv["CACertURL"], FirmwareURL: kv["UpgradeServer1"], AdminPassword: kv["admin AdminPswd"],
+	// The phone's own URL is its Flash settings put together: protocol (4
+	// HTTP, 5 HTTPS), server host and the file name with "$mac.cfg" off.
+	var provURL string
+	if host := strings.TrimSpace(kv["Flash Server IP"]); host != "" {
+		scheme := map[string]string{"4": "http", "5": "https"}[strings.TrimSpace(kv["Flash Protocol"])]
+		provURL = scheme + "://" + host + "/" + strings.TrimSuffix(strings.TrimSpace(kv["Flash File Name"]), "$mac.cfg")
 	}
-	c.Port, _ = strconv.Atoi(kv["SIP1 RegisterPort"])
+	c := Config{
+		Server: kv["SIP1 Register Addr"], User: kv["SIP1 Phone Number"], AuthUser: kv["SIP1 Register User"],
+		Password: kv["SIP1 Register Pswd"], DisplayName: kv["SIP1 Display Name"], ProvURL: provURL,
+		CAURL: kv["CACertURL"], FirmwareURL: kv["Auto Image Url"], AdminPassword: kv["admin AdminPswd"],
+	}
+	c.Port, _ = strconv.Atoi(kv["SIP1 Register Port"])
 	for _, v := range numbered(kv, `^Fkey(\d+) Value$`, func(n int) bool { return kv["Fkey"+strconv.Itoa(n)+" Type"] == "1" }) {
 		num, _, _ := strings.Cut(v, "@")
 		c.BLF = append(c.BLF, num)
