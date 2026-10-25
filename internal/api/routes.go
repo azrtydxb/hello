@@ -151,6 +151,12 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/phones/{id}/admin-password/reveal", auth.ScopeSecrets, auth.RoleAdmin, false, s.revealAdminPassword},
 		{"POST", "/api/v1/phones/{id}/admin-password/rotate", auth.ScopeSecrets, auth.RoleAdmin, false, s.rotateAdminPassword},
 		{"GET", "/api/v1/phones/{id}/fetches", auth.ScopeRead, auth.RoleViewer, false, s.phoneFetches},
+		{"POST", "/api/v1/phones/resync", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushResync, false)},
+		{"POST", "/api/v1/phones/reboot", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushReboot, false)},
+		{"POST", "/api/v1/phones/{id}/resync", auth.ScopeWrite, auth.RoleOperator, false, s.pushPhone(store.PushResync)},
+		{"POST", "/api/v1/phones/{id}/reboot", auth.ScopeWrite, auth.RoleOperator, false, s.pushPhone(store.PushReboot)},
+		{"GET", "/api/v1/phones/{id}/pushes", auth.ScopeRead, auth.RoleViewer, false, s.listPhonePushes},
+		{"GET", "/api/v1/phone-pushes", auth.ScopeRead, auth.RoleViewer, false, s.latestPhonePushes},
 		{"GET", "/api/v1/phones/{id}/preview", auth.ScopeRead, auth.RoleViewer, false, s.previewPhone},
 
 		{"GET", "/api/v1/phonebooks", auth.ScopeRead, auth.RoleViewer, false, s.listPhonebooks},
@@ -178,6 +184,8 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/phone-groups/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneGroup},
 		{"PUT", "/api/v1/phone-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updatePhoneGroup},
 		{"DELETE", "/api/v1/phone-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deletePhoneGroup},
+		{"POST", "/api/v1/phone-groups/{id}/resync", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushResync, true)},
+		{"POST", "/api/v1/phone-groups/{id}/reboot", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushReboot, true)},
 		{"PUT", "/api/v1/phone-groups/{id}/books", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupBooks},
 
 		{"GET", "/api/v1/prov/templates", auth.ScopeRead, auth.RoleViewer, false, s.listTemplates},

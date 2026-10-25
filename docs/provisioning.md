@@ -362,6 +362,78 @@ key could not be found in any public document, so Hello does not guess one;
 Fanvil phones get MWI from the unsolicited `NOTIFY`. Neither vendor has been
 tested on hardware.
 
+## Remote resync and reboot (check-sync)
+
+A phone can be told to re-fetch its configuration, or to reboot, without
+touching it. Hello sends an out-of-dialog `NOTIFY` with `Event: check-sync`
+to every registered contact of the phone's device, through the same path as
+a call to it (the registration's `Path`, so the edge proxy reaches the
+phone's NAT flow). Hello never sends `Event: reset`; a factory reset stays
+on the phone, and the Grandstream template does not enable "Allow SIP Reset".
+
+| Vendor      | Resync                    | Reboot                   | Status                                            |
+| ----------- | ------------------------- | ------------------------ | ------------------------------------------------- |
+| Yealink     | `check-sync;reboot=false` | `check-sync;reboot=true` | verify on hardware                                |
+| Snom        | `check-sync;reboot=false` | `check-sync;reboot=true` | verify on hardware                                |
+| Poly        | `check-sync`              | `check-sync;reboot=true` | verify on hardware                                |
+| Grandstream | `check-sync`              | `check-sync;reboot=true` | WP8x6 documented; the reboot form is to verify    |
+| Fanvil      | `check-sync`              | `check-sync;reboot=true` | `resync` is the other documented event; to verify |
+| Generic     | `check-sync`              | `check-sync;reboot=true` |                                                   |
+
+Grandstream phones challenge the `NOTIFY` with digest when `P4428 = 1`
+(NOTIFY authentication), which the template writes; Hello answers the
+challenge with the device's stored digest hash, preferring SHA-256, only in
+the device's own realm (a challenge in any other realm is not answered and the
+push reports `auth_failed`). The template also writes `P95030 = 0`, so a plain
+check-sync re-provisions without a reboot (WP8x6, firmware 1.0.3.20 and
+later).
+
+**Console.** Phone page: Resync and Reboot (reboot asks for confirmation) and
+the last pushes with their result. Phones page: a resync and a reboot button
+per row, "Resync all" and "Reboot all", and the newest result per phone.
+Phone groups page: resync and reboot for every phone in a group. Operators
+and admins can push; viewers cannot.
+
+**API.** `POST /api/v1/phones/{id}/resync` and `.../reboot` (202, the queued
+push), `POST /api/v1/phone-groups/{id}/resync|reboot` and
+`POST /api/v1/phones/resync|reboot` (202, `{queued, skipped}`; phones with no
+device or disabled are skipped), `GET /api/v1/phones/{id}/pushes` and
+`GET /api/v1/phone-pushes` (the newest per phone). A phone with no enabled
+device answers `409`. Every request is audited (`resync` or `reboot` on the
+phone, the group, or `all`).
+
+**How it runs.** The request is a row in `phone_pushes`, and hello-control
+sends PostgreSQL `NOTIFY hello_checksync`. Any hello-sip node claims it (a
+row is claimed once), at most `HELLO_PROV_PUSH_RATE` claims per minute across
+the cluster (default 20), so a push to 500 phones takes 25 minutes at the
+default; raise the rate for big sites. A claim that stays "sending" for two
+minutes (its node died) is written off as `failed`.
+
+**Results.**
+
+| Result           | Meaning                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------- |
+| `pending`        | Queued, waiting for a node or for the rate                                                      |
+| `sending`        | Claimed; the NOTIFY is out                                                                      |
+| `ok`             | The phone answered 2xx. The phone's next fetch in the fetch log confirms it                     |
+| `not_registered` | No registration, or the phone answered `481` or `404`; the change waits for the periodic resync |
+| `timeout`        | No answer ("push not acknowledged"); the change lands at the periodic resync                    |
+| `auth_failed`    | The phone's challenge was in an unknown realm, or it rejected the credentials                   |
+| `failed`         | Any other answer or a send error                                                                |
+
+A phone registered from two contacts gets the NOTIFY on both, and the result
+is the best of them (`ok`, then `auth_failed`, `timeout`, `failed`,
+`not_registered`). Watch `hello_checksync_total{event,result}`.
+
+**Automatic resync.** With `HELLO_PROV_AUTO_RESYNC=true` (default off)
+hello-control fingerprints what each bound phone's configuration renders from
+(the account, server, BLF keys, address book assignment, firmware pin, time
+settings and the template that resolves for it) every 30 seconds. A change
+that is the same at two scans in a row queues a resync for that phone, so a
+burst of edits pushes once; pushes still go out at `HELLO_PROV_PUSH_RATE`. A
+phone seen for the first time is only recorded. Automatic pushes show as
+"(automatic)" and are audited as `auto_resync` by `system`.
+
 ## Redirect services
 
 A vendor redirect service sends a factory-new phone to Hello from anywhere

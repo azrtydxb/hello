@@ -38,6 +38,9 @@
     <P145>0</P145>
     <P194>1</P194>
     <P193>{{div .Prov.ResyncSeconds 60}}</P193>
+{{- /* Check-sync (spec S-5): P95030 = 0 so a plain check-sync re-provisions without a reboot (WP8x6 fw 1.0.3.20 and later) [R8x6 section 1]; P4428 = 1 authenticates the NOTIFY, which hello-sip answers from the device's HA1. */}}
+    <P95030>0</P95030>
+    <P4428>1</P4428>
 {{- with .Book}}
     <P330>3</P330>
     <P331>{{xml .HostPath}}</P331>

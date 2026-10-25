@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api";
 import {
   getPhone,
   listPhoneFetches,
+  listPhonePushes,
   previewPhoneFile,
+  pushPhone,
   revealAdminPassword,
   rotateAdminPassword,
   vendorLabel,
@@ -29,6 +31,7 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { usePolling } from "../usePolling";
 import {
   DeletePhoneDialog,
   IssuedUrlModal,
@@ -49,6 +52,7 @@ import {
   RedirectBadge,
   vendorModel,
 } from "./phones/ui";
+import { PushLine, RebootDialog } from "./phones/push";
 import "./phones/inventory.css";
 import { Can } from "../role";
 
@@ -57,7 +61,7 @@ type PhoneState =
   | { status: "error"; message: string }
   | { status: "ready"; phone: Phone };
 
-type Pending = "rotate" | "rearm" | "delete" | "rotate-admin" | null;
+type Pending = "rotate" | "rearm" | "delete" | "rotate-admin" | "reboot" | null;
 type Tab = "fetches" | "preview";
 
 const FETCH_PAGE = 50;
@@ -115,6 +119,11 @@ export function PhoneDetail() {
   }, [id]);
 
   const phone = state.status === "ready" ? state.phone : null;
+  const loadPushes = useCallback(
+    (signal: AbortSignal) => listPhonePushes(id, signal),
+    [id],
+  );
+  const pushes = usePolling(loadPushes, 4000);
 
   async function onReveal() {
     if (!phone) return;
@@ -132,6 +141,17 @@ export function PhoneDetail() {
 
   const step = phone ? manualRedirectStep(phone.vendor) : null;
 
+  async function onResync() {
+    if (!phone) return;
+    try {
+      await pushPhone(phone.id, "resync");
+      pushes.reload();
+      toast.show(`Resync queued for ${phoneName(phone)}.`);
+    } catch (err) {
+      toast.show(`Could not queue a resync: ${errorMessage(err)}`);
+    }
+  }
+
   return (
     <section aria-labelledby="page-title">
       <PageHeader
@@ -141,6 +161,26 @@ export function PhoneDetail() {
         actions={
           phone && (
             <>
+              <Can>
+                <Button
+                  variant="secondary"
+                  icon="refresh-cw"
+                  disabled={phone.deviceId === null || !phone.enabled}
+                  onClick={() => void onResync()}
+                >
+                  Resync
+                </Button>
+              </Can>
+              <Can>
+                <Button
+                  variant="secondary"
+                  icon="power"
+                  disabled={phone.deviceId === null || !phone.enabled}
+                  onClick={() => setPending("reboot")}
+                >
+                  Reboot
+                </Button>
+              </Can>
               <Can min="admin">
                 <Button
                   variant="secondary"
@@ -264,6 +304,26 @@ export function PhoneDetail() {
             </div>
 
             <div className="prov-stack">
+              <h2 className="inv-section-title">Resync and reboot</h2>
+              <p className="prov-muted">
+                The phone is sent a check-sync; the result is the phone&apos;s
+                answer. Its next fetch below confirms it re-read its
+                configuration.
+              </p>
+              {pushes.status === "loading" && <Spinner label="Loading…" />}
+              {pushes.status !== "loading" &&
+                (pushes.data ?? []).length === 0 && (
+                  <p className="prov-muted">Nothing sent yet.</p>
+                )}
+              {pushes.status !== "loading" &&
+                (pushes.data ?? []).slice(0, 5).map((p) => (
+                  <div key={String(p.id)}>
+                    <PushLine push={p} />
+                  </div>
+                ))}
+            </div>
+
+            <div className="prov-stack">
               <h2 className="inv-section-title">Admin password</h2>
               <p className="prov-muted">
                 The phone&apos;s web UI password. Revealing it is audited.
@@ -321,6 +381,22 @@ export function PhoneDetail() {
         )}
       </div>
 
+      {phone && pending === "reboot" && (
+        <RebootDialog
+          title={`Reboot ${phoneName(phone)}?`}
+          description="The phone restarts and drops any call it is in. It fetches its configuration again when it is back."
+          run={async () => {
+            await pushPhone(phone.id, "reboot");
+            return `Reboot queued for ${phoneName(phone)}.`;
+          }}
+          onDone={(m) => {
+            setPending(null);
+            pushes.reload();
+            toast.show(m);
+          }}
+          onClose={() => setPending(null)}
+        />
+      )}
       {phone && pending === "rotate" && (
         <RotateTokenDialog
           phone={phone}

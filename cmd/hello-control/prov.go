@@ -142,6 +142,9 @@ func startProv(ctx context.Context, cfg config.Control, st *store.Store, objs *a
 	go pruneFetches(ctx, st, vk, cfg.NodeID, cfg.Prov.AuditRetention, log)
 	go runRedirectWorker(ctx, st, vk, cfg.NodeID, deployment, metrics, log)
 	go publishPhoneStates(ctx, st, metrics, cfg.Prov.Resync, log)
+	if cfg.Prov.AutoResync {
+		go autoSync(ctx, st, plog)
+	}
 	return nil
 }
 

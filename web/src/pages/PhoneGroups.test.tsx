@@ -274,6 +274,47 @@ describe("Phone groups", () => {
   });
 });
 
+describe("Phone group resync and reboot", () => {
+  it("resyncs the group and reboots it only after confirmation", async () => {
+    const calls = api("operator", {
+      "POST /api/v1/phone-groups/9/resync": () =>
+        json({ queued: 1, skipped: 0 }, 202),
+      "POST /api/v1/phone-groups/9/reboot": () =>
+        json({ queued: 1, skipped: 1 }, 202),
+    });
+    renderApp("/phones/groups");
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Resync every phone in Site A",
+      }),
+    );
+    expect(
+      await screen.findByText(/Site A: 1 phone queued to resync/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reboot every phone in Site A" }),
+    );
+    expect(calls.some((c) => c.url.endsWith("/reboot"))).toBe(false);
+    const confirm = screen.getByRole("dialog", {
+      name: "Reboot every phone in Site A?",
+    });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Reboot" }));
+    expect(
+      await screen.findByText(/1 phone queued to reboot; 1 skipped/),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the push buttons from a viewer", async () => {
+    api("viewer");
+    renderApp("/phones/groups");
+    await screen.findByText("Site A");
+    expect(
+      screen.queryByRole("button", { name: "Resync every phone in Site A" }),
+    ).toBeNull();
+  });
+});
+
 describe("Phone group on the phone form", () => {
   it("offers the groups and saves the chosen one", async () => {
     const calls = mockApi({

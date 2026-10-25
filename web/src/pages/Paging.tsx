@@ -330,7 +330,11 @@ function TestPanel({ group: g }: { group: PagingGroup }) {
         }))}
         onChange={(e) => setExt(e.target.value)}
       />
-      <Button size="sm" disabled={busy || ext === ""} onClick={() => void run()}>
+      <Button
+        size="sm"
+        disabled={busy || ext === ""}
+        onClick={() => void run()}
+      >
         {busy ? "Paging…" : "Page now"}
       </Button>
       {error && <Alert tone="bad">{error}</Alert>}

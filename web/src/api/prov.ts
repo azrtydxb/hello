@@ -179,6 +179,71 @@ export const revealAdminPassword = (phoneId: Id) =>
 export const rotateAdminPassword = (phoneId: Id) =>
   request<void>("POST", `/api/v1/phones/${seg(phoneId)}/admin-password/rotate`);
 
+// --- check-sync pushes: resync and reboot ------------------------------------------
+
+export type PushKind = "resync" | "reboot";
+
+/** What a push achieved; pending and sending are not final. */
+export type PushStatus =
+  | "pending"
+  | "sending"
+  | "ok"
+  | "not_registered"
+  | "timeout"
+  | "auth_failed"
+  | "failed";
+
+/** One resync or reboot request and its result. */
+export interface PhonePush {
+  id: Id;
+  phoneId: Id;
+  kind: PushKind;
+  source: "manual" | "auto";
+  actor: string;
+  status: PushStatus;
+  detail: string;
+  contacts: number;
+  requestedAt: string;
+  finishedAt: string | null;
+}
+
+/** How many phones a bulk push queued and how many it skipped (no device, or disabled). */
+export interface BulkPush {
+  queued: number;
+  skipped: number;
+}
+
+/** POST /api/v1/phones/{id}/resync|reboot: 202 with the queued push. */
+export const pushPhone = (phoneId: Id, kind: PushKind) =>
+  request<PhonePush>("POST", `/api/v1/phones/${seg(phoneId)}/${kind}`);
+
+/** POST /api/v1/phone-groups/{id}/resync|reboot. */
+export const pushGroup = (groupId: Id, kind: PushKind) =>
+  request<BulkPush>("POST", `/api/v1/phone-groups/${seg(groupId)}/${kind}`);
+
+/** POST /api/v1/phones/resync|reboot: every phone. */
+export const pushAllPhones = (kind: PushKind) =>
+  request<BulkPush>("POST", `/api/v1/phones/${kind}`);
+
+/** GET /api/v1/phones/{id}/pushes, newest first. */
+export async function listPhonePushes(
+  phoneId: Id,
+  signal?: AbortSignal,
+): Promise<PhonePush[]> {
+  const path = `/api/v1/phones/${seg(phoneId)}/pushes?limit=20`;
+  const body = await request<unknown>("GET", path, { signal });
+  return listItems<PhonePush>(body, path);
+}
+
+/** GET /api/v1/phone-pushes: the newest push of every phone that has one. */
+export async function listLatestPushes(
+  signal?: AbortSignal,
+): Promise<PhonePush[]> {
+  const path = "/api/v1/phone-pushes";
+  const body = await request<unknown>("GET", path, { signal });
+  return listItems<PhonePush>(body, path);
+}
+
 /** GET /api/v1/phones/{id}/fetches?before=&limit=, newest first. */
 export async function listPhoneFetches(
   phoneId: Id,

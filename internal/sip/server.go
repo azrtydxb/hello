@@ -106,6 +106,10 @@ type Config struct {
 	HATakeoverEnabled bool
 	HATakeoverPoll    time.Duration
 	HATakeoverJitter  time.Duration
+
+	// PushRate is how many check-sync pushes the cluster claims per minute
+	// (HELLO_PROV_PUSH_RATE; zero means 20).
+	PushRate int
 }
 
 // Deps are the Server's collaborators.
@@ -133,6 +137,9 @@ type Deps struct {
 	// MailboxEvents carries mailbox changes made by the control plane so
 	// MWI NOTIFYs go out at once; nil leaves only the safety-net re-read.
 	MailboxEvents MailboxEvents
+	// Pushes is the check-sync push queue hello-control fills; nil
+	// disables pushes.
+	Pushes PushQueue
 	// Settings applies feature-code mutations (DND, forwarding) by queueing
 	// them to PostgreSQL and bumping the configuration revision; nil makes
 	// the mutating feature codes answer 503.
@@ -420,6 +427,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.mwiPollLoop(rctx) })
 	if s.deps.MailboxEvents != nil {
 		s.bg.Go(func() { s.deps.MailboxEvents.Watch(rctx, s.mailboxChanged) })
+	}
+	if s.deps.Pushes != nil {
+		s.bg.Go(func() { s.pushLoop(rctx) })
 	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })

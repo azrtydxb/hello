@@ -57,6 +57,7 @@ function api(p = phone(), more: Routes = {}) {
   return mockApi({
     ...ME,
     "GET /api/v1/phones/5": () => json(p),
+    "GET /api/v1/phones/5/pushes?limit=20": () => json({ items: [] }),
     "GET /api/v1/phones/5/fetches?limit=50": () =>
       json({
         items: [fetchRow(1), fetchRow(2, { result: "denied", status: 403 })],
@@ -152,5 +153,75 @@ describe("Phone detail", () => {
     await waitFor(() =>
       expect(screen.getByTestId("location")).toHaveTextContent(/^\/phones$/),
     );
+  });
+
+  it("queues a resync and shows the result the phone gave", async () => {
+    const push = (status: string) => ({
+      id: 9,
+      phoneId: 5,
+      kind: "resync",
+      source: "manual",
+      actor: "alice",
+      status,
+      detail: "200",
+      contacts: 1,
+      requestedAt: "2026-10-02T11:00:00Z",
+      finishedAt: status === "pending" ? null : "2026-10-02T11:00:01Z",
+    });
+    const calls = api(phone(), {
+      "POST /api/v1/phones/5/resync": () => json(push("pending"), 202),
+      "GET /api/v1/phones/5/pushes?limit=20": [
+        () => json({ items: [] }),
+        () => json({ items: [push("ok")] }),
+      ],
+    });
+    renderApp("/phones/5");
+    fireEvent.click(await screen.findByRole("button", { name: "Resync" }));
+    expect(
+      await screen.findByText("Resync: Acknowledged (200)"),
+    ).toBeInTheDocument();
+    expect(
+      calls.some((c) => c.method === "POST" && c.url.endsWith("/resync")),
+    ).toBe(true);
+  });
+
+  it("asks before rebooting, and reports a timeout as not acknowledged", async () => {
+    const reboot = {
+      id: 10,
+      phoneId: 5,
+      kind: "reboot",
+      source: "manual",
+      actor: "alice",
+      status: "timeout",
+      detail: "no answer",
+      contacts: 1,
+      requestedAt: "2026-10-02T11:00:00Z",
+      finishedAt: "2026-10-02T11:00:09Z",
+    };
+    const calls = api(phone(), {
+      "POST /api/v1/phones/5/reboot": () =>
+        json({ ...reboot, status: "pending" }, 202),
+      "GET /api/v1/phones/5/pushes?limit=20": [
+        () => json({ items: [] }),
+        () => json({ items: [reboot] }),
+      ],
+    });
+    renderApp("/phones/5");
+    fireEvent.click(await screen.findByRole("button", { name: "Reboot" }));
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    const confirm = screen.getByRole("dialog", { name: "Reboot Front desk?" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Reboot" }));
+    expect(
+      await screen.findByText("Reboot: Push not acknowledged"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer a push to a phone with no device", async () => {
+    api(phone({ deviceId: null }));
+    renderApp("/phones/5");
+    expect(
+      await screen.findByRole("button", { name: "Resync" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reboot" })).toBeDisabled();
   });
 });

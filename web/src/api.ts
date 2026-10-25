@@ -1138,12 +1138,7 @@ export interface PageTestResult {
   id: string;
   extension: string;
   result:
-    | "answered"
-    | "busy"
-    | "dnd"
-    | "no_answer"
-    | "no_registration"
-    | "failed";
+    "answered" | "busy" | "dnd" | "no_answer" | "no_registration" | "failed";
   detail?: string;
   node: string;
   contacts: PageTestContact[];

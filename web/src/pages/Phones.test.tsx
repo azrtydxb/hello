@@ -518,3 +518,54 @@ describe("Phone admin password", () => {
     expect(document.body.innerHTML).not.toContain(secret);
   });
 });
+
+describe("Phones resync and reboot", () => {
+  it("shows each phone's last push result and resyncs one phone", async () => {
+    const push = {
+      id: 3,
+      phoneId: 5,
+      kind: "resync",
+      source: "auto",
+      actor: "system",
+      status: "not_registered",
+      detail: "not registered",
+      contacts: 0,
+      requestedAt: "2026-10-02T11:00:00Z",
+      finishedAt: "2026-10-02T11:00:01Z",
+    };
+    const calls = api([phone({ id: 5 })], {
+      "GET /api/v1/phone-pushes": () => json({ items: [push] }),
+      "POST /api/v1/phones/5/resync": () =>
+        json({ ...push, status: "pending" }, 202),
+    });
+    renderApp("/phones");
+    const t = await table();
+    expect(
+      await within(t).findByText("Resync: Not registered"),
+    ).toBeInTheDocument();
+    fireEvent.click(within(t).getByRole("button", { name: /^Resync / }));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) => c.method === "POST" && c.url === "/api/v1/phones/5/resync",
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it("asks before rebooting every phone", async () => {
+    const calls = api([phone({ id: 5 })], {
+      "GET /api/v1/phone-pushes": () => json({ items: [] }),
+      "POST /api/v1/phones/reboot": () => json({ queued: 1, skipped: 0 }, 202),
+    });
+    renderApp("/phones");
+    await table();
+    fireEvent.click(screen.getByRole("button", { name: "Reboot all" }));
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    const confirm = screen.getByRole("dialog", { name: "Reboot every phone?" });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Reboot" }));
+    expect(
+      await screen.findByText("1 phone queued to reboot."),
+    ).toBeInTheDocument();
+  });
+});

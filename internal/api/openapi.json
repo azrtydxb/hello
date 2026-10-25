@@ -4231,6 +4231,423 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/phones/resync": {
+      "post": {
+        "operationId": "resyncAllPhones",
+        "summary": "Ask every phone to re-fetch its configuration",
+        "description": "Queues a check-sync NOTIFY for every bound, enabled phone. Each phone's result shows in its pushes list.",
+        "tags": ["phones"],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["queued", "skipped"],
+                  "properties": {
+                    "queued": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/reboot": {
+      "post": {
+        "operationId": "rebootAllPhones",
+        "summary": "Ask every phone to reboot",
+        "description": "Queues a check-sync NOTIFY with reboot=true for every bound, enabled phone.",
+        "tags": ["phones"],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["queued", "skipped"],
+                  "properties": {
+                    "queued": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "disruptive: reboots a handset, console only"
+        }
+      }
+    },
+    "/api/v1/phones/{id}/resync": {
+      "post": {
+        "operationId": "resyncPhone",
+        "summary": "Ask a phone to re-fetch its configuration",
+        "description": "Queues a check-sync NOTIFY to the phone's registered contacts. The result (ok, not_registered, timeout, auth_failed, failed) appears in the phone's pushes list.",
+        "tags": ["phones"],
+        "responses": {
+          "202": {
+            "description": "Queued push",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhonePush"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/{id}/reboot": {
+      "post": {
+        "operationId": "rebootPhone",
+        "summary": "Ask a phone to reboot",
+        "description": "Queues a check-sync NOTIFY with reboot=true to the phone's registered contacts.",
+        "tags": ["phones"],
+        "responses": {
+          "202": {
+            "description": "Queued push",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhonePush"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "disruptive: reboots a handset, console only"
+        }
+      }
+    },
+    "/api/v1/phones/{id}/pushes": {
+      "get": {
+        "operationId": "listPhonePushes",
+        "summary": "A phone's resync and reboot pushes, newest first",
+        "description": "Lists a phone's recent check-sync pushes with their result.",
+        "tags": ["phones"],
+        "responses": {
+          "200": {
+            "description": "Pushes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PhonePush"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "Page size, 1-100."
+          }
+        ],
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-pushes": {
+      "get": {
+        "operationId": "listLatestPhonePushes",
+        "summary": "The newest push of every phone",
+        "description": "Lists the most recent resync or reboot of each phone that has had one, with its result.",
+        "tags": ["phones"],
+        "responses": {
+          "200": {
+            "description": "Latest pushes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PhonePush"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/resync": {
+      "post": {
+        "operationId": "resyncPhoneGroup",
+        "summary": "Ask every phone of a group to re-fetch its configuration",
+        "description": "Queues a check-sync NOTIFY for every bound, enabled phone in the group.",
+        "tags": ["phones"],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["queued", "skipped"],
+                  "properties": {
+                    "queued": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/reboot": {
+      "post": {
+        "operationId": "rebootPhoneGroup",
+        "summary": "Ask every phone of a group to reboot",
+        "description": "Queues a check-sync NOTIFY with reboot=true for every bound, enabled phone in the group.",
+        "tags": ["phones"],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["queued", "skipped"],
+                  "properties": {
+                    "queued": {
+                      "type": "integer"
+                    },
+                    "skipped": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "disruptive: reboots a handset, console only"
+        }
+      }
+    },
     "/api/v1/phones/{id}/preview": {
       "get": {
         "operationId": "previewPhoneFile",
@@ -8393,6 +8810,54 @@
           }
         }
       },
+      "PhonePush": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "phoneId": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["resync", "reboot"]
+          },
+          "source": {
+            "type": "string",
+            "enum": ["manual", "auto"]
+          },
+          "actor": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "sending",
+              "ok",
+              "not_registered",
+              "timeout",
+              "auth_failed",
+              "failed"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          },
+          "contacts": {
+            "type": "integer"
+          },
+          "requestedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
       "PhoneWithURL": {
         "allOf": [
           {
@@ -9295,27 +9760,46 @@
         "required": ["id", "extension", "result", "contacts", "node"],
         "description": "The outcome of a paging-group test page.",
         "properties": {
-          "id": {"type": "string"},
-          "extension": {"type": "string", "description": "The member that was paged"},
+          "id": { "type": "string" },
+          "extension": {
+            "type": "string",
+            "description": "The member that was paged"
+          },
           "result": {
             "type": "string",
-            "enum": ["answered", "busy", "dnd", "no_answer", "no_registration", "failed"],
+            "enum": [
+              "answered",
+              "busy",
+              "dnd",
+              "no_answer",
+              "no_registration",
+              "failed"
+            ],
             "description": "Overall result; answered when any contact answered and heard the tone"
           },
-          "detail": {"type": "string", "description": "Why the test failed, when it did"},
-          "node": {"type": "string", "description": "The hello-sip node that ran the test"},
+          "detail": {
+            "type": "string",
+            "description": "Why the test failed, when it did"
+          },
+          "node": {
+            "type": "string",
+            "description": "The hello-sip node that ran the test"
+          },
           "contacts": {
             "type": "array",
             "items": {
               "type": "object",
               "required": ["device", "userAgent", "result", "headers"],
               "properties": {
-                "device": {"type": "string"},
-                "userAgent": {"type": "string"},
-                "result": {"type": "string", "enum": ["answered", "busy", "no_answer", "failed"]},
+                "device": { "type": "string" },
+                "userAgent": { "type": "string" },
+                "result": {
+                  "type": "string",
+                  "enum": ["answered", "busy", "no_answer", "failed"]
+                },
                 "headers": {
                   "type": "array",
-                  "items": {"type": "string"},
+                  "items": { "type": "string" },
                   "description": "The auto-answer headers the INVITE carried, as Name: value"
                 }
               }
@@ -11692,9 +12176,21 @@
                   "type": "object",
                   "required": ["extension", "device", "result"],
                   "properties": {
-                    "extension": {"type": "string"},
-                    "device": {"type": "string", "description": "The member contact's device; empty when the member was never rung"},
-                    "result": {"type": "string", "enum": ["answered", "busy", "dnd", "no_answer", "no_registration"]}
+                    "extension": { "type": "string" },
+                    "device": {
+                      "type": "string",
+                      "description": "The member contact's device; empty when the member was never rung"
+                    },
+                    "result": {
+                      "type": "string",
+                      "enum": [
+                        "answered",
+                        "busy",
+                        "dnd",
+                        "no_answer",
+                        "no_registration"
+                      ]
+                    }
                   }
                 }
               }
