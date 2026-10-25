@@ -762,8 +762,8 @@ func (f *rtpFeed) digit(d byte) {
 
 // TestVoicemailLeaveMessage fails if the answer is not the anchor's, if no
 // WAV lands in the audio store with a message row behind it, if '#' does not
-// finish the recording, or if the MWI MESSAGE with the new counts is not
-// sent.
+// finish the recording, or if the unsolicited MWI NOTIFY with the new counts is
+// not sent or MWI goes out as a MESSAGE.
 func TestVoicemailLeaveMessage(t *testing.T) {
 	vm := newVMStore()
 	vm.boxes["200"] = VoicemailBox{ID: 5, Extension: "200"}
@@ -811,8 +811,13 @@ func TestVoicemailLeaveMessage(t *testing.T) {
 	if v := pbx.metric(t, "hello_voicemail_messages_total", map[string]string{"result": "stored"}); v != 1 {
 		t.Fatalf("voicemail_messages{stored} = %v", v)
 	}
-	// MWI: the box owner's device gets the MESSAGE with the counts.
-	m := waitReq(t, b.messages, "MWI MESSAGE")
+	// MWI: the box owner's device holds no subscription, so it gets an
+	// unsolicited message-summary NOTIFY with the counts, never a MESSAGE.
+	m := waitReq(t, b.notifies, "unsolicited MWI NOTIFY")
+	if ev := m.GetHeader("Event"); ev == nil || ev.Value() != "message-summary" || m.GetHeader("Subscription-State") != nil {
+		t.Fatalf("unsolicited NOTIFY headers: %s", m.String())
+	}
+	noReq(t, b.messages, 100*time.Millisecond, "MWI MESSAGE")
 	body := string(m.Body())
 	if !strings.Contains(body, "Messages-Waiting: yes") || !strings.Contains(body, "Message-Account: sip:200@") || !strings.Contains(body, "Voice-Message: 1/1") {
 		t.Fatalf("MWI body = %q", body)

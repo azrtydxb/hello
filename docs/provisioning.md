@@ -221,6 +221,34 @@ with `{mac}`, which the phone fills in with its MAC on every re-check.
 X series. The model's common file (`F0V00X5U0000.cfg` for the X5U) and
 `<mac>.cfg` with the account.
 
+## Voicemail indicator (MWI)
+
+Hello tells a phone about waiting voicemail with RFC 3842 `message-summary`.
+A phone that sends `SUBSCRIBE` with `Event: message-summary` for its own
+mailbox is answered `200` and gets an immediate `NOTIFY` with the counts
+(`Messages-Waiting`, `Voice-Message`), then another on every new, heard or
+deleted message. The subscription must come from a device of the mailbox's
+own extension (anything else is `403`), `Expires` is held between 60 and
+3600 seconds, and an event Hello does not serve gets `489 Bad Event`.
+Contacts that hold no subscription get an unsolicited `NOTIFY` with the same
+body instead, never both. Hello no longer sends MWI as a SIP `MESSAGE`.
+
+A subscription lives on the node that accepted it. After a node restart or
+failover the phone re-subscribes on its next refresh and gets the current
+counts at once. Messages heard or deleted through the API reach the phone
+within about ten seconds (the node re-reads subscribed mailboxes). Watch
+`hello_mwi_notify_total{kind,result}`.
+
+The built-in templates provision the subscription and the voicemail number:
+
+| Vendor      | Setting written                                                  | Status                                  |
+| ----------- | ---------------------------------------------------------------- | --------------------------------------- |
+| Grandstream | `P99 = 1` (Subscribe for MWI), `P33` voicemail number (`*97` default) | Grandstream template keys (WP8x6, WP822) |
+| Yealink     | `account.1.subscribe_mwi = 1`, `voice_mail.number.1`             | verify on hardware                      |
+| Poly        | `msg.mwi.1.subscribe`, `msg.mwi.1.callBack`                      | verify on hardware                      |
+| Snom        | `user_mailbox` (the phone subscribes to it)                      | verify on hardware                      |
+| Fanvil      | `SIP1 MWINum`; no subscribe key confirmed, unsolicited `NOTIFY` covers it | verify on hardware              |
+
 ## Redirect services
 
 A vendor redirect service sends a factory-new phone to Hello from anywhere

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
@@ -500,39 +499,12 @@ func collectDigits(ctx context.Context, sess media.Session, dtmf chan byte) []by
 	}
 }
 
-// sendMWI publishes the extension's message counts as a MESSAGE with
-// Message-Account (S-8), to every registered device of the box's extension.
+// sendMWI tells the call's mailbox owner the counts changed (S-1).
 func (c *call) sendMWI() {
 	c.mu.Lock()
 	ext := c.dialled
 	c.mu.Unlock()
-	c.s.sendMWI(ext)
-}
-
-func (s *Server) sendMWI(ext string) {
-	if s.deps.Voicemails == nil {
-		return
-	}
-	s.goBG(func() {
-		defer contain(s.log, "MWI")
-		ctx, cancel := context.WithTimeout(context.Background(), 2*s.cfg.StateTimeout)
-		defer cancel()
-		unread, total, err := s.deps.Voicemails.MessageCounts(ctx, s.boxIDFor(ext))
-		if err != nil {
-			s.log.Warn("MWI counts unavailable", "error", err)
-			return
-		}
-		body := fmt.Sprintf("Messages-Waiting: %s\r\nMessage-Account: sip:%s@%s\r\nVoice-Message: %d/%d (%d/%d)\r\n",
-			yesNo(unread > 0), ext, s.cfg.Domain, unread, total, unread, total)
-		for _, b := range s.bindingsFor(ext) {
-			mctx, mcancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout)
-			err := s.sendMESSAGE(mctx, "sip:"+ext+"@"+s.cfg.Domain, b, body)
-			mcancel()
-			if err != nil {
-				s.log.Debug("MWI MESSAGE failed", "device", b.Device, "error", err)
-			}
-		}
-	})
+	c.s.notifyMWI(ext)
 }
 
 // boxIDFor is the snapshot's box id for an extension (0 without one).
@@ -562,42 +534,4 @@ func (s *Server) bindingsFor(ext string) []livestate.Binding {
 		out = append(out, bs...)
 	}
 	return out
-}
-
-// sendMESSAGE sends one MESSAGE request to a binding's contact.
-func (s *Server) sendMESSAGE(ctx context.Context, from string, b livestate.Binding, body string) error {
-	var target sip.Uri
-	raw := strings.TrimSuffix(strings.TrimPrefix(b.ContactURI, "<"), ">")
-	if err := sip.ParseUri(raw, &target); err != nil {
-		return fmt.Errorf("binding contact %q: %w", b.ContactURI, err)
-	}
-	req := sip.NewRequest(sip.MESSAGE, target)
-	fromHdr := &sip.FromHeader{Address: sip.Uri{User: "voicemail", Host: s.cfg.Domain}, Params: sip.HeaderParams{{K: "tag", V: sip.GenerateTagN(8)}}}
-	to := &sip.ToHeader{Address: sip.Uri{Scheme: "sip", User: b.Extension, Host: s.cfg.Domain}}
-	callID := sip.CallIDHeader(newID())
-	req.AppendHeader(fromHdr)
-	req.AppendHeader(to)
-	req.AppendHeader(&callID)
-	req.AppendHeader(&sip.CSeqHeader{SeqNo: 1, MethodName: sip.MESSAGE})
-	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
-	req.AppendHeader(sip.HeaderClone(&s.contact))
-	req.AppendHeader(sip.NewHeader("Content-Type", "application/simple-message-summary"))
-	req.SetBody([]byte(body))
-	req.SetTransport("UDP")
-	if b.Source != "" {
-		req.SetDestination(b.Source)
-	}
-	res, err := s.client.Do(ctx, req)
-	if err != nil {
-		return err
-	}
-	s.m.response(res.StatusCode)
-	return nil
-}
-
-func yesNo(b bool) string {
-	if b {
-		return "yes"
-	}
-	return "no"
 }

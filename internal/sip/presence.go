@@ -28,6 +28,7 @@ const (
 // node that accepted it, and a phone re-SUBSCRIBEs after a node restart.
 type subscription struct {
 	callID    string
+	event     string // eventDialog or eventMessageSummary
 	device    string
 	extension string
 	localTag  string
@@ -37,7 +38,20 @@ type subscription struct {
 	version   uint64
 	expires   time.Time
 	lastState string
+	lastMWI   string // message-summary: the body last sent, to skip repeats
 }
+
+// Subscription event packages Hello serves.
+const (
+	eventDialog         = "dialog"
+	eventMessageSummary = "message-summary"
+	allowEvents         = "dialog, message-summary"
+
+	// MWI subscriptions renew at the phone's pace but are clamped to this
+	// range (spec S-1).
+	mwiMinExpires = 60 * time.Second
+	mwiMaxExpires = 3600 * time.Second
+)
 
 // presenceFanout bounds one state change's fan-out; it runs on its own
 // goroutine, so a slow Valkey or a slow phone never delays the call.
@@ -80,34 +94,52 @@ func (s *Server) devicesOf(snap *snapshot.Snapshot, ext string) []string {
 	return out
 }
 
-// handleSubscribe serves a dialog (BLF) SUBSCRIBE: digest-authenticated,
-// Event: dialog only, expiry clamped to the registration limits. The 200
-// carries our To tag, which every NOTIFY of this dialog reuses.
+// handleSubscribe serves a SUBSCRIBE: digest-authenticated, Event: dialog
+// (BLF) or Event: message-summary (RFC 3842, own mailbox only); any other
+// event gets 489. The 200 carries our To tag, which every NOTIFY of this
+// dialog reuses.
 func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 	snap := s.deps.Snapshots.Current()
 	if snap == nil {
 		s.unavailable(tx, req)
 		return
 	}
-	if _, ok := s.verify(req, tx, snap); !ok {
+	dev, ok := s.verify(req, tx, snap)
+	if !ok {
 		return
 	}
-	if ev := req.GetHeader("Event"); ev == nil || !strings.EqualFold(strings.TrimSpace(ev.Value()), "dialog") {
-		s.respond(tx, req, sip.StatusBadRequest, "Bad Event")
-		return
+	event := ""
+	if ev := req.GetHeader("Event"); ev != nil {
+		event = strings.ToLower(strings.TrimSpace(strings.SplitN(ev.Value(), ";", 2)[0]))
 	}
-	ext := req.Recipient.User
-	if !snap.HasExtension(ext) {
-		s.respond(tx, req, sip.StatusNotFound, "Not Found")
+	var ext string
+	switch event {
+	case eventDialog:
+		ext = req.Recipient.User
+		if !snap.HasExtension(ext) {
+			s.respond(tx, req, sip.StatusNotFound, "Not Found")
+			return
+		}
+	case eventMessageSummary:
+		var ok bool
+		if ext, ok = mailboxOf(snap, dev, req.Recipient.User); !ok {
+			s.respond(tx, req, sip.StatusForbidden, "Forbidden")
+			return
+		}
+	default:
+		s.respond(tx, req, 489, "Bad Event", sip.NewHeader("Allow-Events", allowEvents))
 		return
 	}
 	exp := s.subscribeExpires(req)
+	if exp > 0 && event == eventMessageSummary {
+		exp = min(max(exp, mwiMinExpires), mwiMaxExpires)
+	}
 	if exp == 0 { // an unsubscribe
 		s.dropSub(req.CallID().Value(), true)
 		s.respond(tx, req, sip.StatusOK, "OK", sip.NewHeader("Expires", "0"))
 		return
 	}
-	sub, fresh := s.upsertSub(req, ext, exp)
+	sub, fresh := s.upsertSub(req, event, ext, exp)
 	if sub == nil {
 		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 		return
@@ -118,9 +150,17 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	s.respond(tx, req, sip.StatusOK, "OK",
 		sip.NewHeader("Expires", strconv.Itoa(int(exp/time.Second))),
-		sip.NewHeader("Event", "dialog"),
+		sip.NewHeader("Event", event),
 		&sip.ToHeader{Address: *req.To().Address.Clone(), Params: tag})
 	s.m.PresenceSubscriptions.Set(float64(s.subCount()))
+	if event == eventMessageSummary {
+		kind := MWIInitial
+		if !fresh {
+			kind = MWIRefresh
+		}
+		s.goBG(func() { s.sendMWINotify(sub, int(exp/time.Second), "", kind) })
+		return
+	}
 	if fresh {
 		init := StateIdle
 		if e, ok := snap.Extension(ext); ok && e.DND {
@@ -128,6 +168,27 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 		}
 		go s.sendStateNotify(sub, init, int(exp/time.Second), "")
 	}
+}
+
+// mailboxOf resolves the mailbox a message-summary SUBSCRIBE addresses: the
+// authenticated device's own extension. The Request-URI may name the
+// extension, one of that extension's device usernames (phones use their
+// account user) or the voicemail feature code (Snom and Yealink can
+// subscribe to the voicemail number); anything else is another mailbox.
+func mailboxOf(snap *snapshot.Snapshot, dev snapshot.Device, user string) (string, bool) {
+	if dev.Extension == "" {
+		return "", false
+	}
+	if user == dev.Extension {
+		return dev.Extension, true
+	}
+	if d, ok := snap.DeviceByUsername(user); ok && d.Extension == dev.Extension {
+		return dev.Extension, true
+	}
+	if fc, ok := snap.FeatureCode(user); ok && fc.Action == "voicemail" {
+		return dev.Extension, true
+	}
+	return "", false
 }
 
 // subscribeExpires reads the subscription's expiry: the Expires header or
@@ -168,7 +229,7 @@ func (s *Server) subscribeExpires(req *sip.Request) time.Duration {
 // upsertSub creates or refreshes the subscription of req's dialog. It
 // returns the subscription (nil when an in-dialog SUBSCRIBE matches no
 // dialog: 481) and whether it was created now.
-func (s *Server) upsertSub(req *sip.Request, ext string, exp time.Duration) (*subscription, bool) {
+func (s *Server) upsertSub(req *sip.Request, event, ext string, exp time.Duration) (*subscription, bool) {
 	id := req.CallID().Value()
 	s.subsMu.Lock()
 	defer s.subsMu.Unlock()
@@ -185,7 +246,7 @@ func (s *Server) upsertSub(req *sip.Request, ext string, exp time.Duration) (*su
 		target = ct.Address
 	}
 	sub := &subscription{
-		callID: id, device: req.From().Address.User, extension: ext,
+		callID: id, event: event, device: req.From().Address.User, extension: ext,
 		localTag: sip.GenerateTagN(8), remoteTag: tagOf(req.From()),
 		target: *target.Clone(), expires: time.Now().Add(exp),
 	}
@@ -208,7 +269,11 @@ func (s *Server) dropSub(id string, notify bool) {
 	}
 	s.subsMu.Unlock()
 	if ok && notify {
-		go s.sendStateNotify(sub, StateIdle, 0, "deactivated")
+		if sub.event == eventMessageSummary {
+			s.goBG(func() { s.sendMWINotify(sub, 0, "deactivated", MWITerminate) })
+		} else {
+			go s.sendStateNotify(sub, StateIdle, 0, "deactivated")
+		}
 	}
 	if ok {
 		s.m.PresenceSubscriptions.Set(float64(s.subCount()))
@@ -235,7 +300,7 @@ func (s *Server) notifyExtension(ext, state string) {
 	s.subsMu.Lock()
 	var targets []*subscription
 	for id := range s.byExt[ext] {
-		if sub, ok := s.subs[id]; ok {
+		if sub, ok := s.subs[id]; ok && sub.event != eventMessageSummary {
 			sub.lastState = state
 			cp := *sub
 			targets = append(targets, &cp)
@@ -339,6 +404,10 @@ func (s *Server) subExpireLoop(ctx context.Context) {
 		if len(expired) > 0 {
 			s.m.PresenceSubscriptions.Set(float64(s.subCount()))
 			for _, sub := range expired {
+				if sub.event == eventMessageSummary {
+					s.goBG(func() { s.sendMWINotify(sub, 0, "timeout", MWITerminate) })
+					continue
+				}
 				//nolint:gosec // detached on purpose: the fan-out must not
 				// stall the sweeper (spec failure mode "presence flood").
 				go s.sendStateNotify(sub, sub.lastState, 0, "timeout")
