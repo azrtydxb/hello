@@ -597,7 +597,10 @@ answer by themselves on the speaker.
   of every member with `Call-Info: <sip:host>;answer-after=0` and an
   `Alert-Info` auto-answer value, and the phones answer on the speaker.
   Audio is one way, from the caller to the members: whatever a member sends
-  back is dropped. When the caller hangs up, every leg ends. A page also
+  back is dropped. Until the first member answers, the caller hears Hello's
+  page tone (two short beeps, repeated) as early media instead of ringback;
+  it stops when the page connects. When the caller hangs up, every leg
+  ends. A page also
   ends after `HELLO_PAGE_MAX_SECONDS` (120), and the caller hears busy when
   no member answers within 10 seconds.
 - **Who is skipped.** Members on DND, members in a call (a page never
@@ -611,10 +614,23 @@ answer by themselves on the speaker.
   (`*80200`) calls that extension's phones with the same headers and
   two-way audio. It respects DND, never answers a phone that is in a call
   (that phone rings normally), and does not follow forwarding. An extension
-  with `allowIntercom` off (`PATCH /api/v1/extensions/{id}`) rings normally.
-- **CDRs.** A page or intercom call has `kind` `page` or `intercom`; the
-  call trace lists each page member's result (`answered`, `busy`, `dnd`,
-  `no_answer`, `no_registration`).
+  with `allowIntercom` off rings normally; set it with the Allow intercom
+  switch on the extension's page or `PATCH /api/v1/extensions/{id}`.
+- **Testing a group.** The Test button on a paging group (or
+  `POST /api/v1/paging-groups/{id}/test`, admin only, body
+  `{"extension": "200"}`, default the first member) pages that one member
+  as a real page would, plays the tone for three seconds and hangs up. The
+  result lists each registered contact, what it did and the auto-answer
+  headers sent, which is how to check a phone's setting without a second
+  person. A member on DND (in a normal group) or in a call is reported, not
+  rung. A test needs Valkey and a running `hello-sip` node, and answers
+  `504` when none takes it within 20 seconds. It writes no CDR.
+- **CDRs.** A page or intercom call has `kind` `page` or `intercom`. A page
+  also has one row per member (table `cdr_page_legs`) with the member's
+  extension, the contact's device and its result (`answered`, `busy`, `dnd`,
+  `no_answer`, `no_registration`), returned as `pageLegs` by
+  `GET /api/v1/cdrs/{id}` and listed on the call's detail page; the call
+  trace repeats them.
 - **Security.** Auto-answer turns a phone into a listening device, so Hello
   adds these headers only on the legs it creates for a page or an intercom
   call. `Alert-Info`, `Call-Info` and `Answer-After` headers in anything a

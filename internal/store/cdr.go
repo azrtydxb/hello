@@ -39,6 +39,17 @@ type CDR struct {
 	RTPJitterMs          *float64   `json:"rtpJitterMs"`
 	// Kind is call, page or intercom (migration 00013).
 	Kind string `json:"kind"`
+	// PageLegs is a page's outcome per member (migration 00014); set by
+	// GetCDR for a page only.
+	PageLegs []PageLeg `json:"pageLegs,omitempty"`
+}
+
+// PageLeg is one paged member's outcome: answered, busy, dnd, no_answer or
+// no_registration. Device is empty for a member that was never rung.
+type PageLeg struct {
+	Extension string `json:"extension"`
+	Device    string `json:"device"`
+	Result    string `json:"result"`
 }
 
 const cdrCols = `id, correlation_id, sip_call_id, source, destination, start_time, ring_time, answer_time,

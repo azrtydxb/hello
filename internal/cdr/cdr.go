@@ -26,7 +26,7 @@ const (
 	DirectionOutbound = "outbound"
 )
 
-// Call kinds (migration 00011).
+// Call kinds (migration 00013).
 const (
 	KindCall     = "call"
 	KindPage     = "page"
@@ -72,6 +72,18 @@ type Record struct {
 	RTPJitterMs *float64
 	// Kind is call (default), page or intercom.
 	Kind string
+	// PageLegs is a page's outcome per member (migration 00014), one row
+	// each; empty for any other call.
+	PageLegs []PageLeg
+}
+
+// PageLeg is one paged member's outcome: answered, busy, dnd, no_answer or
+// no_registration. Device is the member contact's device user name, empty
+// for a member that was never rung.
+type PageLeg struct {
+	Extension string `json:"extension"`
+	Device    string `json:"device"`
+	Result    string `json:"result"`
 }
 
 // Execer is the subset of a pgx pool or connection the writer needs.
@@ -126,14 +138,17 @@ func (w *Writer) Enqueue(r Record) bool {
 	}
 }
 
-const insert = `INSERT INTO cdrs (correlation_id, sip_call_id, source, destination,
+const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source, destination,
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
     rtp_packets, rtp_lost, rtp_jitter_ms, kind)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
-ON CONFLICT (correlation_id) DO NOTHING`
+ON CONFLICT (correlation_id) DO NOTHING RETURNING id)
+INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
+SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
+FROM c, jsonb_array_elements($26::jsonb) WITH ORDINALITY AS l(leg, ord)`
 
 // Run writes queued records until ctx is cancelled, retrying each with
 // exponential backoff. After cancellation it tries to flush what is left for
@@ -214,11 +229,19 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	if err != nil {
 		return err
 	}
+	legs := r.PageLegs
+	if legs == nil {
+		legs = []PageLeg{}
+	}
+	lj, err := json.Marshal(legs)
+	if err != nil {
+		return err
+	}
 	_, err = w.db.Exec(wctx, insert, r.CorrelationID, r.SIPCallID, r.Source, r.Destination,
 		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
-		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind)
+		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, string(lj))
 	return err
 }
 

@@ -1,10 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/azrtydxb/hello/internal/livestate"
 )
 
 // TestPagingGroupCRUD: create, read, replace and delete a paging group, and
@@ -124,4 +129,91 @@ func TestExtensionAllowIntercom(t *testing.T) {
 	if got["allowIntercom"] != false {
 		t.Fatalf("after PATCH allowIntercom = %v", got["allowIntercom"])
 	}
+}
+
+// fakePageTester answers a test page at once with a canned result.
+type fakePageTester struct {
+	mu   sync.Mutex
+	reqs []livestate.PageTestRequest
+}
+
+func (f *fakePageTester) EnqueuePageTest(_ context.Context, r livestate.PageTestRequest) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reqs = append(f.reqs, r)
+	return nil
+}
+
+func (f *fakePageTester) GetPageTestResult(_ context.Context, id string) (livestate.PageTestResult, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range f.reqs {
+		if r.ID == id {
+			return livestate.PageTestResult{ID: id, Extension: r.Extension, Result: "answered", Node: "sip-1",
+				Contacts: []livestate.PageTestContact{{Device: "d1", Result: "answered", Headers: []string{"Alert-Info: auto-answer"}}}}, true, nil
+		}
+	}
+	return livestate.PageTestResult{}, false, nil
+}
+
+// neverPageTester queues a request that no node ever takes.
+type neverPageTester struct{ fakePageTester }
+
+func (*neverPageTester) GetPageTestResult(context.Context, string) (livestate.PageTestResult, bool, error) {
+	return livestate.PageTestResult{}, false, nil
+}
+
+// TestPagingGroupTestEndpoint: POST /paging-groups/{id}/test queues a test
+// page for one member and returns the SIP node's result. It fails if the
+// default member is not the first, a non-member is paged, a disabled group
+// is tested, an unknown group is not 404, a missing SIP node does not time
+// out as 504, or a missing queue is not 503.
+func TestPagingGroupTestEndpoint(t *testing.T) {
+	pt := &fakePageTester{}
+	e := newEnvConfig(t, Config{Objects: newMemObjects(), PageTests: pt, PageTestWait: time.Second}, nil)
+	c := e.login()
+	m1 := c.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]string{"number": "101", "name": "Sales"}).json(t)
+	m2 := c.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]string{"number": "102", "name": "Support"}).json(t)
+	g := c.must(http.StatusCreated, "POST", "/api/v1/paging-groups", map[string]any{
+		"name": "kitchen", "code": "*60", "members": []json.Number{json.Number(fmt.Sprint(m1["id"])), json.Number(fmt.Sprint(m2["id"]))},
+	}).json(t)
+	path := fmt.Sprintf("/api/v1/paging-groups/%v/test", g["id"])
+
+	res := c.must(http.StatusOK, "POST", path, map[string]any{}).json(t)
+	if res["result"] != "answered" || res["extension"] != "101" {
+		t.Fatalf("default test = %v, want the first member answered", res)
+	}
+	if got := c.must(http.StatusOK, "POST", path, map[string]any{"extension": "102"}).json(t); got["extension"] != "102" {
+		t.Fatalf("test of 102 paged %v", got["extension"])
+	}
+	if len(pt.reqs) != 2 || pt.reqs[0].GroupCode != "*60" || pt.reqs[1].Extension != "102" {
+		t.Fatalf("queued requests = %+v", pt.reqs)
+	}
+	c.must(http.StatusBadRequest, "POST", path, map[string]any{"extension": "999"})
+	c.must(http.StatusBadRequest, "POST", path, map[string]any{"bogus": 1})
+	c.must(http.StatusNotFound, "POST", "/api/v1/paging-groups/987654/test", map[string]any{})
+
+	c.must(http.StatusOK, "PUT", fmt.Sprintf("/api/v1/paging-groups/%v", g["id"]), map[string]any{
+		"name": "kitchen", "code": "*60", "enabled": false,
+		"members": []json.Number{json.Number(fmt.Sprint(m1["id"]))},
+	})
+	c.must(http.StatusConflict, "POST", path, map[string]any{})
+
+	// No node takes the request: 504 after the wait.
+	e2 := newEnvConfig(t, Config{PageTests: &neverPageTester{}, PageTestWait: 600 * time.Millisecond}, nil)
+	c2 := e2.login()
+	x := c2.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]string{"number": "101", "name": "Sales"}).json(t)
+	g2 := c2.must(http.StatusCreated, "POST", "/api/v1/paging-groups", map[string]any{
+		"name": "a", "code": "*61", "members": []json.Number{json.Number(fmt.Sprint(x["id"]))},
+	}).json(t)
+	c2.must(http.StatusGatewayTimeout, "POST", fmt.Sprintf("/api/v1/paging-groups/%v/test", g2["id"]), map[string]any{})
+
+	// No queue configured: 503.
+	e3 := newEnvConfig(t, Config{}, nil)
+	c3 := e3.login()
+	y := c3.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]string{"number": "101", "name": "Sales"}).json(t)
+	g3 := c3.must(http.StatusCreated, "POST", "/api/v1/paging-groups", map[string]any{
+		"name": "a", "code": "*61", "members": []json.Number{json.Number(fmt.Sprint(y["id"]))},
+	}).json(t)
+	c3.must(http.StatusServiceUnavailable, "POST", fmt.Sprintf("/api/v1/paging-groups/%v/test", g3["id"]), map[string]any{})
 }
