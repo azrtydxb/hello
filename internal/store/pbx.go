@@ -670,6 +670,10 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*97", Action: "voicemail"},
 		{Code: "*80", Action: "intercom"},
 		{Code: "##", Action: "attended_transfer"},
+		{Code: "*45", Action: ActionQueueLogin},
+		{Code: "*46", Action: ActionQueueLogout},
+		{Code: "*47", Action: ActionQueuePause, Argument: "break"},
+		{Code: "*48", Action: ActionQueueUnpause},
 	}
 }
 

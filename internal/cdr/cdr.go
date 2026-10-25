@@ -75,6 +75,29 @@ type Record struct {
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
 	PageLegs []PageLeg
+	// QueueLegs is what the call did in a call queue (migration 00023): one
+	// row per event, in order; empty for a call that never queued.
+	QueueLegs []QueueLeg
+}
+
+// Queue leg events.
+const (
+	QueueEnter    = "enter"    // the caller joined the queue
+	QueueAgent    = "agent"    // an agent was rung (Result: no_answer, busy, answered)
+	QueueAnswered = "answered" // an agent answered
+	QueueWait     = "wait"     // how long the caller waited (WaitMs)
+	QueueAbandon  = "abandon"  // the caller hung up while waiting
+	QueueExit     = "exit"     // the queue sent the caller elsewhere (Result: timeout, full, no_agents, breakout)
+)
+
+// QueueLeg is one event of a call in a queue.
+type QueueLeg struct {
+	Event     string    `json:"event"`
+	Queue     string    `json:"queue"`
+	Extension string    `json:"extension"`
+	WaitMs    int64     `json:"waitMs"`
+	Result    string    `json:"result"`
+	At        time.Time `json:"at"`
 }
 
 // PageLeg is one paged member's outcome: answered, busy, dnd, no_answer or
@@ -145,10 +168,14 @@ const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source
     rtp_packets, rtp_lost, rtp_jitter_ms, kind)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
-ON CONFLICT (correlation_id) DO NOTHING RETURNING id)
-INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
+ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
+p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
-FROM c, jsonb_array_elements($26::jsonb) WITH ORDINALITY AS l(leg, ord)`
+FROM c, jsonb_array_elements($26::jsonb) WITH ORDINALITY AS l(leg, ord) RETURNING 1)
+INSERT INTO cdr_queue_legs (cdr_id, position, event, queue, extension, wait_ms, result, at)
+SELECT c.id, l.ord, l.leg->>'event', l.leg->>'queue', l.leg->>'extension', (l.leg->>'waitMs')::bigint,
+       l.leg->>'result', (l.leg->>'at')::timestamptz
+FROM c, jsonb_array_elements($27::jsonb) WITH ORDINALITY AS l(leg, ord)`
 
 // Run writes queued records until ctx is cancelled, retrying each with
 // exponential backoff. After cancellation it tries to flush what is left for
@@ -237,11 +264,19 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	if err != nil {
 		return err
 	}
+	qlegs := r.QueueLegs
+	if qlegs == nil {
+		qlegs = []QueueLeg{}
+	}
+	qj, err := json.Marshal(qlegs)
+	if err != nil {
+		return err
+	}
 	_, err = w.db.Exec(wctx, insert, r.CorrelationID, r.SIPCallID, r.Source, r.Destination,
 		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
-		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, string(lj))
+		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, string(lj), string(qj))
 	return err
 }
 

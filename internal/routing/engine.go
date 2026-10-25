@@ -26,6 +26,7 @@ type Table struct {
 	inbound    []compiledInbound  // sorted by Position
 	extensions map[string]string
 	ivrMenus   map[string]bool
+	queues     map[string]bool
 	resolved   map[int64][]netip.Addr
 	// dial holds the compiled internal dialing patterns of every trunk
 	// whose policy mode is "patterns" (compileDialing in inbound.go).
@@ -63,6 +64,7 @@ func Compile(cfg Config) (*Table, []FieldError) {
 		trunkIdx:   make(map[int64]int, len(cfg.Trunks)),
 		extensions: maps.Clone(cfg.Extensions),
 		ivrMenus:   maps.Clone(cfg.IVRMenus),
+		queues:     maps.Clone(cfg.Queues),
 		resolved:   make(map[int64][]netip.Addr, len(cfg.ResolvedIPs)),
 		dial:       make(map[int64][]dialPattern, len(cfg.Trunks)),
 	}
@@ -299,6 +301,10 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 		if !t.ivrMenus[r.Destination] {
 			addErr(errs, p+".destination", fmt.Sprintf("IVR menu %s does not exist", quote(r.Destination)))
 		}
+	case "queue":
+		if !t.queues[r.Destination] {
+			addErr(errs, p+".destination", fmt.Sprintf("queue %s does not exist", quote(r.Destination)))
+		}
 	case "internal":
 		// The DID the route matched names the target; the route carries
 		// none of its own.
@@ -314,7 +320,7 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 			addErr(errs, p+".destination", "must be a sip: or sips: URI without whitespace")
 		}
 	default:
-		addErr(errs, p+".destinationKind", `must be "extension", "external", "internal", "ivr" or "sip_uri"`)
+		addErr(errs, p+".destinationKind", `must be "extension", "external", "internal", "ivr", "queue" or "sip_uri"`)
 	}
 }
 

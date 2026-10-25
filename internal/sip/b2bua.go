@@ -186,6 +186,22 @@ type call struct {
 	vmExt       string
 	vmTap       func(leg string, pkt *media.RTPPacket)
 	bridgedExt  string
+
+	// Call queue state (queue.go), guarded by mu. qName is the queue the call
+	// waited in, qAgent the agent that answered (whose wrap-up starts when
+	// the call ends), qLegs the CDR's queue legs and qDepth the failover
+	// chain's length.
+	qName  string
+	qAgent string
+	qWrap  time.Duration
+	qLegs  []cdr.QueueLeg
+	qDepth int
+	// takenOffer is the caller's SDP of a call a survivor took over, which
+	// has no INVITE: the offer a queued caller's agent legs are built from.
+	takenOffer []byte
+	// qWaiting is true while the caller waits in a queue, since qEnteredAt.
+	qWaiting   bool
+	qEnteredAt time.Time
 }
 
 // callStages is the forwarding/DND context of the extension a call is
@@ -307,6 +323,11 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		c.startIVR(tx, snap, m)
 		return
 	}
+	// A queue's number answers and queues the caller.
+	if q, ok := snap.QueueByNumber(c.dialled); ok {
+		c.startQueue(tx, snap, q)
+		return
+	}
 	// A feature code dialled as a call (*78, *72599, *97) is dispatched here
 	// and never reaches routing.
 	if fc, arg, ok := matchFeatureCode(snap, c.dialled); ok {
@@ -406,6 +427,14 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 			return
 		}
 		c.startIVR(tx, snap, m)
+	case dec.Kind == routing.KindInbound && dec.Queue != "":
+		q, ok := snap.Queue(dec.Queue)
+		if !ok {
+			s.respond(tx, req, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "queue "+dec.Queue+" does not exist", ResultNotFound)
+			return
+		}
+		c.startQueue(tx, snap, q)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
 		c.considerAnchor(snap, EndpointInfo{}) // external URI: caller-side triggers only
 		c.ringURI(req, tx, dec)
@@ -1022,6 +1051,8 @@ func (c *call) end(status int, side, reason, result string) {
 			c.releaseSlots()
 			return
 		}
+		c.queueAbandoned()
+		go c.queueEnded()
 		c.unpublish()
 		c.record(status, side, reason, result)
 	})
@@ -1051,7 +1082,7 @@ func (c *call) release() {
 	}
 	if hom != nil {
 		// A taken-over call's callee dialog is bound outside c.legs.
-		for _, l := range hom.legs {
+		for _, l := range hom.pair() {
 			if l != nil {
 				c.s.unbind(l.callID, c)
 			}
@@ -1092,6 +1123,9 @@ func (c *call) record(status int, side, reason, result string) {
 	if ps := c.page; ps != nil {
 		r.PageLegs = ps.results()
 	}
+	c.mu.Lock()
+	r.QueueLegs = append([]cdr.QueueLeg(nil), c.qLegs...)
+	c.mu.Unlock()
 	c.s.m.Calls.WithLabelValues(result).Inc()
 	if c.groupName != "" {
 		c.s.m.GroupCalls.WithLabelValues(c.groupName, c.groupStrategy, result).Inc()
@@ -1310,22 +1344,29 @@ func (l *leg) invite() (*sip.Request, error) {
 	req.AppendHeader(&callID)
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: 1, MethodName: sip.INVITE})
 	maxFwd := sip.MaxForwardsHeader(70)
-	if mf := c.inv.MaxForwards(); mf != nil && mf.Val() > 1 {
-		maxFwd = sip.MaxForwardsHeader(mf.Val() - 1)
+	if c.inv != nil {
+		if mf := c.inv.MaxForwards(); mf != nil && mf.Val() > 1 {
+			maxFwd = sip.MaxForwardsHeader(mf.Val() - 1)
+		}
 	}
 	req.AppendHeader(&maxFwd)
 	req.AppendHeader(sip.HeaderClone(&s.contact))
 	req.AppendHeader(sip.NewHeader("Allow", allow))
-	if body := c.inv.Body(); len(body) > 0 {
-		if ct := c.inv.ContentType(); ct != nil {
-			req.AppendHeader(sip.HeaderClone(ct))
+	callerSDP := c.callerOffer()
+	if len(callerSDP) > 0 {
+		if c.inv != nil {
+			if ct := c.inv.ContentType(); ct != nil {
+				req.AppendHeader(sip.HeaderClone(ct))
+			}
+		} else {
+			req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 		}
-		req.SetBody(body)
+		req.SetBody(callerSDP)
 	}
 	// An anchored call terminates media: the fork's offer is the anchor's
 	// leg-b port, not the caller's SDP (spec S-2).
 	if l.c.isAnchored() {
-		if off, err := media.ParseAudioSDP(c.inv.Body()); err == nil {
+		if off, err := media.ParseAudioSDP(callerSDP); err == nil {
 			if body := l.c.anchoredOfferB(off); len(body) > 0 {
 				req.SetBody(body)
 				req.RemoveHeader("Content-Type")

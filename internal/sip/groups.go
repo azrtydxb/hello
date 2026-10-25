@@ -298,6 +298,13 @@ func (c *call) groupFail(snap *snapshot.Snapshot, g snapshot.RingGroup) {
 			return
 		}
 		c.hangupGroup(sip.StatusTemporarilyUnavailable, "failure IVR menu unavailable")
+	case "queue":
+		if q, ok := snap.Queue(g.FailureTarget); ok {
+			c.addTrace(fmt.Sprintf("Group %s: queue %q", g.Name, g.FailureTarget))
+			c.startQueue(nil, snap, q)
+			return
+		}
+		c.hangupGroup(sip.StatusTemporarilyUnavailable, "failure queue unavailable")
 	case "external":
 		if req := c.inv; req != nil {
 			c.forward(req, nil, snap, g.FailureTarget, nil)

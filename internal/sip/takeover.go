@@ -80,15 +80,31 @@ func haLegFrom(d livestate.DialogLeg, uas bool) *haLeg {
 type homedCall struct {
 	takenFrom string
 	takenAt   time.Time
+	mu        sync.RWMutex // legs[1] is set once more when a queued call reaches its agent
 	legs      [2]*haLeg
+}
+
+// pair is a consistent copy of the two legs.
+func (h *homedCall) pair() [2]*haLeg {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.legs
+}
+
+// setCallee installs the callee leg of a call that had none.
+func (h *homedCall) setCallee(b *haLeg) {
+	h.mu.Lock()
+	h.legs[1] = b
+	h.mu.Unlock()
 }
 
 // leg is the caller's (false) or callee's (true) homed leg.
 func (h *homedCall) leg(callee bool) *haLeg {
+	legs := h.pair()
 	if callee {
-		return h.legs[1]
+		return legs[1]
 	}
-	return h.legs[0]
+	return legs[0]
 }
 
 // useCSeq spends the leg's next CSeq value.
@@ -894,6 +910,7 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 	}
 	c := s.haNewCall(st, from, a, nil, start)
 	c.haSolo = true
+	c.takenOffer = []byte(a.remoteSDP)
 	var (
 		body []byte
 		sess media.Session
@@ -987,6 +1004,10 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		}
 		c.addTrace("Voicemail restarts from its greeting after the takeover")
 		go c.voicemailFlow(mode, reason, sess)
+		return
+	}
+	if st.State == haPhaseQueue {
+		c.queueResume(st.StateDetail)
 		return
 	}
 	if st.State == haPhaseIVR {

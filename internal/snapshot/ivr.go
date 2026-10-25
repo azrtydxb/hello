@@ -20,6 +20,7 @@ const (
 	IVRPaging       = "paging"
 	IVRMenuKind     = "ivr"
 	IVRExternal     = "external"
+	IVRQueue        = "queue"
 )
 
 // IVRDest is where a menu option, timeout or invalid choice sends the call.

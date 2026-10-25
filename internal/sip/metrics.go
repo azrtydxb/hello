@@ -67,6 +67,16 @@ type Metrics struct {
 	// IVRTotal counts IVR menu events: entered, option, direct_dial,
 	// timeout, invalid, dial, dial_failed, connected and exit_<kind>.
 	IVRTotal *prometheus.CounterVec // event
+	// Call queues (migration 00023). QueueWaiting is the callers waiting in
+	// queues this node holds (sum it across nodes); QueueWait is the time
+	// callers waited by outcome (answered, abandoned, timeout, full,
+	// no_agents, breakout); QueueAgents the agents by state, published by
+	// one node at a time.
+	QueueWaiting   *prometheus.GaugeVec     // queue
+	QueueWait      *prometheus.HistogramVec // queue, outcome
+	QueueAbandoned *prometheus.CounterVec   // queue
+	QueueCalls     *prometheus.CounterVec   // queue, event
+	QueueAgents    *prometheus.GaugeVec     // queue, state
 
 	// Phase 7 (in-call HA, spec S-13). DialogReplicated counts replication
 	// writes by result; DialogTakeovers the calls this node took over;
@@ -197,6 +207,22 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.IVRTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_ivr_total", Help: "IVR menu events (entered, option, direct_dial, timeout, invalid, dial, dial_failed, connected, exit_<kind>).",
 	}, []string{"event"})
+	m.QueueWaiting = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hello_queue_waiting", Help: "Callers waiting in a queue whose dialogs this node holds; sum across nodes.",
+	}, []string{"queue"})
+	m.QueueWait = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "hello_queue_wait_seconds", Help: "Time callers waited in a queue, by outcome (answered, abandoned, timeout, full, no_agents, breakout).",
+		Buckets: []float64{1, 5, 10, 20, 30, 60, 120, 300, 600, 1800},
+	}, []string{"queue", "outcome"})
+	m.QueueAbandoned = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_queue_abandoned_total", Help: "Callers who hung up while waiting in a queue.",
+	}, []string{"queue"})
+	m.QueueCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_queue_calls_total", Help: "Queue call events (entered, answered, abandoned, exit_<reason>).",
+	}, []string{"queue", "event"})
+	m.QueueAgents = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hello_queue_agents", Help: "Agents per queue by state (available, on_call, ringing, dnd, wrapping, paused, logged_out); reported by one node at a time.",
+	}, []string{"queue", "state"})
 	m.PagingLegs = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_paging_legs_total", Help: "Page member legs by result (answered, busy, dnd, no_answer, no_registration).",
 	}, []string{"result"})
@@ -216,6 +242,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Forwarded, m.GroupCalls,
 		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal,
+		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	return m
 }

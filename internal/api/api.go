@@ -16,6 +16,7 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/version"
@@ -81,6 +82,13 @@ type Store interface {
 	DeleteIVRMenu(ctx context.Context, actor string, id int64, check store.Check) error
 	IVRMenuNameExists(ctx context.Context, name string) (bool, error)
 
+	ListQueues(ctx context.Context) ([]store.Queue, error)
+	GetQueue(ctx context.Context, id int64) (store.Queue, error)
+	CreateQueue(ctx context.Context, actor string, in store.QueueInput, check store.Check) (store.Queue, error)
+	UpdateQueue(ctx context.Context, actor string, id int64, in store.QueueInput, check store.Check) (store.Queue, error)
+	DeleteQueue(ctx context.Context, actor string, id int64, check store.Check) error
+	QueueNameExists(ctx context.Context, name string) (bool, error)
+
 	ListFeatureCodes(ctx context.Context) ([]store.FeatureCode, error)
 	PutFeatureCodes(ctx context.Context, actor string, codes []store.FeatureCode, check store.Check) error
 
@@ -132,6 +140,17 @@ type Store interface {
 	RoutingConfig(ctx context.Context) (store.RoutingSnapshot, error)
 }
 
+// QueueLive is the part of the call queues' shared state the API reads and
+// writes; queue.Store satisfies it.
+type QueueLive interface {
+	Waiting(ctx context.Context, queue string) ([]queue.Entry, error)
+	Agent(ctx context.Context, ext string) (queue.AgentState, bool, error)
+	Agents(ctx context.Context) (map[string]queue.AgentState, error)
+	SetAgent(ctx context.Context, st queue.AgentState) error
+	Stats(ctx context.Context, queue string) (map[string]queue.AgentStats, error)
+	AvgHandle(ctx context.Context, queue string) (time.Duration, error)
+}
+
 // Live is the shared live state; *livestate.Store implements it.
 type Live interface {
 	AllBindings(ctx context.Context) ([]livestate.Binding, error)
@@ -143,6 +162,9 @@ type Live interface {
 type Config struct {
 	Store Store
 	Live  Live
+	// Queues is the call queues shared state (waiting callers, agent login
+	// and pause) in Valkey; nil answers 503 on the live queue routes.
+	Queues QueueLive
 	// SIPDomain is the realm device HA1 values are computed for.
 	SIPDomain  string
 	SessionTTL time.Duration

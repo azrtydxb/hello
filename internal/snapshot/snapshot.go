@@ -147,6 +147,8 @@ type Snapshot struct {
 	anns   map[string]string
 	// ivrByName and ivrByNumber are the IVR menus (migration 00018).
 	ivrByName, ivrByNumber map[string]IVRMenu
+	// queueByName and queueByNumber are the call queues (migration 00023).
+	queueByName, queueByNumber map[string]Queue
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
 }
@@ -404,7 +406,11 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	return New(rev, domain, devices).WithExtensions(bare...).
+	queues, err := loadQueues(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	return New(rev, domain, devices).WithExtensions(bare...).WithQueues(queues).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
 		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs), nil
 }

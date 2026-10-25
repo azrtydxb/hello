@@ -22,6 +22,7 @@ import (
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/ops"
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/sip"
 	"github.com/azrtydxb/hello/internal/snapshot"
@@ -170,7 +171,7 @@ func run(args []string) error {
 		Pushes:        pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
 		Voicemails:    voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings,
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
-		HAState: live, Membership: members, PageTests: live,
+		HAState: live, Membership: members, PageTests: live, Queues: queue.NewValkey(vk),
 	})
 	if err != nil {
 		return err

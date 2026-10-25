@@ -103,6 +103,8 @@ func validateIVRDestination(f *fieldErrs, path, kind, target string) {
 		ok, want = usernameRe.MatchString(target), "a name of 1-64 of A-Z a-z 0-9 . _ -"
 	case store.IVRPaging:
 		ok, want = pageCodeRe.MatchString(target), "a page code: '*' plus 2-4 digits"
+	case store.IVRQueueDest:
+		ok, want = usernameRe.MatchString(target), "a queue name of 1-64 of A-Z a-z 0-9 . _ -"
 	case store.IVRExternal:
 		ok, want = externalNumRe.MatchString(target), "2-32 of 0-9 * # with an optional leading +"
 	}

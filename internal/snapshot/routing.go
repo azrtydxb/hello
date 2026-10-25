@@ -195,6 +195,23 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 	if err := rows.Err(); err != nil {
 		return cfg, nil, fmt.Errorf("snapshot: ivr menus: %w", err)
 	}
+	rows, err = db.Query(ctx, `SELECT name FROM queues`)
+	if err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: queues: %w", err)
+	}
+	cfg.Queues = map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return cfg, nil, fmt.Errorf("snapshot: scan queue: %w", err)
+		}
+		cfg.Queues[n] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: queues: %w", err)
+	}
 	return cfg, bad, nil
 }
 

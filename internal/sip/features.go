@@ -28,6 +28,13 @@ const (
 	ActionIntercom = "intercom"
 	// ActionIVR runs an IVR menu: the argument names it.
 	ActionIVR = "ivr"
+	// The agent codes of the call queues: log in (the argument of a dialled
+	// code is an optional queue number), log out, pause (the code row's
+	// argument is the reason) and unpause.
+	ActionQueueLogin   = "queue_login"
+	ActionQueueLogout  = "queue_logout"
+	ActionQueuePause   = "queue_pause"
+	ActionQueueUnpause = "queue_unpause"
 )
 
 // ExtUpdate is one queued extension-feature change from a feature code.
@@ -84,6 +91,9 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		return true
 	case ActionIntercom:
 		c.handleIntercom(tx, arg)
+		return true
+	case ActionQueueLogin, ActionQueueLogout, ActionQueuePause, ActionQueueUnpause:
+		c.handleQueueCode(tx, fc, arg)
 		return true
 	case ActionIVR:
 		name := fc.Argument

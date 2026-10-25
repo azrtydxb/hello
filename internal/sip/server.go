@@ -21,6 +21,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
@@ -164,6 +165,12 @@ type Deps struct {
 	// PageTests is the queue of paging-group test requests from the admin
 	// API; nil disables them.
 	PageTests PageTests
+	// Queues is the call queues' shared state (Valkey); nil disables call
+	// queues (a call to a queue is refused with 503).
+	Queues queue.Store
+	// MOH supplies music on hold for queues by class; nil plays the built-in
+	// tone.
+	MOH MOHProvider
 }
 
 // Server is one SIP node.
@@ -430,6 +437,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.peerLoop(rctx) })
 	s.bg.Go(func() { s.subExpireLoop(rctx) })
 	s.bg.Go(func() { s.mwiPollLoop(rctx) })
+	s.bg.Go(func() { s.queueLoop(rctx) })
 	if s.deps.MailboxEvents != nil {
 		s.bg.Go(func() { s.deps.MailboxEvents.Watch(rctx, s.mailboxChanged) })
 	}

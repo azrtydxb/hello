@@ -39,7 +39,8 @@ var (
 var (
 	strategies = []string{"ring-all", "sequential", "round-robin", "longest-idle", "weighted"}
 	fcActions  = []string{"forward_always", "forward_busy", "forward_no_answer", "dnd_on", "dnd_off",
-		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr"}
+		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr",
+		"queue_login", "queue_logout", "queue_pause", "queue_unpause"}
 )
 
 // voicemailLimits bound greeting uploads.
@@ -501,8 +502,12 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		if !usernameRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be the name of an IVR menu")
 		}
+	case "queue":
+		if !usernameRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be the name of a queue")
+		}
 	default:
-		f.add("failureKind", `must be "none", "voicemail", "external", "announcement" or "ivr"`)
+		f.add("failureKind", `must be "none", "voicemail", "external", "announcement", "ivr" or "queue"`)
 	}
 	if len(in.Members) == 0 || len(in.Members) > 50 {
 		f.add("members", "must have 1-50 members")
@@ -554,6 +559,9 @@ func (s *server) createRingGroup(w http.ResponseWriter, r *http.Request) {
 	if len(f) == 0 && in.FailureKind == "ivr" {
 		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
 	}
+	if len(f) == 0 && in.FailureKind == "queue" {
+		s.requireQueue(r.Context(), &f, "failureTarget", in.FailureTarget)
+	}
 	if len(f) > 0 {
 		writeFields(w, f)
 		return
@@ -593,6 +601,9 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 	f := validateRingGroup(&in)
 	if len(f) == 0 && in.FailureKind == "ivr" {
 		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
+	}
+	if len(f) == 0 && in.FailureKind == "queue" {
+		s.requireQueue(r.Context(), &f, "failureTarget", in.FailureTarget)
 	}
 	if len(f) > 0 {
 		writeFields(w, f)
@@ -655,6 +666,9 @@ func (s *server) putFeatureCodes(w http.ResponseWriter, r *http.Request) {
 		seen[c.Code] = true
 		if c.Action == "ivr" {
 			s.requireIVRMenu(r.Context(), &f, p+".argument", c.Argument)
+		}
+		if c.Action == "queue_pause" && len(c.Argument) > 32 {
+			f.add(p+".argument", "the pause reason is at most 32 characters")
 		}
 	}
 	if len(f) > 0 {
