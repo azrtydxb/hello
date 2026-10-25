@@ -25,7 +25,7 @@ type VoicemailBox struct {
 	GreetingObject    string `json:"greetingObject"`
 	UnreachableObject string `json:"unreachableObject"`
 	// BusyObject is the custom greeting for a busy extension and NameObject
-	// the owner's recorded name (migration 00027); "" means the default
+	// the owner's recorded name (migration 00029); "" means the default
 	// spoken prompt is used.
 	BusyObject string `json:"busyObject"`
 	NameObject string `json:"nameObject"`

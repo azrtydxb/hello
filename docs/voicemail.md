@@ -36,8 +36,9 @@ others.
 
 ## Checking messages (`*97`)
 
-Dial `*97` from your phone (or `*97` followed by another extension, to check
-that extension's box), then follow the voice.
+Dial `*97` from your phone, then follow the voice. (`*97` followed by an
+extension number, which a phone's transfer-to-voicemail key dials, leaves a
+message in that extension's box instead.)
 
 1. **PIN.** "Please enter your PIN, followed by the pound key." Three wrong
    attempts end the call.
