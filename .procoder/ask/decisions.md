@@ -372,3 +372,11 @@ Spec: `.procoder/specs/phonebooks-ptt.md`. Accepted by the user:
 - **PTT, all of:** (a) server paging groups: a page code or PTT key makes Hello call all group members, auto-answer one-way (vendor auto-answer headers such as Call-Info answer-after=0 and Alert-Info), across subnets, with CDRs; (b) phone multicast PTT: Hello provisions the phones' own multicast paging/PTT channels (Poly PTT/paging, Yealink/Grandstream/Snom/Fanvil multicast listen/send), LAN only; (c) 1-to-1 intercom: two-way auto-answer by prefix code or DSS key.
 
 Decision: accepted by the user (2026-10-25), all of the above.
+
+## Phonebooks and PTT spec: merge and start implementation? (2026-10-25)
+
+- Merge PR #114 and start phase 1 (recommended)
+- Review the spec first, then decide
+- Keep everything paused
+
+Decision: accepted "Merge PR #114 and start phase 1".
