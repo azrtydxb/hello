@@ -143,7 +143,7 @@ func startMinio(t *testing.T) *MinioObjects {
 		// A reused server starts with an empty data directory (the CI
 		// service container): wait for it and create the bucket, exactly as
 		// the throwaway-container path below does.
-		waitBucket(t, o)
+		ensureSharedBuckets(t, o)
 		return o
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -213,6 +213,26 @@ func waitBucket(t *testing.T, o *MinioObjects) {
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
+}
+
+var (
+	sharedBucketsMu sync.Mutex
+	sharedBucketsOK bool
+)
+
+// ensureSharedBuckets runs waitBucket once per test process against the
+// reused (CI service) endpoint: every test shares the same buckets and keys
+// its objects uniquely, so repeating the bucket probes per test only adds
+// requests to a MinIO that already throttles under load.
+func ensureSharedBuckets(t *testing.T, o *MinioObjects) {
+	t.Helper()
+	sharedBucketsMu.Lock()
+	defer sharedBucketsMu.Unlock()
+	if sharedBucketsOK {
+		return
+	}
+	waitBucket(t, o)
+	sharedBucketsOK = true
 }
 
 const (
