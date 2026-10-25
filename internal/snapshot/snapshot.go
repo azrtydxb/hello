@@ -150,7 +150,7 @@ type Snapshot struct {
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
 	anns   map[string]string
-	// ivrByName and ivrByNumber are the IVR menus (migration 00018).
+	// ivrByName and ivrByNumber are the IVR menus (migration 00027).
 	ivrByName, ivrByNumber map[string]IVRMenu
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState

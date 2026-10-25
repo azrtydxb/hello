@@ -7,6 +7,8 @@ package routing
 
 import (
 	"net/netip"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -74,6 +76,10 @@ type Trunk struct {
 	// InternalDialing gates what the trunk may dial in the extension
 	// namespace (spec S-2); zero value: mode "off".
 	InternalDialing Dialing
+	// Codecs is the audio codec allow-list offered to the trunk, in the
+	// caller's order (names: PCMU, PCMA, G722, opus). Empty means the
+	// default, PCMU and PCMA: most carriers accept G.711 only.
+	Codecs []string
 }
 
 // OutboundRoute matches calls from extensions to external numbers.
@@ -222,3 +228,41 @@ func (t *Trace) Add(text string) { *t = append(*t, Step{N: len(*t) + 1, Text: te
 //
 //	func ApplyTransform(tr Transform, number string) (string, error)
 //	    Exposed for tests and the API's validation preview.
+
+// TrunkCodecNames are the audio codecs a trunk may be offered, as the
+// allow-list spells them.
+var TrunkCodecNames = []string{"PCMU", "PCMA", "G722", "opus"}
+
+// DefaultTrunkCodecs is what a trunk without a list is offered: G.711 only,
+// the codecs every carrier accepts.
+var DefaultTrunkCodecs = []string{"PCMU", "PCMA"}
+
+// NormalizeCodecs maps a codec allow-list to its canonical spelling
+// (PCMU, PCMA, G722, opus), keeping the order. It reports an unknown or
+// repeated name, or an empty list, as an error message; nil means valid.
+func NormalizeCodecs(in []string) ([]string, string) {
+	if len(in) == 0 {
+		return nil, "at least one codec is required"
+	}
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, n := range in {
+		canon := ""
+		for _, c := range TrunkCodecNames {
+			if strings.EqualFold(c, strings.TrimSpace(n)) {
+				canon = c
+			}
+		}
+		switch {
+		case canon == "":
+			return nil, "unknown codec " + strconvQuote(n) + "; use PCMU, PCMA, G722 or opus"
+		case seen[canon]:
+			return nil, "codec " + canon + " is listed twice"
+		}
+		seen[canon] = true
+		out = append(out, canon)
+	}
+	return out, ""
+}
+
+func strconvQuote(s string) string { return strconv.Quote(s) }

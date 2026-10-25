@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// IVR destination kinds (migration 00018). The target's meaning depends on
+// IVR destination kinds (migration 00027). The target's meaning depends on
 // the kind: an extension number (extension, voicemail), a ring group name,
 // an announcement name, a page code, an IVR menu name or an external number;
 // hangup has none.
@@ -27,7 +27,7 @@ type IVRDest struct {
 	Kind, Target string
 }
 
-// IVRMenu is an IVR / auto-attendant menu (migration 00018). The prompts
+// IVRMenu is an IVR / auto-attendant menu (migration 00027). The prompts
 // are announcement names (resolved with Snapshot.Announcement); an empty
 // prompt name means none. Timeouts are seconds. Options maps a digit
 // (0-9, * or #) to its destination.
