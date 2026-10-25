@@ -12,6 +12,7 @@ import {
   updateGroup,
   type Book,
   type Group,
+  type MulticastChannel,
   type MulticastInput,
   type Ptt,
 } from "../api/phonebook";
@@ -57,6 +58,20 @@ type State =
     };
 
 const sameId = (a: Id, b: Id) => String(a) === String(b);
+
+/** A group's channels as they are written back: without the id. */
+function channelInputs(
+  channels: MulticastChannel[] | undefined,
+): MulticastInput[] {
+  return (channels ?? []).map((c) => ({
+    label: c.label,
+    address: c.address,
+    port: c.port,
+    codec: c.codec,
+    role: c.role,
+    priority: c.priority,
+  }));
+}
 
 /** The API's field errors by path. */
 function pathErrors(err: unknown): PathErrors {
@@ -325,7 +340,7 @@ function GroupModal({
   const [bookIds, setBookIds] = useState<Id[]>(group?.bookIds ?? []);
   const [pick, setPick] = useState("");
   const [channels, setChannels] = useState<MulticastInput[]>(
-    (group?.multicast ?? []).map(({ id: _id, ...c }) => c),
+    channelInputs(group?.multicast),
   );
   const [ptt, setPtt] = useState<Ptt>(group?.ptt ?? emptyPtt());
   const [mcErrors, setMcErrors] = useState<PathErrors>({});
@@ -377,7 +392,7 @@ function GroupModal({
       }
       // The group exists now: a failure below leaves it saved, so the modal
       // stays open on the fields that were refused.
-      const before = (saved.multicast ?? []).map(({ id: _id, ...c }) => c);
+      const before = channelInputs(saved.multicast);
       if (JSON.stringify(before) !== JSON.stringify(channels)) {
         try {
           saved = await setGroupMulticast(saved.id, channels);
