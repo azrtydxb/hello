@@ -74,11 +74,32 @@ func ParseRTP(data []byte) (*RTPPacket, bool) {
 	}, true
 }
 
+// DTMFDigit maps an RFC 4733 telephone-event code to the ASCII digit every
+// consumer works in: 0-9 are '0'-'9', 10 is '*', 11 is '#' and 12-15 are
+// 'A'-'D'. An input that is already one of those ASCII characters is
+// returned unchanged, so mapping twice is harmless. Other codes (flash,
+// fax and modem tones) are not digits and report false.
+func DTMFDigit(code byte) (byte, bool) {
+	switch {
+	case code <= 9:
+		return '0' + code, true
+	case code == 10:
+		return '*', true
+	case code == 11:
+		return '#', true
+	case code >= 12 && code <= 15:
+		return 'A' + (code - 12), true
+	case code >= '0' && code <= '9', code == '*', code == '#', code >= 'A' && code <= 'D':
+		return code, true
+	}
+	return 0, false
+}
+
 // DTMFEvent is one decoded RFC 2833/4733 telephone-event packet. Sequence
 // is filled in by the caller from the RTP packet so the filter can tell a
 // repeated end packet from a new press of the same digit.
 type DTMFEvent struct {
-	Code     byte
+	Code     byte // ASCII digit, mapped from the wire code by ParseTelephoneEvent
 	End      bool
 	Sequence uint16
 }
@@ -86,13 +107,20 @@ type DTMFEvent struct {
 // ParseTelephoneEvent extracts the event code and end-of-event flag from a
 // telephone-event payload. The short 4-byte form carries the E flag in bit
 // 7 of byte 1; the long form (RFC 4733 section 2.5.1.3) carries it in bit 7
-// of the last byte. Fewer than 4 bytes is not an event we can trust.
+// of the last byte. Fewer than 4 bytes is not an event we can trust. The
+// wire event code is mapped to its ASCII digit here (see DTMFDigit), so
+// every consumer downstream sees '*' and '#', never 10 and 11; an event
+// that is not a DTMF digit is rejected.
 func ParseTelephoneEvent(payload []byte) (DTMFEvent, bool) {
 	if len(payload) < 4 {
 		return DTMFEvent{}, false
 	}
 	var ev DTMFEvent
-	ev.Code = payload[0]
+	code, isDigit := DTMFDigit(payload[0])
+	if !isDigit {
+		return DTMFEvent{}, false
+	}
+	ev.Code = code
 	if len(payload) == 4 {
 		ev.End = payload[1]&0x80 != 0
 	} else {
