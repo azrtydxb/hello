@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"errors"
 	"slices"
 	"testing"
 
@@ -199,7 +200,7 @@ func TestClosure(t *testing.T) {
 	if !slices.Equal(ids, want) {
 		t.Fatalf("closure nodes %v, want %v", ids, want)
 	}
-	if _, err := Build(office(), Options{Closure: "trunk:404"}); err != ErrUnknownNode {
+	if _, err := Build(office(), Options{Closure: "trunk:404"}); !errors.Is(err, ErrUnknownNode) {
 		t.Fatalf("err %v", err)
 	}
 }

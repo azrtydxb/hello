@@ -40,7 +40,7 @@ func TestCatalogueConsistent(t *testing.T) {
 					t.Errorf("%s.%s -> %s.%s: target is not an input", n.Kind, p.ID, tg.Kind, tg.Port)
 					continue
 				}
-				if dst.Type != p.Type && !(p.Type == PortCall && dst.Type == PortVoicemail) {
+				if dst.Type != p.Type && (p.Type != PortCall || dst.Type != PortVoicemail) {
 					t.Errorf("%s.%s (%s) -> %s.%s (%s): port types differ", n.Kind, p.ID, p.Type, tg.Kind, tg.Port, dst.Type)
 				}
 			}
