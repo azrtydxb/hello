@@ -168,7 +168,7 @@ type Group struct {
 	IncludeCompany    bool    `json:"includeCompany"`
 	BookIDs           []int64 `json:"bookIds"`
 	// Multicast is the group's multicast paging channels and PTT its
-	// push-to-talk settings (migration 00015).
+	// push-to-talk settings (migration 00016).
 	Multicast  []MulticastChannel `json:"multicast"`
 	PTT        PTT                `json:"ptt"`
 	PhoneCount int                `json:"phoneCount"`

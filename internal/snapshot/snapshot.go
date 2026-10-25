@@ -98,7 +98,7 @@ type PagingGroup struct {
 	Members  []string
 	Callers  []string
 	// Multicast is the multicast channel the page is also sent to (migration
-	// 00015), nil when the group pages its members only. With no Members the
+	// 00016), nil when the group pages its members only. With no Members the
 	// page is multicast only.
 	Multicast *MulticastTarget
 }

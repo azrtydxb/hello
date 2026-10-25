@@ -47,7 +47,7 @@ type PagingGroup struct {
 	Members  []PagingExtension `json:"members"`
 	Callers  []PagingExtension `json:"callers"`
 	// MulticastChannelID names a multicast channel of a phone group the page
-	// is also sent to (migration 00015); MulticastChannel describes it.
+	// is also sent to (migration 00016); MulticastChannel describes it.
 	MulticastChannelID *int64           `json:"multicastChannelId"`
 	MulticastChannel   *PagingMulticast `json:"multicastChannel"`
 	CreatedAt          time.Time        `json:"createdAt"`
