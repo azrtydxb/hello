@@ -3415,7 +3415,12 @@
             "$ref": "#/components/responses/Unavailable"
           },
           "504": {
-            "description": "No hello-sip node reported the test page in time"
+            "description": "No hello-sip node reported the test page in time",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
           }
         },
         "x-hello-scope": "admin",
@@ -10211,6 +10216,7 @@
                   "internal",
                   "unavailable",
                   "upstream",
+                  "timeout",
                   "render_error",
                   "forbidden_role",
                   "insufficient_scope",
