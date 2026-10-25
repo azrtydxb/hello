@@ -403,6 +403,7 @@ func (t *Table) fromTrunk(d *Decision, c Call, usable TrunkUsability) {
 	}
 	d.Trace.Add(fmt.Sprintf("Route %s matched (%s)", strconv.Quote(r.r.Name), how))
 	d.Route = r.r.Name
+	d.MOHClassID, d.MOHRingback = r.r.MOHClassID, r.r.MOHRingback
 
 	// Caller ID: for a call ringing an internal extension ("extension" or
 	// "internal" destination) the ladder of spec S-4 — received, else the

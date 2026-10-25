@@ -26,6 +26,53 @@ transcodes. Recordings store the pass-through payload as received (G.711
 payloads are recorded as WAV; other codecs are stored with the codec noted
 in the recording metadata).
 
+## Music on hold and waiting music
+
+An anchored call plays music to a party the other side puts on hold: a
+`sendonly` or `inactive` re-INVITE from either phone starts the music toward
+the other leg, and the holder's own stream is muted meanwhile (an `inactive`
+hold is offered to the held phone as `sendonly` so it can hear). A resume
+(`sendrecv`), the hangup, or a takeover that finds the call no longer held
+stops it. Parking (S-6) uses the same player.
+
+Music comes from **MOH classes** (Media, Music on hold): a named, ordered
+playlist of announcements, played in a loop or shuffled (a shuffle plays every
+track once per pass and never repeats one back to back). The class is picked
+in this order, the first that names an existing class winning:
+
+1. the extension that holds the call (its **Music on hold** setting);
+2. the ring group the call dialled;
+3. the inbound route that delivered it;
+4. the one class marked **default**;
+5. the built-in tune (a short computed arpeggio), also used when a class has
+   no announcements or none of them can be loaded, so a hold is never silent.
+
+Deleting a class clears every pick that named it; those fall through to the
+next level.
+
+**Waiting music instead of ringback.** A ring group or inbound route with
+*Play music instead of ringback* answers the caller with `183 Session
+Progress` and the anchor's SDP, then plays its class while the destination
+rings; the music stops when the destination answers (or the call moves on to
+voicemail or an announcement). The group's setting wins over the route's. A
+phone that ignores early media hears nothing until the answer, which is why
+the setting is off by default.
+
+Tracks are announcements (WAV, uploaded on the Announcements page). They are
+decoded once per 30 seconds and encoded through the leg's negotiated G.711
+law; WAVs at a multiple of 8 kHz are averaged down to 8 kHz. Hello is the only
+source of hold music: no built-in phone template writes a music on hold
+setting (Grandstream P2350 stays empty), which `TestPhonesOriginNoMusicOnHold`
+enforces.
+
+If the node anchoring a held call fails, the replicated state carries
+`moh:<class id>:<leg>`; the node that takes the call over restarts the music
+from the start of the playlist toward the same leg (`TestMusicOnHoldTakeover`).
+
+API: `GET/POST /api/v1/moh-classes`, `GET/PUT/DELETE /api/v1/moh-classes/{id}`;
+`mohClassId` on extensions, ring groups and inbound routes, and `mohRingback`
+on the last two. Migration `00021_music_on_hold`.
+
 ## Metrics
 
 `hello_rtp_sessions`, `hello_rtp_packets_total{direction}`,

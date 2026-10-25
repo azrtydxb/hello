@@ -107,6 +107,10 @@ type relayLeg struct {
 
 	// stats is the leg's inbound-stream counters (locked).
 	stats legStats
+
+	// muted drops what this leg receives instead of forwarding it to the
+	// peer (a holder's stream while music plays to the held party).
+	muted atomic.Bool
 }
 
 // legStats is one leg's inbound counters; the direction label comes from
@@ -365,6 +369,9 @@ func (r *Relay) recv(l *relayLeg) {
 			if h != nil {
 				h(l.name, pkt)
 			}
+		}
+		if l.muted.Load() {
+			continue
 		}
 		r.forward(l, buf[:n])
 	}
@@ -655,11 +662,7 @@ func (r *Relay) PlayTo(ctx context.Context, legName string, pcm []byte) error {
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("media: announcement stream: %w", err)
 	}
-	encode := EncodePCMU
-	pt := uint8(0)
-	if l.audioPT == 8 {
-		encode, pt = EncodePCMA, 8
-	}
+	encode, pt := l.encoder()
 	seq := binary.BigEndian.Uint16(b[0:2])
 	ts := binary.BigEndian.Uint32(b[2:6])
 	ssrc := binary.BigEndian.Uint32(b[6:10])

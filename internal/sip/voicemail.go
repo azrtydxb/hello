@@ -150,6 +150,7 @@ func (s *Server) voicemailAnchor(offer []byte) *media.Anchor {
 // the voicemail media must not queue behind that.
 func (c *call) answerSelf(body []byte) bool {
 	s := c.s
+	c.stopRingMOH() // voicemail and announcements replace the waiting music
 	c.mu.Lock()
 	tx := c.invTx
 	c.mu.Unlock()

@@ -62,6 +62,7 @@ import { usePlatformBadges } from "./pages/platform/ui";
 import { Recordings } from "./pages/Recordings";
 import { Announcements } from "./pages/Announcements";
 import { VoiceSettings } from "./pages/VoiceSettings";
+import { MusicOnHold } from "./pages/MusicOnHold";
 import { Registrations } from "./pages/Registrations";
 import { RouteTest } from "./pages/RouteTest";
 import { RoutesPage } from "./pages/Routes";
@@ -91,6 +92,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/paging": Paging,
   "/recordings": Recordings,
   "/announcements": Announcements,
+  "/moh": MusicOnHold,
   "/system": System,
   "/settings/voice": VoiceSettings,
   "/routes/test": RouteTest,

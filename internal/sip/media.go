@@ -691,8 +691,17 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	}
 	dir := media.SDPDirection(body)
 	c.setHADirs(fromCaller, dir)
+	// An inactive hold stays inactive toward the holder, but the held peer
+	// is offered sendonly so it can hear the music (S-33).
+	peerDir := dir
+	if dir == "inactive" {
+		peerDir = "sendonly"
+		c.setHAPeerDir(fromCaller, peerDir)
+	}
 	c.haRefresh() // the hold's directions are in the snapshot before the change replicates
-	c.setHeld(dir == "sendonly" || dir == "inactive")
+	held := dir == "sendonly" || dir == "inactive"
+	c.setHeld(held)
+	c.holdMOH(fromCaller, held)
 	// The answer to the offer's side: our SDP with the mirrored direction.
 	ansDir := mirrorDirection(dir)
 	ans := media.BuildAudioSDPDir(c.anchorHost, c.legPortFor(fromCaller), off.PayloadType,
@@ -703,7 +712,6 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	s.send(tx, res)
 	// The peer gets our SDP in the same direction (a held side hears
 	// silence because the held side stopped sending).
-	peerDir := dir
 	peer := media.BuildAudioSDPDir(c.anchorHost, c.legPortFor(!fromCaller), off.PayloadType,
 		off.DTMFPayloadType, off.DTMFRate, peerDir)
 	c.mu.Lock()
