@@ -361,3 +361,22 @@ With thinking off, the model answers about 2–3 of 10 factual PBX questions wit
 Fallbacks either way: an endpoint that rejects "required" (400/422) is asked again without it and is never asked with it again, and a tool phase that ends with no call at all is nudged once.
 
 Decision: lead decision (2026-10-15), pending user review: force a tool call on the first step, use the `no_data_needed` no-op tool, and keep both fallbacks.
+
+## Address books and PTT / paging / intercom (2026-10-25)
+
+Spec: `.procoder/specs/phonebooks-ptt.md`. Accepted by the user:
+
+- **Address books for all brands** (Yealink, Poly, Grandstream, Snom, Fanvil), delivered as each vendor's native remote phonebook / directory XML over the existing provisioning HTTPS endpoint with the phone's existing provisioning credentials, written into the phone config so the phone fetches and refreshes it periodically. No LDAP.
+- **Book kinds, all of:** a shared company book (admin-managed in UI/API, CSV import/export); an automatic extensions list that is always in sync; multiple named books assignable to phone groups/sites; per-user personal contacts in a self-service UI.
+- **Server-side caller-name lookup:** on inbound and internal calls Hello resolves the calling number against the books and sets the display name (SIP From / P-Asserted display name), the web UI and the CDRs.
+- **PTT, all of:** (a) server paging groups: a page code or PTT key makes Hello call all group members, auto-answer one-way (vendor auto-answer headers such as Call-Info answer-after=0 and Alert-Info), across subnets, with CDRs; (b) phone multicast PTT: Hello provisions the phones' own multicast paging/PTT channels (Poly PTT/paging, Yealink/Grandstream/Snom/Fanvil multicast listen/send), LAN only; (c) 1-to-1 intercom: two-way auto-answer by prefix code or DSS key.
+
+Decision: accepted by the user (2026-10-25), all of the above.
+
+## Phonebooks and PTT spec: merge and start implementation? (2026-10-25)
+
+- Merge PR #114 and start phase 1 (recommended)
+- Review the spec first, then decide
+- Keep everything paused
+
+Decision: accepted "Merge PR #114 and start phase 1".
