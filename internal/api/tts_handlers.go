@@ -2,7 +2,7 @@ package api
 
 // Text-to-speech prompts. The operator authors text in the console and asks
 // for it to be generated; the audio is made once through OpenRouter (an
-// ElevenLabs model), stored as an 8 kHz WAV and played from storage ever
+// ElevenLabs model), stored as a WAV at the model's own sample rate and played from storage ever
 // after. Nothing here runs at call time, and a generation only happens on an
 // explicit request: saving text, listing voices and playing never call the
 // provider. The OpenRouter key is sealed in the database, write-only through
@@ -25,7 +25,7 @@ import (
 // Synthesizer is the text-to-speech provider; *tts.Client implements it and
 // the tests replace it with a fake, so no test touches the network.
 type Synthesizer interface {
-	// Synthesize returns 8 kHz 16-bit mono WAV audio for text.
+	// Synthesize returns 16-bit mono WAV audio for text.
 	Synthesize(ctx context.Context, key, model, voice, text string) ([]byte, error)
 	CheckKey(ctx context.Context, key string) error
 	Voices(ctx context.Context, key string) ([]tts.Model, error)

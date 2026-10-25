@@ -6,6 +6,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net/http"
 	"strings"
@@ -277,21 +278,45 @@ func TestGenerateKeepsManualUpload(t *testing.T) {
 	c.must(http.StatusConflict, "POST", fmt.Sprintf("/api/v1/announcements/%v/generate", a["id"]), map[string]any{})
 }
 
-// TestUploadResampledTo8k fails if a 24 kHz upload is stored at its own rate
-// or a stereo or empty file is accepted.
-func TestUploadResampledTo8k(t *testing.T) {
+// TestUploadKeepsRate fails if an upload is squashed to 8 kHz instead of
+// stored at its own rate (up to 48 kHz), if a stereo file is refused instead
+// of down-mixed to mono, if a 96 kHz file is not capped at 48 kHz, or if an
+// empty or compressed file is accepted or refused without saying why.
+func TestUploadKeepsRate(t *testing.T) {
 	_, _, objs, c, _ := newTTSEnv(t)
 	w24 := media.EncodeWAV(bytes.Repeat([]byte{0, 1}, 24000), 24000)
 	mpMust(c, http.StatusCreated, "POST", "/api/v1/announcements", annMultipart("hi", w24))
 	pcm, rate, err := media.DecodeWAV(objs.objs["ann:ann/hi.wav"])
-	if err != nil || rate != 8000 || len(pcm)/2 != 8000 {
+	if err != nil || rate != 24000 || len(pcm)/2 != 24000 {
 		t.Fatalf("stored rate=%d samples=%d err=%v", rate, len(pcm)/2, err)
 	}
-	stereo := media.EncodeWAV(make([]byte, 400), 8000)
-	stereo[22] = 2 // channels
-	r := mpMust(c, http.StatusBadRequest, "POST", "/api/v1/announcements", annMultipart("st", stereo))
-	if !strings.Contains(string(r.body), "16-bit mono") {
-		t.Fatalf("stereo refusal = %s", r.body)
+	// 48 kHz stereo 16-bit: stored mono at 48 kHz.
+	stereo := make([]byte, 4*48000)
+	for i := range 48000 {
+		binary.LittleEndian.PutUint16(stereo[4*i:], uint16(int16(i%200)*50))
+		binary.LittleEndian.PutUint16(stereo[4*i+2:], uint16(int16(i%200)*50))
+	}
+	wst := media.EncodeWAV(stereo, 48000)
+	binary.LittleEndian.PutUint16(wst[22:], 2)       // channels
+	binary.LittleEndian.PutUint32(wst[28:], 48000*4) // byte rate
+	binary.LittleEndian.PutUint16(wst[32:], 4)       // block align
+	mpMust(c, http.StatusCreated, "POST", "/api/v1/announcements", annMultipart("song", wst))
+	pcm, rate, err = media.DecodeWAV(objs.objs["ann:ann/song.wav"])
+	if err != nil || rate != 48000 || len(pcm)/2 != 48000 {
+		t.Fatalf("stereo song stored rate=%d samples=%d err=%v", rate, len(pcm)/2, err)
+	}
+	// 96 kHz is capped at 48 kHz.
+	w96 := media.EncodeWAV(make([]byte, 2*96000), 96000)
+	mpMust(c, http.StatusCreated, "POST", "/api/v1/announcements", annMultipart("hires", w96))
+	if _, rate, _ = media.DecodeWAV(objs.objs["ann:ann/hires.wav"]); rate != 48000 {
+		t.Fatalf("96 kHz stored at %d", rate)
+	}
+	// A compressed WAV is refused and the answer says what to upload.
+	adpcm := media.EncodeWAV(make([]byte, 400), 8000)
+	binary.LittleEndian.PutUint16(adpcm[20:], 0x0002)
+	r := mpMust(c, http.StatusBadRequest, "POST", "/api/v1/announcements", annMultipart("adpcm", adpcm))
+	if !strings.Contains(string(r.body), "uncompressed PCM") {
+		t.Fatalf("compressed refusal = %s", r.body)
 	}
 	mpMust(c, http.StatusBadRequest, "POST", "/api/v1/announcements", annMultipart("empty", media.EncodeWAV(nil, 8000)))
 }

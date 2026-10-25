@@ -1342,7 +1342,7 @@ export const listAnnouncements = (signal?: AbortSignal) =>
   list<Announcement>("/api/v1/announcements", signal);
 
 /** The largest announcement WAV the server accepts (spec S-5). */
-export const MAX_ANNOUNCEMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_ANNOUNCEMENT_BYTES = 64 * 1024 * 1024;
 
 /**
  * POST /api/v1/announcements: multipart with `name` and `file` (WAV) parts.

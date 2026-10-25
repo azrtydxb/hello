@@ -3304,7 +3304,7 @@
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "WAV bytes, at most 10 MiB; the bytes are checked, not the declared content type."
+                    "description": "WAV bytes, at most 64 MiB; the bytes are checked, not the declared content type. Uncompressed PCM (8, 16, 24 or 32 bit) or float WAV, mono or stereo; stereo is mixed to mono and stored as 16-bit PCM at the file's own sample rate up to 48 kHz (higher rates are reduced to 48 kHz)."
                   }
                 }
               }
@@ -3452,7 +3452,7 @@
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "WAV bytes, at most 10 MiB; the bytes are checked, not the declared content type."
+                    "description": "WAV bytes, at most 64 MiB; the bytes are checked, not the declared content type. Uncompressed PCM (8, 16, 24 or 32 bit) or float WAV, mono or stereo; stereo is mixed to mono and stored as 16-bit PCM at the file's own sample rate up to 48 kHz (higher rates are reduced to 48 kHz)."
                   }
                 }
               }

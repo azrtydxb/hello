@@ -164,9 +164,14 @@ func (o *minioObjects) GetAnnouncement(ctx context.Context, key string) ([]byte,
 		return nil, fmt.Errorf("media: open announcement %s: %w", key, err)
 	}
 	defer func() { _ = obj.Close() }()
-	data, err := io.ReadAll(obj)
-	if err != nil {
+	// A song is tens of megabytes: size the buffer from the object's length
+	// so ReadAll does not grow it through a chain of copies.
+	var buf bytes.Buffer
+	if st, err := obj.Stat(); err == nil && st.Size > 0 && st.Size < 1<<30 {
+		buf.Grow(int(st.Size) + 512)
+	}
+	if _, err := buf.ReadFrom(obj); err != nil {
 		return nil, fmt.Errorf("media: read announcement %s: %w", key, err)
 	}
-	return data, nil
+	return buf.Bytes(), nil
 }

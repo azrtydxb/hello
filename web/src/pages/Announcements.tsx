@@ -196,7 +196,7 @@ export function Announcements() {
       <PageHeader
         eyebrow="Media"
         title="Announcements"
-        description="Named prompts that ring groups and routes can play. Upload a WAV (up to 10 MB), or write the text and generate it once; either plays from storage."
+        description="Named prompts that ring groups and routes can play. Upload a WAV (up to 64 MB; PCM or float, 8 to 32 bit, mono or stereo; stereo is mixed to mono and sample rates up to 48 kHz are kept), or write the text and generate it once; either plays from storage."
         actions={
           <Can>
             <Button

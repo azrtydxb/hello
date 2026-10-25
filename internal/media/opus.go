@@ -41,6 +41,33 @@ func newOpusEncoder(rate int) (enc opusEncoder, err error) {
 	return &opusEnc{e: e}, nil
 }
 
+// opusMusicBitrate is the target bit rate of the Opus encoder that plays
+// stored audio: enough for a stereo-quality-sounding mono song up to the
+// full band, still well under a G.711 call's 64 kbit/s.
+const opusMusicBitrate = 48000
+
+// newOpusMusicEncoder is an encoder for one-way playback of stored audio at
+// rate: the audio application (which keeps high frequencies a speech-tuned
+// encoder drops) at a fixed music bit rate and a moderate complexity, since
+// the encoder is pure Go and runs once per held call.
+func newOpusMusicEncoder(rate int) (enc opusEncoder, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			enc, err = nil, fmt.Errorf("media: opus encoder: %v", r)
+		}
+	}()
+	e, err := opuslib.NewEncoder(rate, 1, opuslib.ApplicationAudio)
+	if err != nil {
+		return nil, fmt.Errorf("media: opus encoder: %w", err)
+	}
+	if err := e.SetBitrate(opusMusicBitrate); err != nil {
+		_ = e.Close()
+		return nil, fmt.Errorf("media: opus encoder: %w", err)
+	}
+	_ = e.SetComplexity(5) // a hint: keep the library default when refused
+	return &opusEnc{e: e}, nil
+}
+
 func newOpusDecoder(rate int) (dec opusDecoder, err error) {
 	defer func() {
 		if r := recover(); r != nil {
