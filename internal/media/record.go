@@ -1,7 +1,7 @@
 // Call recording (plan contract 5): the pass-through tap of an anchored
-// session's RTP payloads into a WAV (G.711 payloads are decoded and the
-// directions mixed; any other codec's payload is stored pass-through with
-// the codec noted), the MinIO object keys of contract 4, and the in-memory
+// session's RTP payloads into a WAV (G.711, G.722 and Opus payloads are
+// decoded and the directions mixed; any other codec's payload is stored
+// pass-through with the codec noted), the MinIO object keys of contract 4, and the in-memory
 // bound of the spec's failure mode (a recording holds at most 10 MB).
 package media
 
@@ -50,12 +50,21 @@ var announcementRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 // Recorder captures one recorded call's audio. The B2BUA feeds it the
 // pass-through payloads of the anchored session's audio packets (both
 // directions) with Write, pauses it while the call is held, and takes the
-// WAV with Result when the recording stops. Safe for concurrent use.
+// WAV with Result when the recording stops. G.711, G.722 and Opus payloads
+// are decoded (the relay passes payloads through untouched, so the tap is
+// where wideband audio becomes PCM); each direction is kept at its own
+// codec's sample rate and the mix is made at the highest. Safe for
+// concurrent use.
 type Recorder struct {
 	mu sync.Mutex
-	// pcm holds the decoded audio per leg, in arrival order.
-	pcm      map[string][]byte
-	raw      []byte // pass-through payload when a direction is not G.711
+	// pcm holds the decoded audio per leg, in arrival order, at rate[leg].
+	pcm  map[string][]byte
+	rate map[string]int
+	// codecs maps negotiated payload types to codecs; the static G.711 and
+	// G.722 types are always known.
+	codecs   map[uint8]Codec
+	decoders map[string]*Decoder // per leg and payload type
+	raw      []byte              // pass-through payload when a direction is not decodable
 	codec    string
 	maxBytes int
 	over     bool // the 10 MB bound was hit; the recording is truncated
@@ -63,35 +72,76 @@ type Recorder struct {
 
 // NewRecorder returns a recorder with the 10 MB bound.
 func NewRecorder() *Recorder {
-	return &Recorder{pcm: map[string][]byte{}, maxBytes: maxRecordingBytes}
+	return &Recorder{
+		pcm: map[string][]byte{}, rate: map[string]int{},
+		codecs: map[uint8]Codec{}, decoders: map[string]*Decoder{},
+		maxBytes: maxRecordingBytes,
+	}
 }
 
-// Write captures one audio payload from one leg. G.711 payloads (0 PCMU,
-// 8 PCMA) are decoded to PCM; any other payload type is kept pass-through
-// with the codec noted (spec edge case "codec mismatch after re-INVITE").
+// SetCodec tells the recorder which codec a payload type carries; it is how
+// a dynamic payload type (Opus, usually 96-127) becomes decodable.
+func (rec *Recorder) SetCodec(c Codec) {
+	rec.mu.Lock()
+	rec.codecs[c.PT] = c
+	rec.mu.Unlock()
+}
+
+// codecFor resolves a payload type under the lock.
+func (rec *Recorder) codecFor(pt uint8) (Codec, bool) {
+	if c, ok := rec.codecs[pt]; ok {
+		return c, c.Supported()
+	}
+	c, ok := StaticCodec(pt)
+	return c, ok
+}
+
+// Write captures one audio payload from one leg. Payloads of a known codec
+// (G.711, G.722, Opus) are decoded to PCM; any other payload type is kept
+// pass-through with the codec noted (spec edge case "codec mismatch after
+// re-INVITE").
 func (rec *Recorder) Write(leg string, pt uint8, payload []byte) {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
-	switch pt {
-	case 0, 8:
-		if rec.raw != nil {
-			return // the recording is raw since an earlier packet; stay raw
+	c, ok := rec.codecFor(pt)
+	if ok && rec.raw == nil {
+		key := fmt.Sprintf("%s/%d", leg, pt)
+		dec := rec.decoders[key]
+		if dec == nil {
+			d, err := NewDecoder(c)
+			if err != nil {
+				ok = false
+			} else {
+				dec = d
+				rec.decoders[key] = d
+			}
 		}
-		decoded := DecodePCMU(payload)
-		if pt == 8 {
-			decoded = DecodePCMA(payload)
+		if ok {
+			decoded := dec.Decode(payload)
+			if rate := c.SampleRate(); rec.rate[leg] != 0 && rec.rate[leg] != rate {
+				// The leg changed codec mid-call: bring the new audio to
+				// the rate the leg's recording already has.
+				if r, err := Resample(decoded, rate, rec.rate[leg]); err == nil {
+					decoded = r
+				}
+			} else {
+				rec.rate[leg] = rate
+			}
+			if rec.room(len(decoded)) {
+				rec.pcm[leg] = append(rec.pcm[leg], decoded...)
+			}
+			return
 		}
-		if rec.room(len(decoded)) {
-			rec.pcm[leg] = append(rec.pcm[leg], decoded...)
-		}
-	default:
-		if rec.raw == nil {
-			rec.codec = CodecName(pt)
-			rec.raw = []byte{}
-		}
-		if rec.room(len(payload)) {
-			rec.raw = append(rec.raw, payload...)
-		}
+	}
+	if ok {
+		return // the recording is raw since an earlier packet; stay raw
+	}
+	if rec.raw == nil {
+		rec.codec = CodecName(pt)
+		rec.raw = []byte{}
+	}
+	if rec.room(len(payload)) {
+		rec.raw = append(rec.raw, payload...)
 	}
 }
 
@@ -109,17 +159,39 @@ func (rec *Recorder) room(n int) bool {
 	return false
 }
 
-// Result takes the recording: the WAV of the mixed G.711 directions, or
-// the pass-through payload with the codec noted when any direction was
-// not G.711. durMs is the longest direction's duration in ms.
+// Result takes the recording: the WAV of the mixed directions, or the
+// pass-through payload with the codec noted when any direction was not
+// decodable. durMs is the longest direction's duration in ms. The WAV's
+// sample rate is the highest of the directions' (16 kHz when either side
+// spoke G.722 or Opus, else 8 kHz); slower directions are resampled up.
 func (rec *Recorder) Result() (audio []byte, codec string, durMs int64) {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
+	for k, d := range rec.decoders {
+		d.Close()
+		delete(rec.decoders, k)
+	}
 	if rec.raw != nil {
 		return rec.raw, rec.codec, 0
 	}
+	mixRate := sampleRateHz
+	for leg, p := range rec.pcm {
+		if len(p) > 0 && rec.rate[leg] > mixRate {
+			mixRate = rec.rate[leg]
+		}
+	}
+	dirs := map[string][]byte{}
 	var maxLen int
-	for _, p := range rec.pcm {
+	for leg, p := range rec.pcm {
+		if len(p) == 0 {
+			continue
+		}
+		if r := rec.rate[leg]; r != 0 && r != mixRate {
+			if up, err := Resample(p, r, mixRate); err == nil {
+				p = up
+			}
+		}
+		dirs[leg] = p
 		if len(p) > maxLen {
 			maxLen = len(p)
 		}
@@ -127,8 +199,8 @@ func (rec *Recorder) Result() (audio []byte, codec string, durMs int64) {
 	if maxLen == 0 {
 		return nil, "", 0
 	}
-	mixed := MixPCM(rec.pcm)
-	return EncodeWAV(mixed, sampleRateHz), "WAV", int64(maxLen/2) * 1000 / sampleRateHz
+	mixed := MixPCM(dirs)
+	return EncodeWAV(mixed, mixRate), "WAV", int64(maxLen/2) * 1000 / int64(mixRate)
 }
 
 // Over reports whether the recording hit the 10 MB bound and was
@@ -147,6 +219,8 @@ func CodecName(pt uint8) string {
 		return "PCMU"
 	case 8:
 		return "PCMA"
+	case 9:
+		return "G722"
 	}
 	return fmt.Sprintf("pt/%d", pt)
 }

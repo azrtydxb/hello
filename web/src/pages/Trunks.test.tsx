@@ -20,6 +20,7 @@ const TRUNK = {
   enabled: true,
   destinations: [{ host: "10.0.0.5", port: 5060, priority: 0, weight: 1 }],
   internalDialing: { mode: "off", patterns: [] },
+  codecs: ["PCMU", "PCMA"],
   createdAt: "2026-10-01T10:00:00Z",
   updatedAt: "2026-10-01T10:00:00Z",
 };
@@ -116,6 +117,56 @@ describe("Trunks", () => {
       screen.getByRole("button", { name: "Change password" }),
     ).toBeVisible();
     expectPasswordNowhere();
+  });
+
+  it("offers G.711 by default and sends the codecs the operator allows", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () => json({ items: [] }),
+      "POST /api/v1/trunks": () => json(TRUNK, 201),
+    });
+    renderApp("/trunks");
+
+    expect(await screen.findByText("No trunks yet")).toBeVisible();
+    fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
+    const drawer = screen.getByRole("dialog", { name: "New trunk" });
+    // Most carriers accept G.711 only, so only PCMU and PCMA start ticked.
+    expect(within(drawer).getByLabelText(/PCMU/)).toBeChecked();
+    expect(within(drawer).getByLabelText(/PCMA/)).toBeChecked();
+    expect(within(drawer).getByLabelText(/G\.722/)).not.toBeChecked();
+    expect(within(drawer).getByLabelText(/Opus/)).not.toBeChecked();
+
+    field("Name", "carrier-hd");
+    field("Username", "acct1001");
+    field("Password (optional)", PASSWORD);
+    field("Host 1", "10.0.0.5");
+    fireEvent.click(within(drawer).getByLabelText(/G\.722/));
+    fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
+    await screen.findByText("Trunk carrier-primary created.");
+    expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+      codecs: ["PCMU", "PCMA", "G722"],
+    });
+  });
+
+  it("refuses a trunk with no codec ticked", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [] }),
+      "GET /api/v1/trunks/status": () => json({ items: [] }),
+    });
+    renderApp("/trunks");
+    expect(await screen.findByText("No trunks yet")).toBeVisible();
+    fireEvent.click(screen.getAllByRole("button", { name: "New trunk" })[0]!);
+    const drawer = screen.getByRole("dialog", { name: "New trunk" });
+    field("Name", "carrier-none");
+    field("Username", "acct1001");
+    field("Password (optional)", PASSWORD);
+    field("Host 1", "10.0.0.5");
+    fireEvent.click(within(drawer).getByLabelText(/PCMU/));
+    fireEvent.click(within(drawer).getByLabelText(/PCMA/));
+    fireEvent.click(screen.getByRole("button", { name: "Create trunk" }));
+    expect(await screen.findByText("Offer at least one codec.")).toBeVisible();
   });
 
   it("shows only set / not set on reload, and rotates the password only when asked", async () => {

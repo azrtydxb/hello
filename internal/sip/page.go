@@ -60,10 +60,15 @@ type pageEvent struct{ answered bool }
 
 // pageState is a running page.
 type pageState struct {
-	group  snapshot.PagingGroup
-	fan    *media.Fanout
-	host   string
-	pt     uint8
+	group snapshot.PagingGroup
+	fan   *media.Fanout
+	host  string
+	pt    uint8
+	// codec is the page's one codec (G.722 when the caller offered it,
+	// else its first G.711): the caller's answer, the fan-out and the
+	// members' offer all speak it. A G.722 page offers members PCMU as
+	// well, and a member that picks it hears a G.711 rendition.
+	codec  media.AudioSDP
 	events chan pageEvent
 
 	// The tone the caller hears until the first member answers (early
@@ -307,14 +312,22 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 		deny(sip.StatusForbidden, "extension "+c.callerNum+" may not page "+g.Name, "denied", ResultFailed)
 		return
 	}
-	off, err := media.ParseAudioSDP(req.Body())
+	full, err := media.ParseAudioSDP(req.Body())
 	if err != nil {
-		deny(sip.StatusNotAcceptableHere, "page needs a G.711 offer: "+err.Error(), "failed", ResultFailed)
+		deny(sip.StatusNotAcceptableHere, "page needs a G.711 or G.722 offer: "+err.Error(), "failed", ResultFailed)
 		return
 	}
+	off, ok := full.Pick("g722", "g711")
+	if !ok {
+		deny(sip.StatusNotAcceptableHere, "page needs a G.711 or G.722 offer", "failed", ResultFailed)
+		return
+	}
+	off.Events = nil // a page carries no DTMF
+	off.Codecs = off.Codecs[:1]
+	off.DTMFPayloadType, off.DTMFRate = 0, 0
 	emergency := g.Priority == snapshot.PagingEmergency
 	busy := s.busyExtensions()
-	ps := &pageState{group: g, host: s.anchorHostOr(off.Address), pt: off.PayloadType, callerAddr: udpAddr(off.Address, off.Port)}
+	ps := &pageState{group: g, host: s.anchorHostOr(off.Address), pt: off.PayloadType, codec: off, callerAddr: udpAddr(off.Address, off.Port)}
 	var targets []pageBinding
 	for _, ext := range g.Members {
 		if ext == c.callerNum {
@@ -371,7 +384,7 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 		s.pageRelease(c)
 		return
 	}
-	fan, err := media.NewFanout(s.cfg.RTPPortMin, s.cfg.RTPPortMax, off.PayloadType)
+	fan, err := media.NewFanoutCodec(s.cfg.RTPPortMin, s.cfg.RTPPortMax, off.Codec)
 	if err != nil {
 		c.addTrace("Page media failed: " + err.Error())
 		c.respondA(sip.StatusServiceUnavailable, "Service Unavailable")
@@ -392,7 +405,7 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 		c.addTrace(fmt.Sprintf("Page also sent to multicast %s:%d", mc.Address, mc.Port))
 	}
 	ps.events = make(chan pageEvent, len(targets)+1)
-	offer := media.BuildAudioSDPDir(ps.host, fan.MemberPort(), off.PayloadType, 0, 0, "sendonly")
+	offer := pageMemberOffer(ps, fan.MemberPort())
 	c.addTrace(fmt.Sprintf("Paging group %s (%s): %d legs", g.Name, g.Priority, len(targets)))
 	if g.Multicast == nil {
 		c.pageEarlyMedia(ps)
@@ -427,7 +440,7 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 // ever sends the tone and never sends a member's audio back. A phone that
 // ignores early media just hears nothing until the answer.
 func (c *call) pageEarlyMedia(ps *pageState) {
-	body := media.BuildAudioSDPDir(ps.host, ps.fan.CallerPort(), ps.pt, 0, 0, "sendrecv")
+	body := ps.codec.Build(ps.host, ps.fan.CallerPort(), "sendrecv")
 	c.s.m.response(sip.StatusSessionInProgress)
 	err := c.dss.Respond(sip.StatusSessionInProgress, "Session Progress", body, sip.NewHeader("Content-Type", "application/sdp"))
 	if err != nil {
@@ -569,7 +582,7 @@ func (c *call) pageAnswerCaller() {
 	c.addTrace("Page established")
 	c.s.m.PagingTotal.WithLabelValues("answered").Inc()
 	c.publish()
-	body := media.BuildAudioSDPDir(ps.host, ps.fan.CallerPort(), ps.pt, 0, 0, "sendrecv")
+	body := ps.codec.Build(ps.host, ps.fan.CallerPort(), "sendrecv")
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
@@ -643,7 +656,10 @@ func (c *call) pageLegAnswered(l *leg) {
 	addr := udpAddr(ans.Address, ans.Port)
 	ps.mu.Lock()
 	closedNow := ps.closed
-	usable := err == nil && addr != nil && ans.PayloadType == ps.pt
+	// A member answers with the page's codec or, on a G.722 page, PCMU.
+	native := err == nil && ans.PayloadType == ps.pt
+	g711 := err == nil && ps.pt == 9 && ans.PayloadType == 0
+	usable := addr != nil && (native || g711)
 	if !closedNow && usable {
 		pl.answered, pl.result = true, PageLegAnswered
 	}
@@ -656,7 +672,11 @@ func (c *call) pageLegAnswered(l *leg) {
 		return
 	}
 	l.ack(nil, "")
-	ps.fan.AddTarget(l.callID, addr)
+	if g711 {
+		ps.fan.AddFallbackTarget(l.callID, addr)
+	} else {
+		ps.fan.AddTarget(l.callID, addr)
+	}
 	select {
 	case ps.events <- pageEvent{answered: true}:
 	default:
@@ -854,4 +874,16 @@ func (c *call) pageMemberGone(l *leg) {
 	if !pending && ps.group.Multicast == nil {
 		go c.endBoth("every page member hung up")
 	}
+}
+
+// pageMemberOffer is the sendonly SDP offered to page members: the page's
+// codec and, on a G.722 page, PCMU as the fallback for a phone without
+// G.722 (the fan-out renders it from the G.722 stream).
+func pageMemberOffer(ps *pageState, port int) []byte {
+	codecs := ps.codec.Codecs
+	if ps.pt == 9 {
+		pcmu, _ := media.StaticCodec(0)
+		codecs = append(append([]media.Codec(nil), codecs...), pcmu)
+	}
+	return media.BuildSDP(ps.host, port, codecs, nil, "sendonly")
 }

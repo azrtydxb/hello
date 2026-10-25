@@ -240,6 +240,12 @@ export interface TrunkFields {
   destinations: TrunkDestination[];
   /** What the trunk may dial in the extension namespace. */
   internalDialing: InternalDialing;
+  /**
+   * The audio codecs offered to the trunk (store.Trunk.codecs): any of
+   * "PCMU", "PCMA", "G722", "opus". Default ["PCMU", "PCMA"]: most carriers
+   * accept G.711 only.
+   */
+  codecs: string[];
 }
 
 /** A trunk as returned: the password is never returned, only hasPassword. */

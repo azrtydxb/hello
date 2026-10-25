@@ -1,9 +1,15 @@
-// Package media is Hello's anchored-media recorder and player for voicemail
-// calls. The B2BUA anchors media (terminates RTP in this package) only when
-// a call is routed to voicemail; every other call stays direct RTP between
-// the end points. Audio is 8 kHz mono 16-bit little-endian PCM throughout;
-// on the wire it is G.711 (PCMU or PCMA) in RTP, with DTMF as RFC 2833/4733
-// telephone events. Recorded messages are stored as WAV files in MinIO.
+// Package media is Hello's media plane. Every call is anchored: the relay
+// (relay.go) bridges the two legs' RTP through the node without
+// transcoding, so the negotiated codec (G.722, Opus, PCMU or PCMA, see
+// sdp.go) passes through unchanged and the recording tap decodes it
+// (record.go). Media Hello itself terminates (voicemail, announcements,
+// IVR, paging tones; anchor.go and the fan-out) is a Session: mono 16-bit
+// little-endian PCM at the session's sample rate (Session.SampleRate) -
+// 16 kHz when G.722 was negotiated, 8 kHz for G.711 - encoded to the wire
+// codec in RTP, with DTMF as RFC 2833/4733 telephone events. G.722 is a
+// pure-Go sub-band ADPCM codec (g722.go); Opus runs on a pure-Go (no cgo)
+// transpilation of libopus (codec.go). Recorded messages are stored as WAV
+// files in MinIO.
 package media
 
 import (
@@ -11,9 +17,10 @@ import (
 	"time"
 )
 
-// sampleRateHz and the frame constants describe the one audio format the
-// whole package speaks. frameSamples at sampleRateHz is a 20 ms RTP frame,
-// the packetisation nearly every SIP endpoint offers.
+// sampleRateHz and the frame constants describe the narrowband (G.711)
+// audio format and the canonical rate of stored assets. frameSamples at
+// sampleRateHz is a 20 ms RTP frame, the packetisation nearly every SIP
+// endpoint offers; wideband sessions scale it by Codec.FrameSamples.
 const (
 	sampleRateHz = 8000
 	frameSamples = 160 // 20 ms of audio
@@ -25,12 +32,17 @@ const (
 // call. The B2BUA creates it with Anchor.Answer, plays prompts into it with
 // Play and captures the caller's message with Record.
 type Session interface {
-	// Play plays PCM (16-bit mono, 8 kHz) to the remote party, in real
-	// time. It returns once every frame has been sent, or ctx.Err() when
+	// SampleRate is the PCM sample rate of Play and Record: 8000 when the
+	// session negotiated G.711, 16000 for G.722 or Opus. Prompts stored at
+	// another rate go through Resample first.
+	SampleRate() int
+
+	// Play plays PCM (16-bit mono, at SampleRate) to the remote party, in
+	// real time. It returns once every frame has been sent, or ctx.Err() when
 	// ctx is cancelled mid-way.
 	Play(ctx context.Context, audio []byte) error
 
-	// Record records PCM (16-bit mono, 8 kHz) from the remote party.
+	// Record records PCM (16-bit mono, at SampleRate) from the remote party.
 	//
 	// It returns the recorded PCM when the remote party presses DTMF '#'
 	// (that digit is delivered on dtmf like every other digit), when maxDur
