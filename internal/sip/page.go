@@ -178,6 +178,9 @@ func (s *Server) busyExtensions() map[string]bool {
 	for _, lc := range calls {
 		if lc.State == "connected" {
 			busy[lc.From], busy[lc.To] = true, true
+			if lc.Callee != "" {
+				busy[lc.Callee] = true
+			}
 		}
 	}
 	s.mu.Lock()
@@ -190,6 +193,9 @@ func (s *Server) busyExtensions() map[string]bool {
 		c.mu.Lock()
 		if c.connected && !c.ended {
 			busy[c.callerNum], busy[c.dialled], busy[c.rewritten] = true, true, true
+			if c.winner != nil && c.winner.binding.Extension != "" {
+				busy[c.winner.binding.Extension] = true
+			}
 		}
 		c.mu.Unlock()
 	}

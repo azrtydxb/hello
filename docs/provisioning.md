@@ -867,6 +867,59 @@ unverified on a phone.
   that node must be on the phones' LAN: in Kubernetes, host networking or a
   secondary interface on that VLAN.
 
+## Call waiting and busy handling
+
+Each extension has a **Call waiting** switch (`callWaiting`, on by default;
+the extension's page in the console or `PATCH /api/v1/extensions/{id}`).
+
+- **On.** A call to an extension that is in a call still rings its phones,
+  and the phone shows its own call-waiting indication and tone.
+- **Off.** A call to an extension that is in a call does not ring: the caller
+  gets the extension's forward-busy target when one is set, otherwise the
+  extension's voicemail when it has one, otherwise `486 Busy Here`. An
+  extension that is not busy rings as usual.
+- **Ring groups and hunt groups** skip a member that is in a call and has
+  call waiting off, as they skip a DND member; a member with call waiting on
+  is still rung. A group left with no member follows its failure destination.
+- **Paging and intercom.** Paging already skips every member in a call (a
+  page never interrupts a call), whatever the switch says. An intercom call
+  to an extension in a call rings it as a normal call instead of
+  auto-answering, whatever the switch says; the call-waiting flag is not
+  consulted on that path. Call parking and pickup do not exist in Hello yet;
+  when they do, they must not consult the flag either (a pickup answers a
+  call that is already ringing).
+- **How busy is decided.** An extension is busy while any connected call of
+  the cluster has it as caller, as the dialled number, or as the extension
+  whose phone answered (a ring group member, a forward target). Every node
+  publishes its calls to Valkey with a heartbeat and a TTL (the same live
+  call record the dashboard and paging use), so the state is cluster-wide,
+  is released when the call ends (BYE, CANCEL, failure, takeover) and
+  expires by itself when the owning node dies. Nothing extra is counted. If
+  Valkey is unreachable the extension is treated as idle and rings.
+- **Feature codes.** `*71` turns call waiting on and `*70` turns it off for
+  the extension of the phone that dials it, like `*78` and `*79` do for DND
+  (also mid-call as DTMF). The defaults are added by migration 00026 to
+  existing installs unless the code is already used; change them under
+  System, Feature codes.
+- **Phone settings.** The built-in templates write the phone's own switch
+  and tone from the flag, so the phone and Hello agree. **A change reaches a
+  phone at its next resync** (use Resync on the Phones page, or wait for the
+  resync interval); a toggle by feature code does the same. All keys are
+  from the vendor's documentation or published configuration templates and
+  **none is confirmed on hardware yet** (lab item 26):
+
+  | Vendor      | Keys written (on / off)                                                                                                                                                                                               | Source                                                                                                                                                                                                                                       |
+  | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Grandstream | `P26063` account 1 call waiting: 1 / 2 (WP856: 2 / 1, its template reads it the other way round); `P91` phone-wide: 0 / 1; `P186` call-waiting tone: 0 / 1 (WP8x6; the WP822 template has no such key and ignores it) | `wp8x6_config_1.0.3.39` ("Enable Call Waiting", 0 Default, 1 Yes, 2 No) and `wp810_822_825_config_1.0.11.83` ("Disable Call Waiting", 0 Default, 1 No, 2 Yes) in config-template_09302026: the wording is inverted, the values mean the same |
+  | Yealink     | `call_waiting.enable` 1 / 0, `call_waiting.tone` 1 / 0                                                                                                                                                                | Yealink SIP IP Phones Administrator Guide, "Call Waiting"; the same keys in third-party provisioning templates                                                                                                                               |
+  | Snom        | `call_waiting idx=1` `on` / `off` (`visual` would show it without a tone)                                                                                                                                             | Snom settings reference and the Tancredi snom template                                                                                                                                                                                       |
+  | Poly        | `call.callWaiting.enable` 1 / 0, `call.callWaiting.ring` `beep`                                                                                                                                                       | Poly UC Software Administrator Guide; provisioning templates for VVX                                                                                                                                                                         |
+  | Fanvil      | `P1 CallWaiting` 1 / 0 and `P1 CWaiting Tone` 1 / 0 in `<CALL FEATURE MODULE>`                                                                                                                                        | Fanvil X-series exported configuration (a real phone export; the XML form is `CallWaiting` and `CWaitingTone`)                                                                                                                               |
+
+  The WP822 and WP836 call-waiting tone is the phone's own
+  (`P347` and its gain `P1555`, left at their defaults); the lab check
+  listens for it with the flag on and expects silence with it off.
+
 ## Security model and its limits
 
 What protects the phones' secrets:

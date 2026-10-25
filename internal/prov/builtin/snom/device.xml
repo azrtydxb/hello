@@ -14,6 +14,8 @@
     <codec_priority_list idx="1" perm="R">g722,{{if .Codecs.Opus}}opus,{{end}}pcmu,pcma,telephone-event</codec_priority_list>
 {{- /* MWI (spec S-1): user_mailbox names the mailbox the phone ties MWI to and dials for voicemail (Snom Service Hub, user_mailbox, D-series); Snom documents no separate subscribe flag. Unverified on hardware (lab item 1). */}}
     <user_mailbox idx="1" perm="R">{{xml (or .Line.VoicemailCode "*97")}}</user_mailbox>
+{{- /* Call waiting (phone-feature-parity S-18): call_waiting per line is on (waiting tone), visual (no tone) or off; Hello writes on or off from the extension's flag. Key and values as in Snom's own settings reference and the Tancredi snom template. Unverified on hardware (verify, lab item 26). */}}
+    <call_waiting idx="1" perm="R">{{if .Line.CallWaiting}}on{{else}}off{{end}}</call_waiting>
     <admin_mode_password perm="R">{{xml .Phone.AdminPassword}}</admin_mode_password>
     <setting_server perm="R">{{xml .Prov.URL}}{mac}</setting_server>
     <prov_polling_enabled perm="R">on</prov_polling_enabled>

@@ -493,6 +493,7 @@ function ExtensionDrawer({
   const [voicemail, setVoicemail] = useState(ext.voicemailEnabled !== false);
   const [record, setRecord] = useState(ext.recordDefault ?? false);
   const [intercom, setIntercom] = useState(ext.allowIntercom !== false);
+  const [callWaiting, setCallWaiting] = useState(ext.callWaiting !== false);
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -525,6 +526,9 @@ function ExtensionDrawer({
     if (record !== (ext.recordDefault ?? false)) patch.recordDefault = record;
     if (intercom !== (ext.allowIntercom !== false)) {
       patch.allowIntercom = intercom;
+    }
+    if (callWaiting !== (ext.callWaiting !== false)) {
+      patch.callWaiting = callWaiting;
     }
     if (Object.keys(patch).length === 0) {
       onClose();
@@ -655,6 +659,13 @@ function ExtensionDrawer({
               labelPosition="end"
               checked={intercom}
               onChange={(e) => setIntercom(e.target.checked)}
+            />
+            <Switch
+              label="Call waiting"
+              hint="On: a second call rings the phone while it is busy. Off: the caller gets forward-busy or busy. *71 and *70 toggle it; the phone follows at its next resync"
+              labelPosition="end"
+              checked={callWaiting}
+              onChange={(e) => setCallWaiting(e.target.checked)}
             />
           </div>
 
