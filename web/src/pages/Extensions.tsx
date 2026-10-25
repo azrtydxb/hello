@@ -11,6 +11,7 @@ import {
   updateExtension,
   type Device,
   type Extension,
+  type Id,
 } from "../api";
 import {
   bindingsOf,
@@ -42,6 +43,7 @@ import { mapFieldErrors } from "../forms";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import "./directory/directory.css";
 import { Can } from "../role";
+import { MOHSelect } from "./media/MohSelect";
 
 const NUMBER_HINT = "2 to 10 digits.";
 const EXTERNAL_PATTERN = /^(\+?[0-9]{2,20})?$/;
@@ -494,6 +496,7 @@ function ExtensionDrawer({
   const [record, setRecord] = useState(ext.recordDefault ?? false);
   const [intercom, setIntercom] = useState(ext.allowIntercom !== false);
   const [callWaiting, setCallWaiting] = useState(ext.callWaiting !== false);
+  const [mohClass, setMohClass] = useState<Id | null>(ext.mohClassId ?? null);
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -529,6 +532,9 @@ function ExtensionDrawer({
     }
     if (callWaiting !== (ext.callWaiting !== false)) {
       patch.callWaiting = callWaiting;
+    }
+    if (String(mohClass ?? "") !== String(ext.mohClassId ?? "")) {
+      patch.mohClassId = mohClass;
     }
     if (Object.keys(patch).length === 0) {
       onClose();
@@ -666,6 +672,13 @@ function ExtensionDrawer({
               labelPosition="end"
               checked={callWaiting}
               onChange={(e) => setCallWaiting(e.target.checked)}
+            />
+            <MOHSelect
+              id="ext-moh"
+              label="Music on hold"
+              hint="What callers hear while this extension holds them. Default uses the global class."
+              value={mohClass}
+              onChange={setMohClass}
             />
           </div>
 

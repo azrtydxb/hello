@@ -664,18 +664,26 @@ type InboundRoute struct {
 	DestinationKind   string            `json:"destinationKind"`
 	Destination       string            `json:"destination"`
 	Enabled           bool              `json:"enabled"`
+	// MOHClassID is the music on hold class of calls this route delivers
+	// (nil uses the global default); MOHRingback plays it to the caller
+	// instead of ringback while the destination rings (migration 00021).
+	MOHClassID  *int64 `json:"mohClassId"`
+	MOHRingback bool   `json:"mohRingback"`
 }
 
 const inboundCols = `id, position, name, did_kind, did, trunk_id, sip_domain, header_name, header_regex, schedule,
-	callerid_transform, destination_kind, destination, enabled`
+	callerid_transform, destination_kind, destination, enabled, moh_class_id, moh_ringback`
 
 func scanInbound(r interface{ Scan(...any) error }) (InboundRoute, error) {
 	var in InboundRoute
-	var trunk sql.NullInt64
+	var trunk, moh sql.NullInt64
 	var sched, cid []byte
 	if err := r.Scan(&in.ID, &in.Position, &in.Name, &in.DIDKind, &in.DID, &trunk, &in.SIPDomain, &in.HeaderName,
-		&in.HeaderRegex, &sched, &cid, &in.DestinationKind, &in.Destination, &in.Enabled); err != nil {
+		&in.HeaderRegex, &sched, &cid, &in.DestinationKind, &in.Destination, &in.Enabled, &moh, &in.MOHRingback); err != nil {
 		return in, err
+	}
+	if moh.Valid {
+		in.MOHClassID = &moh.Int64
 	}
 	if trunk.Valid {
 		in.TrunkID = &trunk.Int64
@@ -731,6 +739,9 @@ func writeInbound(ctx context.Context, tx *sql.Tx, id int64, in InboundRoute) er
 			return err
 		}
 	}
+	if err := checkMOHClass(ctx, tx, "mohClassId", in.MOHClassID); err != nil {
+		return err
+	}
 	sched, err := jsonArg(in.Schedule)
 	if err != nil {
 		return err
@@ -741,9 +752,9 @@ func writeInbound(ctx context.Context, tx *sql.Tx, id int64, in InboundRoute) er
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE inbound_routes SET name = $2, did_kind = $3, did = $4, trunk_id = $5,
 			sip_domain = $6, header_name = $7, header_regex = $8, schedule = $9::jsonb, callerid_transform = $10::jsonb,
-			destination_kind = $11, destination = $12, enabled = $13
+			destination_kind = $11, destination = $12, enabled = $13, moh_class_id = $14, moh_ringback = $15
 		WHERE id = $1`, id, in.Name, in.DIDKind, in.DID, in.TrunkID, in.SIPDomain, in.HeaderName, in.HeaderRegex,
-		sched, cid, in.DestinationKind, in.Destination, in.Enabled)
+		sched, cid, in.DestinationKind, in.Destination, in.Enabled, in.MOHClassID, in.MOHRingback)
 	return err
 }
 
@@ -908,7 +919,10 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 			ID: in.ID, Position: in.Position, Name: in.Name, DIDKind: in.DIDKind, DID: in.DID,
 			SIPDomain: in.SIPDomain, HeaderName: in.HeaderName, HeaderRegex: in.HeaderRegex, Schedule: in.Schedule,
 			CallerID: in.CallerIDTransform, DestinationKind: in.DestinationKind, Destination: in.Destination,
-			Enabled: in.Enabled,
+			Enabled: in.Enabled, MOHRingback: in.MOHRingback,
+		}
+		if in.MOHClassID != nil {
+			r.MOHClassID = *in.MOHClassID
 		}
 		if in.TrunkID != nil {
 			r.TrunkID = *in.TrunkID

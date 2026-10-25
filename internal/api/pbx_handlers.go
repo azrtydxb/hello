@@ -417,6 +417,8 @@ type ringGroupBody struct {
 	FailureKind   *string              `json:"failureKind"`
 	FailureTarget *string              `json:"failureTarget"`
 	Members       *[]ringGroupMemberIn `json:"members"`
+	MOHClassID    nullable[int64]      `json:"mohClassId"`
+	MOHRingback   *bool                `json:"mohRingback"`
 }
 
 type ringGroupMemberIn struct {
@@ -454,6 +456,12 @@ func (b ringGroupBody) toInput(base store.RingGroupInput) (store.RingGroupInput,
 	}
 	if b.FailureTarget != nil {
 		base.FailureTarget = *b.FailureTarget
+	}
+	if b.MOHClassID.Set {
+		base.MOHClassID = b.MOHClassID.Value
+	}
+	if b.MOHRingback != nil {
+		base.MOHRingback = *b.MOHRingback
 	}
 	if b.Members != nil {
 		base.Members = make([]store.RingGroupMember, 0, len(*b.Members))
@@ -585,6 +593,7 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 		Name: current.Name, Strategy: current.Strategy, Hunt: current.Hunt,
 		RingTimeout: current.RingTimeout, MemberDelay: current.MemberDelay, IgnoreDND: current.IgnoreDND,
 		FailureKind: current.FailureKind, FailureTarget: current.FailureTarget, Members: current.Members,
+		MOHClassID: current.MOHClassID, MOHRingback: current.MOHRingback,
 	}
 	in, _ := b.toInput(base)
 	if f := validateRingGroup(&in); len(f) > 0 {
