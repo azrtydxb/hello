@@ -1995,6 +1995,150 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/flow/catalogue": {
+      "get": {
+        "operationId": "getFlowCatalogue",
+        "summary": "Read the flow node and port catalogue",
+        "description": "Returns every node kind of the flow canvas with its ports, each port's type (and the colour and shape that type is drawn with) and, for every output, the inputs it may connect to. An entry whose `requires` is set is allowed in principle but cannot be stored until what it names exists. Use it to learn which objects can be joined before changing the configuration.",
+        "tags": [
+          "flow"
+        ],
+        "responses": {
+          "200": {
+            "description": "Read the flow node and port catalogue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowCatalogue"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/flow/graph": {
+      "get": {
+        "operationId": "getFlowGraph",
+        "summary": "Read the call flow as a graph",
+        "description": "Draws the saved configuration as nodes (trunks, routes, extensions, ring groups, announcements, paging groups, feature codes and the terminals calls end in) and edges between their ports. Every edge names the owner: the one field of one object it is stored in, so connecting or disconnecting is one update of that object. A target that resolves to nothing is a `missing` node with a `dangling_reference` warning. Targets resolve as hello-sip does: ring group name, then extension number. Each node's `version` changes whenever the object does. Nothing is stored: the graph is built from the live tables.",
+        "tags": [
+          "flow"
+        ],
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "`all` (default) or `closure:<nodeId>`, everything reachable from a node by following its outputs, for example `closure:inboundRoute:3`. `all` answers 413 above 5000 nodes.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "required": false,
+            "description": "`devices` adds devices and phones, which are left out by default.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "devices"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read the call flow as a graph",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowGraph"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "description": "The graph is too large; use scope=closure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/flow/revision": {
+      "get": {
+        "operationId": "getFlowRevision",
+        "summary": "Read the configuration revision",
+        "description": "Returns the revision every configuration change advances. Poll it to know when a graph read earlier is out of date.",
+        "tags": [
+          "flow"
+        ],
+        "responses": {
+          "200": {
+            "description": "Read the configuration revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowRevision"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/cluster": {
       "get": {
         "operationId": "getCluster",
@@ -10056,6 +10200,315 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PagingGroup"
+            }
+          }
+        }
+      },
+      "FlowRevision": {
+        "type": "object",
+        "required": [
+          "configRevision"
+        ],
+        "properties": {
+          "configRevision": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "FlowTarget": {
+        "type": "object",
+        "required": [
+          "kind",
+          "port"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "port": {
+            "type": "string"
+          },
+          "requires": {
+            "type": "string",
+            "description": "What must exist before this connection can be stored"
+          },
+          "note": {
+            "type": "string",
+            "description": "Why the connection is restricted"
+          }
+        }
+      },
+      "FlowPort": {
+        "type": "object",
+        "required": [
+          "id",
+          "direction",
+          "type",
+          "many",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "in",
+              "out"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "call",
+              "voicemail",
+              "carrier",
+              "member",
+              "prompt",
+              "schedule",
+              "holdMusic",
+              "device"
+            ]
+          },
+          "many": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string",
+            "description": "The stored field an edge on this port is kept in"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowTarget"
+            }
+          }
+        }
+      },
+      "FlowNodeType": {
+        "type": "object",
+        "required": [
+          "kind",
+          "label",
+          "ports"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "pseudo": {
+            "type": "boolean"
+          },
+          "terminal": {
+            "type": "boolean"
+          },
+          "requires": {
+            "type": "string"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowPort"
+            }
+          }
+        }
+      },
+      "FlowPortStyle": {
+        "type": "object",
+        "required": [
+          "type",
+          "label",
+          "colour",
+          "shape"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "colour": {
+            "type": "string"
+          },
+          "shape": {
+            "type": "string"
+          }
+        }
+      },
+      "FlowCatalogue": {
+        "type": "object",
+        "required": [
+          "portTypes",
+          "nodes"
+        ],
+        "properties": {
+          "portTypes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowPortStyle"
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNodeType"
+            }
+          }
+        }
+      },
+      "FlowRef": {
+        "type": "object",
+        "required": [
+          "node",
+          "port"
+        ],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "port": {
+            "type": "string"
+          }
+        }
+      },
+      "FlowOwner": {
+        "type": "object",
+        "required": [
+          "node",
+          "field"
+        ],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          }
+        }
+      },
+      "FlowNode": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "summary"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "`<kind>:<id>`, or `<kind>:<key>` for feature codes and terminals"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "version": {
+            "type": "string",
+            "description": "First 16 hex characters of the sha256 of the object; changes whenever the object does"
+          }
+        }
+      },
+      "FlowEdge": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "target",
+          "owner"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FlowRef"
+          },
+          "target": {
+            "$ref": "#/components/schemas/FlowRef"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/FlowOwner"
+          },
+          "implicit": {
+            "type": "boolean",
+            "description": "Follows from the configuration but is stored in no field"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Edge details such as member position, weight, delay or trunk order"
+          }
+        }
+      },
+      "FlowWarning": {
+        "type": "object",
+        "required": [
+          "node",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "dangling_reference",
+              "empty_group",
+              "voicemail_disabled_target"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "FlowGraph": {
+        "type": "object",
+        "required": [
+          "configRevision",
+          "nodes",
+          "edges",
+          "warnings"
+        ],
+        "properties": {
+          "configRevision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNode"
+            }
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowEdge"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowWarning"
             }
           }
         }
