@@ -71,6 +71,9 @@ type Metrics struct {
 	DialogReplicated *prometheus.CounterVec // result
 	DialogTakeovers  prometheus.Counter
 	ZombieCalls      prometheus.Counter
+
+	// Conf is the server conference series (spec S-34).
+	Conf *confMetrics
 }
 
 // Transfer kinds for hello_transfers_total.
@@ -211,6 +214,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Forwarded, m.GroupCalls,
 		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
+	m.Conf = newConfMetrics(reg)
 	return m
 }
 

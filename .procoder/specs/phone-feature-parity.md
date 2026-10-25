@@ -196,7 +196,14 @@ The user asked for everything and left the details open. These defaults settle e
 - [S-31] **Phonebook caps per model** (addition to phonebooks-ptt phase B). The Grandstream renderer truncates to the model cap from S-2: 500 for WP822 and 1000 for WP8x6 [R822 §7][R8x6 §7]. It keeps books in the delivered-set order, and the phone page warns when entries were dropped. P330 = 3, P331 in host/path form without a scheme, and P332 between 5 and 720 [R8x6 §7] confirm phonebooks-ptt's Grandstream "verify" cells. "Remove Manually-edited Entries on Download" is set on and the Import Group Method is set explicitly [R8x6 §7][R822 §7]. A vCard rendering of the delivered set is offered for WP8x6 1.0.3.24 and later [R8x6 RN] as another slot format, unused by default.
 - [S-32] **Auto-answer restriction** (addition to phonebooks-ptt phase E). WP models get "Accept Incoming SIP from Proxy Only" (S-22), which fills phonebooks-ptt's "Accept only from server" cell for Grandstream [R822 §8]. The exact auto-answer header form the WP822 and WP836 honour is recorded in that spec's vendor table when phase E's lab test runs.
 - [S-33] **Music on hold.** The anchor plays music on hold to a held or parked party when the holding device sends `sendonly`/`inactive`, or the call is parked. It plays an admin-chosen announcement in a loop, or a built-in tone if none is chosen. The Grandstream MOH URI P2350 [R8x6 §3] is left empty so the phone does not originate its own MOH call.
-- [S-34] **Server conference.** A conference feature: rooms with a number, an optional PIN, at most 10 participants and mixing on the anchor node (G.711 and G.722). A three-way merge from phones that use a conference URI is supported by setting the BroadSoft N-way URI P2318 [R8x6 TPL] to a room factory number (**verify**). Local 3-way and 4-way conferencing on the phone keeps working unchanged.
+- [S-34] **Server conference.** Reversed from out of scope on 2026-10-25 (`.procoder/ask/decisions.md`). Rooms are audio only and are mixed on one SIP node (G.711 now; a wideband codec joins through `media.PartyCodec`). Behaviour, controls, the HA design and its limits are in `docs/conference.md`. A room has:
+  - a number (2 to 10 digits), an optional user PIN and an optional leader PIN (sealed, write-only), and a seat cap of 2 to 50 (default 10; the next caller is refused `486`);
+  - wait-for-leader with a hold source (a soft beep, with music on hold plugging in through the `ConferenceHold` dependency), join and leave tones or announcements, mute on entry, and optional recording to the recordings store in ten-minute segments;
+  - DTMF controls `*6` (mute or unmute yourself), and for leaders `*5` (mute everyone else), `*7` (lock) and `*8` (remove the last joiner);
+  - a place as a routing destination (`destinationKind` `conference` on an inbound route, a node on the flow canvas), and as a phone key (a room number among a phone's BLF keys joins it and lights while the room has people in it);
+  - a live console view of participants with mute, kick and lock, over `POST /api/v1/conferences/{id}/control`;
+  - one owning node per room by a Valkey lease; joins on another node are forwarded to the owner; a node loss moves the room through the in-call takeover.
+    A three-way merge from phones that use a conference URI (the BroadSoft N-way URI P2318 [R8x6 TPL], **verify**) works by setting P2318 to a room number. Local 3-way and 4-way conferencing on the phone keeps working unchanged.
 - [S-35] **Presence extensions.**
   - Unknown events get `489` (S-1).
   - `Event: reg` (RFC 3680) is served for an extension's own registrations.
@@ -521,7 +528,7 @@ These items are checked on hardware (two WP836 on 1.0.1.44 and 1.0.1.80, upgrade
 - [ ] [S-31] `TestGrandstreamPhonebookCap` in `internal/prov/phonebook` passes. It fails if a WP822 directory exceeds 500 entries or a WP8x6 directory exceeds 1000, if truncation breaks the delivered-set order, if P331 carries a scheme, or if the vCard slot is malformed.
 - [ ] [S-32] The phonebooks-ptt `TestAutoAnswerHardening` passes with WP822 and WP836 provclient profiles. It fails if a WP template lacks "Accept Incoming SIP from Proxy Only".
 - [ ] [S-33] `TestMusicOnHold` in `internal/sip` passes. It fails if a held or parked party hears silence when MOH is configured, or MOH continues after resume.
-- [ ] [S-34] `TestConferenceRoom` in `internal/sip` passes. It fails if participants cannot hear each other, a wrong PIN joins, an 11th participant joins, or the N-way URI merge does not join both calls.
+- [x] [S-34] `TestConferenceRoom`, `TestConferencePIN`, `TestConferenceCapacity`, `TestConferenceControls`, `TestConferenceWaitForLeader`, `TestConferenceMuteOnEntry`, `TestConferenceTwoNodes`, `TestConferenceTakeover` and `TestConferenceKeyLamp` in `internal/sip` pass. They fail if participants cannot hear each other (or a talker hears itself), a wrong PIN joins, an 11th participant joins a default room, a control does not act, a join on the non-owner node does not reach the owner's one mixer, or a node loss does not keep the participants in the room. The N-way URI merge needs a phone (**needs hardware**).
 - [ ] [S-35] `TestPresenceExtensions` in `internal/sip` passes. It fails if Event: reg, PUBLISH presence or an eventlist subscription is refused or returns another extension's data.
 - [ ] [S-36] `TestRTCPXRCollector` in `internal/sip` passes. It fails if a vq-rtcpxr PUBLISH is not stored on the matching CDR or a malformed one is stored.
 - [ ] [S-37] `TestWP822FileSequence` in `test/provclient` passes. It fails if the WP822 profile's request sequence does not end provisioned, or the Grandstream account ringtone does not follow the ring map's internal tone.
@@ -535,84 +542,84 @@ Every gap row of both reports, with what this spec does and the PR (Phased deliv
 
 ### [R822] WP822
 
-| Report section and row                       | Status in report                      | Closed by                                   | PR             |
-| -------------------------------------------- | ------------------------------------- | ------------------------------------------- | -------------- |
-| §1 Config file name sequence                 | supported, confirm                    | S-37                                        | 2              |
-| §1 Second account                            | missing                               | S-10                                        | 21             |
-| §1 Codec order                               | missing                               | S-3, S-4                                    | 2, 3           |
-| §1 DTMF mode                                 | partial                               | S-3                                         | 2              |
-| §1 MWI subscribe flag                        | missing                               | S-1, S-3                                    | 1, 2           |
-| §1 Voicemail access number                   | partial                               | S-3                                         | 2              |
-| §1 Feature-code / DND / forward sync         | missing                               | S-7                                         | 7              |
-| §1 Phonebook URL / interval                  | planned                               | PB-B, S-31                                  | PB-B, 18       |
-| §1 Wallpaper / ringtone                      | missing                               | S-12, S-44                                  | 12, 15         |
-| §1 Config file encryption / P1 auth          | missing                               | S-22                                        | 27             |
-| §1 Speed dial keys                           | missing                               | S-12                                        | 15             |
-| §2 SIP over TCP / TLS                        | missing                               | S-13, S-14                                  | 22, 23         |
-| §2 SRTP                                      | missing                               | S-15                                        | 24             |
-| §2 Keep-alive RFC 5626 / OPTIONS / TCP       | unverified                            | S-3, S-9                                    | 2, 9           |
-| §2 DNS SRV / failover / failback             | partial                               | S-20                                        | 29             |
-| §2 Session timers                            | missing                               | S-9                                         | 9              |
-| §2 100rel / PRACK                            | missing                               | S-17                                        | 26             |
-| §2 Authenticate incoming INVITE / proxy only | unverified                            | S-22                                        | 27             |
-| §2 Trusted Domain Name list                  | missing                               | S-22                                        | 27             |
-| §2 Factory reset via NOTIFY                  | missing                               | S-5 (never sent; Allow SIP Reset off), S-22 | 4, 27          |
-| §2 RTCP-XR                                   | missing                               | S-36                                        | 35             |
-| §3 Attended transfer before answer           | unverified                            | S-17                                        | 26             |
-| §3 3-way conference                          | supported (server rooms out of scope) | S-34                                        | 33             |
-| §3 Call waiting                              | unverified                            | S-18                                        | 26             |
-| §3 Call forward (phone-local not synced)     | supported, partial                    | S-7                                         | 7              |
-| §3 DND                                       | partial                               | S-7                                         | 7              |
-| §3 Call pickup                               | missing                               | S-50 (defaults 2 and 4)                     | 5              |
-| §3 Call park                                 | missing                               | S-6                                         | 6              |
-| §3 Intercom                                  | planned                               | PB-E, S-32                                  | PB-E, 27       |
-| §3 Distinctive ring                          | missing                               | S-39 to S-44                                | 10, 11, 12     |
-| §3 Caller name display                       | planned                               | PB-C                                        | PB-C           |
-| §3 Emergency / E911                          | partial                               | S-28                                        | 30             |
-| §3 Off-hook auto dial / hotline              | missing                               | S-12                                        | 15             |
-| §3 Hot desking                               | n/a                                   | documented unsupported (default 16), S-11   | 21             |
-| §3 Anonymous outbound                        | unverified                            | S-19                                        | 26             |
-| §4 BLF keys                                  | partial                               | S-2, S-3, S-12 (speed dials)                | 2, 15          |
-| §4 BLF eventlist                             | missing                               | S-35                                        | 34             |
-| §4 Presence PUBLISH                          | missing                               | S-35                                        | 34             |
-| §4 SUBSCRIBE for registration                | missing                               | S-1 (489), S-35                             | 1, 34          |
-| §5 MWI SUBSCRIBE message-summary             | missing                               | S-1                                         | 1              |
-| §5 Unsolicited MWI                           | partial                               | S-1                                         | 1              |
-| §5 Voicemail access                          | supported, template default           | S-3                                         | 2              |
-| §5 Voicemail with wideband / Opus            | partial                               | S-4                                         | 3              |
-| §5 SIP MESSAGE                               | missing                               | S-8                                         | 8              |
-| §6 G.722                                     | partial                               | S-4                                         | 3              |
-| §6 Opus                                      | partial                               | S-4                                         | 3              |
-| §6 G.729 / iLBC                              | unverified                            | S-4 (relayed), S-3 (disabled in order)      | 2, 3           |
-| §6 Jitter buffer / VoWLAN target delay       | n/a, optional                         | S-12                                        | 15             |
-| §6 DSCP                                      | partial                               | S-21                                        | 28             |
-| §7 XML phonebook, 500 cap                    | planned                               | PB-B, S-31                                  | PB-B, 18       |
-| §7 LDAP                                      | missing by decision                   | out of scope (decision)                     | —              |
-| §7 Caller-name lookup                        | planned                               | PB-C                                        | PB-C           |
-| §7 Local contacts read-only                  | planned                               | S-31                                        | 18             |
-| §8 Multicast paging listen                   | planned                               | PB-F, S-30                                  | PB-F, 18       |
-| §8 PTT button (no DSS keys)                  | planned, spec wrong                   | S-30                                        | 18             |
-| §8 Server paging groups                      | planned                               | PB-E                                        | PB-E           |
-| §8 Intercom 1:1                              | planned                               | PB-E                                        | PB-E           |
-| §8 Restrict auto-answer to server            | planned                               | S-32                                        | 27             |
-| §8 Door system (GDS)                         | missing                               | S-45 to S-49                                | 13, 14, 16, 17 |
-| §9 Remote resync / reboot                    | missing                               | S-5                                         | 4              |
-| §9 Firmware confirmation bypass              | supported, optional                   | S-22                                        | 27             |
-| §9 Firmware downgrade guard                  | unverified                            | S-26                                        | 19             |
-| §9 TR-069                                    | missing                               | S-22 (off)                                  | 27             |
-| §9 GDMS                                      | partial                               | out of scope beyond provisioning spec       | —              |
-| §9 Syslog                                    | missing                               | S-27                                        | 36             |
-| §9 Keypad menu / SSH / web access            | missing                               | S-22                                        | 27             |
-| §10 SSID provisioning                        | missing                               | S-23                                        | 31             |
-| §10 802.11r/k/v                              | missing                               | S-24                                        | 31             |
-| §10 Roaming threshold                        | missing                               | S-24                                        | 31             |
-| §10 Power save                               | missing                               | S-12                                        | 15             |
-| §10 Registration resilience on roam          | unverified                            | S-9                                         | 9              |
-| §10 NAT keep-alive on Wi-Fi sleep            | unverified                            | S-3, S-9                                    | 2, 9           |
-| §11 WP822 as known model                     | partial                               | S-2, S-3, S-38                              | 2              |
-| §11 Per-phone extra settings                 | missing                               | S-12                                        | 15             |
-| §11 Remote actions                           | missing                               | S-5                                         | 4              |
-| §11 Paging / phonebook pages                 | planned                               | PB-B, PB-E                                  | PB             |
+| Report section and row                       | Status in report              | Closed by                                   | PR             |
+| -------------------------------------------- | ----------------------------- | ------------------------------------------- | -------------- |
+| §1 Config file name sequence                 | supported, confirm            | S-37                                        | 2              |
+| §1 Second account                            | missing                       | S-10                                        | 21             |
+| §1 Codec order                               | missing                       | S-3, S-4                                    | 2, 3           |
+| §1 DTMF mode                                 | partial                       | S-3                                         | 2              |
+| §1 MWI subscribe flag                        | missing                       | S-1, S-3                                    | 1, 2           |
+| §1 Voicemail access number                   | partial                       | S-3                                         | 2              |
+| §1 Feature-code / DND / forward sync         | missing                       | S-7                                         | 7              |
+| §1 Phonebook URL / interval                  | planned                       | PB-B, S-31                                  | PB-B, 18       |
+| §1 Wallpaper / ringtone                      | missing                       | S-12, S-44                                  | 12, 15         |
+| §1 Config file encryption / P1 auth          | missing                       | S-22                                        | 27             |
+| §1 Speed dial keys                           | missing                       | S-12                                        | 15             |
+| §2 SIP over TCP / TLS                        | missing                       | S-13, S-14                                  | 22, 23         |
+| §2 SRTP                                      | missing                       | S-15                                        | 24             |
+| §2 Keep-alive RFC 5626 / OPTIONS / TCP       | unverified                    | S-3, S-9                                    | 2, 9           |
+| §2 DNS SRV / failover / failback             | partial                       | S-20                                        | 29             |
+| §2 Session timers                            | missing                       | S-9                                         | 9              |
+| §2 100rel / PRACK                            | missing                       | S-17                                        | 26             |
+| §2 Authenticate incoming INVITE / proxy only | unverified                    | S-22                                        | 27             |
+| §2 Trusted Domain Name list                  | missing                       | S-22                                        | 27             |
+| §2 Factory reset via NOTIFY                  | missing                       | S-5 (never sent; Allow SIP Reset off), S-22 | 4, 27          |
+| §2 RTCP-XR                                   | missing                       | S-36                                        | 35             |
+| §3 Attended transfer before answer           | unverified                    | S-17                                        | 26             |
+| §3 3-way conference                          | supported; server rooms built | S-34                                        | 33             |
+| §3 Call waiting                              | unverified                    | S-18                                        | 26             |
+| §3 Call forward (phone-local not synced)     | supported, partial            | S-7                                         | 7              |
+| §3 DND                                       | partial                       | S-7                                         | 7              |
+| §3 Call pickup                               | missing                       | S-50 (defaults 2 and 4)                     | 5              |
+| §3 Call park                                 | missing                       | S-6                                         | 6              |
+| §3 Intercom                                  | planned                       | PB-E, S-32                                  | PB-E, 27       |
+| §3 Distinctive ring                          | missing                       | S-39 to S-44                                | 10, 11, 12     |
+| §3 Caller name display                       | planned                       | PB-C                                        | PB-C           |
+| §3 Emergency / E911                          | partial                       | S-28                                        | 30             |
+| §3 Off-hook auto dial / hotline              | missing                       | S-12                                        | 15             |
+| §3 Hot desking                               | n/a                           | documented unsupported (default 16), S-11   | 21             |
+| §3 Anonymous outbound                        | unverified                    | S-19                                        | 26             |
+| §4 BLF keys                                  | partial                       | S-2, S-3, S-12 (speed dials)                | 2, 15          |
+| §4 BLF eventlist                             | missing                       | S-35                                        | 34             |
+| §4 Presence PUBLISH                          | missing                       | S-35                                        | 34             |
+| §4 SUBSCRIBE for registration                | missing                       | S-1 (489), S-35                             | 1, 34          |
+| §5 MWI SUBSCRIBE message-summary             | missing                       | S-1                                         | 1              |
+| §5 Unsolicited MWI                           | partial                       | S-1                                         | 1              |
+| §5 Voicemail access                          | supported, template default   | S-3                                         | 2              |
+| §5 Voicemail with wideband / Opus            | partial                       | S-4                                         | 3              |
+| §5 SIP MESSAGE                               | missing                       | S-8                                         | 8              |
+| §6 G.722                                     | partial                       | S-4                                         | 3              |
+| §6 Opus                                      | partial                       | S-4                                         | 3              |
+| §6 G.729 / iLBC                              | unverified                    | S-4 (relayed), S-3 (disabled in order)      | 2, 3           |
+| §6 Jitter buffer / VoWLAN target delay       | n/a, optional                 | S-12                                        | 15             |
+| §6 DSCP                                      | partial                       | S-21                                        | 28             |
+| §7 XML phonebook, 500 cap                    | planned                       | PB-B, S-31                                  | PB-B, 18       |
+| §7 LDAP                                      | missing by decision           | out of scope (decision)                     | —              |
+| §7 Caller-name lookup                        | planned                       | PB-C                                        | PB-C           |
+| §7 Local contacts read-only                  | planned                       | S-31                                        | 18             |
+| §8 Multicast paging listen                   | planned                       | PB-F, S-30                                  | PB-F, 18       |
+| §8 PTT button (no DSS keys)                  | planned, spec wrong           | S-30                                        | 18             |
+| §8 Server paging groups                      | planned                       | PB-E                                        | PB-E           |
+| §8 Intercom 1:1                              | planned                       | PB-E                                        | PB-E           |
+| §8 Restrict auto-answer to server            | planned                       | S-32                                        | 27             |
+| §8 Door system (GDS)                         | missing                       | S-45 to S-49                                | 13, 14, 16, 17 |
+| §9 Remote resync / reboot                    | missing                       | S-5                                         | 4              |
+| §9 Firmware confirmation bypass              | supported, optional           | S-22                                        | 27             |
+| §9 Firmware downgrade guard                  | unverified                    | S-26                                        | 19             |
+| §9 TR-069                                    | missing                       | S-22 (off)                                  | 27             |
+| §9 GDMS                                      | partial                       | out of scope beyond provisioning spec       | —              |
+| §9 Syslog                                    | missing                       | S-27                                        | 36             |
+| §9 Keypad menu / SSH / web access            | missing                       | S-22                                        | 27             |
+| §10 SSID provisioning                        | missing                       | S-23                                        | 31             |
+| §10 802.11r/k/v                              | missing                       | S-24                                        | 31             |
+| §10 Roaming threshold                        | missing                       | S-24                                        | 31             |
+| §10 Power save                               | missing                       | S-12                                        | 15             |
+| §10 Registration resilience on roam          | unverified                    | S-9                                         | 9              |
+| §10 NAT keep-alive on Wi-Fi sleep            | unverified                    | S-3, S-9                                    | 2, 9           |
+| §11 WP822 as known model                     | partial                       | S-2, S-3, S-38                              | 2              |
+| §11 Per-phone extra settings                 | missing                       | S-12                                        | 15             |
+| §11 Remote actions                           | missing                       | S-5                                         | 4              |
+| §11 Paging / phonebook pages                 | planned                       | PB-B, PB-E                                  | PB             |
 
 ### [R8x6] WP816 / WP826 / WP836
 
@@ -636,7 +643,7 @@ Every gap row of both reports, with what this spec does and the PR (Phased deliv
 | §2 100rel / PRACK                                           | missing                               | S-17                    | 26         |
 | §3 Music on hold                                            | missing                               | S-33                    | 32         |
 | §3 Blind / attended transfer verify                         | supported, verify                     | S-17                    | 26         |
-| §3 Server conference P2318                                  | missing                               | S-34                    | 33         |
+| §3 Server conference P2318                                  | rooms built; P2318 needs hardware     | S-34                    | 33         |
 | §3 Call park P60069 / P2336                                 | missing                               | S-6, S-3                | 6          |
 | §3 Call pickup                                              | missing                               | S-50                    | 5          |
 | §3 Forward / DND (server vs local)                          | partial                               | S-7                     | 7          |

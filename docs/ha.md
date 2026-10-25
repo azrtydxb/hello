@@ -133,6 +133,16 @@ This table is normative: it is what Hello does. The Test column names the test t
 | **Delayed or out-of-order NOTIFY**           | —                                                         | —                                                                                                                                              | Each reload reads the database's current revision, so a late NOTIFY never applies an older one; a reload that finds the revision already loaded is skipped. A missed NOTIFY is caught by the 30 s poll | Automatic                                                                                                                   | Phase 1 `TestWatcherNotifyPollAndRetention`                                                                      |
 | **Kamailio dies**                            | Your monitoring                                           | —                                                                                                                                              | Nothing new reaches the cluster through it                                                                                                                                                             | In production, a second Kamailio takes over the VIP or SRV target (below). In the lab Kamailio is a single point of failure | Manual: [Kamailio loss](#kamailio-loss)                                                                          |
 
+## Conference rooms
+
+A conference room is mixed on one node, its owner, chosen by a lease in Valkey.
+A join that lands on another node is forwarded to the owner, and a room
+survives the death of the owner or of a node holding forwarded callers: the
+participants are taken over like any call and the room moves to a survivor.
+Participants are asked for the PIN again after a recovery, and a leader's mutes
+and lock are not carried over. The design, the table of what each failure does
+and the limitations are in [Conference rooms](conference.md#high-availability).
+
 ## Drain a node for maintenance
 
 1. Open **Cluster** and choose **Drain** on the node, or call

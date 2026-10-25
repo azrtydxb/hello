@@ -161,7 +161,7 @@ export interface PageLegResult {
 /** GET /api/v1/cdrs/{id}: the CDR plus its routing trace. */
 export interface CdrDetail extends Cdr {
   /** call, page or intercom. */
-  kind?: "call" | "page" | "intercom";
+  kind?: "call" | "page" | "intercom" | "conference";
   /** A page's outcome per member, in the order they were paged. */
   pageLegs?: PageLegResult[];
   trace: TraceStep[];
@@ -1165,6 +1165,106 @@ export const testPagingGroup = (groupId: Id, extension?: string) =>
 
 export const deletePagingGroup = (groupId: Id) =>
   request<void>("DELETE", `/api/v1/paging-groups/${id(groupId)}`);
+
+// --- conference rooms ------------------------------------------------------------
+
+export type ConferenceSound = "none" | "tone" | "announcement";
+
+/** One participant of a live room. */
+export interface ConferenceParticipant {
+  /** Identifies the participant in control commands. */
+  id: string;
+  number: string;
+  name: string;
+  leader: boolean;
+  muted: boolean;
+  /** A leader or operator muted the participant, who cannot unmute itself. */
+  mutedByLeader: boolean;
+  waiting: boolean;
+  joinedAt: string;
+}
+
+/** A room's live state, published by the SIP node that mixes it. */
+export interface ConferenceLive {
+  room: string;
+  node: string;
+  locked: boolean;
+  recording: boolean;
+  participants: ConferenceParticipant[];
+  updatedAt: string;
+}
+
+/** A conference room as returned. The PINs are write-only: only whether each is set comes back. */
+export interface Conference {
+  id: Id;
+  name: string;
+  number: string;
+  hasUserPin: boolean;
+  hasLeaderPin: boolean;
+  maxParticipants: number;
+  waitForLeader: boolean;
+  muteOnEntry: boolean;
+  entryExit: ConferenceSound;
+  entryAnnouncement: string;
+  exitAnnouncement: string;
+  record: boolean;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  live: ConferenceLive | null;
+}
+
+/** The writable fields of a room (PUT replaces it). A PIN left out is kept; "" clears it. */
+export interface ConferenceFields {
+  name: string;
+  number: string;
+  userPin?: string;
+  leaderPin?: string;
+  maxParticipants: number;
+  waitForLeader: boolean;
+  muteOnEntry: boolean;
+  entryExit: ConferenceSound;
+  entryAnnouncement: string;
+  exitAnnouncement: string;
+  record: boolean;
+  enabled: boolean;
+}
+
+export type ConferenceAction =
+  | "mute"
+  | "unmute"
+  | "kick"
+  | "lock"
+  | "unlock"
+  | "mute_all"
+  | "unmute_all"
+  | "end";
+
+export const listConferences = (signal?: AbortSignal) =>
+  list<Conference>("/api/v1/conferences", signal);
+
+export const createConference = (input: ConferenceFields) =>
+  request<Conference>("POST", "/api/v1/conferences", { body: input });
+
+export const putConference = (roomId: Id, input: ConferenceFields) =>
+  request<Conference>("PUT", `/api/v1/conferences/${id(roomId)}`, {
+    body: input,
+  });
+
+export const deleteConference = (roomId: Id) =>
+  request<void>("DELETE", `/api/v1/conferences/${id(roomId)}`);
+
+/** Queues a control command (mute, kick, lock, ...) for the node that mixes the room. */
+export const controlConference = (
+  roomId: Id,
+  action: ConferenceAction,
+  participant?: string,
+) =>
+  request<{ queued: boolean; node: string; commandId: string }>(
+    "POST",
+    `/api/v1/conferences/${id(roomId)}/control`,
+    { body: participant === undefined ? { action } : { action, participant } },
+  );
 
 // --- feature codes and presence -------------------------------------------------
 

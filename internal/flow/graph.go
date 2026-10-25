@@ -22,6 +22,7 @@ type Input struct {
 	Extensions    []store.Extension
 	RingGroups    []store.RingGroup
 	PagingGroups  []store.PagingGroup
+	Conferences   []store.Conference
 	Announcements []store.Announcement
 	FeatureCodes  []store.FeatureCode
 	Devices       []store.Device
@@ -107,25 +108,27 @@ type builder struct {
 	nodes map[string]bool
 	edges map[string]bool
 
-	groupByName map[string]string // ring group name -> node id
-	extByNumber map[string]string // extension number -> node id
-	exts        map[string]store.Extension
-	annByName   map[string]string
-	pagingByKey map[string]string
+	groupByName  map[string]string // ring group name -> node id
+	extByNumber  map[string]string // extension number -> node id
+	exts         map[string]store.Extension
+	annByName    map[string]string
+	pagingByKey  map[string]string
+	confByNumber map[string]string
 }
 
 // Build draws the configuration. The result is deterministic: nodes and
 // edges are sorted by id.
 func Build(in Input, opt Options) (Graph, error) {
 	b := &builder{
-		g:           Graph{ConfigRevision: in.Revision, Nodes: []Node{}, Edges: []Edge{}, Warnings: []Warning{}},
-		nodes:       map[string]bool{},
-		edges:       map[string]bool{},
-		groupByName: map[string]string{},
-		extByNumber: map[string]string{},
-		exts:        map[string]store.Extension{},
-		annByName:   map[string]string{},
-		pagingByKey: map[string]string{},
+		g:            Graph{ConfigRevision: in.Revision, Nodes: []Node{}, Edges: []Edge{}, Warnings: []Warning{}},
+		nodes:        map[string]bool{},
+		edges:        map[string]bool{},
+		groupByName:  map[string]string{},
+		extByNumber:  map[string]string{},
+		exts:         map[string]store.Extension{},
+		annByName:    map[string]string{},
+		pagingByKey:  map[string]string{},
+		confByNumber: map[string]string{},
 	}
 	b.addObjects(in)
 	b.addRoutes(in)
@@ -258,6 +261,13 @@ func (b *builder) addObjects(in Input) {
 		b.annByName[a.Name] = nid(KindAnnouncement, a.ID)
 		b.node(nid(KindAnnouncement, a.ID), KindAnnouncement, a.Name, nil, a)
 	}
+	for _, c := range in.Conferences {
+		b.confByNumber[c.Number] = nid(KindConference, c.ID)
+		b.node(nid(KindConference, c.ID), KindConference, c.Name, map[string]any{
+			"number": c.Number, "maxParticipants": c.MaxParticipants, "enabled": c.Enabled,
+			"waitForLeader": c.WaitForLeader, "record": c.Record, "pin": c.HasUserPIN,
+		}, c)
+	}
 	for _, p := range in.PagingGroups {
 		b.pagingByKey[p.Code] = nid(KindPagingGroup, p.ID)
 		b.pagingByKey[p.Name] = nid(KindPagingGroup, p.ID)
@@ -338,6 +348,12 @@ func (b *builder) addRoutes(in Input) {
 			}
 		case "external":
 			dst = Ref{b.external(r.Destination), "call"}
+		case "conference":
+			if id, ok := b.confByNumber[r.Destination]; ok {
+				dst = Ref{id, "call"}
+			} else {
+				dst = Ref{b.missing(rid, r.Destination, fmt.Sprintf("conference room %q does not exist", r.Destination)), "call"}
+			}
 		case "sip_uri":
 			id := KindSIPURI + ":" + r.Destination
 			b.node(id, KindSIPURI, r.Destination, map[string]any{"uri": r.Destination}, nil)

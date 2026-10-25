@@ -280,7 +280,9 @@ func (s *Store) blfKeys(ctx context.Context, raw []byte) ([]prov.BLFKey, error) 
 	keys := make([]prov.BLFKey, 0, len(numbers))
 	for _, n := range numbers {
 		var name string
-		err := s.db.QueryRowContext(ctx, `SELECT name FROM extensions WHERE number = $1`, n).Scan(&name)
+		// A key may also name a conference room: pressing it joins the room.
+		err := s.db.QueryRowContext(ctx, `SELECT name FROM extensions WHERE number = $1
+			UNION ALL SELECT name FROM conference_rooms WHERE number = $1 LIMIT 1`, n).Scan(&name)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}

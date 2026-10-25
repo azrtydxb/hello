@@ -406,6 +406,7 @@ Decision: accepted "Wait: deploy only after the hitless-upgrade fixes are merged
 The operator writes prompt text in the GUI and generates the audio once with ElevenLabs. It is stored and replayed with no live TTS during calls.
 
 Where the ElevenLabs API key lives:
+
 - SOPS secret, like the AI key (recommended)
 - Encrypted in the DB and set in the GUI
 - Both, with the GUI value winning
@@ -413,6 +414,7 @@ Where the ElevenLabs API key lives:
 Decision: accepted "Encrypted in the DB and set in the GUI". It is sealed with HELLO_SECRET_KEY.
 
 The IVR part, since Hello has no IVR yet:
+
 - Build an IVR/auto-attendant too (recommended)
 - Prompts only for now
 
@@ -431,3 +433,23 @@ Spec: `.procoder/specs/flow-canvas.md`. The user answered all five:
 - **Saving (2026-10-25):** always a draft plus Apply with a diff, undo/redo, live validation, one transaction and a later revert. Rationale: a call flow changes live calls, so no silent auto-save.
 
 Decision: accepted by the user (2026-10-25), all of the above. Migration numbers 00017-00023 belong to other in-flight branches (tts, ivr, codecs, time-conditions, moh, park-pickup, queues); the flow canvas uses 00024 and up.
+
+## Server conference rooms (2026-10-25)
+
+`hello-pbx-spec.md` §3 listed "large-scale conferencing" as a non-goal, and the phone-feature-parity spec (S-34) kept server rooms out of scope in its earlier table rows.
+
+Question: should Hello now build server conference rooms (audio mixing on the PBX, with a number, PINs and a live control UI), reversing that non-goal?
+
+Decision: the user answered "yes" (2026-10-25). Conference rooms are in scope and the §3 non-goal is amended accordingly. Rooms are audio only, mixed on one SIP node per room (ownership in Valkey, see `docs/conference.md`).
+
+In the same answer the user also said they want these features, which other agents specify separately and which this entry does not scope or change:
+
+- SMS, WhatsApp and live chat
+- video
+- browser calling (WebRTC)
+- mobile apps
+- Microsoft Teams integration
+
+The §3 non-goal list still names WebRTC and the rest until those specs land; only the conferencing non-goal changed here.
+
+Video follows rooms: the user wants conference video, and video recording later (clients spec). The room keeps its state per participant and its media behind a codec interface so a video track can be added beside the audio.

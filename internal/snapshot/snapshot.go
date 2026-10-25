@@ -145,6 +145,8 @@ type Snapshot struct {
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
 	anns   map[string]string
+	// confs maps a dialled number to its conference room (spec S-34).
+	confs map[string]Conference
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
 }
@@ -159,7 +161,7 @@ type groupEntry struct {
 // domain are skipped and listed in Skipped.
 func New(revision int64, domain string, devices []Device) *Snapshot {
 	s := &Snapshot{Revision: revision, byUser: map[string]Device{}, byExt: map[string][]Device{},
-		exts: map[string]Extension{}, groups: map[string]groupEntry{}, codes: map[string]FeatureCode{}, pages: map[string]PagingGroup{},
+		exts: map[string]Extension{}, groups: map[string]groupEntry{}, codes: map[string]FeatureCode{}, pages: map[string]PagingGroup{}, confs: map[string]Conference{},
 		anns: map[string]string{}, known: map[string]bool{}}
 	for _, d := range devices {
 		if d.Realm != domain {
@@ -764,6 +766,11 @@ func (w *Watcher) loadAll(ctx context.Context, conn Querier) (*Snapshot, error) 
 	if err != nil {
 		return nil, err
 	}
+	rooms, err := loadConferences(ctx, q, w.Box, w.Log)
+	if err != nil {
+		return nil, err
+	}
+	s.WithConferences(rooms)
 	cfg, bad, err := loadRouting(ctx, q, w.Box, w.Log)
 	if err != nil {
 		return nil, err

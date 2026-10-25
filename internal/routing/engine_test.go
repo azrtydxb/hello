@@ -1565,3 +1565,26 @@ func TestLoopPrevention(t *testing.T) {
 		"Loop prevented: the call has already been routed outbound once",
 	})
 }
+
+// TestInboundConference fails if an inbound route cannot target a conference
+// room, if a missing room is accepted, or if the decision does not carry the
+// room.
+func TestInboundConference(t *testing.T) {
+	cfg := Config{
+		Trunks: []Trunk{{ID: 1, Name: "carrier", Mode: "ip", Enabled: true, SourceCIDRs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
+			Destinations: []Destination{{Host: "carrier.example.com"}}}},
+		Inbound: []InboundRoute{{ID: 1, Position: 1, Name: "meet", DIDKind: "exact", DID: "5551234",
+			DestinationKind: "conference", Destination: "800", Enabled: true}},
+		Extensions:  map[string]string{"100": ""},
+		Conferences: map[string]string{"800": "Weekly"},
+	}
+	d := mustCompile(t, cfg).Decide(Call{FromTrunk: 1, Number: "5551234", CallerID: "+15550000", At: time.Now()}, nil)
+	if d.Kind != KindInbound || d.Conference != "800" || d.Extension != "" {
+		t.Fatalf("decision = %+v, want an inbound call to conference 800", d)
+	}
+	cfg.Conferences = nil
+	_, errs := Compile(cfg)
+	if len(errs) != 1 || !strings.Contains(errs[0].Message, "conference room") {
+		t.Fatalf("a route to a missing room compiled: %v", errs)
+	}
+}

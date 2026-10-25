@@ -383,6 +383,10 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 		if in.Destination != "" {
 			f.add("destination", `must be empty when destinationKind is "internal"`)
 		}
+	case "conference":
+		if !confNumberRe.MatchString(in.Destination) {
+			f.add("destination", "must be a conference room number (2-10 digits)")
+		}
 	case "external":
 		if !externalNumRe.MatchString(in.Destination) {
 			f.add("destination", "must be 2-32 of 0-9 * # with an optional leading +")
@@ -395,7 +399,7 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 			f.add("destination", "must be a sip: URI of at most 255 characters")
 		}
 	default:
-		f.add("destinationKind", `must be "extension", "external", "internal" or "sip_uri"`)
+		f.add("destinationKind", `must be "extension", "external", "internal", "conference" or "sip_uri"`)
 	}
 	return f
 }

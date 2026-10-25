@@ -3,8 +3,10 @@ import { Link } from "react-router";
 import {
   errorMessage,
   fieldErrors,
+  listConferences,
   listDevices,
   listExtensions,
+  type Conference,
   type Device,
   type Extension,
   type Id,
@@ -82,6 +84,8 @@ type ListState =
       devices: Device[];
       templates: Template[];
       groups: Group[];
+      /** Conference rooms: a key can join one. Optional, like the groups. */
+      rooms: Conference[];
       /** When the list was loaded: "stale" is measured from here. */
       loadedAt: number;
     };
@@ -251,8 +255,10 @@ export function Phones() {
       listTemplates(controller.signal).catch(() => [] as Template[]),
       // Phone groups are optional too: a phone without one still works.
       listGroups(controller.signal).catch(() => [] as Group[]),
+      // Conference rooms may be keys too; without the list only extensions are offered.
+      listConferences(controller.signal).catch(() => [] as Conference[]),
     ])
-      .then(([phones, extensions, devices, templates, groups]) =>
+      .then(([phones, extensions, devices, templates, groups, rooms]) =>
         setList({
           status: "ready",
           phones,
@@ -260,6 +266,7 @@ export function Phones() {
           devices,
           templates,
           groups,
+          rooms,
           loadedAt: Date.now(),
         }),
       )
@@ -525,6 +532,7 @@ export function Phones() {
           devices={ready.devices}
           templates={ready.templates}
           groups={ready.groups}
+          rooms={ready.rooms}
           onClose={() => setEditing(null)}
           onCreated={(created) => {
             updatePhones((phones) => [...phones, withoutUrl(created)]);
@@ -782,6 +790,7 @@ function PhoneForm({
   devices,
   templates,
   groups,
+  rooms,
   onClose,
   onCreated,
   onUpdated,
@@ -791,6 +800,7 @@ function PhoneForm({
   devices: Device[];
   templates: Template[];
   groups: Group[];
+  rooms: Conference[];
   onClose: () => void;
   onCreated: (phone: IssuedPhone) => void;
   onUpdated: (phone: Phone) => void;
@@ -826,7 +836,12 @@ function PhoneForm({
   );
   const bindsExisting =
     deviceId !== NEW_DEVICE && deviceId !== "" && deviceId !== originalDevice;
-  const blfChoices = extensions.filter((x) => !blf.includes(x.number));
+  // A key may name an extension (a busy lamp that dials it) or a conference
+  // room (a lamp that shows who is in it and joins it).
+  const blfChoices = [
+    ...extensions,
+    ...rooms.map((r) => ({ number: r.number, name: `${r.name} (conference)` })),
+  ].filter((x) => !blf.includes(x.number));
 
   const idOf = (value: string): Id | undefined =>
     [...extensions, ...devices, ...templates, ...groups]

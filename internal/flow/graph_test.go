@@ -204,3 +204,34 @@ func TestClosure(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+// TestGraphConference fails if an inbound route to a conference room has no
+// edge to the room's node, or if a route to a missing room is not shown as a
+// missing target.
+func TestGraphConference(t *testing.T) {
+	in := Input{
+		Revision:    1,
+		Conferences: []store.Conference{{ID: 3, Name: "Weekly", Number: "800", MaxParticipants: 10, Enabled: true}},
+		Inbound: []store.InboundRoute{
+			{ID: 1, Name: "meet", DID: "1", DestinationKind: "conference", Destination: "800", Enabled: true},
+			{ID: 2, Name: "ghost", DID: "2", DestinationKind: "conference", Destination: "899", Enabled: true},
+		},
+	}
+	g, err := Build(in, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := edgeIDs(g)
+	for _, want := range []string{"inboundRoute:1.destination->conference:3.call", "inboundRoute:2.destination->missing:899.call"} {
+		if !slices.Contains(ids, want) {
+			t.Errorf("edge %q missing from %v", want, ids)
+		}
+	}
+	var found bool
+	for _, n := range g.Nodes {
+		found = found || (n.ID == "conference:3" && n.Kind == KindConference)
+	}
+	if !found {
+		t.Error("the room has no node")
+	}
+}

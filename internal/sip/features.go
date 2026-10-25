@@ -182,7 +182,14 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	if h := req.ContentType(); h != nil && strings.Contains(h.Value(), "dtmf-relay") {
 		if d, ok := dtmfDigit(req.Body()); ok {
-			s.dispatchDigit(ref.c, ref.leg == nil, d)
+			switch {
+			case ref.leg == nil && ref.c.confDigit(d):
+				// A conference participant's key press is a room control.
+			case ref.leg == nil && ref.c.confFwdActive():
+				ref.c.confForwardDigit(d) // the owner's participant reads it
+			default:
+				s.dispatchDigit(ref.c, ref.leg == nil, d)
+			}
 		}
 	}
 	s.respond(tx, req, sip.StatusOK, "OK")

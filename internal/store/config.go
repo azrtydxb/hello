@@ -73,6 +73,9 @@ func (s *Store) GetExtension(ctx context.Context, id int64) (Extension, error) {
 func (s *Store) CreateExtension(ctx context.Context, actor, number, name, externalNumber string, check Check) (Extension, error) {
 	var e Extension
 	err := s.configChange(ctx, actor, "create", "extension", check, func(tx *sql.Tx) (int64, error) {
+		if err := conferenceNumberTaken(ctx, tx, number); err != nil {
+			return 0, err
+		}
 		var err error
 		e, err = scanExtension(tx.QueryRowContext(ctx,
 			`INSERT INTO extensions (number, name, external_number) VALUES ($1, $2, $3) RETURNING `+extensionCols,

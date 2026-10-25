@@ -26,6 +26,12 @@ transcodes. Recordings store the pass-through payload as received (G.711
 payloads are recorded as WAV; other codecs are stored with the codec noted
 in the recording metadata).
 
+The one exception is a [conference room](conference.md): it decodes every
+participant to a common 8 kHz mixing rate, mixes, and encodes each
+participant's mix in that participant's own codec. That is G.711 today; a
+wideband codec joins by implementing `media.PartyCodec`. Each participant uses
+one RTP port from the range below.
+
 ## Metrics
 
 `hello_rtp_sessions`, `hello_rtp_packets_total{direction}`,

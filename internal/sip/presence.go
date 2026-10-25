@@ -116,7 +116,7 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 	switch event {
 	case eventDialog:
 		ext = req.Recipient.User
-		if !snap.HasExtension(ext) {
+		if _, room := snap.Conference(ext); !snap.HasExtension(ext) && !room {
 			s.respond(tx, req, sip.StatusNotFound, "Not Found")
 			return
 		}
@@ -165,6 +165,9 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 		init := StateIdle
 		if e, ok := snap.Extension(ext); ok && e.DND {
 			init = StateDND
+		}
+		if _, room := snap.Conference(ext); room && s.confOccupied(ext) {
+			init = StateOnCall // a conference key's lamp is lit while the room has people in it
 		}
 		go s.sendStateNotify(sub, init, int(exp/time.Second), "")
 	}

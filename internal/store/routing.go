@@ -912,6 +912,22 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 	if err := rows.Err(); err != nil {
 		return snap, err
 	}
+	crows, err := q.QueryContext(ctx, `SELECT number, name FROM conference_rooms`)
+	if err != nil {
+		return snap, err
+	}
+	defer func() { _ = crows.Close() }()
+	cfg.Conferences = map[string]string{}
+	for crows.Next() {
+		var n, name string
+		if err := crows.Scan(&n, &name); err != nil {
+			return snap, err
+		}
+		cfg.Conferences[n] = name
+	}
+	if err := crows.Err(); err != nil {
+		return snap, err
+	}
 	return snap, nil
 }
 

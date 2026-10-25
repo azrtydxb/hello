@@ -109,6 +109,12 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/paging-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPagingGroup},
 		{"DELETE", "/api/v1/paging-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deletePagingGroup},
 		{"POST", "/api/v1/paging-groups/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testPagingGroup},
+		{"GET", "/api/v1/conferences", auth.ScopeRead, auth.RoleViewer, false, s.listConferences},
+		{"POST", "/api/v1/conferences", auth.ScopeAdmin, auth.RoleAdmin, false, s.createConference},
+		{"GET", "/api/v1/conferences/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getConference},
+		{"PUT", "/api/v1/conferences/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putConference},
+		{"DELETE", "/api/v1/conferences/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteConference},
+		{"POST", "/api/v1/conferences/{id}/control", auth.ScopeWrite, auth.RoleOperator, false, s.controlConference},
 		{"GET", "/api/v1/feature-codes", auth.ScopeRead, auth.RoleViewer, false, s.listFeatureCodes},
 		{"PUT", "/api/v1/feature-codes", auth.ScopeWrite, auth.RoleOperator, false, s.putFeatureCodes},
 

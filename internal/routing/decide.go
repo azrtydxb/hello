@@ -413,7 +413,7 @@ func (t *Table) fromTrunk(d *Decision, c Call, usable TrunkUsability) {
 	// caller ID would lose the call.
 	var cid string
 	switch r.r.DestinationKind {
-	case "extension", "internal":
+	case "extension", "internal", "conference":
 		cid = normaliseCallerID(&d.Trace, &r.callerID, internalCallerID(&d.Trace, src, c.CallerID))
 	default:
 		cid = inboundCallerID(&d.Trace, &r.callerID, c.CallerID)
@@ -434,6 +434,9 @@ func (t *Table) fromTrunk(d *Decision, c Call, usable TrunkUsability) {
 		}
 		d.Trace.Add(fmt.Sprintf("Internal lookup %s -> extension %s", show(did), show(ext)))
 		d.Kind, d.Extension = KindInbound, ext
+	case "conference":
+		d.Trace.Add("Destination: conference room " + show(r.r.Destination))
+		d.Kind, d.Conference = KindInbound, r.r.Destination
 	case "sip_uri":
 		d.Trace.Add("Destination: SIP URI " + r.r.Destination)
 		d.Kind, d.SIPURI = KindInbound, r.r.Destination

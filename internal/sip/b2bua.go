@@ -119,6 +119,23 @@ type call struct {
 	// anchorHost is the advertised IPv4 for relay SDP answers.
 	anchorHost string
 
+	// Server conference (spec S-34). conf is this node's participant when
+	// the call is a member of a room mixed here; confFwd is set while the
+	// call reaches its room through the node that owns it; confPeer marks
+	// the owner's side of such a forwarded call (the forwarding node writes
+	// the CDR); confRehomed marks a forwarded call whose owner died and
+	// whose far end now lives on this node. All guarded by mu except
+	// confOnce.
+	conf         *confPart
+	confRoom     *confRoom
+	confAnswer   []byte
+	confDone     chan struct{}
+	confOnce     sync.Once
+	confFwd      *confFwd
+	confPeer     bool
+	confPeerNode string
+	confRehomed  bool
+
 	// kind is the CDR kind: call (default), page or intercom (Phase E).
 	// autoAnswer adds the auto-answer headers to this call's legs (an
 	// intercom call only, spec P-16). page is the state of a server page.
@@ -267,6 +284,21 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		s.unavailable(tx, req)
 		return
 	}
+	if node, ok := s.confForwardFrom(req); ok {
+		// Another node reached the caller and sends the call here, to the
+		// node that mixes the room (spec S-34).
+		cfg, found := snap.Conference(req.Recipient.User)
+		c := s.newCall(req)
+		from := req.From()
+		c.callerNum, c.callerName = from.Address.User, from.DisplayName
+		if !found {
+			s.respond(tx, req, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "conference room unknown", ResultNotFound)
+			return
+		}
+		c.joinConference(req, tx, snap, cfg, node)
+		return
+	}
 	if req.GetHeader("Authorization") == nil {
 		if t, ok := s.trunkSource(req, snap); ok {
 			s.inboundCall(req, tx, snap, t)
@@ -287,6 +319,11 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	// store keeps page codes from colliding with feature codes.
 	if g, ok := snap.PagingGroup(c.dialled); ok {
 		c.handlePage(tx, snap, g)
+		return
+	}
+	// A conference room's number joins the room (spec S-34).
+	if cfg, ok := snap.Conference(c.dialled); ok {
+		c.joinConference(req, tx, snap, cfg, "")
 		return
 	}
 	// A feature code dialled as a call (*78, *72599, *97) is dispatched here
@@ -383,6 +420,14 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
 		c.considerAnchor(snap, EndpointInfo{}) // external URI: caller-side triggers only
 		c.ringURI(req, tx, dec)
+	case dec.Kind == routing.KindInbound && dec.Conference != "":
+		cfg, ok := snap.Conference(dec.Conference)
+		if !ok {
+			s.respond(tx, req, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "conference room unknown", ResultNotFound)
+			return
+		}
+		c.joinConference(req, tx, snap, cfg, "")
 	default:
 		code, reason := dec.RejectCode, dec.Reason
 		if code < 300 {
@@ -791,7 +836,9 @@ func (c *call) hangup(side string) {
 			return
 		}
 		if side == cdr.SideCaller {
-			w.bye()
+			if w != nil { // a callee-less call (voicemail, a conference room) has no fork to end
+				w.bye()
+			}
 		} else {
 			c.byeA()
 		}
@@ -1075,6 +1122,12 @@ func (c *call) record(status int, side, reason, result string) {
 			r.RTPPackets, r.RTPLost, r.RTPJitterMs = &p, &l, &j
 		}
 	}
+	c.mu.Lock()
+	peer := c.confPeer
+	c.mu.Unlock()
+	if peer {
+		return // the node that reached the caller writes the participation's CDR
+	}
 	c.s.deps.CDRs.Enqueue(r)
 }
 
@@ -1298,6 +1351,9 @@ func (l *leg) invite() (*sip.Request, error) {
 		}
 	}
 	l.addPagingHeaders(req)
+	for _, h := range c.confForwardHeaders(l.callID) {
+		req.AppendHeader(h)
+	}
 	req.SetTransport("UDP")
 	switch {
 	case l.trunk != nil:
@@ -1606,6 +1662,9 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	defer c.endInDialog()
+	if c.confInDialog(req, tx) {
+		return // a conference participant: answered from its own media socket
+	}
 	if hom := c.homed(); hom != nil {
 		// A taken-over call terminates media in dialog from the replicated
 		// relay: hold direction mirrored, the peer re-INVITEd the same way.

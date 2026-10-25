@@ -66,6 +66,7 @@ import { Registrations } from "./pages/Registrations";
 import { RouteTest } from "./pages/RouteTest";
 import { RoutesPage } from "./pages/Routes";
 import { Paging } from "./pages/Paging";
+import { Conferences } from "./pages/Conferences";
 import { RingGroups } from "./pages/RingGroups";
 import { System } from "./pages/System";
 import { Trunks } from "./pages/Trunks";
@@ -89,6 +90,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/voicemail": Voicemail,
   "/ring-groups": RingGroups,
   "/paging": Paging,
+  "/conferences": Conferences,
   "/recordings": Recordings,
   "/announcements": Announcements,
   "/system": System,

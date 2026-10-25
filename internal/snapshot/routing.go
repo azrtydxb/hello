@@ -162,6 +162,23 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 	if err := loadInbound(ctx, db, &cfg); err != nil {
 		return cfg, nil, err
 	}
+	cfg.Conferences = map[string]string{}
+	crows, err := db.Query(ctx, `SELECT number, name FROM conference_rooms`)
+	if err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: conference rooms: %w", err)
+	}
+	for crows.Next() {
+		var n, name string
+		if err := crows.Scan(&n, &name); err != nil {
+			crows.Close()
+			return cfg, nil, fmt.Errorf("snapshot: scan conference room: %w", err)
+		}
+		cfg.Conferences[n] = name
+	}
+	crows.Close()
+	if err := crows.Err(); err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: conference rooms: %w", err)
+	}
 	rows, err = db.Query(ctx, `SELECT number, external_number FROM extensions`)
 	if err != nil {
 		return cfg, nil, fmt.Errorf("snapshot: external numbers: %w", err)

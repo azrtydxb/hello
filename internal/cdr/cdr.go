@@ -26,11 +26,12 @@ const (
 	DirectionOutbound = "outbound"
 )
 
-// Call kinds (migration 00013).
+// Call kinds (migration 00013; conference, 00025).
 const (
-	KindCall     = "call"
-	KindPage     = "page"
-	KindIntercom = "intercom"
+	KindCall       = "call"
+	KindPage       = "page"
+	KindIntercom   = "intercom"
+	KindConference = "conference"
 )
 
 // Termination sides.
