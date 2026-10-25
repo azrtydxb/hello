@@ -1,7 +1,9 @@
 package sip
 
 import (
+	"log/slog"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/routing"
@@ -131,4 +133,35 @@ func TestEngineInboundDID(t *testing.T) {
 		t.Fatalf("CDR = %+v", cd)
 	}
 	wantTrace(t, cd.Trace, "Source 127.0.0.1 identifies trunk carrier-in", "Call established")
+}
+
+// TestRejectedInviteLogged fails if an unrouted INVITE answered with 404 by
+// hello-sip is not logged at INFO with caller, dialled number, status and
+// reason, or if the log carries any credential.
+func TestRejectedInviteLogged(t *testing.T) {
+	var buf syncBuffer
+	cfg := routing.Config{Extensions: map[string]string{"100": "", "200": ""}}
+	pbx := startPBX(t, callerDevices(), trunkCfg(newFakeTrunkState()), withEngine(t, cfg),
+		func(_ *Config, deps *Deps) {
+			deps.Log = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		})
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	r := waitCall(t, dial(t.Context(), a, "999"))
+	if code := responseCode(r.err); code != 404 {
+		t.Fatalf("unrouted call = %v, want 404", r.err)
+	}
+	pbx.nextCDR(t)
+	eventually(t, "reject logged", func() bool { return strings.Contains(buf.String(), "INVITE rejected by hello-sip") })
+	logs := buf.String()
+	for _, want := range []string{"level=INFO", "dialled=999", "status=404", `reason="No outbound route matched`, "caller="} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("log lacks %q:\n%s", want, logs)
+		}
+	}
+	for _, secret := range []string{"Authorization", "response=", "nonce"} {
+		if strings.Contains(logs, secret) {
+			t.Fatalf("log leaks %q:\n%s", secret, logs)
+		}
+	}
 }
