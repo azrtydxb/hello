@@ -490,6 +490,7 @@ func SampleData(full bool) RenderData {
 		Time: NewTimeInfo("UTC", "pool.ntp.org", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 	}
 	if full {
+		d.Codecs = CodecInfo{Opus: true}
 		d.Phone.Label = "Reception"
 		d.Line.VoicemailCode = "*97"
 		d.Firmware = &FirmwareInfo{URL: "https://prov.hello.example/p/sample/fw/firmware.rom", Dir: "https://prov.hello.example/p/sample/fw", Via: 2, Version: "1.2.3"}

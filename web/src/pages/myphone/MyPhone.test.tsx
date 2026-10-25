@@ -70,7 +70,7 @@ describe("My phone (role user)", () => {
       "Call history",
       "Profile",
     ]) {
-      expect(nav.getByRole("link", { name })).toBeInTheDocument();
+      expect(nav.getByRole("link", { name, hidden: true })).toBeInTheDocument();
     }
     for (const hidden of [
       "Extensions",

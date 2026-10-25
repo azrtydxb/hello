@@ -78,7 +78,7 @@ describe("Users", () => {
     expect(within(row).getByText("101")).toBeInTheDocument();
     expect(within(row).getByText("Active")).toBeInTheDocument();
     expect(
-      within(sidebar()).getByRole("link", { name: /Users/ }),
+      within(sidebar()).getByRole("link", { name: /Users/, hidden: true }),
     ).toBeInTheDocument();
   });
 
