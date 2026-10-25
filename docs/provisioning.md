@@ -67,6 +67,68 @@ every row (MAC, vendor, model, extension, duplicates in the file and in
 Hello) and changes nothing. The import creates every phone in one
 transaction, or none if any row fails. It creates a device per phone.
 
+### Onboarding queue: let the phone announce itself
+
+You do not have to know a phone's MAC first. Point DHCP option 66 at
+`http://prov.hello.kw.watteel.lab/p/boot/`, join a new phone to the network
+and open **Directory → Onboarding**. When an unknown phone asks for its
+configuration, Hello still answers an empty `404` and serves it nothing, but
+records the phone in the queue: MAC, vendor, model and firmware (read from the
+User-Agent and the requested file name), source IP, the path it asked for,
+first and last seen and how often. The page refreshes by itself and the
+sidebar badge counts the waiting phones.
+
+- **Adopt** (operators and administrators) opens a dialog: choose the
+  extension, optionally a label. Hello creates the phone exactly as **Add
+  phone** does (a new device on that extension, sealed secrets, armed for the
+  boot hand-off, vendor redirect registration), prefilled with the reported
+  vendor and model, and removes the candidate. A phone that reported no model
+  needs one typed in. **The phone picks up its configuration on its next
+  retry or after a reboot**; a phone that gave up waiting can be power-cycled.
+  The provisioning URL is not shown: the phone gets it through the hand-off.
+- **Bulk adopt** takes the ticked phones and either gives them consecutive
+  extensions from a starting number (in the order listed; the extensions must
+  exist) or lets you pick one per phone. All are adopted or none.
+- **Dismiss** removes a phone until it asks again. **Ignore this MAC** also
+  puts it on the ignore list (shown under the queue), and Hello stops
+  recording it until you choose **Stop ignoring**.
+
+Through the API (operator or administrator): `GET /api/v1/onboarding/candidates`,
+`POST /api/v1/onboarding/candidates/{mac}/adopt`,
+`POST /api/v1/onboarding/candidates/{mac}/dismiss` (`{"ignore":true}` to
+ignore), `POST /api/v1/onboarding/adopt` (bulk: `items` and an optional
+`startNumber`), `GET /api/v1/onboarding/ignored` and
+`DELETE /api/v1/onboarding/ignored/{mac}`. Every action is in the audit log
+(`adopt`, `adopt-batch`, `dismiss`, `ignore`, `unignore`).
+
+The endpoint is unauthenticated, so the queue is bounded:
+
+- Only well-formed MACs are recorded: 12 hex digits that a device can have (not
+  all-zero, broadcast or a group address).
+- A MAC that is already a phone is never recorded.
+- Each source IP may write at most 30 times a minute (cluster-wide, in Valkey,
+  with the usual in-memory fallback). Writes over the limit are dropped; the
+  response is the same `404`.
+- The queue holds at most 500 phones. When it is full, new MACs are ignored
+  and counted in `hello_onboarding_captures_total{outcome="full"}`; phones
+  already queued keep being refreshed. Dismiss or adopt to make room.
+- A phone unseen for 30 days leaves the queue.
+- Several control pods share one PostgreSQL table, written with a single
+  upsert and a database lock for new rows, so the cap holds across pods.
+
+A phone waiting in the queue does not count as a denial towards blocking its
+source IP, so a few new phones behind one address never get that address (and
+the adopted phones on it) blocked.
+
+Metrics: `hello_onboarding_candidates` (the queue's size) and
+`hello_onboarding_captures_total{outcome}` (`stored`, `known`, `ignored`,
+`full`, `rate_limited`, `error`).
+
+Adopting arms the phone for the trust-on-first-use hand-off (see
+[Trust on first use](#trust-on-first-use)): whoever asks first for the
+phone's per-MAC boot file after you adopt it gets its token, so adopt a phone
+when it is about to boot, and set `HELLO_PROV_BOOT_CIDRS`.
+
 ## DHCP option 66, 160 and 43
 
 Give the phones' network this value; it is the same for every vendor:
@@ -1039,7 +1101,9 @@ What protects the phones' secrets:
 - Every request is in the fetch log with the token redacted (`/p/****/…`);
   the ingress access log is off. No secret, token or redirect credential is
   ever logged.
-- The boot path never serves a SIP secret or an admin password.
+- The boot path never serves a SIP secret or an admin password, and an
+  unadopted phone is served nothing: its request only adds it to the
+  [onboarding queue](#onboarding-queue-let-the-phone-announce-itself).
 
 What it does not protect against:
 

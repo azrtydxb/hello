@@ -3874,6 +3874,219 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/moh-classes": {
+      "get": {
+        "operationId": "listMOHClasses",
+        "summary": "List music on hold classes",
+        "description": "Lists every music on hold class with its playlist. A class is a named playlist of announcements played in a loop or shuffled to a held or parked party, and optionally to a caller instead of ringback.",
+        "tags": [
+          "media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Classes ordered by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClassList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createMOHClass",
+        "summary": "Create a music on hold class",
+        "description": "Creates a class from announcement ids. Marking it default clears the flag on the previous default. A class with no announcements plays the built-in tone. Validation failures list each failing field in error.fields.",
+        "tags": [
+          "media"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MOHClassInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClass"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/moh-classes/{id}": {
+      "get": {
+        "operationId": "getMOHClass",
+        "summary": "One music on hold class",
+        "description": "Returns one class by id.",
+        "tags": [
+          "media"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The class",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClass"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putMOHClass",
+        "summary": "Replace a music on hold class",
+        "description": "Replaces a class as a whole, playlist included. A hold already playing keeps its music until it resumes.",
+        "tags": [
+          "media"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MOHClassInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClass"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteMOHClass",
+        "summary": "Delete a music on hold class",
+        "description": "Deletes a class. Extensions, ring groups and inbound routes that named it fall back to the global default class, or the built-in tone.",
+        "tags": [
+          "media"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/park-lots": {
       "get": {
         "operationId": "listParkLots",
@@ -8499,6 +8712,306 @@
         }
       }
     },
+    "/api/v1/onboarding/candidates": {
+      "get": {
+        "operationId": "listOnboardingCandidates",
+        "summary": "Phones that asked for a configuration before being added",
+        "description": "Lists the onboarding queue: unadopted phones whose MAC asked the provisioning endpoint for a configuration in the last 30 days, newest first.",
+        "tags": ["onboarding"],
+        "responses": {
+          "200": {
+            "description": "Queue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OnboardingCandidate"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/onboarding/candidates/{mac}/adopt": {
+      "post": {
+        "operationId": "adoptOnboardingCandidate",
+        "summary": "Adopt a queued phone: create the phone for an extension and remove it from the queue",
+        "description": "Creates a phone for the candidate (vendor and model prefilled from what it reported) bound to an extension, named by id, number or user, exactly as POST /phones does, and removes the candidate. The provisioning URL is not returned: the phone is armed and finds its URL through the boot hand-off on its next retry or reboot.",
+        "tags": ["onboarding"],
+        "responses": {
+          "201": {
+            "description": "Adopted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Phone"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingAdopt"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/mac"
+          }
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/onboarding/candidates/{mac}/dismiss": {
+      "post": {
+        "operationId": "dismissOnboardingCandidate",
+        "summary": "Remove a queued phone; optionally ignore its MAC",
+        "description": "Removes the candidate from the queue. With ignore true its MAC is also put on the ignore list, so it is not queued again until removed from it.",
+        "tags": ["onboarding"],
+        "responses": {
+          "204": {
+            "description": "Dismissed"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingDismiss"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/mac"
+          }
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/onboarding/adopt": {
+      "post": {
+        "operationId": "bulkAdoptOnboardingCandidates",
+        "summary": "Adopt several queued phones, with consecutive extensions or one per row",
+        "description": "Adopts every listed candidate in one transaction, or none. A row names its extension (id, number or user); rows that name none take consecutive numbers from startNumber in list order. Any failing row answers 400 with the rows and nothing is adopted.",
+        "tags": ["onboarding"],
+        "responses": {
+          "200": {
+            "description": "Adopted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingBulkResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed request (an error), or rows that cannot be adopted (the result, ok false, nothing adopted)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/OnboardingBulkResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingBulkAdopt"
+              }
+            }
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/onboarding/ignored": {
+      "get": {
+        "operationId": "listOnboardingIgnored",
+        "summary": "MACs the queue never records",
+        "description": "Lists the ignored MACs, newest first.",
+        "tags": ["onboarding"],
+        "responses": {
+          "200": {
+            "description": "Ignored MACs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OnboardingIgnored"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/onboarding/ignored/{mac}": {
+      "delete": {
+        "operationId": "deleteOnboardingIgnored",
+        "summary": "Stop ignoring a MAC",
+        "description": "Takes the MAC off the ignore list; the phone is queued again on its next request.",
+        "tags": ["onboarding"],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/mac"
+          }
+        ],
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phonebooks": {
       "get": {
         "operationId": "listPhonebooks",
@@ -9975,6 +10488,15 @@
           "format": "uuid"
         },
         "description": "The id (a UUID) of the finding, proposal, session or task, as its list operation or creating call returned it."
+      },
+      "mac": {
+        "name": "mac",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "The MAC of an onboarding candidate or ignored phone (12 hex digits, optionally separated by : - or .), as the list operation returns it."
       }
     },
     "responses": {
@@ -10194,6 +10716,229 @@
           "groupId": {
             "type": ["integer", "null"],
             "description": "Id of the phone group the phone belongs to; null for none."
+          }
+        }
+      },
+      "OnboardingCandidate": {
+        "type": "object",
+        "description": "An unadopted phone that asked for its configuration.",
+        "required": [
+          "mac",
+          "vendor",
+          "model",
+          "firmware",
+          "sourceIp",
+          "requestedPath",
+          "firstSeen",
+          "lastSeen",
+          "requestCount"
+        ],
+        "properties": {
+          "mac": {
+            "type": "string",
+            "description": "12 lowercase hex digits"
+          },
+          "vendor": {
+            "type": "string",
+            "enum": [
+              "yealink",
+              "poly",
+              "grandstream",
+              "snom",
+              "fanvil",
+              "generic"
+            ],
+            "description": "From the User-Agent or the requested file name; generic when unknown"
+          },
+          "model": {
+            "type": "string",
+            "description": "As the phone reported it; empty when it did not"
+          },
+          "firmware": {
+            "type": "string",
+            "description": "Firmware version from the User-Agent; empty when unknown"
+          },
+          "sourceIp": {
+            "type": "string",
+            "description": "Address of the latest request"
+          },
+          "requestedPath": {
+            "type": "string",
+            "description": "Path of the latest request"
+          },
+          "firstSeen": {
+            "type": "string",
+            "format": "date-time",
+            "description": "First request"
+          },
+          "lastSeen": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Latest request"
+          },
+          "requestCount": {
+            "type": "integer",
+            "description": "Requests seen"
+          }
+        }
+      },
+      "OnboardingAdopt": {
+        "type": "object",
+        "description": "Give exactly one of extensionId, extensionNumber and userId.",
+        "properties": {
+          "extensionId": {
+            "type": "integer",
+            "description": "The extension to bind the phone to"
+          },
+          "extensionNumber": {
+            "type": "string",
+            "description": "The extension's number, instead of its id"
+          },
+          "userId": {
+            "type": "integer",
+            "description": "A user; the phone is bound to the user's linked extension"
+          },
+          "label": {
+            "type": "string",
+            "description": "The phone's label"
+          },
+          "vendor": {
+            "type": "string",
+            "enum": [
+              "yealink",
+              "poly",
+              "grandstream",
+              "snom",
+              "fanvil",
+              "generic"
+            ],
+            "description": "Overrides the reported vendor"
+          },
+          "model": {
+            "type": "string",
+            "description": "Overrides the reported model; required when the phone reported none"
+          }
+        }
+      },
+      "OnboardingDismiss": {
+        "type": "object",
+        "properties": {
+          "ignore": {
+            "type": "boolean",
+            "description": "Also never queue this MAC again"
+          }
+        }
+      },
+      "OnboardingBulkAdopt": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 100,
+            "description": "The candidates to adopt, each by MAC with its extension (extensionId, extensionNumber or userId), optional label, vendor and model",
+            "items": {
+              "type": "object",
+              "required": ["mac"],
+              "properties": {
+                "mac": {
+                  "type": "string",
+                  "description": "The candidate's MAC"
+                },
+                "extensionId": {
+                  "type": "integer"
+                },
+                "extensionNumber": {
+                  "type": "string",
+                  "description": "The extension's number"
+                },
+                "userId": {
+                  "type": "integer"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "The phone's label"
+                },
+                "vendor": {
+                  "type": "string",
+                  "enum": [
+                    "yealink",
+                    "poly",
+                    "grandstream",
+                    "snom",
+                    "fanvil",
+                    "generic"
+                  ],
+                  "description": "Overrides the reported vendor"
+                },
+                "model": {
+                  "type": "string",
+                  "description": "Model override"
+                }
+              }
+            }
+          },
+          "startNumber": {
+            "type": "string",
+            "description": "Rows that name no extension take consecutive numbers from here, in list order"
+          }
+        }
+      },
+      "OnboardingBulkResult": {
+        "type": "object",
+        "required": ["rows", "ok", "adopted"],
+        "properties": {
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["index", "mac", "errors"],
+              "properties": {
+                "index": {
+                  "type": "integer"
+                },
+                "mac": {
+                  "type": "string"
+                },
+                "extension": {
+                  "type": "string"
+                },
+                "errors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "adopted": {
+            "type": "integer"
+          }
+        }
+      },
+      "OnboardingIgnored": {
+        "type": "object",
+        "required": ["mac", "vendor", "model", "createdBy", "createdAt"],
+        "properties": {
+          "mac": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -10928,6 +11673,22 @@
             "type": "string",
             "enum": ["none", "voicemail", "external"]
           },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls to this group; null uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
+          },
           "failureTarget": {
             "type": "string"
           },
@@ -10992,6 +11753,22 @@
             "type": "string",
             "enum": ["none", "voicemail", "external"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls to this group; null or absent uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "failureTarget": {
             "type": "string",
@@ -11078,6 +11855,22 @@
             "type": "string",
             "enum": ["none", "voicemail", "external"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls to this group; null clears it."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "failureTarget": {
             "type": "string",
@@ -11196,6 +11989,118 @@
                   "description": "The auto-answer headers the INVITE carried, as Name: value"
                 }
               }
+            }
+          }
+        }
+      },
+      "MOHClass": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "isDefault",
+          "tracks",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "loop",
+              "shuffle"
+            ],
+            "description": "loop plays the tracks in order and starts over; shuffle plays them in a fresh random order each pass."
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "The global default class: what a hold plays when no extension, group or route picks one."
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "announcementId",
+                "name"
+              ],
+              "properties": {
+                "announcementId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MOHClassInput": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The class name, unique."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "loop",
+              "shuffle"
+            ],
+            "description": "Default loop."
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "Default false."
+          },
+          "announcementIds": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Announcements to play, in order. Empty plays the built-in tone."
+          }
+        }
+      },
+      "MOHClassList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MOHClass"
             }
           }
         }
@@ -12395,6 +13300,18 @@
             "type": "boolean",
             "description": "Call waiting. On (the default): a call to this extension while it is in a call rings its devices and the phone shows call waiting. Off: the caller gets the forwardBusy target, or 486 Busy Here without one; ring groups skip the extension while it is busy. Provisioned into the phone's own call-waiting setting, so a phone resync applies a change."
           },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class callers hear while this extension holds them; null uses the global default."
+          },
           "directoryHidden": {
             "type": "boolean",
             "description": "Kept out of the automatic extensions address book."
@@ -12481,6 +13398,18 @@
           "callWaiting": {
             "type": "boolean",
             "description": "Call waiting. On (the default): a call to this extension while it is in a call rings its devices and the phone shows call waiting. Off: the caller gets the forwardBusy target, or 486 Busy Here without one; ring groups skip the extension while it is busy. Provisioned into the phone's own call-waiting setting, so a phone resync applies a change."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class callers hear while this extension holds them; null clears it (global default)."
           },
           "directoryHidden": {
             "type": "boolean",
@@ -13907,6 +14836,22 @@
             "type": "string",
             "enum": ["extension", "external", "sip_uri", "internal"]
           },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls this route delivers; null uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
+          },
           "destination": {
             "type": "string",
             "example": "101",
@@ -13982,6 +14927,22 @@
             "type": "string",
             "enum": ["extension", "external", "sip_uri", "internal"],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls this route delivers; null or absent uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "destination": {
             "type": "string",
@@ -14059,6 +15020,22 @@
             "type": "string",
             "enum": ["extension", "external", "sip_uri", "internal"],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls this route delivers; null clears it."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "destination": {
             "type": "string",

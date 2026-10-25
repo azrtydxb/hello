@@ -221,6 +221,7 @@ func (c *call) forward(req *sip.Request, tx sip.ServerTransaction, snap *snapsho
 	})
 	c.trace = append(c.trace, dec.Trace...)
 	c.route, c.rewritten = dec.Route, dec.Number
+	c.noteMOHRoute(dec)
 	switch {
 	case dec.Kind == routing.KindOutbound:
 		c.direction = cdr.DirectionOutbound

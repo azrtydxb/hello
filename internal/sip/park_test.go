@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -789,4 +790,45 @@ func TestCallParkSpokenSlot(t *testing.T) {
 	if joined := strings.Join(traces, "\n"); !strings.Contains(joined, "Slot 701 announced by voice") {
 		t.Fatalf("CDR trace lacks the spoken announcement:\n%s", joined)
 	}
+}
+
+// TestCallParkMusic: a parked party hears the music on hold class (the
+// default class here), and the music stops once the call is retrieved. It
+// fails if the parked party hears silence or the old periodic tone, if the
+// class track is not fetched, or if the music plays over the retriever.
+func TestCallParkMusic(t *testing.T) {
+	objs := &fakeObjects{}
+	_ = objs.Put(context.Background(), "ann/hold1.wav", loudWAV())
+	classes := []snapshot.MOHClass{{ID: 1, Name: "default", IsDefault: true, Names: []string{"hold1"}, Objects: []string{"ann/hold1.wav"}}}
+	st := parkStore(t)
+	pbx := startPBX(t, threeDevices(), withMedia(false), withPark(st, "sip-a", testLot),
+		withVoicemail(newVMStore(), objs), withFeatures(func(s *snapshot.Snapshot) { s.WithMOHClasses(classes) }))
+	a, b, c := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1"), newPhone(t, pbx, "c1", "pc")
+	for _, p := range []*phone{a, b, c} {
+		p.register(t)
+		p.setCallee(answerAfter(nil))
+	}
+	pc := establish(t, a, b)
+	parkBy(t, a, pc, "*74")
+	occupied(t, st, "701", "100")
+	waitReq(t, a.byes, "BYE to the parker")
+
+	n, peak := rtpCount(pc.feedB.conn, 1500*time.Millisecond)
+	if n < 40 || peak < 500 {
+		t.Fatalf("the parked party got %d packets (peak %d) in 1.5s, want a steady music stream", n, peak)
+	}
+	if !slices.Contains(objs.snapshotGets(), "ann/hold1.wav") {
+		t.Fatalf("the class track was never fetched: %v", objs.snapshotGets())
+	}
+
+	r2 := waitCall(t, dial(t.Context(), c, "*75701"))
+	if r2.err != nil {
+		t.Fatalf("retrieve: %v", r2.err)
+	}
+	rtpCount(pc.feedB.conn, 200*time.Millisecond) // drain what was in flight
+	if n, peak := rtpCount(pc.feedB.conn, 600*time.Millisecond); peak >= 500 {
+		t.Fatalf("music continued after the retrieve: %d packets, peak %d", n, peak)
+	}
+	hangup(t, r2.dcs)
+	waitReq(t, b.byes, "BYE to the parked party")
 }

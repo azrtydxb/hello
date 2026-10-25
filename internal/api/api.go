@@ -121,6 +121,12 @@ type Store interface {
 	ClearTTSKey(ctx context.Context, actor string) (store.TTSSettings, error)
 	TTSKey(ctx context.Context) (string, error)
 
+	ListMOHClasses(ctx context.Context) ([]store.MOHClass, error)
+	GetMOHClass(ctx context.Context, id int64) (store.MOHClass, error)
+	CreateMOHClass(ctx context.Context, actor string, in store.MOHClassInput) (store.MOHClass, error)
+	UpdateMOHClass(ctx context.Context, actor string, id int64, in store.MOHClassInput) (store.MOHClass, error)
+	DeleteMOHClass(ctx context.Context, actor string, id int64) error
+
 	ListTrunks(ctx context.Context) ([]store.Trunk, error)
 	GetTrunk(ctx context.Context, id int64) (store.Trunk, error)
 	CreateTrunk(ctx context.Context, actor string, in store.TrunkInput, password string, check store.Check) (store.Trunk, error)

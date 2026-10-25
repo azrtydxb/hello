@@ -165,10 +165,8 @@ type Deps struct {
 	// API; nil disables them.
 	PageTests PageTests
 	// Park is the shared call-park store (Valkey); nil disables call park,
-	// retrieve and cross-node pickup. Hold is what a parked party hears;
-	// nil plays the built-in tone until music on hold supplies one.
+	// retrieve and cross-node pickup. A parked party hears music on hold.
 	Park ParkState
-	Hold HoldAudio
 }
 
 // Server is one SIP node.
@@ -234,6 +232,10 @@ type Server struct {
 	// handoff is set while the node drains with in-call HA: its calls are
 	// being handed to survivors.
 	handoff atomic.Bool
+
+	// mohCache holds decoded music on hold announcements (guarded by mohMu).
+	mohMu    sync.Mutex
+	mohCache map[string]mohAudioEntry
 
 	// Presence (S-10) and feature-code (S-11) state. subs holds the live
 	// dialog subscriptions by Call-ID, byExt the per-extension index used

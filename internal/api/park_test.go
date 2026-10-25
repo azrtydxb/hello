@@ -24,7 +24,7 @@ func TestParkLotCRUD(t *testing.T) {
 	e := newPBXEnv(t, newMemObjects())
 	c := e.login()
 
-	// A fresh install carries the default lot, 701-720 (migration 00027).
+	// A fresh install carries the default lot, 701-720 (migration 00030).
 	var list struct {
 		Items []map[string]any `json:"items"`
 	}

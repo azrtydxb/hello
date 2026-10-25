@@ -26,7 +26,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 )
 
-// Park actions (feature-code rows, migration 00027).
+// Park actions (feature-code rows, migration 00030).
 const (
 	ActionPark            = "park"
 	ActionParkRetrieve    = "park_retrieve"
@@ -57,31 +57,6 @@ type ParkState interface {
 	ParkGetReply(ctx context.Context, id string) (livestate.ParkReply, bool, error)
 }
 
-// HoldAudio is what a parked party hears. The music-on-hold feature
-// implements it (Play blocks, streaming into the relay leg until ctx ends);
-// without one the built-in tone plays.
-type HoldAudio interface {
-	Play(ctx context.Context, relay *media.Relay, leg string)
-}
-
-// toneHold is the built-in hold audio: a short tone every ten seconds, so
-// the parked party knows the line is still up.
-type toneHold struct{}
-
-func (toneHold) Play(ctx context.Context, relay *media.Relay, leg string) {
-	beep := media.BeepPCM()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(10 * time.Second):
-		}
-		if relay.PlayTo(ctx, leg, beep) != nil {
-			return
-		}
-	}
-}
-
 // Park phases of a held call.
 const (
 	phaseParked    = "parked"
@@ -104,6 +79,8 @@ type parkState struct {
 	// parked, for a taker of the call to continue with.
 	parkedAt, returnAt time.Time
 	party, partyName   string
+	// music is the music on hold the parked party hears (guarded by c.mu).
+	music *mohPlayer
 }
 
 func (p *parkState) halt() { p.stopOnce.Do(func() { close(p.stop) }) }
@@ -427,11 +404,19 @@ func (c *call) parkHold(pk *parkState, relay *media.Relay, partyLeg, parkerLeg s
 		case <-ctx.Done():
 		}
 	}()
-	hold := s.deps.Hold
-	if hold == nil {
-		hold = toneHold{}
+	// The parked party hears music on hold: the parker's class, else the
+	// dialled group's or route's when the callee parked, else the default
+	// (the built-in tone when none is set). runMOH, not startHoldMOH: the
+	// replicated detail belongs to park, which a taker restarts here.
+	var classID int64
+	if snap := s.deps.Snapshots.Current(); snap != nil {
+		classID = c.holdClassID(snap, parkerLeg == legCaller)
 	}
-	go hold.Play(ctx, relay, partyLeg)
+	player := c.runMOH(relay, partyLeg, "", classID)
+	c.mu.Lock()
+	pk.music = player
+	c.mu.Unlock()
+	defer c.stopParkMusic(pk)
 
 	refresh := time.NewTicker(parkRefreshEvery)
 	defer refresh.Stop()
@@ -470,6 +455,16 @@ func (c *call) parkHold(pk *parkState, relay *media.Relay, partyLeg, parkerLeg s
 			return
 		}
 	}
+}
+
+// stopParkMusic ends the parked party's music on hold: it is retrieved,
+// answered by its parker, moved to voicemail or gone.
+func (c *call) stopParkMusic(pk *parkState) {
+	c.mu.Lock()
+	p := pk.music
+	pk.music = nil
+	c.mu.Unlock()
+	c.stopMOHPlayer(p)
 }
 
 // parkRestore re-reserves a slot record that vanished while the call is
@@ -517,6 +512,7 @@ func (c *call) parkRetrieved(offer media.AudioSDP, retriever string, takerNode, 
 	pk.phase = "retrieved"
 	c.mu.Unlock()
 	pk.halt()
+	c.stopParkMusic(pk)
 	leg := legCallee
 	if lk.relayLeg == legCallee {
 		leg = legCaller
@@ -732,6 +728,7 @@ func (c *call) parkReturnLegs(snap *snapshot.Snapshot, pk *parkState, relay *med
 // parkReturnAnswered bridges the parker's answer with the held party.
 func (c *call) parkReturnAnswered(rc *call, l *leg, pk *parkState, partyLeg, parkerLeg string) {
 	s := c.s
+	c.stopParkMusic(pk)
 	if ans, err := media.ParseAudioSDP(l.session().InviteResponse.Body()); err == nil {
 		c.mu.Lock()
 		relay := c.relay
@@ -762,6 +759,7 @@ func (c *call) parkReturnAnswered(rc *call, l *leg, pk *parkState, partyLeg, par
 // any call that reached a box. With no voicemail the call ends.
 func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Relay) {
 	s := c.s
+	c.stopParkMusic(pk)
 	end := func(why string) {
 		c.addTrace(why)
 		s.parkMetric("return", "dropped")
