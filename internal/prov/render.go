@@ -136,6 +136,7 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 		return nil, errDeadline
 	}
 	d.Line.AccountLabel = AccountLabel(d.Line.Label, d.Line.DisplayName)
+	d.Phone.CWInverted = d.Phone.Vendor == Grandstream && strings.HasPrefix(strings.ToUpper(strings.ReplaceAll(d.Phone.Model, " ", "")), "WP856")
 	w := &cappedWriter{ctx: ctx}
 	if err := tmpl.Execute(w, toData(reflect.ValueOf(d))); err != nil {
 		if w.err != nil {
@@ -482,7 +483,7 @@ func checkPattern(p string) string {
 func SampleData(full bool) RenderData {
 	d := RenderData{
 		Phone:  Phone{MAC: "0015651234ab", MACUpper: "0015651234AB", Vendor: Generic, Model: "MODEL", AdminPassword: "sample-admin-password"},
-		Line:   Line{Username: "1001-1234ab", AuthName: "1001-1234ab", Password: "sample-secret", DisplayName: "Sample User", Label: "1001", Domain: "hello.example"},
+		Line:   Line{Username: "1001-1234ab", AuthName: "1001-1234ab", Password: "sample-secret", DisplayName: "Sample User", Label: "1001", Domain: "hello.example", CallWaiting: true},
 		Server: Server{Host: "sip.hello.example", Port: 5060, Transport: "udp", Expiry: 3600},
 		Prov: ProvInfo{URL: "https://prov.hello.example/p/sample/", CAURL: "http://prov.hello.example/p/ca.crt", ResyncSeconds: 86400,
 			CACertPEM: "-----BEGIN CERTIFICATE-----\nU0FNUExF\n-----END CERTIFICATE-----"},

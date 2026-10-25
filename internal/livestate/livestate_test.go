@@ -60,10 +60,12 @@ func TestBindingsRefreshAndExpiry(t *testing.T) {
 
 func TestCallsTTL(t *testing.T) {
 	s, ctx := store(t), context.Background()
-	if err := s.PutCall(ctx, Call{ID: "c1", Node: "sip-1", State: "ringing"}, 500*time.Millisecond); err != nil {
+	if err := s.PutCall(ctx, Call{ID: "c1", Node: "sip-1", State: "connected", Callee: "200"}, 500*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.Calls(ctx); err != nil || len(got) != 1 {
+	// The record carries the answering extension: it counts busy (S-18) and
+	// stops counting with the record when its node stops refreshing it.
+	if got, err := s.Calls(ctx); err != nil || len(got) != 1 || got[0].Callee != "200" {
 		t.Fatalf("calls = %v, %v", got, err)
 	}
 	time.Sleep(800 * time.Millisecond)
