@@ -37,8 +37,8 @@ func TestUserAddRole(t *testing.T) {
 		if err := userAdd(ctx, f, tc.args, strings.NewReader("pw-123456\n"), io.Discard); err != nil {
 			t.Fatalf("%v: %v", tc.args, err)
 		}
-		if f.name != "sam" || f.role != tc.want || !auth.CheckPassword(f.hash, "pw-123456") {
-			t.Errorf("%v: created %q role %q (password hashed: %v)", tc.args, f.name, f.role, auth.CheckPassword(f.hash, "pw-123456"))
+		if f.name != "sam" || f.role != tc.want || !auth.CheckUserPassword(f.hash, "pw-123456") {
+			t.Errorf("%v: created %q role %q (password hashed: %v)", tc.args, f.name, f.role, auth.CheckUserPassword(f.hash, "pw-123456"))
 		}
 	}
 	for _, bad := range [][]string{{"--role", "root", "sam"}, {}, {"a", "b"}} {
