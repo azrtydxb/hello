@@ -166,8 +166,11 @@ func checkPageCode(ctx context.Context, tx *sql.Tx, code string) error {
 }
 
 func writePagingLists(ctx context.Context, tx *sql.Tx, id int64, in PagingGroupInput) error {
-	for _, t := range []string{"paging_group_members", "paging_group_callers"} {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+t+` WHERE group_id = $1`, id); err != nil {
+	for _, q := range []string{
+		`DELETE FROM paging_group_members WHERE group_id = $1`,
+		`DELETE FROM paging_group_callers WHERE group_id = $1`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, id); err != nil {
 			return err
 		}
 	}
