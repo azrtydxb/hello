@@ -310,7 +310,8 @@ func (s *Store) pinnedFirmware(ctx context.Context, v prov.Vendor, model, base s
 		}
 		spec := globSpecificity(glob)
 		if best == nil || spec > bestSpec || (spec == bestSpec && id < bestID) {
-			best, bestSpec, bestID = &prov.FirmwareInfo{URL: base + "fw/" + file, Version: version}, spec, id
+			dir := strings.TrimSuffix(base, "/") + "/fw"
+			best, bestSpec, bestID = &prov.FirmwareInfo{URL: base + "fw/" + file, Dir: dir, Via: prov.UpgradeVia(dir), Version: version}, spec, id
 		}
 	}
 	return best, rows.Err()

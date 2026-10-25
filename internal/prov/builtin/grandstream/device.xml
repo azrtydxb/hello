@@ -32,8 +32,11 @@
     <P30>{{xml .Time.NTP}}</P30>
     <P246>{{xml .Time.Zone}}</P246>
 {{- with .Firmware}}
-    <P6767>2</P6767>
-    <P192>{{xml .URL}}</P192>
+    <P6767>{{.Via}}</P6767>
+    <P192>{{xml .Dir}}</P192>
+    <P232></P232>
+    <P233></P233>
+    <P238>0</P238>
 {{- end}}
   </config>
 </gs_provision>
