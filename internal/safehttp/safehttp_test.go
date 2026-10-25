@@ -100,7 +100,10 @@ func TestClientRefusesLoopback(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("hi")) }))
 	defer ts.Close()
 	for _, o := range []Options{{}, {AllowAllPrivate: true}, {Allow: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}}} {
-		_, err := NewClient(o).Get(ts.URL)
+		resp, err := NewClient(o).Get(ts.URL)
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
 		if err == nil || !errors.Is(err, ErrBlockedAddress) {
 			t.Errorf("Get(loopback) with %+v = %v, want ErrBlockedAddress", o, err)
 		}
@@ -110,8 +113,7 @@ func TestClientRefusesLoopback(t *testing.T) {
 // TestRedirects fails if a redirect is followed by default, or a same-host
 // redirect is refused when allowed, or a cross-host one is followed.
 func TestRedirects(t *testing.T) {
-	var other *httptest.Server
-	other = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("other")) }))
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("other")) }))
 	defer other.Close()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/same", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/final", http.StatusFound) })
@@ -164,7 +166,10 @@ func TestTimeout(t *testing.T) {
 		return (&net.Dialer{}).DialContext(ctx, network, address)
 	}
 	start := time.Now()
-	_, err := NewClient(Options{Timeout: 200 * time.Millisecond, DialContext: dial}).Get(ts.URL)
+	resp, err := NewClient(Options{Timeout: 200 * time.Millisecond, DialContext: dial}).Get(ts.URL)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 	if err == nil || time.Since(start) > 3*time.Second {
 		t.Fatalf("Get = %v after %v", err, time.Since(start))
 	}
