@@ -28,7 +28,7 @@ A phone must be added by MAC before it can provision. An unknown MAC's request g
 
 ## Constraints
 
-- Migration `00027_onboarding.sql`, additive. No in-memory-only state. A queued phone's request is not a denial towards the source's block. Phone configs and credentials are never printed or stored by this feature; the adopt answer carries no token.
+- Migration `00028_onboarding.sql`, additive. No in-memory-only state. A queued phone's request is not a denial towards the source's block. Phone configs and credentials are never printed or stored by this feature; the adopt answer carries no token.
 
 ## Data
 
