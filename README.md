@@ -117,6 +117,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_SIP_STATE_TIMEOUT`                         | sip     | `200ms`; Valkey calls while handling SIP                                                                                      |
 | `HELLO_SIP_TRUSTED_PROXIES`                       | sip     | unset (trust none); CIDRs of the SIP balancers (Kamailio) whose `Path` and client address are believed                        |
 | `HELLO_DRAIN_TIMEOUT`                             | sip     | `2h`; a draining node hangs up remaining calls after this                                                                     |
+| `HELLO_ROLLOUT_WAIT`                              | sip     | `0` (off); on SIGTERM, wait up to this long for the one-at-a-time restart token and a READY peer before draining (docs/ha.md) |
 | `HELLO_MEMBER_HEARTBEAT`                          | sip     | `1s`; how often the node refreshes its cluster membership in Valkey (at most 1.33s: a third of the 4s membership TTL)         |
 | `HELLO_PROV_PUBLIC_URL`                           | control | unset (off); the `https://` host phones reach; boot and CA URLs use its plain-HTTP form                                       |
 | `HELLO_PROV_ADDR`                                 | control | `:8083`; the provisioning listener                                                                                            |

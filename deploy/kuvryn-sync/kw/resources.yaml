@@ -869,7 +869,7 @@ spec:
         # so during a rollout a name has no DNS record until its new pod is
         # ready; without this wait Kamailio crash-loops (CrashLoopBackOff)
         # until both exist. Waits for every host in dispatcher.list, bounded
-        # (covers hello-sip-2's preStop stagger and drain), logged, and then
+        # (covers a hello-sip rollout: the gate wait and drain), logged, and then
         # starts Kamailio regardless: a node that stays gone still fails
         # loudly there rather than silently running without it.
         - name: wait-dispatcher
@@ -1070,7 +1070,10 @@ spec:
                     values:
                       - sip
               topologyKey: kubernetes.io/hostname
-      terminationGracePeriodSeconds: 120 # a drain must finish (lab: 2h, capped here)
+      # Up to 150s at the rollout gate (HELLO_ROLLOUT_WAIT: waits for the
+      # restart token and a READY hello-sip-2) plus the 90s drain (lab: 2h,
+      # capped here) plus margin.
+      terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
           image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-496df9424ef8fa045bafe622a8eb3f954650a936
@@ -1121,8 +1124,15 @@ spec:
               # name, resolvable in-cluster (dispatcher + dialog routes).
               value: hello-sip-1:5060
             - name: HELLO_DRAIN_TIMEOUT
-              # Under the pod's 120s termination grace, so a drain finishes.
+              # With the rollout gate wait, under the pod's 270s termination grace.
               value: 90s
+            - name: HELLO_ROLLOUT_WAIT
+              # On SIGTERM the node first takes the hello-sip restart token
+              # (Valkey) and waits for a READY peer, so Sync's simultaneous
+              # Recreate of hello-sip-1 and hello-sip-2 rolls them one at a
+              # time and a draining node always has a survivor. Wait plus
+              # drain stays under the pod's termination grace.
+              value: 150s
             - name: MINIO_ENDPOINT
               # The voicemail object store (contract 6): the in-namespace
               # MinIO Deployment/Service, as in the lab's compose file.
@@ -1280,8 +1290,7 @@ spec:
                     values:
                       - sip
               topologyKey: kubernetes.io/hostname
-      # 20s settle + up to 120s waiting for hello-sip-1 (preStop below) + the
-      # 120s drain hello-sip-1 has.
+      # Same budget as hello-sip-1: the rollout gate wait plus the drain.
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
@@ -1290,28 +1299,6 @@ spec:
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
-          lifecycle:
-            # Staggers a rollout. Sync applies hello-sip-1 and hello-sip-2
-            # together and each is Recreate (hostNetwork: the new pod needs
-            # the old one's ports), so without this both nodes are down at
-            # once and a draining node has no READY survivor to hand its
-            # calls to (docs/ha.md). Before this pod gets SIGTERM (drain), it
-            # stays READY and serves as hello-sip-1's survivor: it waits 20s
-            # (long enough for hello-sip-1 to have started its own
-            # termination, if it is rolling) and then until hello-sip-1
-            # answers /readyz, i.e. its replacement is up. When hello-sip-1
-            # is not rolling this costs 20s. Capped at ~120s so a hello-sip-1
-            # that never returns cannot block this rollout forever.
-            preStop:
-              exec:
-                command:
-                  - sh
-                  - -c
-                  - >-
-                    sleep 20; i=0;
-                    while [ $i -lt 30 ]; do
-                    wget -q -T 2 -O /dev/null http://hello-sip-1:8082/readyz && exit 0;
-                    i=$((i+1)); sleep 2; done; exit 0
           env:
             - name: HELLO_NODE_ID
               valueFrom:
@@ -1355,8 +1342,15 @@ spec:
               # name, resolvable in-cluster (dispatcher + dialog routes).
               value: hello-sip-2:5060
             - name: HELLO_DRAIN_TIMEOUT
-              # Under the pod's 120s termination grace, so a drain finishes.
+              # With the rollout gate wait, under the pod's 270s termination grace.
               value: 90s
+            - name: HELLO_ROLLOUT_WAIT
+              # On SIGTERM the node first takes the hello-sip restart token
+              # (Valkey) and waits for a READY peer, so Sync's simultaneous
+              # Recreate of hello-sip-1 and hello-sip-2 rolls them one at a
+              # time and a draining node always has a survivor. Wait plus
+              # drain stays under the pod's termination grace.
+              value: 150s
             - name: MINIO_ENDPOINT
               # The voicemail object store (contract 6): the in-namespace
               # MinIO Deployment/Service, as in the lab's compose file.

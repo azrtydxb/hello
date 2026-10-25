@@ -117,6 +117,8 @@ spec:
               value: "$(HELLO_NODE_ID).{{ $full }}-sip.{{ .Release.Namespace }}.svc.{{ .Values.global.clusterDomain }}:5060"
             - name: HELLO_DRAIN_TIMEOUT
               value: {{ printf "%ds" (int $sip.drainTimeoutSeconds) | quote }}
+            - name: HELLO_ROLLOUT_WAIT
+              value: {{ printf "%ds" (int $sip.rolloutWaitSeconds) | quote }}
             - name: HELLO_RTP_PORT_MIN
               value: {{ $sip.rtpPortMin | quote }}
             - name: HELLO_RTP_PORT_MAX
