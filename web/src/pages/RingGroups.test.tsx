@@ -108,6 +108,8 @@ describe("RingGroups", () => {
         ignoreDnd: false,
         failureKind: "external",
         failureTarget: "+97142000100",
+        mohClassId: null,
+        mohRingback: false,
         members: [
           {
             extensionId: 1,
