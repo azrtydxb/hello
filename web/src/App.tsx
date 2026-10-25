@@ -55,6 +55,7 @@ import { PhoneDetail } from "./pages/PhoneDetail";
 import { PhoneGroups } from "./pages/PhoneGroups";
 import { MyContacts } from "./pages/MyContacts";
 import { Phonebooks } from "./pages/Phonebooks";
+import { Onboarding } from "./pages/Onboarding";
 import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
 import { ProvSettings } from "./pages/ProvSettings";
@@ -64,6 +65,7 @@ import { Users } from "./pages/Users";
 import { Can } from "./role";
 import { getAIStatus } from "./api/aiagent";
 import { usePolling } from "./usePolling";
+import { useOnboardingBadge } from "./pages/onboarding/badge";
 import { usePlatformBadges } from "./pages/platform/ui";
 import { Recordings } from "./pages/Recordings";
 import { Announcements } from "./pages/Announcements";
@@ -83,6 +85,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/extensions": Extensions,
   "/devices": Devices,
   "/phones": Phones,
+  "/onboarding": Onboarding,
   "/phonebooks": Phonebooks,
   "/me/contacts": MyContacts,
   "/registrations": Registrations,
@@ -121,7 +124,9 @@ function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
   const controlPlane = useControlPlane();
-  const badges = usePlatformBadges();
+  const platformBadges = usePlatformBadges();
+  const onboardingBadges = useOnboardingBadge();
+  const badges = { ...platformBadges, ...onboardingBadges };
   const aiStatus = usePolling(getAIStatus, 60_000);
   const aiEnabled = aiStatus.status !== "loading" && !!aiStatus.data?.enabled;
   const reachable = controlPlane.status === "reachable";
