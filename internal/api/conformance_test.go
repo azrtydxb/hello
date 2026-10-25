@@ -37,6 +37,10 @@ var conformanceExempt = func() map[string]string {
 		"dismissAIProposal 200", "dismissAIProposal 400", "dismissAIProposal 404", "dismissAIProposal 409"} {
 		m[k] = why
 	}
+	const race = "only reachable when the candidate or its phone changes between the lookup and the write"
+	for _, k := range []string{"adoptOnboardingCandidate 409", "bulkAdoptOnboardingCandidates 404", "bulkAdoptOnboardingCandidates 409"} {
+		m[k] = race
+	}
 	return m
 }()
 
