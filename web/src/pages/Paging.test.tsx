@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { json, ME, mockApi, noContent, renderApp } from "../test/api";
 
@@ -29,6 +29,7 @@ function setup(extra: Parameters<typeof mockApi>[0] = {}) {
     ...ME,
     "GET /api/v1/extensions": () => json({ items: EXTENSIONS }),
     "GET /api/v1/paging-groups": () => json({ items: [] }),
+    "GET /api/v1/multicast-channels": () => json({ items: [] }),
     ...extra,
   });
 }
@@ -130,43 +131,32 @@ describe("Paging", () => {
     ).toBeVisible();
   });
 
-  it("creates a multicast-only group from a phone group's listening channel", async () => {
+  it("creates a multicast-only group from a catalog paging channel", async () => {
     const channel = (
       id: number,
-      role: string,
+      kind: string,
       codec: string,
       label: string,
+      enabled = true,
     ) => ({
       id,
       label,
       address: `239.255.0.${id}`,
       port: 5004,
       codec,
-      role,
+      kind,
       priority: 1,
+      enabled,
     });
     const calls = setup({
-      "GET /api/v1/phone-groups?limit=200": () =>
+      "GET /api/v1/multicast-channels": () =>
         json({
           items: [
-            {
-              id: 9,
-              name: "Warehouse",
-              description: "",
-              includeExtensions: true,
-              includeCompany: true,
-              bookIds: [],
-              multicast: [
-                channel(1, "both", "PCMU", "Dock"),
-                channel(2, "send", "PCMU", "Talk-only"),
-                channel(3, "listen", "G722", "Wideband"),
-              ],
-              phoneCount: 0,
-              createdAt: CREATED,
-              updatedAt: CREATED,
-            },
+            channel(1, "paging", "PCMU", "Dock"),
+            channel(2, "paging", "PCMU", "Off", false),
+            channel(3, "paging", "G722", "Wideband"),
+            channel(4, "ptt", "PCMU", "Talk"),
           ],
-          next: "",
         }),
       "POST /api/v1/paging-groups": () =>
         json(
@@ -176,12 +166,11 @@ describe("Paging", () => {
             multicastChannelId: 1,
             multicastChannel: {
               id: 1,
-              groupId: 9,
-              groupName: "Warehouse",
               label: "Dock",
               address: "239.255.0.1",
               port: 5004,
               codec: "PCMU",
+              enabled: true,
             },
           },
           201,
@@ -209,18 +198,13 @@ describe("Paging", () => {
     const labels = Array.from(pick.querySelectorAll("option")).map(
       (o) => o.textContent,
     );
-    expect(labels).toEqual([
-      "None",
-      "Warehouse · Dock (239.255.0.1:5004, PCMU)",
-    ]);
+    expect(labels).toEqual(["None", "Dock (239.255.0.1:5004, PCMU)"]);
     fireEvent.change(pick, { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Create group" }));
     expect(
       await screen.findByText("Paging group kitchen created."),
     ).toBeVisible();
-    expect(
-      screen.getByText(/Also multicast to Warehouse · Dock/),
-    ).toBeVisible();
+    expect(screen.getByText(/Also multicast to Dock/)).toBeVisible();
     expect(calls).toContainEqual({
       method: "POST",
       url: "/api/v1/paging-groups",
@@ -234,6 +218,98 @@ describe("Paging", () => {
         multicastChannelId: 1,
       },
     });
+  });
+
+  it("manages the multicast channel catalog", async () => {
+    const DOCK = {
+      id: 1,
+      label: "Dock",
+      address: "239.255.0.1",
+      port: 5004,
+      codec: "PCMU",
+      kind: "paging",
+      priority: 1,
+      enabled: true,
+    };
+    const calls = setup({
+      "GET /api/v1/multicast-channels": () => json({ items: [DOCK] }),
+      "POST /api/v1/multicast-channels": [
+        json(
+          {
+            error: {
+              code: "bad_request",
+              message: "invalid multicast channel",
+              fields: [{ path: "address", message: "already used" }],
+            },
+          },
+          400,
+        ),
+        () =>
+          json(
+            {
+              ...DOCK,
+              id: 2,
+              label: "Talk",
+              address: "224.0.1.117",
+              port: 5001,
+              kind: "ptt",
+            },
+            201,
+          ),
+      ],
+      "DELETE /api/v1/multicast-channels/1": () => noContent(),
+    });
+    renderApp("/paging");
+    const table = await screen.findByRole("table", {
+      name: "Multicast channels",
+    });
+    expect(await within(table).findByText("239.255.0.1:5004")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "New channel" }));
+    const dialog = screen.getByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "Talk" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Kind"), {
+      target: { value: "ptt" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/Multicast address/), {
+      target: { value: "224.0.1.117" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/Port/), {
+      target: { value: "5001" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Create channel" }),
+    );
+    expect(await within(dialog).findByText("already used")).toBeVisible();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Create channel" }),
+    );
+    expect(
+      await screen.findByText("Multicast channel Talk created."),
+    ).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "POST",
+      url: "/api/v1/multicast-channels",
+      body: {
+        label: "Talk",
+        address: "224.0.1.117",
+        port: 5001,
+        codec: "PCMU",
+        priority: 1,
+        kind: "ptt",
+        enabled: true,
+      },
+    });
+    expect(within(table).getByText("Push-to-talk")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Dock" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete channel" }));
+    expect(
+      await screen.findByText("Multicast channel Dock deleted."),
+    ).toBeVisible();
+    expect(within(table).queryByText("239.255.0.1:5004")).toBeNull();
   });
 
   it("shows a server validation error at its field", async () => {

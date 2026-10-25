@@ -136,6 +136,7 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 		return nil, errDeadline
 	}
 	d.Line.AccountLabel = AccountLabel(d.Line.Label, d.Line.DisplayName)
+	d.Phone.PTTCapable, d.Phone.WP = SupportsPTT(d.Phone.Vendor, d.Phone.Model), WPFamily(d.Phone.Vendor, d.Phone.Model)
 	d.Phone.CWInverted = d.Phone.Vendor == Grandstream && strings.HasPrefix(strings.ToUpper(strings.ReplaceAll(d.Phone.Model, " ", "")), "WP856")
 	if d.Phone.Vendor == Grandstream {
 		d.Phone.Family = GrandstreamFamily(d.Phone.Model)
@@ -509,10 +510,14 @@ func SampleData(full bool) RenderData {
 			{Label: "Warehouse", Address: "239.255.0.1", Port: 5004, Codec: "PCMU", Priority: 1},
 			{Label: "Office", Address: "239.255.0.2", Port: 5006, Codec: "PCMU", Priority: 2},
 		}, []string{"both", "listen"})
-		d.PTT = NewPTTInfo("224.0.1.116:5001", "PCMU", 1, false, []PTTChannel{
-			{Channel: 1, Label: "All", Transmit: 1, Subscribe: 1},
-			{Channel: 2, Label: "Floor", Transmit: 1, Subscribe: 1},
-		})
+		d.PTT = NewPTTInfo(PTTSettings{Enabled: true, Address: "224.0.1.116:5001", Codec: "PCMU", DefaultChannel: 1,
+			PriorityChannel: 24, EmergencyChannel: 25, GroupPaging: true, DefaultGroup: 26, PriorityGroup: 49, EmergencyGroup: 50,
+			Channels: []PTTChannel{
+				{Channel: 1, Label: "All", Transmit: 1, Subscribe: 1},
+				{Channel: 2, Label: "Floor", Transmit: 1, Subscribe: 1},
+				{Channel: 26, Label: "Announcements", Transmit: 1, Subscribe: 1},
+			}})
+		d.Paging = DefaultPagingOptions()
 		for i := range 12 {
 			n := strconv.Itoa(1002 + i)
 			d.BLF = append(d.BLF, BLFKey{Number: n, Label: "User " + n, URI: "sip:" + n + "@hello.example"})
