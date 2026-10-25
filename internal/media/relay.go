@@ -485,11 +485,15 @@ func (l *relayLeg) send(data []byte) {
 // sequence, timestamp and SSRC are rewritten (contract 3), the payload is
 // untouched (no transcoding).
 func (r *Relay) rewrite(l *relayLeg, data []byte) ([]byte, bool) {
+	return l.out.rewritePacket(data)
+}
+
+// rewritePacket maps one inbound RTP packet into this outbound stream.
+func (o *rewriteState) rewritePacket(data []byte) ([]byte, bool) {
 	pkt, ok := ParseRTP(data)
 	if !ok {
 		return nil, false
 	}
-	o := &l.out
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if !o.started {

@@ -56,6 +56,11 @@ type Metrics struct {
 	PresenceSubscriptions prometheus.Gauge
 	HoldActive            prometheus.Gauge
 
+	// Phase E (spec P-12, P-13): server pages and intercom calls.
+	PagingTotal   *prometheus.CounterVec // result
+	PagingLegs    *prometheus.CounterVec // result
+	IntercomTotal *prometheus.CounterVec // result
+
 	// Phase 7 (in-call HA, spec S-13). DialogReplicated counts replication
 	// writes by result; DialogTakeovers the calls this node took over;
 	// ZombieCalls the calls no survivor could save.
@@ -173,6 +178,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.HoldActive = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_hold_active", Help: "Calls currently held on this node (either leg sendonly).",
 	})
+	m.PagingTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_paging_total", Help: "Server pages by result (answered, no_answer, busy, denied, capacity, failed).",
+	}, []string{"result"})
+	m.PagingLegs = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_paging_legs_total", Help: "Page member legs by result (answered, busy, dnd, no_answer, no_registration).",
+	}, []string{"result"})
+	m.IntercomTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_intercom_total", Help: "Intercom calls by result (auto_answer, ring, denied, failed).",
+	}, []string{"result"})
 	m.DialogReplicated = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_dialog_replicated_total", Help: "Dialog replication writes by result (ok, failed).",
 	}, []string{"result"})
@@ -185,7 +199,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Forwarded, m.GroupCalls,
-		m.PresenceSubscriptions, m.HoldActive,
+		m.PresenceSubscriptions, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	return m
 }

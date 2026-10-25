@@ -21,6 +21,9 @@ type State interface {
 	AllBindings(ctx context.Context) ([]livestate.Binding, error)
 	PutCall(ctx context.Context, c livestate.Call, ttl time.Duration) error
 	DeleteCall(ctx context.Context, id string) error
+	// Calls lists the cluster's live calls (the busy check of a page and
+	// an intercom call).
+	Calls(ctx context.Context) ([]livestate.Call, error)
 	// SetDeviceState publishes a device's presence (contract 3).
 	SetDeviceState(ctx context.Context, sds livestate.DeviceState, ttl time.Duration) error
 }

@@ -51,6 +51,14 @@ type Config struct {
 	RecountInterval time.Duration
 	// MaxCallDuration ends a connected call with BYE to both legs (4h).
 	MaxCallDuration time.Duration
+	// Server paging (spec P-12): PageMaxDuration ends a page (120s),
+	// PageAnswerTimeout gives up when no member answers (10s), PageFanout
+	// caps the legs of one page (200) and PageConcurrent the pages a node
+	// runs at once (5).
+	PageMaxDuration   time.Duration
+	PageAnswerTimeout time.Duration
+	PageFanout        int
+	PageConcurrent    int
 	// PeerRefresh is how often this node announces itself and reloads the
 	// peer set (10s); NodeTTL is how long its announcement lives (30s).
 	PeerRefresh time.Duration
@@ -219,6 +227,10 @@ type Server struct {
 	digitsMu sync.Mutex
 	anchor   atomic.Pointer[media.Anchor]
 	vmBytes  atomic.Int64
+	// pages is the running server page per paging group id (guarded by
+	// pageMu): a group has one active page.
+	pages  map[int64]*call
+	pageMu sync.Mutex
 }
 
 // SetMediaAnchor wires the voicemail media anchor; without it voicemail
@@ -284,6 +296,14 @@ func New(cfg Config, deps Deps) (*Server, error) {
 	setDefault(&cfg.StateTimeout, 200*time.Millisecond)
 	setDefault(&cfg.RingTimeout, 30*time.Second)
 	setDefault(&cfg.MaxCallDuration, 4*time.Hour)
+	setDefault(&cfg.PageMaxDuration, 120*time.Second)
+	setDefault(&cfg.PageAnswerTimeout, 10*time.Second)
+	if cfg.PageFanout <= 0 {
+		cfg.PageFanout = 200
+	}
+	if cfg.PageConcurrent <= 0 {
+		cfg.PageConcurrent = 5
+	}
 	setDefault(&cfg.PeerRefresh, 10*time.Second)
 	setDefault(&cfg.NodeTTL, 30*time.Second)
 	setDefault(&cfg.TrunkLeaseRefresh, 10*time.Second)
@@ -314,6 +334,7 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		rrPos:     map[int64]*atomic.Uint64{},
 		lastEnd:   map[string]time.Time{},
 		digits:    map[*call]*digitBuffer{},
+		pages:     map[int64]*call{},
 		haOffline: map[string]*haOfflineNode{}, haLastActive: map[string]int{}, haIncSeen: map[string]haIncWatch{},
 	}
 	setDefault(&cfg.HADialogHeartbeat, 5*time.Second)

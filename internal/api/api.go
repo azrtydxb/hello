@@ -66,6 +66,12 @@ type Store interface {
 	UpdateRingGroup(ctx context.Context, actor string, id int64, in store.RingGroupInput, check store.Check) (store.RingGroup, error)
 	DeleteRingGroup(ctx context.Context, actor string, id int64, check store.Check) error
 
+	ListPagingGroups(ctx context.Context) ([]store.PagingGroup, error)
+	GetPagingGroup(ctx context.Context, id int64) (store.PagingGroup, error)
+	CreatePagingGroup(ctx context.Context, actor string, in store.PagingGroupInput, check store.Check) (store.PagingGroup, error)
+	UpdatePagingGroup(ctx context.Context, actor string, id int64, in store.PagingGroupInput, check store.Check) (store.PagingGroup, error)
+	DeletePagingGroup(ctx context.Context, actor string, id int64, check store.Check) error
+
 	ListFeatureCodes(ctx context.Context) ([]store.FeatureCode, error)
 	PutFeatureCodes(ctx context.Context, actor string, codes []store.FeatureCode, check store.Check) error
 

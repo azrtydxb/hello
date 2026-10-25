@@ -3151,6 +3151,209 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/paging-groups": {
+      "get": {
+        "operationId": "listPagingGroups",
+        "summary": "List paging groups",
+        "description": "Lists every server paging group with its members and allowed callers.",
+        "tags": ["paging-groups"],
+        "responses": {
+          "200": {
+            "description": "Paging groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagingGroupList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createPagingGroup",
+        "summary": "Create a paging group",
+        "description": "Creates a paging group: dialling its code pages every member at once, one-way, with auto-answer. The code must not collide with a feature code. Validation failures list each failing field in error.fields.",
+        "tags": ["paging-groups"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PagingGroupInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagingGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/paging-groups/{id}": {
+      "get": {
+        "operationId": "getPagingGroup",
+        "summary": "One paging group",
+        "description": "Returns one paging group by id.",
+        "tags": ["paging-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The paging group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagingGroup"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putPagingGroup",
+        "summary": "Replace a paging group",
+        "description": "Replaces a paging group as a whole, member and caller lists included. A page already running keeps the member set it started with.",
+        "tags": ["paging-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PagingGroupInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagingGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deletePagingGroup",
+        "summary": "Delete a paging group",
+        "description": "Deletes a paging group. Its member and caller lists go with it.",
+        "tags": ["paging-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/feature-codes": {
       "get": {
         "operationId": "listFeatureCodes",
@@ -7656,6 +7859,138 @@
           }
         }
       },
+      "PagingExtension": {
+        "type": "object",
+        "required": ["extensionId", "number", "name"],
+        "properties": {
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string",
+            "description": "The extension's number (read-only)."
+          },
+          "name": {
+            "type": "string",
+            "description": "The extension's name (read-only)."
+          }
+        }
+      },
+      "PagingGroup": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "code",
+          "priority",
+          "enabled",
+          "members",
+          "callers",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^\\*[0-9]{2,4}$",
+            "description": "The dialled page code, for example *60."
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["normal", "emergency"],
+            "description": "An emergency page ignores DND and preempts a normal page; neither interrupts a call in progress."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PagingExtension"
+            }
+          },
+          "callers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PagingExtension"
+            },
+            "description": "Extensions allowed to page; empty means any internal extension."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PagingGroupInput": {
+        "type": "object",
+        "required": ["name", "code", "members"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique group name (letters, digits, . _ -)."
+          },
+          "code": {
+            "type": "string",
+            "pattern": "^\\*[0-9]{2,4}$",
+            "description": "Unique page code: '*' plus 2-4 digits, not colliding with a feature code."
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["normal", "emergency"],
+            "description": "Defaults to normal."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to true; a disabled group answers its code with 403."
+          },
+          "members": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Extension ids paged together, 1-200."
+          },
+          "callers": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Extension ids allowed to page; empty means any internal extension."
+          }
+        }
+      },
+      "PagingGroupList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PagingGroup"
+            }
+          }
+        }
+      },
       "FeatureCode": {
         "type": "object",
         "required": ["code", "action", "argument"],
@@ -7675,7 +8010,8 @@
               "voicemail",
               "blind_transfer",
               "attended_transfer",
-              "announcement"
+              "announcement",
+              "intercom"
             ]
           },
           "argument": {
@@ -8055,7 +8391,8 @@
           "forwardBusy",
           "forwardNoAnswer",
           "voicemailEnabled",
-          "recordDefault"
+          "recordDefault",
+          "allowIntercom"
         ],
         "properties": {
           "id": {
@@ -8110,6 +8447,10 @@
           "recordDefault": {
             "type": "boolean",
             "description": "Record this extension's calls by default; *1 toggles recording mid-call either way."
+          },
+          "allowIntercom": {
+            "type": "boolean",
+            "description": "Whether an intercom call (*80 plus the number) auto-answers on this extension; false rings it normally."
           }
         }
       },
@@ -8185,6 +8526,10 @@
           "recordDefault": {
             "type": "boolean",
             "description": "Record this extension's calls by default."
+          },
+          "allowIntercom": {
+            "type": "boolean",
+            "description": "Whether an intercom call (*80 plus the number) auto-answers on this extension; false rings it normally."
           }
         },
         "minProperties": 1
@@ -8544,7 +8889,8 @@
           "originalDestination",
           "rewrittenDestination",
           "route",
-          "trunk"
+          "trunk",
+          "kind"
         ],
         "properties": {
           "id": {
@@ -8633,6 +8979,11 @@
           "rtpJitterMs": {
             "type": ["number", "null"],
             "description": "Larger of the two directions' interarrival jitter in ms; null when not measured."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["call", "page", "intercom"],
+            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call."
           }
         },
         "description": "Null times are omitted."
