@@ -169,6 +169,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		EmailDelivery: cfg.SmtpHost != "",
 		ProvStore:     st,
 		Phonebooks:    st,
+		Dialing:       cfg.Dial,
 		Prov:          provAPI(cfg, settings, deployment, objs, log),
 		SIPDomain:     cfg.SIPDomain,
 		SessionTTL:    cfg.SessionTTL,

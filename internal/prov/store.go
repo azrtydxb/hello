@@ -128,6 +128,12 @@ type Store interface {
 	// phone has none. ErrNotFound when the phone is gone.
 	DeliveredBooks(ctx context.Context, phoneID int64) ([]phonebook.Book, error)
 
+	// DeliveredVersion returns the version of the phone's delivered set
+	// (spec P-11): it changes whenever the set, or an entry of any book in
+	// it, does, so a directory rendered under it can be reused until then.
+	// It is read before DeliveredBooks. ErrNotFound when the phone is gone.
+	DeliveredVersion(ctx context.Context, phoneID int64) (BooksVersion, error)
+
 	// FirmwareByName finds a vendor's uploaded firmware by file name.
 	// ErrNotFound when there is none.
 	FirmwareByName(ctx context.Context, v Vendor, filename string) (Firmware, error)

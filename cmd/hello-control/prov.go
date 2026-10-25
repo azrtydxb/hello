@@ -20,6 +20,7 @@ import (
 	"github.com/azrtydxb/hello/internal/api"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/prov"
+	provbook "github.com/azrtydxb/hello/internal/prov/phonebook"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -116,6 +117,7 @@ func startProv(ctx context.Context, cfg config.Control, st *store.Store, objs *a
 	handler := prov.NewHandler(st, limiter, objs, prov.Options{
 		PublicURL: cfg.Prov.PublicURL, TrustedProxies: cfg.Prov.TrustedProxies, BootCIDRs: cfg.Prov.BootCIDRs,
 		CACertFile: cfg.Prov.CACert, Resync: cfg.Prov.Resync, Audit: audit, Metrics: metrics, Log: plog,
+		BookCache: provbook.NewCache(vk.Client, plog),
 	})
 	srv := &http.Server{
 		Handler:           handler,
