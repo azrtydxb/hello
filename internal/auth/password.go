@@ -80,7 +80,7 @@ func CheckUserPassword(hash, password string) bool {
 	if err1 != nil || err2 != nil || len(want) == 0 || mem > 1<<20 || t > 10 || threads == 0 {
 		return false
 	}
-	got := argon2.IDKey([]byte(password), salt, t, mem, threads, uint32(len(want)))
+	got := argon2.IDKey([]byte(password), salt, t, mem, threads, uint32(len(want))) //nolint:gosec // G115: bounded by the stored hash length
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 

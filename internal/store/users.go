@@ -447,7 +447,8 @@ func (s *Store) UpdateProfile(ctx context.Context, actor string, id int64, c Pro
 
 // UserExtensions returns the extensions user id manages, primary first.
 func (s *Store) UserExtensions(ctx context.Context, userID int64) ([]Extension, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+prefixed("e.", extensionCols)+`
+	//nolint:gosec // G202: the prefix is a constant column list
+	rows, err := s.db.QueryContext(ctx, extQuery+`
 		FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id
 		WHERE ue.user_id = $1 ORDER BY ue.position, e.number`, userID)
 	if err != nil {
@@ -468,7 +469,8 @@ func (s *Store) UserExtensions(ctx context.Context, userID int64) ([]Extension, 
 // UserExtension returns extension id if user userID manages it, else
 // ErrNotFound.
 func (s *Store) UserExtension(ctx context.Context, userID, id int64) (Extension, error) {
-	e, err := scanExtension(s.db.QueryRowContext(ctx, `SELECT `+prefixed("e.", extensionCols)+`
+	//nolint:gosec // G202: the prefix is a constant column list
+	e, err := scanExtension(s.db.QueryRowContext(ctx, extQuery+`
 		FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id
 		WHERE ue.user_id = $1 AND e.id = $2`, userID, id))
 	return e, mapErr(err)
@@ -477,7 +479,8 @@ func (s *Store) UserExtension(ctx context.Context, userID, id int64) (Extension,
 // UserVoicemailMessage returns message id if it is in a box of an extension
 // user userID manages, else ErrNotFound.
 func (s *Store) UserVoicemailMessage(ctx context.Context, userID, id int64) (VoicemailMessage, error) {
-	m, err := scanMessage(s.db.QueryRowContext(ctx, `SELECT `+prefixed("m.", messageCols)+`
+	//nolint:gosec // G202: the prefix is a constant column list
+	m, err := scanMessage(s.db.QueryRowContext(ctx, msgQuery+`
 		FROM voicemail_messages m
 		JOIN voicemail_boxes b ON b.id = m.box_id
 		JOIN user_extensions ue ON ue.extension_id = b.extension_id
@@ -489,7 +492,8 @@ func (s *Store) UserVoicemailMessage(ctx context.Context, userID, id int64) (Voi
 // numbers is the source or the destination, newest first, with the cursor
 // for the next page.
 func (s *Store) UserCDRs(ctx context.Context, userID, before int64, limit int) ([]CDR, string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+prefixed("c.", cdrCols)+`
+	//nolint:gosec // G202: the prefix is a constant column list
+	rows, err := s.db.QueryContext(ctx, cdrQuery+`
 		FROM cdrs c
 		WHERE ($2::bigint = 0 OR c.id < $2::bigint) AND EXISTS (
 			SELECT 1 FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id
@@ -527,3 +531,11 @@ func prefixed(prefix, cols string) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+// The column lists are constants; building the SELECT prefixes here keeps
+// string concatenation out of the query call sites.
+var (
+	extQuery = "SELECT " + prefixed("e.", extensionCols) + " "
+	msgQuery = "SELECT " + prefixed("m.", messageCols) + " "
+	cdrQuery = "SELECT " + prefixed("c.", cdrCols) + " "
+)

@@ -1136,7 +1136,8 @@ func TestUserAdmin(t *testing.T) {
 // bad setting is accepted, the test email is not sent with the stored
 // settings, or only an admin may use these routes is not enforced.
 func TestSMTPSettings(t *testing.T) {
-	f, h, _, logs := newAcctFake(t)
+	f, _, _, logs := newAcctFake(t)
+	var h http.Handler
 	var sentWith mailer.Settings
 	var sentTo string
 	fail := false

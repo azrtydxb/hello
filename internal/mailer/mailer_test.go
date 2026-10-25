@@ -30,7 +30,6 @@ type memQueue struct {
 	mu      sync.Mutex
 	jobs    map[int64]*qjob
 	results map[int64][]Result
-	removed []string
 	fanouts int
 }
 
