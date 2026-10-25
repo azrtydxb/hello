@@ -76,9 +76,12 @@ type event struct {
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ip, https := h.client(r)
+	// Some phones append their own "/" to a provisioning URL that already
+	// ends in one (/p/boot//cfg….xml); runs of slashes mean one.
+	path := collapseSlashes(r.URL.Path)
 	ev := &event{vendor: "unknown", rec: FetchRecord{
 		At: time.Now(), IP: ip, UserAgent: truncateUA(r.UserAgent()),
-		PathRedacted: RedactPath(r.URL.Path), Kind: KindOther,
+		PathRedacted: RedactPath(path), Kind: KindOther,
 	}}
 	defer h.finish(ev)
 	ctx := r.Context()
@@ -86,7 +89,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.empty(w, ev, http.StatusTooManyRequests, ResultRateLimited)
 		return
 	}
-	rest, ok := strings.CutPrefix(r.URL.Path, "/p/")
+	rest, ok := strings.CutPrefix(path, "/p/")
 	readOnly := r.Method == http.MethodGet || r.Method == http.MethodHead
 	allowed := readOnly || r.Method == http.MethodPut
 	if !ok || !allowed {
@@ -106,6 +109,23 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		h.serveDevice(w, r, ev, seg, name, https)
 	}
+}
+
+// collapseSlashes turns every run of "/" into one. It does not resolve
+// "." or ".."; those stay in the name for the allowlist to reject.
+func collapseSlashes(p string) string {
+	if !strings.Contains(p, "//") {
+		return p
+	}
+	var b strings.Builder
+	b.Grow(len(p))
+	for i := 0; i < len(p); i++ {
+		if p[i] == '/' && i > 0 && p[i-1] == '/' {
+			continue
+		}
+		b.WriteByte(p[i])
+	}
+	return b.String()
 }
 
 func (h *handler) finish(ev *event) {
