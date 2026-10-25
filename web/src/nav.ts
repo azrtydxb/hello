@@ -134,6 +134,25 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
+    label: "Integrations",
+    items: [
+      {
+        label: "Overview",
+        path: "/integrations",
+        phase: 5,
+        icon: "plug",
+        minRole: "admin",
+      },
+      {
+        label: "API access",
+        path: "/integrations/api-access",
+        phase: 5,
+        icon: "key-round",
+        minRole: "admin",
+      },
+    ],
+  },
+  {
     label: "Platform",
     items: [
       { label: "Cluster", path: "/cluster", phase: 3, icon: "server" },
@@ -205,4 +224,26 @@ export function pageTitle(pathname: string): string | null {
     (i) => i.path !== "/" && pathname.startsWith(i.path + "/"),
   ).sort((a, b) => b.path.length - a.path.length)[0];
   return parent ? parent.label : null;
+}
+
+/**
+ * The label of the group holding the nav item for `pathname` (the longest
+ * matching path), or null. Call detail belongs to Call history.
+ */
+export function activeGroupLabel(
+  groups: readonly NavGroup[],
+  pathname: string,
+): string | null {
+  const path = /^\/history\/[^/]+$/.test(pathname) ? "/history" : pathname;
+  let best: { label: string; len: number } | null = null;
+  for (const g of groups) {
+    for (const i of g.items) {
+      const hit =
+        i.path === path || (i.path !== "/" && path.startsWith(i.path + "/"));
+      if (hit && (!best || i.path.length > best.len)) {
+        best = { label: g.label, len: i.path.length };
+      }
+    }
+  }
+  return best ? best.label : null;
 }

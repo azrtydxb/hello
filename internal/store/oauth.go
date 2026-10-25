@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/auth"
@@ -35,7 +36,7 @@ func oauthErr(err error) error {
 
 const clientCols = `client_id, kind, name, coalesce(client_uri, ''), to_json(redirect_uris)::text,
 	coalesce(metadata::text, ''), cache_until, created_at, last_used_at, coalesce(description, ''),
-	coalesce(role, ''), to_json(scopes)::text, enabled, created_by`
+	coalesce(role, ''), to_json(scopes)::text, enabled, created_by, to_json(extension_scope)::text`
 
 type rowScanner interface{ Scan(...any) error }
 
@@ -48,10 +49,16 @@ func scanClient(r rowScanner) (oauth.Client, error) {
 		scopes           sql.NullString
 		createdBy        sql.NullInt64
 		role, clientKind string
+		extScope         sql.NullString
 	)
 	if err := r.Scan(&c.ID, &clientKind, &c.Name, &c.ClientURI, &redirects, &meta, &cache, &c.CreatedAt, &last,
-		&c.Description, &role, &scopes, &c.Enabled, &createdBy); err != nil {
+		&c.Description, &role, &scopes, &c.Enabled, &createdBy, &extScope); err != nil {
 		return c, err
+	}
+	if extScope.Valid && extScope.String != "null" {
+		if err := json.Unmarshal([]byte(extScope.String), &c.ExtensionScope); err != nil {
+			return c, err
+		}
 	}
 	c.Kind, c.Role = clientKind, auth.Role(role)
 	if err := json.Unmarshal([]byte(redirects), &c.RedirectURIs); err != nil {
@@ -575,9 +582,9 @@ func (s *Store) CreateServiceAccount(ctx context.Context, actor string, c oauth.
 			return oauth.ErrConflict
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO oauth_clients (client_id, kind, name, description, role, scopes, enabled, created_by)
-			VALUES ($1, 'service', $2, $3, $4, $5::text[], $6, $7)`,
-			c.ID, c.Name, c.Description, string(c.Role), scopeArg(c.Scopes), c.Enabled, c.CreatedBy); err != nil {
+			INSERT INTO oauth_clients (client_id, kind, name, description, role, scopes, enabled, created_by, extension_scope)
+			VALUES ($1, 'service', $2, $3, $4, $5::text[], $6, $7, $8::text[])`,
+			c.ID, c.Name, c.Description, string(c.Role), scopeArg(c.Scopes), c.Enabled, c.CreatedBy, extScopeArg(c.ExtensionScope)); err != nil {
 			return err
 		}
 		return insertAudit(ctx, tx, actor, "create", "service_account", c.ID)
@@ -602,8 +609,10 @@ func (s *Store) UpdateServiceAccount(ctx context.Context, actor, id string, ch o
 			enabled = *ch.Enabled
 		}
 		res, err := tx.ExecContext(ctx, `UPDATE oauth_clients SET description = coalesce($2, description),
-			role = coalesce($3, role), scopes = coalesce($4::text[], scopes), enabled = coalesce($5, enabled)
-			WHERE client_id = $1 AND kind = 'service'`, id, ch.Description, role, scopes, enabled)
+			role = coalesce($3, role), scopes = coalesce($4::text[], scopes), enabled = coalesce($5, enabled),
+			extension_scope = CASE WHEN $6 THEN $7::text[] ELSE extension_scope END
+			WHERE client_id = $1 AND kind = 'service'`, id, ch.Description, role, scopes, enabled,
+			ch.SetExtensionScope, extScopeArg(ch.ExtensionScope))
 		if err != nil {
 			return err
 		}
@@ -611,7 +620,7 @@ func (s *Store) UpdateServiceAccount(ctx context.Context, actor, id string, ch o
 			return err
 		}
 		// Narrowing or disabling stops the account's live tokens now.
-		if ch.Enabled != nil || ch.Scopes != nil || ch.Role != nil {
+		if ch.Enabled != nil || ch.Scopes != nil || ch.Role != nil || ch.SetExtensionScope {
 			if _, err := tx.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = now()
 				WHERE client_id = $1 AND revoked_at IS NULL`, id); err != nil {
 				return err
@@ -717,4 +726,13 @@ func (s *Store) PruneOAuth(ctx context.Context, cutoff time.Time) (int64, error)
 		total += n
 	}
 	return total, nil
+}
+
+// extScopeArg is a service account's extension limit as a text[] argument:
+// nil stays NULL (every extension), an empty list is an empty array.
+func extScopeArg(nums []string) any {
+	if nums == nil {
+		return nil
+	}
+	return "{" + strings.Join(nums, ",") + "}"
 }

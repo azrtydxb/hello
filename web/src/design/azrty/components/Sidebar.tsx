@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useId, type CSSProperties, type ReactNode } from "react";
 import { cx } from "./cx";
 import { Icon } from "./Icon";
 
@@ -100,26 +100,73 @@ export function SidebarNav({
   );
 }
 
-/** A group of nav items under an eyebrow heading (none when `label` is empty). */
+/**
+ * A group of nav items under an eyebrow heading (none when `label` is empty).
+ * Pass `expanded` and `onToggle` to make the heading a disclosure button;
+ * collapsed items stay in the DOM but are hidden.
+ */
 export function SidebarNavGroup({
   label,
   children,
+  expanded,
+  onToggle,
+  alert,
 }: {
   label: string;
   children: ReactNode;
+  expanded?: boolean;
+  onToggle?: () => void;
+  /** Flags a collapsed group whose items need attention (a badge). */
+  alert?: boolean;
 }) {
+  const id = useId();
+  if (!label || !onToggle) {
+    return (
+      <div
+        className="az-sidebar__group"
+        role="group"
+        aria-label={label || undefined}
+      >
+        {label && (
+          <span className="az-eyebrow" aria-hidden="true">
+            {label}
+          </span>
+        )}
+        {children}
+      </div>
+    );
+  }
+  const open = expanded !== false;
   return (
     <div
-      className="az-sidebar__group"
-      role="group"
-      aria-label={label || undefined}
+      className={cx("az-sidebar__group", !open && "az-sidebar__group--closed")}
     >
-      {label && (
-        <span className="az-eyebrow" aria-hidden="true">
-          {label}
-        </span>
-      )}
-      {children}
+      <button
+        type="button"
+        className="az-eyebrow az-sidebar__toggle"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={onToggle}
+      >
+        <span>{label}</span>
+        {!open && alert && (
+          <span
+            className="az-sidebar__alert"
+            role="img"
+            aria-label="needs attention"
+          />
+        )}
+        <Icon name="chevron-down" size={13} className="az-sidebar__chev" />
+      </button>
+      <div
+        id={id}
+        role="group"
+        aria-label={label}
+        className="az-sidebar__items"
+        hidden={!open}
+      >
+        {children}
+      </div>
     </div>
   );
 }

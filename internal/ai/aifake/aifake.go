@@ -201,8 +201,8 @@ func (s *Store) FailAITasks(_ context.Context, replica, code, message string, at
 	return n, nil
 }
 
-// TryAILock implements ai.Store.
-func (s *Store) TryAILock(_ context.Context, k string) (func(), bool, error) {
+// TryLock implements ai.Store.
+func (s *Store) TryLock(_ context.Context, k string) (func(), bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.locks[k] {

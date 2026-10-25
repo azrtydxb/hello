@@ -223,6 +223,15 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		Scan(&d.Line.VoicemailCode); err != nil {
 		return d, prov.Template{}, err
 	}
+	// Park and park-retrieve codes: empty until those feature actions exist
+	// (the phone then keeps its own empty setting).
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(min(code) FILTER (WHERE action = 'park'), ''), COALESCE(min(code) FILTER (WHERE action = 'park_retrieve'), '') FROM feature_codes`).
+		Scan(&d.Line.ParkCode, &d.Line.ParkRetrieveCode); err != nil {
+		return d, prov.Template{}, err
+	}
+	if d.Emergency, err = s.emergencyNumbers(ctx); err != nil {
+		return d, prov.Template{}, err
+	}
 	host, port := splitHostPort(s.prov.SIPServer)
 	d.Server = prov.Server{Host: host, Port: port, Transport: "udp", Expiry: int(s.prov.Expiry / time.Second)}
 	d.Prov = s.prov.info(token, d.Phone.MAC)
@@ -257,6 +266,27 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		return d, prov.Template{}, prov.ErrNoTemplate
 	}
 	return d, t, nil
+}
+
+// emergencyNumbers lists the numbers of the enabled emergency-flagged
+// outbound routes that match by prefix and are plain dial strings, comma
+// separated: the phone dials these without the usual dial-plan delay. A
+// regex route has no fixed number to hand the phone and is skipped.
+func (s *Store) emergencyNumbers(ctx context.Context) (string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT match FROM outbound_routes WHERE emergency AND enabled AND match_kind = 'prefix' ORDER BY position, id`)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	var nums []string
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return "", err
+		}
+		nums = prov.AddEmergencyNumber(nums, m)
+	}
+	return strings.Join(nums, ","), rows.Err()
 }
 
 // nullStr scans a nullable text column into s ("" for NULL).

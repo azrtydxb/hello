@@ -284,7 +284,7 @@ func TestOAuthMetadata(t *testing.T) {
 		if !slices.Equal(m.ResponseTypes, []string{"code"}) || !slices.Equal(m.Challenge, []string{"S256"}) ||
 			!slices.Equal(m.GrantTypes, []string{"authorization_code", "refresh_token", "client_credentials"}) ||
 			!slices.Equal(m.AuthMethods, []string{"none", "client_secret_basic", "client_secret_post"}) ||
-			!slices.Equal(m.Scopes, []string{"read", "write", "admin", "secrets"}) || !m.CIMD || !m.ISS {
+			!slices.Equal(m.Scopes, []string{"read", "write", "admin", "secrets", "calls", "events", "recordings"}) || !m.CIMD || !m.ISS {
 			t.Fatalf("server metadata = %s", rec.Body)
 		}
 		for _, res := range []string{"/api/v1", "/mcp"} {
@@ -299,7 +299,7 @@ func TestOAuthMetadata(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &pr); err != nil || rec.Code != http.StatusOK {
 				t.Fatalf("resource metadata %s = %d %s", res, rec.Code, rec.Body)
 			}
-			if pr.Resource != public+res || !slices.Equal(pr.AS, []string{public}) || len(pr.Scopes) != 4 ||
+			if pr.Resource != public+res || !slices.Equal(pr.AS, []string{public}) || len(pr.Scopes) != len(auth.AllScopes) ||
 				!slices.Equal(pr.Bearer, []string{"header"}) || pr.Name == "" {
 				t.Fatalf("resource metadata %s = %s", res, rec.Body)
 			}

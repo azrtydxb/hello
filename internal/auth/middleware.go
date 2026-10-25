@@ -34,6 +34,10 @@ type Actor struct {
 	Audience []string
 	// ServiceName is the service account's name for KindService.
 	ServiceName string
+	// ExtensionScope limits a service credential to these extension
+	// numbers (spec integrations I-33); nil is every extension. A user's
+	// own limit comes from the extensions linked to the user, not from here.
+	ExtensionScope []string
 	// Via is how the change was made when not through a client: the audit
 	// via of an agent request (ViaAssistant), else empty.
 	Via string
