@@ -94,6 +94,7 @@ type trunkBody struct {
 	Enabled         *bool                  `json:"enabled"`
 	Destinations    *[]routing.Destination `json:"destinations"`
 	InternalDialing *dialingBody           `json:"internalDialing"`
+	Messaging       *bool                  `json:"messaging"`
 }
 
 // dialingBody is an internalDialing request field (trunk plan contract 5).
@@ -146,6 +147,7 @@ func (b trunkBody) applyTo(in *store.TrunkInput) {
 	setIf(&in.DefaultCallerID, b.DefaultCallerID)
 	setIf(&in.Enabled, b.Enabled)
 	setIf(&in.Destinations, b.Destinations)
+	setIf(&in.Messaging, b.Messaging)
 }
 
 // validPassword checks a new trunk password without echoing it.

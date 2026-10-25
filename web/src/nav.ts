@@ -44,6 +44,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { label: "Phonebooks", path: "/phonebooks", phase: 5, icon: "book-user" },
       { label: "My contacts", path: "/me/contacts", phase: 5, icon: "contact" },
       {
+        label: "My messages",
+        path: "/me/messages",
+        phase: 5,
+        icon: "message-square",
+      },
+      {
         label: "Registrations",
         path: "/registrations",
         phase: 1,
@@ -91,6 +97,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { label: "Active calls", path: "/calls", phase: 1, icon: "phone-call" },
       { label: "Call history", path: "/history", phase: 1, icon: "history" },
+      {
+        label: "Messages",
+        path: "/messages",
+        phase: 5,
+        icon: "messages-square",
+        // Sending is a write; reading the text is admin only (the page says so).
+        minRole: "operator",
+      },
     ],
   },
   {

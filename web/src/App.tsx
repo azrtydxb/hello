@@ -48,6 +48,8 @@ import { NotFound } from "./pages/NotFound";
 import { PhoneDetail } from "./pages/PhoneDetail";
 import { PhoneGroups } from "./pages/PhoneGroups";
 import { MyContacts } from "./pages/MyContacts";
+import { MyMessages } from "./pages/MyMessages";
+import { Messages } from "./pages/Messages";
 import { Phonebooks } from "./pages/Phonebooks";
 import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
@@ -78,6 +80,8 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/phones": Phones,
   "/phonebooks": Phonebooks,
   "/me/contacts": MyContacts,
+  "/me/messages": MyMessages,
+  "/messages": Messages,
   "/registrations": Registrations,
   "/calls": Calls,
   "/history": History,

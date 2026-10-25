@@ -179,6 +179,16 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/me/contacts/{id}", auth.ScopeWrite, auth.RoleViewer, false, s.updateContact},
 		{"DELETE", "/api/v1/me/contacts/{id}", auth.ScopeWrite, auth.RoleViewer, false, s.deleteContact},
 
+		{"GET", "/api/v1/messages", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessages},
+		{"POST", "/api/v1/messages", auth.ScopeWrite, auth.RoleOperator, false, s.sendMessage},
+		{"GET", "/api/v1/messages/conversations", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessageConversations},
+		{"GET", "/api/v1/messages/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessageSettings},
+		{"PUT", "/api/v1/messages/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessageSettings},
+		{"POST", "/api/v1/messages/purge", auth.ScopeAdmin, auth.RoleAdmin, false, s.purgeMessages},
+		{"GET", "/api/v1/me/messages", auth.ScopeRead, auth.RoleViewer, false, s.listMyMessages},
+		{"POST", "/api/v1/me/messages", auth.ScopeWrite, auth.RoleViewer, false, s.sendMyMessage},
+		{"GET", "/api/v1/me/messages/conversations", auth.ScopeRead, auth.RoleViewer, false, s.listMyMessageConversations},
+
 		{"GET", "/api/v1/phone-groups", auth.ScopeRead, auth.RoleViewer, false, s.listPhoneGroups},
 		{"POST", "/api/v1/phone-groups", auth.ScopeAdmin, auth.RoleAdmin, false, s.createPhoneGroup},
 		{"GET", "/api/v1/phone-groups/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getPhoneGroup},

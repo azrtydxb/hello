@@ -74,6 +74,10 @@ type Trunk struct {
 	// InternalDialing gates what the trunk may dial in the extension
 	// namespace (spec S-2); zero value: mode "off".
 	InternalDialing Dialing
+	// Messaging turns SMS over SIP (SIP MESSAGE) on for this trunk, both
+	// ways. Off by default; an inbound MESSAGE from a trunk is refused
+	// unless this is on and the source is the trunk's.
+	Messaging bool
 }
 
 // OutboundRoute matches calls from extensions to external numbers.

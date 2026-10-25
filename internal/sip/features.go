@@ -188,12 +188,6 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 	s.respond(tx, req, sip.StatusOK, "OK")
 }
 
-// handleMessage answers an inbound MESSAGE 200; the MWI MESSAGEs are
-// outbound only.
-func (s *Server) handleMessage(req *sip.Request, tx sip.ServerTransaction) {
-	s.respond(tx, req, sip.StatusOK, "OK")
-}
-
 // dtmfDigit reads a digit from a dtmf-relay body ("Signal=2", "Signal: #").
 func dtmfDigit(body []byte) (byte, bool) {
 	for _, line := range strings.Split(string(body), "\n") {

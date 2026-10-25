@@ -10,6 +10,7 @@
     <user_realname idx="1" perm="R">{{xml .Line.DisplayName}}</user_realname>
     <user_idle_text idx="1" perm="R">{{xml .Line.AccountLabel}}</user_idle_text>
     <user_expiry idx="1" perm="R">{{.Server.Expiry}}</user_expiry>
+{{- /* Text messages (SIP MESSAGE, RFC 3428): Snom documents no key to switch instant messages on that we could cite, so none is written; the phone shows a MESSAGE it receives as it does by default. Unverified on hardware (lab item). */}}
 {{- /* MWI (spec S-1): user_mailbox names the mailbox the phone ties MWI to and dials for voicemail (Snom Service Hub, user_mailbox, D-series); Snom documents no separate subscribe flag. Unverified on hardware (lab item 1). */}}
     <user_mailbox idx="1" perm="R">{{xml (or .Line.VoicemailCode "*97")}}</user_mailbox>
     <admin_mode_password perm="R">{{xml .Phone.AdminPassword}}</admin_mode_password>

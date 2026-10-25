@@ -89,6 +89,8 @@ interface TrunkDraft {
   defaultCallerId: string;
   enabled: boolean;
   destinations: DestinationDraft[];
+  /** SMS over SIP (SIP MESSAGE) through this trunk. */
+  messaging: boolean;
   /** What the trunk may dial in the extension namespace. */
   dialingMode: DialingMode;
   /** The patterns, one per line; used only in mode "patterns". */
@@ -117,6 +119,7 @@ const NEW_TRUNK: TrunkDraft = {
   defaultCallerId: "",
   enabled: true,
   destinations: [NEW_DESTINATION],
+  messaging: false,
   dialingMode: "off",
   dialingPatterns: "",
   dialingConfirm: false,
@@ -142,6 +145,7 @@ function toDraft(t: Trunk): TrunkDraft {
       priority: String(d.priority),
       weight: String(d.weight),
     })),
+    messaging: t.messaging === true,
     dialingMode:
       dialing?.mode === "patterns" || dialing?.mode === "all"
         ? dialing.mode
@@ -228,6 +232,7 @@ function toInput(d: TrunkDraft): TrunkInput {
       weight: Number(x.weight),
     })),
     internalDialing: toDialingInput(d),
+    messaging: d.messaging,
   };
 }
 
@@ -266,6 +271,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "internalDialing.mode",
     "internalDialing.patterns",
     "internalDialing.confirm",
+    "messaging",
     ...d.destinations.flatMap((_, i) => [
       `destinations[${i}]`,
       ...["host", "port", "priority", "weight"].map(
@@ -517,6 +523,7 @@ function TrunkCard({
             label: "Internal dialing",
             value: dialingLabel(t.internalDialing),
           },
+          { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
           { label: "Password", value: password },
         ]
       : [
@@ -536,6 +543,7 @@ function TrunkCard({
             label: "Internal dialing",
             value: dialingLabel(t.internalDialing),
           },
+          { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
           { label: "Password", value: password },
         ];
 
@@ -903,6 +911,13 @@ function TrunkDrawer({
             labelPosition="end"
             checked={draft.enabled}
             onChange={(e) => set("enabled", e.target.checked)}
+          />
+          <Switch
+            label="SMS over SIP"
+            hint="Send and receive text messages (SIP MESSAGE) through this trunk. Incoming texts reach the extension an inbound route names for the number; only from this trunk's addresses. Off by default."
+            labelPosition="end"
+            checked={draft.messaging}
+            onChange={(e) => set("messaging", e.target.checked)}
           />
         </fieldset>
 

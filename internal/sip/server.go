@@ -164,6 +164,9 @@ type Deps struct {
 	// PageTests is the queue of paging-group test requests from the admin
 	// API; nil disables them.
 	PageTests PageTests
+	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
+	// MESSAGE 503.
+	Messages MessageQueue
 }
 
 // Server is one SIP node.
@@ -249,6 +252,13 @@ type Server struct {
 	// pageMu): a group has one active page.
 	pages  map[int64]*call
 	pageMu sync.Mutex
+
+	// SIP MESSAGE delivery (messages.go): extensions whose device just
+	// registered, a pending full sweep, and the delivery loop's wake-up.
+	msgMu    sync.Mutex
+	msgKick  map[string]struct{}
+	msgSweep bool
+	msgWake  chan struct{}
 }
 
 // SetMediaAnchor wires the voicemail media anchor; without it voicemail
@@ -353,6 +363,8 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		lastEnd:   map[string]time.Time{},
 		digits:    map[*call]*digitBuffer{},
 		pages:     map[int64]*call{},
+		msgKick:   map[string]struct{}{},
+		msgWake:   make(chan struct{}, 1),
 		haOffline: map[string]*haOfflineNode{}, haLastActive: map[string]int{}, haIncSeen: map[string]haIncWatch{},
 	}
 	setDefault(&cfg.HADialogHeartbeat, 5*time.Second)
@@ -438,6 +450,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
+	}
+	if s.deps.Messages != nil {
+		s.bg.Go(func() { s.messageLoop(rctx) })
 	}
 	if s.deps.HAState != nil && s.deps.Membership != nil && s.cfg.HATakeoverEnabled {
 		// A takeover re-INVITEs from the listening socket, which sipgo

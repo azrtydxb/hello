@@ -28,7 +28,7 @@ func TestRoutesTable(t *testing.T) {
 	// contacts. A session holds every scope; a viewer's token can only hold
 	// read, so a viewer changes contacts from the console.
 	selfService := func(r RouteInfo) bool {
-		return r.Scope == auth.ScopeWrite && r.Role == auth.RoleViewer && strings.HasPrefix(r.Pattern, "/api/v1/me/contacts")
+		return r.Scope == auth.ScopeWrite && r.Role == auth.RoleViewer && (strings.HasPrefix(r.Pattern, "/api/v1/me/contacts") || strings.HasPrefix(r.Pattern, "/api/v1/me/messages"))
 	}
 	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true}
 	seen := map[string]bool{}

@@ -53,6 +53,7 @@ type Trunk struct {
 	Enabled         bool                  `json:"enabled"`
 	Destinations    []routing.Destination `json:"destinations"`
 	InternalDialing Dialing               `json:"internalDialing"`
+	Messaging       bool                  `json:"messaging"`
 	CreatedAt       time.Time             `json:"createdAt"`
 	UpdatedAt       time.Time             `json:"updatedAt"`
 }
@@ -72,6 +73,7 @@ type TrunkInput struct {
 	Enabled         bool
 	Destinations    []routing.Destination
 	InternalDialing Dialing
+	Messaging       bool
 }
 
 // Input returns t's writable fields.
@@ -82,6 +84,7 @@ func (t Trunk) Input() TrunkInput {
 		SourceCIDRs: slices.Clone(t.SourceCIDRs), MaxCalls: t.MaxCalls, DefaultCallerID: t.DefaultCallerID,
 		Enabled: t.Enabled, Destinations: slices.Clone(t.Destinations),
 		InternalDialing: Dialing{Mode: t.InternalDialing.Mode, Patterns: slices.Clone(t.InternalDialing.Patterns)},
+		Messaging:       t.Messaging,
 	}
 }
 
@@ -94,13 +97,13 @@ type PasswordChange struct {
 
 const trunkCols = `id, name, mode, username, password_enc IS NOT NULL, realm, from_domain, register_expires,
 	options_interval, to_json(source_cidrs::text[]), max_calls, default_caller_id, enabled, to_json(internal_dialing),
-	created_at, updated_at`
+	messaging, created_at, updated_at`
 
 func scanTrunk(r interface{ Scan(...any) error }) (Trunk, error) {
 	var t Trunk
 	var cidrs, dialing []byte
 	if err := r.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &t.HasPassword, &t.Realm, &t.FromDomain, &t.RegisterExpires,
-		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &t.Messaging, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return t, err
 	}
 	t.SourceCIDRs = []string{}
@@ -234,10 +237,10 @@ func (s *Store) CreateTrunk(ctx context.Context, actor string, in TrunkInput, pa
 	err := s.configChange(ctx, actor, "create", "trunk", check, func(tx *sql.Tx) (int64, error) {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO trunks (name, mode, username, realm, from_domain, register_expires,
-				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb) RETURNING id`,
+				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, messaging)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb, $13) RETURNING id`,
 			in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires, in.OptionsInterval,
-			nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled, dialingArg(in.InternalDialing)).Scan(&id); err != nil {
+			nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled, dialingArg(in.InternalDialing), in.Messaging).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := s.setPassword(ctx, tx, id, password); err != nil {
@@ -275,10 +278,10 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE trunks SET name = $2, mode = $3, username = $4, realm = $5,
 				from_domain = $6, register_expires = $7, options_interval = $8, source_cidrs = $9::cidr[],
-				max_calls = $10, default_caller_id = $11, enabled = $12, internal_dialing = $13::jsonb, updated_at = now()
+				max_calls = $10, default_caller_id = $11, enabled = $12, internal_dialing = $13::jsonb, messaging = $14, updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires,
 			in.OptionsInterval, nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled,
-			dialingArg(in.InternalDialing)); err != nil {
+			dialingArg(in.InternalDialing), in.Messaging); err != nil {
 			return id, err
 		}
 		if pw.Set {
@@ -927,7 +930,7 @@ func routingTrunks(s *Store, trunks []Trunk, sealed map[int64][]byte, snap Routi
 			RegisterExpires: time.Duration(t.RegisterExpires) * time.Second,
 			OptionsInterval: time.Duration(t.OptionsInterval) * time.Second,
 			MaxCalls:        t.MaxCalls, DefaultCallerID: t.DefaultCallerID, Enabled: t.Enabled, Destinations: t.Destinations,
-			InternalDialing: t.InternalDialing.dialing(),
+			InternalDialing: t.InternalDialing.dialing(), Messaging: t.Messaging,
 		}
 		if errs := routing.CompileDialing(rt.InternalDialing); len(errs) > 0 {
 			snap.Misconfigured[t.ID] = true

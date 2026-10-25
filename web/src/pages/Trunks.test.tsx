@@ -20,6 +20,7 @@ const TRUNK = {
   enabled: true,
   destinations: [{ host: "10.0.0.5", port: 5060, priority: 0, weight: 1 }],
   internalDialing: { mode: "off", patterns: [] },
+  messaging: false,
   createdAt: "2026-10-01T10:00:00Z",
   updatedAt: "2026-10-01T10:00:00Z",
 };
@@ -116,6 +117,33 @@ describe("Trunks", () => {
       screen.getByRole("button", { name: "Change password" }),
     ).toBeVisible();
     expectPasswordNowhere();
+  });
+
+  it("turns SMS over SIP on for a trunk, off by default", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () => json({ ...TRUNK, messaging: true }),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    expect(within(primary).getByText("SMS over SIP")).toBeVisible();
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    const sms = screen.getByRole("switch", { name: /SMS over SIP/ });
+    expect(sms).not.toBeChecked();
+    fireEvent.click(sms);
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await screen.findByText("Trunk carrier-primary saved."),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      messaging: true,
+    });
   });
 
   it("shows only set / not set on reload, and rotates the password only when asked", async () => {

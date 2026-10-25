@@ -8261,6 +8261,653 @@
         }
       }
     },
+    "/api/v1/messages": {
+      "get": {
+        "operationId": "listMessages",
+        "summary": "List text messages",
+        "description": "Lists sent messages, newest first, one entry per send (a message to a group or to everyone is one entry with the counts of its recipients). Admin only: message bodies are private.",
+        "tags": [
+          "messages"
+        ],
+        "parameters": [
+          {
+            "name": "extension",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "description": "Only messages this extension sent or received."
+          },
+          {
+            "name": "conversation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "A conversation key from the conversations list."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "delivered",
+                "failed"
+              ]
+            },
+            "description": "Only messages with this status."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Search text in the body, the sender, the recipient and the group name."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The next of the previous page; omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "message content is private: it is not exposed to an agent"
+        }
+      },
+      "post": {
+        "operationId": "sendMessage",
+        "summary": "Send a text message",
+        "description": "Sends a text message (SIP MESSAGE) from the PBX to one extension, a ring group, a paging group, every phone (targetKind broadcast, which needs confirm true) or an external number through a trunk that has messaging turned on. It is queued and answered 202: a recipient with no registered phone gets it when a phone registers, until the message expires (the TTL in the messaging settings). The sender shown on the phone is the administrator, not an extension.",
+        "tags": [
+          "messages"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageSend"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageSent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/messages/conversations": {
+      "get": {
+        "operationId": "listMessageConversations",
+        "summary": "List text message conversations",
+        "description": "Lists the conversations (a pair of parties, a group, or the broadcasts) with their most recent message, most recently active first. Admin only.",
+        "tags": [
+          "messages"
+        ],
+        "parameters": [
+          {
+            "name": "extension",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "description": "Only messages this extension sent or received."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "delivered",
+                "failed"
+              ]
+            },
+            "description": "Only conversations with a message in this status."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Search text in the body, the sender, the recipient and the group name."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MessageConversation"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/messages/settings": {
+      "get": {
+        "operationId": "getMessageSettings",
+        "summary": "Get the messaging settings",
+        "description": "The messaging switch, how long an undelivered message waits for its recipient to register (ttlHours), how long the history is kept (retentionDays) and the limits. Admin only.",
+        "tags": [
+          "messages"
+        ],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "updateMessageSettings",
+        "summary": "Replace the messaging settings",
+        "description": "Replaces all the settings. Admin only. Turning messaging off refuses new messages; stored ones are still delivered.",
+        "tags": [
+          "messages"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageSettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/messages/purge": {
+      "post": {
+        "operationId": "purgeMessages",
+        "summary": "Delete old text message history",
+        "description": "Deletes delivered and failed messages older than the given number of days now (0 deletes every finished message). Messages still waiting for delivery are kept. The history is also purged on its own after the retention in the settings. Admin only.",
+        "tags": [
+          "messages"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "olderThanDays"
+                ],
+                "properties": {
+                  "olderThanDays": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 3650,
+                    "description": "Delete finished messages older than this many days; 0 deletes every finished message."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "deleted"
+                  ],
+                  "properties": {
+                    "deleted": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "destroys history; an administrator does this in the console"
+        }
+      }
+    },
+    "/api/v1/me/messages": {
+      "get": {
+        "operationId": "listMyMessages",
+        "summary": "List my text messages",
+        "description": "Lists the messages the signed-in user's extension sent or received, newest first. Only the user's own extension is reachable: no route takes an extension, and a credential without a user (a service account) is refused with 403. A user an administrator has not linked to an extension has no messages (403, code no_extension).",
+        "tags": [
+          "messages"
+        ],
+        "parameters": [
+          {
+            "name": "conversation",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "A conversation key from the conversations list."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "delivered",
+                "failed"
+              ]
+            },
+            "description": "Only messages with this status."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Search text in the body, the sender, the recipient and the group name."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The next of the previous page; omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "personal data: a user's own messages are not exposed to an agent"
+        }
+      },
+      "post": {
+        "operationId": "sendMyMessage",
+        "summary": "Send a text message from my extension",
+        "description": "Sends a text message from the signed-in user's own extension to an extension, a ring group, a paging group (when the extension may page it) or an external number. The sender is always the user's extension. Answered 202.",
+        "tags": [
+          "messages"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessageSend"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageSent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "acts as the user's own extension: not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/messages/conversations": {
+      "get": {
+        "operationId": "listMyMessageConversations",
+        "summary": "List my text message conversations",
+        "description": "The conversations of the signed-in user's extension, most recently active first.",
+        "tags": [
+          "messages"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Search text in the body, the sender, the recipient and the group name."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Conversations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MessageConversation"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "personal data: a user's own messages are not exposed to an agent"
+        }
+      }
+    },
     "/api/v1/phone-groups": {
       "get": {
         "operationId": "listPhoneGroups",
@@ -8708,6 +9355,33 @@
       }
     },
     "responses": {
+        "TooLarge": {
+          "description": "The message is too large",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Error"
+              }
+            }
+          }
+        },
+        "RateLimited": {
+          "description": "Too many messages; see Retry-After",
+          "headers": {
+            "Retry-After": {
+              "schema": {
+                "type": "integer"
+              }
+            }
+          },
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Error"
+              }
+            }
+          }
+        },
       "BadRequest": {
         "description": "Invalid input",
         "content": {
@@ -8810,6 +9484,337 @@
       }
     },
     "schemas": {
+        "MessageSend": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "targetKind",
+            "body"
+          ],
+          "properties": {
+            "targetKind": {
+              "type": "string",
+              "enum": [
+                "extension",
+                "ring_group",
+                "paging_group",
+                "broadcast",
+                "external"
+              ],
+              "description": "What target names. broadcast sends to every extension that has an enabled device and needs confirm true; /me/messages does not allow it."
+            },
+            "target": {
+              "type": "string",
+              "description": "An extension number, the name of a ring group, the code or name of a paging group, or an external number (2-32 digits, optionally with a leading +). Empty for broadcast."
+            },
+            "body": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 700,
+              "description": "The text, at most 700 bytes: a message travels as one UDP packet."
+            },
+            "confirm": {
+              "type": "boolean",
+              "description": "Must be true for a broadcast."
+            }
+          }
+        },
+        "MessageSent": {
+          "type": "object",
+          "required": [
+            "batch",
+            "scope",
+            "recipients"
+          ],
+          "properties": {
+            "batch": {
+              "type": "string",
+              "description": "Identifies the send; its messages share it."
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "direct",
+                "ring_group",
+                "paging_group",
+                "broadcast"
+              ]
+            },
+            "recipients": {
+              "type": "integer",
+              "description": "How many extensions or numbers the message was queued for."
+            }
+          }
+        },
+        "Message": {
+          "type": "object",
+          "required": [
+            "id",
+            "batch",
+            "sender",
+            "senderKind",
+            "senderName",
+            "actor",
+            "recipient",
+            "recipientKind",
+            "scope",
+            "scopeRef",
+            "trunk",
+            "contentType",
+            "body",
+            "bodyBytes",
+            "status",
+            "detail",
+            "attempts",
+            "createdAt",
+            "expiresAt",
+            "deliveredAt",
+            "recipients",
+            "delivered",
+            "pending",
+            "failed"
+          ],
+          "properties": {
+            "id": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "batch": {
+              "type": "string"
+            },
+            "sender": {
+              "type": "string",
+              "description": "An extension number, an external number or \"system\"."
+            },
+            "senderKind": {
+              "type": "string",
+              "enum": [
+                "extension",
+                "external",
+                "system"
+              ]
+            },
+            "senderName": {
+              "type": "string"
+            },
+            "actor": {
+              "type": "string",
+              "description": "The user or credential that sent it through the API, empty for a phone."
+            },
+            "recipient": {
+              "type": "string",
+              "description": "The recipient of this entry (the first, for a message to a group)."
+            },
+            "recipientKind": {
+              "type": "string",
+              "enum": [
+                "extension",
+                "external"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "direct",
+                "ring_group",
+                "paging_group",
+                "broadcast"
+              ]
+            },
+            "scopeRef": {
+              "type": "string",
+              "description": "The group the message was sent to."
+            },
+            "trunk": {
+              "type": "string",
+              "description": "The trunk an external message used, empty otherwise."
+            },
+            "contentType": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string",
+              "description": "The text; empty for content that is not text."
+            },
+            "bodyBytes": {
+              "type": "integer"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "delivered",
+                "failed"
+              ],
+              "description": "Overall: pending while any recipient still waits."
+            },
+            "detail": {
+              "type": "string",
+              "description": "Why a message is pending or failed."
+            },
+            "attempts": {
+              "type": "integer"
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time",
+              "description": "When an undelivered message is given up on."
+            },
+            "deliveredAt": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "recipients": {
+              "type": "integer",
+              "description": "Recipients of the send."
+            },
+            "delivered": {
+              "type": "integer"
+            },
+            "pending": {
+              "type": "integer"
+            },
+            "failed": {
+              "type": "integer"
+            }
+          }
+        },
+        "MessagePage": {
+          "type": "object",
+          "required": [
+            "items",
+            "next"
+          ],
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Message"
+              }
+            },
+            "next": {
+              "type": "string",
+              "description": "Pass as cursor= for the next page; empty on the last page."
+            }
+          }
+        },
+        "MessageConversation": {
+          "type": "object",
+          "required": [
+            "key",
+            "scope",
+            "scopeRef",
+            "messages",
+            "lastId",
+            "lastAt",
+            "lastSender",
+            "lastRecipient",
+            "lastSnippet",
+            "lastStatus",
+            "parties"
+          ],
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "Pass as conversation= to list its messages."
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "direct",
+                "ring_group",
+                "paging_group",
+                "broadcast"
+              ]
+            },
+            "scopeRef": {
+              "type": "string"
+            },
+            "messages": {
+              "type": "integer"
+            },
+            "lastId": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "lastAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "lastSender": {
+              "type": "string"
+            },
+            "lastRecipient": {
+              "type": "string"
+            },
+            "lastSnippet": {
+              "type": "string"
+            },
+            "lastStatus": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "delivered",
+                "failed"
+              ]
+            },
+            "parties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The two sides of a direct conversation; empty for a group."
+            }
+          }
+        },
+        "MessageSettings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "ttlHours",
+            "retentionDays",
+            "ratePerMinute",
+            "maxQueuedPerExtension"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether new messages are accepted."
+            },
+            "ttlHours": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 720,
+              "description": "How long an undelivered message waits for its recipient to register."
+            },
+            "retentionDays": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3650,
+              "description": "How long delivered and failed messages are kept."
+            },
+            "ratePerMinute": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "description": "Sends per sender per minute."
+            },
+            "maxQueuedPerExtension": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "description": "Undelivered messages kept per extension; the oldest are dropped."
+            }
+          }
+        },
       "RedirectStatus": {
         "type": "object",
         "required": ["state"],
@@ -10228,7 +11233,11 @@
                   "ai_budget_exhausted",
                   "task_running",
                   "proposal_not_open",
-                  "proposal_stale"
+                  "proposal_stale",
+                  "rate_limited",
+                  "too_large",
+                  "messaging_disabled",
+                  "no_messaging_trunk"
                 ]
               },
               "message": {
@@ -11239,7 +12248,8 @@
           "defaultCallerId",
           "enabled",
           "destinations",
-          "internalDialing"
+          "internalDialing",
+          "messaging"
         ],
         "properties": {
           "id": {
@@ -11323,6 +12333,10 @@
           },
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing"
+          },
+          "messaging": {
+            "type": "boolean",
+            "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Off by default."
           }
         }
       },
@@ -11412,6 +12426,10 @@
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing",
             "description": "The trunk's internal-number dialing policy: what it may dial in the extension namespace. Default mode \"off\" dials no internal number, so a new trunk reaches nothing internal. Set whole: a body that carries internalDialing replaces the policy."
+          },
+          "messaging": {
+            "type": "boolean",
+            "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
           }
         }
       },
@@ -11501,6 +12519,10 @@
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing",
             "description": "The trunk's internal-number dialing policy: what it may dial in the extension namespace. Default mode \"off\" dials no internal number, so a new trunk reaches nothing internal. Set whole: a body that carries internalDialing replaces the policy."
+          },
+          "messaging": {
+            "type": "boolean",
+            "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
           }
         }
       },

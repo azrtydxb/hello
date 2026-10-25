@@ -19,6 +19,9 @@ var Allowlist = []string{
 	"createOutboundRoute", "updateOutboundRoute", "deleteOutboundRoute",
 	"createInboundRoute", "updateInboundRoute", "deleteInboundRoute",
 	"updateTrunk", "updatePhone",
+	// A text message is a one-shot create: the assistant proposes the
+	// words and the recipients, a person applies it.
+	"sendMessage",
 }
 
 // deletes are the allowlisted operations that remove a resource: only ring

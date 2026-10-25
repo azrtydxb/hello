@@ -174,6 +174,9 @@ type Config struct {
 	// lookup keys of stored numbers are built in.
 	Phonebooks PhonebookStore
 	Dialing    phonebook.Dialing
+	// Messages is the SIP MESSAGE persistence; nil answers 503 on the
+	// message routes.
+	Messages MessageStore
 	// AI is the OAuth authorization server (spec ai-external-access); nil
 	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
 	// routes answer 404 and bearer tokens get no audience check.

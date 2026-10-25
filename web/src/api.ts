@@ -234,6 +234,8 @@ export interface TrunkFields {
   destinations: TrunkDestination[];
   /** What the trunk may dial in the extension namespace. */
   internalDialing: InternalDialing;
+  /** SMS over SIP: text messages may be sent and received through it. */
+  messaging: boolean;
 }
 
 /** A trunk as returned: the password is never returned, only hasPassword. */
