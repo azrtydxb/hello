@@ -31,6 +31,10 @@ type Config struct {
 	CAURL         string
 	FirmwareURL   string
 	AdminPassword string
+	// ParkCode and ParkRetrieveCode are the codes the Park and Retrieve
+	// softkeys use (Grandstream WP8x6: P60069 and P2336); "" when unset.
+	ParkCode         string
+	ParkRetrieveCode string
 }
 
 // caCommentRE finds the CA URL the XML formats carry in a comment, where
@@ -220,6 +224,7 @@ func ParseGrandstream(b []byte, mac string) (Config, error) {
 		}
 	}
 	c := Config{
+		ParkCode: p["P60069"], ParkRetrieveCode: p["P2336"],
 		User: p["P35"], AuthUser: p["P36"], Password: p["P34"], DisplayName: p["P3"],
 		ProvURL: gsURL(p["P212"], p["P237"], "/"), CAURL: caFromComment(b), FirmwareURL: gsURL(p["P6767"], p["P192"], ""), AdminPassword: p["P2"],
 	}

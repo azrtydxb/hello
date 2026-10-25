@@ -164,6 +164,11 @@ type Deps struct {
 	// PageTests is the queue of paging-group test requests from the admin
 	// API; nil disables them.
 	PageTests PageTests
+	// Park is the shared call-park store (Valkey); nil disables call park,
+	// retrieve and cross-node pickup. Hold is what a parked party hears;
+	// nil plays the built-in tone until music on hold supplies one.
+	Park ParkState
+	Hold HoldAudio
 }
 
 // Server is one SIP node.
@@ -438,6 +443,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
+	}
+	if s.deps.Park != nil {
+		s.bg.Go(func() { s.parkLoop(rctx) })
 	}
 	if s.deps.HAState != nil && s.deps.Membership != nil && s.cfg.HATakeoverEnabled {
 		// A takeover re-INVITEs from the listening socket, which sipgo

@@ -266,8 +266,10 @@ func (s *Store) CreatePagingGroup(ctx context.Context, actor string, in PagingGr
 			return 0, err
 		}
 		var id int64
-		if err := tx.QueryRowContext(ctx, `INSERT INTO paging_groups (name, code, priority, enabled, multicast_channel_id)
-			VALUES ($1, $2, $3, $4, $5) RETURNING id`, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID).Scan(&id); err != nil {
+		if err := dialGuard(ctx, tx, "code", func() error {
+			return tx.QueryRowContext(ctx, `INSERT INTO paging_groups (name, code, priority, enabled, multicast_channel_id)
+				VALUES ($1, $2, $3, $4, $5) RETURNING id`, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID).Scan(&id)
+		}); err != nil {
 			return 0, err
 		}
 		if err := writePagingLists(ctx, tx, id, in); err != nil {
@@ -292,12 +294,14 @@ func (s *Store) UpdatePagingGroup(ctx context.Context, actor string, id int64, i
 		if err := checkPagingChannel(ctx, tx, in.MulticastChannelID); err != nil {
 			return id, err
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE paging_groups SET name = $2, code = $3, priority = $4, enabled = $5,
-			multicast_channel_id = $6, updated_at = now() WHERE id = $1`, id, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID)
-		if err != nil {
-			return id, err
-		}
-		if err := requireRow(res); err != nil {
+		if err := dialGuard(ctx, tx, "code", func() error {
+			res, err := tx.ExecContext(ctx, `UPDATE paging_groups SET name = $2, code = $3, priority = $4, enabled = $5,
+				multicast_channel_id = $6, updated_at = now() WHERE id = $1`, id, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID)
+			if err != nil {
+				return err
+			}
+			return requireRow(res)
+		}); err != nil {
 			return id, err
 		}
 		if err := writePagingLists(ctx, tx, id, in); err != nil {

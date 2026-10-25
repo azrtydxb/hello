@@ -158,6 +158,10 @@ type Line struct {
 	// ParkCode and ParkRetrieveCode are the call-park and park-retrieve
 	// feature codes, empty when none is configured.
 	ParkCode, ParkRetrieveCode string
+	// PickupGroupCode and PickupDirectedCode are the group-pickup and
+	// directed-pickup feature codes (phone-feature-parity S-50), empty when
+	// none is configured; the directed one is dialled with the extension after it.
+	PickupGroupCode, PickupDirectedCode string
 }
 
 // Server is the registrar the phone registers with.

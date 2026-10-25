@@ -3874,6 +3874,469 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/park-lots": {
+      "get": {
+        "operationId": "listParkLots",
+        "summary": "List park lots",
+        "description": "Lists the call park lots: each is a range of slot numbers a call can be parked in, with the time a parked call waits before it rings its parker again and the ring window before it goes to the parker's voicemail.",
+        "tags": [
+          "park"
+        ],
+        "responses": {
+          "200": {
+            "description": "Park lots",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParkLotList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createParkLot",
+        "summary": "Create a park lot",
+        "description": "Creates a park lot. The slot range must not overlap another lot, an extension number or a ring group name. Dialling the park code during a call parks it in the first free slot; dialling the retrieve code and a slot, or the slot itself, retrieves it. Validation failures list each failing field in error.fields.",
+        "tags": [
+          "park"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParkLotInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParkLot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/park-lots/{id}": {
+      "get": {
+        "operationId": "getParkLot",
+        "summary": "One park lot",
+        "description": "Returns one park lot by id.",
+        "tags": [
+          "park"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The park lot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParkLot"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putParkLot",
+        "summary": "Replace a park lot",
+        "description": "Replaces a park lot as a whole. Calls already parked keep their slot until they are retrieved or time out. A range that overlaps another lot, an extension number or a ring group name is refused with 400.",
+        "tags": [
+          "park"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParkLotInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParkLot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteParkLot",
+        "summary": "Delete a park lot",
+        "description": "Deletes a park lot. Calls already parked in it keep their slot until they are retrieved or time out.",
+        "tags": [
+          "park"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/parked-calls": {
+      "get": {
+        "operationId": "listParkedCalls",
+        "summary": "List the calls parked now",
+        "description": "Lists the calls parked right now on every node: the slot, the lot, who parked the call, who is parked, when, and when the call returns to its parker. Needs Valkey.",
+        "tags": [
+          "park"
+        ],
+        "responses": {
+          "200": {
+            "description": "Parked calls",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParkedCallList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/pickup-groups": {
+      "get": {
+        "operationId": "listPickupGroups",
+        "summary": "List pickup groups",
+        "description": "Lists the call pickup groups: a member may answer a call ringing any other member. An extension in no pickup group may pick up calls ringing the other members of its ring groups.",
+        "tags": [
+          "pickup"
+        ],
+        "responses": {
+          "200": {
+            "description": "Pickup groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupGroupList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createPickupGroup",
+        "summary": "Create a pickup group",
+        "description": "Creates a pickup group of 1-200 extensions. Group pickup answers the oldest call ringing another member; directed pickup answers a named member's call. Validation failures list each failing field in error.fields.",
+        "tags": [
+          "pickup"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickupGroupInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/pickup-groups/{id}": {
+      "get": {
+        "operationId": "getPickupGroup",
+        "summary": "One pickup group",
+        "description": "Returns one pickup group by id.",
+        "tags": [
+          "pickup"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The pickup group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupGroup"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putPickupGroup",
+        "summary": "Replace a pickup group",
+        "description": "Replaces a pickup group as a whole, member list included.",
+        "tags": [
+          "pickup"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickupGroupInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deletePickupGroup",
+        "summary": "Delete a pickup group",
+        "description": "Deletes a pickup group. Its members fall back to the pickup scope of their ring groups.",
+        "tags": [
+          "pickup"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/paging-groups": {
       "get": {
         "operationId": "listPagingGroups",
@@ -4187,7 +4650,7 @@
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
-        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, call_waiting_on, call_waiting_off.",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed. Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -10653,6 +11116,262 @@
           }
         }
       },
+      "ParkLot": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "slotStart",
+          "slotEnd",
+          "returnSecs",
+          "voicemailSecs",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slotStart": {
+            "type": "integer",
+            "description": "The first slot number."
+          },
+          "slotEnd": {
+            "type": "integer",
+            "description": "The last slot number."
+          },
+          "returnSecs": {
+            "type": "integer",
+            "description": "Seconds an unretrieved call waits before it rings its parker again."
+          },
+          "voicemailSecs": {
+            "type": "integer",
+            "description": "Seconds the parker's phones then ring before the call goes to the parker's voicemail (or is ended when the parker has none)."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ParkLotInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "slotStart",
+          "slotEnd"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique lot name (letters, digits, . _ -)."
+          },
+          "slotStart": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99999,
+            "description": "The first slot number."
+          },
+          "slotEnd": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99999,
+            "description": "The last slot number; at most 100 slots per lot, and no overlap with another lot, an extension number or a ring group name."
+          },
+          "returnSecs": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 3600,
+            "description": "Defaults to 120."
+          },
+          "voicemailSecs": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 3600,
+            "description": "Defaults to 60."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to true; a disabled lot parks no new calls."
+          }
+        }
+      },
+      "ParkLotList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParkLot"
+            }
+          }
+        }
+      },
+      "ParkedCall": {
+        "type": "object",
+        "required": [
+          "slot",
+          "lot",
+          "node",
+          "callId",
+          "correlationId",
+          "parkedBy",
+          "caller",
+          "callerName",
+          "parkedAt",
+          "returnAt",
+          "phase"
+        ],
+        "description": "A call parked in a slot right now.",
+        "properties": {
+          "slot": {
+            "type": "string"
+          },
+          "lot": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string",
+            "description": "The hello-sip node holding the call's dialog and media."
+          },
+          "callId": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "parkedBy": {
+            "type": "string",
+            "description": "The extension that parked the call."
+          },
+          "caller": {
+            "type": "string",
+            "description": "The parked party's number."
+          },
+          "callerName": {
+            "type": "string"
+          },
+          "parkedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "returnAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the call rings its parker again."
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "parked",
+              "returning"
+            ]
+          }
+        }
+      },
+      "ParkedCallList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParkedCall"
+            }
+          }
+        }
+      },
+      "PickupGroup": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "members",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PagingExtension"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PickupGroupInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "members"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique group name (letters, digits, . _ -)."
+          },
+          "members": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Extension ids, 1-200."
+          }
+        }
+      },
+      "PickupGroupList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PickupGroup"
+            }
+          }
+        }
+      },
       "PagingGroup": {
         "type": "object",
         "required": [
@@ -11120,7 +11839,11 @@
               "announcement",
               "intercom",
               "call_waiting_on",
-              "call_waiting_off"
+              "call_waiting_off",
+              "park",
+              "park_retrieve",
+              "pickup_group",
+              "pickup_directed"
             ]
           },
           "argument": {
@@ -11173,7 +11896,11 @@
                     "announcement",
                     "intercom",
                     "call_waiting_on",
-                    "call_waiting_off"
+                    "call_waiting_off",
+                    "park",
+                    "park_retrieve",
+                    "pickup_group",
+                    "pickup_directed"
                   ]
                 },
                 "argument": {

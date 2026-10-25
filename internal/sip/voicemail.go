@@ -249,7 +249,11 @@ func (c *call) voicemailFlow(mode int, reason string, sess media.Session) {
 	done := c.hungUp || c.ended
 	c.mu.Unlock()
 	if !done {
-		c.hangup(cdr.SideCallee)
+		side := cdr.SideCallee
+		if c.isLinked() {
+			side = cdr.SideSystem // a parked call's party is on either side of the dialog
+		}
+		c.hangup(side)
 	}
 }
 
