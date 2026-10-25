@@ -466,7 +466,7 @@ func SampleData(full bool) RenderData {
 	if full {
 		d.Phone.Label = "Reception"
 		d.Line.VoicemailCode = "*97"
-		d.Firmware = &FirmwareInfo{URL: "https://prov.hello.example/p/sample/fw/firmware.rom", Version: "1.2.3"}
+		d.Firmware = &FirmwareInfo{URL: "https://prov.hello.example/p/sample/fw/firmware.rom", Dir: "https://prov.hello.example/p/sample/fw", Via: 2, Version: "1.2.3"}
 		d.Book = NewBookInfo("https://prov.hello.example/p/sample/", []string{"Extensions", "Company", "Warehouse"}, DefaultBookRefresh)
 		for i := range 12 {
 			n := strconv.Itoa(1002 + i)

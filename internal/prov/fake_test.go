@@ -245,7 +245,7 @@ func (s *fakeStore) RenderInputs(_ context.Context, id int64) (RenderData, Templ
 	}
 	d.Book = NewBookInfo(DeviceURL(s.public, p.plain), names, DefaultBookRefresh)
 	if p.pinned != nil {
-		d.Firmware = &FirmwareInfo{URL: FirmwareURL(s.public, p.plain, p.pinned.Filename), Version: p.pinned.Version}
+		d.Firmware = &FirmwareInfo{URL: FirmwareURL(s.public, p.plain, p.pinned.Filename), Dir: strings.TrimSuffix(DeviceURL(s.public, p.plain), "/") + "/fw", Via: UpgradeVia(s.public.Scheme + "://"), Version: p.pinned.Version}
 	}
 	t, ok := Resolve(d.Phone, p.override, append(append([]Template{}, s.templates...), Builtins()...))
 	if !ok {

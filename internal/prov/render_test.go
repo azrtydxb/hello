@@ -24,7 +24,7 @@ func renderSample(firmware bool) RenderData {
 		Time:   TimeInfo{Zone: "Europe/Brussels", NTP: "pool.ntp.org"},
 	}
 	if firmware {
-		d.Firmware = &FirmwareInfo{URL: d.Prov.URL + "fw/T54W-96.86.0.70.rom", Version: "96.86.0.70"}
+		d.Firmware = &FirmwareInfo{URL: d.Prov.URL + "fw/T54W-96.86.0.70.rom", Dir: d.Prov.URL + "fw", Via: 2, Version: "96.86.0.70"}
 	}
 	return d
 }
@@ -104,6 +104,9 @@ func TestRenderedConfigContents(t *testing.T) {
 			}
 			if pinned {
 				want.FirmwareURL = d.Firmware.URL
+				if v == Grandstream {
+					want.FirmwareURL = d.Firmware.Dir // P192 is the directory
+				}
 			}
 			for _, g := range got {
 				if !reflect.DeepEqual(g, want) {
