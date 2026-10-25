@@ -44,7 +44,9 @@ func TestMessageClaimOnce(t *testing.T) {
 	ctx := context.Background()
 	const total = 40
 	for i := 0; i < total; i++ {
-		if _, err := st.SendMessage(ctx, direct("102", "m")); err != nil {
+		in := direct("102", "m")
+		in.Sender, in.SenderKind = "", MsgSenderSystem // the system is not rate limited
+		if _, err := st.SendMessage(ctx, in); err != nil {
 			t.Fatal(err)
 		}
 	}
