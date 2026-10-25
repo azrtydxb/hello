@@ -34,11 +34,11 @@ type Store interface {
 	// FailAITasks fails replica's queued and running tasks with code.
 	FailAITasks(ctx context.Context, replica, code, message string, at time.Time) (int64, error)
 
-	// TryAILock takes the session-level advisory lock
+	// TryLock takes the session-level advisory lock
 	// pg_try_advisory_lock(hashtext(key)) on a dedicated connection; ok is
 	// false when another holds it. unlock releases it and the connection;
 	// a dead replica's lock goes with its connection.
-	TryAILock(ctx context.Context, key string) (unlock func(), ok bool, err error)
+	TryLock(ctx context.Context, key string) (unlock func(), ok bool, err error)
 	// LastAgentRun is agent's most recent run, nil when it never ran.
 	LastAgentRun(ctx context.Context, agent string) (*AgentRun, error)
 	// AgentRunRequested reports whether a run-now request waits for agent.

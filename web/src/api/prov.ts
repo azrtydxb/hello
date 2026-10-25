@@ -617,3 +617,15 @@ export interface ProvSettings {
 
 export const getProvSettings = (signal?: AbortSignal) =>
   request<ProvSettings>("GET", "/api/v1/prov/settings", { signal });
+
+/**
+ * Whether Hello can provision BLF keys for the phone. A Grandstream WP
+ * (WP8xx, WP856) has no BLF key type in its provisioning template, so the
+ * API refuses keys for it; the phone form hides the editor.
+ */
+export function supportsBlf(vendor: string, model: string): boolean {
+  return !(
+    vendor === "grandstream" &&
+    /^WP(8[1-3]6|856|8(10|2[0258]))/i.test(model.replace(/[\s_-]/g, ""))
+  );
+}

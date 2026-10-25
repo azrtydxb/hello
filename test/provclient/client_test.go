@@ -47,6 +47,18 @@ func model(t *testing.T, vendor string) Model {
 	return Model{}
 }
 
+// modelNamed is the representative phone with the model name.
+func modelNamed(t *testing.T, name string) Model {
+	t.Helper()
+	for _, m := range Models {
+		if m.Model == name {
+			return m
+		}
+	}
+	t.Fatalf("no model %s", name)
+	return Model{}
+}
+
 const mac = "0004f2a1b2c3"
 
 // TestSequences fails if a vendor's request sequence, its MAC case, its
@@ -120,5 +132,40 @@ func TestRequiredFileMissing(t *testing.T) {
 		if _, err := (Client{HTTP: srv.Client()}).Provision(context.Background(), m, mac, srv.URL+"/p/x/"); err == nil {
 			t.Errorf("%s: no error without a device file", m.Vendor)
 		}
+	}
+}
+
+// TestGrandstreamWPSequences fails if the WP822 or WP836 does not fetch
+// the Grandstream sequence with its own common file name and a User-Agent
+// that carries its model, firmware and MAC, or if the parsed account is
+// wrong.
+func TestGrandstreamWPSequences(t *testing.T) {
+	gs := "<gs_provision><mac>" + mac + "</mac><config><P35>101</P35><P47>pbx:5060</P47></config></gs_provision>"
+	for _, name := range []string{"WP822", "WP836"} {
+		t.Run(name, func(t *testing.T) {
+			m := modelNamed(t, name)
+			if !m.NoBLF {
+				t.Error("a WP model takes no BLF keys")
+			}
+			f := &fakeServer{files: map[string]string{"cfg" + mac + ".xml": gs}}
+			srv := httptest.NewServer(f)
+			defer srv.Close()
+			res, err := (Client{HTTP: srv.Client()}).Provision(context.Background(), m, mac, srv.URL+"/p/x/")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"GET cfg" + mac, "GET cfg" + mac + ".bin", "GET cfg" + mac + ".xml", "GET cfg" + strings.ToLower(name) + ".xml", "GET cfg.xml"}
+			if !slices.Equal(f.got, want) {
+				t.Fatalf("requests = %q, want %q", f.got, want)
+			}
+			if res.Config.User != "101" || len(res.Config.BLF) != 0 {
+				t.Fatalf("config = %+v", res.Config)
+			}
+			for _, ua := range f.uas {
+				if !strings.Contains(ua, "HW "+name+" SW "+m.Firmware) || !strings.Contains(ua, mac) {
+					t.Fatalf("User-Agent %q", ua)
+				}
+			}
+		})
 	}
 }

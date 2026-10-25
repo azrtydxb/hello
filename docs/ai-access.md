@@ -94,17 +94,40 @@ asking you to approve more).
 | `admin`   | Also users and roles, API tokens, service accounts, OAuth clients, settings, node drain.                                                                                                          |
 | `secrets` | Operations that reveal or rotate secrets (device SIP passwords, trunk credentials). Never pre-selected; even with it, MCP results withhold secret values (see [Security model](#security-model)). |
 
-`admin` implies `write`, which implies `read`; `secrets` stands alone.
+The integration scopes (see [Integrations](#integration-scopes)) are for apps
+that place calls or follow them:
 
-| Role       | May grant                           |
-| ---------- | ----------------------------------- |
-| `viewer`   | `read`                              |
-| `operator` | `read`, `write`                     |
-| `admin`    | `read`, `write`, `admin`, `secrets` |
+| Scope        | Allows                                                                                                                                                         |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `calls`      | Place and hang up calls from the holder's own extensions (click-to-call) and read the state of the calls it started. Never pre-selected on the consent screen. |
+| `events`     | Receive live call events (ringing, answered, ended, missed) for the extensions the holder may see.                                                             |
+| `recordings` | Create and revoke expiring links to call recordings.                                                                                                           |
+
+`admin` implies `write`, which implies `read`; `secrets`, `calls`, `events` and
+`recordings` stand alone.
+
+| Role       | May grant                                                            |
+| ---------- | -------------------------------------------------------------------- |
+| `viewer`   | `read`, `events`                                                     |
+| `operator` | `read`, `write`, `calls`, `events`, `recordings`                     |
+| `admin`    | `read`, `write`, `admin`, `secrets`, `calls`, `events`, `recordings` |
 
 An agent never has more than its user: the role is read on every request,
 so demoting a user (System → Users, admin only) narrows every app they
 approved on its next call.
+
+### Integration scopes
+
+`calls`, `events` and `recordings` are held by apps that integrate Hello with
+other software (a CRM, a browser extension, an automation tool); the design
+is in `.procoder/specs/integrations.md`. A scope alone does not say which
+extensions an app may act for. A service account therefore carries an
+optional **extension limit** (`extensionScope`: a list of extension numbers;
+unset means every extension, an empty list none), set when it is created or
+changed under **Integrations → API access** and by `PATCH
+/api/v1/service-accounts/{id}`. Changing the limit, like changing the role or
+scopes, stops the account's live tokens. The limit is enforced by the
+operations that use these scopes as they are added.
 
 ## Consent and revocation
 
@@ -112,7 +135,7 @@ The consent screen (`/oauth/consent`, never framed) shows the client's
 name, its host (the name is self-asserted, the host is not; dynamically
 registered clients are marked unverified), the resources it asks for and
 each scope with what it allows. You may uncheck scopes; scopes your role
-cannot grant are not selectable, and `secrets` is never pre-checked.
+cannot grant are not selectable, and `secrets` and `calls` are never pre-checked.
 
 Revoke an app under **AI access → Connected apps**: its grant and every
 token issued under it stop working on the next request. An `admin` sees and
