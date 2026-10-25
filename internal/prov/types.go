@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -150,8 +151,24 @@ type ProvInfo struct {
 
 // FirmwareInfo is the firmware pinned for the phone's model.
 type FirmwareInfo struct {
-	URL     string
+	URL     string // the full URL of the pinned file
 	Version string
+	// Dir is the URL of the directory the file is in, without a trailing
+	// slash. Grandstream takes a firmware server directory and appends the
+	// model's own file name, so it needs this, not URL.
+	Dir string
+	// Via is the Grandstream "upgrade via" value for the scheme Dir is
+	// served on, see UpgradeVia.
+	Via int
+}
+
+// UpgradeVia is the Grandstream "upgrade via" value (P6767) for a URL:
+// 2 for HTTPS, 1 for anything else (HTTP).
+func UpgradeVia(u string) int {
+	if strings.HasPrefix(strings.ToLower(u), "https://") {
+		return 2
+	}
+	return 1
 }
 
 // TimeInfo is the phone's clock setup.

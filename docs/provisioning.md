@@ -210,6 +210,20 @@ discarded.
 GXP, GRP, GXV and WP. The phone tries `cfg<mac>`, `cfg<mac>.bin` (both
 `404`) and then `cfg<mac>.xml`, the P-value file with the account.
 
+Firmware: Grandstream treats P192 as a firmware server _directory_ and
+appends the model's own file name (`wp810fw.bin` for the WP822,
+`wp8x6fw.bin` for the WP836), so the file sets P192 to
+`.Firmware.Dir`, `<prov URL>fw` with no trailing slash, and the phone
+fetches `/p/<token>/fw/<file>`, which Hello serves from the pinned file of
+that name. Pin the firmware under the exact file name the phone asks for.
+P6767 (firmware upgrade via) follows the scheme of that URL, `2` for HTTPS
+and `1` for HTTP; P232 and P233 (file prefix and postfix) stay empty;
+P238 is `0`, so the phone checks for firmware at every boot. These values
+come from the Grandstream WP8xx administration guides (Maintenance →
+Upgrade and Provisioning) and are unconfirmed on a phone, so verify them.
+The phone also asks for `ring<N>.bin` and `ring<N>.ogg` in that directory;
+Hello answers those with an empty `404` (`not_found`, no block counted).
+
 ### Snom
 
 D series. Booted, the phone asks for `snom<model>.htm` and
@@ -254,15 +268,15 @@ a priority, and one or more files, each a file-name pattern (`{mac}`,
 
 Templates see only these values:
 
-| Value       | Fields                                                                                |
-| ----------- | ------------------------------------------------------------------------------------- |
-| `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                  |
-| `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode` |
-| `.Server`   | `Host`, `Port`, `Transport` (`udp`), `Expiry` (seconds)                               |
-| `.BLF`      | a list of `Number`, `Label`, `URI`                                                    |
-| `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `ResyncSeconds`                           |
-| `.Firmware` | `URL`, `Version`, or nil when no firmware is pinned                                   |
-| `.Time`     | `Zone`, `NTP`                                                                         |
+| Value       | Fields                                                                                                                            |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                              |
+| `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                             |
+| `.Server`   | `Host`, `Port`, `Transport` (`udp`), `Expiry` (seconds)                                                                           |
+| `.BLF`      | a list of `Number`, `Label`, `URI`                                                                                                |
+| `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `ResyncSeconds`                                                                       |
+| `.Firmware` | `URL` (the file), `Dir` (its directory, no trailing slash), `Version`, `Via` (1 HTTP, 2 HTTPS), or nil when no firmware is pinned |
+| `.Time`     | `Zone`, `NTP`                                                                                                                     |
 
 Functions: `xml` (escape), `upper`, `lower`, `default`, `add`, `div`. For
 example, a key/value phone:

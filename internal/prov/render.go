@@ -466,7 +466,7 @@ func SampleData(full bool) RenderData {
 	if full {
 		d.Phone.Label = "Reception"
 		d.Line.VoicemailCode = "*97"
-		d.Firmware = &FirmwareInfo{URL: "https://prov.hello.example/p/sample/fw/firmware.rom", Version: "1.2.3"}
+		d.Firmware = &FirmwareInfo{URL: "https://prov.hello.example/p/sample/fw/firmware.rom", Dir: "https://prov.hello.example/p/sample/fw", Via: 2, Version: "1.2.3"}
 		for i := range 12 {
 			n := strconv.Itoa(1002 + i)
 			d.BLF = append(d.BLF, BLFKey{Number: n, Label: "User " + n, URI: "sip:" + n + "@hello.example"})
