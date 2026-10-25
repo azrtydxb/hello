@@ -127,9 +127,7 @@ func TestHoldKeepsNegotiatedCodec(t *testing.T) {
 func trunkCall(t *testing.T, codecs []string, carrierSDP string) (inv, answer []byte) {
 	t.Helper()
 	car := newCarrier(t, "acct1", "pw-primary")
-	car.mu.Lock()
-	car.sdp = carrierSDP
-	car.mu.Unlock()
+	car.setSDP(carrierSDP)
 	tr := car.trunk(1, "carrier-primary", "ip")
 	tr.Codecs = codecs
 	r := &fakeRouter{extensions: map[string]bool{"100": true, "200": true}, trunks: []routing.Trunk{tr}}

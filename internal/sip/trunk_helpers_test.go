@@ -387,7 +387,7 @@ type carrier struct {
 	ua    *sipgo.UserAgent
 	srv   *sipgo.Server
 	dua   *sipgo.DialogUA
-	sdp   string // guarded by mu
+	sdp   string // answer SDP; guarded by mu (set via setSDP, read by answerSDP)
 
 	grant       atomic.Int64 // registration expiry granted, seconds
 	inviteCode  atomic.Int64 // 200 answer, 0 ring forever, -1 stay silent, else that code
@@ -557,11 +557,10 @@ func (cr *carrier) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	cr.mu.Lock()
 	cr.dialogs[req.CallID().Value()] = dss
-	answer := []byte(cr.sdp)
 	cr.mu.Unlock()
 	switch code {
 	case 200:
-		_ = dss.RespondSDP(answer)
+		_ = dss.RespondSDP([]byte(cr.answerSDP()))
 	case 0:
 		_ = dss.Respond(180, "Ringing", nil)
 		<-dss.Context().Done()
@@ -569,6 +568,20 @@ func (cr *carrier) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	default:
 		_ = dss.Respond(int(code), statusText(int(code)), nil)
 	}
+}
+
+// setSDP replaces the SDP the carrier answers INVITEs with. The SIP server
+// goroutine reads it concurrently, so it is set under mu.
+func (cr *carrier) setSDP(sdp string) {
+	cr.mu.Lock()
+	cr.sdp = sdp
+	cr.mu.Unlock()
+}
+
+func (cr *carrier) answerSDP() string {
+	cr.mu.Lock()
+	defer cr.mu.Unlock()
+	return cr.sdp
 }
 
 func (cr *carrier) trunk(id int64, name, mode string) routing.Trunk {
