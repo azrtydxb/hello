@@ -145,6 +145,8 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 			d.Book = &b
 		}
 	}
+	d.Prov.CACertBase64 = pemBase64(d.Prov.CACertPEM)
+	d.BLF = PlaceBLF(d.Phone.Vendor, d.Phone.Model, d.BLF, d.Codes.PickupDirected)
 	w := &cappedWriter{ctx: ctx}
 	if err := tmpl.Execute(w, toData(reflect.ValueOf(d))); err != nil {
 		if w.err != nil {

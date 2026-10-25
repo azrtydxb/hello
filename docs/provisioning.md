@@ -67,6 +67,68 @@ every row (MAC, vendor, model, extension, duplicates in the file and in
 Hello) and changes nothing. The import creates every phone in one
 transaction, or none if any row fails. It creates a device per phone.
 
+### Onboarding queue: let the phone announce itself
+
+You do not have to know a phone's MAC first. Point DHCP option 66 at
+`http://prov.hello.kw.watteel.lab/p/boot/`, join a new phone to the network
+and open **Directory → Onboarding**. When an unknown phone asks for its
+configuration, Hello still answers an empty `404` and serves it nothing, but
+records the phone in the queue: MAC, vendor, model and firmware (read from the
+User-Agent and the requested file name), source IP, the path it asked for,
+first and last seen and how often. The page refreshes by itself and the
+sidebar badge counts the waiting phones.
+
+- **Adopt** (operators and administrators) opens a dialog: choose the
+  extension, optionally a label. Hello creates the phone exactly as **Add
+  phone** does (a new device on that extension, sealed secrets, armed for the
+  boot hand-off, vendor redirect registration), prefilled with the reported
+  vendor and model, and removes the candidate. A phone that reported no model
+  needs one typed in. **The phone picks up its configuration on its next
+  retry or after a reboot**; a phone that gave up waiting can be power-cycled.
+  The provisioning URL is not shown: the phone gets it through the hand-off.
+- **Bulk adopt** takes the ticked phones and either gives them consecutive
+  extensions from a starting number (in the order listed; the extensions must
+  exist) or lets you pick one per phone. All are adopted or none.
+- **Dismiss** removes a phone until it asks again. **Ignore this MAC** also
+  puts it on the ignore list (shown under the queue), and Hello stops
+  recording it until you choose **Stop ignoring**.
+
+Through the API (operator or administrator): `GET /api/v1/onboarding/candidates`,
+`POST /api/v1/onboarding/candidates/{mac}/adopt`,
+`POST /api/v1/onboarding/candidates/{mac}/dismiss` (`{"ignore":true}` to
+ignore), `POST /api/v1/onboarding/adopt` (bulk: `items` and an optional
+`startNumber`), `GET /api/v1/onboarding/ignored` and
+`DELETE /api/v1/onboarding/ignored/{mac}`. Every action is in the audit log
+(`adopt`, `adopt-batch`, `dismiss`, `ignore`, `unignore`).
+
+The endpoint is unauthenticated, so the queue is bounded:
+
+- Only well-formed MACs are recorded: 12 hex digits that a device can have (not
+  all-zero, broadcast or a group address).
+- A MAC that is already a phone is never recorded.
+- Each source IP may write at most 30 times a minute (cluster-wide, in Valkey,
+  with the usual in-memory fallback). Writes over the limit are dropped; the
+  response is the same `404`.
+- The queue holds at most 500 phones. When it is full, new MACs are ignored
+  and counted in `hello_onboarding_captures_total{outcome="full"}`; phones
+  already queued keep being refreshed. Dismiss or adopt to make room.
+- A phone unseen for 30 days leaves the queue.
+- Several control pods share one PostgreSQL table, written with a single
+  upsert and a database lock for new rows, so the cap holds across pods.
+
+A phone waiting in the queue does not count as a denial towards blocking its
+source IP, so a few new phones behind one address never get that address (and
+the adopted phones on it) blocked.
+
+Metrics: `hello_onboarding_candidates` (the queue's size) and
+`hello_onboarding_captures_total{outcome}` (`stored`, `known`, `ignored`,
+`full`, `rate_limited`, `error`).
+
+Adopting arms the phone for the trust-on-first-use hand-off (see
+[Trust on first use](#trust-on-first-use)): whoever asks first for the
+phone's per-MAC boot file after you adopt it gets its token, so adopt a phone
+when it is about to boot, and set `HELLO_PROV_BOOT_CIDRS`.
+
 ## DHCP option 66, 160 and 43
 
 Give the phones' network this value; it is the same for every vendor:
@@ -259,6 +321,20 @@ D series. Booted, the phone asks for `snom<model>.htm` and
 `snom<model>-<MAC>.htm`; Hello sets its setting server to the per-device URL
 with `{mac}`, which the phone fills in with its MAC on every re-check.
 
+Web UI: `admin_mode_password` is the keypad PIN only. The web password is
+`http_user` (`admin`) with `http_pass` on the D3xx and D7xx and
+`webserver_admin_password` on the D86x and D89x, all set to the phone's
+admin password. The Hello CA goes out as `<certificates><certificate
+type="base64">` after `</phone-settings>` (device file and boot file), which
+needs firmware 8.7.5.52 or 8.9.3.41 and later.
+
+Star codes and recording: with the PBX's DND and forward feature codes
+defined, the file sets `dnd_on_code`, `dnd_off_code` and the per-identity
+`fwd_all`, `fwd_busy` and `fwd_time` on and off codes, so the phone's DND and
+forward keys dial them. `recording_mechanism` is `SIP`: the Record key sends
+SIP INFO `Record: on` or `Record: off`, which Hello turns into the `*1`
+recording toggle.
+
 ### Fanvil
 
 X series. The model's common file (`F0V0X5U00000.cfg` for the X5U,
@@ -270,6 +346,34 @@ Protocol` `5` for HTTPS, and `Flash Mode` `2` makes it re-check every `Flash
 Interval` hours. A pinned firmware goes in `Auto Image Url`, the file's full
 URL. These key names follow Fanvil's X-series configuration files; they are
 unconfirmed on a phone, so verify them.
+
+Web password, intercom, star codes, recording and BLF: the web account is
+`--MMI Account--` (`Account1 Name`, `Account1 Password`, `Account1 Level`),
+where earlier templates wrote a `--Web User List--` no Fanvil export contains.
+`P1 Enable Intercom`, `Intercom Mute`, `Intercom Tone` and `Intercom Barge`
+accept the PBX's auto-answer calls (the line's own `SIP1 Auto Answer` stays
+off, it would answer every call). With the PBX's DND and forward codes
+defined, `SIP1 SvcCode Mode = 1` and the `DNDOn`, `DNDOff`, `CFUOn`,
+`CFUOff`, `CFBOn`, `CFBOff`, `CFNOn` and `CFNOff` codes make the DND and
+forward keys dial them; `SIP1 Pickup Num` is the directed pickup code.
+`SIP1 Record Start` and `Record Stop` are `Record:on` and `Record:off`, the
+INFO bodies Hello turns into the `*1` toggle. BLF keys are in
+`<DSSKEY CONFIG MODULE>`, in `--Dsskey Config<page>--:` sections.
+
+### BLF keys and model capacity
+
+Hello places each phone's BLF keys on the keys its model has
+(`internal/prov/keycaps.go`) and drops the rest; the capability table is
+there, with its sources. Yealink starts at `linekey.2` (`linekey.1` is the
+account) and goes on into `expansion_module.N.key.M` on the T53, T54, T57
+and T58 (three EXP50 of 60 keys); a BLF line key carries
+`linekey.N.pickup_value` when the PBX has a directed-pickup code. Snom
+starts at fkey `idx` 1 (idx 0 is the account's line key) and goes on into
+expansion module 1 at the model's index from the Service Hub table (18
+keys). Fanvil X4U, X5U and X6U fill their DSS pages (6, 6 and 12 keys,
+five pages). A model not in the table keeps every key, from the vendor's
+first free key, as before; Poly has no table (no limit could be cited) and
+keeps its unlimited attendant list.
 
 ### HD voice codec order
 
@@ -307,8 +411,14 @@ shows otherwise.
   phone), the BLF key numbers, and P64 against P246 for the zone string.
 - Snom `firmware` is the firmware's full URL from firmware 10.1.38; older
   firmware ignores it (`firmware_status`, an XML file naming the URL, is the
-  way there). `admin_mode_password` is the keypad PIN, not the web password.
-- Fanvil `CACertURL`, the web password, the BLF keys and the phonebook keys.
+  way there). `admin_mode_password` is the keypad PIN, not the web password
+  (`http_pass` is). The per-identity `idx="1"` on `fwd_*_code` follows the
+  Service Hub's "Identity" location; its page prints no XML example.
+- Fanvil `CACertURL` (in no Fanvil export or manual; no configuration key for
+  a trusted CA could be found, so none is added) and the phonebook keys.
+  The `Fkey` value format `<number>@1/b` and the `--Dsskey Config<page>--:`
+  section names come from Fanvil exports and a production template, not from
+  a Fanvil document.
 - Time zones on a phone: see [Time zones](#time-zones); the Fanvil keys
   (`Time Zone`, `DST Type` and the rule fields) and the Poly daylight-saving
   keys are unconfirmed on hardware.
@@ -371,7 +481,7 @@ The built-in templates provision the subscription and the voicemail number:
 | Yealink     | `account.1.subscribe_mwi = 1`, `voice_mail.number.1`                  | verify on hardware                       |
 | Poly        | `msg.mwi.1.subscribe`, `msg.mwi.1.callBack`                           | verify on hardware                       |
 | Snom        | `user_mailbox` (`*97` default)                                        | key documented; unverified on hardware   |
-| Fanvil      | `SIP1 MWINum` (`*97` default); no subscribe key written               | unverified on hardware                   |
+| Fanvil      | `SIP1 Subscribe = 1`, `SIP1 Sub Expire`, `SIP1 MWI Num` (`*97` default) | keys from a Fanvil export; unverified on hardware |
 
 Sources. Snom: Service Hub, D-series settings, `user_mailbox` (service.snom.com,
 "Identities - Login Information: Mailbox"): the account name of the mailbox
@@ -379,11 +489,12 @@ tied to the SIP identity, needed when the MWI message does not carry the
 mailbox URI. Snom documents no separate subscribe setting; the phone lights
 its lamp from a subscription or from the unsolicited `NOTIFY` Hello sends to
 contacts without one, and Hello accepts a `message-summary` `SUBSCRIBE` to the
-voicemail code `*97` as the extension's own mailbox. Fanvil: `SIP1 MWINum` is
-the voicemail number key already used by the template. Fanvil's subscribe-MWI
-key could not be found in any public document, so Hello does not guess one;
-Fanvil phones get MWI from the unsolicited `NOTIFY`. Neither vendor has been
-tested on hardware.
+voicemail code `*97` as the extension's own mailbox. Fanvil: the XU series
+manual (Line >> SIP >> Basic Settings) lists "Subscribe For Voice Message",
+"Voice Message Number" and "Voice Message Subscribe Period"; they are
+`SIP1 Subscribe`, `SIP1 MWI Num` and `SIP1 Sub Expire` in a Fanvil
+configuration export (the manual does not print key names). Neither vendor
+has been tested on hardware.
 
 ## Remote resync and reboot (check-sync)
 
@@ -500,8 +611,9 @@ Templates see only these values:
 | `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                              |
 | `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                             |
 | `.Server`   | `Host`, `Port`, `Transport` (`udp`), `Expiry` (seconds)                                                                           |
-| `.BLF`      | a list of `Number`, `Label`, `URI`                                                                                                |
-| `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `ResyncSeconds`                                                                       |
+| `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`        |
+| `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                       |
+| `.Codes`    | the PBX's star codes: `DNDOn`, `DNDOff`, `ForwardOn`, `ForwardOff`, `ForwardBusyOn`/`Off`, `ForwardNoAnswerOn`/`Off`, `PickupDirected` (empty when the PBX has none) |
 | `.Firmware` | `URL` (the file), `Dir` (its directory, no trailing slash), `Version`, `Via` (1 HTTP, 2 HTTPS), or nil when no firmware is pinned |
 | `.Time`     | `Zone`, `NTP`, `TZ` (the zone per vendor, see [Time zones](#time-zones))                                                          |
 
@@ -804,7 +916,7 @@ answer by themselves on the speaker.
   | Yealink     | `features.intercom.allow = 1`, `features.intercom.tone = 1`, `features.intercom.mute = 0`, `features.intercom.barge = 0`                                                                      | Yealink SIP IP Phones Administrator Guide, "Intercom"; the `Alert-Info: Ring Answer` value is still to be confirmed                                                                                                     |
   | Poly        | `voIpProt.SIP.alertInfo.1.value = "Auto Answer"`, class `ringAutoAnswer`                                                                                                                      | Poly UC Software Administrator Guide, `voIpProt.SIP.alertInfo`                                                                                                                                                          |
   | Snom        | `answer_after_policy = idle`: answer an intercom call by itself only on an idle phone; Hello sends `Alert-Info: <http://www.notused.com>;info=alert-autoanswer;delay=0`                       | Snom Service Hub, "Intercom - Paging feature" (the header form) and `answer_after_policy` (off, idle, always, not_busy; D series); the PBX must pass the header unaltered                                               |
-  | Fanvil      | none: enable Intercom/auto answer on the phone                                                                                                                                                | Fanvil's published guides give no provisioning key for it that could be confirmed; Hello sends `Call-Info: answer-after=0` and `Alert-Info: info=Auto Answer`, unverified                                               |
+  | Fanvil      | `P1 Enable Intercom = 1`, `P1 Intercom Mute = 0`, `P1 Intercom Tone = 1`, `P1 Intercom Barge = 0` (the line's own `SIP1 Auto Answer` stays off) | Fanvil XU series manual, Features >> Intercom (Enable Intercom: accept a call with an Alert-Info header and answer it after a delay; Mute, Tone, Barge); key names from a Fanvil configuration export. Hello sends `Call-Info: answer-after=0` and `Alert-Info: info=Auto Answer`, unverified on hardware |
 
   The Grandstream speaker volume for pages has no P-value in these
   templates (only the PTT emergency channel volume, `P22181`); the warning
@@ -933,7 +1045,9 @@ What protects the phones' secrets:
 - Every request is in the fetch log with the token redacted (`/p/****/…`);
   the ingress access log is off. No secret, token or redirect credential is
   ever logged.
-- The boot path never serves a SIP secret or an admin password.
+- The boot path never serves a SIP secret or an admin password, and an
+  unadopted phone is served nothing: its request only adds it to the
+  [onboarding queue](#onboarding-queue-let-the-phone-announce-itself).
 
 What it does not protect against:
 

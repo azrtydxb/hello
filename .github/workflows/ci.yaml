@@ -690,7 +690,7 @@ jobs:
       # pulls base images through Kuvryn Ant's Docker Hub mirror. BuildKit
       # pushes with the credentials of the docker login below.
       - id: builder
-        uses: azrtydxb/.github/actions/setup-builder@d021f2ca9fa3d6682085a7d069b7c8b1dc7b9b80 # main
+        uses: azrtydxb/.github/actions/setup-builder@a6fb8e66bd50b411a1f20b826567ef320aec469b # main
       # Reads the build cache kind-upgrade writes on main (same cache names,
       # same arch); publish itself never writes it.
       - id: ant

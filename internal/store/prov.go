@@ -344,6 +344,10 @@ func (s *Store) createPhone(ctx context.Context, tx *sql.Tx, actor string, in Ph
 	if s.box == nil {
 		return out, errors.New("store: no secret box to seal provisioning secrets")
 	}
+	// A phone created by hand (or imported) leaves the onboarding queue.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM onboarding_candidates WHERE mac = $1`, in.MAC); err != nil {
+		return out, err
+	}
 	var existing int64
 	switch err := tx.QueryRowContext(ctx, `SELECT id FROM phones WHERE mac = $1`, in.MAC).Scan(&existing); {
 	case err == nil:

@@ -346,6 +346,31 @@ func TestRenderInputsFirmwareAndFetches(t *testing.T) {
 	}
 }
 
+// TestRenderInputsFeatureCodes fails if the render data does not carry the
+// PBX's DND and forward star codes (Snom and Fanvil dial them from the
+// phone's keys), or carries a directed-pickup code the PBX does not have.
+func TestRenderInputsFeatureCodes(t *testing.T) {
+	st, _, ext := provStore(t)
+	ctx := context.Background()
+	if err := st.EnsureFeatureCodes(ctx, DefaultFeatureCodes()); err != nil {
+		t.Fatal(err)
+	}
+	c, err := st.CreatePhone(ctx, "test", PhoneInput{MAC: "805ec0000004", Vendor: prov.Yealink, Model: "T54W",
+		ExtensionID: ext, Enabled: true, Realm: "hello.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _, err := st.RenderInputs(ctx, c.Phone.ID)
+	if err != nil && !errors.Is(err, prov.ErrNoTemplate) {
+		t.Fatal(err)
+	}
+	want := prov.FeatureCodes{DNDOn: "*78", DNDOff: "*79", ForwardOn: "*72", ForwardOff: "*73",
+		ForwardBusyOn: "*90", ForwardBusyOff: "*91", ForwardNoAnswerOn: "*92", ForwardNoAnswerOff: "*93"}
+	if d.Codes != want {
+		t.Fatalf("codes = %+v, want %+v", d.Codes, want)
+	}
+}
+
 // TestPhoneFetchStates fails if a phone that never fetched, one that
 // fetched since the stale bound and one whose last fetch is older are not
 // counted in their own state.
