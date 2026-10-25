@@ -657,9 +657,22 @@ jobs:
               context: .,
               file: Dockerfile,
               target: hello-control,
+              cache: control,
             }
-          - { name: hello-sip, context: ., file: Dockerfile, target: hello-sip }
-          - { name: hello-ui, context: web, file: web/Dockerfile, target: "" }
+          - {
+              name: hello-sip,
+              context: .,
+              file: Dockerfile,
+              target: hello-sip,
+              cache: sip,
+            }
+          - {
+              name: hello-ui,
+              context: web,
+              file: web/Dockerfile,
+              target: "",
+              cache: ui,
+            }
           # The official kamailio image is amd64-only; the kw nodes are
           # arm64, so the edge image builds from Debian trixie here (see
           # docker/kamailio/Dockerfile).
@@ -668,24 +681,26 @@ jobs:
               context: docker/kamailio,
               file: docker/kamailio/Dockerfile,
               target: "",
+              cache: kamailio,
             }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # BuildKit runs in its own container and does not inherit the host
-      # trust store, so both Nexus ports need the exemption: :443 is the
-      # read-only group, :5000 the hosted repository that accepts the push.
-      # Base images come through the pull-through cache, not Docker Hub.
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # The runner pod's BuildKit sidecar (linux/arm64, the kw nodes' arch),
+      # not a builder container on the runner's Docker daemon. Its config
+      # pulls base images through Kuvryn Ant's Docker Hub mirror. BuildKit
+      # pushes with the credentials of the docker login below.
+      - id: builder
+        uses: azrtydxb/.github/actions/setup-builder@d021f2ca9fa3d6682085a7d069b7c8b1dc7b9b80 # main
+      # Reads the build cache kind-upgrade writes on main (same cache names,
+      # same arch); publish itself never writes it.
+      - id: ant
+        uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
         with:
-          buildkitd-config-inline: |
-            [registry."192.168.10.131"]
-              insecure = true
-            [registry."192.168.10.131:5000"]
-              insecure = true
-            [registry."docker.io"]
-              mirrors = ["ant.azrty.com"]
-      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
-        with:
+          build-cache: "true"
+          cache-name: ${{ matrix.image.cache }}
+          arch-suffix: arm64
+          cache-write: "false"
+          sccache: "false"
           docker-login: "true"
           required: "true"
           go: "false"
@@ -729,5 +744,8 @@ jobs:
           # images; the other Dockerfiles declare no COMMIT arg.
           build-args: |
             COMMIT=${{ github.sha }}
+          builder: ${{ steps.builder.outputs.name }}
+          platforms: linux/arm64
           push: true
           tags: ${{ steps.content.outputs.tags }}
+          cache-from: ${{ steps.ant.outputs.cache-from }}
