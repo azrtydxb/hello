@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Vendor is a phone brand. The five first-class vendors have built-in
@@ -119,6 +120,10 @@ type Phone struct {
 	// PTTCapable is set for a phone with the PTT and group paging feature
 	// set (SupportsPTT): the Grandstream WP816, WP826 and WP836.
 	PTTCapable bool
+	// CWInverted is set for the Grandstream WP856, whose published template
+	// reads P26063 the other way round (1 = off, 2 = on). Render fills it
+	// from Vendor and Model.
+	CWInverted bool
 }
 
 // Line is the SIP account of the phone's bound device.
@@ -128,10 +133,19 @@ type Line struct {
 	Password    string // the opened device secret; masked in previews
 	DisplayName string // the extension's name
 	Label       string // the extension number
-	Domain      string // HELLO_SIP_DOMAIN
+	// AccountLabel is what the phone shows for the account: "101 (Office)",
+	// or the bare number when the extension has no name. Render fills it
+	// from Label and DisplayName; it never feeds SIP auth or caller ID.
+	AccountLabel string
+	Domain       string // HELLO_SIP_DOMAIN
 	// VoicemailCode is the feature code the message key dials (spec S-5);
 	// empty when no voicemail feature code is configured.
 	VoicemailCode string
+	// CallWaiting is the extension's call-waiting flag (spec S-18): the
+	// templates write the phone's own call-waiting (and tone) setting from
+	// it, so the phone and Hello agree about a second call. False means the
+	// phone must not announce one.
+	CallWaiting bool
 }
 
 // Server is the registrar the phone registers with.
@@ -333,3 +347,28 @@ func RedirectAAD(v Vendor) string { return "redirect:" + string(v) }
 //	Builtins() []Template
 //	    the embedded built-in templates (ID 0, BuiltinRef their name), for
 //	    resolution and for the templates API to list and copy
+
+// AccountLabel is the account name a phone shows on its screen and line
+// keys: the extension number followed by the extension's name in
+// parentheses, or the bare number when the name is empty. Control
+// characters (newlines would start a new key in the line-based vendor
+// formats) become spaces; escaping for XML is the template's job.
+func AccountLabel(number, name string) string {
+	clean := func(s string) string {
+		s = strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return ' '
+			}
+			return r
+		}, s)
+		return strings.Join(strings.Fields(s), " ")
+	}
+	number, name = clean(number), clean(name)
+	if name == "" || name == number {
+		return number
+	}
+	if number == "" {
+		return name
+	}
+	return number + " (" + name + ")"
+}

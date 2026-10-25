@@ -105,7 +105,8 @@ CREATE TABLE time_conditions (
 CREATE UNIQUE INDEX time_conditions_toggle_number ON time_conditions (toggle_number) WHERE toggle_number <> '';
 
 -- Time conditions are destinations of IVR options and exits, ring group
--- failover, inbound routes and feature codes.
+-- failover and inbound routes. The feature-code actions follow in 00027,
+-- which has to come after 00026 (call waiting) re-creates that CHECK.
 ALTER TABLE ivr_menus DROP CONSTRAINT ivr_menus_timeout_kind_check;
 ALTER TABLE ivr_menus ADD CONSTRAINT ivr_menus_timeout_kind_check
   CHECK (timeout_kind IN ('hangup','extension','ring_group','voicemail','announcement','paging','ivr','external','time_condition'));
@@ -120,34 +121,15 @@ ALTER TABLE ring_groups DROP CONSTRAINT ring_groups_failure_kind_check;
 ALTER TABLE ring_groups ADD CONSTRAINT ring_groups_failure_kind_check
   CHECK (failure_kind IN ('none','voicemail','external','announcement','ivr','time_condition'));
 
-ALTER TABLE feature_codes DROP CONSTRAINT feature_codes_action_check;
-ALTER TABLE feature_codes ADD CONSTRAINT feature_codes_action_check
-  CHECK (action IN ('forward_always','forward_busy','forward_no_answer','dnd_on','dnd_off',
-                    'voicemail','blind_transfer','attended_transfer','announcement','page','intercom','ivr',
-                    'time_condition','tc_override'));
-
 ALTER TABLE inbound_routes DROP CONSTRAINT inbound_routes_destination_kind_check;
 ALTER TABLE inbound_routes ADD CONSTRAINT inbound_routes_destination_kind_check
   CHECK (destination_kind IN ('extension','external','sip_uri','internal','ivr','time_condition'));
-
--- Existing installs get the default toggle code; a fresh install (empty
--- table) gets it from the control process's defaults instead, so the
--- "seed only an empty table" rule still holds.
-INSERT INTO feature_codes (code, action, argument)
-SELECT '*28', 'tc_override', 'toggle' WHERE EXISTS (SELECT 1 FROM feature_codes)
-ON CONFLICT (code) DO NOTHING;
 
 -- +goose Down
 DELETE FROM inbound_routes WHERE destination_kind = 'time_condition';
 ALTER TABLE inbound_routes DROP CONSTRAINT inbound_routes_destination_kind_check;
 ALTER TABLE inbound_routes ADD CONSTRAINT inbound_routes_destination_kind_check
   CHECK (destination_kind IN ('extension','external','sip_uri','internal','ivr'));
-
-DELETE FROM feature_codes WHERE action IN ('time_condition', 'tc_override');
-ALTER TABLE feature_codes DROP CONSTRAINT feature_codes_action_check;
-ALTER TABLE feature_codes ADD CONSTRAINT feature_codes_action_check
-  CHECK (action IN ('forward_always','forward_busy','forward_no_answer','dnd_on','dnd_off',
-                    'voicemail','blind_transfer','attended_transfer','announcement','page','intercom','ivr'));
 
 UPDATE ring_groups SET failure_kind = 'none', failure_target = '' WHERE failure_kind = 'time_condition';
 ALTER TABLE ring_groups DROP CONSTRAINT ring_groups_failure_kind_check;

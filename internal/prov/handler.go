@@ -46,6 +46,9 @@ type Options struct {
 	// BookCache keeps rendered directories between requests (spec P-11);
 	// nil renders every request.
 	BookCache BookCache
+	// RenderBudget bounds each config and boot-body render; 0 is the
+	// spec's 100 ms (S-8). Tests that are not about the deadline widen it.
+	RenderBudget time.Duration
 }
 
 type handler struct {
@@ -67,6 +70,9 @@ func NewHandler(s Store, l *Limiter, o Opener, opt Options) http.Handler {
 	}
 	if opt.Audit == nil {
 		opt.Audit = NewAudit(s, opt.Metrics, opt.Log)
+	}
+	if opt.RenderBudget <= 0 {
+		opt.RenderBudget = renderBudget
 	}
 	return &handler{s: s, l: l, o: o, opt: opt}
 }
@@ -314,7 +320,7 @@ func (h *handler) serveDevice(w http.ResponseWriter, r *http.Request, ev *event,
 		return
 	}
 	start := time.Now()
-	body, err := renderBody(ctx, file.Body, data)
+	body, err := renderBody(ctx, file.Body, data, h.opt.RenderBudget)
 	h.opt.Metrics.RenderSeconds.Observe(time.Since(start).Seconds())
 	if err != nil {
 		h.opt.Log.Error("provisioning: render failed", "phone", rec.ID, "template", tmpl.Name, "file", name, "error", err)
@@ -591,7 +597,7 @@ func CACertPEM(path string) string {
 }
 
 func (h *handler) bootBody(ctx context.Context, w http.ResponseWriter, ev *event, res Result, ctype, body string, p Phone, info ProvInfo) {
-	out, err := renderBody(ctx, body, RenderData{Phone: p, Prov: info})
+	out, err := renderBody(ctx, body, RenderData{Phone: p, Prov: info}, h.opt.RenderBudget)
 	if err != nil {
 		h.opt.Log.Error("provisioning: boot body render failed", "vendor", ev.vendor, "error", err)
 		h.empty(w, ev, http.StatusNotFound, ResultRenderError)

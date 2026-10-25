@@ -104,6 +104,16 @@ func TestPagingGroupCRUD(t *testing.T) {
 	}
 	c.must(http.StatusNotFound, "PUT", "/api/v1/paging-groups/987654", put)
 
+	// Renaming onto another group's name or code is a conflict, as on create.
+	other := c.must(http.StatusCreated, "POST", "/api/v1/paging-groups",
+		map[string]any{"name": "garage", "code": "*62", "members": []json.Number{m2}}).json(t)
+	otherID := fmt.Sprint(other["id"])
+	c.must(http.StatusConflict, "PUT", "/api/v1/paging-groups/"+otherID,
+		map[string]any{"name": "kitchen", "code": "*62", "members": []json.Number{m2}})
+	c.must(http.StatusConflict, "PUT", "/api/v1/paging-groups/"+otherID,
+		map[string]any{"name": "garage", "code": "*60", "members": []json.Number{m2}})
+	c.must(http.StatusNoContent, "DELETE", "/api/v1/paging-groups/"+otherID, nil)
+
 	// Deleting an extension removes it from the lists (cascade).
 	c.must(http.StatusNoContent, "DELETE", fmt.Sprintf("/api/v1/extensions/%v", e.ext101["id"]), nil)
 	got := c.must(http.StatusOK, "GET", "/api/v1/paging-groups/"+id, nil).json(t)
@@ -129,6 +139,29 @@ func TestExtensionAllowIntercom(t *testing.T) {
 	if got["allowIntercom"] != false {
 		t.Fatalf("after PATCH allowIntercom = %v", got["allowIntercom"])
 	}
+}
+
+// TestExtensionCallWaiting: call waiting is on by default and changes
+// through PATCH, GET returns it, and the feature-code actions accept the
+// two toggles (spec S-18). It fails if a new extension does not ring while
+// busy by default or the change is not stored.
+func TestExtensionCallWaiting(t *testing.T) {
+	e := newPBXEnv(t, newMemObjects())
+	c := e.login()
+	if e.ext101["callWaiting"] != true {
+		t.Fatalf("new extension callWaiting = %v, want true", e.ext101["callWaiting"])
+	}
+	path := fmt.Sprintf("/api/v1/extensions/%v", e.ext101["id"])
+	got := c.must(http.StatusOK, "PATCH", path, map[string]any{"callWaiting": false}).json(t)
+	if got["callWaiting"] != false {
+		t.Fatalf("after PATCH callWaiting = %v", got["callWaiting"])
+	}
+	if got := c.must(http.StatusOK, "GET", path, nil).json(t); got["callWaiting"] != false {
+		t.Fatalf("GET callWaiting = %v, want false", got["callWaiting"])
+	}
+	c.must(http.StatusOK, "PUT", "/api/v1/feature-codes", map[string]any{"items": []map[string]any{
+		{"code": "*70", "action": "call_waiting_off"}, {"code": "*71", "action": "call_waiting_on"},
+	}})
 }
 
 // fakePageTester answers a test page at once with a canned result.

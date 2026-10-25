@@ -24,10 +24,6 @@ const (
 	renderBudget   = 100 * time.Millisecond
 )
 
-// renderTimeout is the per-render deadline; a variable only so a test can
-// prove the deadline is enforced without a template that is slow.
-var renderTimeout = renderBudget
-
 // ErrNoFile: the template has no file whose pattern names the requested
 // file (the handler answers an empty 404, result not_found).
 var ErrNoFile = errors.New("prov: the template has no such file")
@@ -104,7 +100,7 @@ func urlParts(s string) url.URL {
 func Render(ctx context.Context, t Template, file string, d RenderData) ([]byte, error) {
 	for _, f := range t.Files {
 		if strings.EqualFold(ExpandPattern(f.Pattern, d.Phone), file) {
-			return renderBody(ctx, f.Body, d)
+			return renderBody(ctx, f.Body, d, renderBudget)
 		}
 	}
 	return nil, ErrNoFile
@@ -125,16 +121,22 @@ func ExpandPattern(pattern string, p Phone) string {
 	return strings.NewReplacer("{mac}", p.MAC, "{MAC}", p.MACUpper, "{model}", strings.ReplaceAll(p.Model, " ", "")).Replace(pattern)
 }
 
-func renderBody(ctx context.Context, body string, d RenderData) ([]byte, error) {
+// renderBody renders body within budget (renderBudget in production; the
+// handler and Validate take it as a parameter so tests that assert content,
+// not latency, do not fail when a loaded runner stalls a render past the
+// wall-clock deadline).
+func renderBody(ctx context.Context, body string, d RenderData, budget time.Duration) ([]byte, error) {
 	tmpl, _, err := parseBody(body)
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, renderTimeout)
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	if err := ctx.Err(); err != nil {
 		return nil, errDeadline
 	}
+	d.Line.AccountLabel = AccountLabel(d.Line.Label, d.Line.DisplayName)
+	d.Phone.CWInverted = d.Phone.Vendor == Grandstream && strings.HasPrefix(strings.ToUpper(strings.ReplaceAll(d.Phone.Model, " ", "")), "WP856")
 	w := &cappedWriter{ctx: ctx}
 	if err := tmpl.Execute(w, toData(reflect.ValueOf(d))); err != nil {
 		if w.err != nil {
@@ -412,7 +414,10 @@ func (c *checker) chain(n parse.Node, t reflect.Type, idents []string) (reflect.
 // {model}), every body (parses, uses only documented variables and
 // allowed functions), and a render of every file against a sample phone,
 // with and without optional data, within 100 ms and 256 KiB.
-func Validate(t Template) []FieldError {
+func Validate(t Template) []FieldError { return validate(t, renderBudget) }
+
+// validate is Validate with the sample renders bounded by budget.
+func validate(t Template, budget time.Duration) []FieldError {
 	var errs []FieldError
 	add := func(p string, line int, msg string) {
 		errs = append(errs, FieldError{Path: p, Line: line, Message: msg})
@@ -449,7 +454,7 @@ func Validate(t Template) []FieldError {
 			continue
 		}
 		for _, d := range []RenderData{SampleData(true), SampleData(false)} {
-			if _, err := renderBody(context.Background(), f.Body, d); err != nil {
+			if _, err := renderBody(context.Background(), f.Body, d, budget); err != nil {
 				add(pre+"body", 0, "sample render: "+err.Error())
 				break
 			}
@@ -478,7 +483,7 @@ func checkPattern(p string) string {
 func SampleData(full bool) RenderData {
 	d := RenderData{
 		Phone:  Phone{MAC: "0015651234ab", MACUpper: "0015651234AB", Vendor: Generic, Model: "MODEL", AdminPassword: "sample-admin-password"},
-		Line:   Line{Username: "1001-1234ab", AuthName: "1001-1234ab", Password: "sample-secret", DisplayName: "Sample User", Label: "1001", Domain: "hello.example"},
+		Line:   Line{Username: "1001-1234ab", AuthName: "1001-1234ab", Password: "sample-secret", DisplayName: "Sample User", Label: "1001", Domain: "hello.example", CallWaiting: true},
 		Server: Server{Host: "sip.hello.example", Port: 5060, Transport: "udp", Expiry: 3600},
 		Prov: ProvInfo{URL: "https://prov.hello.example/p/sample/", CAURL: "http://prov.hello.example/p/ca.crt", ResyncSeconds: 86400,
 			CACertPEM: "-----BEGIN CERTIFICATE-----\nU0FNUExF\n-----END CERTIFICATE-----"},

@@ -133,13 +133,29 @@ type Announcement struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 	// Object is the MinIO key; it stays internal.
 	Object string `json:"-"`
+	// SourceText, VoiceID and ModelID are the authored text-to-speech prompt
+	// (empty for an uploaded recording). GeneratedAt is when audio was last
+	// generated from it; TextHash is the hash of the text, voice and model
+	// that audio came from. TextEdited is true when the authored prompt no
+	// longer matches the generated audio. Playback never calls the provider.
+	SourceText  string     `json:"sourceText"`
+	VoiceID     string     `json:"voiceId"`
+	ModelID     string     `json:"modelId"`
+	GeneratedAt *time.Time `json:"generatedAt"`
+	TextHash    string     `json:"-"`
+	Generated   bool       `json:"generated"`
+	TextEdited  bool       `json:"textEdited"`
 }
 
-const announcementCols = `id, name, created_at, updated_at, minio_object`
+const announcementCols = `id, name, created_at, updated_at, minio_object,
+	COALESCE(source_text, ''), COALESCE(voice_id, ''), COALESCE(model_id, ''), generated_at, COALESCE(text_hash, '')`
 
 func scanAnnouncement(r interface{ Scan(...any) error }) (Announcement, error) {
 	var a Announcement
-	err := r.Scan(&a.ID, &a.Name, &a.CreatedAt, &a.UpdatedAt, &a.Object)
+	err := r.Scan(&a.ID, &a.Name, &a.CreatedAt, &a.UpdatedAt, &a.Object,
+		&a.SourceText, &a.VoiceID, &a.ModelID, &a.GeneratedAt, &a.TextHash)
+	a.Generated = a.TextHash != ""
+	a.TextEdited = a.TextHash != "" && PromptHash(a.SourceText, a.VoiceID, a.ModelID) != a.TextHash
 	return a, err
 }
 
@@ -204,11 +220,61 @@ func (s *Store) ReplaceAnnouncement(ctx context.Context, actor string, id int64)
 	var a Announcement
 	err := s.configChange(ctx, actor, "update", "announcement", nil, func(tx *sql.Tx) (int64, error) {
 		var err error
+		// Uploaded audio replaces generated audio: the old generation record
+		// no longer describes what is stored.
 		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
-			UPDATE announcements SET updated_at = now() WHERE id = $1 RETURNING `+announcementCols, id))
+			UPDATE announcements SET updated_at = now(), text_hash = NULL, generated_at = NULL
+			WHERE id = $1 RETURNING `+announcementCols, id))
 		return id, err
 	})
 	return a, err
+}
+
+// SaveAnnouncementPrompt stores the authored text, voice and model of an
+// announcement without generating audio (a draft). It touches no audio, so it
+// is audited but does not bump the configuration revision.
+func (s *Store) SaveAnnouncementPrompt(ctx context.Context, actor string, id int64, text, voice, model string) (Announcement, error) {
+	var a Announcement
+	err := s.provChange(ctx, actor, "update", "announcement", func(tx *sql.Tx) (string, bool, error) {
+		var err error
+		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
+			UPDATE announcements SET source_text = $2, voice_id = $3, model_id = $4
+			WHERE id = $1 RETURNING `+announcementCols, id, text, voice, model))
+		return strconv.FormatInt(id, 10), false, err
+	})
+	return a, mapErr(err)
+}
+
+// CreateGeneratedAnnouncement inserts an announcement whose audio was just
+// generated from the given prompt and stored at object.
+func (s *Store) CreateGeneratedAnnouncement(ctx context.Context, actor, name, object, text, voice, model string, check Check) (Announcement, error) {
+	var a Announcement
+	err := s.configChange(ctx, actor, "generate", "announcement", check, func(tx *sql.Tx) (int64, error) {
+		var err error
+		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
+			INSERT INTO announcements (name, minio_object, source_text, voice_id, model_id, generated_at, text_hash)
+			VALUES ($1, $2, $3, $4, $5, now(), $6) RETURNING `+announcementCols,
+			name, object, text, voice, model, PromptHash(text, voice, model)))
+		return a.ID, err
+	})
+	return a, err
+}
+
+// MarkAnnouncementGenerated records that the audio at the announcement's
+// object was generated from the prompt. Audited as "generate", with a
+// revision bump and NOTIFY so hello-sip reloads the audio.
+func (s *Store) MarkAnnouncementGenerated(ctx context.Context, actor string, id int64, text, voice, model string) (Announcement, error) {
+	var a Announcement
+	err := s.configChange(ctx, actor, "generate", "announcement", nil, func(tx *sql.Tx) (int64, error) {
+		var err error
+		a, err = scanAnnouncement(tx.QueryRowContext(ctx, `
+			UPDATE announcements SET updated_at = now(), source_text = $2, voice_id = $3, model_id = $4,
+			       generated_at = now(), text_hash = $5
+			WHERE id = $1 RETURNING `+announcementCols,
+			id, text, voice, model, PromptHash(text, voice, model)))
+		return id, err
+	})
+	return a, mapErr(err)
 }
 
 // DeleteAnnouncement removes an announcement row and returns its MinIO

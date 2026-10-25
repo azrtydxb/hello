@@ -1132,8 +1132,12 @@ func (c *call) live() livestate.Call {
 	if c.homedCall != nil {
 		ha = livestate.HATakenOver
 	}
+	callee := ""
+	if c.winner != nil {
+		callee = c.winner.binding.Extension
+	}
 	return livestate.Call{
-		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, State: state,
+		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, Callee: callee, State: state,
 		Node: c.s.cfg.NodeID, Media: "direct", StartedAt: c.start, AnsweredAt: answered, HA: ha, Direction: c.direction,
 	}
 }
