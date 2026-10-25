@@ -10,7 +10,8 @@ on:
   pull_request:
   # Three tiers: the unit job goes on every pull request and push; the
   # integration tier — the database-backed suites, the race detector and the
-  # HA soak — runs on the nightly cron, a manual dispatch and v* tags; the
+  # HA soak — runs on the nightly cron, a manual dispatch, v* tags and any
+  # pull request that changes database-touching paths (db-changes); the
   # full tier (kind-upgrade, lab) stays off the pull request path. Publish
   # stays on push to main and v* tags; bench stays dispatch-only.
   schedule:
@@ -37,8 +38,8 @@ env:
 jobs:
   go:
     # Unit tier: hermetic tests only, on the PR and push-to-main path. The
-    # database-backed suites run in the `integration` job (nightly and v*
-    # tags), so this job needs no service containers and stays inside the
+    # database-backed suites run in the `integration` job (nightly, v* tags and
+    # database-touching pull requests), so this job needs no service containers and stays inside the
     # five-minute PR budget. Tests that need a database, Valkey or MinIO skip
     # when their HELLO_TEST_* variable is unset; `integration` sets them and
     # runs the same `go test ./...`.
@@ -90,16 +91,48 @@ jobs:
             /root/.cache/go-build
           key: go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-${{ github.sha }}
 
+  db-changes:
+    # Whether a pull request touches code the database-backed tests cover:
+    # migrations, the store and API, the integration suite, and every package
+    # with a HELLO_TEST_DATABASE_URL test. Only pull requests are filtered;
+    # the other events run the integration job unconditionally.
+    if: github.event_name == 'pull_request'
+    runs-on: arc-azrtydxb
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      db: ${{ steps.filter.outputs.db }}
+    steps:
+      - id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            db:
+              - 'migrations/**'
+              - 'internal/store/**'
+              - 'internal/api/**'
+              - 'internal/ai/**'
+              - 'internal/cdr/**'
+              - 'internal/snapshot/**'
+              - 'test/integration/**'
+              - 'go.mod'
+              - '.github/workflows/ci.yaml'
+
   integration:
     # Integration tier: the database-backed suites (PostgreSQL, Valkey, MinIO)
-    # plus the race detector and the HA soak. Off the PR and push-to-main
-    # path — the nightly cron, a manual dispatch, and v* tags (the full tier)
-    # run it. The unit job skips these tests, so this job is what actually
-    # proves the database code works.
+    # plus the race detector and the HA soak. Runs on the nightly cron, a
+    # manual dispatch, v* tags (the full tier) and any pull request that
+    # changes database-touching paths (see db-changes). The unit job skips
+    # these tests, so this job is what actually proves the database code works.
+    needs: db-changes
     if: >-
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.ref, 'refs/tags/v')
+      !cancelled() && (
+        github.event_name == 'schedule' ||
+        github.event_name == 'workflow_dispatch' ||
+        startsWith(github.ref, 'refs/tags/v') ||
+        (github.event_name == 'pull_request' && needs.db-changes.outputs.db == 'true'))
     runs-on: arc-azrtydxb
     timeout-minutes: 40
     container:
