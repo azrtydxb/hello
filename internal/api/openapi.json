@@ -3459,7 +3459,7 @@
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
-        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer.",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -9295,27 +9295,46 @@
         "required": ["id", "extension", "result", "contacts", "node"],
         "description": "The outcome of a paging-group test page.",
         "properties": {
-          "id": {"type": "string"},
-          "extension": {"type": "string", "description": "The member that was paged"},
+          "id": { "type": "string" },
+          "extension": {
+            "type": "string",
+            "description": "The member that was paged"
+          },
           "result": {
             "type": "string",
-            "enum": ["answered", "busy", "dnd", "no_answer", "no_registration", "failed"],
+            "enum": [
+              "answered",
+              "busy",
+              "dnd",
+              "no_answer",
+              "no_registration",
+              "failed"
+            ],
             "description": "Overall result; answered when any contact answered and heard the tone"
           },
-          "detail": {"type": "string", "description": "Why the test failed, when it did"},
-          "node": {"type": "string", "description": "The hello-sip node that ran the test"},
+          "detail": {
+            "type": "string",
+            "description": "Why the test failed, when it did"
+          },
+          "node": {
+            "type": "string",
+            "description": "The hello-sip node that ran the test"
+          },
           "contacts": {
             "type": "array",
             "items": {
               "type": "object",
               "required": ["device", "userAgent", "result", "headers"],
               "properties": {
-                "device": {"type": "string"},
-                "userAgent": {"type": "string"},
-                "result": {"type": "string", "enum": ["answered", "busy", "no_answer", "failed"]},
+                "device": { "type": "string" },
+                "userAgent": { "type": "string" },
+                "result": {
+                  "type": "string",
+                  "enum": ["answered", "busy", "no_answer", "failed"]
+                },
                 "headers": {
                   "type": "array",
-                  "items": {"type": "string"},
+                  "items": { "type": "string" },
                   "description": "The auto-answer headers the INVITE carried, as Name: value"
                 }
               }
@@ -9507,7 +9526,8 @@
                     "voicemail",
                     "blind_transfer",
                     "attended_transfer",
-                    "announcement"
+                    "announcement",
+                    "intercom"
                   ]
                 },
                 "argument": {
@@ -11692,9 +11712,21 @@
                   "type": "object",
                   "required": ["extension", "device", "result"],
                   "properties": {
-                    "extension": {"type": "string"},
-                    "device": {"type": "string", "description": "The member contact's device; empty when the member was never rung"},
-                    "result": {"type": "string", "enum": ["answered", "busy", "dnd", "no_answer", "no_registration"]}
+                    "extension": { "type": "string" },
+                    "device": {
+                      "type": "string",
+                      "description": "The member contact's device; empty when the member was never rung"
+                    },
+                    "result": {
+                      "type": "string",
+                      "enum": [
+                        "answered",
+                        "busy",
+                        "dnd",
+                        "no_answer",
+                        "no_registration"
+                      ]
+                    }
                   }
                 }
               }
