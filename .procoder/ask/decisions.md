@@ -380,3 +380,7 @@ Decision: accepted by the user (2026-10-25), all of the above.
 - Keep everything paused
 
 Decision: accepted "Merge PR #114 and start phase 1".
+
+## Phase E ahead of B-D (2026-10-25)
+
+Decision: User approved moving phase E (server paging/intercom) ahead of B–D.

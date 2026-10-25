@@ -68,6 +68,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         phase: 4,
         icon: "users-round",
       },
+      { label: "Paging", path: "/paging", phase: 5, icon: "megaphone" },
     ],
   },
   {
