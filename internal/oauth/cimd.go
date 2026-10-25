@@ -12,8 +12,9 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/azrtydxb/hello/internal/safehttp"
 )
 
 // Client ID metadata document limits (spec S-8).
@@ -25,7 +26,7 @@ const (
 
 // errPrivateAddress is a dial refused because the address is private,
 // loopback or link-local.
-var errPrivateAddress = errors.New("address is private, loopback or link-local")
+var errPrivateAddress = safehttp.ErrBlockedAddress
 
 // cimdFetcher fetches client ID metadata documents with the SSRF guards of
 // spec S-8.
@@ -47,37 +48,18 @@ func newCIMDFetcher(c *http.Client, allowPrivate bool, m *Metrics) *cimdFetcher 
 }
 
 // guardedTransport refuses, at dial time (after resolution, so DNS
-// rebinding cannot slip through), any address that is not public unicast.
+// rebinding cannot slip through), any address that is not public unicast;
+// allowPrivate (HELLO_OAUTH_CIMD_ALLOW_PRIVATE, a lab switch) admits private
+// and loopback addresses too, as it always has.
 func guardedTransport(allowPrivate bool) *http.Transport {
-	d := &net.Dialer{Timeout: cimdTimeout, Control: func(_, address string, _ syscall.RawConn) error {
-		if allowPrivate {
-			return nil
-		}
-		ap, err := netip.ParseAddrPort(address)
-		if err != nil {
-			return err
-		}
-		if !publicAddr(ap.Addr()) {
-			return errPrivateAddress
-		}
-		return nil
-	}}
-	return &http.Transport{
-		DialContext:           d.DialContext,
-		TLSHandshakeTimeout:   cimdTimeout,
-		ResponseHeaderTimeout: cimdTimeout,
-		MaxIdleConns:          4,
-		IdleConnTimeout:       time.Minute,
-		Proxy:                 nil,
+	o := safehttp.Options{Timeout: cimdTimeout}
+	if allowPrivate {
+		o.DialContext = (&net.Dialer{Timeout: cimdTimeout}).DialContext
 	}
+	return safehttp.NewTransport(o)
 }
 
-func publicAddr(a netip.Addr) bool {
-	a = a.Unmap()
-	return a.IsValid() && a.IsGlobalUnicast() && !a.IsPrivate() && !a.IsLoopback() &&
-		!a.IsLinkLocalUnicast() && !a.IsUnspecified() &&
-		!netip.MustParsePrefix("100.64.0.0/10").Contains(a) // carrier-grade NAT
-}
+func publicAddr(a netip.Addr) bool { return safehttp.Public(a) }
 
 // isCIMDClientID reports whether id is a client ID metadata document URL:
 // https with a host and a path other than "/".

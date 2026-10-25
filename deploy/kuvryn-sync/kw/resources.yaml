@@ -1077,7 +1077,7 @@ spec:
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-8ac01c25d6fed0f581fb1c07b36fa7dbc0fef707
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-a45a18d6d692d88d49ee5aefef8033db6aa18309
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1296,7 +1296,7 @@ spec:
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-8ac01c25d6fed0f581fb1c07b36fa7dbc0fef707
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-a45a18d6d692d88d49ee5aefef8033db6aa18309
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1488,7 +1488,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-8ac01c25d6fed0f581fb1c07b36fa7dbc0fef707
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-a45a18d6d692d88d49ee5aefef8033db6aa18309
           command:
             - sh
             - -c
@@ -1535,7 +1535,7 @@ spec:
               value: "false"
       containers:
         - name: hello-control
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-8ac01c25d6fed0f581fb1c07b36fa7dbc0fef707
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-a45a18d6d692d88d49ee5aefef8033db6aa18309
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1827,7 +1827,7 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-ui:sha-8ac01c25d6fed0f581fb1c07b36fa7dbc0fef707
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-ui:sha-a45a18d6d692d88d49ee5aefef8033db6aa18309
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.

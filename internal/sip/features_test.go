@@ -1165,3 +1165,52 @@ func TestVoicemailStorageRetry(t *testing.T) {
 		return len(vm.snapshotMsgs()) == 1
 	})
 }
+
+// TestVoicemailOfExtension fails if *97 plus an extension (a transfer to
+// voicemail, CALL-55) does not take a message into that extension's box, or
+// if an extension without a box is not refused with 404.
+func TestVoicemailOfExtension(t *testing.T) {
+	vm := newVMStore()
+	vm.boxes["200"] = VoicemailBox{ID: 5, Extension: "200"}
+	objs := &fakeObjects{}
+	feats := func(s *snapshot.Snapshot) {
+		featureSnapshot(s)
+		s.WithExtensionData([]snapshot.Extension{{Number: "200", VoicemailEnabled: true, VoicemailBoxID: 5}, {Number: "100"}})
+	}
+	pbx := startPBX(t, callerDevices(), withFeatures(feats), withVoicemail(vm, objs))
+	anchored(pbx)
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+
+	r := waitCall(t, dial(t.Context(), a, "*97999"))
+	if code := responseCode(r.err); code != 404 {
+		t.Fatalf("*97 of an unknown extension = %v, want 404", r.err)
+	}
+	pbx.nextCDR(t)
+	r = waitCall(t, dial(t.Context(), a, "*97100"))
+	if code := responseCode(r.err); code != 404 {
+		t.Fatalf("*97 of an extension without a box = %v, want 404", r.err)
+	}
+	pbx.nextCDR(t)
+
+	r = waitCall(t, dial(t.Context(), a, "*97200"))
+	if r.err != nil {
+		t.Fatalf("*97200: %v", r.err)
+	}
+	if answer := string(r.dcs.InviteResponse.Body()); !strings.Contains(answer, "m=audio") {
+		t.Fatalf("answer is not the anchor's: %q", answer)
+	}
+	feed := startRTPFeed(t, r.dcs.InviteResponse.Body())
+	feed.silence(2.5)
+	feed.digit('#')
+	deadline := time.Now().Add(5 * time.Second)
+	for len(vm.snapshotMsgs()) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("message was not stored")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if msg := vm.snapshotMsgs()[0]; msg.BoxID != 5 {
+		t.Fatalf("message row = %+v, want box 5", msg)
+	}
+}

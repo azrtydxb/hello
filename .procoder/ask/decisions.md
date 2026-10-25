@@ -406,6 +406,7 @@ Decision: accepted "Wait: deploy only after the hitless-upgrade fixes are merged
 The operator writes prompt text in the GUI and generates the audio once with ElevenLabs. It is stored and replayed with no live TTS during calls.
 
 Where the ElevenLabs API key lives:
+
 - SOPS secret, like the AI key (recommended)
 - Encrypted in the DB and set in the GUI
 - Both, with the GUI value winning
@@ -413,6 +414,7 @@ Where the ElevenLabs API key lives:
 Decision: accepted "Encrypted in the DB and set in the GUI". It is sealed with HELLO_SECRET_KEY.
 
 The IVR part, since Hello has no IVR yet:
+
 - Build an IVR/auto-attendant too (recommended)
 - Prompts only for now
 
@@ -446,3 +448,62 @@ Decision: accepted by the user (2026-10-25), all of the above. Migration numbers
 ## 2026-10-25: Clients and video (browser softphone, mobile apps, video, Teams)
 
 The user decided to add four things: a WebRTC softphone in the web UI, iOS and Android apps with push for incoming calls, video calls, and Microsoft Teams integration. This reverses the WebRTC non-goal in `hello-pbx-spec.md` §3. Spec: `.procoder/specs/clients-webrtc-mobile-video.md` (draft; its five open questions are for the user). Hard ordering from the user: TLS and SRTP (`phone-feature-parity.md` S-13 to S-16) come before any WebRTC phase.
+
+## 2026-10-25: Clients and video, answers to the open questions
+
+Spec: `.procoder/specs/clients-webrtc-mobile-video.md`, now approved. The user answered questions 1, 2, 4 and 5; question 3 was not put to the user and the recommendation was taken.
+
+1. **Reach: LAN and VPN first.** Internet reach is decided later, once the clients work; Phase 12 stays as an optional later step. Rationale: LAN and VPN cover the lab and most of the value, and Internet reach needs networking decisions (public name and certificate, router forwards, exposed TURN, a hardening review) that are better taken against working clients.
+2. **Mobile: web softphone only for now.** The native apps, the push gateway and mobile video (sections F and G, Phases 7, 8 and 9) are not now, by user decision, until the user asks. The design stays in the spec, and nothing built before then may make them harder to add (`Platform` interface, `devices.kind = mobile`). Rationale: the browser softphone gives calling on any desk without paid developer accounts, push credentials or store builds.
+3. **Media path: Go-native Pion modules in the anchor, not rtpengine** (recommendation taken, not asked). Rationale: one media path, one HA model (the in-call takeover keeps working), `CGO_ENABLED=0` kept.
+4. **Teams: documentation and the SBC-peer trunk profile only.** Nothing is built or bought until a tenant and a real need exist; no certification attempt. Rationale: Direct Routing needs a certified SBC or a DRaaS provider and a Teams Phone tenant, none of which exist.
+5. **Video: web video relayed without transcoding (H.264 Constrained Baseline, VP8), and video is recorded.** The recording design is S-42 and the new Phase 6b:
+   - **Containers:** fragmented MP4 for H.264 and WebM for VP8, depacketized without decoding. Audio stays the existing WAV, because muxing G.711/G.722 into MP4/WebM would need transcoding.
+   - **Object store:** fragments are streamed to MinIO every 10 s or 4 MiB with a manifest, and a hello-control finalizer joins them with a seek index. Video cannot be held in memory like the 10 MB audio buffer.
+   - **Retention and quota:** a separate video retention (default 30 days) and a quota (`HELLO_RECORDING_VIDEO_QUOTA_GB`, alert at 80 percent, no new video recordings at 100 percent while audio continues).
+   - **Playback:** a UI player that slaves the video to the WAV clock using the manifest offsets.
+   - **Size:** up to about 1.35 GB per hour for a two-way call at 1500 kbit/s, against about 58 MB for an hour of 8 kHz audio.
+   - **HA:** the recording state is in the replicated dialog record; on takeover new parts start at the next keyframe; a crash loses at most one unflushed fragment per stream plus the gap, and a drain flushes first.
+
+   Desk-phone and door video waits for hardware; conference video comes after conference rooms. Rationale: the user wants video calls kept like audio calls. Streaming segments is the only way to bound memory, and a separate retention and quota keep video from crowding out audio recordings.
+
+Not done here (outside this change, left for the user to request): the Phase 0 amendments to `hello-pbx-spec.md` §3/§5 and the `phone-feature-parity.md` dependency limit.
+
+Decision: accepted by the user (2026-10-25).
+
+## 2026-10-25: Messaging channels, answers to the open questions
+
+Spec: `.procoder/specs/messaging-channels.md`, now approved. The user answered questions 1, 2, 3 and 5; question 4 was not put to the user and the recommendation was taken.
+
+1. **Providers: Twilio first, then Telnyx; Bandwidth and Vonage later.** Before go-live the customer starts 10DLC (and, if wanted, toll-free) registration in their own provider account. Rationale: both have documented, testable APIs; registration approval takes time and is the customer's account, so Hello only reports its state.
+2. **Public access: not now; build LAN-only.** The separate public listener (`/hooks`, `/chat`, `/m`) is out of scope until the user decides. Consequence, stated in the spec:
+   - **No inbound SMS/MMS by webhook:** a provider number cannot receive texts.
+   - **No status callbacks:** status is read by polling the provider's message resource instead.
+   - **No WhatsApp:** the Cloud API is webhook-only.
+   - **No public chat widget:** a LAN chat widget for intranet pages is built instead.
+   - **No outbound MMS:** providers fetch media from a public link.
+
+   The phases are reordered so LAN-testable work comes first: inbox core, outbound sending on Twilio, SIP MESSAGE desk-phone texting plus the SIP trunk channel (the one LAN inbound path), the LAN chat widget, then routing, Telnyx, AI and integrations.
+
+   Polling was checked in the provider docs: Twilio's message list (`GET .../Messages.json`, filters `To`/`From`/`DateSent`, inbound records with body) is **[verified]**. Telnyx lists inbound messages through `GET /v2/detail_records` (`record_type=messaging`, `direction=inbound`) without text **[verified]**; each body needs `GET /v2/messages/{id}`, which only works within 10 days, and that it returns inbound bodies is **[unverified]**. WhatsApp has no list endpoint that was found **[unverified]**. Polling is noted as N3, not scheduled. Rationale: the UI is LAN-only on kw today and no Internet-facing surface should exist until the user chooses one.
+
+3. **Outbound first contact: off by default.** When an admin turns it on, each message needs an attested consent and is rate limited. Never bulk. Rationale: carrier rules and consent law, and toll-fraud exposure.
+4. **Storage: plaintext in PostgreSQL with full-text search** (recommendation taken, not asked). It relies on volume encryption, has audited supervisor views and keeps messages 365 days (SMS) and 90 days (chat, media). Rationale: sealing bodies would remove inbox search; credentials stay sealed regardless.
+5. **AI: suggest-only triage and drafts first.** Auto-reply is off by default and enabled per number. It answers only from admin FAQ snippets, sends at most 3 replies per conversation, discloses itself and goes through the private-endpoint guard. Rationale: customer-visible AI output needs grounding, a cap and a human handoff before it can be trusted.
+
+Decision: accepted by the user (2026-10-25).
+
+## Phone onboarding queue (2026-10-25)
+
+Spec: `.procoder/specs/phone-onboarding.md`. The user wants to join a brand-new phone to the network (DHCP option 66 at `http://prov.hello.kw.watteel.lab/p/boot/`) and have it show up in a queue that phones are created from, instead of knowing its MAC first.
+
+Decision (the user's brief, 2026-10-25): an unknown MAC's config request keeps its empty 404 and is upserted into a PostgreSQL table `onboarding_candidates` (migration `00028_onboarding.sql`, with `onboarding_ignored`). Nothing is served to an unadopted phone. The brief fixed the capture, the kinds of limits, the API, the UI and the metric; these choices were made while building it and were not asked separately:
+
+- **PostgreSQL only, no in-memory state**, so two control pods agree: a seen phone is refreshed by one `UPDATE`; a new MAC is inserted under an advisory lock that makes the 500-row cap exact across pods. Timestamps are the database's.
+- **Abuse limits:** a per-source-IP limit of 30 candidate writes a minute through the existing provisioning limiter (Valkey, memory fallback, never fail open); the 500-row cap (new MACs ignored and counted in `hello_onboarding_captures_total{outcome="full"}`, existing rows still refresh); 30-day expiry (listed and counted as gone at once, deleted by a per-minute idempotent prune on every pod); only MACs a device can have (12 lowercase hex, not all-zero, broadcast or group); a MAC that is already a phone is never written.
+- **Capture points:** the per-MAC boot file of any vendor (the DHCP option 66 flow), and a common boot file when the User-Agent carries the MAC (Yealink, Grandstream, Fanvil). The vendor, model and firmware come from the User-Agent, falling back to the file name's vendor.
+- **A queued phone is not a denial.** The unknown-MAC 404 used to count towards blocking the source IP (10 in 10 minutes). A phone waiting for adoption retries by design and shares an address with adopted phones, so a captured request answers the same empty 404 without that count. Rate-limited, malformed or unconfigured requests are still denials.
+- **Adopt is manual phone creation:** `AdoptCandidates` calls the same `createPhone` as `POST /phones` in one transaction (device on the extension, sealed secrets, boot arming, redirect registration), so behaviour and validation match; it deletes the candidate and audits `adopt`/`adopt-batch` plus `create phone`. Bulk adopt is all or none. A phone created by hand or by CSV import also leaves the queue. The extension can be named by id, number or user (the user's linked extension). The adopt answer carries no provisioning URL: the armed phone gets it through the boot hand-off.
+- **Roles:** operator and admin (the write scope, which is the operator-level scope), for the reads too; viewers see neither the page nor the queue. Dismiss can add the MAC to an ignore list, which is listed and reversible.
+
+The user can change any of them; none is hard to undo.

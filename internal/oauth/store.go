@@ -31,6 +31,8 @@ const (
 	ClientCIMD    = "cimd"
 	ClientDCR     = "dcr"
 	ClientService = "service"
+	// ClientPreregistered is one of Hello's own apps (spec integrations I-32).
+	ClientPreregistered = "preregistered"
 )
 
 // Client is a registered or fetched OAuth client, or a service account.
@@ -54,6 +56,9 @@ type Client struct {
 	Enabled     bool
 	CreatedBy   *int64
 	Secrets     []Secret
+	// ExtensionScope is the extension numbers the account may act for; nil
+	// is every extension (spec integrations I-33).
+	ExtensionScope []string
 }
 
 // Secret is a service-account client secret's metadata; only its hash is
@@ -121,6 +126,10 @@ type ServiceAccountChange struct {
 	Role        *auth.Role
 	Scopes      *auth.Scopes
 	Enabled     *bool
+	// SetExtensionScope says ExtensionScope is to be stored; a nil
+	// ExtensionScope then clears the limit.
+	SetExtensionScope bool
+	ExtensionScope    []string
 }
 
 // Store is the authorization server's persistence, implemented by

@@ -243,3 +243,75 @@ func TestServiceAccountStore(t *testing.T) {
 		t.Fatalf("deleted account = %v", err)
 	}
 }
+
+// TestServiceAccountExtensionScope fails if a service account's extension
+// limit is not stored (nil, empty and a list are three different things),
+// is not carried on the actor of its access token, is not changed or cleared
+// by an update, or an update that changes it leaves the live token working.
+func TestServiceAccountExtensionScope(t *testing.T) {
+	s := scratchStore(t)
+	ctx := context.Background()
+	create := func(id, name string, scope []string) oauth.Client {
+		t.Helper()
+		c, err := s.CreateServiceAccount(ctx, "user:alice", oauth.Client{ID: id, Kind: oauth.ClientService, Name: name,
+			Role: auth.RoleOperator, Scopes: auth.Scopes{auth.ScopeRead, auth.ScopeCalls}, Enabled: true, ExtensionScope: scope})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	all := create("hello_sa_all", "all", nil)
+	none := create("hello_sa_none", "none", []string{})
+	some := create("hello_sa_some", "some", []string{"101", "0102"})
+	if all.ExtensionScope != nil {
+		t.Errorf("unrestricted account has scope %v", all.ExtensionScope)
+	}
+	if none.ExtensionScope == nil || len(none.ExtensionScope) != 0 {
+		t.Errorf("empty scope read back as %#v", none.ExtensionScope)
+	}
+	if len(some.ExtensionScope) != 2 || some.ExtensionScope[0] != "101" || some.ExtensionScope[1] != "0102" {
+		t.Errorf("scope read back as %v", some.ExtensionScope)
+	}
+
+	token := func(c oauth.Client) string {
+		t.Helper()
+		secret, h := auth.NewPrefixed(auth.PrefixClientSecret)
+		if _, err := s.AddClientSecret(ctx, "user:alice", c.ID, h, nil); err != nil {
+			t.Fatal(err)
+		}
+		at, ah := auth.NewPrefixed(auth.PrefixAccess)
+		if err := s.ClientCredentials(ctx, c.ID, auth.HashToken(secret), func(cl oauth.Client) (oauth.Token, error) {
+			return oauth.Token{Hash: ah, Kind: oauth.TokenAccess, ClientID: cl.ID, Scopes: cl.Scopes,
+				Resources: []string{"https://h/api/v1"}, ExpiresAt: time.Now().Add(time.Hour)}, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	atSome, atAll := token(some), token(all)
+	a, err := s.TokenActor(ctx, auth.HashToken(atSome))
+	if err != nil || len(a.ExtensionScope) != 2 || a.ExtensionScope[1] != "0102" || !a.Scopes.Has(auth.ScopeCalls) {
+		t.Fatalf("limited actor = %+v, %v", a, err)
+	}
+	if a, err = s.TokenActor(ctx, auth.HashToken(atAll)); err != nil || a.ExtensionScope != nil {
+		t.Fatalf("unrestricted actor = %+v, %v", a, err)
+	}
+
+	// Narrowing the limit stops the live token; clearing it lifts the limit.
+	if _, err := s.UpdateServiceAccount(ctx, "user:alice", some.ID, oauth.ServiceAccountChange{
+		SetExtensionScope: true, ExtensionScope: []string{"101"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TokenActor(ctx, auth.HashToken(atSome)); !errors.Is(err, auth.ErrNoCredentials) {
+		t.Fatalf("token survived a change of its extension limit: %v", err)
+	}
+	got, err := s.UpdateServiceAccount(ctx, "user:alice", some.ID, oauth.ServiceAccountChange{SetExtensionScope: true})
+	if err != nil || got.ExtensionScope != nil {
+		t.Fatalf("cleared scope = %v, %v", got.ExtensionScope, err)
+	}
+	desc := "renamed"
+	got, err = s.UpdateServiceAccount(ctx, "user:alice", none.ID, oauth.ServiceAccountChange{Description: &desc})
+	if err != nil || got.ExtensionScope == nil {
+		t.Fatalf("an update that does not mention the scope changed it: %v, %v", got.ExtensionScope, err)
+	}
+}

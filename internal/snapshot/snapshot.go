@@ -150,7 +150,7 @@ type Snapshot struct {
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
 	anns   map[string]string
-	// ivrByName and ivrByNumber are the IVR menus (migration 00018).
+	// ivrByName and ivrByNumber are the IVR menus (migration 00029).
 	ivrByName, ivrByNumber map[string]IVRMenu
 	// queueByName and queueByNumber are the call queues (migration 00023).
 	queueByName, queueByNumber map[string]Queue

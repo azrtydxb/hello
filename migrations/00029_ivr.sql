@@ -2,8 +2,7 @@
 -- IVR / auto-attendant. A menu plays a greeting (an announcement), collects
 -- DTMF digits and routes the call to the destination of the chosen option.
 -- Prompts are announcements (migration 00005), so any uploaded or generated
--- announcement works. Additive, so a rolling upgrade works. The "ivr"
--- feature-code action is added by 00029, after 00026 rewrites that constraint.
+-- announcement works. Additive, so a rolling upgrade works.
 
 CREATE TABLE ivr_menus (
     id                  BIGSERIAL   PRIMARY KEY,
@@ -53,6 +52,12 @@ ALTER TABLE ring_groups DROP CONSTRAINT ring_groups_failure_kind_check;
 ALTER TABLE ring_groups ADD CONSTRAINT ring_groups_failure_kind_check
   CHECK (failure_kind IN ('none','voicemail','external','announcement','ivr'));
 
+ALTER TABLE feature_codes DROP CONSTRAINT feature_codes_action_check;
+ALTER TABLE feature_codes ADD CONSTRAINT feature_codes_action_check
+  CHECK (action IN ('forward_always','forward_busy','forward_no_answer','dnd_on','dnd_off',
+                    'voicemail','blind_transfer','attended_transfer','announcement','page','intercom',
+                    'call_waiting_on','call_waiting_off','ivr'));
+
 ALTER TABLE inbound_routes DROP CONSTRAINT inbound_routes_destination_kind_check;
 ALTER TABLE inbound_routes ADD CONSTRAINT inbound_routes_destination_kind_check
   CHECK (destination_kind IN ('extension','external','sip_uri','internal','ivr'));
@@ -62,6 +67,13 @@ DELETE FROM inbound_routes WHERE destination_kind = 'ivr';
 ALTER TABLE inbound_routes DROP CONSTRAINT inbound_routes_destination_kind_check;
 ALTER TABLE inbound_routes ADD CONSTRAINT inbound_routes_destination_kind_check
   CHECK (destination_kind IN ('extension','external','sip_uri','internal'));
+
+DELETE FROM feature_codes WHERE action = 'ivr';
+ALTER TABLE feature_codes DROP CONSTRAINT feature_codes_action_check;
+ALTER TABLE feature_codes ADD CONSTRAINT feature_codes_action_check
+  CHECK (action IN ('forward_always','forward_busy','forward_no_answer','dnd_on','dnd_off',
+                    'voicemail','blind_transfer','attended_transfer','announcement','page','intercom',
+                    'call_waiting_on','call_waiting_off'));
 
 UPDATE ring_groups SET failure_kind = 'none', failure_target = '' WHERE failure_kind = 'ivr';
 ALTER TABLE ring_groups DROP CONSTRAINT ring_groups_failure_kind_check;

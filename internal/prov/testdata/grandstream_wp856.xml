@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Kuvryn Hello: WP856 0015651234ab. Hello CA certificate: http://prov.hello.example/p/ca.crt -->
+<gs_provision version="1">
+  <mac>0015651234ab</mac>
+  <config version="1">
+    <P271>1</P271>
+    <P270>1001 (Sample User)</P270>
+    <P47>sip.hello.example:5060</P47>
+    <P35>1001-1234ab</P35>
+    <P36>1001-1234ab</P36>
+    <P34>sample-secret</P34>
+    <P3>Sample User</P3>
+    <P130>0</P130>
+    <P57>9</P57>
+    <P58>123</P58>
+    <P59>0</P59>
+    <P60>8</P60>
+    <P61>8</P61>
+    <P62>8</P62>
+    <P32>60</P32>
+    <P99>1</P99>
+    <P33>*97</P33>
+    <P26063>2</P26063>
+    <P25675>112,911</P25675>
+    <P60069>*85</P60069>
+    <P2336>*86</P2336>
+    <!-- Paging and intercom (Kuvryn Hello phonebooks-ptt spec P-12, P-13): answer by itself, on
+         the speaker after a short beep, when Hello sends Call-Info answer-after=0. The WP8xx
+         Administration Guide names this setting "Account > Call Settings > Allow Auto Answer by
+         Call-Info/Alert-Info" (https://documentation.grandstream.com/knowledge-base/wp8xx-administration-guide/)
+         and the 1.0.11.75 release notes list a warning tone upon auto answer, but Grandstream no
+         longer publishes a WP8xx config template and neither document gives the P-value: P298 is
+         the GXP/GRP template's value for it and is still to be confirmed on a WP822 (verify). The
+         plain "Auto Answer" option (P90) is deliberately not set: it would answer every call.
+         The WP856 template has no P298: its P90 = 2 is "Enable Intercom/Paging" (CALL-24). -->
+    <P90>2</P90>
+    <P26072>1</P26072>
+    <P26071>0</P26071>
+    <P22208>1</P22208>
+    <P1568>0</P1568>
+    <P1569>239.255.0.1:5004</P1569>
+    <P1570>Warehouse</P1570>
+    <P1571>239.255.0.2:5006</P1571>
+    <P1572>Office</P1572>
+    <P1573></P1573>
+    <P1574></P1574>
+    <P1575></P1575>
+    <P1576></P1576>
+    <P1577></P1577>
+    <P1578></P1578>
+    <P1579></P1579>
+    <P1580></P1580>
+    <P1581></P1581>
+    <P1582></P1582>
+    <P1583></P1583>
+    <P1584></P1584>
+    <P1585></P1585>
+    <P1586></P1586>
+    <P1587></P1587>
+    <P1588></P1588>
+    <P2>sample-admin-password</P2>
+    <P212>2</P212>
+    <P237>prov.hello.example/p/sample</P237>
+    <P145>0</P145>
+    <P22296>1</P22296>
+    <P193>1440</P193>
+    <P95030>0</P95030>
+    <P4428>0</P4428>
+    <P330>3</P330>
+    <P331>prov.hello.example/p/sample/pb/0.xml</P331>
+    <P332>30</P332>
+    <P30>pool.ntp.org</P30>
+    <P64>UTC0</P64>
+    <P246>UTC0</P246>
+    <P6767>2</P6767>
+    <P192>prov.hello.example/p/sample/fw</P192>
+    <P232></P232>
+    <P233></P233>
+    <P238>0</P238>
+  </config>
+</gs_provision>

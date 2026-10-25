@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
@@ -51,6 +52,9 @@ var scopeDescriptions = []struct {
 	{auth.ScopeWrite, "Change configuration: extensions, devices, voicemail, recordings, announcements, ring groups, feature codes, trunks, routes, phones, templates and firmware."},
 	{auth.ScopeAdmin, "Manage credentials and the cluster: API tokens, service accounts, other users' connected apps, vendor redirect credentials and node drain."},
 	{auth.ScopeSecrets, "Reveal or rotate secrets in plaintext: device SIP secrets, phone tokens and phone admin passwords."},
+	{auth.ScopeCalls, "Place and hang up calls from your own extensions (click-to-call), and see the state of the calls you started."},
+	{auth.ScopeEvents, "Receive live call events (ringing, answered, ended, missed) for the extensions you may see."},
+	{auth.ScopeRecordings, "Create and revoke expiring links to call recordings."},
 }
 
 // aiSettings is GET /api/v1/ai/settings.
@@ -237,12 +241,15 @@ type serviceAccountJSON struct {
 	CreatedAt   time.Time    `json:"createdAt"`
 	LastUsedAt  *time.Time   `json:"lastUsedAt"`
 	Secrets     []secretJSON `json:"secrets"`
+	// ExtensionScope is null for every extension (spec integrations I-33).
+	ExtensionScope []string `json:"extensionScope"`
 }
 
 func accountJSON(c oauth.Client) serviceAccountJSON {
 	out := serviceAccountJSON{
 		ID: c.ID, Name: c.Name, Description: c.Description, Role: c.Role, Scopes: scopeStrings(c.Scopes),
 		Enabled: c.Enabled, CreatedAt: c.CreatedAt, LastUsedAt: c.LastUsedAt, Secrets: []secretJSON{},
+		ExtensionScope: c.ExtensionScope,
 	}
 	for _, sc := range c.Secrets {
 		out.Secrets = append(out.Secrets, secretJSON{ID: sc.ID, CreatedAt: sc.CreatedAt, ExpiresAt: sc.ExpiresAt, LastUsedAt: sc.LastUsedAt})
@@ -298,6 +305,8 @@ func (s *server) createServiceAccount(w http.ResponseWriter, r *http.Request) {
 		Role        *string  `json:"role"`
 		Scopes      []string `json:"scopes"`
 		Enabled     *bool    `json:"enabled"`
+		// ExtensionScope: omitted or null is every extension.
+		ExtensionScope []string `json:"extensionScope"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -313,6 +322,7 @@ func (s *server) createServiceAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := s.AI.CreateServiceAccount(r.Context(), actor(r), oauth.NewServiceAccount{
 		Name: in.Name, Description: in.Description, Role: *role, Scopes: *scopes, Enabled: in.Enabled == nil || *in.Enabled,
+		ExtensionScope: in.ExtensionScope,
 	})
 	if err != nil {
 		s.aiError(w, "service account", err)
@@ -342,6 +352,8 @@ func (s *server) updateServiceAccount(w http.ResponseWriter, r *http.Request) {
 		Role        *string  `json:"role"`
 		Scopes      []string `json:"scopes"`
 		Enabled     *bool    `json:"enabled"`
+		// ExtensionScope: omitted leaves the limit, null clears it, a list sets it.
+		ExtensionScope json.RawMessage `json:"extensionScope"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -351,9 +363,18 @@ func (s *server) updateServiceAccount(w http.ResponseWriter, r *http.Request) {
 		s.aiError(w, "service account", err)
 		return
 	}
-	c, err := s.AI.UpdateServiceAccount(r.Context(), actor(r), r.PathValue("id"), oauth.ServiceAccountChange{
-		Description: in.Description, Role: role, Scopes: scopes, Enabled: in.Enabled,
-	})
+	ch := oauth.ServiceAccountChange{Description: in.Description, Role: role, Scopes: scopes, Enabled: in.Enabled}
+	if in.ExtensionScope != nil {
+		ch.SetExtensionScope = true
+		if string(in.ExtensionScope) != "null" {
+			ch.ExtensionScope = []string{}
+			if err := json.Unmarshal(in.ExtensionScope, &ch.ExtensionScope); err != nil {
+				badRequest(w, "extensionScope must be a list of extension numbers or null")
+				return
+			}
+		}
+	}
+	c, err := s.AI.UpdateServiceAccount(r.Context(), actor(r), r.PathValue("id"), ch)
 	if err != nil {
 		s.aiError(w, "service account", err)
 		return

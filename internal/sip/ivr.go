@@ -1,4 +1,4 @@
-// IVR / auto-attendant (migration 00018). A menu answers the call through
+// IVR / auto-attendant (migration 00029). A menu answers the call through
 // the media relay, plays its greeting (an announcement) with barge-in,
 // collects DTMF digits (RFC 4733 through the relay, SIP INFO through the
 // dialog) and sends the call to the destination of the chosen option. The
@@ -44,12 +44,12 @@ type ivrState struct {
 	active atomic.Bool
 
 	mu    sync.Mutex
-	cache map[string][]byte // announcement name -> PCM
-	done  sync.Once         // closes the call's setupDone
+	cache map[string]ivrAudio // announcement name -> PCM
+	done  sync.Once           // closes the call's setupDone
 }
 
 func newIVRState() *ivrState {
-	st := &ivrState{digits: make(chan byte, 32), cache: map[string][]byte{}}
+	st := &ivrState{digits: make(chan byte, 32), cache: map[string]ivrAudio{}}
 	st.active.Store(true)
 	return st
 }
@@ -161,13 +161,12 @@ func (c *call) soloAnswer(phase, detail, what string) bool {
 	s := c.s
 	off, err := media.ParseAudioSDP(c.inv.Body())
 	if err != nil {
-		c.ivrReject(nil, sip.StatusNotAcceptableHere, what+" needs a G.711 SDP offer", ResultFailed)
+		c.ivrReject(nil, sip.StatusNotAcceptableHere, what+" needs an audio SDP offer", ResultFailed)
 		return false
 	}
-	// The menu's voicemail recording taps G.711 packets (relaySession), so the
-	// application answers G.711 whatever else the caller offers.
-	g711, _ := off.Pick("g711")
-	body := c.anchoredAnswerA(off, g711)
+	// No callee: the anchor answers with the best codec it shares with the
+	// caller, as an announcement destination does.
+	body := c.anchoredAnswerA(off, media.AudioSDP{})
 	c.mu.Lock()
 	cancelled := c.isCancelled
 	aborted := closed(c.aborted)
@@ -590,17 +589,23 @@ func ivrClassify(snap *snapshot.Snapshot, m snapshot.IVRMenu, digits string, ter
 
 // --- prompts ---------------------------------------------------------------
 
-// ivrPrompt fetches an announcement as PCM; nil when it is unavailable (the
+// ivrAudio is a decoded prompt: PCM at the WAV's own rate (8 or 16 kHz).
+type ivrAudio struct {
+	pcm  []byte
+	rate int
+}
+
+// ivrPrompt fetches an announcement as PCM; empty when it is unavailable (the
 // step is skipped with a trace, like every announcement).
-func (c *call) ivrPrompt(ctx context.Context, snap *snapshot.Snapshot, name string) []byte {
+func (c *call) ivrPrompt(ctx context.Context, snap *snapshot.Snapshot, name string) ivrAudio {
 	c.mu.Lock()
 	st := c.ivr
 	c.mu.Unlock()
 	st.mu.Lock()
-	pcm, ok := st.cache[name]
+	a, ok := st.cache[name]
 	st.mu.Unlock()
 	if ok {
-		return pcm
+		return a
 	}
 	obj, found := snap.Announcement(name)
 	objs := c.s.deps.Objects
@@ -618,24 +623,24 @@ func (c *call) ivrPrompt(ctx context.Context, snap *snapshot.Snapshot, name stri
 			c.s.log.Warn("ivr prompt unavailable", "announcement", name, "error", err)
 			break
 		}
-		if pcm, _, err = media.DecodeWAV(raw); err != nil {
-			pcm = nil
+		if a.pcm, a.rate, err = media.DecodeWAV(raw); err != nil {
+			a = ivrAudio{}
 			c.addTrace(fmt.Sprintf("IVR prompt %q is not a WAV: skipped", name))
 		}
 	}
 	if ctx.Err() == nil {
 		st.mu.Lock()
-		st.cache[name] = pcm
+		st.cache[name] = a
 		st.mu.Unlock()
 	}
-	return pcm
+	return a
 }
 
 // ivrPlay plays one announcement to the caller. With barge-in a key press
 // stops it and is returned. alive is false once the call has ended.
 func (c *call) ivrPlay(ctx context.Context, snap *snapshot.Snapshot, name string, barge bool) (digit byte, hit, alive bool) {
-	pcm := c.ivrPrompt(ctx, snap, name)
-	if len(pcm) == 0 {
+	a := c.ivrPrompt(ctx, snap, name)
+	if len(a.pcm) == 0 {
 		return 0, false, ctx.Err() == nil
 	}
 	relay := c.anchorRelay()
@@ -651,7 +656,8 @@ func (c *call) ivrPlay(ctx context.Context, snap *snapshot.Snapshot, name string
 	var playErr error
 	go func() {
 		defer close(done)
-		playErr = relay.PlayTo(pctx, legCaller, pcm)
+		// The relay resamples to the caller's codec rate.
+		playErr = relay.PlayPCMTo(pctx, legCaller, a.pcm, a.rate)
 	}()
 	var keys <-chan byte
 	if barge {
@@ -689,15 +695,27 @@ type relaySession struct {
 	relay *media.Relay
 }
 
+// callerCodec is the codec the relay speaks on the caller leg: the first
+// supported one it negotiated, G.711 µ-law when none was set.
+func callerCodec(r *media.Relay) media.Codec {
+	for _, c := range r.Codecs(legCaller) {
+		if c.Supported() {
+			return c
+		}
+	}
+	c, _ := media.StaticCodec(0)
+	return c
+}
+
+// SampleRate is the caller leg's codec rate: 16 kHz for a wideband caller,
+// so a message is recorded and played back without losing the band.
+func (r *relaySession) SampleRate() int { return callerCodec(r.relay).SampleRate() }
+
 func (r *relaySession) Play(ctx context.Context, pcm []byte) error {
-	return r.relay.PlayTo(ctx, legCaller, pcm)
+	return r.relay.PlayPCMTo(ctx, legCaller, pcm, r.SampleRate())
 }
 
 func (r *relaySession) Close() error { return nil }
-
-// SampleRate is 8000: the relay encodes the 8 kHz audio in the leg's codec,
-// and the application answers G.711 (see soloAnswer).
-func (r *relaySession) SampleRate() int { return 8000 }
 
 // setVMTap installs the caller's-RTP tap of a voicemail recording and returns
 // the call's IVR session.
@@ -713,29 +731,35 @@ func (c *call) setVMTap(f func(leg string, pkt *media.RTPPacket)) *ivrState {
 // padded, so the length tracks the time recorded like the voicemail
 // session's.
 func (r *relaySession) Record(ctx context.Context, maxDur time.Duration, dtmf chan<- byte) ([]byte, error) {
+	codec := callerCodec(r.relay)
+	rate := codec.SampleRate()
+	decoder, err := media.NewDecoder(codec)
+	if err != nil {
+		return nil, fmt.Errorf("voicemail recording: %w", err)
+	}
+	defer decoder.Close()
 	var (
 		mu  sync.Mutex
 		pcm []byte
 	)
 	tap := func(leg string, pkt *media.RTPPacket) {
-		if leg != legCaller {
-			return
-		}
-		var dec []byte
-		switch pkt.PayloadType {
-		case 0:
-			dec = media.DecodePCMU(pkt.Payload)
-		case 8:
-			dec = media.DecodePCMA(pkt.Payload)
-		default:
+		if leg != legCaller || pkt.PayloadType != codec.PT {
 			return
 		}
 		mu.Lock()
-		if len(pcm) < 2*8000*int(maxDur/time.Second+1) {
-			pcm = append(pcm, dec...)
+		defer mu.Unlock()
+		if decoder != nil && len(pcm) < 2*rate*int(maxDur/time.Second+1) {
+			pcm = append(pcm, decoder.Decode(pkt.Payload)...)
 		}
-		mu.Unlock()
 	}
+	defer func() {
+		// Runs after the tap is uninstalled (deferred later, so run
+		// earlier) and before the decoder closes: a tap call still in
+		// flight then sees no decoder.
+		mu.Lock()
+		decoder = nil
+		mu.Unlock()
+	}()
 	st := r.c.setVMTap(tap)
 	defer r.c.setVMTap(nil)
 	start := time.Now()
@@ -745,7 +769,7 @@ func (r *relaySession) Record(ctx context.Context, maxDur time.Duration, dtmf ch
 		mu.Lock()
 		out := append([]byte(nil), pcm...)
 		mu.Unlock()
-		if want := int(time.Since(start).Seconds() * 16000); len(out) < want {
+		if want := int(time.Since(start).Seconds() * float64(2*rate)); len(out) < want {
 			out = append(out, make([]byte, (want-len(out))&^1)...)
 		}
 		return out, err

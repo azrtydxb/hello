@@ -203,13 +203,13 @@ func TestRoleEnforcement(t *testing.T) {
 // or change a role, an admin cannot, auth/me omits the caller's role, the
 // last admin can be demoted, a role change writes no audit row or does not
 // apply to an open session's next request, a bad role or unknown user is
-// accepted, or GrantableScopes gives a viewer more than read or an operator
+// accepted, or GrantableScopes gives a viewer more than read and events or an operator
 // admin or secrets (which bounds what consent and service accounts can
 // hold).
 func TestUserRoles(t *testing.T) {
 	for role, want := range map[auth.Role]auth.Scopes{
-		auth.RoleViewer:   {auth.ScopeRead},
-		auth.RoleOperator: {auth.ScopeRead, auth.ScopeWrite},
+		auth.RoleViewer:   {auth.ScopeRead, auth.ScopeEvents},
+		auth.RoleOperator: {auth.ScopeRead, auth.ScopeWrite, auth.ScopeCalls, auth.ScopeEvents, auth.ScopeRecordings},
 		auth.RoleAdmin:    auth.AllScopes,
 	} {
 		if got := auth.GrantableScopes(role); !slices.Equal(got, want) {

@@ -186,6 +186,13 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/phone-pushes", auth.ScopeRead, auth.RoleViewer, false, s.latestPhonePushes},
 		{"GET", "/api/v1/phones/{id}/preview", auth.ScopeRead, auth.RoleViewer, false, s.previewPhone},
 
+		{"GET", "/api/v1/onboarding/candidates", auth.ScopeWrite, auth.RoleOperator, false, s.listOnboarding},
+		{"POST", "/api/v1/onboarding/candidates/{mac}/adopt", auth.ScopeWrite, auth.RoleOperator, false, s.adoptCandidate},
+		{"POST", "/api/v1/onboarding/candidates/{mac}/dismiss", auth.ScopeWrite, auth.RoleOperator, false, s.dismissCandidate},
+		{"POST", "/api/v1/onboarding/adopt", auth.ScopeWrite, auth.RoleOperator, false, s.bulkAdopt},
+		{"GET", "/api/v1/onboarding/ignored", auth.ScopeWrite, auth.RoleOperator, false, s.listIgnoredMACs},
+		{"DELETE", "/api/v1/onboarding/ignored/{mac}", auth.ScopeWrite, auth.RoleOperator, false, s.unignoreMAC},
+
 		{"GET", "/api/v1/phonebooks", auth.ScopeRead, auth.RoleViewer, false, s.listPhonebooks},
 		{"GET", "/api/v1/phonebooks/lookup", auth.ScopeAdmin, auth.RoleAdmin, false, s.lookupPhonebook},
 		{"POST", "/api/v1/phonebooks", auth.ScopeAdmin, auth.RoleAdmin, false, s.createPhonebook},

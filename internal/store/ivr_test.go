@@ -282,7 +282,7 @@ func TestIVRNumberNotShadowed(t *testing.T) {
 
 // TestIVRFeatureCodeAlongsideCallWaiting: after every migration has run, an
 // "ivr" feature code saves next to the call-waiting codes. A later migration
-// that rewrote the action constraint without "ivr" (00026 once did) makes the
+// that rewrote the action constraint without "ivr" (as 00026 does) makes the
 // insert fail on the CHECK constraint.
 func TestIVRFeatureCodeAlongsideCallWaiting(t *testing.T) {
 	s := scratchStore(t)
