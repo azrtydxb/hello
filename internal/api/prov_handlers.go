@@ -42,6 +42,12 @@ type ProvStore interface {
 	ListPhonePushes(ctx context.Context, phoneID int64, limit int) ([]store.PhonePush, error)
 	LatestPhonePushes(ctx context.Context) ([]store.PhonePush, error)
 
+	ListCandidates(ctx context.Context) ([]store.Candidate, error)
+	DismissCandidate(ctx context.Context, actor, mac string, ignore bool) error
+	ListIgnored(ctx context.Context) ([]store.IgnoredMAC, error)
+	Unignore(ctx context.Context, actor, mac string) error
+	AdoptCandidates(ctx context.Context, actor string, in []store.PhoneInput) ([]store.CreatedPhone, error)
+
 	ListProvTemplates(ctx context.Context) ([]store.ProvTemplate, error)
 	GetProvTemplate(ctx context.Context, id int64) (store.ProvTemplate, error)
 	CreateProvTemplate(ctx context.Context, actor string, t prov.Template) (store.ProvTemplate, error)
