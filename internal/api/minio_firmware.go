@@ -19,13 +19,28 @@ func (m *MinioObjects) EnsureFirmwareBucket(ctx context.Context) error {
 	return m.ensure(ctx, FirmwareBucket)
 }
 
+// firmwarePartSize bounds the upload buffer: with an unknown size minio-go
+// otherwise sizes one part for a 5 TiB object (~537 MiB), which OOMs the pod.
+// 16 MiB parts still cover maxFirmwareBytes (512 MiB) in 32 of the 10000
+// parts S3 allows.
+const firmwarePartSize = 16 << 20
+
+// firmwarePutOptions streams one part buffer at a time.
+func firmwarePutOptions() minio.PutObjectOptions {
+	return minio.PutObjectOptions{
+		ContentType: "application/octet-stream",
+		PartSize:    firmwarePartSize,
+		NumThreads:  1,
+	}
+}
+
 // PutFirmware implements FirmwareObjects; the size is unknown, so the
-// client uploads in parts.
+// client uploads in firmwarePartSize parts.
 func (m *MinioObjects) PutFirmware(ctx context.Context, key string, r io.Reader) error {
 	if err := m.ensure(ctx, FirmwareBucket); err != nil {
 		return err
 	}
-	_, err := m.cli.PutObject(ctx, FirmwareBucket, key, r, -1, minio.PutObjectOptions{ContentType: "application/octet-stream"})
+	_, err := m.cli.PutObject(ctx, FirmwareBucket, key, r, -1, firmwarePutOptions())
 	if err != nil {
 		return fmt.Errorf("api: put firmware %s: %w", key, err)
 	}
