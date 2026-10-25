@@ -230,7 +230,7 @@ func (c *call) playPreRoll(ctx context.Context, sess media.Session) {
 		c.addTrace(fmt.Sprintf("Announcement %q unavailable: skipped", name))
 		return
 	}
-	pcm, _, err := media.DecodeWAV(raw)
+	pcm, err := media.WAVToRate(raw, sess.SampleRate())
 	if err != nil {
 		c.addTrace(fmt.Sprintf("Announcement %q is not a WAV: skipped", name))
 		return

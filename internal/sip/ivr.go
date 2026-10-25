@@ -155,7 +155,20 @@ func (c *call) ivrAnswer(m snapshot.IVRMenu) bool {
 		c.ivrReject(nil, sip.StatusNotAcceptableHere, "IVR needs a G.711 SDP offer", ResultFailed)
 		return false
 	}
-	body := c.anchoredAnswerA(off)
+	// The menu plays and reads 8 kHz audio: answer with the G.711 codecs the
+	// caller offered, even when it also offered wideband ones.
+	g711 := off
+	g711.Codecs = nil
+	for _, cd := range off.Codecs {
+		if cd.PT == 0 || cd.PT == 8 {
+			g711.Codecs = append(g711.Codecs, cd)
+		}
+	}
+	if len(g711.Codecs) == 0 {
+		c.ivrReject(nil, sip.StatusNotAcceptableHere, "IVR needs a G.711 SDP offer", ResultFailed)
+		return false
+	}
+	body := c.anchoredAnswerA(g711, g711)
 	c.mu.Lock()
 	cancelled := c.isCancelled
 	aborted := closed(c.aborted)
@@ -638,6 +651,9 @@ func (r *relaySession) Play(ctx context.Context, pcm []byte) error {
 }
 
 func (r *relaySession) Close() error { return nil }
+
+// SampleRate is 8000: the menu runs on G.711.
+func (r *relaySession) SampleRate() int { return 8000 }
 
 // setVMTap installs the caller's-RTP tap of a voicemail recording and returns
 // the call's IVR session.
