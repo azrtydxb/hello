@@ -39,7 +39,7 @@ var (
 var (
 	strategies = []string{"ring-all", "sequential", "round-robin", "longest-idle", "weighted"}
 	fcActions  = []string{"forward_always", "forward_busy", "forward_no_answer", "dnd_on", "dnd_off",
-		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr"}
+		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr", "time_condition", "tc_override"}
 )
 
 // voicemailLimits bound greeting uploads.
@@ -501,8 +501,12 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		if !usernameRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be the name of an IVR menu")
 		}
+	case "time_condition":
+		if !usernameRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be the name of a time condition")
+		}
 	default:
-		f.add("failureKind", `must be "none", "voicemail", "external", "announcement" or "ivr"`)
+		f.add("failureKind", `must be "none", "voicemail", "external", "announcement", "ivr" or "time_condition"`)
 	}
 	if len(in.Members) == 0 || len(in.Members) > 50 {
 		f.add("members", "must have 1-50 members")
@@ -554,6 +558,9 @@ func (s *server) createRingGroup(w http.ResponseWriter, r *http.Request) {
 	if len(f) == 0 && in.FailureKind == "ivr" {
 		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
 	}
+	if len(f) == 0 && in.FailureKind == "time_condition" {
+		s.requireTimeCondition(r.Context(), &f, "failureTarget", in.FailureTarget)
+	}
 	if len(f) > 0 {
 		writeFields(w, f)
 		return
@@ -593,6 +600,9 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 	f := validateRingGroup(&in)
 	if len(f) == 0 && in.FailureKind == "ivr" {
 		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
+	}
+	if len(f) == 0 && in.FailureKind == "time_condition" {
+		s.requireTimeCondition(r.Context(), &f, "failureTarget", in.FailureTarget)
 	}
 	if len(f) > 0 {
 		writeFields(w, f)
@@ -655,6 +665,12 @@ func (s *server) putFeatureCodes(w http.ResponseWriter, r *http.Request) {
 		seen[c.Code] = true
 		if c.Action == "ivr" {
 			s.requireIVRMenu(r.Context(), &f, p+".argument", c.Argument)
+		}
+		if c.Action == "time_condition" {
+			s.requireTimeCondition(r.Context(), &f, p+".argument", c.Argument)
+		}
+		if c.Action == "tc_override" && !slices.Contains([]string{"toggle", "open", "closed", "auto"}, c.Argument) {
+			f.add(p+".argument", `must be "toggle", "open", "closed" or "auto"`)
 		}
 	}
 	if len(f) > 0 {

@@ -210,6 +210,25 @@ current.
 | `getIVRMenu`                | read  | `GET /api/v1/ivr-menus/{id}`                       | One IVR menu                                                                                                                             |
 | `putIVRMenu`                | write | `PUT /api/v1/ivr-menus/{id}`                       | Replace an IVR menu                                                                                                                      |
 | `deleteIVRMenu`             | write | `DELETE /api/v1/ivr-menus/{id}`                    | Delete an IVR menu                                                                                                                       |
+| `listSchedules`             | read  | `GET /api/v1/schedules`                            | List schedules |
+| `createSchedule`            | write | `POST /api/v1/schedules`                           | Create a schedule |
+| `getSchedule`               | read  | `GET /api/v1/schedules/{id}`                       | One schedule |
+| `putSchedule`               | write | `PUT /api/v1/schedules/{id}`                       | Replace a schedule |
+| `deleteSchedule`            | write | `DELETE /api/v1/schedules/{id}`                    | Delete a schedule |
+| `listCalendars`             | read  | `GET /api/v1/calendars`                            | List calendars |
+| `createCalendar`            | write | `POST /api/v1/calendars`                           | Create a calendar |
+| `getCalendar`               | read  | `GET /api/v1/calendars/{id}`                       | One calendar |
+| `putCalendar`               | write | `PUT /api/v1/calendars/{id}`                       | Replace a calendar |
+| `deleteCalendar`            | write | `DELETE /api/v1/calendars/{id}`                    | Delete a calendar |
+| `listTimeConditions`        | read  | `GET /api/v1/time-conditions`                      | List time conditions |
+| `createTimeCondition`       | write | `POST /api/v1/time-conditions`                     | Create a time condition |
+| `getTimeCondition`          | read  | `GET /api/v1/time-conditions/{id}`                 | One time condition |
+| `putTimeCondition`          | write | `PUT /api/v1/time-conditions/{id}`                 | Replace a time condition |
+| `deleteTimeCondition`       | write | `DELETE /api/v1/time-conditions/{id}`              | Delete a time condition |
+| `importCalendar`            | write | `POST /api/v1/calendars/{id}/import`               | Import dates into a calendar |
+| `setTimeConditionOverride`  | write | `PUT /api/v1/time-conditions/{id}/override`        | Set the day/night override |
+| `evaluateTimeCondition`     | read  | `GET /api/v1/time-conditions/{id}/evaluate`        | What would the time condition do |
+| `getTimeSettings`           | read  | `GET /api/v1/time-settings`                        | Default time zone |
 | `listPagingGroups`          | read  | `GET /api/v1/paging-groups`                        | List paging groups                                                                                                                       |
 | `createPagingGroup`         | admin | `POST /api/v1/paging-groups`                       | Create a paging group                                                                                                                    |
 | `getPagingGroup`            | read  | `GET /api/v1/paging-groups/{id}`                   | One paging group                                                                                                                         |

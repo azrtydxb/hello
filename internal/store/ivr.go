@@ -36,12 +36,15 @@ const (
 	IVRPaging       = "paging"
 	IVRMenuDest     = "ivr"
 	IVRExternal     = "external"
+	// IVRTimeCondition names a time condition (migration 00020), which picks
+	// one of its own destinations when the call arrives.
+	IVRTimeCondition = "time_condition"
 )
 
 // IVRDestinationKinds lists the destination kinds, in the order the UI shows
 // them.
 var IVRDestinationKinds = []string{IVRHangup, IVRExtension, IVRRingGroup, IVRVoicemail, IVRAnnouncement,
-	IVRPaging, IVRMenuDest, IVRExternal}
+	IVRPaging, IVRMenuDest, IVRExternal, IVRTimeCondition}
 
 // IVRDestination is where an option, a timeout or an invalid choice sends
 // the call.
@@ -232,6 +235,8 @@ func checkIVRDestination(ctx context.Context, tx *sql.Tx, d ivrDest) error {
 		return exists(`SELECT count(*) FROM ivr_menus WHERE name = $1`, "IVR menu")
 	case IVRExternal:
 		// The format is checked by the API; routing decides at call time.
+	case IVRTimeCondition:
+		return exists(`SELECT count(*) FROM time_conditions WHERE name = $1`, "time condition")
 	default:
 		return fieldError(d.path+".kind", "is not a destination kind")
 	}
@@ -404,6 +409,9 @@ func ivrReferences(ctx context.Context, tx *sql.Tx, id int64, name string) ([]st
 			(m.timeout_kind = 'ivr' AND m.timeout_target = $1) OR (m.invalid_kind = 'ivr' AND m.invalid_target = $1)
 			OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind = 'ivr' AND o.dest_target = $1))`,
 			"IVR menu", []any{name, id}},
+		{`SELECT name FROM time_conditions WHERE
+			(open_kind = 'ivr' AND open_target = $1) OR (closed_kind = 'ivr' AND closed_target = $1)
+			OR (holiday_kind = 'ivr' AND holiday_target = $1)`, "time condition", []any{name}},
 	} {
 		rows, err := tx.QueryContext(ctx, q.query, q.args...)
 		if err != nil {

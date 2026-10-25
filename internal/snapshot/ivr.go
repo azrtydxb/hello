@@ -20,6 +20,8 @@ const (
 	IVRPaging       = "paging"
 	IVRMenuKind     = "ivr"
 	IVRExternal     = "external"
+	// IVRTimeCondition names a time condition (migration 00020).
+	IVRTimeCondition = "time_condition"
 )
 
 // IVRDest is where a menu option, timeout or invalid choice sends the call.

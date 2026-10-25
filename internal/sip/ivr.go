@@ -296,6 +296,8 @@ func (c *call) ivrLeave(ctx context.Context, snap *snapshot.Snapshot, m snapshot
 	c.addTrace(fmt.Sprintf("IVR %s: %s -> %s %s", m.Name, ex.why, d.Kind, d.Target))
 	c.s.m.IVRTotal.WithLabelValues("exit_" + d.Kind).Inc()
 	switch d.Kind {
+	case snapshot.IVRTimeCondition:
+		return c.ivrTimeCondition(ctx, snap, m, ex)
 	case snapshot.IVRMenuKind:
 		return d.Target, false
 	case snapshot.IVRAnnouncement:

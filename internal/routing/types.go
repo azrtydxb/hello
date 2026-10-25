@@ -106,7 +106,7 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr"
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "time_condition"
 	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr"
 	Enabled         bool
 }
@@ -122,6 +122,9 @@ type Config struct {
 	// IVRMenus is the set of IVR menu names an inbound route may name as
 	// its "ivr" destination.
 	IVRMenus map[string]bool
+	// TimeConditions is the set of time condition names an inbound route may
+	// name as its "time_condition" destination.
+	TimeConditions map[string]bool
 	// ResolvedIPs maps a trunk ID to the IPs its destination hostnames
 	// resolved to, for source validation. hello-sip fills it off the call
 	// path (DNS); hello-control's route tester may leave it empty.
@@ -176,7 +179,9 @@ type Decision struct {
 	Extension string
 	SIPURI    string
 	// IVR is the IVR menu an inbound route sends the call to.
-	IVR           string
+	IVR string
+	// TimeCondition is the time condition an inbound route sends the call to.
+	TimeCondition string
 	Number        string      // rewritten number sent to the carrier
 	CallerID      string      // caller ID to present
 	Route         string      // name of the matched route

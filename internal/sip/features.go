@@ -85,6 +85,21 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 	case ActionIntercom:
 		c.handleIntercom(tx, arg)
 		return true
+	case ActionTimeCondition:
+		name := fc.Argument
+		if name == "" {
+			name = arg
+		}
+		snap := s.deps.Snapshots.Current()
+		if snap == nil {
+			s.unavailable(tx, c.inv)
+			return true
+		}
+		c.routeTimeCondition(tx, snap, name)
+		return true
+	case ActionTCOverride:
+		c.handleTCOverride(tx, fc, arg)
+		return true
 	case ActionIVR:
 		name := fc.Argument
 		if name == "" {

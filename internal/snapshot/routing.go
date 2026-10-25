@@ -195,6 +195,23 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 	if err := rows.Err(); err != nil {
 		return cfg, nil, fmt.Errorf("snapshot: ivr menus: %w", err)
 	}
+	rows, err = db.Query(ctx, `SELECT name FROM time_conditions`)
+	if err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: time conditions: %w", err)
+	}
+	cfg.TimeConditions = map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return cfg, nil, fmt.Errorf("snapshot: scan time condition: %w", err)
+		}
+		cfg.TimeConditions[n] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: time conditions: %w", err)
+	}
 	return cfg, bad, nil
 }
 

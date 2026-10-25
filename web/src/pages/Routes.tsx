@@ -1,3 +1,4 @@
+import { listTimeConditions, type TimeCondition } from "../api/timecond";
 import {
   useEffect,
   useRef,
@@ -409,6 +410,7 @@ const DESTINATION_KIND: Record<
   external: { label: "External", icon: "phone-forwarded" },
   sip_uri: { label: "SIP URI", icon: "at-sign" },
   ivr: { label: "IVR menu", icon: "list-tree" },
+  time_condition: { label: "Time condition", icon: "clock" },
 };
 
 function Destination({
@@ -1203,6 +1205,7 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   external: "External number",
   sip_uri: "SIP URI",
   ivr: "IVR menu",
+  time_condition: "Time condition",
 };
 
 function InboundDrawer({
@@ -1220,8 +1223,12 @@ function InboundDrawer({
   const [d, setD] = useState(() => inboundDraft(route));
   const [busy, setBusy] = useState(false);
   const [menus, setMenus] = useState<IvrMenu[]>([]);
+  const [timeConds, setTimeConds] = useState<TimeCondition[]>([]);
   useEffect(() => {
     const controller = new AbortController();
+    listTimeConditions(controller.signal)
+      .then(setTimeConds)
+      .catch(() => undefined); // the picker stays empty; saving still works
     listIvrMenus(controller.signal)
       .then(setMenus)
       .catch(() => undefined); // the picker stays empty; saving still works
@@ -1346,6 +1353,7 @@ function InboundDrawer({
               { value: "external", label: "External number" },
               { value: "sip_uri", label: "SIP URI" },
               { value: "ivr", label: "IVR menu" },
+              { value: "time_condition", label: "Time condition" },
             ]}
             onChange={(e) =>
               set(
@@ -1354,7 +1362,28 @@ function InboundDrawer({
               )
             }
           />
-          {d.destinationKind === "ivr" ? (
+          {d.destinationKind === "time_condition" ? (
+            <Select
+              id={id("destination")}
+              label={DESTINATION_LABEL.time_condition}
+              value={d.destination}
+              error={v.errors.destination}
+              options={[
+                { value: "", label: "Choose…" },
+                ...(d.destination !== "" &&
+                !timeConds.some((t) => t.name === d.destination)
+                  ? [
+                      {
+                        value: d.destination,
+                        label: `${d.destination} (not found)`,
+                      },
+                    ]
+                  : []),
+                ...timeConds.map((t) => ({ value: t.name, label: t.name })),
+              ]}
+              onChange={(e) => set("destination", e.target.value)}
+            />
+          ) : d.destinationKind === "ivr" ? (
             <Select
               id={id("destination")}
               label={DESTINATION_LABEL.ivr}

@@ -669,6 +669,7 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*93", Action: "forward_no_answer", Argument: "clear"},
 		{Code: "*97", Action: "voicemail"},
 		{Code: "*80", Action: "intercom"},
+		{Code: "*28", Action: "tc_override", Argument: "toggle"},
 		{Code: "##", Action: "attended_transfer"},
 	}
 }

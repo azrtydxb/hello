@@ -298,6 +298,9 @@ func (c *call) groupFail(snap *snapshot.Snapshot, g snapshot.RingGroup) {
 			return
 		}
 		c.hangupGroup(sip.StatusTemporarilyUnavailable, "failure IVR menu unavailable")
+	case "time_condition":
+		c.addTrace(fmt.Sprintf("Group %s: time condition %q", g.Name, g.FailureTarget))
+		c.routeTimeCondition(nil, snap, g.FailureTarget)
 	case "external":
 		if req := c.inv; req != nil {
 			c.forward(req, nil, snap, g.FailureTarget, nil)

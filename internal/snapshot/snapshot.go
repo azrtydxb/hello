@@ -147,6 +147,8 @@ type Snapshot struct {
 	anns   map[string]string
 	// ivrByName and ivrByNumber are the IVR menus (migration 00018).
 	ivrByName, ivrByNumber map[string]IVRMenu
+	// tcByName and tcByToggle are the time conditions (migration 00020).
+	tcByName, tcByToggle map[string]TimeCondition
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
 }
@@ -404,9 +406,13 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	tcs, err := loadTimeConditions(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	return New(rev, domain, devices).WithExtensions(bare...).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithTimeConditions(tcs), nil
 }
 
 // loadAnnouncements reads the announcement set (name -> MinIO object), so

@@ -265,6 +265,7 @@ func (c *call) boxDetails() VoicemailBox {
 // mid-recording still leaves the message he recorded (spec edge case: only
 // a take under one second is discarded).
 func (c *call) vmLeave(ctx context.Context, sess media.Session, box VoicemailBox, reason string) {
+	c.playPreRoll(ctx, sess)
 	c.playGreeting(ctx, sess, box, reason)
 	c.mu.Lock()
 	vm := c.s.deps.Voicemails

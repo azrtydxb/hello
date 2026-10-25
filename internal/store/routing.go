@@ -926,7 +926,24 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 		}
 		cfg.IVRMenus[n] = true
 	}
-	return snap, mrows.Err()
+	if err := mrows.Err(); err != nil {
+		return snap, err
+	}
+	_ = mrows.Close()
+	trows, err := q.QueryContext(ctx, `SELECT name FROM time_conditions`)
+	if err != nil {
+		return snap, err
+	}
+	defer func() { _ = trows.Close() }()
+	cfg.TimeConditions = map[string]bool{}
+	for trows.Next() {
+		var n string
+		if err := trows.Scan(&n); err != nil {
+			return snap, err
+		}
+		cfg.TimeConditions[n] = true
+	}
+	return snap, trows.Err()
 }
 
 // routingTrunks converts the stored trunks to the engine's type. A trunk

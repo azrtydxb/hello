@@ -9,6 +9,7 @@ import {
   type PagingGroup,
   type RingGroup,
 } from "../api";
+import type { TimeCondition } from "../api/timecond";
 import { Input, Select } from "../design/azrty/components";
 
 /** What the destination pickers choose from; each list loads on its own. */
@@ -18,6 +19,8 @@ export interface DestinationChoices {
   announcements: readonly Announcement[];
   pagingGroups: readonly PagingGroup[];
   menus: readonly IvrMenu[];
+  /** Time conditions; absent where a page does not load them. */
+  timeConditions?: readonly TimeCondition[];
 }
 
 interface Option {
@@ -79,6 +82,13 @@ function targetOptions(
           .map((m) => ({ value: m.name, label: m.name })),
         value,
       );
+    case "time_condition":
+      return withCurrent(
+        (c.timeConditions ?? [])
+          .filter((t) => t.name !== selfName)
+          .map((t) => ({ value: t.name, label: t.name })),
+        value,
+      );
     default:
       return null;
   }
@@ -91,6 +101,7 @@ const TARGET_LABEL: Partial<Record<IvrDestinationKind, string>> = {
   announcement: "Announcement",
   paging: "Paging group",
   ivr: "IVR menu",
+  time_condition: "Time condition",
   external: "Number",
 };
 

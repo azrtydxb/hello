@@ -1,3 +1,4 @@
+import { listTimeConditions, type TimeCondition } from "../api/timecond";
 import { useEffect, useState, type FormEvent } from "react";
 import {
   createRingGroup,
@@ -100,6 +101,8 @@ function failureText(g: RingGroup): string {
       return `Announcement ${g.failureTarget || UNKNOWN}`;
     case "ivr":
       return `IVR menu ${g.failureTarget || UNKNOWN}`;
+    case "time_condition":
+      return `Time condition ${g.failureTarget || UNKNOWN}`;
     default:
       return "Hang up";
   }
@@ -463,6 +466,9 @@ function validateGroup(d: GroupDraft): Record<string, string> {
   if (d.failureKind === "ivr" && d.failureTarget.trim() === "") {
     e.failureTarget = "Choose the IVR menu.";
   }
+  if (d.failureKind === "time_condition" && d.failureTarget.trim() === "") {
+    e.failureTarget = "Choose the time condition.";
+  }
   if (d.failureKind === "voicemail") {
     if (d.failureTarget.trim() === "") {
       e.failureTarget = "Enter the extension whose box takes the call.";
@@ -495,8 +501,12 @@ function RingGroupDrawer({
   const [formError, setFormError] = useState<string | null>(null);
   const [pick, setPick] = useState("");
   const [menus, setMenus] = useState<IvrMenu[]>([]);
+  const [timeConds, setTimeConds] = useState<TimeCondition[]>([]);
   useEffect(() => {
     const controller = new AbortController();
+    listTimeConditions(controller.signal)
+      .then(setTimeConds)
+      .catch(() => undefined); // the picker stays empty; saving still works
     listIvrMenus(controller.signal)
       .then(setMenus)
       .catch(() => undefined); // the picker stays empty; saving still works
@@ -778,6 +788,7 @@ function RingGroupDrawer({
               { value: "voicemail", label: "Voicemail" },
               { value: "external", label: "External number" },
               { value: "ivr", label: "IVR menu" },
+              { value: "time_condition", label: "Time condition" },
             ]}
             onChange={(e) => set("failureKind", e.target.value as FailureKind)}
           />
@@ -803,7 +814,31 @@ function RingGroupDrawer({
               onChange={(e) => set("failureTarget", e.target.value)}
             />
           )}
-          {d.failureKind !== "none" && d.failureKind !== "ivr" && (
+          {d.failureKind === "time_condition" && (
+            <Select
+              id={fid("failureTarget")}
+              label="Time condition"
+              value={d.failureTarget}
+              error={errors.failureTarget}
+              options={[
+                { value: "", label: "Choose…" },
+                ...(d.failureTarget !== "" &&
+                !timeConds.some((t) => t.name === d.failureTarget)
+                  ? [
+                      {
+                        value: d.failureTarget,
+                        label: `${d.failureTarget} (not found)`,
+                      },
+                    ]
+                  : []),
+                ...timeConds.map((t) => ({ value: t.name, label: t.name })),
+              ]}
+              onChange={(e) => set("failureTarget", e.target.value)}
+            />
+          )}
+          {d.failureKind !== "none" &&
+            d.failureKind !== "ivr" &&
+            d.failureKind !== "time_condition" && (
             <Input
               id={fid("failureTarget")}
               label={
