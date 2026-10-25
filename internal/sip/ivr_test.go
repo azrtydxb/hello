@@ -515,6 +515,9 @@ func TestIVRInboundRoute(t *testing.T) {
 	var seq = dcs.InviteRequest.CSeq().SeqNo + 10
 	sendDigits(t, from, dcs, "1", &seq)
 	waitReq(t, callee.invites, "INVITE to the option's extension")
+	eventually(t, "the menu connected the call", func() bool {
+		return pbx.metric(t, "hello_ivr_total", map[string]string{"event": "connected"}) == 1
+	})
 	hangup(t, dcs)
 	cd := pbx.nextCDR(t)
 	if cd.Direction != "inbound" || cd.Route != "Main DID" || cd.RewrittenDestination != "100" {
