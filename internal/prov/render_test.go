@@ -177,7 +177,7 @@ func TestCACertInTemplates(t *testing.T) {
 		}
 		boot := func(v Vendor) []byte {
 			t.Helper()
-			b, err := renderBody(context.Background(), bootBodies[v].common, RenderData{Phone: d.Phone, Prov: d.Prov})
+			b, err := renderBody(context.Background(), bootBodies[v].common, RenderData{Phone: d.Phone, Prov: d.Prov}, testRenderBudget)
 			if err != nil {
 				t.Fatalf("%s boot: %v", v, err)
 			}
@@ -203,7 +203,7 @@ func TestCACertInTemplates(t *testing.T) {
 // validation administrators' templates must pass.
 func TestBuiltinsValidate(t *testing.T) {
 	for _, b := range Builtins() {
-		if errs := Validate(b); len(errs) > 0 {
+		if errs := validate(b, testRenderBudget); len(errs) > 0 {
 			t.Errorf("%s: %+v", b.Name, errs)
 		}
 		if !b.Builtin() || b.BuiltinRef != string(b.Vendor) {
@@ -319,9 +319,7 @@ func TestTemplateResolutionAndValidation(t *testing.T) {
 	}
 
 	// The 100 ms deadline: with the budget shrunk, a valid render fails.
-	defer func(d time.Duration) { renderTimeout = d }(renderTimeout)
-	renderTimeout = time.Nanosecond
-	if errs := Validate(file("{{.Line.Username}}")); len(errs) != 1 || !strings.Contains(errs[0].Message, "100ms") {
+	if errs := validate(file("{{.Line.Username}}"), time.Nanosecond); len(errs) != 1 || !strings.Contains(errs[0].Message, "100ms") {
 		t.Errorf("deadline not enforced: %+v", errs)
 	}
 }
@@ -337,7 +335,7 @@ func TestBootBodiesHandOff(t *testing.T) {
 	ownInfo := ProvInfo{URL: own, CAURL: bootInfo.CAURL, ResyncSeconds: 86400}
 	render := func(t *testing.T, body string, info ProvInfo) string {
 		t.Helper()
-		b, err := renderBody(context.Background(), body, RenderData{Phone: Phone{MAC: "ec74d769e044", Model: "WP836"}, Prov: info})
+		b, err := renderBody(context.Background(), body, RenderData{Phone: Phone{MAC: "ec74d769e044", Model: "WP836"}, Prov: info}, testRenderBudget)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -197,7 +197,11 @@ func TestPrivacyGuard(t *testing.T) {
 				}
 				return nil
 			}
-			if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, filepath.Join("internal", "ai", "provider.go")) {
+			// internal/tts is the second place: it speaks to OpenRouter's fixed
+			// host with the admin-set key and takes no operator-supplied URL,
+			// so there is no address for the dial guard to check.
+			if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, filepath.Join("internal", "ai", "provider.go")) ||
+				strings.HasSuffix(p, filepath.Join("internal", "tts", "tts.go")) {
 				return nil
 			}
 			src, err := os.ReadFile(p)
@@ -205,7 +209,7 @@ func TestPrivacyGuard(t *testing.T) {
 				return err
 			}
 			if bytes.Contains(src, []byte("go-ai-sdk/"+"providers/")) {
-				t.Errorf("%s imports a go-ai-sdk provider; only internal/ai/provider.go may", p)
+				t.Errorf("%s imports a go-ai-sdk provider; only internal/ai/provider.go and internal/tts/tts.go may", p)
 			}
 			return nil
 		})

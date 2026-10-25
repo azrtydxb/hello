@@ -1995,6 +1995,150 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/flow/catalogue": {
+      "get": {
+        "operationId": "getFlowCatalogue",
+        "summary": "Read the flow node and port catalogue",
+        "description": "Returns every node kind of the flow canvas with its ports, each port's type (and the colour and shape that type is drawn with) and, for every output, the inputs it may connect to. An entry whose `requires` is set is allowed in principle but cannot be stored until what it names exists. Use it to learn which objects can be joined before changing the configuration.",
+        "tags": [
+          "flow"
+        ],
+        "responses": {
+          "200": {
+            "description": "Read the flow node and port catalogue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowCatalogue"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/flow/graph": {
+      "get": {
+        "operationId": "getFlowGraph",
+        "summary": "Read the call flow as a graph",
+        "description": "Draws the saved configuration as nodes (trunks, routes, extensions, ring groups, announcements, paging groups, feature codes and the terminals calls end in) and edges between their ports. Every edge names the owner: the one field of one object it is stored in, so connecting or disconnecting is one update of that object. A target that resolves to nothing is a `missing` node with a `dangling_reference` warning. Targets resolve as hello-sip does: ring group name, then extension number. Each node's `version` changes whenever the object does. Nothing is stored: the graph is built from the live tables.",
+        "tags": [
+          "flow"
+        ],
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "`all` (default) or `closure:<nodeId>`, everything reachable from a node by following its outputs, for example `closure:inboundRoute:3`. `all` answers 413 above 5000 nodes.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "required": false,
+            "description": "`devices` adds devices and phones, which are left out by default.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "devices"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Read the call flow as a graph",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowGraph"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "description": "The graph is too large; use scope=closure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/flow/revision": {
+      "get": {
+        "operationId": "getFlowRevision",
+        "summary": "Read the configuration revision",
+        "description": "Returns the revision every configuration change advances. Poll it to know when a graph read earlier is out of date.",
+        "tags": [
+          "flow"
+        ],
+        "responses": {
+          "200": {
+            "description": "Read the configuration revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowRevision"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/cluster": {
       "get": {
         "operationId": "getCluster",
@@ -2687,6 +2831,427 @@
         }
       }
     },
+    "/api/v1/tts/settings": {
+      "get": {
+        "operationId": "getTtsSettings",
+        "summary": "The text-to-speech settings",
+        "description": "Returns the text-to-speech provider settings: whether an OpenRouter API key is set (never the key), the last four characters of it, and the default model and voice.",
+        "tags": [
+          "media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TtsSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putTtsSettings",
+        "summary": "Set the OpenRouter key and the default model and voice",
+        "description": "Sets the OpenRouter API key (write-only, sealed in the database and never returned) and the default ElevenLabs model and voice used when a prompt does not name its own.",
+        "tags": [
+          "media"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "apiKey": {
+                    "type": "string",
+                    "description": "The OpenRouter API key; stored sealed and never returned."
+                  },
+                  "model": {
+                    "type": "string",
+                    "description": "The default OpenRouter model, for example elevenlabs/eleven-multilingual-v2."
+                  },
+                  "voice": {
+                    "type": "string",
+                    "description": "The default voice of the model; empty for none."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TtsSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "carries the OpenRouter API key"
+        }
+      }
+    },
+    "/api/v1/tts/settings/key": {
+      "delete": {
+        "operationId": "deleteTtsKey",
+        "summary": "Remove the stored OpenRouter key",
+        "description": "Removes the stored OpenRouter API key. Prompts already generated keep playing; new ones cannot be generated until a key is set again.",
+        "tags": [
+          "media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TtsSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/tts/settings/test": {
+      "post": {
+        "operationId": "testTtsKey",
+        "summary": "Test the OpenRouter connection",
+        "description": "Checks with OpenRouter that the stored API key is accepted. Spends no credits.",
+        "tags": [
+          "media"
+        ],
+        "responses": {
+          "200": {
+            "description": "The key is accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "talks to the provider with the stored key"
+        }
+      }
+    },
+    "/api/v1/tts/voices": {
+      "get": {
+        "operationId": "listTtsVoices",
+        "summary": "List the ElevenLabs models and voices",
+        "description": "Lists the ElevenLabs text-to-speech models OpenRouter offers and the voices of each, for the model and voice pickers.",
+        "tags": [
+          "media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "models"
+                  ],
+                  "properties": {
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TtsModel"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/announcements/generate": {
+      "post": {
+        "operationId": "generateNewAnnouncement",
+        "summary": "Create an announcement from text",
+        "description": "Creates an announcement and generates its audio once from text through the text-to-speech provider; the WAV is stored and played from storage ever after.",
+        "tags": [
+          "media"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "text"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9._-]{1,64}$",
+                    "description": "Unique name the announcement is configured by."
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "The prompt text to speak, at most 2500 characters."
+                  },
+                  "voiceId": {
+                    "type": "string",
+                    "description": "The voice to speak it in; empty uses the default voice from the text-to-speech settings."
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "description": "The OpenRouter ElevenLabs model; empty uses the default model from the text-to-speech settings."
+                  },
+                  "force": {
+                    "type": "boolean",
+                    "description": "Generate even when the stored audio already came from this exact text, voice and model."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created and generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "spends text-to-speech credits; started from the console"
+        }
+      }
+    },
+    "/api/v1/extensions/{id}/voicemail/greeting": {
+      "put": {
+        "operationId": "putVoicemailGreeting",
+        "summary": "Set a greeting from an announcement or from text",
+        "description": "Sets a voicemail box's greeting or unreachable audio from an existing announcement, or from text generated once through the text-to-speech provider. Uploading a WAV stays on the voicemail box update.",
+        "tags": [
+          "voicemail"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "slot",
+                  "source"
+                ],
+                "properties": {
+                  "slot": {
+                    "type": "string",
+                    "enum": [
+                      "greeting",
+                      "unreachable"
+                    ],
+                    "description": "Which audio to set."
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "announcement",
+                      "text"
+                    ],
+                    "description": "Where the audio comes from."
+                  },
+                  "announcementId": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "The announcement to copy when the source is announcement."
+                  },
+                  "text": {
+                    "type": "string",
+                    "description": "The prompt text to speak, at most 2500 characters."
+                  },
+                  "voiceId": {
+                    "type": "string",
+                    "description": "The voice to speak it in; empty uses the default voice from the text-to-speech settings."
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "description": "The OpenRouter ElevenLabs model; empty uses the default model from the text-to-speech settings."
+                  },
+                  "force": {
+                    "type": "boolean",
+                    "description": "Generate even when the stored audio already came from this exact text, voice and model."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The box",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailGreetingResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "spends text-to-speech credits; started from the console"
+        }
+      }
+    },
     "/api/v1/announcements": {
       "get": {
         "operationId": "listAnnouncements",
@@ -2787,6 +3352,80 @@
       }
     },
     "/api/v1/announcements/{id}": {
+      "patch": {
+        "operationId": "saveAnnouncementPrompt",
+        "summary": "Save an announcement's prompt text",
+        "description": "Saves the authored text, voice and model of an announcement without generating audio. The announcement then shows as edited since its last generation until it is generated again.",
+        "tags": [
+          "media"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "The prompt text to speak, at most 2500 characters."
+                  },
+                  "voiceId": {
+                    "type": "string",
+                    "description": "The voice to speak it in; empty uses the default voice from the text-to-speech settings."
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "description": "The OpenRouter ElevenLabs model; empty uses the default model from the text-to-speech settings."
+                  },
+                  "force": {
+                    "type": "boolean",
+                    "description": "Generate even when the stored audio already came from this exact text, voice and model."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The announcement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Announcement"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
       "put": {
         "operationId": "replaceAnnouncement",
         "summary": "Replace an announcement's audio",
@@ -2889,6 +3528,90 @@
         "x-hello-scope": "write",
         "x-hello-role": "operator",
         "x-hello-mcp": true
+      }
+    },
+    "/api/v1/announcements/{id}/generate": {
+      "post": {
+        "operationId": "generateAnnouncement",
+        "summary": "Generate or regenerate an announcement's audio from text",
+        "description": "Generates the announcement's audio from its text through the text-to-speech provider and stores it. Idempotent: when the stored audio already came from the same text, voice and model nothing is generated unless force is set. Playback never calls the provider.",
+        "tags": [
+          "media"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "description": "The prompt text to speak, at most 2500 characters."
+                  },
+                  "voiceId": {
+                    "type": "string",
+                    "description": "The voice to speak it in; empty uses the default voice from the text-to-speech settings."
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "description": "The OpenRouter ElevenLabs model; empty uses the default model from the text-to-speech settings."
+                  },
+                  "force": {
+                    "type": "boolean",
+                    "description": "Generate even when the stored audio already came from this exact text, voice and model."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The announcement and whether audio was generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "spends text-to-speech credits; started from the console"
+        }
       }
     },
     "/api/v1/announcements/{id}/audio": {
@@ -9420,6 +10143,12 @@
             "type": "string",
             "description": "Object key of the unreachable greeting; empty for none."
           },
+          "greetingTts": {
+            "$ref": "#/components/schemas/TtsRecord"
+          },
+          "unreachableTts": {
+            "$ref": "#/components/schemas/TtsRecord"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -10060,6 +10789,315 @@
           }
         }
       },
+      "FlowRevision": {
+        "type": "object",
+        "required": [
+          "configRevision"
+        ],
+        "properties": {
+          "configRevision": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "FlowTarget": {
+        "type": "object",
+        "required": [
+          "kind",
+          "port"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "port": {
+            "type": "string"
+          },
+          "requires": {
+            "type": "string",
+            "description": "What must exist before this connection can be stored"
+          },
+          "note": {
+            "type": "string",
+            "description": "Why the connection is restricted"
+          }
+        }
+      },
+      "FlowPort": {
+        "type": "object",
+        "required": [
+          "id",
+          "direction",
+          "type",
+          "many",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "in",
+              "out"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "call",
+              "voicemail",
+              "carrier",
+              "member",
+              "prompt",
+              "schedule",
+              "holdMusic",
+              "device"
+            ]
+          },
+          "many": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string",
+            "description": "The stored field an edge on this port is kept in"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowTarget"
+            }
+          }
+        }
+      },
+      "FlowNodeType": {
+        "type": "object",
+        "required": [
+          "kind",
+          "label",
+          "ports"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "pseudo": {
+            "type": "boolean"
+          },
+          "terminal": {
+            "type": "boolean"
+          },
+          "requires": {
+            "type": "string"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowPort"
+            }
+          }
+        }
+      },
+      "FlowPortStyle": {
+        "type": "object",
+        "required": [
+          "type",
+          "label",
+          "colour",
+          "shape"
+        ],
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "colour": {
+            "type": "string"
+          },
+          "shape": {
+            "type": "string"
+          }
+        }
+      },
+      "FlowCatalogue": {
+        "type": "object",
+        "required": [
+          "portTypes",
+          "nodes"
+        ],
+        "properties": {
+          "portTypes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowPortStyle"
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNodeType"
+            }
+          }
+        }
+      },
+      "FlowRef": {
+        "type": "object",
+        "required": [
+          "node",
+          "port"
+        ],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "port": {
+            "type": "string"
+          }
+        }
+      },
+      "FlowOwner": {
+        "type": "object",
+        "required": [
+          "node",
+          "field"
+        ],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          }
+        }
+      },
+      "FlowNode": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "summary"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "`<kind>:<id>`, or `<kind>:<key>` for feature codes and terminals"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "version": {
+            "type": "string",
+            "description": "First 16 hex characters of the sha256 of the object; changes whenever the object does"
+          }
+        }
+      },
+      "FlowEdge": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "target",
+          "owner"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/FlowRef"
+          },
+          "target": {
+            "$ref": "#/components/schemas/FlowRef"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/FlowOwner"
+          },
+          "implicit": {
+            "type": "boolean",
+            "description": "Follows from the configuration but is stored in no field"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Edge details such as member position, weight, delay or trunk order"
+          }
+        }
+      },
+      "FlowWarning": {
+        "type": "object",
+        "required": [
+          "node",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "dangling_reference",
+              "empty_group",
+              "voicemail_disabled_target"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "FlowGraph": {
+        "type": "object",
+        "required": [
+          "configRevision",
+          "nodes",
+          "edges",
+          "warnings"
+        ],
+        "properties": {
+          "configRevision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowNode"
+            }
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowEdge"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowWarning"
+            }
+          }
+        }
+      },
       "FeatureCode": {
         "type": "object",
         "required": ["code", "action", "argument"],
@@ -10690,6 +11728,120 @@
           }
         }
       },
+      "TtsSettings": {
+        "type": "object",
+        "required": [
+          "provider",
+          "configured",
+          "keyHint",
+          "model",
+          "voice",
+          "updatedAt"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "The text-to-speech provider; always openrouter."
+          },
+          "configured": {
+            "type": "boolean",
+            "description": "Whether an API key is stored; the key itself is never returned."
+          },
+          "keyHint": {
+            "type": "string",
+            "description": "The last four characters of the stored key, or empty."
+          },
+          "model": {
+            "type": "string",
+            "description": "The default OpenRouter model."
+          },
+          "voice": {
+            "type": "string",
+            "description": "The default voice."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TtsModel": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "voices"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "voices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "GenerationResult": {
+        "type": "object",
+        "required": [
+          "announcement",
+          "regenerated"
+        ],
+        "properties": {
+          "announcement": {
+            "$ref": "#/components/schemas/Announcement"
+          },
+          "regenerated": {
+            "type": "boolean",
+            "description": "False when the stored audio already came from this exact text, voice and model, so the provider was not called."
+          }
+        }
+      },
+      "TtsRecord": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "voice": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "VoicemailGreetingResult": {
+        "type": "object",
+        "required": [
+          "box",
+          "regenerated"
+        ],
+        "properties": {
+          "box": {
+            "$ref": "#/components/schemas/VoicemailBox"
+          },
+          "regenerated": {
+            "type": "boolean"
+          }
+        }
+      },
       "Announcement": {
         "type": "object",
         "required": ["id", "name", "createdAt", "updatedAt"],
@@ -10709,6 +11861,29 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "sourceText": {
+            "type": "string",
+            "description": "The authored text-to-speech prompt; empty for an uploaded recording."
+          },
+          "voiceId": {
+            "type": "string"
+          },
+          "modelId": {
+            "type": "string"
+          },
+          "generatedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When audio was last generated from the text; null when never."
+          },
+          "generated": {
+            "type": "boolean",
+            "description": "Whether the stored audio was generated from text."
+          },
+          "textEdited": {
+            "type": "boolean",
+            "description": "True when the text, voice or model changed since the audio was generated."
           }
         }
       },
