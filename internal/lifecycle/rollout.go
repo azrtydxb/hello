@@ -44,6 +44,11 @@ type RolloutGate struct {
 	Log  *slog.Logger
 }
 
+// slot is the token owner: the node's stable identity, not its pod name, so
+// the replacement pod (a new name under a Deployment) releases the token its
+// predecessor took (cluster.Slot).
+func (g *RolloutGate) slot() string { return cluster.Slot(g.ID) }
+
 func (g *RolloutGate) poll() time.Duration {
 	if g.Poll > 0 {
 		return g.Poll
@@ -100,8 +105,8 @@ func (g *RolloutGate) Enter(ctx context.Context) bool {
 func (g *RolloutGate) try(ctx context.Context) (held, ready bool, err error) {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	holder, err := g.Store.AcquireRollout(cctx, g.Kind, g.ID, g.TTL)
-	if err != nil || holder != g.ID {
+	holder, err := g.Store.AcquireRollout(cctx, g.Kind, g.slot(), g.TTL)
+	if err != nil || holder != g.slot() {
 		return false, false, err
 	}
 	members, err := g.Store.Members(cctx)
@@ -110,7 +115,8 @@ func (g *RolloutGate) try(ctx context.Context) (held, ready bool, err error) {
 	}
 	peers := 0
 	for _, m := range members {
-		if m.Kind != g.Kind || m.ID == g.ID {
+		// A replaced pod's tombstone (same slot, other pod name) is no peer.
+		if m.Kind != g.Kind || cluster.Slot(m.ID) == g.slot() {
 			continue
 		}
 		peers++
@@ -133,7 +139,7 @@ func (g *RolloutGate) keepAlive(ctx context.Context) {
 				return
 			case <-t.C:
 				cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-				if _, err := g.Store.AcquireRollout(cctx, g.Kind, g.ID, g.TTL); err != nil {
+				if _, err := g.Store.AcquireRollout(cctx, g.Kind, g.slot(), g.TTL); err != nil {
 					g.Log.Debug("rollout gate: renewal failed", "error", err)
 				}
 				cancel()
@@ -150,7 +156,7 @@ func (g *RolloutGate) Release() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := g.Store.ReleaseRollout(ctx, g.Kind, g.ID); err != nil {
+	if err := g.Store.ReleaseRollout(ctx, g.Kind, g.slot()); err != nil {
 		g.Log.Debug("rollout gate: release failed", "error", err)
 	}
 }

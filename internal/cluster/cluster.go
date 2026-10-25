@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -66,6 +67,18 @@ type Member struct {
 	// nodes.
 	Incarnation string `json:"incarnation,omitempty"`
 }
+
+// podSuffix is what a Deployment appends to its name for a pod:
+// "-<replica set hash>-<5 characters>".
+var podSuffix = regexp.MustCompile(`-[a-z0-9]{6,10}-[a-z0-9]{5}$`)
+
+// Slot is the stable identity behind a node ID. On kw a node's ID is its pod
+// name, and a Deployment's replacement pod gets a new one
+// (hello-sip-1-d4f7cfdc8-2ccf7, then hello-sip-1-5c9b7d6f4-k8x2m), so "the
+// node that was replaced" needs the ID without the generated suffix: the
+// slot is hello-sip-1 for both. IDs without the suffix (a StatefulSet pod,
+// a compose service) are their own slot.
+func Slot(id string) string { return podSuffix.ReplaceAllString(id, "") }
 
 // NewIncarnation returns a fresh random process incarnation id.
 func NewIncarnation() string {

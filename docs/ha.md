@@ -162,7 +162,9 @@ no node. Set `HELLO_ROLLOUT_WAIT` (kw: 150s) and SIGTERM takes a rollout gate
 before the drain starts:
 
 - The node takes the one-per-kind restart token in Valkey
-  (`hello:rollout:sip`, expiring after 2 minutes without renewal) and waits,
+  (`hello:rollout:sip`, expiring after 2 minutes without renewal; held by the
+  node's slot, its ID without a Deployment pod's generated suffix, so a
+  replacement pod with a new name releases what its predecessor took) and waits,
   still READY and serving, until another SIP node is READY. Two nodes told to
   stop together get the token one after the other.
 - It keeps the token while it drains and after it exits. Its replacement

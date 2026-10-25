@@ -208,6 +208,43 @@ func TestRolloutGateDisabled(t *testing.T) {
 	}
 }
 
+// TestRolloutGateReplacementPodReleases fails if the token is keyed by pod
+// name: on kw a Deployment's replacement pod has a new name
+// (hello-sip-1-d4f7cfdc8-2ccf7 becomes hello-sip-1-5c9b7d6f4-k8x2m), so it
+// could never release what its predecessor took, and the peer would wait
+// out the whole token TTL (the hello-sip-1 tombstone of the old pod is not a
+// peer either).
+func TestRolloutGateReplacementPodReleases(t *testing.T) {
+	const old1, new1, pod2 = "hello-sip-1-d4f7cfdc8-2ccf7", "hello-sip-1-5c9b7d6f4-k8x2m", "hello-sip-2-b97d69c-xxfcw"
+	f := &fakeRollouts{}
+	f.setMember(sipMember(old1, cluster.Ready))
+	f.setMember(sipMember(pod2, cluster.Ready))
+	if !expectEntered(t, enterAsync(t.Context(), gate(f, old1, time.Minute)), "hello-sip-2 is READY") {
+		t.Fatal("no token")
+	}
+	// hello-sip-2 is told to stop too: it must wait for hello-sip-1's replacement.
+	res := enterAsync(t.Context(), gate(f, pod2, time.Minute))
+	expectBlocked(t, res, "hello-sip-1's replacement is not READY yet")
+	f.setMember(cluster.Member{ID: old1, Kind: cluster.KindSIP, State: cluster.Offline})
+	f.setMember(sipMember(new1, cluster.Ready))
+	gate(f, new1, time.Minute).Release()
+	if !expectEntered(t, res, "the replacement pod released the token") {
+		t.Fatal("no token")
+	}
+}
+
+// TestRolloutGateIgnoresOwnTombstones fails if a node counts its own
+// predecessor's tombstone as a peer and waits for it: after a clean restart
+// the only other member of the slot is OFFLINE for ever.
+func TestRolloutGateIgnoresOwnTombstones(t *testing.T) {
+	f := &fakeRollouts{}
+	f.setMember(cluster.Member{ID: "hello-sip-1-d4f7cfdc8-2ccf7", Kind: cluster.KindSIP, State: cluster.Offline})
+	f.setMember(sipMember("hello-sip-1-5c9b7d6f4-k8x2m", cluster.Ready))
+	if !expectEntered(t, enterAsync(t.Context(), gate(f, "hello-sip-1-5c9b7d6f4-k8x2m", time.Minute)), "its predecessor's tombstone is no peer") {
+		t.Fatal("no token")
+	}
+}
+
 // TestRolloutReleaseOnlyByHolder fails if a restarted node that does not
 // hold the token releases the peer's.
 func TestRolloutReleaseOnlyByHolder(t *testing.T) {
