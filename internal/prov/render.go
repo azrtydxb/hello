@@ -489,6 +489,14 @@ func SampleData(full bool) RenderData {
 		d.Line.VoicemailCode = "*97"
 		d.Firmware = &FirmwareInfo{URL: "https://prov.hello.example/p/sample/fw/firmware.rom", Dir: "https://prov.hello.example/p/sample/fw", Via: 2, Version: "1.2.3"}
 		d.Book = NewBookInfo("https://prov.hello.example/p/sample/", []string{"Extensions", "Company", "Warehouse"}, DefaultBookRefresh)
+		d.Multicast = NewMulticastInfo([]MulticastChannel{
+			{Label: "Warehouse", Address: "239.255.0.1", Port: 5004, Codec: "PCMU", Priority: 1},
+			{Label: "Office", Address: "239.255.0.2", Port: 5006, Codec: "PCMU", Priority: 2},
+		}, []string{"both", "listen"})
+		d.PTT = NewPTTInfo("224.0.1.116:5001", "PCMU", 1, false, []PTTChannel{
+			{Channel: 1, Label: "All", Transmit: 1, Subscribe: 1},
+			{Channel: 2, Label: "Floor", Transmit: 1, Subscribe: 1},
+		})
 		for i := range 12 {
 			n := strconv.Itoa(1002 + i)
 			d.BLF = append(d.BLF, BLFKey{Number: n, Label: "User " + n, URI: "sip:" + n + "@hello.example"})

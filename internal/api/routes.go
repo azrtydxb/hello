@@ -187,6 +187,8 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/phone-groups/{id}/resync", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushResync, true)},
 		{"POST", "/api/v1/phone-groups/{id}/reboot", auth.ScopeWrite, auth.RoleOperator, false, s.pushBulk(store.PushReboot, true)},
 		{"PUT", "/api/v1/phone-groups/{id}/books", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupBooks},
+		{"PUT", "/api/v1/phone-groups/{id}/multicast", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupMulticast},
+		{"PUT", "/api/v1/phone-groups/{id}/ptt", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPhoneGroupPTT},
 
 		{"GET", "/api/v1/prov/templates", auth.ScopeRead, auth.RoleViewer, false, s.listTemplates},
 		{"POST", "/api/v1/prov/templates", auth.ScopeWrite, auth.RoleOperator, false, s.createTemplate},

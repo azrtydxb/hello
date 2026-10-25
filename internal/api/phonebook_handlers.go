@@ -40,6 +40,8 @@ type PhonebookStore interface {
 	UpdatePhoneGroup(ctx context.Context, actor string, id int64, in store.GroupInput) (phonebook.Group, error)
 	DeletePhoneGroup(ctx context.Context, actor string, id int64) error
 	SetPhoneGroupBooks(ctx context.Context, actor string, id int64, bookIDs []int64) (phonebook.Group, error)
+	SetPhoneGroupMulticast(ctx context.Context, actor string, id int64, in []phonebook.MulticastInput) (phonebook.Group, error)
+	SetPhoneGroupPTT(ctx context.Context, actor string, id int64, in phonebook.PTT) (phonebook.Group, error)
 }
 
 // Page sizes of the address-book lists.
@@ -567,6 +569,63 @@ func (s *server) putPhoneGroupBooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g, err := s.Phonebooks.SetPhoneGroupBooks(r.Context(), actor(r).String(), id, *in.BookIDs)
+	if err != nil {
+		s.bookError(w, "phone group", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, g)
+}
+
+// putPhoneGroupMulticast replaces a group's multicast paging channels
+// (spec P-15): every phone of the group is provisioned to listen on the
+// channels that listen and to send on those that send.
+func (s *server) putPhoneGroupMulticast(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok || s.booksDisabled(w) {
+		return
+	}
+	var in struct {
+		Channels *[]phonebook.MulticastInput `json:"channels"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Channels == nil {
+		badRequest(w, "channels is required (an empty list removes every channel)")
+		return
+	}
+	if f := phonebook.ValidateMulticast(*in.Channels); len(f) > 0 {
+		writePhonebookFields(w, f)
+		return
+	}
+	g, err := s.Phonebooks.SetPhoneGroupMulticast(r.Context(), actor(r).String(), id, *in.Channels)
+	if err != nil {
+		s.bookError(w, "phone group", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, g)
+}
+
+// putPhoneGroupPTT replaces a group's push-to-talk settings and channels
+// (phone-feature-parity S-30). Only phones that support PTT (Grandstream
+// WP8x6) are given them.
+func (s *server) putPhoneGroupPTT(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok || s.booksDisabled(w) {
+		return
+	}
+	in := phonebook.PTT{Address: phonebook.DefaultPTTAddress, Codec: phonebook.CodecPCMU, DefaultChannel: 1}
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Channels == nil {
+		in.Channels = []phonebook.PTTChannel{}
+	}
+	if f := phonebook.ValidatePTT(in); len(f) > 0 {
+		writePhonebookFields(w, f)
+		return
+	}
+	g, err := s.Phonebooks.SetPhoneGroupPTT(r.Context(), actor(r).String(), id, in)
 	if err != nil {
 		s.bookError(w, "phone group", err)
 		return

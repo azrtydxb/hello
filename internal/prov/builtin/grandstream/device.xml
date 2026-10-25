@@ -29,6 +29,33 @@
          the GXP/GRP template's value for it and is still to be confirmed on a WP822 (verify). The
          plain "Auto Answer" option (P90) is deliberately not set: it would answer every call. -->
     <P298>1</P298>
+{{- /* Paging button and multicast paging (phone-feature-parity S-30, phonebooks-ptt P-15). Keys from Grandstream's own config templates wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83 (config-template_09302026) and the WP8x6 Administration Guide "PTT/Paging": P22208 multicast paging on, P1568 codec (0 PCMU, 8 PCMA, 9 G.722), P1569 and up listening address and label pairs (ten slots); the WP8x6 only: P22556 PTT/Paging, P82317 side key (0 PTT/Paging), P22177 PTT, P22183 PTT/group paging address, P22184 default channel, P22179 accept while busy, P22180 codec, channels 1 to 25 at P82001 + 5 (n-1): available, transmit, subscribe, join, name. All unverified on a phone (verify). */}}
+{{- with .Multicast}}
+    <P22208>1</P22208>
+    <P1568>{{.GSCodec}}</P1568>
+{{- range .ListenSlots}}
+    <P{{.Param}}>{{xml .HostPort}}</P{{.Param}}>
+    <P{{add .Param 1}}>{{xml .Label}}</P{{add .Param 1}}>
+{{- end}}
+{{- end}}
+{{- if or .PTT (and .Multicast .Multicast.PagingKey)}}
+    <P22556>1</P22556>
+    <P82317>0</P82317>
+{{- end}}
+{{- with .PTT}}
+    <P22177>1</P22177>
+    <P22183>{{xml .Address}}</P22183>
+    <P22184>{{.DefaultChannel}}</P22184>
+    <P22179>{{.AcceptBusy}}</P22179>
+    <P22180>{{.CodecGS}}</P22180>
+{{- range .Channels}}
+    <P{{.Base}}>{{.Available}}</P{{.Base}}>
+    <P{{add .Base 1}}>{{.Transmit}}</P{{add .Base 1}}>
+    <P{{add .Base 2}}>{{.Subscribe}}</P{{add .Base 2}}>
+    <P{{add .Base 3}}>{{.Available}}</P{{add .Base 3}}>
+    <P{{add .Base 4}}>{{xml .Label}}</P{{add .Base 4}}>
+{{- end}}
+{{- end}}
     <P2>{{xml .Phone.AdminPassword}}</P2>
     <P212>{{urlvia .Prov.URL}}</P212>
 {{- with .Prov.CACertPEM}}

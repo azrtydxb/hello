@@ -8553,6 +8553,118 @@
         "x-hello-role": "admin",
         "x-hello-mcp": true
       }
+    },
+    "/api/v1/phone-groups/{id}/multicast": {
+      "put": {
+        "operationId": "setPhoneGroupMulticast",
+        "summary": "Set a phone group's multicast paging channels",
+        "description": "Replaces the group's multicast paging channels (at most 10). Every phone of the group is provisioned to listen on the channels that listen and to send on those that send; Hello is not in the media path, which works on a LAN where multicast is delivered. Addresses must be IPv4 multicast outside 224.0.0.0/24, ports 1024 to 65535, codecs PCMU, PCMA or G722, and no listen address twice. A paging group can name one of these channels to send its page there too. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneGroupMulticast"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/ptt": {
+      "put": {
+        "operationId": "setPhoneGroupPTT",
+        "summary": "Set a phone group's push-to-talk settings",
+        "description": "Replaces the group's push-to-talk settings: whether PTT is on, the PTT and group paging multicast address, codec, default channel and the channels (1 to 25) with label and whether the phone may transmit and subscribe. Only Grandstream WP8x6 phones are given them. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneGroupPTT"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
     }
   },
   "components": {
@@ -14238,6 +14350,117 @@
           }
         }
       },
+      "MulticastChannelInput": {
+        "type": "object",
+        "required": ["label", "address", "port", "codec", "role", "priority"],
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Name shown on the phone, 1 to 40 characters"
+          },
+          "address": {
+            "type": "string",
+            "description": "IPv4 multicast address outside 224.0.0.0/24, such as 239.255.0.1"
+          },
+          "port": {
+            "type": "integer",
+            "description": "UDP port, 1024 to 65535"
+          },
+          "codec": {
+            "type": "string",
+            "enum": ["PCMU", "PCMA", "G722"],
+            "description": "Codec of the channel"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["listen", "send", "both"],
+            "description": "Whether the phones listen on it, send to it or both"
+          },
+          "priority": { "type": "integer", "description": "1 (highest) to 25" }
+        }
+      },
+      "MulticastChannel": {
+        "allOf": [
+          { "$ref": "#/components/schemas/MulticastChannelInput" },
+          {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "type": "integer", "format": "int64" } }
+          }
+        ]
+      },
+      "PhoneGroupMulticast": {
+        "type": "object",
+        "required": ["channels"],
+        "additionalProperties": false,
+        "properties": {
+          "channels": {
+            "type": "array",
+            "description": "The group's channels in priority order; replaces the whole list",
+            "items": { "$ref": "#/components/schemas/MulticastChannelInput" }
+          }
+        }
+      },
+      "PTTChannel": {
+        "type": "object",
+        "required": ["channel", "label", "transmit", "subscribe"],
+        "properties": {
+          "channel": {
+            "type": "integer",
+            "description": "Channel number, 1 to 25"
+          },
+          "label": {
+            "type": "string",
+            "description": "Name shown on the phone"
+          },
+          "transmit": {
+            "type": "boolean",
+            "description": "The phone may talk on the channel"
+          },
+          "subscribe": {
+            "type": "boolean",
+            "description": "The phone hears the channel"
+          }
+        }
+      },
+      "PhoneGroupPTT": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "address",
+          "codec",
+          "defaultChannel",
+          "channels"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Push-to-talk is on for the group's WP8x6 phones"
+          },
+          "address": {
+            "type": "string",
+            "description": "IPv4 multicast address and port of PTT and group paging, default 224.0.1.116:5001"
+          },
+          "codec": {
+            "type": "string",
+            "enum": ["PCMU", "G722"],
+            "description": "PTT codec"
+          },
+          "defaultChannel": {
+            "type": "integer",
+            "description": "The channel the PTT button talks on; one of the channels, and it must transmit"
+          },
+          "acceptWhileBusy": {
+            "type": "boolean",
+            "description": "Accept PTT while in a call"
+          },
+          "channels": {
+            "type": "array",
+            "description": "The channels, 1 to 25",
+            "items": { "$ref": "#/components/schemas/PTTChannel" }
+          }
+        }
+      },
       "PhoneGroup": {
         "type": "object",
         "required": [
@@ -14278,6 +14501,12 @@
             },
             "description": "The named books delivered, in order."
           },
+          "multicast": {
+            "type": "array",
+            "description": "The group's multicast paging channels",
+            "items": { "$ref": "#/components/schemas/MulticastChannel" }
+          },
+          "ptt": { "$ref": "#/components/schemas/PhoneGroupPTT" },
           "phoneCount": {
             "type": "integer"
           },
