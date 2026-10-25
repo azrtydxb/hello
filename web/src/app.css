@@ -80,6 +80,15 @@
   color: var(--az-text);
 }
 
+.az-sidebar__alert {
+  margin-left: auto;
+  margin-right: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--az-warn);
+}
+
 .az-sidebar__chev {
   transition: transform 0.15s ease;
 }

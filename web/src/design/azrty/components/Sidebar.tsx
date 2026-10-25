@@ -110,11 +110,14 @@ export function SidebarNavGroup({
   children,
   expanded,
   onToggle,
+  alert,
 }: {
   label: string;
   children: ReactNode;
   expanded?: boolean;
   onToggle?: () => void;
+  /** Flags a collapsed group whose items need attention (a badge). */
+  alert?: boolean;
 }) {
   const id = useId();
   if (!label || !onToggle) {
@@ -146,6 +149,13 @@ export function SidebarNavGroup({
         onClick={onToggle}
       >
         <span>{label}</span>
+        {!open && alert && (
+          <span
+            className="az-sidebar__alert"
+            role="img"
+            aria-label="needs attention"
+          />
+        )}
         <Icon name="chevron-down" size={13} className="az-sidebar__chev" />
       </button>
       <div

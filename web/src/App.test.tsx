@@ -67,9 +67,17 @@ describe("App navigation", () => {
       }),
     ).toHaveAttribute("href", "/cluster");
     expect(
-      within(nav).getByRole("link", { name: /^Trunks\s*, 1 issue$/ }),
+      within(nav).getByRole("link", {
+        name: /^Trunks\s*, 1 issue$/,
+        hidden: true,
+      }),
     ).toHaveAttribute("href", "/trunks");
-    expect(within(nav).getByRole("link", { name: "Routes" })).toBeVisible();
+    // Trunks sits in the collapsed Call flow group, which flags the badge.
+    const callFlow = within(nav).getByRole("button", { name: /^Call flow/ });
+    expect(callFlow).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(callFlow).getByRole("img", { name: "needs attention" }),
+    ).toBeInTheDocument();
   });
 
   it("lists Registrations and gives every Phase 1 page real content", async () => {
@@ -87,7 +95,7 @@ describe("App navigation", () => {
       within(nav).getByRole("link", { name: "Active calls", hidden: true }),
     ).toHaveAttribute("href", "/calls");
     expect(
-      within(nav).getByRole("link", { name: "Call history" }),
+      within(nav).getByRole("link", { name: "Call history", hidden: true }),
     ).toHaveAttribute("href", "/history");
     expect(
       await screen.findByText("No devices are registered"),
@@ -106,10 +114,10 @@ describe("App navigation", () => {
     const nav = await screen.findByRole("navigation", { name: "Primary" });
     await within(nav).findByRole("link", { name: "Findings", hidden: true });
     for (const group of NAV_GROUPS.filter((g) => g.label)) {
-      const section = within(nav).getByRole("group", {
-        name: group.label,
-        hidden: true,
-      });
+      const toggle = within(nav).getByRole("button", { name: group.label });
+      const section = document.getElementById(
+        toggle.getAttribute("aria-controls")!,
+      )!;
       expect(
         within(section)
           .getAllByRole("link", { hidden: true })

@@ -165,6 +165,7 @@ function Shell() {
               label={group.label}
               expanded={isExpanded(group.label)}
               onToggle={() => toggle(group.label)}
+              alert={group.items.some((i) => badges[i.path] != null)}
             >
               {group.items.map((item) => (
                 // NavLink sets aria-current="page" on the active link.
