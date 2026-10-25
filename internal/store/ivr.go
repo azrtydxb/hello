@@ -1,6 +1,6 @@
 package store
 
-// IVR / auto-attendant menus (migration 00028). A menu plays an announcement,
+// IVR / auto-attendant menus (migration 00029). A menu plays an announcement,
 // collects DTMF digits and sends the call to the destination of the chosen
 // option. Every mutation runs through configChange, so it is audited, bumps
 // the configuration revision and notifies hello-sip.

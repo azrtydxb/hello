@@ -10,7 +10,7 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// IVR / auto-attendant menus (migration 00028). Reads are open to a viewer;
+// IVR / auto-attendant menus (migration 00029). Reads are open to a viewer;
 // changes need the write scope, like ring groups. A menu that pages (a paging
 // destination) needs the admin role and scope, like the paging groups
 // themselves: it lets anyone who reaches the menu page the group.
