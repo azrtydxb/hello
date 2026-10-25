@@ -60,6 +60,12 @@ export interface Extension {
   directoryHidden?: boolean;
   /** An intercom call (`*80` plus the number) auto-answers; true by default. */
   allowIntercom?: boolean;
+  /**
+   * Call waiting; true by default. Off: a call to the extension while it is in
+   * a call goes to forward-busy (else busy), and the phone's own call-waiting
+   * setting is switched off at the next resync.
+   */
+  callWaiting?: boolean;
   /** The extension's voicemail box, when it has one. */
   voicemailBoxId?: Id | null;
   createdAt: string;
@@ -234,6 +240,12 @@ export interface TrunkFields {
   destinations: TrunkDestination[];
   /** What the trunk may dial in the extension namespace. */
   internalDialing: InternalDialing;
+  /**
+   * The audio codecs offered to the trunk (store.Trunk.codecs): any of
+   * "PCMU", "PCMA", "G722", "opus". Default ["PCMU", "PCMA"]: most carriers
+   * accept G.711 only.
+   */
+  codecs: string[];
 }
 
 /** A trunk as returned: the password is never returned, only hasPassword. */
@@ -656,6 +668,7 @@ export const updateExtension = (
     recordDefault?: boolean;
     directoryHidden?: boolean;
     allowIntercom?: boolean;
+    callWaiting?: boolean;
   },
 ) =>
   request<Extension>("PATCH", `/api/v1/extensions/${id(extensionId)}`, {
@@ -1181,7 +1194,7 @@ export const FEATURE_CODE_PATTERN = /^(\*[0-9#]{2,4}|##)$/;
 
 /**
  * The actions a feature code can perform (migration 00004's action column,
- * widened by 00005 with announcement and 00013 with intercom).
+ * widened by 00005 with announcement, 00013 with intercom and 00026 with call waiting).
  */
 export const FEATURE_CODE_ACTIONS = [
   "forward_always",
@@ -1194,6 +1207,8 @@ export const FEATURE_CODE_ACTIONS = [
   "attended_transfer",
   "announcement",
   "intercom",
+  "call_waiting_on",
+  "call_waiting_off",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
@@ -1211,6 +1226,8 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   attended_transfer: "Attended transfer",
   announcement: "Play announcement",
   intercom: "Intercom (auto-answer)",
+  call_waiting_on: "Call waiting on",
+  call_waiting_off: "Call waiting off",
 };
 
 /** GET /api/v1/feature-codes. */
@@ -1296,6 +1313,16 @@ export interface Announcement {
   name: string;
   createdAt: string;
   updatedAt?: string;
+  /** The authored text-to-speech prompt; "" for an uploaded recording. */
+  sourceText?: string;
+  voiceId?: string;
+  modelId?: string;
+  /** When audio was last generated from the text; null/absent when never. */
+  generatedAt?: string | null;
+  /** Whether the stored audio was generated from text. */
+  generated?: boolean;
+  /** The text, voice or model changed since the audio was generated. */
+  textEdited?: boolean;
 }
 
 /** GET /api/v1/announcements. */
