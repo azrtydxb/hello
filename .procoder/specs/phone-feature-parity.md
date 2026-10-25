@@ -236,7 +236,7 @@ The user asked for everything and left the details open. These defaults settle e
   - a check-sync push to 500 phones finishes within the configured push rate;
   - TLS handshakes are not on the call path for an established connection;
   - the anchor's SRTP adds under 50 µs per packet p99 (benchmark).
-- Dependencies: at most one new Go module for Opus (S-4) and one for DTLS (S-16, e.g. pion/dtls), each named in the plan and reviewed; everything else uses stdlib and existing modules.
+- Dependencies: at most one new Go module for Opus (S-4), named in the plan and reviewed. For DTLS and ICE (S-16) the limit of one module is amended 2026-10-25 by `clients-webrtc-mobile-video.md` (Default 1): S-16 and that spec's WebRTC leg are the same code, delivered once, using the pure-Go Pion set (`pion/ice`, `pion/dtls`, `pion/srtp`, `pion/rtp`, `pion/rtcp`, `pion/sdp`, MIT), named in that spec's Phase 1 and reviewed there. Everything else uses stdlib and existing modules.
 - Deployment: kw via Kuvryn Sync; TLS port 5061 and syslog 514/6514 are exposed through the existing Service definitions; no workloads on the user's Mac; CI on the Arc runners.
 - Gate per PR: gofmt, `go vet`, golangci-lint (0), `go test -race ./...` green, `procoder check` 0 blocking, web lint and tests, mutation checks; REVIEW.md applies.
 
