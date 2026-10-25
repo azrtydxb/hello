@@ -38,6 +38,10 @@ type Actor struct {
 	// (an admin set the current one); the API admits nothing but the
 	// password change, /auth/me and logout meanwhile.
 	MustChangePassword bool
+	// ExtensionScope limits a service credential to these extension
+	// numbers (spec integrations I-33); nil is every extension. A user's
+	// own limit comes from the extensions linked to the user, not from here.
+	ExtensionScope []string
 	// Via is how the change was made when not through a client: the audit
 	// via of an agent request (ViaAssistant), else empty.
 	Via string

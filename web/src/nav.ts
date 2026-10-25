@@ -81,6 +81,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       },
       { label: "Devices", path: "/devices", phase: 1, icon: "smartphone" },
       { label: "Phones", path: "/phones", phase: 5, icon: "phone" },
+      {
+        label: "Onboarding",
+        path: "/onboarding",
+        phase: 5,
+        icon: "user-plus",
+        // Adopting creates phones, a write; viewers do not see it.
+        minRole: "operator",
+      },
       { label: "Phonebooks", path: "/phonebooks", phase: 5, icon: "book-user" },
       {
         label: "Registrations",
@@ -156,6 +164,25 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "git-pull-request",
       },
       { label: "AI status", path: "/ai/status", phase: 5, icon: "activity" },
+    ],
+  },
+  {
+    label: "Integrations",
+    items: [
+      {
+        label: "Overview",
+        path: "/integrations",
+        phase: 5,
+        icon: "plug",
+        minRole: "admin",
+      },
+      {
+        label: "API access",
+        path: "/integrations/api-access",
+        phase: 5,
+        icon: "key-round",
+        minRole: "admin",
+      },
     ],
   },
   {

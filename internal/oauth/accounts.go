@@ -49,6 +49,9 @@ type NewServiceAccount struct {
 	Role        auth.Role
 	Scopes      auth.Scopes
 	Enabled     bool
+	// ExtensionScope limits the account to these extension numbers; nil is
+	// every extension.
+	ExtensionScope []string
 }
 
 // checkAccountScopes holds a service account to the scopes its role may
@@ -72,6 +75,29 @@ func checkAccountScopes(role auth.Role, scopes auth.Scopes) error {
 	return nil
 }
 
+// maxExtensionScope bounds a service account's extension list.
+const maxExtensionScope = 1000
+
+// checkExtensionScope validates a service account's extension limit: nil is
+// unrestricted, an empty list allows none, and every entry is an extension
+// number (2 to 10 digits, like extensions.number), without duplicates.
+func checkExtensionScope(nums []string) error {
+	if len(nums) > maxExtensionScope {
+		return inputErr("extensionScope has too many entries")
+	}
+	seen := make(map[string]bool, len(nums))
+	for _, n := range nums {
+		if len(n) < 2 || len(n) > 10 || strings.Trim(n, "0123456789") != "" {
+			return inputErr("extensionScope entries must be extension numbers (2 to 10 digits)")
+		}
+		if seen[n] {
+			return inputErr("extensionScope lists " + n + " twice")
+		}
+		seen[n] = true
+	}
+	return nil
+}
+
 // ServiceAccounts lists the service accounts.
 func (s *Server) ServiceAccounts(ctx context.Context) ([]Client, error) {
 	return s.o.Store.ServiceAccounts(ctx)
@@ -91,9 +117,13 @@ func (s *Server) CreateServiceAccount(ctx context.Context, a auth.Actor, in NewS
 	if err := checkAccountScopes(in.Role, in.Scopes); err != nil {
 		return Client{}, err
 	}
+	if err := checkExtensionScope(in.ExtensionScope); err != nil {
+		return Client{}, err
+	}
 	c := Client{
 		ID: "hello_sa_" + strings.ToLower(rand.Text()[:16]), Kind: ClientService, Name: in.Name,
 		Description: in.Description, Role: in.Role, Scopes: in.Scopes, Enabled: in.Enabled,
+		ExtensionScope: in.ExtensionScope,
 	}
 	if a.UserID != 0 {
 		uid := a.UserID
@@ -105,6 +135,11 @@ func (s *Server) CreateServiceAccount(ctx context.Context, a auth.Actor, in NewS
 // UpdateServiceAccount changes a service account; a new role or scopes
 // must still fit together.
 func (s *Server) UpdateServiceAccount(ctx context.Context, a auth.Actor, id string, ch ServiceAccountChange) (Client, error) {
+	if ch.SetExtensionScope {
+		if err := checkExtensionScope(ch.ExtensionScope); err != nil {
+			return Client{}, err
+		}
+	}
 	if ch.Role != nil || ch.Scopes != nil {
 		cur, err := s.o.Store.ServiceAccount(ctx, id)
 		if err != nil {

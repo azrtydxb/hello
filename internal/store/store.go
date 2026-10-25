@@ -436,12 +436,13 @@ WITH pat AS (
 	WHERE t.token_hash = $1 AND u.id = t.user_id AND u.enabled AND t.revoked_at IS NULL
 	  AND (t.expires_at IS NULL OR t.expires_at > now())
 	RETURNING t.id, u.id AS uid, u.username, u.role, t.kind, to_json(t.scopes)::text AS scopes,
-		''::text AS client_id, '[]'::text AS resources, ''::text AS service, u.must_change_password AS must_change
+		''::text AS client_id, '[]'::text AS resources, ''::text AS service, NULL::text AS extension_scope, u.must_change_password AS must_change
 ), oat AS (
 	SELECT 0::bigint AS id, coalesce(u.id, 0) AS uid, coalesce(u.username, '') AS username,
 		coalesce(u.role, c.role) AS role, CASE WHEN c.kind = 'service' THEN 'service' ELSE 'oauth' END AS kind,
 		to_json(o.scopes)::text AS scopes, o.client_id, to_json(o.resources)::text AS resources,
 		CASE WHEN c.kind = 'service' THEN c.name ELSE '' END AS service,
+		CASE WHEN c.kind = 'service' THEN to_json(c.extension_scope)::text END AS extension_scope,
 		coalesce(u.must_change_password, false) AS must_change
 	FROM oauth_tokens o
 	JOIN oauth_clients c ON c.client_id = o.client_id
@@ -462,9 +463,10 @@ func (s *Store) TokenActor(ctx context.Context, hash []byte) (auth.Actor, error)
 		a                 auth.Actor
 		kind              string
 		scopes, resources sql.NullString
+		extScope          sql.NullString
 	)
 	err := s.db.QueryRowContext(ctx, tokenActorSQL, hash).Scan(&a.TokenID, &a.UserID, &a.Username, &a.Role,
-		&kind, &scopes, &a.ClientID, &resources, &a.ServiceName, &a.MustChangePassword)
+		&kind, &scopes, &a.ClientID, &resources, &a.ServiceName, &extScope, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
 	}
@@ -487,6 +489,11 @@ func (s *Store) TokenActor(ctx context.Context, hash []byte) (auth.Actor, error)
 	}
 	if resources.Valid {
 		if err := json.Unmarshal([]byte(resources.String), &a.Audience); err != nil {
+			return a, err
+		}
+	}
+	if extScope.Valid && extScope.String != "null" {
+		if err := json.Unmarshal([]byte(extScope.String), &a.ExtensionScope); err != nil {
 			return a, err
 		}
 	}

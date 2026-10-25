@@ -31,6 +31,10 @@ import {
 } from "./nav";
 import { useNavGroups } from "./useNavGroups";
 import { AIAccess } from "./pages/AIAccess";
+import {
+  IntegrationsApiAccess,
+  IntegrationsOverview,
+} from "./pages/Integrations";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
 import { AIProposalDetail } from "./pages/AIProposalDetail";
@@ -51,6 +55,7 @@ import { PhoneDetail } from "./pages/PhoneDetail";
 import { PhoneGroups } from "./pages/PhoneGroups";
 import { MyContacts } from "./pages/MyContacts";
 import { Phonebooks } from "./pages/Phonebooks";
+import { Onboarding } from "./pages/Onboarding";
 import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
 import { ProvSettings } from "./pages/ProvSettings";
@@ -66,6 +71,7 @@ import { MyVoicemail } from "./pages/myphone/MyVoicemail";
 import { Can } from "./role";
 import { getAIStatus } from "./api/aiagent";
 import { usePolling } from "./usePolling";
+import { useOnboardingBadge } from "./pages/onboarding/badge";
 import { usePlatformBadges } from "./pages/platform/ui";
 import { Recordings } from "./pages/Recordings";
 import { Announcements } from "./pages/Announcements";
@@ -85,6 +91,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/extensions": Extensions,
   "/devices": Devices,
   "/phones": Phones,
+  "/onboarding": Onboarding,
   "/phonebooks": Phonebooks,
   "/me/contacts": MyContacts,
   "/me/voicemail": MyVoicemail,
@@ -113,6 +120,8 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/ai/proposals": AIProposals,
   "/ai/status": AIStatus,
   "/users": Users,
+  "/integrations": IntegrationsOverview,
+  "/integrations/api-access": IntegrationsApiAccess,
 };
 
 /** A load that never answers, for what a self-service user may not read. */
@@ -131,7 +140,9 @@ function Shell() {
   const location = useLocation();
   const controlPlane = useControlPlane();
   const isUser = state.status === "signedIn" && state.role === "user";
-  const badges = usePlatformBadges(!isUser);
+  const platformBadges = usePlatformBadges(!isUser);
+  const onboardingBadges = useOnboardingBadge();
+  const badges = { ...platformBadges, ...onboardingBadges };
   // The AI status is a viewer-level read; a self-service user has no access.
   const aiStatus = usePolling(isUser ? idleStatus : getAIStatus, 60_000);
   const aiEnabled = aiStatus.status !== "loading" && !!aiStatus.data?.enabled;
