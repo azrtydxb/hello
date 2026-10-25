@@ -136,7 +136,7 @@ func (s *Store) RenamePhonebook(ctx context.Context, actor string, id int64, nam
 		if kind == phonebook.KindExtensions {
 			return errExtensionsBook()
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE phonebooks SET name = $2, updated_at = now() WHERE id = $1`, id, name); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE phonebooks SET name = $2, version = version + 1, updated_at = now() WHERE id = $1`, id, name); err != nil {
 			return namedBookError(err, name)
 		}
 		if out, err = scanBook(tx.QueryRowContext(ctx, `SELECT `+bookCols+` FROM phonebooks b WHERE b.id = $1`, id)); err != nil {
@@ -259,8 +259,20 @@ func (s *Store) ExportPhonebook(ctx context.Context, bookID int64) (phonebook.Bo
 	if err != nil {
 		return b, nil, err
 	}
-	var rows *sql.Rows
-	if b.Kind == phonebook.KindExtensions {
+	out, err := s.bookEntries(ctx, bookID, b.Kind)
+	return b, out, err
+}
+
+// bookEntries reads every entry of a book of any kind, in delivery order.
+// It is the only reader a personal book has besides its owner's: callers
+// are the provisioning handler, through a phone's delivered set, and the
+// owner's own routes.
+func (s *Store) bookEntries(ctx context.Context, bookID int64, kind phonebook.Kind) ([]phonebook.EntryInput, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if kind == phonebook.KindExtensions {
 		rows, err = s.db.QueryContext(ctx, `SELECT id, number, name, created_at, updated_at FROM extensions
 			WHERE NOT directory_hidden ORDER BY lower(name), number`)
 	} else {
@@ -268,26 +280,26 @@ func (s *Store) ExportPhonebook(ctx context.Context, bookID int64) (phonebook.Bo
 			WHERE book_id = $1 ORDER BY lower(last_name), lower(first_name), id`, bookID)
 	}
 	if err != nil {
-		return b, nil, err
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	out := []phonebook.EntryInput{}
 	for rows.Next() {
 		var e phonebook.Entry
-		if b.Kind == phonebook.KindExtensions {
+		if kind == phonebook.KindExtensions {
 			var id int64
 			var number, name string
 			var created, updated time.Time
 			if err := rows.Scan(&id, &number, &name, &created, &updated); err != nil {
-				return b, nil, err
+				return nil, err
 			}
 			e = extensionEntry(bookID, id, number, name, created, updated)
 		} else if e, err = scanEntry(rows); err != nil {
-			return b, nil, err
+			return nil, err
 		}
 		out = append(out, e.EntryInput)
 	}
-	return b, out, rows.Err()
+	return out, rows.Err()
 }
 
 // indexRoom refuses a write that would take the lookup index past

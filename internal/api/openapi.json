@@ -6844,6 +6844,65 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/phonebooks/lookup": {
+      "get": {
+        "operationId": "lookupPhonebook",
+        "summary": "Check which address-book entry would name a caller",
+        "description": "Reduces number to its lookup key and says which entry of the extensions, named and company books would name it as a caller, in that order (the named books are those of the groups of the callee's phones; without callee only extensions and company are searched). An exact match on the key wins; otherwise the last 9 digits match when exactly one entry has them (several is \"ambiguous\" and names nobody). Anonymous, feature codes, short codes and non-numbers are \"unresolvable\". A personal book is never read.",
+        "tags": ["phonebooks"],
+        "parameters": [
+          {
+            "name": "number",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "The calling number as dialled or stored: +41 79 123 45 67, 0041791234567, 079 123 45 67 or a SIP URI."
+          },
+          {
+            "name": "callee",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "description": "The extension called, to include the named books of its phones' groups; it must exist."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The lookup result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhonebookLookup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phonebooks/{id}": {
       "get": {
         "operationId": "getPhonebook",
@@ -7366,6 +7425,346 @@
         "x-hello-role": "operator",
         "x-hello-mcp": {
           "exclude": "CSV download"
+        }
+      }
+    },
+    "/api/v1/me/contacts": {
+      "get": {
+        "operationId": "listMyContacts",
+        "summary": "List my personal contacts",
+        "description": "Lists the signed-in user's own contacts by id. Only the user's own book is reachable: no route takes a user id, and a credential without a user (a service account) is refused with 403. A user an administrator has not linked to an extension has no personal book (403, code no_extension).",
+        "tags": ["phonebooks"],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The next of the previous page; omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of contacts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhonebookEntryPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "personal data: a user's own contacts are not exposed to an agent"
+        }
+      },
+      "post": {
+        "operationId": "createMyContact",
+        "summary": "Add a personal contact",
+        "description": "Adds a contact to the signed-in user's own book (at most 1000 contacts), creating the book with the first. The contact is delivered to the phones of the user's extension at their next fetch of the address book.",
+        "tags": ["phonebooks"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhonebookEntryInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhonebookEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "personal data: a user's own contacts are not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/contacts/import": {
+      "post": {
+        "operationId": "importMyContacts",
+        "summary": "Import personal contacts from CSV",
+        "description": "Reads a CSV file (multipart part \"file\", at most 2 MiB and 5000 rows) in the address-book import format into the signed-in user's own book. dry_run=true checks every row and writes nothing. An import is all or nothing; mode=replace deletes the user's contacts first. A book cannot be taken past 1000 contacts (409).",
+        "tags": ["phonebooks"],
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "true only checks the rows."
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["append", "replace"],
+              "default": "append"
+            },
+            "description": "append adds to the book; replace swaps its content."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "additionalProperties": false,
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The CSV file."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rows checked or imported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhonebookImportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A malformed request (an error), or an import with failing rows (the result, ok false, nothing written)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PhonebookImportResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "multipart CSV upload"
+        }
+      }
+    },
+    "/api/v1/me/contacts/export": {
+      "get": {
+        "operationId": "exportMyContacts",
+        "summary": "Export my personal contacts as CSV",
+        "description": "Downloads the signed-in user's own contacts as CSV in the import format.",
+        "tags": ["phonebooks"],
+        "responses": {
+          "200": {
+            "description": "CSV with a header row",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "CSV download"
+        }
+      }
+    },
+    "/api/v1/me/contacts/{id}": {
+      "put": {
+        "operationId": "updateMyContact",
+        "summary": "Replace a personal contact",
+        "description": "Replaces one of the signed-in user's own contacts. A contact of another user is 404.",
+        "tags": ["phonebooks"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhonebookEntryInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The contact",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhonebookEntry"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "personal data: a user's own contacts are not exposed to an agent"
+        }
+      },
+      "delete": {
+        "operationId": "deleteMyContact",
+        "summary": "Delete a personal contact",
+        "description": "Deletes one of the signed-in user's own contacts. A contact of another user is 404.",
+        "tags": ["phonebooks"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": {
+          "exclude": "personal data: a user's own contacts are not exposed to an agent"
         }
       }
     },
@@ -9093,6 +9492,8 @@
                   "forbidden_role",
                   "insufficient_scope",
                   "last_admin",
+                  "no_user",
+                  "no_extension",
                   "ai_disabled",
                   "ai_busy",
                   "ai_budget_exhausted",
@@ -12902,6 +13303,66 @@
             "maxLength": 32,
             "example": "+41 79 123 45 67",
             "description": "The number as typed; lookups reduce it to a normalised key."
+          }
+        }
+      },
+      "PhonebookLookup": {
+        "type": "object",
+        "required": ["number", "key", "result", "searched"],
+        "properties": {
+          "number": {
+            "type": "string",
+            "description": "The number as asked."
+          },
+          "callee": {
+            "type": "string",
+            "description": "The callee as asked."
+          },
+          "key": {
+            "type": "string",
+            "description": "The lookup key; empty when unresolvable."
+          },
+          "result": {
+            "type": "string",
+            "enum": ["match", "ambiguous", "none", "unresolvable"]
+          },
+          "via": {
+            "type": "string",
+            "enum": ["exact", "suffix"],
+            "description": "How the entry matched: on the key or on the last 9 digits."
+          },
+          "source": {
+            "type": "string",
+            "enum": ["extensions", "named", "company"],
+            "description": "The kind of book that names the number."
+          },
+          "book": {
+            "type": "string",
+            "description": "The name of that book."
+          },
+          "bookId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "entryId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The entry's id (the extension's for the extensions book)."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name the callee's phone would show."
+          },
+          "matches": {
+            "type": "integer",
+            "description": "How many entries share the last 9 digits when ambiguous."
+          },
+          "searched": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The books looked in, in order."
           }
         }
       },

@@ -43,6 +43,9 @@ type Options struct {
 	Audit   *Audit
 	Metrics *Metrics
 	Log     *slog.Logger
+	// BookCache keeps rendered directories between requests (spec P-11);
+	// nil renders every request.
+	BookCache BookCache
 }
 
 type handler struct {
@@ -347,7 +350,7 @@ func (h *handler) body(w http.ResponseWriter, ev *event, res Result, ctype strin
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(body)
+	_, _ = w.Write(body) //nolint:gosec // G705: not HTML; a vendor config or directory, with the Content-Type of its file, no-store
 	ev.rec.Status, ev.rec.Result, ev.rec.Bytes = http.StatusOK, res, int64(len(body))
 }
 
