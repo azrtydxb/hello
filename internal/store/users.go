@@ -104,6 +104,10 @@ type NewAccount struct {
 // (never the password or its hash).
 func (s *Store) CreateAccount(ctx context.Context, actor string, in NewAccount) (User, error) {
 	var u User
+	if in.Voicemail.After == "" {
+		// The zero value is not a valid column value; "none" is the default.
+		in.Voicemail.After = "none"
+	}
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `
@@ -228,8 +232,21 @@ func (s *Store) UpdateAccount(ctx context.Context, actor string, id int64, c Acc
 		case c.Role != nil && cur.Role != role:
 			action = "set-role:" + string(role)
 		}
-		if err := insertAudit(ctx, tx, actor, action, "user", strconv.FormatInt(id, 10)); err != nil {
-			return err
+		// A change of extensions alone is audited as the link event only.
+		onlyLink := action == "update" && c.ExtensionIDs != nil && c.DisplayName == nil && c.Email == nil && c.Voicemail == nil
+		if !onlyLink {
+			if err := insertAudit(ctx, tx, actor, action, "user", strconv.FormatInt(id, 10)); err != nil {
+				return err
+			}
+		}
+		if c.ExtensionIDs != nil {
+			link := "set-extension"
+			if len(*c.ExtensionIDs) == 0 {
+				link = "unset-extension"
+			}
+			if err := insertAudit(ctx, tx, actor, link, "user", strconv.FormatInt(id, 10)); err != nil {
+				return err
+			}
 		}
 		u, err = scanUser(tx.QueryRowContext(ctx, `SELECT `+userCols+` FROM users WHERE id = $1`, id))
 		return err
