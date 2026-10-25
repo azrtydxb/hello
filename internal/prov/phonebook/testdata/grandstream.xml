@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AddressBook>
+  <version>1</version>
+  <Contact>
+    <LastName>Acme &lt;Corp&gt;</LastName>
+    <FirstName></FirstName>
+    <Phone>
+      <phonenumber>02 555 00 00</phonenumber>
+      <accountindex>1</accountindex>
+    </Phone>
+  </Contact>
+  <Contact>
+    <LastName>Adams</LastName>
+    <FirstName>Bob</FirstName>
+    <Phone type="Work">
+      <phonenumber>1003</phonenumber>
+      <accountindex>1</accountindex>
+    </Phone>
+  </Contact>
+  <Contact>
+    <LastName>Müller</LastName>
+    <FirstName>Zoë</FirstName>
+    <Phone type="Work">
+      <phonenumber>+32 2 555 01 02</phonenumber>
+      <accountindex>1</accountindex>
+    </Phone>
+  </Contact>
+  <Contact>
+    <LastName>Smith &amp; Sons</LastName>
+    <FirstName>Tom</FirstName>
+    <Phone type="Work">
+      <phonenumber>1001</phonenumber>
+      <accountindex>1</accountindex>
+    </Phone>
+    <Phone type="Mobile">
+      <phonenumber>+32470123456</phonenumber>
+      <accountindex>1</accountindex>
+    </Phone>
+    <Phone type="Home">
+      <phonenumber>0471 22 33 44</phonenumber>
+      <accountindex>1</accountindex>
+    </Phone>
+  </Contact>
+  <Contact>
+    <LastName>ÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜ</LastName>
+    <FirstName>Ann</FirstName>
+    <Phone type="Work">
+      <phonenumber>1002</phonenumber>
+      <accountindex>1</accountindex>
+    </Phone>
+  </Contact>
+</AddressBook>

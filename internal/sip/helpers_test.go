@@ -1046,6 +1046,12 @@ func (p *phone) sendRefer(t *testing.T, dcs *sipgo.DialogClientSession, referTo 
 // challenge; expires<0 omits the header.
 func (p *phone) subscribe(t *testing.T, ext string, expires int) *sip.Response {
 	t.Helper()
+	return p.subscribeEvent(t, ext, "dialog", expires)
+}
+
+// subscribeEvent is subscribe for any Event package.
+func (p *phone) subscribeEvent(t *testing.T, ext, event string, expires int) *sip.Response {
+	t.Helper()
 	req := sip.NewRequest(sip.SUBSCRIBE, sip.Uri{Scheme: "sip", User: ext, Host: testDomain})
 	req.AppendHeader(&sip.FromHeader{Address: p.aorURI(), Params: sip.HeaderParams{{K: "tag", V: sip.GenerateTagN(8)}}})
 	req.AppendHeader(&sip.ToHeader{Address: sip.Uri{Scheme: "sip", User: ext, Host: testDomain}})
@@ -1053,7 +1059,7 @@ func (p *phone) subscribe(t *testing.T, ext string, expires int) *sip.Response {
 	req.AppendHeader(&callID)
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: 1, MethodName: sip.SUBSCRIBE})
 	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
-	req.AppendHeader(sip.NewHeader("Event", "dialog"))
+	req.AppendHeader(sip.NewHeader("Event", event))
 	req.AppendHeader(sip.HeaderClone(&p.contact))
 	if expires >= 0 {
 		req.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(expires)))
