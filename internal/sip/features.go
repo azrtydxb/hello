@@ -26,6 +26,10 @@ const (
 	// ActionIntercom is the 1-to-1 intercom prefix (phonebooks-ptt spec
 	// P-13): the code plus an extension number auto-answers that phone.
 	ActionIntercom = "intercom"
+	// ActionCallWaitingOn and ActionCallWaitingOff toggle the extension's
+	// call-waiting flag (migration 00026, spec S-18).
+	ActionCallWaitingOn  = "call_waiting_on"
+	ActionCallWaitingOff = "call_waiting_off"
 )
 
 // ExtUpdate is one queued extension-feature change from a feature code.
@@ -36,6 +40,7 @@ type ExtUpdate struct {
 	ForwardAlways   *string
 	ForwardBusy     *string
 	ForwardNoAnswer *string
+	CallWaiting     *bool
 }
 
 // SettingsSink takes extension-feature changes and applies them later: the
@@ -75,7 +80,17 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		c.record(sip.StatusForbidden, cdr.SideSystem, "transfer code dialled as a call", ResultFailed)
 		return true
 	case ActionVoicemail:
+		if arg != "" && !c.voicemailTarget(arg) {
+			s.respond(tx, c.inv, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "no voicemail box for extension "+arg, ResultNotFound)
+			return true
+		}
 		if !c.begin(c.inv, tx) {
+			return true
+		}
+		if arg != "" {
+			// *97<ext>: leave a message in that extension's box (CALL-55).
+			c.startVoicemail(vmLeave, "transfer")
 			return true
 		}
 		c.voicemailOwnBox(fc.Argument)
@@ -135,6 +150,12 @@ func featureUpdate(fc snapshot.FeatureCode, arg, ext string) (ExtUpdate, bool) {
 	case ActionDNDOff:
 		off := false
 		upd.DND = &off
+	case ActionCallWaitingOn:
+		on := true
+		upd.CallWaiting = &on
+	case ActionCallWaitingOff:
+		off := false
+		upd.CallWaiting = &off
 	case ActionForwardAlways:
 		if fc.Argument == "clear" {
 			empty := ""

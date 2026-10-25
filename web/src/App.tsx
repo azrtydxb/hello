@@ -26,9 +26,15 @@ import {
   EXACT_PATHS,
   NAV_ITEMS,
   navGroupsFor,
+  activeGroupLabel,
   pageTitle,
 } from "./nav";
+import { useNavGroups } from "./useNavGroups";
 import { AIAccess } from "./pages/AIAccess";
+import {
+  IntegrationsApiAccess,
+  IntegrationsOverview,
+} from "./pages/Integrations";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
 import { AIProposalDetail } from "./pages/AIProposalDetail";
@@ -49,6 +55,7 @@ import { PhoneDetail } from "./pages/PhoneDetail";
 import { PhoneGroups } from "./pages/PhoneGroups";
 import { MyContacts } from "./pages/MyContacts";
 import { Phonebooks } from "./pages/Phonebooks";
+import { Onboarding } from "./pages/Onboarding";
 import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
 import { ProvSettings } from "./pages/ProvSettings";
@@ -58,6 +65,7 @@ import { Users } from "./pages/Users";
 import { Can } from "./role";
 import { getAIStatus } from "./api/aiagent";
 import { usePolling } from "./usePolling";
+import { useOnboardingBadge } from "./pages/onboarding/badge";
 import { usePlatformBadges } from "./pages/platform/ui";
 import { Recordings } from "./pages/Recordings";
 import { Announcements } from "./pages/Announcements";
@@ -78,6 +86,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/extensions": Extensions,
   "/devices": Devices,
   "/phones": Phones,
+  "/onboarding": Onboarding,
   "/phonebooks": Phonebooks,
   "/me/contacts": MyContacts,
   "/registrations": Registrations,
@@ -102,6 +111,8 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/ai/proposals": AIProposals,
   "/ai/status": AIStatus,
   "/users": Users,
+  "/integrations": IntegrationsOverview,
+  "/integrations/api-access": IntegrationsApiAccess,
 };
 
 const ROLE_LABELS = {
@@ -115,13 +126,24 @@ function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
   const controlPlane = useControlPlane();
-  const badges = usePlatformBadges();
+  const platformBadges = usePlatformBadges();
+  const onboardingBadges = useOnboardingBadge();
+  const badges = { ...platformBadges, ...onboardingBadges };
   const aiStatus = usePolling(getAIStatus, 60_000);
   const aiEnabled = aiStatus.status !== "loading" && !!aiStatus.data?.enabled;
   const reachable = controlPlane.status === "reachable";
   const title = pageTitle(location.pathname);
   // Call detail belongs to Call history in the nav.
   const historyDetail = /^\/history\/[^/]+$/.test(location.pathname);
+
+  const navGroups = navGroupsFor(
+    state.status === "signedIn" ? state.role : undefined,
+    aiEnabled,
+  );
+  const { isExpanded, toggle } = useNavGroups(
+    state.status === "signedIn" ? state.username : "",
+    activeGroupLabel(navGroups, location.pathname),
+  );
 
   function onLogout() {
     // Leave first, so the sign-in page carries no ?next= back into the app.
@@ -152,11 +174,14 @@ function Shell() {
         onSignOut={onLogout}
       >
         <SidebarNav label="Primary">
-          {navGroupsFor(
-            state.status === "signedIn" ? state.role : undefined,
-            aiEnabled,
-          ).map((group) => (
-            <SidebarNavGroup key={group.label} label={group.label}>
+          {navGroups.map((group) => (
+            <SidebarNavGroup
+              key={group.label}
+              label={group.label}
+              expanded={isExpanded(group.label)}
+              onToggle={() => toggle(group.label)}
+              alert={group.items.some((i) => badges[i.path] != null)}
+            >
               {group.items.map((item) => (
                 // NavLink sets aria-current="page" on the active link.
                 <NavLink

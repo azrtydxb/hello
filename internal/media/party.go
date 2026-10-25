@@ -11,60 +11,66 @@ import (
 	"time"
 )
 
-// PartyCodec converts between a party's RTP payload and mixing-rate samples.
-// G.711 is the baseline; a wideband codec (G.722, Opus) implements this
-// interface with a transcode to and from MixRate and registers itself with
-// RegisterPartyCodec, and the mixer needs no other change.
-type PartyCodec interface {
-	// PayloadType is the static RTP payload type the SDP negotiates.
-	PayloadType() uint8
-	// Decode turns one RTP payload into samples at MixRate.
-	Decode(payload []byte) []int16
-	// Encode turns one MixFrame of samples at MixRate into an RTP payload.
-	Encode(frame []int16) []byte
-	// TimestampStep is the RTP timestamp advance of one 20 ms frame (160 for
-	// 8 kHz G.711, 320 for G.722's 8 kHz-clocked 16 kHz audio).
-	TimestampStep() uint32
+// partyCodec converts between a participant's RTP payload and samples at
+// the mixing rate (MixRate, 8 kHz). G.711 is direct. A wideband codec (G.722,
+// Opus) decodes at 16 kHz and a streaming half-band filter brings it down to
+// the mixing rate; the mix goes up the same way before it is encoded. The
+// codec's state lives here, so one partyCodec serves one participant.
+type partyCodec struct {
+	codec Codec
+	enc   *Encoder
+	dec   *Decoder
+	down  *Down2 // wideband decode path, nil for G.711
+	up    *Up2   // wideband encode path, nil for G.711
 }
 
-type g711Codec struct{ pt uint8 }
-
-func (c g711Codec) PayloadType() uint8 { return c.pt }
-
-func (c g711Codec) Decode(payload []byte) []int16 {
-	if c.pt == 8 {
-		return PCMToSamples(DecodePCMA(payload))
+func newPartyCodec(c Codec) (*partyCodec, error) {
+	enc, err := NewEncoder(c)
+	if err != nil {
+		return nil, err
 	}
-	return PCMToSamples(DecodePCMU(payload))
-}
-
-func (c g711Codec) Encode(frame []int16) []byte {
-	if c.pt == 8 {
-		return EncodePCMA(SamplesToPCM(frame))
+	dec, err := NewDecoder(c)
+	if err != nil {
+		enc.Close()
+		return nil, err
 	}
-	return EncodePCMU(SamplesToPCM(frame))
+	pc := &partyCodec{codec: c, enc: enc, dec: dec}
+	if c.SampleRate() != MixRate {
+		pc.down, pc.up = NewDown2(), NewUp2()
+	}
+	return pc, nil
 }
 
-func (g711Codec) TimestampStep() uint32 { return frameSamples }
-
-var (
-	partyCodecMu sync.RWMutex
-	partyCodecs  = map[uint8]PartyCodec{0: g711Codec{0}, 8: g711Codec{8}}
-)
-
-// RegisterPartyCodec adds (or replaces) the adapter for a payload type.
-func RegisterPartyCodec(c PartyCodec) {
-	partyCodecMu.Lock()
-	defer partyCodecMu.Unlock()
-	partyCodecs[c.PayloadType()] = c
+func (pc *partyCodec) close() {
+	pc.enc.Close()
+	pc.dec.Close()
 }
 
-// PartyCodecFor returns the adapter for a payload type.
-func PartyCodecFor(pt uint8) (PartyCodec, bool) {
-	partyCodecMu.RLock()
-	defer partyCodecMu.RUnlock()
-	c, ok := partyCodecs[pt]
-	return c, ok
+// decode turns one RTP payload into samples at MixRate.
+func (pc *partyCodec) decode(payload []byte) []int16 {
+	s := PCMToSamples(pc.dec.Decode(payload))
+	if pc.down != nil {
+		return pc.down.Process(s)
+	}
+	return s
+}
+
+// encode turns one MixFrame of samples at MixRate into an RTP payload.
+func (pc *partyCodec) encode(frame []int16) []byte {
+	if pc.up != nil {
+		wide := pc.up.Process(frame)
+		// The converter's output length can differ from the codec's frame
+		// by a sample at a stream's start; the codecs need whole frames.
+		want := pc.codec.FrameSamples()
+		if len(wide) > want {
+			wide = wide[:want]
+		}
+		for len(wide) < want {
+			wide = append(wide, 0)
+		}
+		return pc.enc.Encode(SamplesToPCM(wide))
+	}
+	return pc.enc.Encode(SamplesToPCM(frame))
 }
 
 // Queue bounds of a party: its jitter buffer holds at most partyMaxBuffer
@@ -83,8 +89,8 @@ const (
 // offer, so the answer carries the node's address and the socket's port.
 type Party struct {
 	conn  *net.UDPConn
-	codec PartyCodec
-	offer AudioSDP
+	codec *partyCodec
+	offer AudioSDP // the negotiated single codec and its telephone-event
 
 	remoteMu sync.Mutex
 	target   *net.UDPAddr // the SDP's address, used until the first packet
@@ -112,32 +118,40 @@ type Party struct {
 
 // NewParty binds a socket for the participant's media from the port range
 // [minPort, maxPort] (0 for both lets the kernel choose, as the tests do),
-// negotiates the codec from offer (G.711 PCMU/PCMA, or any codec registered
-// with RegisterPartyCodec) and returns the answer SDP advertising host.
+// negotiates the codec from offer the way every call Hello terminates does
+// (G.722 when offered, else G.711, Opus only when nothing else is on offer)
+// and returns the answer SDP advertising host.
 func NewParty(host string, minPort, maxPort int, offer []byte) ([]byte, *Party, error) {
 	ip := net.ParseIP(host)
 	if ip == nil || ip.To4() == nil {
 		return nil, nil, fmt.Errorf("media: advertised host %q is not an IPv4 address", host)
 	}
-	off, err := ParseAudioSDP(offer)
+	parsed, err := ParseAudioSDP(offer)
 	if err != nil {
 		return nil, nil, err
 	}
-	codec, ok := PartyCodecFor(off.PayloadType)
+	off, ok := parsed.Terminated()
 	if !ok {
-		return nil, nil, fmt.Errorf("media: no conference codec for payload type %d", off.PayloadType)
+		return nil, nil, errors.New("media: the offer has no codec a conference can mix")
+	}
+	codec, err := newPartyCodec(off.Codec)
+	if err != nil {
+		return nil, nil, fmt.Errorf("media: conference codec %s: %w", off.Codec.Name, err)
 	}
 	target := &net.UDPAddr{IP: net.ParseIP(off.Address), Port: off.Port}
 	if target.IP == nil {
+		codec.close()
 		return nil, nil, fmt.Errorf("media: offer address %q is not an IP", off.Address)
 	}
 	conn, err := bindPartySocket(minPort, maxPort)
 	if err != nil {
+		codec.close()
 		return nil, nil, err
 	}
 	var b [10]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		_ = conn.Close() // nothing received yet; the close error is irrelevant
+		codec.close()
 		return nil, nil, fmt.Errorf("media: party RTP identifiers: %w", err)
 	}
 	p := &Party{
@@ -148,7 +162,7 @@ func NewParty(host string, minPort, maxPort int, offer []byte) ([]byte, *Party, 
 	}
 	go p.recv()
 	port := conn.LocalAddr().(*net.UDPAddr).Port //nolint:forcetypeassert // always a UDPAddr
-	return BuildAudioSDP(host, port, off.PayloadType, off.DTMFPayloadType, off.DTMFRate), p, nil
+	return off.Build(host, port, "sendrecv"), p, nil
 }
 
 // bindPartySocket takes the first free port of the range; with no range it
@@ -210,6 +224,10 @@ func (p *Party) Close() {
 	p.closeOnce.Do(func() {
 		close(p.done)
 		_ = p.conn.Close() // teardown: nothing depends on the close error
+		// The receive goroutine owns the decoder and frees it on its way out.
+		p.sendMu.Lock()
+		p.codec.enc.Close()
+		p.sendMu.Unlock()
 	})
 }
 
@@ -228,6 +246,7 @@ func (p *Party) LastAudio() time.Time {
 }
 
 func (p *Party) recv() {
+	defer p.codec.dec.Close()
 	buf := make([]byte, rtpMaxPacket)
 	for {
 		n, from, err := p.conn.ReadFromUDP(buf)
@@ -239,11 +258,11 @@ func (p *Party) recv() {
 			continue
 		}
 		switch {
-		case pkt.PayloadType == p.codec.PayloadType():
+		case pkt.PayloadType == p.codec.codec.PT:
 			p.latch(from)
 			p.rx.Add(1)
 			p.lastRx.Store(time.Now().UnixNano())
-			p.push(p.codec.Decode(pkt.Payload))
+			p.push(p.codec.decode(pkt.Payload))
 		case p.offer.DTMFPayloadType != 0 && pkt.PayloadType == p.offer.DTMFPayloadType:
 			p.latch(from)
 			ev, ok := ParseTelephoneEvent(pkt.Payload)
@@ -324,11 +343,11 @@ func (p *Party) send(frame []int16) error {
 		return errPartyClosed
 	default:
 	}
-	payload := p.codec.Encode(frame)
 	p.sendMu.Lock()
-	pkt := BuildRTP(p.codec.PayloadType(), p.seq, p.ts, p.ssrc, p.marker, payload)
+	payload := p.codec.encode(frame)
+	pkt := BuildRTP(p.codec.codec.PT, p.seq, p.ts, p.ssrc, p.marker, payload)
 	p.seq++
-	p.ts += p.codec.TimestampStep()
+	p.ts += p.codec.codec.TimestampStep()
 	p.marker = false
 	p.sendMu.Unlock()
 	if _, err := p.conn.WriteToUDP(pkt, p.peer()); err != nil {

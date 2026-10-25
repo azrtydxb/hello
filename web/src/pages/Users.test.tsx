@@ -112,7 +112,10 @@ describe("Users (spec S-23)", () => {
     expect(await screen.findByText("Front desk")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "New extension" })).toBeNull();
     expect(
-      within(sidebar()).queryByRole("link", { name: /Route tester/ }),
+      within(sidebar()).queryByRole("link", {
+        name: /Route tester/,
+        hidden: true,
+      }),
     ).toBeNull();
     expect(screen.queryByRole("link", { name: /Test a number/ })).toBeNull();
     // Opening an extension shows its details without Save or Delete.
@@ -128,7 +131,10 @@ describe("Users (spec S-23)", () => {
       (await screen.findAllByRole("button", { name: "New extension" })).length,
     ).toBeGreaterThan(0);
     expect(
-      within(sidebar()).getByRole("link", { name: /Route tester/ }),
+      within(sidebar()).getByRole("link", {
+        name: /Route tester/,
+        hidden: true,
+      }),
     ).toBeInTheDocument();
   });
 

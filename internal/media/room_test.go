@@ -1,6 +1,7 @@
 package media
 
 import (
+	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -262,5 +263,115 @@ func TestPartyDTMF(t *testing.T) {
 	case extra := <-p.party.DTMF():
 		t.Fatalf("a duplicate digit %q was delivered", extra)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+// g722Phone is a wideband test endpoint: it sends and receives G.722.
+type g722Phone struct {
+	conn   *net.UDPConn
+	party  *Party
+	dst    *net.UDPAddr
+	enc    *G722Encoder
+	dec    *G722Decoder
+	seq    uint16
+	ts     uint32
+	frames chan []int16
+}
+
+func newG722Phone(t *testing.T) *g722Phone {
+	t.Helper()
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	port := conn.LocalAddr().(*net.UDPAddr).Port
+	// G.722 first, then G.711: the room must pick the wideband codec.
+	offer := "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio " + strconv.Itoa(port) +
+		" RTP/AVP 9 0 101\r\na=rtpmap:101 telephone-event/8000\r\n"
+	ans, party, err := NewParty("127.0.0.1", 0, 0, []byte(offer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(party.Close)
+	sdp, err := ParseAudioSDP(ans)
+	if err != nil || sdp.PayloadType != 9 {
+		t.Fatalf("answer = %q (%v), want G.722", ans, err)
+	}
+	p := &g722Phone{conn: conn, party: party, dst: &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: sdp.Port},
+		enc: NewG722Encoder(), dec: NewG722Decoder(), frames: make(chan []int16, 512)}
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			n, _, err := conn.ReadFromUDP(buf)
+			if err != nil {
+				return
+			}
+			pkt, ok := ParseRTP(buf[:n])
+			if !ok || pkt.PayloadType != 9 {
+				continue
+			}
+			select {
+			case p.frames <- p.dec.Decode(pkt.Payload):
+			default:
+			}
+		}
+	}()
+	return p
+}
+
+func (p *g722Phone) talk(hz, amp float64, d time.Duration) {
+	end := time.Now().Add(d)
+	for i := 0; time.Now().Before(end); i++ {
+		wide := make([]int16, 320)
+		for j := range wide {
+			wide[j] = int16(amp * math.Sin(2*math.Pi*hz*float64(i*320+j)/16000))
+		}
+		pkt := BuildRTP(9, p.seq, p.ts, 99, i == 0, p.enc.Encode(wide))
+		p.seq++
+		p.ts += 160
+		_, _ = p.conn.WriteToUDP(pkt, p.dst)
+		time.Sleep(frameDur)
+	}
+}
+
+func (p *g722Phone) heard(d time.Duration) int {
+	deadline := time.After(d)
+	best := 0
+	for {
+		select {
+		case f := <-p.frames:
+			best = max(best, peak(f))
+		case <-deadline:
+			return best
+		}
+	}
+}
+
+// TestRoomWidebandAndNarrowband fails if a G.722 participant is not answered
+// with G.722, if a G.711 participant does not hear a G.722 one (through the
+// 16 kHz to 8 kHz conversion), or if the G.722 participant does not hear the
+// G.711 one (through the conversion back up).
+func TestRoomWidebandAndNarrowband(t *testing.T) {
+	r := NewRoom()
+	defer r.Close()
+	narrow, wide := newConfPhone(t), newG722Phone(t)
+	r.Add("n", narrow.party, false, false)
+	r.Add("w", wide.party, false, false)
+
+	go wide.talk(500, 8000, 800*time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
+	narrow.drain()
+	if got := narrow.heard(400 * time.Millisecond); got < 3000 {
+		t.Fatalf("the G.711 participant heard peak %d from the G.722 one", got)
+	}
+	time.Sleep(300 * time.Millisecond)
+	go narrow.talk(500, 8000, 800*time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
+	for len(wide.frames) > 0 {
+		<-wide.frames
+	}
+	if got := wide.heard(400 * time.Millisecond); got < 3000 {
+		t.Fatalf("the G.722 participant heard peak %d from the G.711 one", got)
 	}
 }

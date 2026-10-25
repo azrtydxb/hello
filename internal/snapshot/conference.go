@@ -15,7 +15,7 @@ const (
 	ConfSoundAnnouncement = "announcement"
 )
 
-// Conference is a server conference room (migration 00025, spec S-34). The
+// Conference is a server conference room (migration 00029, spec S-34). The
 // PINs are opened here, in the node's memory only, like trunk passwords: the
 // call path compares them against the digits a caller keys in.
 type Conference struct {

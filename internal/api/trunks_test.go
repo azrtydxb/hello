@@ -139,3 +139,50 @@ func TestTrunkDialingValidation(t *testing.T) {
 	}
 	c.must(http.StatusCreated, "POST", "/api/v1/routes/inbound", route)
 }
+
+// TestTrunkCodecs covers the trunk codec allow-list: the G.711 default, the
+// canonical spelling, the refusals, and PATCH keeping or replacing it.
+func TestTrunkCodecs(t *testing.T) {
+	p := newP2Env(t, nil, false)
+	c := p.login()
+	plain := func(extra map[string]any) map[string]any {
+		b := map[string]any{"name": trunkName(), "mode": "ip", "destinations": []map[string]any{{"host": "10.0.0.5"}}}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return b
+	}
+
+	// Default: most carriers accept G.711 only.
+	created := c.must(http.StatusCreated, "POST", "/api/v1/trunks", plain(nil)).json(t)
+	if got := created["codecs"]; !reflect.DeepEqual(got, []any{"PCMU", "PCMA"}) {
+		t.Fatalf("default codecs = %v, want PCMU and PCMA", got)
+	}
+
+	// Names are stored in their canonical spelling, in the order given.
+	wide := c.must(http.StatusCreated, "POST", "/api/v1/trunks", plain(map[string]any{"codecs": []string{"g722", "pcmu", "OPUS"}})).json(t)
+	if got := wide["codecs"]; !reflect.DeepEqual(got, []any{"G722", "PCMU", "opus"}) {
+		t.Fatalf("codecs = %v, want G722 PCMU opus", got)
+	}
+	id := fmt.Sprint(wide["id"])
+
+	for what, codecs := range map[string][]string{
+		"unknown codec": {"PCMU", "G729"},
+		"empty list":    {},
+		"duplicate":     {"PCMU", "pcmu"},
+	} {
+		if got := fieldPaths(t, c.do("POST", "/api/v1/trunks", plain(map[string]any{"codecs": codecs}))); !slices.Contains(got, "codecs") {
+			t.Errorf("%s: fields %v lack codecs", what, got)
+		}
+	}
+
+	// PATCH of another field keeps the list; PATCH of codecs replaces it.
+	kept := c.must(http.StatusOK, "PATCH", "/api/v1/trunks/"+id, map[string]any{"maxCalls": 3}).json(t)
+	if got := kept["codecs"]; !reflect.DeepEqual(got, []any{"G722", "PCMU", "opus"}) {
+		t.Fatalf("PATCH of maxCalls changed codecs to %v", got)
+	}
+	replaced := c.must(http.StatusOK, "PATCH", "/api/v1/trunks/"+id, map[string]any{"codecs": []string{"PCMA"}}).json(t)
+	if got := replaced["codecs"]; !reflect.DeepEqual(got, []any{"PCMA"}) {
+		t.Fatalf("PATCH of codecs = %v", got)
+	}
+}

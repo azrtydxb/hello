@@ -77,6 +77,25 @@ func (c *call) voicemailOwnBox(string) {
 	c.startVoicemail(vmRetrieve, "")
 }
 
+// voicemailTarget points the call at extension ext's voicemail box, for the
+// voicemail feature code dialled with an extension (*97<ext>, which is also
+// what a phone's transfer-to-voicemail key dials). It reports false when ext
+// is no extension of this PBX or its box cannot take a message here.
+func (c *call) voicemailTarget(ext string) bool {
+	snap := c.s.deps.Snapshots.Current()
+	if snap == nil {
+		return false
+	}
+	e, ok := snap.Extension(ext)
+	if !ok || !c.voicemailConfigured(e) {
+		return false
+	}
+	c.mu.Lock()
+	c.dialled = ext
+	c.mu.Unlock()
+	return true
+}
+
 // startVoicemail answers the caller through the media anchor and runs the
 // application in the media goroutine. reason is why the call is here
 // ("no-answer", "busy", "dnd", "unreachable" or "" for *97). The box id
@@ -279,7 +298,7 @@ func (c *call) vmLeave(ctx context.Context, sess media.Session, box VoicemailBox
 		c.addTrace("Voicemail message discarded (hangup or shorter than 1s)")
 		return
 	}
-	wav := media.EncodeWAV(audio, 8000)
+	wav := media.EncodeWAV(audio, sess.SampleRate())
 	key, err := media.ObjectKey(box.ID, c.callID, time.Now())
 	if err != nil {
 		c.s.log.Warn("voicemail object key refused", "error", err)
@@ -331,7 +350,7 @@ func (c *call) playGreeting(ctx context.Context, sess media.Session, box Voicema
 		c.s.log.Warn("voicemail greeting unavailable", "error", err)
 		return
 	}
-	pcm, _, err := media.DecodeWAV(raw)
+	pcm, err := media.WAVToRate(raw, sess.SampleRate())
 	if err != nil {
 		c.s.log.Warn("voicemail greeting is not a WAV", "error", err)
 		return
@@ -375,7 +394,7 @@ func (c *call) recordMessage(ctx context.Context, sess media.Session) ([]byte, t
 		<-watch
 		dur := time.Since(start)
 		if lastDigit == '#' {
-			if len(audio) >= 2*8000 { // one second of 16-bit 8 kHz samples
+			if len(audio) >= 2*sess.SampleRate() { // one second of 16-bit samples
 				return audio, dur, true
 			}
 			return nil, 0, false
@@ -384,7 +403,7 @@ func (c *call) recordMessage(ctx context.Context, sess media.Session) ([]byte, t
 			continue // the caller retypes the message
 		}
 		// The caller hung up (or the session closed): keep what was said.
-		if len(audio) >= 2*8000 {
+		if len(audio) >= 2*sess.SampleRate() {
 			return audio, dur, true
 		}
 		return nil, 0, false
@@ -426,7 +445,7 @@ func (c *call) vmRetrieve(ctx context.Context, sess media.Session, box Voicemail
 	var ok bool
 	var err error
 	for attempt := 0; attempt < 3 && !ok; attempt++ {
-		_ = sess.Play(ctx, media.BeepPCM())
+		_ = sess.Play(ctx, media.BeepPCMRate(sess.SampleRate()))
 		dtmf := make(chan byte, 16)
 		dctx, dcancel := context.WithCancel(ctx)
 		digits := collectDigits(dctx, sess, dtmf)
@@ -460,7 +479,7 @@ func (c *call) vmRetrieve(ctx context.Context, sess media.Session, box Voicemail
 			s.log.Warn("voicemail message unavailable", "error", err)
 			continue
 		}
-		pcm, _, err := media.DecodeWAV(raw)
+		pcm, err := media.WAVToRate(raw, sess.SampleRate())
 		if err != nil {
 			continue
 		}

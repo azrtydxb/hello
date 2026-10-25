@@ -59,11 +59,16 @@ Every control (DTMF or console) is in the audit log with its actor, and
 Every 20 ms the owner takes one frame from each admitted participant, sums the
 loudest four talkers above a noise gate, and sends each participant that sum
 minus their own voice. Participants waiting for a leader are not mixed; they
-hear only the hold source. The mixer runs at 8 kHz: G.711 (PCMU, PCMA) is
-supported. A wideband codec plugs in by implementing `media.PartyCodec`
-(decode to and from the mixing rate) and registering it; the mixer, controls
-and recording need no other change. Room state is kept per participant, so a
-later video track can sit beside the audio without redesigning the room.
+hear only the hold source. The mixer runs at 8 kHz. Each participant keeps
+its own codec: a room answers like every call Hello terminates (G.722 when
+offered, else G.711, Opus only when nothing else is on offer), decodes the
+participant to the mixing rate (a streaming half-band filter takes G.722 and
+Opus down from 16 kHz) and encodes that participant's mix back in its codec, so
+a G.711 phone and a G.722 phone share a room. Mixing at 8 kHz means wideband
+participants hear narrowband quality; Opus is unavailable in `-race` builds.
+Room state is kept per participant and its media sits behind that codec step,
+so a video track can be added beside the audio later without redesigning the
+room.
 
 Wait-for-leader audio is the `ConferenceHold` dependency of the SIP server:
 return the music-on-hold samples at the mixing rate from `HoldSamples(room)`

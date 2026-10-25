@@ -12,6 +12,12 @@ type Metrics struct {
 	RedirectOps   *prometheus.CounterVec // vendor, op, result
 	FirmwareBytes *prometheus.CounterVec // vendor
 	AuditDropped  prometheus.Counter
+	// OnboardingCandidates is set by hello-control from the queue's size.
+	OnboardingCandidates prometheus.Gauge
+	// OnboardingCaptures counts candidate captures by outcome (stored,
+	// known, ignored, full, rate_limited, error); "full" counts the new
+	// MACs dropped because the queue is at its cap.
+	OnboardingCaptures *prometheus.CounterVec
 }
 
 // NewMetrics registers the provisioning metrics on reg.
@@ -36,8 +42,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		AuditDropped: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "hello_prov_audit_dropped_total", Help: "Fetch audit rows dropped because the queue was full or the database failed.",
 		}),
+		OnboardingCandidates: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "hello_onboarding_candidates", Help: "Unadopted phones waiting in the onboarding queue.",
+		}),
+		OnboardingCaptures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "hello_onboarding_captures_total", Help: "Onboarding candidate captures by outcome (stored, known, ignored, full, rate_limited, error).",
+		}, []string{"outcome"}),
 	}
-	reg.MustRegister(m.Requests, m.RenderSeconds, m.Phones, m.RedirectOps, m.FirmwareBytes, m.AuditDropped)
+	reg.MustRegister(m.Requests, m.RenderSeconds, m.Phones, m.RedirectOps, m.FirmwareBytes, m.AuditDropped,
+		m.OnboardingCandidates, m.OnboardingCaptures)
 	return m
 }
 

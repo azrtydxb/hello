@@ -67,6 +67,68 @@ every row (MAC, vendor, model, extension, duplicates in the file and in
 Hello) and changes nothing. The import creates every phone in one
 transaction, or none if any row fails. It creates a device per phone.
 
+### Onboarding queue: let the phone announce itself
+
+You do not have to know a phone's MAC first. Point DHCP option 66 at
+`http://prov.hello.kw.watteel.lab/p/boot/`, join a new phone to the network
+and open **Directory → Onboarding**. When an unknown phone asks for its
+configuration, Hello still answers an empty `404` and serves it nothing, but
+records the phone in the queue: MAC, vendor, model and firmware (read from the
+User-Agent and the requested file name), source IP, the path it asked for,
+first and last seen and how often. The page refreshes by itself and the
+sidebar badge counts the waiting phones.
+
+- **Adopt** (operators and administrators) opens a dialog: choose the
+  extension, optionally a label. Hello creates the phone exactly as **Add
+  phone** does (a new device on that extension, sealed secrets, armed for the
+  boot hand-off, vendor redirect registration), prefilled with the reported
+  vendor and model, and removes the candidate. A phone that reported no model
+  needs one typed in. **The phone picks up its configuration on its next
+  retry or after a reboot**; a phone that gave up waiting can be power-cycled.
+  The provisioning URL is not shown: the phone gets it through the hand-off.
+- **Bulk adopt** takes the ticked phones and either gives them consecutive
+  extensions from a starting number (in the order listed; the extensions must
+  exist) or lets you pick one per phone. All are adopted or none.
+- **Dismiss** removes a phone until it asks again. **Ignore this MAC** also
+  puts it on the ignore list (shown under the queue), and Hello stops
+  recording it until you choose **Stop ignoring**.
+
+Through the API (operator or administrator): `GET /api/v1/onboarding/candidates`,
+`POST /api/v1/onboarding/candidates/{mac}/adopt`,
+`POST /api/v1/onboarding/candidates/{mac}/dismiss` (`{"ignore":true}` to
+ignore), `POST /api/v1/onboarding/adopt` (bulk: `items` and an optional
+`startNumber`), `GET /api/v1/onboarding/ignored` and
+`DELETE /api/v1/onboarding/ignored/{mac}`. Every action is in the audit log
+(`adopt`, `adopt-batch`, `dismiss`, `ignore`, `unignore`).
+
+The endpoint is unauthenticated, so the queue is bounded:
+
+- Only well-formed MACs are recorded: 12 hex digits that a device can have (not
+  all-zero, broadcast or a group address).
+- A MAC that is already a phone is never recorded.
+- Each source IP may write at most 30 times a minute (cluster-wide, in Valkey,
+  with the usual in-memory fallback). Writes over the limit are dropped; the
+  response is the same `404`.
+- The queue holds at most 500 phones. When it is full, new MACs are ignored
+  and counted in `hello_onboarding_captures_total{outcome="full"}`; phones
+  already queued keep being refreshed. Dismiss or adopt to make room.
+- A phone unseen for 30 days leaves the queue.
+- Several control pods share one PostgreSQL table, written with a single
+  upsert and a database lock for new rows, so the cap holds across pods.
+
+A phone waiting in the queue does not count as a denial towards blocking its
+source IP, so a few new phones behind one address never get that address (and
+the adopted phones on it) blocked.
+
+Metrics: `hello_onboarding_candidates` (the queue's size) and
+`hello_onboarding_captures_total{outcome}` (`stored`, `known`, `ignored`,
+`full`, `rate_limited`, `error`).
+
+Adopting arms the phone for the trust-on-first-use hand-off (see
+[Trust on first use](#trust-on-first-use)): whoever asks first for the
+phone's per-MAC boot file after you adopt it gets its token, so adopt a phone
+when it is about to boot, and set `HELLO_PROV_BOOT_CIDRS`.
+
 ## DHCP option 66, 160 and 43
 
 Give the phones' network this value; it is the same for every vendor:
@@ -270,6 +332,29 @@ Protocol` `5` for HTTPS, and `Flash Mode` `2` makes it re-check every `Flash
 Interval` hours. A pinned firmware goes in `Auto Image Url`, the file's full
 URL. These key names follow Fanvil's X-series configuration files; they are
 unconfirmed on a phone, so verify them.
+
+### HD voice codec order
+
+Every built-in template puts G.722 first, then Opus on the models that have
+it, then PCMU and PCMA, and leaves the other codecs (G.729, G.726, G.723,
+iLBC) off. Hello offers phones G.722, Opus, PCMU and PCMA only, so two phones
+that both do G.722 talk wideband and anything else falls back to G.711 (see
+[Media anchoring](media.md#codecs-hd-voice)). The keys, for account 1 (the
+account Hello provisions); another account of a multi-account model takes
+the same keys with its own number:
+
+| Vendor      | Keys                                                                                                                                                                                              |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.N.codec.g722.enable` and `.priority = 1`, then `opus`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0` |
+| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 9 (G.722), 123 (Opus, models that have it), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...) |
+| Snom        | `codec_priority_list idx="N"` = `g722,opus,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                             |
+| Fanvil      | `SIPN Voice Codec Map` = `G722,opus,G711U,G711A`                                                                                                                                                  |
+| Poly        | `voice.codecPref.G722="1"`, `.Opus="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                  |
+
+Opus is listed only for models known to support it (`internal/prov/codecs.go`);
+an unknown model gets G.722, PCMU and PCMA. The keys are from the vendors'
+administrator guides and configuration templates and are unverified on
+hardware, like the other keys marked so on this page.
 
 ### Still to verify on a phone
 
@@ -844,6 +929,59 @@ unverified on a phone.
   that node must be on the phones' LAN: in Kubernetes, host networking or a
   secondary interface on that VLAN.
 
+## Call waiting and busy handling
+
+Each extension has a **Call waiting** switch (`callWaiting`, on by default;
+the extension's page in the console or `PATCH /api/v1/extensions/{id}`).
+
+- **On.** A call to an extension that is in a call still rings its phones,
+  and the phone shows its own call-waiting indication and tone.
+- **Off.** A call to an extension that is in a call does not ring: the caller
+  gets the extension's forward-busy target when one is set, otherwise the
+  extension's voicemail when it has one, otherwise `486 Busy Here`. An
+  extension that is not busy rings as usual.
+- **Ring groups and hunt groups** skip a member that is in a call and has
+  call waiting off, as they skip a DND member; a member with call waiting on
+  is still rung. A group left with no member follows its failure destination.
+- **Paging and intercom.** Paging already skips every member in a call (a
+  page never interrupts a call), whatever the switch says. An intercom call
+  to an extension in a call rings it as a normal call instead of
+  auto-answering, whatever the switch says; the call-waiting flag is not
+  consulted on that path. Call parking and pickup do not exist in Hello yet;
+  when they do, they must not consult the flag either (a pickup answers a
+  call that is already ringing).
+- **How busy is decided.** An extension is busy while any connected call of
+  the cluster has it as caller, as the dialled number, or as the extension
+  whose phone answered (a ring group member, a forward target). Every node
+  publishes its calls to Valkey with a heartbeat and a TTL (the same live
+  call record the dashboard and paging use), so the state is cluster-wide,
+  is released when the call ends (BYE, CANCEL, failure, takeover) and
+  expires by itself when the owning node dies. Nothing extra is counted. If
+  Valkey is unreachable the extension is treated as idle and rings.
+- **Feature codes.** `*71` turns call waiting on and `*70` turns it off for
+  the extension of the phone that dials it, like `*78` and `*79` do for DND
+  (also mid-call as DTMF). The defaults are added by migration 00026 to
+  existing installs unless the code is already used; change them under
+  System, Feature codes.
+- **Phone settings.** The built-in templates write the phone's own switch
+  and tone from the flag, so the phone and Hello agree. **A change reaches a
+  phone at its next resync** (use Resync on the Phones page, or wait for the
+  resync interval); a toggle by feature code does the same. All keys are
+  from the vendor's documentation or published configuration templates and
+  **none is confirmed on hardware yet** (lab item 26):
+
+  | Vendor      | Keys written (on / off)                                                                                                                                                                                               | Source                                                                                                                                                                                                                                       |
+  | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Grandstream | `P26063` account 1 call waiting: 1 / 2 (WP856: 2 / 1, its template reads it the other way round); `P91` phone-wide: 0 / 1; `P186` call-waiting tone: 0 / 1 (WP8x6; the WP822 template has no such key and ignores it) | `wp8x6_config_1.0.3.39` ("Enable Call Waiting", 0 Default, 1 Yes, 2 No) and `wp810_822_825_config_1.0.11.83` ("Disable Call Waiting", 0 Default, 1 No, 2 Yes) in config-template_09302026: the wording is inverted, the values mean the same |
+  | Yealink     | `call_waiting.enable` 1 / 0, `call_waiting.tone` 1 / 0                                                                                                                                                                | Yealink SIP IP Phones Administrator Guide, "Call Waiting"; the same keys in third-party provisioning templates                                                                                                                               |
+  | Snom        | `call_waiting idx=1` `on` / `off` (`visual` would show it without a tone)                                                                                                                                             | Snom settings reference and the Tancredi snom template                                                                                                                                                                                       |
+  | Poly        | `call.callWaiting.enable` 1 / 0, `call.callWaiting.ring` `beep`                                                                                                                                                       | Poly UC Software Administrator Guide; provisioning templates for VVX                                                                                                                                                                         |
+  | Fanvil      | `P1 CallWaiting` 1 / 0 and `P1 CWaiting Tone` 1 / 0 in `<CALL FEATURE MODULE>`                                                                                                                                        | Fanvil X-series exported configuration (a real phone export; the XML form is `CallWaiting` and `CWaitingTone`)                                                                                                                               |
+
+  The WP822 and WP836 call-waiting tone is the phone's own
+  (`P347` and its gain `P1555`, left at their defaults); the lab check
+  listens for it with the flag on and expects silence with it off.
+
 ## Security model and its limits
 
 What protects the phones' secrets:
@@ -857,7 +995,9 @@ What protects the phones' secrets:
 - Every request is in the fetch log with the token redacted (`/p/****/…`);
   the ingress access log is off. No secret, token or redirect credential is
   ever logged.
-- The boot path never serves a SIP secret or an admin password.
+- The boot path never serves a SIP secret or an admin password, and an
+  unadopted phone is served nothing: its request only adds it to the
+  [onboarding queue](#onboarding-queue-let-the-phone-announce-itself).
 
 What it does not protect against:
 

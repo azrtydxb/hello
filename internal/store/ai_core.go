@@ -166,10 +166,13 @@ func (s *Store) FailAITasks(ctx context.Context, replica, code, message string, 
 	return res.RowsAffected()
 }
 
-// TryAILock takes pg_try_advisory_lock(hashtext(key)) on a connection of
+// TryLock takes pg_try_advisory_lock(hashtext(key)) on a connection of
 // its own, held until unlock (or until the process dies and PostgreSQL
-// drops the connection).
-func (s *Store) TryAILock(ctx context.Context, key string) (func(), bool, error) {
+// drops the connection). Any "one replica does this" task uses it with a
+// key of its own: the AI scheduler and, with the integrations spec, the
+// directory sync, webhook sweeper and CRM refresher. Keys are namespaced
+// hello:<area>:<task> and must not collide with the configuration lock.
+func (s *Store) TryLock(ctx context.Context, key string) (func(), bool, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, false, err

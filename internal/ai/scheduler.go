@@ -109,7 +109,7 @@ func (sc *Scheduler) runIfDue(ctx context.Context, a Agent) error {
 	if due, _, err := sc.due(ctx, a); err != nil || !due {
 		return err
 	}
-	unlock, ok, err := s.st.TryAILock(ctx, "hello:ai:agent:"+a.Name())
+	unlock, ok, err := s.st.TryLock(ctx, "hello:ai:agent:"+a.Name())
 	if err != nil {
 		return err
 	}

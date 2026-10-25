@@ -217,7 +217,7 @@ func (c *call) joinConference(req *sip.Request, tx sip.ServerTransaction, snap *
 		refuse(sip.StatusNotAcceptableHere, ResultFailed, "failed", "no usable audio offer")
 		return
 	}
-	if _, ok := media.PartyCodecFor(offer.PayloadType); !ok {
+	if _, ok := offer.Terminated(); !ok {
 		refuse(sip.StatusNotAcceptableHere, ResultFailed, "failed", "no common conference codec")
 		return
 	}
@@ -618,17 +618,16 @@ func (c *call) confInDialog(req *sip.Request, tx sip.ServerTransaction) bool {
 	body := answer
 	if off, err := media.ParseAudioSDP(req.Body()); err == nil {
 		p.party.Retarget(off.Address, off.Port)
+		// The answer keeps the codec negotiated at the start; only the
+		// direction follows the offer (a hold is answered recvonly).
 		dir := "sendrecv"
 		switch media.SDPDirection(req.Body()) {
-		case "sendonly", "inactive":
+		case "sendonly":
 			dir = "recvonly"
-			if media.SDPDirection(req.Body()) == "inactive" {
-				dir = "inactive"
-			}
+		case "inactive":
+			dir = "inactive"
 		}
-		if sdp, err := media.ParseAudioSDP(answer); err == nil {
-			body = media.BuildAudioSDPDir(sdp.Address, sdp.Port, off.PayloadType, off.DTMFPayloadType, off.DTMFRate, dir)
-		}
+		body = []byte(strings.ReplaceAll(string(answer), "a=sendrecv", "a="+dir))
 	}
 	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", body)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
@@ -794,12 +793,21 @@ func (c *call) confRehome(cfg snapshot.Conference, f *confFwd) {
 			cfg = cur
 		}
 	}
-	off, err := media.ParseAudioSDP(c.inv.Body())
+	// The loopback "phone" is the relay's second leg, which speaks the codec
+	// the dead owner answered with: the codec the phone is sending.
+	c.mu.Lock()
+	w := c.winner
+	c.mu.Unlock()
+	var ownerAns []byte
+	if w != nil && w.session() != nil && w.session().InviteResponse != nil {
+		ownerAns = w.session().InviteResponse.Body()
+	}
+	off, err := media.ParseAudioSDP(ownerAns)
 	if err != nil {
 		c.endBoth("conference owner lost")
 		return
 	}
-	loop := media.BuildAudioSDP("127.0.0.1", relay.LegPort(legCallee), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
+	loop := off.Narrow(off.PayloadType).Build("127.0.0.1", relay.LegPort(legCallee), "sendrecv")
 	own, err := s.confResolve(cfg.Number)
 	if err != nil || !own.self {
 		c.addTrace("Conference owner lost and the room could not be moved here")

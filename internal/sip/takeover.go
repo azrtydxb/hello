@@ -630,8 +630,8 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 		s.haAbandon(st, from, "relay leg b: "+err.Error())
 		return
 	}
-	relay.SetPayloadTypes(legCaller, off.PayloadType, off.DTMFPayloadType)
-	relay.SetPayloadTypes(legCallee, off.PayloadType, off.DTMFPayloadType)
+	relay.SetCodecs(legCaller, off.Codecs, off.DTMFPayloadType)
+	relay.SetCodecs(legCallee, off.Codecs, off.DTMFPayloadType)
 	host := s.anchorHostOr(off.Address)
 	s.log.Info("takeover claimed", "call_id", st.CallID, "from", from)
 	c := s.haNewCall(st, from, a, b, start)
@@ -640,7 +640,8 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	c.anchored = true
 	c.anchorReason = AnchorPolicy
 	c.relay = relay
-	c.rec = &recording{}
+	c.rec = &recording{codecs: off.Codecs}
+	c.negotiated = off
 	c.mu.Unlock()
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
@@ -821,10 +822,9 @@ func (c *call) haInDialog(hom *homedCall, req *sip.Request, tx sip.ServerTransac
 		dir := media.SDPDirection(req.Body())
 		c.setHeld(dir == "sendonly" || dir == "inactive")
 		c.setHADirs(fromCaller, dir)
-		ans = media.BuildAudioSDPDir(c.anchorHost, c.legPortFor(fromCaller), off.PayloadType,
-			off.DTMFPayloadType, off.DTMFRate, mirrorDirection(dir))
-		peer = media.BuildAudioSDPDir(c.anchorHost, c.legPortFor(!fromCaller), off.PayloadType,
-			off.DTMFPayloadType, off.DTMFRate, dir)
+		off = c.midCallOffer(off)
+		ans = off.Build(c.anchorHost, c.legPortFor(fromCaller), mirrorDirection(dir))
+		peer = off.Build(c.anchorHost, c.legPortFor(!fromCaller), dir)
 	}
 	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", ans)
 	if err == nil {
@@ -937,17 +937,21 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 				s.haAbandon(st, from, "relay leg: "+err.Error())
 				return
 			}
-			relay.SetPayloadTypes(leg, off.PayloadType, off.DTMFPayloadType)
 		}
+		// Hello answers the caller itself: G.722 if offered, else G.711.
+		ansSDP := media.AnswerFor(off, media.AudioSDP{})
+		relay.SetCodecs(legCaller, ansSDP.Codecs, ansSDP.DTMFPayloadType)
+		relay.SetCodecs(legCallee, ansSDP.Codecs, ansSDP.DTMFPayloadType)
 		relay.SetTarget(legCaller, udpAddr(off.Address, off.Port))
 		c.anchorHost = s.anchorHostOr(off.Address)
 		c.relay, c.anchored, c.anchorReason = relay, true, AnchorPolicy
-		c.rec = &recording{}
+		c.rec = &recording{codecs: ansSDP.Codecs}
+		c.negotiated = ansSDP
 		relay.Start()
 		if m := s.deps.Media; m != nil {
 			m.NoteStart()
 		}
-		body = media.BuildAudioSDP(c.anchorHost, relay.LegPort(legCaller), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
+		body = ansSDP.Build(c.anchorHost, relay.LegPort(legCaller), "sendrecv")
 	}
 	s.log.Info("takeover re-INVITE", "call_id", st.CallID, "leg", legCaller, "to", a.destination(s), "app", st.State)
 	res, ok := s.haReinvite(a, body)
