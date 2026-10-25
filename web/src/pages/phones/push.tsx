@@ -14,7 +14,7 @@ export const PUSH_LABEL: Record<PushStatus, string> = {
   ok: "Acknowledged (200)",
   not_registered: "Not registered",
   timeout: "Push not acknowledged",
-  auth_failed: "Authentication failed",
+  auth_failed: "Phone rejected the request, needs one manual reboot",
   failed: "Failed",
 };
 
