@@ -15,10 +15,13 @@ var ErrLastAdmin = errors.New("store: last admin")
 
 // User is a management user without its password hash.
 type User struct {
-	ID        int64     `json:"id"`
-	Username  string    `json:"username"`
-	Role      auth.Role `json:"role"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID       int64     `json:"id"`
+	Username string    `json:"username"`
+	Role     auth.Role `json:"role"`
+	// ExtensionID is the extension the user is linked to (spec P-3); nil
+	// when there is none.
+	ExtensionID *int64    `json:"extensionId"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 // CreateUser inserts a management user with role, except that the first
@@ -40,7 +43,7 @@ func (s *Store) CreateUser(ctx context.Context, actor, username, passwordHash st
 
 // ListUsers returns every management user with its role, by id.
 func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, username, role, created_at FROM users ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, username, role, extension_id, created_at FROM users ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +51,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]User, error) {
 	out := []User{}
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.ExtensionID, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -66,8 +69,8 @@ func (s *Store) SetUserRole(ctx context.Context, actor string, id int64, role au
 		if err != nil {
 			return err
 		}
-		err = tx.QueryRowContext(ctx, `SELECT id, username, role, created_at FROM users WHERE id = $1 FOR UPDATE`, id).
-			Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt)
+		err = tx.QueryRowContext(ctx, `SELECT id, username, role, extension_id, created_at FROM users WHERE id = $1 FOR UPDATE`, id).
+			Scan(&u.ID, &u.Username, &u.Role, &u.ExtensionID, &u.CreatedAt)
 		if err != nil {
 			return mapErr(err)
 		}
@@ -98,4 +101,42 @@ func lockAdmins(ctx context.Context, tx *sql.Tx) (int, error) {
 		n++
 	}
 	return n, rows.Err()
+}
+
+// SetUserExtension links user id to an extension, or unlinks it with nil,
+// and records the audit event. An extension is linked to at most one user;
+// one already taken is a conflict naming the user.
+func (s *Store) SetUserExtension(ctx context.Context, actor string, id int64, extension *int64) (User, error) {
+	var u User
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		err := tx.QueryRowContext(ctx, `SELECT id, username, role, extension_id, created_at FROM users WHERE id = $1 FOR UPDATE`, id).
+			Scan(&u.ID, &u.Username, &u.Role, &u.ExtensionID, &u.CreatedAt)
+		if err != nil {
+			return mapErr(err)
+		}
+		action := "unset-extension"
+		if extension != nil {
+			action = "set-extension"
+			var number string
+			switch err := tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE id = $1 FOR SHARE`, *extension).Scan(&number); {
+			case errors.Is(err, sql.ErrNoRows):
+				return fieldError("extensionId", "no such extension")
+			case err != nil:
+				return err
+			}
+			var other string
+			switch err := tx.QueryRowContext(ctx, `SELECT username FROM users WHERE extension_id = $1 AND id <> $2`, *extension, id).Scan(&other); {
+			case err == nil:
+				return conflict("extension %s is already linked to user %q", number, other)
+			case !errors.Is(err, sql.ErrNoRows):
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET extension_id = $2 WHERE id = $1`, id, extension); err != nil {
+			return err
+		}
+		u.ExtensionID = extension
+		return insertAudit(ctx, tx, actor, action, "user", strconv.FormatInt(id, 10))
+	})
+	return u, err
 }

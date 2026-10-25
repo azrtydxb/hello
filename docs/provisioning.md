@@ -299,6 +299,39 @@ The token in the per-device URL is the phone's credential.
   it (immediately) and fix the phone's URL to `https://`. The one plain-HTTP
   hand-off of trust on first use does not set this flag.
 
+## Address books
+
+Hello keeps the contact data that phones will show as a directory. This
+part is the data and its API; phones are not yet pointed at a directory, so
+nothing changes on a phone until delivery lands.
+
+- **Books.** The **company** book and the **extensions** book exist once.
+  The extensions book is computed from the extensions (name and number) and
+  is read-only; hide an extension from it with `directoryHidden` on the
+  extension (`PATCH /api/v1/extensions/{id}`). **Named** books are created
+  by an admin (at most 100). An entry has a first name, last name, company
+  (any one is enough), one to three numbers labelled `work`, `mobile`,
+  `home` or `other`, and a note; a book holds at most 5,000 entries.
+- **Who can do what.** Viewers read books, entries and groups. Operators
+  also change the entries of the company and named books and import and
+  export CSV. Admins also create, rename and delete books, and manage phone
+  groups.
+- **Phone groups** decide which books a phone is delivered: the extensions
+  and company books (on by default) and up to five named books, in order.
+  Put a phone in a group with `groupId` on `PATCH /api/v1/phones/{id}`.
+- **Link a user to an extension** with `extensionId` on
+  `PATCH /api/v1/users/{id}` (admin; one user per extension). It is what
+  ties a user's personal contacts to the phones of that extension.
+- **CSV.** `POST /api/v1/phonebooks/{id}/import` takes a multipart `file`
+  with the header `first_name,last_name,company,work,mobile,home,other,note`
+  (UTF-8 with or without a byte order mark, comma or semicolon, up to 2 MiB
+  and 5,000 rows). `dry_run=true` reports every failing row with its row,
+  column and reason and writes nothing; an import is all or nothing, and
+  `mode=replace` swaps the book's content instead of appending.
+  `GET /api/v1/phonebooks/{id}/export` writes the same format; a cell
+  starting with `=`, `+`, `-` or `@` gets a leading apostrophe so a
+  spreadsheet does not evaluate it, and the import removes it again.
+
 ## Security model and its limits
 
 What protects the phones' secrets:

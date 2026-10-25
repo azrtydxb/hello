@@ -496,8 +496,8 @@ export function HealthAlerts({
 function peakLine(series: CdrConcurrency | undefined): string {
   if (!series) return "From call records";
   if (!series.peak)
-    return "No recorded calls in this window · from call records";
-  return `Peak ${series.peak.calls} at ${clock(series.peak.at, false)} · from call records`;
+    return "No calls in this window · from call records and live calls";
+  return `Peak ${series.peak.calls} at ${clock(series.peak.at, false)} · from call records and live calls`;
 }
 
 /** About five evenly spaced HH:MM labels for the chart's x axis. */
@@ -531,7 +531,8 @@ function ConcurrencyChart({
   return (
     <LineChart
       height={170}
-      label={`Concurrent calls over the last ${range}, from call records. ${peakLine(data)}.`}
+      integer
+      label={`Concurrent calls over the last ${range}. ${peakLine(data)}.`}
       labels={axisLabels(data.points)}
       series={[
         {

@@ -25,19 +25,22 @@ type Extension struct {
 	VoicemailEnabled bool   `json:"voicemailEnabled"`
 	RecordDefault    bool   `json:"recordDefault"`
 	// AllowIntercom lets an intercom call auto-answer on this extension
-	// (migration 00011); false rings it normally.
-	AllowIntercom bool      `json:"allowIntercom"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	// (migration 00012); false rings it normally.
+	AllowIntercom bool `json:"allowIntercom"`
+	// DirectoryHidden keeps the extension out of the automatic extensions
+	// book (spec P-1).
+	DirectoryHidden bool      `json:"directoryHidden"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 const extensionCols = `id, number, name, external_number, dnd, forward_always, forward_busy, forward_no_answer,
-	voicemail_enabled, record_default, allow_intercom, created_at, updated_at`
+	voicemail_enabled, record_default, allow_intercom, directory_hidden, created_at, updated_at`
 
 func scanExtension(r interface{ Scan(...any) error }) (Extension, error) {
 	var e Extension
 	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.ExternalNumber, &e.DND, &e.ForwardAlways, &e.ForwardBusy,
-		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CreatedAt, &e.UpdatedAt)
+		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.DirectoryHidden, &e.CreatedAt, &e.UpdatedAt)
 	return e, err
 }
 
@@ -93,6 +96,7 @@ type ExtensionChange struct {
 	VoicemailEnabled             *bool
 	RecordDefault                *bool
 	AllowIntercom                *bool
+	DirectoryHidden              *bool
 }
 
 // UpdateExtension changes the fields that are not nil. Renumbering an
@@ -114,9 +118,9 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 			       forward_always = COALESCE($6, forward_always), forward_busy = COALESCE($7, forward_busy),
 			       forward_no_answer = COALESCE($8, forward_no_answer), voicemail_enabled = COALESCE($9, voicemail_enabled),
 			       record_default = COALESCE($10, record_default), allow_intercom = COALESCE($11, allow_intercom),
-			       updated_at = now()
+			       directory_hidden = COALESCE($12, directory_hidden), updated_at = now()
 			WHERE id = $1 RETURNING `+extensionCols, id, c.Number, c.Name, c.ExternalNumber,
-			c.DND, c.ForwardAlways, c.ForwardBusy, c.ForwardNoAnswer, c.VoicemailEnabled, c.RecordDefault, c.AllowIntercom))
+			c.DND, c.ForwardAlways, c.ForwardBusy, c.ForwardNoAnswer, c.VoicemailEnabled, c.RecordDefault, c.AllowIntercom, c.DirectoryHidden))
 		return id, err
 	})
 	return e, err

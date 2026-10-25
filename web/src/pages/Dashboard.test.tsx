@@ -251,7 +251,7 @@ describe("Dashboard", () => {
     fireEvent.click(screen.getByRole("radio", { name: "1h" }));
     expect(
       await screen.findByText(
-        "No recorded calls in this window · from call records",
+        "No calls in this window · from call records and live calls",
       ),
     ).toBeVisible();
     expect(calls.map((c) => c.url)).toContain(

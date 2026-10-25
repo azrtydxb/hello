@@ -262,6 +262,7 @@ func (s *server) updatePhone(w http.ResponseWriter, r *http.Request) {
 		ExtensionID *int64          `json:"extensionId"`
 		DeviceID    json.RawMessage `json:"deviceId"`
 		TemplateID  json.RawMessage `json:"templateId"`
+		GroupID     json.RawMessage `json:"groupId"`
 		BLF         *[]string       `json:"blf"`
 		Enabled     *bool           `json:"enabled"`
 	}
@@ -280,6 +281,16 @@ func (s *server) updatePhone(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		c.TemplateID = &tpl
+	}
+	if in.GroupID != nil {
+		var grp *int64
+		if string(in.GroupID) != "null" {
+			grp = new(int64)
+			if err := json.Unmarshal(in.GroupID, grp); err != nil || *grp <= 0 {
+				f.add("groupId", "must be a phone group id or null")
+			}
+		}
+		c.GroupID = &grp
 	}
 	switch {
 	case string(in.DeviceID) == "null":

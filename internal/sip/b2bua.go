@@ -1066,7 +1066,7 @@ func (c *call) live() livestate.Call {
 	}
 	return livestate.Call{
 		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, State: state,
-		Node: c.s.cfg.NodeID, Media: "direct", StartedAt: c.start, AnsweredAt: answered, HA: ha,
+		Node: c.s.cfg.NodeID, Media: "direct", StartedAt: c.start, AnsweredAt: answered, HA: ha, Direction: c.direction,
 	}
 }
 

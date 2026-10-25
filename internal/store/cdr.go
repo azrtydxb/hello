@@ -37,7 +37,7 @@ type CDR struct {
 	RTPPackets           *int64     `json:"rtpPackets"`
 	RTPLost              *int64     `json:"rtpLost"`
 	RTPJitterMs          *float64   `json:"rtpJitterMs"`
-	// Kind is call, page or intercom (migration 00011).
+	// Kind is call, page or intercom (migration 00012).
 	Kind string `json:"kind"`
 }
 

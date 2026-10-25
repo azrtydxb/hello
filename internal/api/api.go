@@ -15,6 +15,7 @@ import (
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/version"
@@ -41,6 +42,7 @@ type Store interface {
 
 	ListUsers(ctx context.Context) ([]store.User, error)
 	SetUserRole(ctx context.Context, actor string, id int64, role auth.Role) (store.User, error)
+	SetUserExtension(ctx context.Context, actor string, id int64, extension *int64) (store.User, error)
 
 	ListTokens(ctx context.Context, userID int64) ([]store.Token, error)
 	CreateToken(ctx context.Context, actor string, userID int64, in store.NewToken, hash []byte) (store.Token, error)
@@ -163,6 +165,11 @@ type Config struct {
 	// the provisioning routes. Prov wires the rest of them.
 	ProvStore ProvStore
 	Prov      ProvConfig
+	// Phonebooks is the address-book persistence; nil answers 503 on the
+	// phonebook and phone-group routes. Dialing is the numbering context the
+	// lookup keys of stored numbers are built in.
+	Phonebooks PhonebookStore
+	Dialing    phonebook.Dialing
 	// AI is the OAuth authorization server (spec ai-external-access); nil
 	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
 	// routes answer 404 and bearer tokens get no audience check.
