@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/csv"
 	"net/http"
 	"regexp"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/cdr"
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -60,8 +63,10 @@ type concurrencyPeak struct {
 }
 
 // cdrConcurrency is GET /api/v1/cdrs/concurrency?range=1h|6h|24h: the
-// number of recorded calls in progress at each step of the window, by
-// direction, and the peak. The window ends at the last whole step.
+// number of calls in progress at each step of the window, by direction,
+// and the peak. Recorded calls come from CDRs; calls still in progress have
+// no CDR yet and are added from the live state, with a final sample at the
+// current time when it falls after the last whole step.
 func (s *server) cdrConcurrency(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("range")
 	if name == "" {
@@ -78,6 +83,7 @@ func (s *server) cdrConcurrency(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "cdr concurrency", err)
 		return
 	}
+	pts = s.addLiveCalls(r.Context(), pts, to, time.Now().UTC())
 	var peak *concurrencyPeak
 	for _, p := range pts {
 		if n := p.Inbound + p.Outbound + p.Internal; n > 0 && (peak == nil || n > peak.Calls) {
@@ -87,6 +93,48 @@ func (s *server) cdrConcurrency(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"range": name, "stepSeconds": int64(rg.step / time.Second), "points": pts, "peak": peak,
 	})
+}
+
+// addLiveCalls counts the calls in the live state, which have no CDR yet,
+// into every sample at or after their start, and appends a sample at now
+// when now is past the last one. A live-state outage leaves the CDR counts
+// as they are.
+func (s *server) addLiveCalls(ctx context.Context, pts []store.ConcurrencyPoint, last, now time.Time) []store.ConcurrencyPoint {
+	if s.Live == nil {
+		return pts
+	}
+	lctx, cancel := context.WithTimeout(ctx, liveTimeout)
+	defer cancel()
+	calls, err := s.Live.Calls(lctx)
+	if err != nil {
+		s.Log.Warn("live state unavailable", "op", "concurrency live calls", "error", err)
+		return pts
+	}
+	if len(calls) == 0 {
+		return pts
+	}
+	if now.After(last) {
+		pts = append(pts, store.ConcurrencyPoint{At: now})
+	}
+	for _, c := range calls {
+		for i := range pts {
+			if !pts[i].At.Before(c.StartedAt) {
+				addDirection(&pts[i], c)
+			}
+		}
+	}
+	return pts
+}
+
+func addDirection(p *store.ConcurrencyPoint, c livestate.Call) {
+	switch c.Direction {
+	case cdr.DirectionInbound:
+		p.Inbound++
+	case cdr.DirectionOutbound:
+		p.Outbound++
+	default:
+		p.Internal++
+	}
 }
 
 // maxCDRExport bounds one CSV export.
