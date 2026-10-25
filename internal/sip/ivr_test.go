@@ -46,18 +46,11 @@ func ivrPBX(t *testing.T, greetSeconds int, menus ...snapshot.IVRMenu) (*testPBX
 	return pbx, objs
 }
 
-// countRTP counts the datagrams the PBX sends to the phone's media port.
+// countRTP points the phone's media at a fresh port and counts the
+// datagrams the PBX sends there (set before the phone dials).
 func countRTP(t *testing.T, p *phone) *atomic.Int64 {
 	t.Helper()
-	off, err := media.ParseAudioSDP([]byte(p.sdp))
-	if err != nil {
-		t.Fatal(err)
-	}
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: off.Port})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
+	conn := rtpSocket(t, p)
 	var n atomic.Int64
 	go func() {
 		buf := make([]byte, 2048)
