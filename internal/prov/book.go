@@ -20,8 +20,10 @@ const MaxBookBytes = 2 << 20
 const DefaultBookRefresh = 15 * time.Minute
 
 // bookSlotRE is the name after /p/<token>/pb/: a slot, 0 the merged set and
-// 1 to 5 the separate sources.
-var bookSlotRE = regexp.MustCompile(`^([0-5])\.xml$`)
+// 1 to 5 the separate sources. A Grandstream WP810/WP822 treats P331 as a
+// directory and appends /phonebook.xml, so <n>.xml/phonebook.xml and
+// <n>/phonebook.xml name the same slot.
+var bookSlotRE = regexp.MustCompile(`^([0-5])(?:\.xml(?:/phonebook\.xml)?|/phonebook\.xml)$`)
 
 // NewBookInfo is the BookInfo of a phone whose delivered books are named
 // names, in order: base is the phone's own https://…/p/<token>/ URL. It is

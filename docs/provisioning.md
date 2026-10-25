@@ -440,6 +440,13 @@ label to the name (`Tom Smith (mobile)`). Past 1,000 entries a Grandstream
 directory keeps the first 1,000 of the delivery order (extensions, company,
 group books), so earlier books win, and logs it.
 
+Grandstream WP810 and WP822 firmware (1.0.11.x) treats `P331` as a
+directory and appends `/phonebook.xml`, requesting
+`/p/<token>/pb/0.xml/phonebook.xml`; the WP836 uses it as the whole file
+URL. The endpoint serves the same book for `pb/<n>.xml`,
+`pb/<n>.xml/phonebook.xml` and `pb/<n>/phonebook.xml`, so one `P331` value
+works for both.
+
 **Not yet confirmed on a phone.** The keys come from the vendor guides
 (Yealink Auto Provisioning Guide, "remote phonebook"; Poly UC Software
 Administrator Guide, "contact directory"; Grandstream GXP/GRP/WP phonebook
