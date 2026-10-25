@@ -53,7 +53,7 @@ first extension is the primary one: the user's personal address book is
 delivered to its phones (see `docs/provisioning.md`). `GET /api/v1/users`
 returns `extensionId` (primary) and `extensionIds` (all).
 
-Users that exist from before keep their link: migration `00029` copies
+Users that exist from before keep their link: migration `00030` copies
 `users.extension_id` into the new `user_extensions` table.
 
 ## What a `user` can do

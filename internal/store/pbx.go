@@ -372,22 +372,27 @@ type RingGroupMember struct {
 
 // RingGroup is a named ring/hunt group with its members in position order.
 type RingGroup struct {
-	ID            int64             `json:"id"`
-	Name          string            `json:"name"`
-	Strategy      string            `json:"strategy"`
-	Hunt          bool              `json:"hunt"`
-	RingTimeout   int               `json:"ringTimeout"`
-	MemberDelay   int               `json:"memberDelay"`
-	IgnoreDND     bool              `json:"ignoreDnd"`
-	FailureKind   string            `json:"failureKind"`
-	FailureTarget string            `json:"failureTarget"`
-	Members       []RingGroupMember `json:"members"`
-	CreatedAt     time.Time         `json:"createdAt"`
-	UpdatedAt     time.Time         `json:"updatedAt"`
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Strategy      string `json:"strategy"`
+	Hunt          bool   `json:"hunt"`
+	RingTimeout   int    `json:"ringTimeout"`
+	MemberDelay   int    `json:"memberDelay"`
+	IgnoreDND     bool   `json:"ignoreDnd"`
+	FailureKind   string `json:"failureKind"`
+	FailureTarget string `json:"failureTarget"`
+	// MOHClassID is the music on hold class of calls to this group (nil
+	// uses the global default); MOHRingback plays it to the caller instead
+	// of ringback while the group rings (migration 00021).
+	MOHClassID  *int64            `json:"mohClassId"`
+	MOHRingback bool              `json:"mohRingback"`
+	Members     []RingGroupMember `json:"members"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	UpdatedAt   time.Time         `json:"updatedAt"`
 }
 
 const groupCols = `g.id, g.name, g.strategy, g.hunt, g.ring_timeout, g.member_delay, g.ignore_dnd,
-	g.failure_kind, g.failure_target, g.created_at, g.updated_at`
+	g.failure_kind, g.failure_target, g.moh_class_id, g.moh_ringback, g.created_at, g.updated_at`
 
 // listRingGroups reads groups (optionally one) and then their members.
 func listRingGroups(ctx context.Context, q querier, where string, args ...any) ([]RingGroup, error) {
@@ -400,9 +405,13 @@ func listRingGroups(ctx context.Context, q querier, where string, args ...any) (
 	var ids []int64
 	for rows.Next() {
 		var g RingGroup
+		var moh sql.NullInt64
 		if err := rows.Scan(&g.ID, &g.Name, &g.Strategy, &g.Hunt, &g.RingTimeout, &g.MemberDelay, &g.IgnoreDND,
-			&g.FailureKind, &g.FailureTarget, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			&g.FailureKind, &g.FailureTarget, &moh, &g.MOHRingback, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
+		}
+		if moh.Valid {
+			g.MOHClassID = &moh.Int64
 		}
 		g.Members = []RingGroupMember{}
 		out = append(out, g)
@@ -464,6 +473,8 @@ type RingGroupInput struct {
 	IgnoreDND     bool
 	FailureKind   string
 	FailureTarget string
+	MOHClassID    *int64
+	MOHRingback   bool
 	Members       []RingGroupMember
 }
 
@@ -489,10 +500,15 @@ func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupI
 	var g RingGroup
 	err := s.configChange(ctx, actor, "create", "ring_group", check, func(tx *sql.Tx) (int64, error) {
 		var id int64
+		if err := checkMOHClass(ctx, tx, "mohClassId", in.MOHClassID); err != nil {
+			return 0, err
+		}
 		if err := tx.QueryRowContext(ctx, `
-			INSERT INTO ring_groups (name, strategy, hunt, ring_timeout, member_delay, ignore_dnd, failure_kind, failure_target)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-			in.Name, in.Strategy, in.Hunt, in.RingTimeout, in.MemberDelay, in.IgnoreDND, in.FailureKind, in.FailureTarget).Scan(&id); err != nil {
+			INSERT INTO ring_groups (name, strategy, hunt, ring_timeout, member_delay, ignore_dnd, failure_kind, failure_target,
+			                         moh_class_id, moh_ringback)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+			in.Name, in.Strategy, in.Hunt, in.RingTimeout, in.MemberDelay, in.IgnoreDND, in.FailureKind, in.FailureTarget,
+			in.MOHClassID, in.MOHRingback).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := writeGroupMembers(ctx, tx, id, in.Members); err != nil {
@@ -509,11 +525,15 @@ func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupI
 func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in RingGroupInput, check Check) (RingGroup, error) {
 	var g RingGroup
 	err := s.configChange(ctx, actor, "update", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		if err := checkMOHClass(ctx, tx, "mohClassId", in.MOHClassID); err != nil {
+			return id, err
+		}
 		res, err := tx.ExecContext(ctx, `
 			UPDATE ring_groups SET name = $2, strategy = $3, hunt = $4, ring_timeout = $5, member_delay = $6,
-			       ignore_dnd = $7, failure_kind = $8, failure_target = $9, updated_at = now()
+			       ignore_dnd = $7, failure_kind = $8, failure_target = $9, moh_class_id = $10, moh_ringback = $11,
+			       updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Strategy, in.Hunt, in.RingTimeout, in.MemberDelay, in.IgnoreDND,
-			in.FailureKind, in.FailureTarget)
+			in.FailureKind, in.FailureTarget, in.MOHClassID, in.MOHRingback)
 		if err != nil {
 			return id, err
 		}
