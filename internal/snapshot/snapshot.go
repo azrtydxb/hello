@@ -58,7 +58,7 @@ type Extension struct {
 	// (migration 00013, spec P-13); false rings it normally.
 	AllowIntercom bool
 	// NoCallWaiting is true when the extension has call waiting off
-	// (migration 00024, spec S-18): a call to it while it is busy is not
+	// (migration 00026, spec S-18): a call to it while it is busy is not
 	// rung. The inverted sense keeps the zero value (and every extension
 	// built without the flag) on the default, call waiting on.
 	NoCallWaiting bool

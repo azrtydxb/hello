@@ -136,6 +136,7 @@ func renderBody(ctx context.Context, body string, d RenderData) ([]byte, error) 
 		return nil, errDeadline
 	}
 	d.Line.AccountLabel = AccountLabel(d.Line.Label, d.Line.DisplayName)
+	d.Phone.CWInverted = d.Phone.Vendor == Grandstream && strings.HasPrefix(strings.ToUpper(strings.ReplaceAll(d.Phone.Model, " ", "")), "WP856")
 	w := &cappedWriter{ctx: ctx}
 	if err := tmpl.Execute(w, toData(reflect.ValueOf(d))); err != nil {
 		if w.err != nil {

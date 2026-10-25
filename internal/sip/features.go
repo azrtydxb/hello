@@ -27,7 +27,7 @@ const (
 	// P-13): the code plus an extension number auto-answers that phone.
 	ActionIntercom = "intercom"
 	// ActionCallWaitingOn and ActionCallWaitingOff toggle the extension's
-	// call-waiting flag (migration 00024, spec S-18).
+	// call-waiting flag (migration 00026, spec S-18).
 	ActionCallWaitingOn  = "call_waiting_on"
 	ActionCallWaitingOff = "call_waiting_off"
 )

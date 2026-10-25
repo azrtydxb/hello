@@ -120,6 +120,10 @@ type Phone struct {
 	// PTTCapable is set for a phone with the PTT and group paging feature
 	// set (SupportsPTT): the Grandstream WP816, WP826 and WP836.
 	PTTCapable bool
+	// CWInverted is set for the Grandstream WP856, whose published template
+	// reads P26063 the other way round (1 = off, 2 = on). Render fills it
+	// from Vendor and Model.
+	CWInverted bool
 }
 
 // Line is the SIP account of the phone's bound device.

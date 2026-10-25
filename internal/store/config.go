@@ -29,7 +29,7 @@ type Extension struct {
 	AllowIntercom bool `json:"allowIntercom"`
 	// CallWaiting rings a busy extension's devices (the phone shows call
 	// waiting); false answers the caller with the forward-busy target or
-	// 486 (migration 00024, spec S-18).
+	// 486 (migration 00026, spec S-18).
 	CallWaiting bool `json:"callWaiting"`
 	// DirectoryHidden keeps the extension out of the automatic extensions
 	// book (spec P-1).

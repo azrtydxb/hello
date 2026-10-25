@@ -1188,7 +1188,7 @@ export const FEATURE_CODE_PATTERN = /^(\*[0-9#]{2,4}|##)$/;
 
 /**
  * The actions a feature code can perform (migration 00004's action column,
- * widened by 00005 with announcement, 00013 with intercom and 00024 with call waiting).
+ * widened by 00005 with announcement, 00013 with intercom and 00026 with call waiting).
  */
 export const FEATURE_CODE_ACTIONS = [
   "forward_always",

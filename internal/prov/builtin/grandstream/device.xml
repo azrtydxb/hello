@@ -16,7 +16,10 @@
     <P99>1</P99>
     <P33>{{xml (or .Line.VoicemailCode "*97")}}</P33>
 {{- /* Call waiting (phone-feature-parity S-18), written from the extension's flag so the phone agrees with Hello. P26063 = account 1 "Enable Call Waiting" (WP8x6) / "Disable Call Waiting" (WP822): 1 = on, 2 = off in both templates (wp8x6_config_1.0.3.39 reads 0 Default, 1 Yes, 2 No; wp810_822_825_config_1.0.11.83 reads 0 Default, 1 No, 2 Yes, the question inverted). P91 = the phone-wide switch: 0 = on, 1 = off in both. P186 = "Enable Call Waiting Tone" (WP8x6 and WP820 templates): 0 = tone, 1 = no tone; the WP822 template has no such key and ignores it, its tone is P347/P1555 which stay at the phone default. Taken from Grandstream's published config templates, not yet confirmed on a phone (verify, lab item 26). */}}
-{{- if .Line.CallWaiting}}
+{{- /* The WP856 template (wp856_config_1.0.3.16: "Enable Call Waiting. 0 Default, 1 No, 2 Yes") reads P26063 the other way round: 2 = on, 1 = off, and has no P91 or P186. */}}
+{{- if .Phone.CWInverted}}
+    <P26063>{{if .Line.CallWaiting}}2{{else}}1{{end}}</P26063>
+{{- else if .Line.CallWaiting}}
     <P26063>1</P26063>
     <P91>0</P91>
     <P186>0</P186>
