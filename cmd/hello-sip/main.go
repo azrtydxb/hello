@@ -169,7 +169,7 @@ func run(args []string) error {
 		Pushes:        pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
 		Voicemails:    voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings,
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
-		HAState: live, Membership: members,
+		HAState: live, Membership: members, PageTests: live,
 	})
 	if err != nil {
 		return err

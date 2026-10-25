@@ -7,12 +7,14 @@ import {
   listExtensions,
   listPagingGroups,
   putPagingGroup,
+  testPagingGroup,
   type Extension,
   type FieldError,
   type Id,
   type PagingGroup,
   type PagingGroupFields,
   type PagingPriority,
+  type PageTestResult,
 } from "../api";
 import {
   Alert,
@@ -206,6 +208,7 @@ function GroupCard({
   onDelete: () => void;
 }) {
   const titleId = `paging-${String(g.id)}-name`;
+  const [testing, setTesting] = useState(false);
   return (
     <li className="az-card cf-card" aria-labelledby={titleId}>
       <div className="cf-card__head cf-card__head--top">
@@ -239,7 +242,20 @@ function GroupCard({
           </li>
         ))}
       </ul>
+      {testing && <TestPanel group={g} />}
       <div className="cf-card__foot">
+        <Can min="admin">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon="megaphone"
+            aria-label={`Test paging group ${g.name}`}
+            aria-expanded={testing}
+            onClick={() => setTesting((t) => !t)}
+          >
+            Test
+          </Button>
+        </Can>
         <Button
           variant="secondary"
           size="sm"
@@ -263,6 +279,90 @@ function GroupCard({
         </Can>
       </div>
     </li>
+  );
+}
+
+const TEST_RESULT: Record<string, string> = {
+  answered: "Answered and played the tone",
+  busy: "In a call",
+  dnd: "Do not disturb (a normal group does not page it)",
+  no_answer: "Did not answer in time",
+  no_registration: "No phone registered",
+  failed: "Failed",
+};
+
+/**
+ * Pages one member as a test: the phone should auto-answer on the speaker,
+ * play a short tone and hang up. The result lists the headers sent, to check
+ * a phone's auto-answer settings.
+ */
+function TestPanel({ group: g }: { group: PagingGroup }) {
+  const [ext, setExt] = useState(g.members[0]?.number ?? "");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<PageTestResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const id = `paging-${String(g.id)}-test`;
+
+  async function run() {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      setResult(await testPagingGroup(g.id, ext));
+    } catch (err: unknown) {
+      setError(`Could not run the test: ${errorMessage(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="cf-add" role="group" aria-label={`Test ${g.name}`}>
+      <Select
+        id={`${id}-member`}
+        label="Member to page"
+        size="sm"
+        value={ext}
+        disabled={busy}
+        options={g.members.map((m) => ({
+          value: m.number,
+          label: `${m.number} ${m.name}`.trim(),
+        }))}
+        onChange={(e) => setExt(e.target.value)}
+      />
+      <Button
+        size="sm"
+        disabled={busy || ext === ""}
+        onClick={() => void run()}
+      >
+        {busy ? "Paging…" : "Page now"}
+      </Button>
+      {error && <Alert tone="bad">{error}</Alert>}
+      {result && (
+        <Alert
+          tone={result.result === "answered" ? "good" : "warn"}
+          title={TEST_RESULT[result.result] ?? result.result}
+        >
+          {result.detail && <p>{result.detail}</p>}
+          {result.contacts.length > 0 && (
+            <ul aria-label="Contacts paged">
+              {result.contacts.map((c) => (
+                <li key={c.device}>
+                  <span className="cf-mono">{c.device}</span>
+                  {c.userAgent ? ` (${c.userAgent})` : ""}: {c.result}
+                  {c.headers.length > 0 && (
+                    <>
+                      {" · sent "}
+                      <span className="cf-mono">{c.headers.join("; ")}</span>
+                    </>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Alert>
+      )}
+    </div>
   );
 }
 

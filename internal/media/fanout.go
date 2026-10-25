@@ -30,6 +30,10 @@ type Fanout struct {
 
 	packets atomic.Uint64
 	inbound atomic.Uint64
+
+	// callerAddr is where the caller's RTP came from, once seen: the tone
+	// of PlayCaller follows it through NAT.
+	callerAddr atomic.Pointer[net.UDPAddr]
 }
 
 // NewFanout binds the caller-side and member-side sockets from the port
@@ -128,13 +132,16 @@ func (f *Fanout) recvCaller() {
 	defer f.wg.Done()
 	buf := make([]byte, rtpMaxPacket)
 	for {
-		n, _, err := f.caller.ReadFromUDP(buf)
+		n, from, err := f.caller.ReadFromUDP(buf)
 		if err != nil {
 			return // closed
 		}
 		pkt, ok := ParseRTP(buf[:n])
 		if !ok || pkt.PayloadType != f.pt {
 			continue
+		}
+		if cur := f.callerAddr.Load(); cur == nil || !cur.IP.Equal(from.IP) || cur.Port != from.Port {
+			f.callerAddr.Store(from)
 		}
 		out, ok := f.out.rewritePacket(buf[:n])
 		if !ok {

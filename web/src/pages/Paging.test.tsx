@@ -75,6 +75,61 @@ describe("Paging", () => {
     });
   });
 
+  it("tests a group by paging one member and shows the headers sent", async () => {
+    const calls = setup({
+      "GET /api/v1/paging-groups": () => json({ items: [GROUP] }),
+      "POST /api/v1/paging-groups/7/test": () =>
+        json({
+          id: "t1",
+          extension: "200",
+          result: "answered",
+          node: "hello-sip-1",
+          contacts: [
+            {
+              device: "kitchen-1",
+              userAgent: "Yealink SIP-T54W",
+              result: "answered",
+              headers: ["Alert-Info: Ring Answer"],
+            },
+          ],
+        }),
+    });
+    renderApp("/paging");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Test paging group kitchen" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Page now" }));
+
+    expect(
+      await screen.findByText("Answered and played the tone"),
+    ).toBeVisible();
+    expect(screen.getByText(/Alert-Info: Ring Answer/)).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "POST",
+      url: "/api/v1/paging-groups/7/test",
+      body: { extension: "200" },
+    });
+  });
+
+  it("shows why a test could not run", async () => {
+    setup({
+      "GET /api/v1/paging-groups": () => json({ items: [GROUP] }),
+      "POST /api/v1/paging-groups/7/test": () =>
+        json(
+          { error: { code: "timeout", message: "no hello-sip node reported" } },
+          504,
+        ),
+    });
+    renderApp("/paging");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Test paging group kitchen" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Page now" }));
+    expect(
+      await screen.findByText(/Could not run the test: .*no hello-sip node/),
+    ).toBeVisible();
+  });
+
   it("shows a server validation error at its field", async () => {
     setup({
       "POST /api/v1/paging-groups": () =>

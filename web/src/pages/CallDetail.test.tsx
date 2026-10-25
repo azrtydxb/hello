@@ -339,4 +339,35 @@ describe("CallDetail", () => {
       "/diagnostics?tab=trace&call=80",
     );
   });
+
+  it("lists a page's outcome per member", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs/90": () =>
+        json({
+          ...BASE,
+          id: 90,
+          kind: "page",
+          finalStatus: 200,
+          direction: "internal",
+          trace: [],
+          pageLegs: [
+            { extension: "210", device: "", result: "dnd" },
+            { extension: "200", device: "b1", result: "answered" },
+          ],
+        }),
+      "GET /api/v1/trunks": () => json({ items: [] }),
+    });
+    renderApp("/history/90");
+
+    const card = (await screen.findByRole("heading", { name: "Page members" }))
+      .parentElement as HTMLElement;
+    const rows = within(card).getAllByRole("term");
+    expect(rows.map((r) => r.textContent)).toEqual([
+      "Extension 210",
+      "Extension 200 (b1)",
+    ]);
+    expect(within(card).getByText("Do not disturb")).toBeVisible();
+    expect(within(card).getByText("Answered")).toBeVisible();
+  });
 });

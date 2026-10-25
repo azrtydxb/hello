@@ -492,6 +492,7 @@ function ExtensionDrawer({
   const [dnd, setDnd] = useState(ext.dnd ?? false);
   const [voicemail, setVoicemail] = useState(ext.voicemailEnabled !== false);
   const [record, setRecord] = useState(ext.recordDefault ?? false);
+  const [intercom, setIntercom] = useState(ext.allowIntercom !== false);
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -522,6 +523,9 @@ function ExtensionDrawer({
       patch.voicemailEnabled = voicemail;
     }
     if (record !== (ext.recordDefault ?? false)) patch.recordDefault = record;
+    if (intercom !== (ext.allowIntercom !== false)) {
+      patch.allowIntercom = intercom;
+    }
     if (Object.keys(patch).length === 0) {
       onClose();
       return;
@@ -644,6 +648,13 @@ function ExtensionDrawer({
               labelPosition="end"
               checked={record}
               onChange={(e) => setRecord(e.target.checked)}
+            />
+            <Switch
+              label="Allow intercom"
+              hint="An intercom call (*80 plus the number) auto-answers; off rings like a normal call"
+              labelPosition="end"
+              checked={intercom}
+              onChange={(e) => setIntercom(e.target.checked)}
             />
           </div>
 

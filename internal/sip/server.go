@@ -156,6 +156,9 @@ type Deps struct {
 	// Membership reports the cluster's nodes (Phase 3); nil disables
 	// takeover.
 	Membership Membership
+	// PageTests is the queue of paging-group test requests from the admin
+	// API; nil disables them.
+	PageTests PageTests
 }
 
 // Server is one SIP node.
@@ -427,6 +430,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.Pushes != nil {
 		s.bg.Go(func() { s.pushLoop(rctx) })
+	}
+	if s.deps.PageTests != nil {
+		s.bg.Go(func() { s.pageTestLoop(rctx) })
 	}
 	if s.deps.HAState != nil && s.deps.Membership != nil && s.cfg.HATakeoverEnabled {
 		// A takeover re-INVITEs from the listening socket, which sipgo

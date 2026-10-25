@@ -3,8 +3,10 @@ package sip
 import (
 	"context"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -156,14 +158,25 @@ func TestPagingGroup(t *testing.T) {
 		t.Fatal("the caller was answered before any member answered")
 	case <-time.After(300 * time.Millisecond):
 	}
+	// Until a member answers the caller hears Hello's page tone (early
+	// media), not ringback.
+	_ = aRTP.SetReadDeadline(time.Now().Add(2 * time.Second))
+	tone := make([]byte, 2048)
+	n, _, err := aRTP.ReadFromUDP(tone)
+	if err != nil {
+		t.Fatalf("the caller heard no page tone before the answer: %v", err)
+	}
+	if pkt, ok := media.ParseRTP(tone[:n]); !ok || pkt.PayloadType != 0 || len(pkt.Payload) != 160 {
+		t.Fatalf("page tone packet = %v (ok %v), want a PCMU frame", pkt, ok)
+	}
 	close(release)
 	r := waitCall(t, res)
 	if r.err != nil {
 		t.Fatalf("page: %v", r.err)
 	}
 	ans := r.dcs.InviteResponse.Body()
-	if media.SDPDirection(ans) != "recvonly" {
-		t.Fatalf("the caller's answer is %q, want recvonly", ans)
+	if media.SDPDirection(ans) != "sendrecv" {
+		t.Fatalf("the caller's answer is %q, want sendrecv (same as the early media)", ans)
 	}
 	callerSDP, err := media.ParseAudioSDP(ans)
 	if err != nil {
@@ -199,9 +212,19 @@ func TestPagingGroup(t *testing.T) {
 	// One-way: whatever a member sends back never reaches the caller.
 	back := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: memberSDP.Port}
 	_, _ = bRTP.WriteToUDP(media.BuildRTP(0, 1, 160, 7, false, []byte("from-member")), back)
-	_ = aRTP.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
-	if n, _, err := aRTP.ReadFromUDP(make([]byte, 2048)); err == nil {
-		t.Fatalf("the caller received %d bytes of a member's audio", n)
+	// (Tone packets still in flight from before the answer are not a
+	// member's audio; the page tone itself has stopped.)
+	quiet := time.Now().Add(400 * time.Millisecond)
+	for time.Now().Before(quiet) {
+		_ = aRTP.SetReadDeadline(quiet)
+		buf := make([]byte, 2048)
+		n, _, err := aRTP.ReadFromUDP(buf)
+		if err != nil {
+			break
+		}
+		if pkt, ok := media.ParseRTP(buf[:n]); ok && string(pkt.Payload) == "from-member" {
+			t.Fatalf("the caller received a member's audio")
+		}
 	}
 
 	// The caller hangs up: every member leg ends.
@@ -211,6 +234,13 @@ func TestPagingGroup(t *testing.T) {
 	cd := pbx.nextCDR(t)
 	if cd.Kind != cdr.KindPage || cd.FinalStatus != 200 || cd.TerminationSide != cdr.SideCaller {
 		t.Fatalf("CDR = kind %q status %d side %q, want page 200 caller", cd.Kind, cd.FinalStatus, cd.TerminationSide)
+	}
+	wantLegs := []cdr.PageLeg{
+		{Extension: "210", Result: "dnd"}, {Extension: "400", Result: "busy"}, {Extension: "500", Result: "no_registration"},
+		{Extension: "200", Device: "b1", Result: "answered"}, {Extension: "300", Device: "c1", Result: "answered"},
+	}
+	if !slices.Equal(cd.PageLegs, wantLegs) {
+		t.Errorf("per-member results = %+v, want %+v", cd.PageLegs, wantLegs)
 	}
 	tr := traceText(cd.Trace)
 	for _, want := range []string{
@@ -226,6 +256,90 @@ func TestPagingGroup(t *testing.T) {
 	}
 	if v := pbx.metric(t, "hello_paging_legs_total", map[string]string{"result": "dnd"}); v != 1 {
 		t.Errorf("hello_paging_legs_total{dnd} = %v", v)
+	}
+}
+
+// fakePageTests is the test-request queue the SIP node polls.
+type fakePageTests struct {
+	mu   sync.Mutex
+	reqs []livestate.PageTestRequest
+	res  chan livestate.PageTestResult
+}
+
+func (f *fakePageTests) TakePageTest(context.Context) (livestate.PageTestRequest, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.reqs) == 0 {
+		return livestate.PageTestRequest{}, false, nil
+	}
+	r := f.reqs[0]
+	f.reqs = f.reqs[1:]
+	return r, true, nil
+}
+
+func (f *fakePageTests) PutPageTestResult(_ context.Context, r livestate.PageTestResult) error {
+	f.res <- r
+	return nil
+}
+
+// TestPagingGroupTest fails if a test page does not ring exactly the one
+// member with the vendor's auto-answer headers and a sendonly offer, if the
+// answered contact hears no tone or is not hung up, if the result lacks the
+// headers sent, if a DND, unregistered or non-member extension is rung, if
+// a test leaves a CDR, or if a queued request is not picked up and its
+// result posted.
+func TestPagingGroupTest(t *testing.T) {
+	q := &fakePageTests{res: make(chan livestate.PageTestResult, 4)}
+	pbx := startPBX(t, pageDevices(), withPaging(pageGroup("normal"), pageExts()...),
+		func(_ *Config, d *Deps) { d.PageTests = q })
+	ph := registerAll(t, pbx, "b1", "c1", "d1")
+	b, c, d := ph["b1"], ph["c1"], ph["d1"]
+	bRTP := rtpSocket(t, b)
+	b.setCallee(answerAfter(nil))
+
+	// The queued request is taken by the node's loop.
+	q.mu.Lock()
+	q.reqs = append(q.reqs, livestate.PageTestRequest{ID: "t1", GroupCode: "*60", Extension: "200"})
+	q.mu.Unlock()
+	var res livestate.PageTestResult
+	select {
+	case res = <-q.res:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the queued test page was not picked up")
+	}
+	inv := waitReq(t, b.invites, "test page INVITE to 200")
+	expectAutoAnswer(t, "200", inv)
+	if media.SDPDirection(inv.Body()) != "sendonly" {
+		t.Errorf("offer %q, want sendonly", inv.Body())
+	}
+	if res.ID != "t1" || res.Result != "answered" || len(res.Contacts) != 1 || res.Contacts[0].Device != "b1" {
+		t.Fatalf("result = %+v, want answered by b1", res)
+	}
+	hdrs := strings.Join(res.Contacts[0].Headers, "|")
+	if !strings.Contains(hdrs, "Alert-Info: auto-answer") || !strings.Contains(hdrs, "Call-Info:") {
+		t.Errorf("headers reported = %q", hdrs)
+	}
+	waitReq(t, b.byes, "BYE to 200 after the test tone")
+	_ = bRTP.SetReadDeadline(time.Now().Add(time.Second))
+	if n, _, err := bRTP.ReadFromUDP(make([]byte, 2048)); err != nil || n < 12 {
+		t.Errorf("the tested phone heard no tone: %d, %v", n, err)
+	}
+	noReq(t, c.invites, 100*time.Millisecond, "INVITE to a member that was not tested")
+
+	for _, tc := range []struct{ ext, want string }{
+		{"210", "dnd"}, {"500", "no_registration"}, {"100", "failed"},
+	} {
+		r := pbx.srv.testPage(t.Context(), livestate.PageTestRequest{ID: tc.ext, GroupCode: "*60", Extension: tc.ext})
+		if r.Result != tc.want || len(r.Contacts) != 0 {
+			t.Errorf("test of %s = %+v, want %s without contacts", tc.ext, r, tc.want)
+		}
+	}
+	noReq(t, d.invites, 100*time.Millisecond, "INVITE to the DND member")
+	if r := pbx.srv.testPage(t.Context(), livestate.PageTestRequest{ID: "x", GroupCode: "*99", Extension: "200"}); r.Result != "failed" {
+		t.Errorf("unknown group = %+v, want failed", r)
+	}
+	if n := len(pbx.cdrs.ch); n != 0 {
+		t.Errorf("test pages wrote %d CDRs", n)
 	}
 }
 
