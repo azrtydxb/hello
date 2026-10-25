@@ -75,7 +75,7 @@ func TestParseAudioSDP(t *testing.T) {
 		}{
 			{"empty", ""},
 			{"port zero", "c=IN IP4 1.2.3.4\r\nm=audio 0 RTP/AVP 0\r\n"},
-			{"no supported codec", "c=IN IP4 1.2.3.4\r\nm=audio 5000 RTP/AVP 9 96\r\n"},
+			{"no supported codec", "c=IN IP4 1.2.3.4\r\nm=audio 5000 RTP/AVP 18 96\r\n"},
 			{"no audio section", "c=IN IP4 1.2.3.4\r\nm=video 5000 RTP/AVP 96\r\n"},
 			{"no c line", "m=audio 5000 RTP/AVP 0\r\n"},
 			{"ip6 c line", "c=IN IP6 ::1\r\nm=audio 5000 RTP/AVP 0\r\n"},

@@ -99,17 +99,24 @@ func (r *Relay) PlayStream(ctx context.Context, legName string, next func() []by
 	ticker := time.NewTicker(frameDur)
 	defer ticker.Stop()
 	first := true
+	var enc legEncoder
+	defer enc.close()
 	for {
 		pcm := next()
 		if len(pcm) < frameBytes {
 			return nil
 		}
-		for off := 0; off+frameBytes <= len(pcm); off += frameBytes {
-			encode, pt := l.encoder()
-			pkt := BuildRTP(pt, seq, ts, ssrc, first, encode(pcm[off:off+frameBytes]))
+		for idx := 0; (idx+1)*frameBytes <= len(pcm); idx++ {
+			// The codec is resolved per frame: a mid-call re-INVITE can
+			// change it, and the next frame follows.
+			frame, codec, err := enc.frame(l, pcm, idx)
+			if err != nil {
+				return err
+			}
+			pkt := BuildRTP(codec.PT, seq, ts, ssrc, first, frame)
 			first = false
 			seq++
-			ts += frameSamples
+			ts += codec.TimestampStep()
 			l.remoteMu.Lock()
 			dst := l.remote
 			l.remoteMu.Unlock()
@@ -127,12 +134,50 @@ func (r *Relay) PlayStream(ctx context.Context, legName string, next func() []by
 	}
 }
 
-// encoder is the leg's outbound audio encoder and payload type: PCMU
-// unless the leg negotiated PCMA. Every audio path that originates audio on
-// a leg (announcements, music on hold) encodes through it.
-func (l *relayLeg) encoder() (func([]byte) []byte, uint8) {
-	if l.audioPT == 8 {
-		return EncodePCMA, 8
+// legEncoder encodes 8 kHz track audio in whatever codec a leg currently
+// speaks: G.711, or G.722 / Opus with the track resampled up. It keeps the
+// stateful encoder and the resampled copy of the current track between
+// frames, and rebuilds them when the leg's codec or the track changes.
+type legEncoder struct {
+	codec Codec
+	enc   *Encoder
+	src   []byte // the 8 kHz track the cached copy was made from
+	pcm   []byte // src at the codec's sample rate
+}
+
+func (e *legEncoder) close() {
+	if e.enc != nil {
+		e.enc.Close()
+		e.enc = nil
 	}
-	return EncodePCMU, 0
+}
+
+// frame returns the encoded idx-th 20 ms frame of the 8 kHz track pcm and
+// the codec it is encoded in.
+func (e *legEncoder) frame(l *relayLeg, pcm []byte, idx int) ([]byte, Codec, error) {
+	codec := l.speaks()
+	if e.enc == nil || e.codec.PT != codec.PT || e.codec.Kind() != codec.Kind() {
+		e.close()
+		enc, err := NewEncoder(codec)
+		if err != nil {
+			return nil, codec, err
+		}
+		e.enc, e.codec, e.src = enc, codec, nil
+	}
+	if len(e.src) != len(pcm) || len(pcm) == 0 || &e.src[0] != &pcm[0] {
+		out := pcm
+		if rate := codec.SampleRate(); rate != sampleRateHz {
+			var err error
+			if out, err = Resample(pcm, sampleRateHz, rate); err != nil {
+				return nil, codec, fmt.Errorf("media: music resample: %w", err)
+			}
+		}
+		e.src, e.pcm = pcm, out
+	}
+	n := 2 * codec.FrameSamples()
+	chunk := make([]byte, n) // silence-padded when the resampled track runs short
+	if lo := idx * n; lo < len(e.pcm) {
+		copy(chunk, e.pcm[lo:min(lo+n, len(e.pcm))])
+	}
+	return e.enc.Encode(chunk), codec, nil
 }

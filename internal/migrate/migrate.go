@@ -20,12 +20,7 @@ func provider(db *sql.DB) (*goose.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Out of order is allowed: parallel branches take migration numbers
-	// with gaps (00018 to 00021 land in whatever order they merge), and a
-	// database that already applied a higher number must still apply a lower
-	// one that arrives later.
-	return goose.NewProvider(goose.DialectPostgres, db, migrations.FS,
-		goose.WithSessionLocker(locker), goose.WithAllowOutofOrder(true))
+	return goose.NewProvider(goose.DialectPostgres, db, migrations.FS, goose.WithSessionLocker(locker))
 }
 
 // Up applies every pending migration and returns how many it applied.

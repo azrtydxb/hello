@@ -37,9 +37,10 @@ func NewAnchor(host string, log *slog.Logger) *Anchor {
 // AdvertisedHost is the IPv4 the anchor writes into SDP answers.
 func (a *Anchor) AdvertisedHost() string { return a.host }
 
-// Answer parses the caller's SDP offer, binds a UDP socket for the
-// anchored leg, starts the receive loop and returns the local answer SDP
-// plus the Session. The socket binds an explicit port (bindRTP); a bind
+// Answer parses the caller's SDP offer, picks the codec (G.722 when offered,
+// else the first G.711, else Opus), binds a UDP socket for the anchored
+// leg, starts the receive loop and returns the local answer SDP plus the
+// Session. The socket binds an explicit port (bindRTP); a bind
 // can still fail (exhaustion, a race with a just-closed socket), so the
 // bind is retried a few times before Answer gives up.
 func (a *Anchor) Answer(offer []byte) ([]byte, Session, error) {
@@ -47,8 +48,21 @@ func (a *Anchor) Answer(offer []byte) ([]byte, Session, error) {
 	if ip == nil || ip.To4() == nil {
 		return nil, nil, fmt.Errorf("media: advertised host %q is not an IPv4 address", a.host)
 	}
-	off, err := ParseAudioSDP(offer)
+	parsed, err := ParseAudioSDP(offer)
 	if err != nil {
+		return nil, nil, err
+	}
+	off, ok := parsed.Terminated()
+	if !ok {
+		return nil, nil, errors.New("media: the offer lists no codec Hello can answer with")
+	}
+	enc, err := NewEncoder(off.Codec)
+	if err != nil {
+		return nil, nil, err
+	}
+	dec, err := NewDecoder(off.Codec)
+	if err != nil {
+		enc.Close()
 		return nil, nil, err
 	}
 	var conn *net.UDPConn
@@ -63,6 +77,8 @@ func (a *Anchor) Answer(offer []byte) ([]byte, Session, error) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if conn == nil {
+		enc.Close()
+		dec.Close()
 		return nil, nil, fmt.Errorf("media: bind RTP socket: %w", bindErr)
 	}
 	port := conn.LocalAddr().(*net.UDPAddr).Port
@@ -70,6 +86,8 @@ func (a *Anchor) Answer(offer []byte) ([]byte, Session, error) {
 	target := &net.UDPAddr{IP: net.ParseIP(off.Address), Port: off.Port}
 	if target.IP == nil {
 		_ = conn.Close() // nothing received yet; the close error is irrelevant
+		enc.Close()
+		dec.Close()
 		return nil, nil, fmt.Errorf("media: offer address %q is not an IP", off.Address)
 	}
 	s := &anchorSession{
@@ -77,17 +95,24 @@ func (a *Anchor) Answer(offer []byte) ([]byte, Session, error) {
 		offer:  off,
 		target: target,
 		log:    a.log,
+		enc:    enc,
+		dec:    dec,
+		rate:   off.Codec.SampleRate(),
+		frame:  2 * off.Codec.FrameSamples(),
 	}
+	s.silent = make([]byte, s.frame)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	if _, err := rand.Read(s.ssrc[:]); err != nil {
 		_ = conn.Close() // nothing received yet; the close error is irrelevant
+		enc.Close()
+		dec.Close()
 		return nil, nil, fmt.Errorf("media: generate RTP SSRC: %w", err)
 	}
+	s.loopDone = make(chan struct{})
 	s.audio = make(chan []byte, inboundQueue)
 	s.dtmf = make(chan byte, dtmfQueue)
 	go s.loop()
-	answer := BuildAudioSDP(a.host, port, off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
-	return answer, s, nil
+	return off.Build(a.host, port, "sendrecv"), s, nil
 }
 
 // bindRTP binds a wildcard UDP socket on an explicit port of the dynamic
@@ -115,7 +140,7 @@ func bindRTP() (*net.UDPConn, error) {
 // anchorSession is the Session implementation over one UDP socket.
 type anchorSession struct {
 	conn   *net.UDPConn
-	offer  AudioSDP     // negotiated codecs; immutable after Answer
+	offer  AudioSDP     // the one negotiated codec and event type; immutable after Answer
 	target *net.UDPAddr // where Play sends until the first packet locks the peer
 	log    *slog.Logger
 
@@ -126,6 +151,17 @@ type anchorSession struct {
 	remoteMu sync.Mutex
 	remote   *net.UDPAddr // peer source address, pinned on the first packet
 
+	// enc and dec are the session's codec state, and rate, frame and silent
+	// its audio format: PCM samples per second, bytes of a 20 ms frame, and
+	// one frame of zeros. enc is used under playMu, dec only by the loop
+	// goroutine.
+	enc    *Encoder
+	dec    *Decoder
+	rate   int
+	frame  int
+	silent []byte
+	playMu sync.Mutex
+
 	seqMu sync.Mutex
 	seq   uint16 // next outgoing sequence number
 	ts    uint32 // next outgoing RTP timestamp
@@ -135,6 +171,8 @@ type anchorSession struct {
 	// dtmf carries decoded DTMF presses awaiting the active Record.
 	audio chan []byte
 	dtmf  chan byte
+	// loopDone closes when the receive loop has returned.
+	loopDone chan struct{}
 	// filter runs only in the loop goroutine, so it needs no lock.
 	filter DTMFFilter
 }
@@ -160,27 +198,44 @@ func (s *anchorSession) Close() error {
 		// A close error on teardown (already closed, ECONNRESET) changes
 		// nothing for the caller; Close keeps its error-free signature.
 		_ = s.conn.Close()
+		// The loop goroutine may still be decoding; the codec state is
+		// released after it has seen the closed socket.
+		go func() {
+			<-s.loopDone
+			s.playMu.Lock()
+			s.enc.Close()
+			s.playMu.Unlock()
+			s.dec.Close()
+		}()
 	})
 	return nil
 }
 
-// Play sends audio to the remote party as G.711 RTP, one 20 ms frame at a
-// time, paced in real time so a phone plays it at speech speed. It returns
+// SampleRate is the PCM sample rate Play and Record use: 8000 for G.711,
+// 16000 for G.722 and Opus.
+func (s *anchorSession) SampleRate() int { return s.rate }
+
+// Play sends audio to the remote party as RTP in the negotiated codec, one
+// 20 ms frame at a time, paced in real time so a phone plays it at speech speed. It returns
 // ctx.Err() when ctx is cancelled mid-way and errSessionClosed after
 // Close.
 func (s *anchorSession) Play(ctx context.Context, audio []byte) error {
 	if len(audio)%2 != 0 {
 		return errors.New("media: PCM length is odd (16-bit samples expected)")
 	}
-	encode := EncodePCMU
-	if s.offer.PayloadType == 8 {
-		encode = EncodePCMA
-	}
+	s.playMu.Lock()
+	defer s.playMu.Unlock()
 	ticker := time.NewTicker(frameDur)
 	defer ticker.Stop()
-	for off := 0; off < len(audio); off += frameBytes {
-		end := min(off+frameBytes, len(audio))
-		if err := s.sendAudio(encode, audio[off:end]); err != nil {
+	for off := 0; off < len(audio); off += s.frame {
+		end := min(off+s.frame, len(audio))
+		chunk := audio[off:end]
+		if len(chunk) < s.frame {
+			// The last frame is padded with silence: the codecs encode
+			// whole frames.
+			chunk = append(append([]byte(nil), chunk...), s.silent[:s.frame-len(chunk)]...)
+		}
+		if err := s.sendAudio(chunk); err != nil {
 			if s.ctx.Err() != nil {
 				return errSessionClosed
 			}
@@ -199,13 +254,13 @@ func (s *anchorSession) Play(ctx context.Context, audio []byte) error {
 
 // sendAudio encodes one frame of PCM and puts it on the wire with the next
 // sequence number and a timestamp advanced by one frame.
-func (s *anchorSession) sendAudio(encode func([]byte) []byte, pcm []byte) error {
-	payload := encode(pcm)
+func (s *anchorSession) sendAudio(pcm []byte) error {
+	payload := s.enc.Encode(pcm)
 	s.seqMu.Lock()
 	seq := s.seq
 	s.seq++
 	ts := s.ts
-	s.ts += frameSamples
+	s.ts += s.offer.Codec.TimestampStep()
 	s.seqMu.Unlock()
 	packet := BuildRTP(s.offer.PayloadType, seq, ts, binary.BigEndian.Uint32(s.ssrc[:]), false, payload)
 	return s.send(packet)
@@ -236,6 +291,7 @@ func (s *anchorSession) currentRemote() *net.UDPAddr {
 // the filter and feeds the two queues, so the hot path never takes a lock
 // beyond the one-off remote pin.
 func (s *anchorSession) loop() {
+	defer close(s.loopDone)
 	buf := make([]byte, rtpMaxPacket)
 	for {
 		n, from, err := s.conn.ReadFromUDP(buf)
@@ -249,7 +305,7 @@ func (s *anchorSession) loop() {
 		}
 		switch {
 		case pkt.PayloadType == s.offer.PayloadType:
-			s.pushAudio(decodePayload(pkt.PayloadType, pkt.Payload))
+			s.pushAudio(s.dec.Decode(pkt.Payload))
 		case s.offer.DTMFPayloadType != 0 && pkt.PayloadType == s.offer.DTMFPayloadType:
 			ev, ok := ParseTelephoneEvent(pkt.Payload)
 			if !ok {
@@ -292,8 +348,8 @@ func (s *anchorSession) pushAudio(pcm []byte) {
 	if len(pcm)%2 == 1 {
 		pcm = pcm[:len(pcm)-1] // a half sample cannot be played; drop it
 	}
-	for off := 0; off < len(pcm); off += frameBytes {
-		end := min(off+frameBytes, len(pcm))
+	for off := 0; off < len(pcm); off += s.frame {
+		end := min(off+s.frame, len(pcm))
 		chunk := make([]byte, end-off)
 		copy(chunk, pcm[off:end])
 		select {
@@ -303,19 +359,6 @@ func (s *anchorSession) pushAudio(pcm []byte) {
 		}
 	}
 }
-
-// decodePayload converts a G.711 payload to 16-bit little-endian PCM per
-// the negotiated payload type.
-func decodePayload(pt uint8, payload []byte) []byte {
-	if pt == 8 {
-		return DecodePCMA(payload)
-	}
-	return DecodePCMU(payload)
-}
-
-// silentFrame is appended by Record for every tick with no inbound media,
-// so a silent stretch is PCM of zeros like any recorder produces.
-var silentFrame = make([]byte, frameBytes)
 
 // Record captures PCM from the remote party for at most maxDur, stopping
 // early on '#' or ctx cancellation, with the guarantees documented on the
@@ -365,11 +408,11 @@ func (s *anchorSession) Record(ctx context.Context, maxDur time.Duration, dtmf c
 			// tracks maxDur whatever the peer's packetisation: media if a
 			// complete frame has arrived, silence if not. A partial frame
 			// waits in rem and leads the next one.
-			if len(rem) >= frameBytes {
-				out = append(out, rem[:frameBytes]...)
-				rem = rem[frameBytes:]
+			if len(rem) >= s.frame {
+				out = append(out, rem[:s.frame]...)
+				rem = rem[s.frame:]
 			} else {
-				out = append(out, silentFrame...)
+				out = append(out, s.silent...)
 			}
 			frame++
 		}

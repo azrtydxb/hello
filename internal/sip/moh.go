@@ -243,7 +243,7 @@ func (c *call) startRingMOH(classID int64) bool {
 	if r == nil || len(c.inv.Body()) == 0 {
 		return false
 	}
-	body := c.anchoredAnswerA(parsedOffer(c))
+	body := c.anchoredAnswerA(parsedOffer(c), media.AudioSDP{})
 	if len(body) == 0 {
 		return false
 	}
@@ -340,6 +340,7 @@ func (p *mohPlaylist) next() []byte {
 		return t
 	}
 	if p.pos >= len(p.order) {
+		//nolint:gosec // G404: shuffle order of hold music, not security-relevant.
 		p.order = rand.Perm(n)
 		if p.order[0] == p.last {
 			p.order[0], p.order[n-1] = p.order[n-1], p.order[0]
