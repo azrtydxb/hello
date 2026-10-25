@@ -135,6 +135,7 @@ func renderBody(ctx context.Context, body string, d RenderData) ([]byte, error) 
 	if err := ctx.Err(); err != nil {
 		return nil, errDeadline
 	}
+	d.Line.AccountLabel = AccountLabel(d.Line.Label, d.Line.DisplayName)
 	w := &cappedWriter{ctx: ctx}
 	if err := tmpl.Execute(w, toData(reflect.ValueOf(d))); err != nil {
 		if w.err != nil {

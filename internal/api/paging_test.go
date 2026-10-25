@@ -104,6 +104,16 @@ func TestPagingGroupCRUD(t *testing.T) {
 	}
 	c.must(http.StatusNotFound, "PUT", "/api/v1/paging-groups/987654", put)
 
+	// Renaming onto another group's name or code is a conflict, as on create.
+	other := c.must(http.StatusCreated, "POST", "/api/v1/paging-groups",
+		map[string]any{"name": "garage", "code": "*62", "members": []json.Number{m2}}).json(t)
+	otherID := fmt.Sprint(other["id"])
+	c.must(http.StatusConflict, "PUT", "/api/v1/paging-groups/"+otherID,
+		map[string]any{"name": "kitchen", "code": "*62", "members": []json.Number{m2}})
+	c.must(http.StatusConflict, "PUT", "/api/v1/paging-groups/"+otherID,
+		map[string]any{"name": "garage", "code": "*60", "members": []json.Number{m2}})
+	c.must(http.StatusNoContent, "DELETE", "/api/v1/paging-groups/"+otherID, nil)
+
 	// Deleting an extension removes it from the lists (cascade).
 	c.must(http.StatusNoContent, "DELETE", fmt.Sprintf("/api/v1/extensions/%v", e.ext101["id"]), nil)
 	got := c.must(http.StatusOK, "GET", "/api/v1/paging-groups/"+id, nil).json(t)

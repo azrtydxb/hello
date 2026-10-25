@@ -3994,7 +3994,12 @@
             "$ref": "#/components/responses/Unavailable"
           },
           "504": {
-            "description": "No hello-sip node reported the test page in time"
+            "description": "No hello-sip node reported the test page in time",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Error" }
+              }
+            }
           }
         },
         "x-hello-scope": "admin",
@@ -4038,7 +4043,7 @@
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
-        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer.",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -10710,7 +10715,8 @@
                     "voicemail",
                     "blind_transfer",
                     "attended_transfer",
-                    "announcement"
+                    "announcement",
+                    "intercom"
                   ]
                 },
                 "argument": {
@@ -10795,6 +10801,7 @@
                   "internal",
                   "unavailable",
                   "upstream",
+                  "timeout",
                   "render_error",
                   "forbidden_role",
                   "insufficient_scope",
