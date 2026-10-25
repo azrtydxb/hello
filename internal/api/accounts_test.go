@@ -716,6 +716,25 @@ func TestSelfServiceIsolation(t *testing.T) {
 	})
 }
 
+// pcmWAV is a 16-bit mono 8 kHz PCM WAV of n samples.
+func pcmWAV(n int) []byte {
+	le32 := func(v int) []byte { return []byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)} }
+	data := make([]byte, 2*n)
+	var b bytes.Buffer
+	b.WriteString("RIFF")
+	b.Write(le32(36 + len(data)))
+	b.WriteString("WAVEfmt ")
+	b.Write(le32(16))
+	b.Write([]byte{1, 0, 1, 0}) // PCM, mono
+	b.Write(le32(8000))
+	b.Write(le32(16000))
+	b.Write([]byte{2, 0, 16, 0})
+	b.WriteString("data")
+	b.Write(le32(len(data)))
+	b.Write(data)
+	return b.Bytes()
+}
+
 // TestSelfServiceActions fails if the user's own address book, voicemail,
 // forwarding, history or profile cannot be managed, or a bad value is
 // accepted.
@@ -779,7 +798,7 @@ func TestSelfServiceActions(t *testing.T) {
 			h.ServeHTTP(rec, r)
 			return rec
 		}
-		wav := append([]byte("RIFF\x00\x00\x00\x00WAVE"), make([]byte, 64)...)
+		wav := pcmWAV(800)
 		if rec := put(map[string][]byte{"greeting": wav}); rec.Code != 200 || len(objs.puts) != 1 || !strings.HasPrefix(objs.puts[0], fmt.Sprintf("box/%d/greeting-", extAlice)) {
 			t.Fatalf("greeting upload = %d %s puts %v", rec.Code, rec.Body, objs.puts)
 		}
