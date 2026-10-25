@@ -1266,7 +1266,10 @@ export interface FeatureCode {
 
 export const FEATURE_CODE_PATTERN = /^(\*[0-9#]{2,4}|##)$/;
 
-/** The actions a feature code can perform (migration 00004's action column). */
+/**
+ * The actions a feature code can perform (migration 00004's action column,
+ * widened by 00005 with announcement and 00013 with intercom).
+ */
 export const FEATURE_CODE_ACTIONS = [
   "forward_always",
   "forward_busy",
@@ -1276,11 +1279,28 @@ export const FEATURE_CODE_ACTIONS = [
   "voicemail",
   "blind_transfer",
   "attended_transfer",
+  "announcement",
+  "intercom",
   "ivr",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
 export type FeatureCodeAction = (typeof FEATURE_CODE_ACTIONS)[number];
+
+/** A human label for each feature-code action. */
+export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
+  forward_always: "Forward always",
+  forward_busy: "Forward when busy",
+  forward_no_answer: "Forward on no answer",
+  dnd_on: "Do not disturb on",
+  dnd_off: "Do not disturb off",
+  voicemail: "Voicemail",
+  blind_transfer: "Blind transfer",
+  attended_transfer: "Attended transfer",
+  announcement: "Play announcement",
+  intercom: "Intercom (auto-answer)",
+  ivr: "IVR menu",
+};
 
 /** GET /api/v1/feature-codes. */
 export const listFeatureCodes = (signal?: AbortSignal) =>
