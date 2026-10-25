@@ -258,6 +258,7 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	if _, ok := s.lookup(req.CallID().Value()); ok {
 		// Same Call-ID as a call in progress but a new transaction: a
 		// merged or looped request (RFC 3261 §8.2.2.2).
+		s.logInviteReject(req, "", sip.StatusLoopDetected, "loop detected")
 		s.respond(tx, req, sip.StatusLoopDetected, "Loop Detected")
 		return
 	}
@@ -314,6 +315,24 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		})
 	}
 	s.dispatch(c, req, tx, snap, dec)
+}
+
+// logInviteReject logs, at INFO, an inbound INVITE that hello-sip itself
+// answered with a final error, so an operator can tell its 404/403/486 from
+// one Kamailio sent. The 401/407 challenges are normal and not logged. Only
+// the caller, the dialled number, the code and the reason are logged, never
+// headers.
+func (s *Server) logInviteReject(req *sip.Request, caller string, code int, reason string) {
+	if code < 400 || code == sip.StatusUnauthorized || code == sip.StatusProxyAuthRequired {
+		return
+	}
+	if caller == "" {
+		if f := req.From(); f != nil {
+			caller = f.Address.User
+		}
+	}
+	s.log.Info("INVITE rejected by hello-sip", "component", "sip", "caller", caller,
+		"dialled", req.Recipient.User, "status", code, "reason", reason, "call_id", req.CallID().Value())
 }
 
 func (s *Server) newCall(req *sip.Request) *call {
@@ -1011,6 +1030,10 @@ func (c *call) release() {
 // connect ends its trace with the reason, which is the CDR's explanation.
 func (c *call) record(status int, side, reason, result string) {
 	c.releaseSlots() // every way an attempt ends passes here exactly once
+	// A taken-over call has no INVITE to log.
+	if side == cdr.SideSystem && c.inv != nil {
+		c.s.logInviteReject(c.inv, c.callerNum, status, reason)
+	}
 	end := time.Now()
 	c.mu.Lock()
 	ring, answer := c.ringTime, c.answerTime
