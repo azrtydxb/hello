@@ -105,10 +105,9 @@ jobs:
     container:
       image: golang:1.27-bookworm
     env:
-      # The database-backed tests read these; without them they skip.
-      HELLO_TEST_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
-      HELLO_TEST_VALKEY_ADDR: valkey:6379
-      HELLO_TEST_MINIO_ENDPOINT: minio:9000
+      # The database-backed tests also read HELLO_TEST_DATABASE_URL,
+      # HELLO_TEST_VALKEY_ADDR and HELLO_TEST_MINIO_ENDPOINT, set by the
+      # "Wait for the services" step (without them they skip).
       HELLO_TEST_MINIO_PASS: hello-voicemail-secret
     services:
       postgres:
@@ -151,6 +150,38 @@ jobs:
           restore-keys: |
             go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-
             go-${{ runner.arch }}-golang1.27-
+      # On the ARC kubernetes-mode runners the job container and its services
+      # share one pod: services answer on localhost (their names do not
+      # resolve) and the services' --health-cmd options are ignored, so the
+      # job no longer waits for them. Resolve the address that works (the
+      # service name on Docker-mode runners, localhost on kubernetes-mode
+      # ones) and wait for each service before the tests start.
+      - name: Wait for the services
+        shell: bash
+        run: |
+          svc() { if getent hosts "$1" >/dev/null; then echo "$1"; else echo localhost; fi; }
+          wait_tcp() {
+            for _ in $(seq 1 90); do
+              if (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null; then return 0; fi
+              sleep 2
+            done
+            echo "::error::$1:$2 did not come up"; return 1
+          }
+          pg=$(svc postgres); vk=$(svc valkey)
+          wait_tcp "$pg" 5432
+          wait_tcp "$vk" 6379
+          mn=$(svc minio)
+          wait_tcp "$mn" 9000
+          for _ in $(seq 1 60); do
+            curl -fsS "http://$mn:9000/minio/health/live" >/dev/null && break
+            sleep 2
+          done
+          curl -fsS "http://$mn:9000/minio/health/live" >/dev/null
+          {
+            echo "HELLO_TEST_MINIO_ENDPOINT=$mn:9000"
+            echo "HELLO_TEST_DATABASE_URL=postgres://hello:hello@$pg:5432/hello?sslmode=disable"
+            echo "HELLO_TEST_VALKEY_ADDR=$vk:6379"
+          } >> "$GITHUB_ENV"
       # Everything with the services up: the database-backed tests run here
       # (the unit job skips them), and the race detector is affordable once a
       # night rather than on every push.
@@ -195,8 +226,8 @@ jobs:
       image: golang:1.27-bookworm
     env:
       HELLO_BENCH: "1"
-      HELLO_TEST_DATABASE_URL: postgres://hello:hello@postgres:5432/hello?sslmode=disable
-      HELLO_TEST_VALKEY_ADDR: valkey:6379
+      # HELLO_TEST_DATABASE_URL and HELLO_TEST_VALKEY_ADDR are set by the
+      # "Wait for the services" step.
     services:
       postgres:
         image: postgres:18-alpine
@@ -215,6 +246,28 @@ jobs:
       - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      # On the ARC kubernetes-mode runners the job container and its services
+      # share one pod: services answer on localhost (their names do not
+      # resolve) and the services' --health-cmd options are ignored, so the
+      # job no longer waits for them. Resolve the address that works (the
+      # service name on Docker-mode runners, localhost on kubernetes-mode
+      # ones) and wait for each service before the tests start.
+      - name: Wait for the services
+        shell: bash
+        run: |
+          svc() { if getent hosts "$1" >/dev/null; then echo "$1"; else echo localhost; fi; }
+          wait_tcp() {
+            for _ in $(seq 1 90); do
+              if (exec 3<>"/dev/tcp/$1/$2") 2>/dev/null; then return 0; fi
+              sleep 2
+            done
+            echo "::error::$1:$2 did not come up"; return 1
+          }
+          pg=$(svc postgres); vk=$(svc valkey)
+          wait_tcp "$pg" 5432
+          wait_tcp "$vk" 6379
+          echo "HELLO_TEST_DATABASE_URL=postgres://hello:hello@$pg:5432/hello?sslmode=disable" >> "$GITHUB_ENV"
+          echo "HELLO_TEST_VALKEY_ADDR=$vk:6379" >> "$GITHUB_ENV"
       - name: Detector latency over 1 000 000 CDRs
         run: go test -count=1 -timeout 40m -v -run TestDetectorLatency ./internal/ai/detect/
 
