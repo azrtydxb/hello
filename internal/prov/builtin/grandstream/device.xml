@@ -11,10 +11,38 @@
     <P34>{{xml .Line.Password}}</P34>
     <P3>{{xml .Line.DisplayName}}</P3>
     <P130>0</P130>
+{{- /* HD voice: Preferred Vocoder choices 1 to 6 of account 1 (P57, P58, P59, P60, P61, P62; Grandstream config templates, "Preferred Vocoder"): 0 PCMU, 8 PCMA, 9 G.722, 123 Opus (the models that have it; payload type P2385 stays at its default 123). Order G.722, Opus, PCMU, PCMA; the choices after the last codec repeat it, which the phone ignores, so no other codec is offered. Another account of a multi-account model has its own choice keys (account 2 P451 to P456, account 3 P551 to P556, and so on in steps of 100); Hello provisions account 1. Unverified on hardware (verify). */}}
+    <P57>9</P57>
+{{- if .Codecs.Opus}}
+    <P58>123</P58>
+    <P59>0</P59>
+    <P60>8</P60>
+    <P61>8</P61>
+    <P62>8</P62>
+{{- else}}
+    <P58>0</P58>
+    <P59>8</P59>
+    <P60>8</P60>
+    <P61>8</P61>
+    <P62>8</P62>
+{{- end}}
     <P32>{{div .Server.Expiry 60}}</P32>
 {{- /* MWI (spec S-1): P99 = Subscribe for MWI [R8x6 TPL, R8x6 section 5; WP822 same key]; P33 = voicemail access number, defaulting to Hello's voicemail feature code. */}}
     <P99>1</P99>
     <P33>{{xml (or .Line.VoicemailCode "*97")}}</P33>
+{{- /* Call waiting (phone-feature-parity S-18), written from the extension's flag so the phone agrees with Hello. P26063 = account 1 "Enable Call Waiting" (WP8x6) / "Disable Call Waiting" (WP822): 1 = on, 2 = off in both templates (wp8x6_config_1.0.3.39 reads 0 Default, 1 Yes, 2 No; wp810_822_825_config_1.0.11.83 reads 0 Default, 1 No, 2 Yes, the question inverted). P91 = the phone-wide switch: 0 = on, 1 = off in both. P186 = "Enable Call Waiting Tone" (WP8x6 and WP820 templates): 0 = tone, 1 = no tone; the WP822 template has no such key and ignores it, its tone is P347/P1555 which stay at the phone default. Taken from Grandstream's published config templates, not yet confirmed on a phone (verify, lab item 26). */}}
+{{- /* The WP856 template (wp856_config_1.0.3.16: "Enable Call Waiting. 0 Default, 1 No, 2 Yes") reads P26063 the other way round: 2 = on, 1 = off, and has no P91 or P186. */}}
+{{- if .Phone.CWInverted}}
+    <P26063>{{if .Line.CallWaiting}}2{{else}}1{{end}}</P26063>
+{{- else if .Line.CallWaiting}}
+    <P26063>1</P26063>
+    <P91>0</P91>
+    <P186>0</P186>
+{{- else}}
+    <P26063>2</P26063>
+    <P91>1</P91>
+    <P186>1</P186>
+{{- end}}
 {{- range $i, $k := .BLF}}
     <P{{add 323 (mul $i 3)}}>1</P{{add 323 (mul $i 3)}}>
     <P{{add 324 (mul $i 3)}}>0</P{{add 324 (mul $i 3)}}>

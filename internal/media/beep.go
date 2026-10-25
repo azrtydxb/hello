@@ -10,7 +10,11 @@ import (
 // not click on a phone. It is generated on every call; the shape is cheap
 // to compute and the source of truth is this function, not a blob in the
 // repo.
-func BeepPCM() []byte {
+func BeepPCM() []byte { return BeepPCMRate(sampleRateHz) }
+
+// BeepPCMRate is BeepPCM at another sample rate (16000 for a G.722
+// session).
+func BeepPCMRate(rate int) []byte {
 	const (
 		frequency = 425.0
 		beepMs    = 500
@@ -18,11 +22,11 @@ func BeepPCM() []byte {
 		// ~ -10 dBFS: loud enough to hear, far from clipping.
 		amplitude = 10000
 	)
-	samples := beepMs * sampleRateHz / 1000
-	fadeSamples := fadeMs * sampleRateHz / 1000
+	samples := beepMs * rate / 1000
+	fadeSamples := fadeMs * rate / 1000
 	out := make([]byte, samples*2)
 	for i := 0; i < samples; i++ {
-		v := amplitude * math.Sin(2*math.Pi*frequency*float64(i)/sampleRateHz)
+		v := amplitude * math.Sin(2*math.Pi*frequency*float64(i)/float64(rate))
 		if i < fadeSamples {
 			v *= float64(i) / float64(fadeSamples)
 		}

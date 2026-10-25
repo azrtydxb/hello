@@ -95,7 +95,19 @@ interface TrunkDraft {
   dialingPatterns: string;
   /** The mode-"all" confirmation; sent as internalDialing.confirm. */
   dialingConfirm: boolean;
+  /** The codecs offered to the trunk, as codecs[]. */
+  codecs: string[];
 }
+
+/** The codecs a trunk may be offered, in the order they are stored. */
+const TRUNK_CODECS: { name: string; label: string; hint: string }[] = [
+  { name: "PCMU", label: "PCMU (G.711 u-law)", hint: "Narrowband; every carrier." },
+  { name: "PCMA", label: "PCMA (G.711 A-law)", hint: "Narrowband; every carrier." },
+  { name: "G722", label: "G.722", hint: "HD voice; only if the carrier supports it." },
+  { name: "opus", label: "Opus", hint: "HD voice; rarely offered by carriers." },
+];
+
+const DEFAULT_TRUNK_CODECS = ["PCMU", "PCMA"];
 
 const NEW_DESTINATION: DestinationDraft = {
   host: "",
@@ -120,6 +132,7 @@ const NEW_TRUNK: TrunkDraft = {
   dialingMode: "off",
   dialingPatterns: "",
   dialingConfirm: false,
+  codecs: DEFAULT_TRUNK_CODECS,
 };
 
 function toDraft(t: Trunk): TrunkDraft {
@@ -148,6 +161,7 @@ function toDraft(t: Trunk): TrunkDraft {
         : "off",
     dialingPatterns: (dialing?.patterns ?? []).join("\n"),
     dialingConfirm: false,
+    codecs: t.codecs?.length ? t.codecs : DEFAULT_TRUNK_CODECS,
   };
 }
 
@@ -201,6 +215,9 @@ function validate(d: TrunkDraft): Record<string, string> {
         `Pattern ${long + 1} is longer than ${MAX_PATTERN_LEN} characters.`;
     }
   }
+  if (d.codecs.length === 0) {
+    e.codecs = "Offer at least one codec.";
+  }
   if (d.dialingMode === "all" && !d.dialingConfirm) {
     e["internalDialing.confirm"] =
       "Confirm that this trunk may dial every internal number.";
@@ -228,6 +245,7 @@ function toInput(d: TrunkDraft): TrunkInput {
       weight: Number(x.weight),
     })),
     internalDialing: toDialingInput(d),
+    codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
   };
 }
 
@@ -263,6 +281,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "enabled",
     "destinations",
     "internalDialing",
+    "codecs",
     "internalDialing.mode",
     "internalDialing.patterns",
     "internalDialing.confirm",
@@ -904,6 +923,39 @@ function TrunkDrawer({
             checked={draft.enabled}
             onChange={(e) => set("enabled", e.target.checked)}
           />
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Codecs</legend>
+          <p className="cf-form__note">
+            The audio codecs offered to this trunk, in the caller's order.
+            Most carriers accept G.711 only, so G.722 and Opus are off until
+            you allow them. Phones are always offered everything they
+            support.
+          </p>
+          <div className="cf-field-group">
+            {TRUNK_CODECS.map((c) => (
+              <Checkbox
+                key={c.name}
+                label={c.label}
+                hint={c.hint}
+                checked={draft.codecs.includes(c.name)}
+                onChange={(e) =>
+                  set(
+                    "codecs",
+                    e.target.checked
+                      ? [...draft.codecs, c.name]
+                      : draft.codecs.filter((n) => n !== c.name),
+                  )
+                }
+              />
+            ))}
+            {errors.codecs && (
+              <p id={`${fid("codecs")}-error`} className="cf-form__error">
+                {errors.codecs}
+              </p>
+            )}
+          </div>
         </fieldset>
 
         <fieldset

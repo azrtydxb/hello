@@ -282,4 +282,57 @@ describe("Announcements", () => {
       body: undefined,
     });
   });
+
+  it("generates a prompt from text once and lists it as generated", async () => {
+    const generated = {
+      id: 11,
+      name: "welcome",
+      createdAt: CREATED,
+      updatedAt: CREATED,
+      sourceText: "Welcome.",
+      generated: true,
+      textEdited: false,
+      generatedAt: CREATED,
+    };
+    const calls = setup({
+      "GET /api/v1/tts/voices": () => json({ models: [] }),
+      "POST /api/v1/announcements/generate": () =>
+        json({ announcement: generated, regenerated: true }, 201),
+    });
+    renderApp("/announcements");
+    await screen.findByRole("row", { name: /closing/ });
+    fireEvent.click(
+      screen.getByRole("button", { name: "New prompt from text" }),
+    );
+    fireEvent.change(await screen.findByLabelText("Prompt name"), {
+      target: { value: "welcome" },
+    });
+    fireEvent.change(screen.getByLabelText("Text to speak"), {
+      target: { value: "Welcome." },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Generate announcement" }),
+    );
+    const row = await screen.findByRole("row", { name: /welcome/ });
+    expect(within(row).getByText("Generated")).toBeVisible();
+    const post = calls.find(
+      (c) => c.method === "POST" && c.url.endsWith("/generate"),
+    );
+    expect(post?.body).toMatchObject({ name: "welcome", text: "Welcome." });
+    expect(calls.filter((c) => c.url.endsWith("/generate")).length).toBe(1);
+  });
+
+  it("marks a prompt whose text changed since generation", async () => {
+    setup({
+      "GET /api/v1/announcements": () =>
+        json({
+          items: [
+            { ...ANN, sourceText: "Hi", generated: true, textEdited: true },
+          ],
+        }),
+    });
+    renderApp("/announcements");
+    const row = await screen.findByRole("row", { name: /closing/ });
+    expect(within(row).getByText("Text edited")).toBeVisible();
+  });
 });

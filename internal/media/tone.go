@@ -15,7 +15,10 @@ import (
 // second of silence (16-bit mono at 8 kHz, 10 ms fades so the edges do not
 // click). It differs from the voicemail beep (425 Hz, one long beep) so the
 // two are not confused. Like BeepPCM it is computed, not stored.
-func PageTonePCM() []byte {
+func PageTonePCM() []byte { return PageTonePCMRate(sampleRateHz) }
+
+// PageTonePCMRate is PageTonePCM at another sample rate.
+func PageTonePCMRate(rate int) []byte {
 	const (
 		frequency = 880.0
 		beepMs    = 200
@@ -24,13 +27,13 @@ func PageTonePCM() []byte {
 		fadeMs    = 10
 		amplitude = 10000
 	)
-	ms := func(n int) int { return n * sampleRateHz / 1000 }
+	ms := func(n int) int { return n * rate / 1000 }
 	beep, gap, rest, fade := ms(beepMs), ms(gapMs), ms(restMs), ms(fadeMs)
 	out := make([]byte, 2*(2*beep+gap+rest))
 	for b := range 2 {
 		start := b * (beep + gap)
 		for i := range beep {
-			v := amplitude * math.Sin(2*math.Pi*frequency*float64(i)/sampleRateHz)
+			v := amplitude * math.Sin(2*math.Pi*frequency*float64(i)/float64(rate))
 			if i < fade {
 				v *= float64(i) / float64(fade)
 			}
@@ -44,18 +47,20 @@ func PageTonePCM() []byte {
 	return out
 }
 
-// streamPCM sends pcm as a G.711 RTP stream of its own (fresh SSRC, own
-// sequence and timestamp space) at real time through send, once or, with
-// loop, until ctx ends. It returns ctx.Err() when cancelled and nil when a
-// single pass finished.
-func streamPCM(ctx context.Context, pcm []byte, pt uint8, loop bool, send func(pkt []byte)) error {
-	if len(pcm) < frameBytes {
+// streamPCM sends pcm (at c's sample rate) as an RTP stream of its own
+// (fresh SSRC, own sequence and timestamp space) at real time through send,
+// once or, with loop, until ctx ends. It returns ctx.Err() when cancelled
+// and nil when a single pass finished.
+func streamPCM(ctx context.Context, pcm []byte, c Codec, loop bool, send func(pkt []byte)) error {
+	frame := 2 * c.FrameSamples()
+	if len(pcm) < frame {
 		return nil
 	}
-	encode := EncodePCMU
-	if pt == 8 {
-		encode = EncodePCMA
+	enc, err := NewEncoder(c)
+	if err != nil {
+		return err
 	}
+	defer enc.Close()
 	var b [10]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("media: tone stream: %w", err)
@@ -67,11 +72,11 @@ func streamPCM(ctx context.Context, pcm []byte, pt uint8, loop bool, send func(p
 	defer ticker.Stop()
 	first := true
 	for {
-		for off := 0; off+frameBytes <= len(pcm); off += frameBytes {
-			send(BuildRTP(pt, seq, ts, ssrc, first, encode(pcm[off:off+frameBytes])))
+		for off := 0; off+frame <= len(pcm); off += frame {
+			send(BuildRTP(c.PT, seq, ts, ssrc, first, enc.Encode(pcm[off:off+frame])))
 			first = false
 			seq++
-			ts += frameSamples
+			ts += c.TimestampStep()
 			select {
 			case <-ticker.C:
 			case <-ctx.Done():
@@ -89,7 +94,7 @@ func streamPCM(ctx context.Context, pcm []byte, pt uint8, loop bool, send func(p
 // address the caller's own RTP arrived from once that is known (NAT), and
 // at dst until then. With loop it runs until ctx ends.
 func (f *Fanout) PlayCaller(ctx context.Context, pcm []byte, dst *net.UDPAddr, loop bool) error {
-	return streamPCM(ctx, pcm, f.pt, loop, func(pkt []byte) {
+	return streamPCM(ctx, f.tonePCM(pcm), f.codec, loop, func(pkt []byte) {
 		to := dst
 		if a := f.callerAddr.Load(); a != nil {
 			to = a
@@ -104,7 +109,7 @@ func (f *Fanout) PlayCaller(ctx context.Context, pcm []byte, dst *net.UDPAddr, l
 // socket (the test page's tone). It returns when the pass is over or ctx
 // ends.
 func (f *Fanout) PlayMembers(ctx context.Context, pcm []byte) error {
-	return streamPCM(ctx, pcm, f.pt, false, func(pkt []byte) {
+	return streamPCM(ctx, f.tonePCM(pcm), f.codec, false, func(pkt []byte) {
 		f.mu.Lock()
 		targets := make([]*net.UDPAddr, 0, len(f.targets))
 		for _, a := range f.targets {
