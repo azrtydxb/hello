@@ -47,8 +47,8 @@
 .az-sidebar__nav {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin-top: 28px;
+  gap: 6px;
+  margin-top: 20px;
 }
 
 .az-sidebar__group {
@@ -62,6 +62,58 @@
   font-size: var(--az-text-xs);
 }
 
+.az-sidebar__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: 0;
+  border-radius: var(--az-radius-md);
+  cursor: pointer;
+  text-align: left;
+}
+
+.az-sidebar__toggle:hover {
+  background: var(--az-hover);
+  color: var(--az-text);
+}
+
+.az-sidebar__alert {
+  margin-left: auto;
+  margin-right: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--az-warn);
+}
+
+.az-sidebar__chev {
+  transition: transform 0.15s ease;
+}
+
+.az-sidebar__group--closed .az-sidebar__chev {
+  transform: rotate(-90deg);
+}
+
+.az-sidebar__items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.az-sidebar__items[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .az-sidebar__chev {
+    transition: none;
+  }
+}
+
+.az-sidebar__items > .az-nav__item,
 .az-sidebar__group > .az-nav__item {
   padding: 8px 12px;
   gap: 11px;
