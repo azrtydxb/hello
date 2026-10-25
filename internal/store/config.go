@@ -112,6 +112,12 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 		if c.Number != nil && *c.Number != number && len(routes) != 0 {
 			return id, inUse("extension "+number, routes)
 		}
+		if c.Number != nil && *c.Number != number {
+			if err := refuseIfIVRPoints(ctx, tx, "extension "+number+", which cannot be renumbered while it is named by", number,
+				IVRExtension, IVRVoicemail); err != nil {
+				return id, err
+			}
+		}
 		e, err = scanExtension(tx.QueryRowContext(ctx, `
 			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name),
 			       external_number = COALESCE($4, external_number), dnd = COALESCE($5, dnd),
@@ -137,6 +143,9 @@ func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, che
 		}
 		if len(routes) > 0 {
 			return id, inUse("extension "+number, routes)
+		}
+		if err := refuseIfIVRPoints(ctx, tx, "extension "+number, number, IVRExtension, IVRVoicemail); err != nil {
+			return id, err
 		}
 		if err := boundPhone(ctx, tx, `d.extension_id = $1`, id); err != nil {
 			return id, err

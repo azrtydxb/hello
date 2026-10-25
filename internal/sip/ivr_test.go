@@ -119,6 +119,9 @@ func TestIVRDigitToExtension(t *testing.T) {
 		}
 		return false
 	})
+	eventually(t, "the menu connected the call", func() bool {
+		return pbx.metric(t, "hello_ivr_total", map[string]string{"event": "connected"}) == 1
+	})
 	if err := r.dcs.Bye(t.Context()); err != nil {
 		t.Fatalf("caller BYE: %v", err)
 	}

@@ -507,3 +507,38 @@ func (s *Store) IVRMenuNameExists(ctx context.Context, name string) (bool, error
 	}
 	return n > 0, nil
 }
+
+// refuseIfIVRPoints returns an *InUseError naming the IVR menus whose
+// options or timeout and invalid exits point at target with one of kinds. It
+// guards the extension, ring group, paging group and announcement a menu
+// names against being deleted or renumbered under it.
+func refuseIfIVRPoints(ctx context.Context, tx *sql.Tx, what, target string, kinds ...string) error {
+	k2 := kinds[0]
+	if len(kinds) > 1 {
+		k2 = kinds[1]
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT m.name FROM ivr_menus m WHERE
+		(m.timeout_kind IN ($1, $2) AND m.timeout_target = $3)
+		OR (m.invalid_kind IN ($1, $2) AND m.invalid_target = $3)
+		OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind IN ($1, $2) AND o.dest_target = $3)
+		ORDER BY m.name`, kinds[0], k2, target)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	var refs []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return err
+		}
+		refs = append(refs, "IVR menu "+n)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(refs) > 0 {
+		return inUseBy(what, refs)
+	}
+	return nil
+}

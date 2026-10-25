@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -104,5 +105,76 @@ func TestIVRMenus(t *testing.T) {
 	}
 	if err := s.DeleteIVRMenu(ctx, "test", main.ID, nil); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("second delete: %v", err)
+	}
+}
+
+// TestIVRNamedObjectsAreProtected: what a menu's options and exits point at
+// cannot be deleted or renumbered, and the error names the menu.
+func TestIVRNamedObjectsAreProtected(t *testing.T) {
+	s := scratchStore(t)
+	ctx := context.Background()
+	var ext, rg, pg int64
+	for q, dst := range map[string]*int64{
+		`INSERT INTO extensions (number, name) VALUES ('101', 'Sales') RETURNING id`:         &ext,
+		`INSERT INTO ring_groups (name, strategy) VALUES ('sales', 'ring-all') RETURNING id`: &rg,
+		`INSERT INTO paging_groups (name, code) VALUES ('kitchen', '*60') RETURNING id`:      &pg,
+	} {
+		if err := s.db.QueryRowContext(ctx, q).Scan(dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	greet, err := s.CreateAnnouncement(ctx, "t", "greet", "ann/greet.wav", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bye, err := s.CreateAnnouncement(ctx, "t", "bye", "ann/bye.wav", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := ivrInput("main", greet.ID)
+	in.Timeout = IVRDestination{Kind: IVRAnnouncement, Target: "bye"}
+	in.Options = []IVROption{
+		{Digit: "1", Kind: IVRExtension, Target: "101"}, {Digit: "3", Kind: IVRRingGroup, Target: "sales"},
+		{Digit: "4", Kind: IVRPaging, Target: "*60"},
+	}
+	menu, err := s.CreateIVRMenu(ctx, "t", in, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inUse *InUseError
+	refuse := func(what string, err error) {
+		t.Helper()
+		if !errors.As(err, &inUse) || !strings.Contains(inUse.Msg, "IVR menu main") {
+			t.Errorf("%s: %v, want an in-use error naming the menu", what, err)
+		}
+	}
+	number := "109"
+	_, err = s.UpdateExtension(ctx, "t", ext, ExtensionChange{Number: &number}, nil)
+	refuse("renumber extension", err)
+	refuse("delete extension", s.DeleteExtension(ctx, "t", ext, nil))
+	_, err = s.UpdateRingGroup(ctx, "t", rg, RingGroupInput{Name: "sales2", Strategy: "ring-all", RingTimeout: 30, FailureKind: "none"}, nil)
+	refuse("rename ring group", err)
+	refuse("delete ring group", s.DeleteRingGroup(ctx, "t", rg, nil))
+	_, err = s.UpdatePagingGroup(ctx, "t", pg, PagingGroupInput{Name: "kitchen", Code: "*61", Priority: PagingNormal, Enabled: true}, nil)
+	refuse("change page code", err)
+	refuse("delete paging group", s.DeletePagingGroup(ctx, "t", pg, nil))
+	_, err = s.DeleteAnnouncement(ctx, "t", bye.ID, nil)
+	refuse("delete announcement", err)
+
+	in.Timeout, in.Options = IVRDestination{Kind: IVRHangup}, nil
+	if _, err := s.UpdateIVRMenu(ctx, "t", menu.ID, in, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DeleteAnnouncement(ctx, "t", bye.ID, nil); err != nil {
+		t.Fatalf("delete announcement after release: %v", err)
+	}
+	if err := s.DeletePagingGroup(ctx, "t", pg, nil); err != nil {
+		t.Fatalf("delete paging group after release: %v", err)
+	}
+	if err := s.DeleteRingGroup(ctx, "t", rg, nil); err != nil {
+		t.Fatalf("delete ring group after release: %v", err)
+	}
+	if err := s.DeleteExtension(ctx, "t", ext, nil); err != nil {
+		t.Fatalf("delete extension after release: %v", err)
 	}
 }

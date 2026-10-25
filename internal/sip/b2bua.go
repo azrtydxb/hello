@@ -186,6 +186,8 @@ type call struct {
 	vmExt       string
 	vmTap       func(leg string, pkt *media.RTPPacket)
 	bridgedExt  string
+	// ivrUnrecoverable is set when a dial-out cannot be done after a takeover.
+	ivrUnrecoverable bool
 }
 
 // callStages is the forwarding/DND context of the extension a call is
@@ -1310,22 +1312,26 @@ func (l *leg) invite() (*sip.Request, error) {
 	req.AppendHeader(&callID)
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: 1, MethodName: sip.INVITE})
 	maxFwd := sip.MaxForwardsHeader(70)
-	if mf := c.inv.MaxForwards(); mf != nil && mf.Val() > 1 {
+	if c.inv == nil {
+		// A call a survivor took over (an IVR menu dialling out) has no INVITE.
+	} else if mf := c.inv.MaxForwards(); mf != nil && mf.Val() > 1 {
 		maxFwd = sip.MaxForwardsHeader(mf.Val() - 1)
 	}
 	req.AppendHeader(&maxFwd)
 	req.AppendHeader(sip.HeaderClone(&s.contact))
 	req.AppendHeader(sip.NewHeader("Allow", allow))
-	if body := c.inv.Body(); len(body) > 0 {
-		if ct := c.inv.ContentType(); ct != nil {
-			req.AppendHeader(sip.HeaderClone(ct))
+	if body := c.offerSDP(); len(body) > 0 {
+		if c.inv != nil {
+			if ct := c.inv.ContentType(); ct != nil {
+				req.AppendHeader(sip.HeaderClone(ct))
+			}
 		}
 		req.SetBody(body)
 	}
 	// An anchored call terminates media: the fork's offer is the anchor's
 	// leg-b port, not the caller's SDP (spec S-2).
 	if l.c.isAnchored() {
-		if off, err := media.ParseAudioSDP(c.inv.Body()); err == nil {
+		if off, err := media.ParseAudioSDP(c.offerSDP()); err == nil {
 			if body := l.c.anchoredOfferB(off); len(body) > 0 {
 				req.SetBody(body)
 				req.RemoveHeader("Content-Type")

@@ -540,6 +540,15 @@ func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupI
 func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in RingGroupInput, check Check) (RingGroup, error) {
 	var g RingGroup
 	err := s.configChange(ctx, actor, "update", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		var cur string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = $1`, id).Scan(&cur); err != nil {
+			return id, err
+		}
+		if cur != in.Name {
+			if err := refuseIfIVRPoints(ctx, tx, "ring group "+cur+", which cannot be renamed while it is named by", cur, IVRRingGroup); err != nil {
+				return id, err
+			}
+		}
 		res, err := tx.ExecContext(ctx, `
 			UPDATE ring_groups SET name = $2, strategy = $3, hunt = $4, ring_timeout = $5, member_delay = $6,
 			       ignore_dnd = $7, failure_kind = $8, failure_target = $9, updated_at = now()
@@ -564,6 +573,13 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 // DeleteRingGroup removes a group and, by cascade, its members.
 func (s *Store) DeleteRingGroup(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		var name string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = $1`, id).Scan(&name); err != nil {
+			return id, err
+		}
+		if err := refuseIfIVRPoints(ctx, tx, "ring group "+name, name, IVRRingGroup); err != nil {
+			return id, err
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM ring_groups WHERE id = $1`, id)
 		if err != nil {
 			return id, err

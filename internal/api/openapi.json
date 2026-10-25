@@ -520,7 +520,7 @@
       "patch": {
         "operationId": "updateExtension",
         "summary": "Change an extension's number or name",
-        "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields.",
+        "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields. Renumbering an extension an IVR menu names is refused (409).",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -574,7 +574,7 @@
       "delete": {
         "operationId": "deleteExtension",
         "summary": "Delete an extension and its devices",
-        "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes.",
+        "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes. An extension an IVR menu names (as a destination or voicemail box) cannot be deleted (409).",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -2862,7 +2862,7 @@
       "delete": {
         "operationId": "deleteAnnouncement",
         "summary": "Delete an announcement",
-        "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time.",
+        "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time. An announcement that an IVR menu plays or names as a destination cannot be deleted (409).",
         "tags": ["media"],
         "parameters": [
           {
@@ -2875,6 +2875,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3071,7 +3074,7 @@
       "patch": {
         "operationId": "updateRingGroup",
         "summary": "Change a ring/hunt group",
-        "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored.",
+        "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored. A group that an IVR menu names cannot be renamed (409).",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -3105,6 +3108,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -3122,7 +3128,7 @@
       "delete": {
         "operationId": "deleteRingGroup",
         "summary": "Delete a ring/hunt group",
-        "description": "Deletes a ring or hunt group. The members go with it.",
+        "description": "Deletes a ring or hunt group. The members go with it. A group that an IVR menu names cannot be deleted (409).",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -3135,6 +3141,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3477,7 +3486,7 @@
       "put": {
         "operationId": "putPagingGroup",
         "summary": "Replace a paging group",
-        "description": "Replaces a paging group as a whole, member and caller lists included. A page already running keeps the member set it started with.",
+        "description": "Replaces a paging group as a whole, member and caller lists included. A page already running keeps the member set it started with. Changing the code of a group an IVR menu names is refused (409).",
         "tags": ["paging-groups"],
         "parameters": [
           {
@@ -3531,7 +3540,7 @@
       "delete": {
         "operationId": "deletePagingGroup",
         "summary": "Delete a paging group",
-        "description": "Deletes a paging group. Its member and caller lists go with it.",
+        "description": "Deletes a paging group. Its member and caller lists go with it. A paging group that an IVR menu names cannot be deleted (409).",
         "tags": ["paging-groups"],
         "parameters": [
           {
@@ -3544,6 +3553,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"

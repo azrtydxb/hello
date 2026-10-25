@@ -286,6 +286,15 @@ func (s *Store) CreatePagingGroup(ctx context.Context, actor string, in PagingGr
 func (s *Store) UpdatePagingGroup(ctx context.Context, actor string, id int64, in PagingGroupInput, check Check) (PagingGroup, error) {
 	var g PagingGroup
 	err := s.configChange(ctx, actor, "update", "paging_group", check, func(tx *sql.Tx) (int64, error) {
+		var cur string
+		if err := tx.QueryRowContext(ctx, `SELECT code FROM paging_groups WHERE id = $1`, id).Scan(&cur); err != nil {
+			return id, err
+		}
+		if cur != in.Code {
+			if err := refuseIfIVRPoints(ctx, tx, "page code "+cur+", which cannot be changed while it is named by", cur, IVRPaging); err != nil {
+				return id, err
+			}
+		}
 		if err := checkPageCode(ctx, tx, in.Code); err != nil {
 			return id, err
 		}
@@ -315,6 +324,13 @@ func (s *Store) UpdatePagingGroup(ctx context.Context, actor string, id int64, i
 // DeletePagingGroup removes a paging group and, by cascade, its lists.
 func (s *Store) DeletePagingGroup(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "paging_group", check, func(tx *sql.Tx) (int64, error) {
+		var code string
+		if err := tx.QueryRowContext(ctx, `SELECT code FROM paging_groups WHERE id = $1`, id).Scan(&code); err != nil {
+			return id, err
+		}
+		if err := refuseIfIVRPoints(ctx, tx, "paging group "+code, code, IVRPaging); err != nil {
+			return id, err
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM paging_groups WHERE id = $1`, id)
 		if err != nil {
 			return id, err

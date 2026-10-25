@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/store"
@@ -168,4 +169,69 @@ func TestIVRMenuCRUD(t *testing.T) {
 	}
 	c.must(http.StatusOK, "GET", "/api/v1/ivr-menus/"+id, nil)
 	c.must(http.StatusNotFound, "GET", "/api/v1/ivr-menus/987654", nil)
+}
+
+// TestIVRNamedObjectsAreProtected: an extension, voicemail box, ring group,
+// paging group or announcement that an IVR option or exit points at cannot
+// be deleted or renumbered (409 naming the menu), and can once the menu lets
+// go. It fails if any of them can be removed from under a menu.
+func TestIVRNamedObjectsAreProtected(t *testing.T) {
+	e := newPBXEnv(t, newMemObjects())
+	c := e.login()
+	ctx := context.Background()
+	greet, err := e.st.CreateAnnouncement(ctx, "test", "greet", "ann/greet.wav", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bye, err := e.st.CreateAnnouncement(ctx, "test", "bye", "ann/bye.wav", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m1 := json.Number(fmt.Sprint(e.ext101["id"]))
+	rg := c.must(http.StatusCreated, "POST", "/api/v1/ring-groups", map[string]any{
+		"name": "sales", "members": []map[string]any{{"extensionId": e.ext101["id"], "position": 1}}}).json(t)
+	pg := c.must(http.StatusCreated, "POST", "/api/v1/paging-groups", map[string]any{
+		"name": "kitchen", "code": "*60", "members": []json.Number{m1}}).json(t)
+	opt := func(d, kind, target string) map[string]any {
+		return map[string]any{"digit": d, "kind": kind, "target": target}
+	}
+	menu := map[string]any{
+		"name": "main", "greetingId": greet.ID,
+		"timeout": map[string]any{"kind": "announcement", "target": "bye"},
+		"options": []map[string]any{
+			opt("1", "extension", "101"), opt("2", "voicemail", "102"),
+			opt("3", "ring_group", "sales"), opt("4", "paging", "*60"),
+		},
+	}
+	made := c.must(http.StatusCreated, "POST", "/api/v1/ivr-menus", menu).json(t)
+
+	refused := func(method, path string, body any) {
+		t.Helper()
+		r := c.must(http.StatusConflict, method, path, body)
+		if !strings.Contains(string(r.body), "IVR menu main") {
+			t.Errorf("%s %s: the 409 does not name the menu: %s", method, path, r.body)
+		}
+	}
+	extPath := func(ext map[string]any) string { return fmt.Sprintf("/api/v1/extensions/%v", ext["id"]) }
+	refused("DELETE", extPath(e.ext101), nil)
+	refused("PATCH", extPath(e.ext101), map[string]any{"number": "109"})
+	refused("DELETE", extPath(e.ext102), nil) // named as a voicemail box
+	refused("PATCH", extPath(e.ext102), map[string]any{"number": "119"})
+	c.must(http.StatusOK, "PATCH", extPath(e.ext102), map[string]any{"name": "Renamed"}) // other changes are fine
+	rgPath := fmt.Sprintf("/api/v1/ring-groups/%v", rg["id"])
+	refused("DELETE", rgPath, nil)
+	refused("PATCH", rgPath, map[string]any{"name": "sales2"})
+	pgPath := fmt.Sprintf("/api/v1/paging-groups/%v", pg["id"])
+	refused("DELETE", pgPath, nil)
+	refused("PUT", pgPath, map[string]any{"name": "kitchen", "code": "*61", "members": []json.Number{m1}})
+	refused("DELETE", fmt.Sprintf("/api/v1/announcements/%v", bye.ID), nil)
+
+	// Once the menu lets go of them they can go.
+	menu["options"] = []map[string]any{}
+	menu["timeout"] = map[string]any{"kind": "hangup", "target": ""}
+	c.must(http.StatusOK, "PUT", fmt.Sprintf("/api/v1/ivr-menus/%v", made["id"]), menu)
+	c.must(http.StatusNoContent, "DELETE", fmt.Sprintf("/api/v1/announcements/%v", bye.ID), nil)
+	c.must(http.StatusNoContent, "DELETE", pgPath, nil)
+	c.must(http.StatusNoContent, "DELETE", rgPath, nil)
+	c.must(http.StatusOK, "PATCH", extPath(e.ext102), map[string]any{"number": "119"})
 }
