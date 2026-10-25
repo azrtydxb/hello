@@ -437,7 +437,7 @@ func (s *server) putVoicemailGreeting(w http.ResponseWriter, r *http.Request) {
 		}
 		hash := store.PromptHash(in.Text, in.VoiceID, in.ModelID)
 		if prevMeta != nil && prevMeta.Hash == hash && prevObject != "" && !in.Force {
-			writeJSON(w, http.StatusOK, map[string]any{"box": s.boxView(prev), "regenerated": false})
+			writeJSON(w, http.StatusOK, map[string]any{"box": s.boxView(r.Context(), prev), "regenerated": false})
 			return
 		}
 		var ok bool
@@ -473,5 +473,5 @@ func (s *server) putVoicemailGreeting(w http.ResponseWriter, r *http.Request) {
 			s.Log.Warn("voicemail: remove old greeting", "error", err)
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"box": s.boxView(b), "regenerated": true})
+	writeJSON(w, http.StatusOK, map[string]any{"box": s.boxView(r.Context(), b), "regenerated": true})
 }

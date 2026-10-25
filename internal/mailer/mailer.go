@@ -1,10 +1,10 @@
+// Package mailer delivers voicemail notification emails. It runs beside call
+// handling and never inside it: a worker fans new voicemail messages out into
+// one notification per recipient, claims due notifications from the shared
+// database queue (one node per notification, so a cluster sends each email
+// once), sends them over SMTP and retries failures with exponential backoff
+// until they succeed or are given up on.
 package mailer
-
-// Package mailer delivers voicemail notification emails: it polls the
-// voicemail_messages queue for email_status='pending' rows, attaches the
-// message audio and sends via SMTP, retrying three times with backoff before
-// the message is marked failed. Nothing on the SIP path or the API waits
-// for SMTP.
 
 import (
 	"context"
@@ -12,64 +12,95 @@ import (
 	"time"
 )
 
-// Job is one message waiting for delivery.
+// Job is one notification claimed for sending.
 type Job struct {
+	ID         int64
 	MessageID  int64
 	To         string
 	Caller     string
 	DurationMs int64
 	CreatedAt  time.Time
-	Object     string // MinIO key of the WAV attachment
+	Object     string // storage key of the recording
+	// Attach adds the recording to the email.
+	Attach   bool
+	Attempts int
+	// Queued is when the notification was created.
+	Queued time.Time
 }
 
-// Queue is the persistence the worker needs; *store.Store implements it.
+// Result is how a send ended, for the queue to record.
+type Result struct {
+	// Err is the failure text, "" on success. It must not carry secrets.
+	Err     string
+	Final   bool
+	RetryAt time.Time
+}
+
+// Queue is the persistence the worker needs; the adapter over *store.Store
+// implements it.
 type Queue interface {
-	PendingEmails(ctx context.Context, limit int) ([]Job, error)
-	MarkEmail(ctx context.Context, id int64, status string) error
+	// FanOut creates the notifications of new messages.
+	FanOut(ctx context.Context, limit int) (int, error)
+	// Claim takes due notifications for this node, including ones whose
+	// sender vanished (claimed longer than stale ago).
+	Claim(ctx context.Context, limit int, stale time.Duration) ([]Job, error)
+	// Finish records a result and applies the recipients' after-send action;
+	// it returns the recording to delete from storage, if the message went.
+	Finish(ctx context.Context, id int64, r Result) (removeObject string, err error)
 }
 
-// Objects fetches message audio from the voicemail bucket.
+// Objects reads and removes message audio.
 type Objects interface {
 	Get(ctx context.Context, object string) ([]byte, error)
+	Remove(ctx context.Context, object string) error
 }
 
-// Sender delivers one built message.
-type Sender interface {
-	Send(ctx context.Context, from, to string, msg []byte) error
-}
-
-// Statuses recorded on the message row.
-const (
-	StatusSent   = "sent"
-	StatusFailed = "failed"
-)
+// SettingsFunc returns the SMTP settings now in force; ok=false when email
+// is not configured. It is read on every pass, so a change in the console
+// applies without a restart.
+type SettingsFunc func(ctx context.Context) (s Settings, ok bool, err error)
 
 // Config wires the worker.
 type Config struct {
-	// From is the envelope sender and From header; empty disables the worker.
-	From    string
-	Queue   Queue
-	Objects Objects
-	Sender  Sender
+	Queue    Queue
+	Objects  Objects
+	Settings SettingsFunc
+	// Deliver sends one built message; nil uses SMTP.
+	Deliver func(ctx context.Context, s Settings, to string, msg []byte) error
 	Log     *slog.Logger
 
-	// MaxAttempts is how often one email is tried (spec S-8: three).
+	// MaxAttempts is how often one notification is tried.
 	MaxAttempts int
-	// Backoff waits before retry attempt n+1; tests replace it.
+	// Backoff is the wait before the retry that follows attempt n.
 	Backoff func(attempt int) time.Duration
+	// GiveUp stops retrying a notification this long after it was queued.
+	GiveUp time.Duration
 	// PollEvery is how often the queue is checked.
 	PollEvery time.Duration
-	// FetchTimeout bounds one attachment download and one SMTP send.
-	FetchTimeout time.Duration
+	// Timeout bounds one attachment download and one SMTP send.
+	Timeout time.Duration
+	// Stale is how long a claim may sit before another node takes the
+	// notification over.
+	Stale time.Duration
+	Now   func() time.Time
 }
 
-// defaults for unset Config fields.
 const (
-	defaultMaxAttempts = 3
-	defaultPollEvery   = 30 * time.Second
-	defaultFetch       = 10 * time.Second
-	defaultBackoff     = 2 * time.Second
+	defaultMaxAttempts = 6
+	defaultPollEvery   = 10 * time.Second
+	defaultTimeout     = 30 * time.Second
+	defaultGiveUp      = 24 * time.Hour
+	batch              = 25
 )
+
+// defaultBackoff doubles from 30 s to one hour.
+func defaultBackoff(attempt int) time.Duration {
+	d := 30 * time.Second
+	for i := 1; i < attempt && d < time.Hour; i++ {
+		d *= 2
+	}
+	return min(d, time.Hour)
+}
 
 // Worker is the voicemail email queue worker.
 type Worker struct {
@@ -85,11 +116,23 @@ func New(cfg Config) *Worker {
 	if cfg.PollEvery <= 0 {
 		cfg.PollEvery = defaultPollEvery
 	}
-	if cfg.FetchTimeout <= 0 {
-		cfg.FetchTimeout = defaultFetch
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = defaultTimeout
+	}
+	if cfg.GiveUp <= 0 {
+		cfg.GiveUp = defaultGiveUp
+	}
+	if cfg.Stale <= 0 {
+		cfg.Stale = 3 * cfg.Timeout
 	}
 	if cfg.Backoff == nil {
-		cfg.Backoff = func(int) time.Duration { return defaultBackoff }
+		cfg.Backoff = defaultBackoff
+	}
+	if cfg.Deliver == nil {
+		cfg.Deliver = Deliver
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
 	}
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
@@ -97,21 +140,12 @@ func New(cfg Config) *Worker {
 	return &Worker{cfg: cfg, log: cfg.Log}
 }
 
-// Enabled reports whether the worker can send (spec: the mailer is disabled
-// when SMTP is not configured).
-func (w *Worker) Enabled() bool { return w.cfg.Sender != nil && w.cfg.From != "" }
-
-// Run delivers queued emails until ctx ends. A disabled worker returns at
-// once.
+// Run works the queue until ctx ends.
 func (w *Worker) Run(ctx context.Context) {
-	if !w.Enabled() {
-		w.log.Info("voicemail email delivery disabled (SMTP not configured)")
-		return
-	}
 	t := time.NewTicker(w.cfg.PollEvery)
 	defer t.Stop()
 	for {
-		w.process(ctx)
+		w.Process(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -120,72 +154,90 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 }
 
-// process is one queue pass; a disabled worker does nothing.
-func (w *Worker) process(ctx context.Context) {
-	if !w.Enabled() {
+// Process is one pass: fan out, claim, send. Without SMTP settings it does
+// nothing, so notifications wait for them (and are given up on after
+// GiveUp).
+func (w *Worker) Process(ctx context.Context) {
+	st, ok, err := w.cfg.Settings(ctx)
+	if err != nil {
+		w.log.Warn("voicemail email: read SMTP settings", "error", err)
 		return
 	}
-	jobs, err := w.cfg.Queue.PendingEmails(ctx, 50)
+	if !ok {
+		return
+	}
+	if _, err := w.cfg.Queue.FanOut(ctx, batch); err != nil {
+		w.log.Warn("voicemail email: fan out", "error", err)
+		return
+	}
+	jobs, err := w.cfg.Queue.Claim(ctx, batch, w.cfg.Stale)
 	if err != nil {
-		w.log.Warn("voicemail email queue", "error", err)
+		w.log.Warn("voicemail email: claim", "error", err)
 		return
 	}
 	for _, j := range jobs {
 		if ctx.Err() != nil {
 			return
 		}
-		w.deliver(ctx, j)
+		w.deliver(ctx, st, j)
 	}
 }
 
-// backoff waits d or until ctx ends, and reports whether the wait completed.
-func backoff(ctx context.Context, d time.Duration) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	case <-time.After(d):
-		return true
-	}
-}
-
-// deliver sends j, retrying up to MaxAttempts with backoff, then records the
-// result on the message row.
-func (w *Worker) deliver(ctx context.Context, j Job) {
-	log := w.log.With("message_id", j.MessageID)
-	var wav []byte
-	if w.cfg.Objects != nil {
-		fctx, cancel := context.WithTimeout(ctx, w.cfg.FetchTimeout)
-		b, err := w.cfg.Objects.Get(fctx, j.Object)
+// deliver makes one attempt for j and records the result.
+func (w *Worker) deliver(ctx context.Context, st Settings, j Job) {
+	log := w.log.With("notification_id", j.ID, "message_id", j.MessageID, "attempt", j.Attempts)
+	lastTry := j.Attempts >= w.cfg.MaxAttempts || w.cfg.Now().Sub(j.Queued) >= w.cfg.GiveUp
+	var (
+		audio    []byte
+		fetchErr error
+	)
+	if j.Attach && w.cfg.Objects != nil {
+		fctx, cancel := context.WithTimeout(ctx, w.cfg.Timeout)
+		audio, fetchErr = w.cfg.Objects.Get(fctx, j.Object)
 		cancel()
-		if err != nil {
-			// The email still goes out, without the attachment.
-			log.Warn("voicemail email: fetch attachment", "error", err)
-		} else {
-			wav = b
-		}
-	}
-	msg, err := BuildMessage(w.cfg.From, j, wav)
-	if err != nil {
-		log.Error("voicemail email: build message", "error", err)
-		_ = w.cfg.Queue.MarkEmail(ctx, j.MessageID, StatusFailed)
-		return
-	}
-	for attempt := 1; ; attempt++ {
-		sctx, cancel := context.WithTimeout(ctx, w.cfg.FetchTimeout)
-		serr := w.cfg.Sender.Send(sctx, w.cfg.From, j.To, msg)
-		cancel()
-		if serr == nil {
-			if merr := w.cfg.Queue.MarkEmail(ctx, j.MessageID, StatusSent); merr != nil {
-				log.Warn("voicemail email: record sent", "error", merr)
-			}
+		if fetchErr != nil && !lastTry {
+			// Retry rather than send without the recording asked for.
+			w.finish(ctx, log, j, "fetch recording: "+fetchErr.Error(), false)
 			return
 		}
-		log.Warn("voicemail email send failed", "attempt", attempt, "max", w.cfg.MaxAttempts, "error", serr)
-		if attempt >= w.cfg.MaxAttempts || !backoff(ctx, w.cfg.Backoff(attempt)) {
-			break
+		if fetchErr != nil {
+			log.Warn("voicemail email: sending without the recording", "error", fetchErr)
+			audio = nil
 		}
 	}
-	if merr := w.cfg.Queue.MarkEmail(ctx, j.MessageID, StatusFailed); merr != nil {
-		log.Warn("voicemail email: record failed", "error", merr)
+	msg, err := BuildMessage(st.From, j, audio)
+	if err != nil {
+		log.Error("voicemail email: build message", "error", err)
+		w.finish(ctx, log, j, "build message: "+err.Error(), true)
+		return
+	}
+	sctx, cancel := context.WithTimeout(ctx, w.cfg.Timeout)
+	err = w.cfg.Deliver(sctx, st, j.To, msg)
+	cancel()
+	if err == nil {
+		w.finish(ctx, log, j, "", false)
+		return
+	}
+	log.Warn("voicemail email send failed", "max", w.cfg.MaxAttempts, "error", err)
+	w.finish(ctx, log, j, err.Error(), lastTry)
+}
+
+func (w *Worker) finish(ctx context.Context, log *slog.Logger, j Job, errText string, final bool) {
+	r := Result{Err: errText, Final: final}
+	if errText != "" && !final {
+		r.RetryAt = w.cfg.Now().Add(w.cfg.Backoff(j.Attempts))
+	}
+	// Recording the result must survive a shutdown that cancels ctx.
+	fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	remove, err := w.cfg.Queue.Finish(fctx, j.ID, r)
+	if err != nil {
+		log.Warn("voicemail email: record result", "error", err)
+		return
+	}
+	if remove != "" && w.cfg.Objects != nil {
+		if err := w.cfg.Objects.Remove(fctx, remove); err != nil {
+			log.Warn("voicemail email: remove recording after send", "error", err)
+		}
 	}
 }
