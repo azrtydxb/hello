@@ -16,6 +16,8 @@ export interface LineChartProps {
   height?: number;
   yTicks?: number;
   format?: (v: number) => string;
+  /** Whole-number y ticks only (counts): a step of at least 1, no repeated labels. */
+  integer?: boolean;
   /** 12% area fill under the first series. */
   area?: boolean;
   /** Accessible summary of what the chart shows. */
@@ -31,19 +33,24 @@ export function LineChart({
   height = 160,
   yTicks = 4,
   format = (v) => String(v),
+  integer = false,
   area = true,
   label,
   className,
   style,
 }: LineChartProps) {
   const all = series.flatMap((s) => s.data);
-  const max = Math.max(1, ...all) * 1.1;
+  const peak = Math.max(1, ...all);
+  // Integer axes step by whole numbers, with no more ticks than steps.
+  const step = integer ? Math.ceil(peak / yTicks) : 0;
+  const tickCount = integer ? Math.ceil(peak / step) : yTicks;
+  const max = integer ? step * tickCount : peak * 1.1;
   const n = Math.max(2, ...series.map((s) => s.data.length));
   const x = (i: number) => (i / (n - 1)) * 100;
   const y = (v: number) => height - (v / max) * height;
   const ticks = Array.from(
-    { length: yTicks + 1 },
-    (_, i) => (max * (yTicks - i)) / yTicks,
+    { length: tickCount + 1 },
+    (_, i) => (max * (tickCount - i)) / tickCount,
   );
   return (
     <div className={cx("az-chart", className)} style={style}>
@@ -70,7 +77,7 @@ export function LineChart({
             y2={y(t)}
             strokeWidth="1"
             vectorEffect="non-scaling-stroke"
-            strokeDasharray={i === yTicks ? undefined : "2 4"}
+            strokeDasharray={i === tickCount ? undefined : "2 4"}
             style={{ stroke: "var(--az-border)" }}
           />
         ))}

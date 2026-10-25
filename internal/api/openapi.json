@@ -8508,6 +8508,11 @@
             "type": "string",
             "example": "direct"
           },
+          "direction": {
+            "type": "string",
+            "enum": ["internal", "inbound", "outbound"],
+            "description": "Call direction as its CDR will record it; absent on records from older nodes"
+          },
           "ha": {
             "type": "string",
             "enum": ["owned", "taken-over"],
