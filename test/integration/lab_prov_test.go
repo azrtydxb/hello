@@ -80,16 +80,20 @@ func TestProvisioningAsVendors(t *testing.T) {
 	lc.must("POST", "/api/v1/extensions", map[string]string{"number": blf, "name": "blf " + blf}, nil, 201)
 
 	for _, m := range provclient.Models {
-		t.Run(m.Vendor, func(t *testing.T) {
+		t.Run(m.Vendor+"-"+m.Model, func(t *testing.T) {
 			lc := &labClient{t: t, c: lc.c}
 			d := lc.createExtension("desk")[0]
 			devID := d.ID
 			mac := m.OUI + randHex(3)
+			phoneBLF, wantBLF := []string{blf}, []string{blf}
+			if m.NoBLF {
+				phoneBLF, wantBLF = []string{}, []string{}
+			}
 			var created labPhoneView
 			lc.must("POST", "/api/v1/phones", map[string]any{
 				"mac": mac, "vendor": m.Vendor, "model": m.Model, "label": "lab " + m.Vendor,
 				"extensionId": mustInt(t, lc.extensionID(d.Extension)), "deviceId": devID,
-				"blf": []string{blf}, "enabled": true,
+				"blf": phoneBLF, "enabled": true,
 			}, &created, 201)
 			remember(tokenOf(created.ProvisioningURL))
 			if !created.BootArmed || !created.SecretRotated {
@@ -129,7 +133,7 @@ func TestProvisioningAsVendors(t *testing.T) {
 				{"server", net.JoinHostPort(c.Server, strconv.Itoa(c.Port)), labKamailio},
 				{"user", c.User, d.User},
 				{"display name", c.DisplayName, "test " + d.Extension},
-				{"BLF", fmt.Sprint(c.BLF), fmt.Sprint([]string{blf})},
+				{"BLF", fmt.Sprint(c.BLF), fmt.Sprint(wantBLF)},
 			}
 			if c.AuthUser != "" || m.Vendor != "snom" { // Snom's auth-name key is unconfirmed
 				checks = append(checks, struct {

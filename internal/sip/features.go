@@ -80,7 +80,17 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		c.record(sip.StatusForbidden, cdr.SideSystem, "transfer code dialled as a call", ResultFailed)
 		return true
 	case ActionVoicemail:
+		if arg != "" && !c.voicemailTarget(arg) {
+			s.respond(tx, c.inv, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "no voicemail box for extension "+arg, ResultNotFound)
+			return true
+		}
 		if !c.begin(c.inv, tx) {
+			return true
+		}
+		if arg != "" {
+			// *97<ext>: leave a message in that extension's box (CALL-55).
+			c.startVoicemail(vmLeave, "transfer")
 			return true
 		}
 		c.voicemailOwnBox(fc.Argument)

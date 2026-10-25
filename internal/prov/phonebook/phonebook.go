@@ -11,7 +11,9 @@ package phonebook
 import (
 	"bytes"
 	"encoding/xml"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -29,8 +31,15 @@ type Book struct {
 // (Yealink) are given; further books are merged into the last one.
 const MaxSources = 5
 
-// MaxGrandstreamEntries is the Grandstream WP8x6's phonebook capacity.
-const MaxGrandstreamEntries = 1000
+// MaxGrandstreamEntries is the phonebook capacity of the Grandstream WP8x6
+// and WP856; MaxGrandstreamWP8xxEntries that of the WP810, WP820, WP822 and
+// WP825 (their guides: "up to 500 items").
+const (
+	MaxGrandstreamEntries      = 1000
+	MaxGrandstreamWP8xxEntries = 500
+)
+
+var wp8xxModelRE = regexp.MustCompile(`^WP8(10|2[0258])`)
 
 // Format is how a vendor takes a directory.
 type Format struct {
@@ -66,14 +75,32 @@ func FormatFor(vendor string) (Format, bool) {
 	return f, ok
 }
 
+// FormatForModel is FormatFor with the capacity of the phone's model: a
+// Grandstream WP810, WP820, WP822 or WP825 takes 500 contacts, not 1000.
+func FormatForModel(vendor, model string) (Format, bool) {
+	f, ok := formats[vendor]
+	if ok && vendor == "grandstream" && wp8xxModelRE.MatchString(strings.ToUpper(strings.NewReplacer(" ", "", "-", "", "_", "").Replace(model))) {
+		f.MaxEntries = MaxGrandstreamWP8xxEntries
+	}
+	return f, ok
+}
+
 // Merge flattens books in order into one entry list, dropping every number
 // whose lookup key an earlier book (or an earlier entry) already has, and
 // every entry left with no number: the earlier book wins (spec P-2). A
 // number with no key cannot be compared and is always kept.
 func Merge(books []Book) []phonebook.EntryInput {
+	out, _ := MergeGrouped(books)
+	return out
+}
+
+// MergeGrouped is Merge that also reports, for each entry returned, the
+// 1-based index of the book it came from.
+func MergeGrouped(books []Book) ([]phonebook.EntryInput, []int) {
 	seen := map[string]bool{}
 	var out []phonebook.EntryInput
-	for _, b := range books {
+	var from []int
+	for bi, b := range books {
 		for _, e := range b.Entries {
 			var nums []phonebook.Number
 			for _, n := range e.Numbers {
@@ -91,9 +118,10 @@ func Merge(books []Book) []phonebook.EntryInput {
 			}
 			e.Numbers = nums
 			out = append(out, e)
+			from = append(from, bi+1)
 		}
 	}
-	return out
+	return out, from
 }
 
 // Group reduces books to at most max sources: the first max-1 stay as they
@@ -117,13 +145,33 @@ func Group(books []Book, max int) []Book {
 type record struct {
 	first, last, company string
 	numbers              []phonebook.Number
+	// groupID and group are the 1-based index and name of the book the
+	// entry came from, set only by RenderBooks (zero otherwise).
+	groupID int
+	group   string
 }
 
 // Render renders entries (already merged in priority order) as the vendor's
 // directory. Entries past the vendor's capacity are dropped from the end of
 // the priority order, so the earlier books win; truncated reports that.
 func Render(vendor string, entries []phonebook.EntryInput) (body []byte, truncated bool, err error) {
-	f, ok := formats[vendor]
+	return render(vendor, "", entries, nil, nil)
+}
+
+// RenderBooks merges books like Merge and renders them for the vendor's
+// model: the capacity is the model's (FormatForModel), and a vendor whose
+// format has contact groups (Grandstream pbgroup) gets one group per book.
+func RenderBooks(vendor, model string, books []Book) (body []byte, truncated bool, err error) {
+	entries, from := MergeGrouped(books)
+	names := make([]string, len(books))
+	for i, b := range books {
+		names[i] = b.Name
+	}
+	return render(vendor, model, entries, from, names)
+}
+
+func render(vendor, model string, entries []phonebook.EntryInput, from []int, names []string) (body []byte, truncated bool, err error) {
+	f, ok := FormatForModel(vendor, model)
 	if !ok {
 		return nil, false, errNoFormat(vendor)
 	}
@@ -131,10 +179,13 @@ func Render(vendor string, entries []phonebook.EntryInput) (body []byte, truncat
 		entries, truncated = entries[:f.MaxEntries], true
 	}
 	recs := make([]record, 0, len(entries))
-	for _, e := range entries {
+	for i, e := range entries {
 		r := record{first: clean(e.FirstName), last: clean(e.LastName), company: clean(e.Company), numbers: cleanNumbers(e.Numbers)}
 		if r.first == "" && r.last == "" {
 			r.last, r.company = r.company, ""
+		}
+		if i < len(from) && from[i] > 0 && from[i] <= len(names) {
+			r.groupID, r.group = from[i], clean(names[from[i]-1])
 		}
 		recs = append(recs, r)
 	}
@@ -249,6 +300,19 @@ var grandstreamTypes = map[string]string{"work": "Work", "mobile": "Mobile", "ho
 
 func encodeGrandstream(b *bytes.Buffer, recs []record, maxName int) {
 	b.WriteString(header + "<AddressBook>\n  <version>1</version>\n")
+	// One pbgroup per book that has a contact in the file, by book order.
+	groups := map[int]string{}
+	var ids []int
+	for _, r := range recs {
+		if _, seen := groups[r.groupID]; !seen && r.groupID > 0 && r.group != "" {
+			groups[r.groupID] = r.group
+			ids = append(ids, r.groupID)
+		}
+	}
+	sort.Ints(ids)
+	for _, id := range ids {
+		b.WriteString("  <pbgroup>\n    <id>" + strconv.Itoa(id) + "</id>\n    <name>" + esc(cut(groups[id], maxName)) + "</name>\n  </pbgroup>\n")
+	}
 	for _, r := range recs {
 		b.WriteString("  <Contact>\n    <LastName>" + esc(cut(r.last, maxName)) + "</LastName>\n    <FirstName>" + esc(cut(r.first, maxName)) + "</FirstName>\n")
 		for _, n := range r.numbers {
@@ -257,6 +321,12 @@ func encodeGrandstream(b *bytes.Buffer, recs []record, maxName int) {
 				attr = ` type="` + t + `"`
 			}
 			b.WriteString("    <Phone" + attr + ">\n      <phonenumber>" + esc(n.Number) + "</phonenumber>\n      <accountindex>1</accountindex>\n    </Phone>\n")
+		}
+		if r.company != "" {
+			b.WriteString("    <Company>" + esc(cut(r.company, maxName)) + "</Company>\n")
+		}
+		if _, ok := groups[r.groupID]; ok {
+			b.WriteString("    <Group>" + strconv.Itoa(r.groupID) + "</Group>\n")
 		}
 		b.WriteString("  </Contact>\n")
 	}
