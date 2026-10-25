@@ -131,6 +131,8 @@ naming the key, if one is missing or malformed.
 | `HELLO_PROV_BOOT_CIDRS`                           | control | unset (any); sources allowed the DHCP trust-on-first-use hand-off                                                             |
 | `HELLO_PROV_TOKEN_GRACE` / `_RESYNC`              | control | `7d` / `24h`; old-token grace after a rotation; the phones' re-check interval                                                 |
 | `HELLO_PROV_BOOK_REFRESH`                         | control | `15m`; how often phones with a refresh setting re-fetch their address book (at least `1m`)                                    |
+| `HELLO_PROV_PUSH_RATE`                            | sip     | `20`; check-sync pushes (resync, reboot) claimed per minute across the cluster                                                |
+| `HELLO_PROV_AUTO_RESYNC`                          | control | `false`; push a resync to a phone 30 s after a change to what its configuration renders from                                  |
 | `HELLO_PROV_TIMEZONE` / `_NTP`                    | control | `UTC` / `pool.ntp.org`                                                                                                        |
 | `HELLO_PROV_AUDIT_RETENTION`                      | control | `90d`; how long the fetch audit is kept                                                                                       |
 | `HELLO_PROV_RATE_*`                               | control | `IP_PER_MIN` `60`, `DENIED_PER_10MIN` `10`, `PHONE_PER_HOUR` `30`                                                             |

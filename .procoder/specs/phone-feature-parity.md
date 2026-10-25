@@ -421,7 +421,7 @@ These items are checked on hardware (two WP836 on 1.0.1.44 and 1.0.1.80, upgrade
   - voicemail or an announcement answers a G.722 offer with anything but G.722;
   - a recording of a G.722 call is not decodable audio;
   - telephone-event is lost.
-- [ ] [S-5] `TestCheckSyncNotify` in `internal/sip` and `TestPhoneResyncAPI` in `internal/api` pass. They fail if:
+- [x] [S-5] `TestCheckSyncNotify` in `internal/sip` and `TestPhoneResyncAPI` in `internal/api` pass. They fail if:
   - the NOTIFY does not reach every registered contact;
   - a digest challenge is not answered;
   - a reboot is sent for resync;

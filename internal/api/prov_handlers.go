@@ -37,6 +37,10 @@ type ProvStore interface {
 	ExistingMACs(ctx context.Context, macs []string) (map[string]int64, error)
 	ListPhoneFetches(ctx context.Context, phoneID, before int64, limit int) ([]store.Fetch, string, error)
 	RenderInputs(ctx context.Context, phoneID int64) (prov.RenderData, prov.Template, error)
+	QueuePush(ctx context.Context, actor string, phoneID int64, kind string) (store.PhonePush, error)
+	QueuePushGroup(ctx context.Context, actor string, groupID int64, kind string) (queued, skipped int, err error)
+	ListPhonePushes(ctx context.Context, phoneID int64, limit int) ([]store.PhonePush, error)
+	LatestPhonePushes(ctx context.Context) ([]store.PhonePush, error)
 
 	ListProvTemplates(ctx context.Context) ([]store.ProvTemplate, error)
 	GetProvTemplate(ctx context.Context, id int64) (store.ProvTemplate, error)
