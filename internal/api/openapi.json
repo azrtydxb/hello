@@ -9617,6 +9617,7 @@
                   "internal",
                   "unavailable",
                   "upstream",
+                  "timeout",
                   "render_error",
                   "forbidden_role",
                   "insufficient_scope",
