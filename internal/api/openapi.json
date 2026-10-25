@@ -3464,7 +3464,7 @@
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
-        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom.",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, call_waiting_on, call_waiting_off.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -10080,7 +10080,9 @@
               "blind_transfer",
               "attended_transfer",
               "announcement",
-              "intercom"
+              "intercom",
+              "call_waiting_on",
+              "call_waiting_off"
             ]
           },
           "argument": {
@@ -10131,7 +10133,9 @@
                     "blind_transfer",
                     "attended_transfer",
                     "announcement",
-                    "intercom"
+                    "intercom",
+                    "call_waiting_on",
+                    "call_waiting_off"
                   ]
                 },
                 "argument": {
@@ -10477,6 +10481,7 @@
           "voicemailEnabled",
           "recordDefault",
           "allowIntercom",
+          "callWaiting",
           "directoryHidden"
         ],
         "properties": {
@@ -10536,6 +10541,10 @@
           "allowIntercom": {
             "type": "boolean",
             "description": "Whether an intercom call (*80 plus the number) auto-answers on this extension; false rings it normally."
+          },
+          "callWaiting": {
+            "type": "boolean",
+            "description": "Call waiting. On (the default): a call to this extension while it is in a call rings its devices and the phone shows call waiting. Off: the caller gets the forwardBusy target, or 486 Busy Here without one; ring groups skip the extension while it is busy. Provisioned into the phone's own call-waiting setting, so a phone resync applies a change."
           },
           "directoryHidden": {
             "type": "boolean",
@@ -10619,6 +10628,10 @@
           "allowIntercom": {
             "type": "boolean",
             "description": "Whether an intercom call (*80 plus the number) auto-answers on this extension; false rings it normally."
+          },
+          "callWaiting": {
+            "type": "boolean",
+            "description": "Call waiting. On (the default): a call to this extension while it is in a call rings its devices and the phone shows call waiting. Off: the caller gets the forwardBusy target, or 486 Busy Here without one; ring groups skip the extension while it is busy. Provisioned into the phone's own call-waiting setting, so a phone resync applies a change."
           },
           "directoryHidden": {
             "type": "boolean",

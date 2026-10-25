@@ -137,6 +137,11 @@ type Line struct {
 	// VoicemailCode is the feature code the message key dials (spec S-5);
 	// empty when no voicemail feature code is configured.
 	VoicemailCode string
+	// CallWaiting is the extension's call-waiting flag (spec S-18): the
+	// templates write the phone's own call-waiting (and tone) setting from
+	// it, so the phone and Hello agree about a second call. False means the
+	// phone must not announce one.
+	CallWaiting bool
 }
 
 // Server is the registrar the phone registers with.

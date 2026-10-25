@@ -141,6 +141,29 @@ func TestExtensionAllowIntercom(t *testing.T) {
 	}
 }
 
+// TestExtensionCallWaiting: call waiting is on by default and changes
+// through PATCH, GET returns it, and the feature-code actions accept the
+// two toggles (spec S-18). It fails if a new extension does not ring while
+// busy by default or the change is not stored.
+func TestExtensionCallWaiting(t *testing.T) {
+	e := newPBXEnv(t, newMemObjects())
+	c := e.login()
+	if e.ext101["callWaiting"] != true {
+		t.Fatalf("new extension callWaiting = %v, want true", e.ext101["callWaiting"])
+	}
+	path := fmt.Sprintf("/api/v1/extensions/%v", e.ext101["id"])
+	got := c.must(http.StatusOK, "PATCH", path, map[string]any{"callWaiting": false}).json(t)
+	if got["callWaiting"] != false {
+		t.Fatalf("after PATCH callWaiting = %v", got["callWaiting"])
+	}
+	if got := c.must(http.StatusOK, "GET", path, nil).json(t); got["callWaiting"] != false {
+		t.Fatalf("GET callWaiting = %v, want false", got["callWaiting"])
+	}
+	c.must(http.StatusOK, "PUT", "/api/v1/feature-codes", map[string]any{"items": []map[string]any{
+		{"code": "*70", "action": "call_waiting_off"}, {"code": "*71", "action": "call_waiting_on"},
+	}})
+}
+
 // fakePageTester answers a test page at once with a canned result.
 type fakePageTester struct {
 	mu   sync.Mutex
