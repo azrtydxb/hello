@@ -27,11 +27,29 @@ const (
 	MWIUnsolicited = "unsolicited" // contact without a subscription
 )
 
-// mwiPollInterval is how often subscribed mailboxes are re-read. Messages
-// heard or deleted through the control-plane API change the store without
-// telling this process, so the poll is what turns them into NOTIFYs. A
-// variable so tests can shorten it.
-var mwiPollInterval = 10 * time.Second
+// mwiPollInterval is how often subscribed mailboxes are re-read. Changes made
+// through the control-plane API reach this process as mailbox events and are
+// NOTIFYed at once; the re-read is only the safety net for an event lost
+// while the listener reconnects. A variable so tests can shorten it.
+var mwiPollInterval = 60 * time.Second
+
+// mailboxChanged handles a mailbox event from the control plane: box 0 means
+// anything may have changed (the listener just (re)connected), otherwise the
+// owner of that box is NOTIFYed. Counts are read fresh, and a subscription
+// whose phone already has them is skipped.
+func (s *Server) mailboxChanged(box int64) {
+	if box == 0 {
+		s.goBG(s.mwiPollOnce)
+		return
+	}
+	snap := s.deps.Snapshots.Current()
+	if snap == nil {
+		return
+	}
+	if ext, ok := snap.ExtensionByBox(box); ok {
+		s.notifyMWI(ext)
+	}
+}
 
 // mwiBody renders the application/simple-message-summary document for one
 // mailbox (RFC 3842 §5.2).

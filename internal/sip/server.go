@@ -130,6 +130,9 @@ type Deps struct {
 	Voicemails VoicemailStore
 	// Objects is the voicemail audio store (MinIO); nil disables voicemail.
 	Objects ObjectStore
+	// MailboxEvents carries mailbox changes made by the control plane so
+	// MWI NOTIFYs go out at once; nil leaves only the safety-net re-read.
+	MailboxEvents MailboxEvents
 	// Settings applies feature-code mutations (DND, forwarding) by queueing
 	// them to PostgreSQL and bumping the configuration revision; nil makes
 	// the mutating feature codes answer 503.
@@ -412,6 +415,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.peerLoop(rctx) })
 	s.bg.Go(func() { s.subExpireLoop(rctx) })
 	s.bg.Go(func() { s.mwiPollLoop(rctx) })
+	if s.deps.MailboxEvents != nil {
+		s.bg.Go(func() { s.deps.MailboxEvents.Watch(rctx, s.mailboxChanged) })
+	}
 	if s.deps.HAState != nil && s.deps.Membership != nil && s.cfg.HATakeoverEnabled {
 		// A takeover re-INVITEs from the listening socket, which sipgo
 		// only knows once ServeUDP registered it: a restarted node's first

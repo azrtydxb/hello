@@ -164,8 +164,9 @@ func run(args []string) error {
 		Snapshots: watcher, State: live, Trunks: live,
 		Throttle: sip.ValkeyThrottle{Client: vk, Window: cfg.AuthFailWindow},
 		CDRs:     cdrs, Metrics: sipMetrics, Log: log.With("component", "sip"),
-		Presence:   sip.ValkeyPresence{Client: vk},
-		Voicemails: voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings,
+		Presence:      sip.ValkeyPresence{Client: vk},
+		MailboxEvents: mailboxEvents{cfg: cfg.Database, log: log.With("component", "mailbox")},
+		Voicemails:    voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings,
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
 		HAState: live, Membership: members,
 	})

@@ -337,3 +337,19 @@ func TestExtensionAndGroupLoad(t *testing.T) {
 		t.Fatal("unknown announcement reported present")
 	}
 }
+
+// TestExtensionByBox fails if a voicemail box id does not resolve to its
+// extension, or box 0 and an unknown box resolve to anything.
+func TestExtensionByBox(t *testing.T) {
+	s := New(1, "example.test", nil).WithExtensionData([]Extension{
+		{Number: "200", VoicemailBoxID: 5}, {Number: "201"},
+	})
+	if n, ok := s.ExtensionByBox(5); !ok || n != "200" {
+		t.Errorf("ExtensionByBox(5) = %q, %v", n, ok)
+	}
+	for _, id := range []int64{0, 6} {
+		if n, ok := s.ExtensionByBox(id); ok {
+			t.Errorf("ExtensionByBox(%d) = %q, want none", id, n)
+		}
+	}
+}

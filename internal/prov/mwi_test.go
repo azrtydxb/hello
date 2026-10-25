@@ -9,8 +9,9 @@ import (
 // TestMWISubscriptionProvisioned fails if a vendor template that has a known
 // MWI subscribe setting does not write it (spec S-1): Grandstream P99 = 1
 // with P33 defaulting to *97, Yealink account.1.subscribe_mwi, Poly
-// msg.mwi.1.subscribe. Snom and Fanvil have no confirmed key (verify) and
-// must still carry the voicemail number.
+// msg.mwi.1.subscribe. Snom (user_mailbox) and Fanvil (SIP1 MWINum) carry
+// the voicemail number, *97 unless the line sets one; neither has a
+// documented subscribe flag (unverified on hardware).
 func TestMWISubscriptionProvisioned(t *testing.T) {
 	d := renderSample(false)
 	d.Line.VoicemailCode = ""
@@ -31,6 +32,22 @@ func TestMWISubscriptionProvisioned(t *testing.T) {
 			if !bytes.Contains(out, []byte(w)) {
 				t.Errorf("%s: %q missing from\n%s", tc.v, w, out)
 			}
+		}
+	}
+	for _, tc := range []struct {
+		v    Vendor
+		file string
+		want string
+	}{
+		{Snom, d.Phone.MACUpper, ">*97<"},
+		{Fanvil, d.Phone.MAC + ".cfg", "SIP1 MWINum        :*97"},
+	} {
+		out, err := Render(context.Background(), builtinFor(t, tc.v), tc.file, d)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.v, err)
+		}
+		if !bytes.Contains(out, []byte(tc.want)) {
+			t.Errorf("%s: default %q missing", tc.v, tc.want)
 		}
 	}
 	d.Line.VoicemailCode = "*55"

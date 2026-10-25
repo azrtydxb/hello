@@ -148,11 +148,13 @@ func (s *Store) GetVoicemailMessage(ctx context.Context, id int64) (VoicemailMes
 // UI, or marking it unheard again).
 func (s *Store) UpdateVoicemailMessageHeard(ctx context.Context, actor string, id int64, heard bool) error {
 	return s.configChange(ctx, actor, "update", "voicemail_message", nil, func(tx *sql.Tx) (int64, error) {
-		res, err := tx.ExecContext(ctx, `UPDATE voicemail_messages SET heard = $2 WHERE id = $1`, id, heard)
+		var box int64
+		err := tx.QueryRowContext(ctx,
+			`UPDATE voicemail_messages SET heard = $2 WHERE id = $1 RETURNING box_id`, id, heard).Scan(&box)
 		if err != nil {
 			return id, err
 		}
-		return id, requireRow(res)
+		return id, notifyMailbox(ctx, tx, box)
 	})
 }
 
@@ -162,17 +164,28 @@ func (s *Store) UpdateVoicemailMessageHeard(ctx context.Context, actor string, i
 func (s *Store) DeleteVoicemailMessage(ctx context.Context, actor string, id int64) (string, error) {
 	var object string
 	err := s.configChange(ctx, actor, "delete", "voicemail_message", nil, func(tx *sql.Tx) (int64, error) {
+		var box int64
 		if err := tx.QueryRowContext(ctx,
-			`SELECT minio_object FROM voicemail_messages WHERE id = $1`, id).Scan(&object); err != nil {
+			`SELECT minio_object, box_id FROM voicemail_messages WHERE id = $1`, id).Scan(&object, &box); err != nil {
 			return id, err
 		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM voicemail_messages WHERE id = $1`, id)
 		if err != nil {
 			return id, err
 		}
-		return id, requireRow(res)
+		if err := requireRow(res); err != nil {
+			return id, err
+		}
+		return id, notifyMailbox(ctx, tx, box)
 	})
 	return object, err
+}
+
+// notifyMailbox queues the mailbox-changed NOTIFY in the changing
+// transaction, so it reaches the SIP nodes only if the change commits.
+func notifyMailbox(ctx context.Context, tx *sql.Tx, box int64) error {
+	_, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2::text)`, MailboxChannel, strconv.FormatInt(box, 10))
+	return err
 }
 
 // VoicemailCounts is a box's MWI summary: unheard and total messages.

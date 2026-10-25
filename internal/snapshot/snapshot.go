@@ -224,6 +224,20 @@ func (s *Snapshot) Extension(number string) (Extension, bool) {
 	return e, ok
 }
 
+// ExtensionByBox returns the number of the extension that owns voicemail box
+// id; ok is false when no extension does.
+func (s *Snapshot) ExtensionByBox(id int64) (string, bool) {
+	if id == 0 {
+		return "", false
+	}
+	for n, e := range s.exts {
+		if e.VoicemailBoxID == id {
+			return n, true
+		}
+	}
+	return "", false
+}
+
 // RingGroup returns the group dialled as number (its name) with its members
 // ordered by position (contract 2).
 func (s *Snapshot) RingGroup(number string) (RingGroup, []RingGroupMember, bool) {

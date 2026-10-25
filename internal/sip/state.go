@@ -34,6 +34,14 @@ type Snapshots interface {
 	Current() *snapshot.Snapshot
 }
 
+// MailboxEvents delivers voicemail changes made outside this process (the
+// control-plane API marking a message heard or deleting it). Watch blocks
+// until ctx ends, calling changed with the box id for each change, and with
+// 0 after every (re)connect to mean "anything may have changed".
+type MailboxEvents interface {
+	Watch(ctx context.Context, changed func(boxID int64))
+}
+
 // CDRSink accepts finished call records without blocking; *cdr.Writer
 // satisfies it.
 type CDRSink interface {

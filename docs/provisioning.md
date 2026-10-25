@@ -254,18 +254,33 @@ body instead, never both. Hello no longer sends MWI as a SIP `MESSAGE`.
 A subscription lives on the node that accepted it. After a node restart or
 failover the phone re-subscribes on its next refresh and gets the current
 counts at once. Messages heard or deleted through the API reach the phone
-within about ten seconds (the node re-reads subscribed mailboxes). Watch
+at once: hello-control sends a PostgreSQL `NOTIFY hello_mwi` with the box id,
+every SIP node listens, and the node holding the subscription sends the
+`NOTIFY`. A node also re-reads subscribed mailboxes every minute and after
+its listener reconnects, in case an event was lost. Watch
 `hello_mwi_notify_total{kind,result}`.
 
 The built-in templates provision the subscription and the voicemail number:
 
-| Vendor      | Setting written                                                           | Status                                   |
-| ----------- | ------------------------------------------------------------------------- | ---------------------------------------- |
-| Grandstream | `P99 = 1` (Subscribe for MWI), `P33` voicemail number (`*97` default)     | Grandstream template keys (WP8x6, WP822) |
-| Yealink     | `account.1.subscribe_mwi = 1`, `voice_mail.number.1`                      | verify on hardware                       |
-| Poly        | `msg.mwi.1.subscribe`, `msg.mwi.1.callBack`                               | verify on hardware                       |
-| Snom        | `user_mailbox` (the phone subscribes to it)                               | verify on hardware                       |
-| Fanvil      | `SIP1 MWINum`; no subscribe key confirmed, unsolicited `NOTIFY` covers it | verify on hardware                       |
+| Vendor      | Setting written                                                       | Status                                   |
+| ----------- | --------------------------------------------------------------------- | ---------------------------------------- |
+| Grandstream | `P99 = 1` (Subscribe for MWI), `P33` voicemail number (`*97` default) | Grandstream template keys (WP8x6, WP822) |
+| Yealink     | `account.1.subscribe_mwi = 1`, `voice_mail.number.1`                  | verify on hardware                       |
+| Poly        | `msg.mwi.1.subscribe`, `msg.mwi.1.callBack`                           | verify on hardware                       |
+| Snom        | `user_mailbox` (`*97` default)                                        | key documented; unverified on hardware   |
+| Fanvil      | `SIP1 MWINum` (`*97` default); no subscribe key written               | unverified on hardware                   |
+
+Sources. Snom: Service Hub, D-series settings, `user_mailbox` (service.snom.com,
+"Identities - Login Information: Mailbox"): the account name of the mailbox
+tied to the SIP identity, needed when the MWI message does not carry the
+mailbox URI. Snom documents no separate subscribe setting; the phone lights
+its lamp from a subscription or from the unsolicited `NOTIFY` Hello sends to
+contacts without one, and Hello accepts a `message-summary` `SUBSCRIBE` to the
+voicemail code `*97` as the extension's own mailbox. Fanvil: `SIP1 MWINum` is
+the voicemail number key already used by the template. Fanvil's subscribe-MWI
+key could not be found in any public document, so Hello does not guess one;
+Fanvil phones get MWI from the unsolicited `NOTIFY`. Neither vendor has been
+tested on hardware.
 
 ## Redirect services
 
