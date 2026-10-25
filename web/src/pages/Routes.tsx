@@ -70,6 +70,7 @@ import { useOrderedList } from "../useOrderedList";
 import { formatSchedule, formatTransform } from "./callflow/format";
 import { FormAlert } from "./callflow/ui";
 import { Can } from "../role";
+import { MOHSelect } from "./media/MohSelect";
 
 const DEFAULT_FAILOVER = "408, 480, 500, 502, 503, 504";
 const FORM_ID = "route-form";
@@ -1132,6 +1133,8 @@ interface InboundDraft {
   destinationKind: InboundRouteFields["destinationKind"];
   destination: string;
   enabled: boolean;
+  mohClassId: Id | null;
+  mohRingback: boolean;
 }
 
 function inboundDraft(r: InboundRoute | null): InboundDraft {
@@ -1148,6 +1151,8 @@ function inboundDraft(r: InboundRoute | null): InboundDraft {
     destinationKind: r?.destinationKind ?? "extension",
     destination: r?.destination ?? "",
     enabled: r?.enabled ?? true,
+    mohClassId: r?.mohClassId ?? null,
+    mohRingback: r?.mohRingback ?? false,
   };
 }
 
@@ -1165,6 +1170,8 @@ function inboundBody(d: InboundDraft): InboundRouteFields {
     destinationKind: d.destinationKind,
     destination: d.destination.trim(),
     enabled: d.enabled,
+    mohClassId: d.mohClassId,
+    mohRingback: d.mohRingback,
   };
 }
 
@@ -1194,6 +1201,8 @@ function inboundKeys(d: InboundDraft): string[] {
     "destinationKind",
     "destination",
     "enabled",
+    "mohClassId",
+    "mohRingback",
     ...transformKeys("callerIdTransform"),
     ...scheduleKeys(d.schedule),
   ];
@@ -1434,6 +1443,21 @@ function InboundDrawer({
             labelPosition="end"
             checked={d.enabled}
             onChange={(e) => set("enabled", e.target.checked)}
+          />
+          <MOHSelect
+            id={id("mohClassId")}
+            label="Music on hold"
+            hint="What these callers hear when held. Default uses the global class."
+            value={d.mohClassId}
+            error={v.errors.mohClassId}
+            onChange={(next) => set("mohClassId", next)}
+          />
+          <Switch
+            label="Play music instead of ringback"
+            hint="The caller hears the class while the destination rings, not a ringing tone"
+            labelPosition="end"
+            checked={d.mohRingback}
+            onChange={(e) => set("mohRingback", e.target.checked)}
           />
         </fieldset>
         <TransformEditor

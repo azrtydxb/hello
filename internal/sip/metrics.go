@@ -67,7 +67,7 @@ type Metrics struct {
 	// IVRTotal counts IVR menu events: entered, option, direct_dial,
 	// timeout, invalid, dial, dial_failed, connected and exit_<kind>.
 	IVRTotal *prometheus.CounterVec // event
-	// Call queues (migration 00023). QueueWaiting is the callers waiting in
+	// Call queues (migration 00031). QueueWaiting is the callers waiting in
 	// queues this node holds (sum it across nodes); QueueWait is the time
 	// callers waited by outcome (answered, abandoned, timeout, full,
 	// no_agents, breakout); QueueAgents the agents by state, published by

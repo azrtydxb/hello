@@ -4,7 +4,6 @@ import (
 	"context"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -50,9 +49,11 @@ func queuePBX(t *testing.T, st queue.Store, extra func(s *snapshot.Snapshot), qu
 		_ = objs.Put(context.Background(), key, media.EncodeWAV(make([]byte, 3200), 8000))
 		anns[n] = key
 	}
+	_ = objs.Put(context.Background(), "ann/jazz.wav", media.EncodeWAV(make([]byte, 16000), 8000))
 	feats := func(s *snapshot.Snapshot) {
 		s.WithAnnouncements(anns)
 		s.WithQueues(queues)
+		s.WithMOHClasses([]snapshot.MOHClass{{ID: 5, Name: "jazz", Names: []string{"jazz"}, Objects: []string{"ann/jazz.wav"}}})
 		s.WithFeatureCodes([]snapshot.FeatureCode{
 			{Code: "*45", Action: ActionQueueLogin}, {Code: "*46", Action: ActionQueueLogout},
 			{Code: "*47", Action: ActionQueuePause, Argument: "break"}, {Code: "*48", Action: ActionQueueUnpause},
@@ -497,23 +498,24 @@ func TestQueueBreakoutVoicemail(t *testing.T) {
 	waitReq(t, a.byes, "the call ends after the message")
 }
 
-// TestQueueMusicOnHold: the music provider is asked for the queue's class and
-// its audio is played; without a provider the built-in tone plays.
+// TestQueueMusicOnHold: a waiting caller hears the queue's music on hold
+// class (its tracks are fetched and played) and the built-in tune when neither
+// the queue nor the system names a class. It fails if the class's audio is
+// not fetched or no media reaches the caller.
 func TestQueueMusicOnHold(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		provider MOHProvider
-		want     string
+		name  string
+		class int64
+		want  string
 	}{
-		{"built-in tone", nil, ""},
-		{"class from the provider", &fakeMOH{pcm: make([]byte, 16000)}, "jazz"},
+		{"built-in tune", 0, ""},
+		{"class of the queue", 5, "ann/jazz.wav"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := queue.NewMemStore()
 			q := testQueue("sales", "600", queue.RingAll, static("200", 0, 1))
-			q.MOHClass = "jazz"
-			pbx, _ := queuePBX(t, st, nil, q)
-			pbx.srv.deps.MOH = tc.provider
+			q.MOHClassID = tc.class
+			pbx, objs := queuePBX(t, st, nil, q)
 			a, b, _ := registerABC(t, pbx)
 			b.setCallee(ringForever())
 			frames := countRTP(t, a)
@@ -522,31 +524,15 @@ func TestQueueMusicOnHold(t *testing.T) {
 				t.Fatal(r.err)
 			}
 			eventually(t, "music plays to the caller", func() bool { return frames.Load() > 20 })
-			if f, ok := tc.provider.(*fakeMOH); ok && f.class() != tc.want {
-				t.Fatalf("class asked = %q, want %q", f.class(), tc.want)
+			if tc.want != "" && !slices.Contains(objs.snapshotGets(), tc.want) {
+				t.Fatalf("the class's track %s was not fetched: %v", tc.want, objs.snapshotGets())
+			}
+			if tc.want == "" && slices.Contains(objs.snapshotGets(), "ann/jazz.wav") {
+				t.Fatal("a track was fetched although no class is set")
 			}
 			hangup(t, r.dcs)
 		})
 	}
-}
-
-type fakeMOH struct {
-	pcm   []byte
-	mu    sync.Mutex
-	asked string
-}
-
-func (f *fakeMOH) PCM(_ context.Context, class string) ([]byte, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.asked = class
-	return f.pcm, true
-}
-
-func (f *fakeMOH) class() string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.asked
 }
 
 // TestQueueTwoNodesNeverRingTheAgentTwice: two nodes, each holding a waiting

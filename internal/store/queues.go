@@ -1,6 +1,6 @@
 package store
 
-// ACD call queues (migration 00023). The configuration lives here; what
+// ACD call queues (migration 00031). The configuration lives here; what
 // changes while calls wait (callers, agent login, pause) lives in Valkey
 // (internal/queue). Every mutation runs through configChange, so it is
 // audited, bumps the configuration revision and notifies hello-sip.
@@ -27,7 +27,7 @@ const (
 // timeout, full and no-agents destinations.
 const IVRQueueDest = "queue"
 
-// Queue feature-code actions (migration 00023).
+// Queue feature-code actions (migration 00031).
 const (
 	ActionQueueLogin   = "queue_login"
 	ActionQueueLogout  = "queue_logout"
@@ -63,7 +63,7 @@ type Queue struct {
 	Timeout            IVRDestination `json:"timeout"`
 	Full               IVRDestination `json:"full"`
 	NoAgents           IVRDestination `json:"noAgents"`
-	MOHClass           string         `json:"mohClass"`
+	MOHClassID         *int64         `json:"mohClassId"`
 	AnnounceFrequency  int            `json:"announceFrequency"`
 	AnnouncePosition   bool           `json:"announcePosition"`
 	AnnounceWait       bool           `json:"announceWait"`
@@ -102,7 +102,7 @@ type QueueInput struct {
 	Timeout           IVRDestination
 	Full              IVRDestination
 	NoAgents          IVRDestination
-	MOHClass          string
+	MOHClassID        *int64
 	AnnounceFrequency int
 	AnnouncePosition  bool
 	AnnounceWait      bool
@@ -119,7 +119,7 @@ type QueueInput struct {
 
 const queueCols = `q.id, q.name, q.number, q.enabled, q.strategy, q.agent_timeout, q.retry_delay, q.wrap_up,
 	q.max_callers, q.max_wait, q.join_empty, q.leave_empty,
-	q.timeout_kind, q.timeout_target, q.full_kind, q.full_target, q.no_agents_kind, q.no_agents_target, q.moh_class,
+	q.timeout_kind, q.timeout_target, q.full_kind, q.full_target, q.no_agents_kind, q.no_agents_target, q.moh_class_id,
 	q.announce_frequency, q.announce_position, q.announce_wait,
 	q.periodic_prompt_id, COALESCE(pp.name, ''), q.position_prompt_id, COALESCE(po.name, ''),
 	q.wait_prompt_id, COALESCE(wp.name, ''), q.minutes_prompt_id, COALESCE(mp.name, ''), q.digits_prefix,
@@ -144,7 +144,7 @@ func listQueues(ctx context.Context, q querier, where string, args ...any) ([]Qu
 		var x Queue
 		if err := rows.Scan(&x.ID, &x.Name, &x.Number, &x.Enabled, &x.Strategy, &x.AgentTimeout, &x.RetryDelay, &x.WrapUp,
 			&x.MaxCallers, &x.MaxWait, &x.JoinEmpty, &x.LeaveEmpty,
-			&x.Timeout.Kind, &x.Timeout.Target, &x.Full.Kind, &x.Full.Target, &x.NoAgents.Kind, &x.NoAgents.Target, &x.MOHClass,
+			&x.Timeout.Kind, &x.Timeout.Target, &x.Full.Kind, &x.Full.Target, &x.NoAgents.Kind, &x.NoAgents.Target, &x.MOHClassID,
 			&x.AnnounceFrequency, &x.AnnouncePosition, &x.AnnounceWait,
 			&x.PeriodicPromptID, &x.PeriodicPromptName, &x.PositionPromptID, &x.PositionPromptName,
 			&x.WaitPromptID, &x.WaitPromptName, &x.MinutesPromptID, &x.MinutesPromptName, &x.DigitsPrefix,
@@ -243,6 +243,9 @@ func checkQueue(ctx context.Context, tx *sql.Tx, id int64, in QueueInput) error 
 			return fieldError("breakoutVoicemail", "extension "+in.BreakoutVoicemail+" has no voicemail box")
 		}
 	}
+	if err := checkMOHClass(ctx, tx, "mohClassId", in.MOHClassID); err != nil {
+		return err
+	}
 	for _, d := range in.destinations() {
 		if d.Kind == IVRQueueDest && d.Target == in.Name {
 			return fieldError(d.path+".target", "a queue cannot send its callers back to itself")
@@ -334,13 +337,13 @@ func queueFK(err error) error {
 
 const queueWriteCols = `name, number, enabled, strategy, agent_timeout, retry_delay, wrap_up, max_callers, max_wait,
 	join_empty, leave_empty, timeout_kind, timeout_target, full_kind, full_target, no_agents_kind, no_agents_target,
-	moh_class, announce_frequency, announce_position, announce_wait, periodic_prompt_id, position_prompt_id,
+	moh_class_id, announce_frequency, announce_position, announce_wait, periodic_prompt_id, position_prompt_id,
 	wait_prompt_id, minutes_prompt_id, digits_prefix, breakout_key, breakout_prompt_id, breakout_voicemail`
 
 func (in QueueInput) args() []any {
 	return []any{in.Name, in.Number, in.Enabled, in.Strategy, in.AgentTimeout, in.RetryDelay, in.WrapUp, in.MaxCallers, in.MaxWait,
 		in.JoinEmpty, in.LeaveEmpty, in.Timeout.Kind, in.Timeout.Target, in.Full.Kind, in.Full.Target, in.NoAgents.Kind, in.NoAgents.Target,
-		in.MOHClass, in.AnnounceFrequency, in.AnnouncePosition, in.AnnounceWait, in.PeriodicPromptID, in.PositionPromptID,
+		in.MOHClassID, in.AnnounceFrequency, in.AnnouncePosition, in.AnnounceWait, in.PeriodicPromptID, in.PositionPromptID,
 		in.WaitPromptID, in.MinutesPromptID, in.DigitsPrefix, in.BreakoutKey, in.BreakoutPromptID, in.BreakoutVoicemail}
 }
 

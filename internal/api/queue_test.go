@@ -39,7 +39,7 @@ func TestValidateQueue(t *testing.T) {
 			in.AnnounceFrequency, in.AnnouncePosition = 30, true
 		},
 		"announce needs frequency": func(in *store.QueueInput) { in.AnnounceWait = true },
-		"bad moh class":            func(in *store.QueueInput) { in.MOHClass = "a b" },
+		"bad moh class":            func(in *store.QueueInput) { in.MOHClassID = ptr(int64(-1)) },
 	}
 	for name, mut := range cases {
 		in := good()

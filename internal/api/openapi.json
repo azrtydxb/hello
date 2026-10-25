@@ -520,7 +520,7 @@
       "patch": {
         "operationId": "updateExtension",
         "summary": "Change an extension's number or name",
-        "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields. Renumbering an extension an IVR menu names is refused (409).",
+        "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields.",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -574,7 +574,7 @@
       "delete": {
         "operationId": "deleteExtension",
         "summary": "Delete an extension and its devices",
-        "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes. An extension an IVR menu names (as a destination or voicemail box) cannot be deleted (409).",
+        "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes.",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -2000,7 +2000,9 @@
         "operationId": "getFlowCatalogue",
         "summary": "Read the flow node and port catalogue",
         "description": "Returns every node kind of the flow canvas with its ports, each port's type (and the colour and shape that type is drawn with) and, for every output, the inputs it may connect to. An entry whose `requires` is set is allowed in principle but cannot be stored until what it names exists. Use it to learn which objects can be joined before changing the configuration.",
-        "tags": ["flow"],
+        "tags": [
+          "flow"
+        ],
         "responses": {
           "200": {
             "description": "Read the flow node and port catalogue",
@@ -2032,7 +2034,9 @@
         "operationId": "getFlowGraph",
         "summary": "Read the call flow as a graph",
         "description": "Draws the saved configuration as nodes (trunks, routes, extensions, ring groups, announcements, paging groups, feature codes and the terminals calls end in) and edges between their ports. Every edge names the owner: the one field of one object it is stored in, so connecting or disconnecting is one update of that object. A target that resolves to nothing is a `missing` node with a `dangling_reference` warning. Targets resolve as hello-sip does: ring group name, then extension number. Each node's `version` changes whenever the object does. Nothing is stored: the graph is built from the live tables.",
-        "tags": ["flow"],
+        "tags": [
+          "flow"
+        ],
         "parameters": [
           {
             "name": "scope",
@@ -2050,7 +2054,9 @@
             "description": "`devices` adds devices and phones, which are left out by default.",
             "schema": {
               "type": "string",
-              "enum": ["devices"]
+              "enum": [
+                "devices"
+              ]
             }
           }
         ],
@@ -2104,7 +2110,9 @@
         "operationId": "getFlowRevision",
         "summary": "Read the configuration revision",
         "description": "Returns the revision every configuration change advances. Poll it to know when a graph read earlier is out of date.",
-        "tags": ["flow"],
+        "tags": [
+          "flow"
+        ],
         "responses": {
           "200": {
             "description": "Read the configuration revision",
@@ -2828,7 +2836,9 @@
         "operationId": "getTtsSettings",
         "summary": "The text-to-speech settings",
         "description": "Returns the text-to-speech provider settings: whether an OpenRouter API key is set (never the key), the last four characters of it, and the default model and voice.",
-        "tags": ["media"],
+        "tags": [
+          "media"
+        ],
         "responses": {
           "200": {
             "description": "Settings",
@@ -2858,7 +2868,9 @@
         "operationId": "putTtsSettings",
         "summary": "Set the OpenRouter key and the default model and voice",
         "description": "Sets the OpenRouter API key (write-only, sealed in the database and never returned) and the default ElevenLabs model and voice used when a prompt does not name its own.",
-        "tags": ["media"],
+        "tags": [
+          "media"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -2919,7 +2931,9 @@
         "operationId": "deleteTtsKey",
         "summary": "Remove the stored OpenRouter key",
         "description": "Removes the stored OpenRouter API key. Prompts already generated keep playing; new ones cannot be generated until a key is set again.",
-        "tags": ["media"],
+        "tags": [
+          "media"
+        ],
         "responses": {
           "200": {
             "description": "Settings",
@@ -2951,7 +2965,9 @@
         "operationId": "testTtsKey",
         "summary": "Test the OpenRouter connection",
         "description": "Checks with OpenRouter that the stored API key is accepted. Spends no credits.",
-        "tags": ["media"],
+        "tags": [
+          "media"
+        ],
         "responses": {
           "200": {
             "description": "The key is accepted",
@@ -2959,7 +2975,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["ok"],
+                  "required": [
+                    "ok"
+                  ],
                   "properties": {
                     "ok": {
                       "type": "boolean"
@@ -2997,7 +3015,9 @@
         "operationId": "listTtsVoices",
         "summary": "List the ElevenLabs models and voices",
         "description": "Lists the ElevenLabs text-to-speech models OpenRouter offers and the voices of each, for the model and voice pickers.",
-        "tags": ["media"],
+        "tags": [
+          "media"
+        ],
         "responses": {
           "200": {
             "description": "Models",
@@ -3005,7 +3025,9 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["models"],
+                  "required": [
+                    "models"
+                  ],
                   "properties": {
                     "models": {
                       "type": "array",
@@ -3041,14 +3063,19 @@
         "operationId": "generateNewAnnouncement",
         "summary": "Create an announcement from text",
         "description": "Creates an announcement and generates its audio once from text through the text-to-speech provider; the WAV is stored and played from storage ever after.",
-        "tags": ["media"],
+        "tags": [
+          "media"
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["name", "text"],
+                "required": [
+                  "name",
+                  "text"
+                ],
                 "properties": {
                   "name": {
                     "type": "string",
@@ -3121,7 +3148,9 @@
         "operationId": "putVoicemailGreeting",
         "summary": "Set a greeting from an announcement or from text",
         "description": "Sets a voicemail box's greeting or unreachable audio from an existing announcement, or from text generated once through the text-to-speech provider. Uploading a WAV stays on the voicemail box update.",
-        "tags": ["voicemail"],
+        "tags": [
+          "voicemail"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3133,16 +3162,25 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["slot", "source"],
+                "required": [
+                  "slot",
+                  "source"
+                ],
                 "properties": {
                   "slot": {
                     "type": "string",
-                    "enum": ["greeting", "unreachable"],
+                    "enum": [
+                      "greeting",
+                      "unreachable"
+                    ],
                     "description": "Which audio to set."
                   },
                   "source": {
                     "type": "string",
-                    "enum": ["announcement", "text"],
+                    "enum": [
+                      "announcement",
+                      "text"
+                    ],
                     "description": "Where the audio comes from."
                   },
                   "announcementId": {
@@ -3318,7 +3356,9 @@
         "operationId": "saveAnnouncementPrompt",
         "summary": "Save an announcement's prompt text",
         "description": "Saves the authored text, voice and model of an announcement without generating audio. The announcement then shows as edited since its last generation until it is generated again.",
-        "tags": ["media"],
+        "tags": [
+          "media"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3330,7 +3370,9 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["text"],
+                "required": [
+                  "text"
+                ],
                 "properties": {
                   "text": {
                     "type": "string",
@@ -3459,7 +3501,7 @@
       "delete": {
         "operationId": "deleteAnnouncement",
         "summary": "Delete an announcement",
-        "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time. An announcement that an IVR menu plays or names as a destination cannot be deleted (409).",
+        "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time.",
         "tags": ["media"],
         "parameters": [
           {
@@ -3472,9 +3514,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3496,7 +3535,9 @@
         "operationId": "generateAnnouncement",
         "summary": "Generate or regenerate an announcement's audio from text",
         "description": "Generates the announcement's audio from its text through the text-to-speech provider and stores it. Idempotent: when the stored audio already came from the same text, voice and model nothing is generated unless force is set. Playback never calls the provider.",
-        "tags": ["media"],
+        "tags": [
+          "media"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3753,7 +3794,7 @@
       "patch": {
         "operationId": "updateRingGroup",
         "summary": "Change a ring/hunt group",
-        "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored. A group that an IVR menu names cannot be renamed (409).",
+        "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored.",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -3787,6 +3828,214 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteRingGroup",
+        "summary": "Delete a ring/hunt group",
+        "description": "Deletes a ring or hunt group. The members go with it.",
+        "tags": ["ring-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/moh-classes": {
+      "get": {
+        "operationId": "listMOHClasses",
+        "summary": "List music on hold classes",
+        "description": "Lists every music on hold class with its playlist. A class is a named playlist of announcements played in a loop or shuffled to a held or parked party, and optionally to a caller instead of ringback.",
+        "tags": [
+          "media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Classes ordered by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClassList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createMOHClass",
+        "summary": "Create a music on hold class",
+        "description": "Creates a class from announcement ids. Marking it default clears the flag on the previous default. A class with no announcements plays the built-in tone. Validation failures list each failing field in error.fields.",
+        "tags": [
+          "media"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MOHClassInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClass"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/moh-classes/{id}": {
+      "get": {
+        "operationId": "getMOHClass",
+        "summary": "One music on hold class",
+        "description": "Returns one class by id.",
+        "tags": [
+          "media"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The class",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClass"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putMOHClass",
+        "summary": "Replace a music on hold class",
+        "description": "Replaces a class as a whole, playlist included. A hold already playing keeps its music until it resumes.",
+        "tags": [
+          "media"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MOHClassInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClass"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
           "409": {
             "$ref": "#/components/responses/Conflict"
           },
@@ -3805,10 +4054,12 @@
         "x-hello-mcp": true
       },
       "delete": {
-        "operationId": "deleteRingGroup",
-        "summary": "Delete a ring/hunt group",
-        "description": "Deletes a ring or hunt group. The members go with it. A group that an IVR menu names cannot be deleted (409).",
-        "tags": ["ring-groups"],
+        "operationId": "deleteMOHClass",
+        "summary": "Delete a music on hold class",
+        "description": "Deletes a class. Extensions, ring groups and inbound routes that named it fall back to the global default class, or the built-in tone.",
+        "tags": [
+          "media"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3820,9 +4071,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -4520,7 +4768,7 @@
       "put": {
         "operationId": "putPagingGroup",
         "summary": "Replace a paging group",
-        "description": "Replaces a paging group as a whole, member and caller lists included. A page already running keeps the member set it started with. Changing the code of a group an IVR menu names is refused (409).",
+        "description": "Replaces a paging group as a whole, member and caller lists included. A page already running keeps the member set it started with.",
         "tags": ["paging-groups"],
         "parameters": [
           {
@@ -4574,7 +4822,7 @@
       "delete": {
         "operationId": "deletePagingGroup",
         "summary": "Delete a paging group",
-        "description": "Deletes a paging group. Its member and caller lists go with it. A paging group that an IVR menu names cannot be deleted (409).",
+        "description": "Deletes a paging group. Its member and caller lists go with it.",
         "tags": ["paging-groups"],
         "parameters": [
           {
@@ -4587,9 +4835,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6887,15 +7132,7 @@
                     "description": "The scopes to grant.",
                     "items": {
                       "type": "string",
-                      "enum": [
-                        "read",
-                        "write",
-                        "admin",
-                        "secrets",
-                        "calls",
-                        "events",
-                        "recordings"
-                      ]
+                      "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
                     }
                   }
                 }
@@ -11450,6 +11687,22 @@
             "type": "string",
             "enum": ["none", "voicemail", "external", "announcement", "ivr", "queue"]
           },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls to this group; null uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
+          },
           "failureTarget": {
             "type": "string"
           },
@@ -11514,6 +11767,22 @@
             "type": "string",
             "enum": ["none", "voicemail", "external", "announcement", "ivr", "queue"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls to this group; null or absent uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "failureTarget": {
             "type": "string",
@@ -11600,6 +11869,22 @@
             "type": "string",
             "enum": ["none", "voicemail", "external", "announcement", "ivr", "queue"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls to this group; null clears it."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "failureTarget": {
             "type": "string",
@@ -11718,6 +12003,118 @@
                   "description": "The auto-answer headers the INVITE carried, as Name: value"
                 }
               }
+            }
+          }
+        }
+      },
+      "MOHClass": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "isDefault",
+          "tracks",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "loop",
+              "shuffle"
+            ],
+            "description": "loop plays the tracks in order and starts over; shuffle plays them in a fresh random order each pass."
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "The global default class: what a hold plays when no extension, group or route picks one."
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "announcementId",
+                "name"
+              ],
+              "properties": {
+                "announcementId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MOHClassInput": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The class name, unique."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "loop",
+              "shuffle"
+            ],
+            "description": "Default loop."
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "Default false."
+          },
+          "announcementIds": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Announcements to play, in order. Empty plays the built-in tone."
+          }
+        }
+      },
+      "MOHClassList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MOHClass"
             }
           }
         }
@@ -12072,10 +12469,10 @@
             "$ref": "#/components/schemas/IVRDestination",
             "description": "Where a caller goes when no agent is logged in. Defaults to hangup."
           },
-          "mohClass": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{0,64}$",
-            "description": "Music on hold class; empty for the default."
+          "mohClassId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Music on hold class the waiting caller hears; null uses the global default."
           },
           "announceFrequency": {
             "type": "integer",
@@ -12273,9 +12670,10 @@
             "$ref": "#/components/schemas/IVRDestination",
             "description": "Where a caller goes when no agent is logged in. Defaults to hangup."
           },
-          "mohClass": {
-            "type": "string",
-            "description": "Music on hold class; empty for the default."
+          "mohClassId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Music on hold class the waiting caller hears; null uses the global default."
           },
           "announceFrequency": {
             "type": "integer",
@@ -12771,7 +13169,9 @@
       },
       "FlowRevision": {
         "type": "object",
-        "required": ["configRevision"],
+        "required": [
+          "configRevision"
+        ],
         "properties": {
           "configRevision": {
             "type": "integer",
@@ -12781,7 +13181,10 @@
       },
       "FlowTarget": {
         "type": "object",
-        "required": ["kind", "port"],
+        "required": [
+          "kind",
+          "port"
+        ],
         "properties": {
           "kind": {
             "type": "string"
@@ -12801,14 +13204,23 @@
       },
       "FlowPort": {
         "type": "object",
-        "required": ["id", "direction", "type", "many", "label"],
+        "required": [
+          "id",
+          "direction",
+          "type",
+          "many",
+          "label"
+        ],
         "properties": {
           "id": {
             "type": "string"
           },
           "direction": {
             "type": "string",
-            "enum": ["in", "out"]
+            "enum": [
+              "in",
+              "out"
+            ]
           },
           "type": {
             "type": "string",
@@ -12843,7 +13255,11 @@
       },
       "FlowNodeType": {
         "type": "object",
-        "required": ["kind", "label", "ports"],
+        "required": [
+          "kind",
+          "label",
+          "ports"
+        ],
         "properties": {
           "kind": {
             "type": "string"
@@ -12870,7 +13286,12 @@
       },
       "FlowPortStyle": {
         "type": "object",
-        "required": ["type", "label", "colour", "shape"],
+        "required": [
+          "type",
+          "label",
+          "colour",
+          "shape"
+        ],
         "properties": {
           "type": {
             "type": "string"
@@ -12888,7 +13309,10 @@
       },
       "FlowCatalogue": {
         "type": "object",
-        "required": ["portTypes", "nodes"],
+        "required": [
+          "portTypes",
+          "nodes"
+        ],
         "properties": {
           "portTypes": {
             "type": "array",
@@ -12906,7 +13330,10 @@
       },
       "FlowRef": {
         "type": "object",
-        "required": ["node", "port"],
+        "required": [
+          "node",
+          "port"
+        ],
         "properties": {
           "node": {
             "type": "string"
@@ -12918,7 +13345,10 @@
       },
       "FlowOwner": {
         "type": "object",
-        "required": ["node", "field"],
+        "required": [
+          "node",
+          "field"
+        ],
         "properties": {
           "node": {
             "type": "string"
@@ -12930,7 +13360,12 @@
       },
       "FlowNode": {
         "type": "object",
-        "required": ["id", "kind", "label", "summary"],
+        "required": [
+          "id",
+          "kind",
+          "label",
+          "summary"
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -12954,7 +13389,12 @@
       },
       "FlowEdge": {
         "type": "object",
-        "required": ["id", "source", "target", "owner"],
+        "required": [
+          "id",
+          "source",
+          "target",
+          "owner"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -12981,7 +13421,11 @@
       },
       "FlowWarning": {
         "type": "object",
-        "required": ["node", "code", "message"],
+        "required": [
+          "node",
+          "code",
+          "message"
+        ],
         "properties": {
           "node": {
             "type": "string"
@@ -13001,7 +13445,12 @@
       },
       "FlowGraph": {
         "type": "object",
-        "required": ["configRevision", "nodes", "edges", "warnings"],
+        "required": [
+          "configRevision",
+          "nodes",
+          "edges",
+          "warnings"
+        ],
         "properties": {
           "configRevision": {
             "type": "integer",
@@ -13107,10 +13556,6 @@
                     "announcement",
                     "intercom",
                     "ivr",
-                    "queue_login",
-                    "queue_logout",
-                    "queue_pause",
-                    "queue_unpause",
                     "call_waiting_on",
                     "call_waiting_off"
                   ]
@@ -13330,15 +13775,7 @@
             "description": "The token's scopes, at most the caller's; absent means read, write and admin (secrets must be named).",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets",
-                "calls",
-                "events",
-                "recordings"
-              ]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "expiresAt": {
@@ -13387,15 +13824,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets",
-                "calls",
-                "events",
-                "recordings"
-              ]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "expiresAt": {
@@ -13444,15 +13873,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets",
-                "calls",
-                "events",
-                "recordings"
-              ]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "expiresAt": {
@@ -13547,6 +13968,18 @@
             "type": "boolean",
             "description": "Call waiting. On (the default): a call to this extension while it is in a call rings its devices and the phone shows call waiting. Off: the caller gets the forwardBusy target, or 486 Busy Here without one; ring groups skip the extension while it is busy. Provisioned into the phone's own call-waiting setting, so a phone resync applies a change."
           },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class callers hear while this extension holds them; null uses the global default."
+          },
           "directoryHidden": {
             "type": "boolean",
             "description": "Kept out of the automatic extensions address book."
@@ -13633,6 +14066,18 @@
           "callWaiting": {
             "type": "boolean",
             "description": "Call waiting. On (the default): a call to this extension while it is in a call rings its devices and the phone shows call waiting. Off: the caller gets the forwardBusy target, or 486 Busy Here without one; ring groups skip the extension while it is busy. Provisioned into the phone's own call-waiting setting, so a phone resync applies a change."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class callers hear while this extension holds them; null clears it (global default)."
           },
           "directoryHidden": {
             "type": "boolean",
@@ -13743,7 +14188,11 @@
       },
       "TtsModel": {
         "type": "object",
-        "required": ["id", "name", "voices"],
+        "required": [
+          "id",
+          "name",
+          "voices"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -13761,7 +14210,10 @@
       },
       "GenerationResult": {
         "type": "object",
-        "required": ["announcement", "regenerated"],
+        "required": [
+          "announcement",
+          "regenerated"
+        ],
         "properties": {
           "announcement": {
             "$ref": "#/components/schemas/Announcement"
@@ -13773,7 +14225,10 @@
         }
       },
       "TtsRecord": {
-        "type": ["object", "null"],
+        "type": [
+          "object",
+          "null"
+        ],
         "properties": {
           "text": {
             "type": "string"
@@ -13795,7 +14250,10 @@
       },
       "VoicemailGreetingResult": {
         "type": "object",
-        "required": ["box", "regenerated"],
+        "required": [
+          "box",
+          "regenerated"
+        ],
         "properties": {
           "box": {
             "$ref": "#/components/schemas/VoicemailBox"
@@ -15046,10 +15504,26 @@
             "type": "string",
             "enum": ["extension", "external", "sip_uri", "internal", "ivr", "queue"]
           },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls this route delivers; null uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
+          },
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, an IVR menu name, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean"
@@ -15121,6 +15595,22 @@
             "type": "string",
             "enum": ["extension", "external", "sip_uri", "internal", "ivr", "queue"],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls this route delivers; null or absent uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "destination": {
             "type": "string",
@@ -15198,6 +15688,22 @@
             "type": "string",
             "enum": ["extension", "external", "sip_uri", "internal", "ivr", "queue"],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls this route delivers; null clears it."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "destination": {
             "type": "string",
@@ -15914,15 +16420,7 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "enum": [
-                    "read",
-                    "write",
-                    "admin",
-                    "secrets",
-                    "calls",
-                    "events",
-                    "recordings"
-                  ]
+                  "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
                 },
                 "description": {
                   "type": "string"
@@ -15981,15 +16479,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets",
-                "calls",
-                "events",
-                "recordings"
-              ]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "resources": {
@@ -16007,15 +16497,7 @@
             "description": "The scopes the caller's role may grant.",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets",
-                "calls",
-                "events",
-                "recordings"
-              ]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           }
         }
@@ -16063,15 +16545,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets",
-                "calls",
-                "events",
-                "recordings"
-              ]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "resources": {
@@ -16171,15 +16645,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets",
-                "calls",
-                "events",
-                "recordings"
-              ]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "enabled": {
@@ -16235,15 +16701,7 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets",
-                "calls",
-                "events",
-                "recordings"
-              ]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "enabled": {
@@ -16278,15 +16736,7 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": [
-                "read",
-                "write",
-                "admin",
-                "secrets",
-                "calls",
-                "events",
-                "recordings"
-              ]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "enabled": {

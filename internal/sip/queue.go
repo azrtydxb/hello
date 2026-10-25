@@ -1,4 +1,4 @@
-// ACD call queues (migration 00023). A queue answers the call through the
+// ACD call queues (migration 00031). A queue answers the call through the
 // media relay, holds the caller with music and periodic announcements and
 // offers the call to the next free agent. The caller's dialog is the
 // ordinary answered B2BUA dialog (like an IVR menu's), so the queue reuses
@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
-	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo/sip"
@@ -44,14 +43,6 @@ const (
 	haPhaseQueue        = "queue"
 	haQueueDetailPrefix = "queue:"
 )
-
-// MOHProvider supplies music on hold by class name. The music-on-hold
-// feature implements it; until it does the queue plays the built-in tone.
-type MOHProvider interface {
-	// PCM returns the class's audio as 16-bit mono 8 kHz PCM; false when the
-	// class is unknown or empty (the built-in tone plays instead).
-	PCM(ctx context.Context, class string) ([]byte, bool)
-}
 
 // queueStore is the queue state, nil when the node has none.
 func (s *Server) queueStore() queue.Store { return s.deps.Queues }
@@ -148,63 +139,41 @@ func (c *call) queueSession(ctx context.Context, snap *snapshot.Snapshot, q snap
 
 // --- the wait ----------------------------------------------------------------
 
-// mohPlayer plays the queue's music to the caller until stopped; announcements
-// stop it and start it again, so the two never overlap on the relay.
-type mohPlayer struct {
-	c    *call
-	pcm  []byte
-	mu   sync.Mutex
-	stop context.CancelFunc
-	done chan struct{}
+// queueMusic plays the queue's music on hold class to the caller until
+// halted; announcements halt it and start it again, so the two never overlap
+// on the relay. The class is the queue's, else the global default, else the
+// built-in tune (the music-on-hold player resolves that).
+type queueMusic struct {
+	c       *call
+	classID int64
+	mu      sync.Mutex
+	p       *mohPlayer
 }
 
-func (p *mohPlayer) start(parent context.Context) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.stop != nil {
+func (m *queueMusic) start() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r := m.c.anchorRelay()
+	if m.p != nil || r == nil {
 		return
 	}
-	relay := p.c.anchorRelay()
-	if relay == nil || len(p.pcm) == 0 {
-		return
-	}
-	ctx, cancel := context.WithCancel(parent)
-	p.stop, p.done = cancel, make(chan struct{})
-	done := p.done
-	go func() {
-		defer close(done)
-		defer contain(p.c.s.log, "queue music")
-		for ctx.Err() == nil {
-			if err := relay.PlayTo(ctx, legCaller, p.pcm); err != nil && ctx.Err() == nil {
-				select { // a relay that cannot play must not spin
-				case <-time.After(time.Second):
-				case <-ctx.Done():
-				}
-			}
-		}
-	}()
+	m.p = m.c.runMOH(r, legCaller, "", m.classID)
 }
 
-func (p *mohPlayer) halt() {
-	p.mu.Lock()
-	cancel, done := p.stop, p.done
-	p.stop, p.done = nil, nil
-	p.mu.Unlock()
-	if cancel != nil {
-		cancel()
-		<-done
-	}
+func (m *queueMusic) halt() {
+	m.mu.Lock()
+	p := m.p
+	m.p = nil
+	m.mu.Unlock()
+	m.c.stopMOHPlayer(p)
 }
 
-// queueMusic returns the audio a waiting caller hears: the queue's class from
-// the music-on-hold provider, else the built-in tone.
-func (c *call) queueMusic(ctx context.Context, q snapshot.Queue) []byte {
-	if p := c.s.deps.MOH; p != nil {
-		if pcm, ok := p.PCM(ctx, q.MOHClass); ok && len(pcm) > 0 {
-			return pcm
-		}
+// musicFor is the class a queue's callers hear.
+func musicFor(snap *snapshot.Snapshot, q snapshot.Queue) int64 {
+	if cl, ok := snap.ResolveMOH(q.MOHClassID); ok {
+		return cl.ID
 	}
-	return media.HoldTonePCM()
+	return 0
 }
 
 // qLeg adds an event to the call's queue legs (its CDR).
@@ -306,9 +275,9 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 		c.queueLeave(ctx, snap, q, menu, why, dest, time.Since(enteredAt))
 	}
 
-	moh := &mohPlayer{c: c, pcm: c.queueMusic(ctx, q)}
+	moh := &queueMusic{c: c, classID: musicFor(snap, q)}
 	defer moh.halt()
-	moh.start(ctx)
+	moh.start()
 
 	c.mu.Lock()
 	digits := c.ivr.digits
@@ -372,7 +341,7 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 				return
 			}
 			lastAnn = time.Now()
-			moh.start(ctx)
+			moh.start()
 		}
 		if now.Before(nextOffer) {
 			continue

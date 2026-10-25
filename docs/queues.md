@@ -19,7 +19,7 @@ MCP tools). The **Queue wallboard** shows them live.
 | Wait at most        | Seconds (0 for no limit, default 600). Then the **timeout** destination applies.                                                               |
 | Join with no agents | Whether a call may join while no agent is logged in. Off sends it to the **no agents** destination at once.                                    |
 | Leave when empty    | Whether waiting callers leave (to the **no agents** destination) when the last agent logs out.                                                 |
-| Music on hold class | The music-on-hold class the caller hears. Empty is the default. Without the music-on-hold feature a built-in tone plays.                       |
+| Music on hold       | A music on hold class (see [media.md](media.md)). Empty uses the global default class, else the built-in tune.                                 |
 | Agents              | Extensions with a static/dynamic flag and a penalty. A static agent is always available, a dynamic one must log in.                            |
 
 ### Strategies
@@ -107,8 +107,9 @@ call, ringing for another queue call, or without a registered phone.
 
 A waiting caller is answered through Hello's media relay, like an IVR menu, so
 it is codec-agnostic: the relay encodes the music and announcements in
-whatever the caller's leg negotiated. Music comes from the music-on-hold
-provider when that feature is present (`MOHProvider`), else a built-in tone.
+whatever the caller's leg negotiated. Music is the queue's music on hold
+class (else the global default, else the built-in tune), played by the same
+player as a hold.
 Announcements are fetched as announcement objects, the same as IVR prompts.
 
 ## Shared state and high availability
@@ -156,7 +157,7 @@ log-in/pause buttons for operators.
 
 ## Migration
 
-Migration `00030_call_queues.sql` adds `queues`, `queue_members` and
+Migration `00031_call_queues.sql` adds `queues`, `queue_members` and
 `cdr_queue_legs`, widens the destination kind checks of inbound routes, ring
 groups and IVR menus with `queue`, and the feature-code actions with the four
 agent actions. It is additive, so a rolling upgrade works.

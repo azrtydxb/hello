@@ -8,6 +8,7 @@ import {
   listAnnouncements,
   listExtensions,
   listIvrMenus,
+  listMOHClasses,
   listPagingGroups,
   listQueues,
   listRingGroups,
@@ -20,6 +21,7 @@ import {
   type Id,
   type IvrDestination,
   type IvrMenu,
+  type MOHClass,
   type PagingGroup,
   type Queue,
   type QueueFields,
@@ -62,6 +64,7 @@ type ListState =
 
 interface Choices extends DestinationChoices {
   all: readonly Extension[];
+  mohClasses: readonly MOHClass[];
 }
 
 function useChoices(): { choices: Choices; error: string | null } {
@@ -70,6 +73,7 @@ function useChoices(): { choices: Choices; error: string | null } {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [pagingGroups, setPagingGroups] = useState<PagingGroup[]>([]);
   const [menus, setMenus] = useState<IvrMenu[]>([]);
+  const [mohClasses, setMohClasses] = useState<MOHClass[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -81,6 +85,7 @@ function useChoices(): { choices: Choices; error: string | null } {
     listAnnouncements(controller.signal).then(setAnnouncements).catch(fail);
     listPagingGroups(controller.signal).then(setPagingGroups).catch(fail);
     listIvrMenus(controller.signal).then(setMenus).catch(fail);
+    listMOHClasses(controller.signal).then(setMohClasses).catch(fail);
     return () => controller.abort();
   }, []);
   return {
@@ -91,6 +96,7 @@ function useChoices(): { choices: Choices; error: string | null } {
       pagingGroups,
       menus,
       all: extensions,
+      mohClasses,
     },
     error,
   };
@@ -332,7 +338,7 @@ interface Draft {
   timeout: IvrDestination;
   full: IvrDestination;
   noAgents: IvrDestination;
-  mohClass: string;
+  mohClassId: string;
   announceFrequency: string;
   announcePosition: boolean;
   announceWait: boolean;
@@ -364,7 +370,7 @@ const draftOf = (q: Queue | null): Draft => ({
   timeout: q?.timeout ?? { kind: "hangup", target: "" },
   full: q?.full ?? { kind: "hangup", target: "" },
   noAgents: q?.noAgents ?? { kind: "hangup", target: "" },
-  mohClass: q?.mohClass ?? "",
+  mohClassId: idStr(q?.mohClassId),
   announceFrequency: String(q?.announceFrequency ?? 0),
   announcePosition: q?.announcePosition ?? false,
   announceWait: q?.announceWait ?? false,
@@ -394,7 +400,7 @@ const KEYS = [
   "timeout",
   "full",
   "noAgents",
-  "mohClass",
+  "mohClassId",
   "announceFrequency",
   "announcePosition",
   "announceWait",
@@ -558,9 +564,12 @@ function QueueDrawer({
       return;
     }
     setBusy(true);
-    const prompt = (v: string): Id | null => {
+    const prompt = (
+      v: string,
+      list: readonly { id: Id }[] = choices.announcements,
+    ): Id | null => {
       if (v === "") return null;
-      return choices.announcements.find((a) => String(a.id) === v)?.id ?? v;
+      return list.find((a) => String(a.id) === v)?.id ?? v;
     };
     try {
       const body: QueueFields = {
@@ -578,7 +587,7 @@ function QueueDrawer({
         timeout: d.timeout,
         full: d.full,
         noAgents: d.noAgents,
-        mohClass: d.mohClass,
+        mohClassId: prompt(d.mohClassId, choices.mohClasses),
         announceFrequency: Number(d.announceFrequency),
         announcePosition: d.announcePosition,
         announceWait: d.announceWait,
@@ -704,14 +713,19 @@ function QueueDrawer({
             checked={d.leaveEmpty}
             onChange={(e) => set("leaveEmpty", e.target.checked)}
           />
-          <Input
-            id="queue-mohClass"
-            label="Music on hold class"
-            mono
-            value={d.mohClass}
-            error={errors.mohClass}
-            hint="Empty for the default music."
-            onChange={(e) => set("mohClass", e.target.value)}
+          <Select
+            id="queue-mohClassId"
+            label="Music on hold"
+            value={d.mohClassId}
+            error={errors.mohClassId}
+            options={[
+              { value: "", label: "The default music" },
+              ...choices.mohClasses.map((c) => ({
+                value: String(c.id),
+                label: c.name,
+              })),
+            ]}
+            onChange={(e) => set("mohClassId", e.target.value)}
           />
         </fieldset>
 

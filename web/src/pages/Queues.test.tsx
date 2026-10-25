@@ -36,7 +36,7 @@ const QUEUE = {
   timeout: { kind: "hangup", target: "" },
   full: { kind: "hangup", target: "" },
   noAgents: { kind: "queue", target: "overflow" },
-  mohClass: "",
+  mohClassId: null,
   announceFrequency: 0,
   announcePosition: false,
   announceWait: false,
@@ -75,6 +75,7 @@ function setup(extra: Parameters<typeof mockApi>[0] = {}) {
     "GET /api/v1/ring-groups": () => json({ items: [] }),
     "GET /api/v1/paging-groups": () => json({ items: [] }),
     "GET /api/v1/ivr-menus": () => json({ items: [] }),
+    "GET /api/v1/moh-classes": () => json({ items: [] }),
     "GET /api/v1/queues": () => json({ items: [QUEUE] }),
     ...extra,
   });

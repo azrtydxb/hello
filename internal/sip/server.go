@@ -168,9 +168,6 @@ type Deps struct {
 	// Queues is the call queues' shared state (Valkey); nil disables call
 	// queues (a call to a queue is refused with 503).
 	Queues queue.Store
-	// MOH supplies music on hold for queues by class; nil plays the built-in
-	// tone.
-	MOH MOHProvider
 }
 
 // Server is one SIP node.
@@ -233,6 +230,10 @@ type Server struct {
 	// handoff is set while the node drains with in-call HA: its calls are
 	// being handed to survivors.
 	handoff atomic.Bool
+
+	// mohCache holds decoded music on hold announcements (guarded by mohMu).
+	mohMu    sync.Mutex
+	mohCache map[string]mohAudioEntry
 
 	// Presence (S-10) and feature-code (S-11) state. subs holds the live
 	// dialog subscriptions by Call-ID, byExt the per-extension index used

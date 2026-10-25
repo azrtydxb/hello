@@ -17,7 +17,7 @@ type QueueMember struct {
 	Position  int
 }
 
-// Queue is a call queue (migration 00023). Prompt names are announcement
+// Queue is a call queue (migration 00031). Prompt names are announcement
 // names (resolved with Snapshot.Announcement); empty means none.
 type Queue struct {
 	ID                                       int64
@@ -28,7 +28,7 @@ type Queue struct {
 	MaxCallers, MaxWait                      int // 0: no limit
 	JoinEmpty, LeaveEmpty                    bool
 	Timeout, Full, NoAgents                  QueueDest
-	MOHClass                                 string
+	MOHClassID                               int64 // 0: the global default
 	AnnounceFrequency                        int
 	AnnouncePosition, AnnounceWait           bool
 	PeriodicPrompt, PositionPrompt           string
@@ -78,7 +78,7 @@ func (s *Snapshot) Queues() []Queue {
 func loadQueues(ctx context.Context, db Querier) ([]Queue, error) {
 	rows, err := db.Query(ctx, `SELECT q.id, q.name, q.number, q.enabled, q.strategy, q.agent_timeout, q.retry_delay, q.wrap_up,
 		q.max_callers, q.max_wait, q.join_empty, q.leave_empty,
-		q.timeout_kind, q.timeout_target, q.full_kind, q.full_target, q.no_agents_kind, q.no_agents_target, q.moh_class,
+		q.timeout_kind, q.timeout_target, q.full_kind, q.full_target, q.no_agents_kind, q.no_agents_target, COALESCE(q.moh_class_id, 0),
 		q.announce_frequency, q.announce_position, q.announce_wait,
 		COALESCE(pp.name, ''), COALESCE(po.name, ''), COALESCE(wp.name, ''), COALESCE(mp.name, ''), q.digits_prefix,
 		q.breakout_key, COALESCE(bp.name, ''), q.breakout_voicemail
@@ -97,7 +97,7 @@ func loadQueues(ctx context.Context, db Querier) ([]Queue, error) {
 		var q Queue
 		if err := rows.Scan(&q.ID, &q.Name, &q.Number, &q.Enabled, &q.Strategy, &q.AgentTimeout, &q.RetryDelay, &q.WrapUp,
 			&q.MaxCallers, &q.MaxWait, &q.JoinEmpty, &q.LeaveEmpty,
-			&q.Timeout.Kind, &q.Timeout.Target, &q.Full.Kind, &q.Full.Target, &q.NoAgents.Kind, &q.NoAgents.Target, &q.MOHClass,
+			&q.Timeout.Kind, &q.Timeout.Target, &q.Full.Kind, &q.Full.Target, &q.NoAgents.Kind, &q.NoAgents.Target, &q.MOHClassID,
 			&q.AnnounceFrequency, &q.AnnouncePosition, &q.AnnounceWait,
 			&q.PeriodicPrompt, &q.PositionPrompt, &q.WaitPrompt, &q.MinutesPrompt, &q.DigitsPrefix,
 			&q.BreakoutKey, &q.BreakoutPrompt, &q.BreakoutBox); err != nil {

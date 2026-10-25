@@ -43,6 +43,7 @@ import { mapFieldErrors, type ErrorMap } from "../forms";
 import { UNKNOWN } from "./callflow/format";
 import { FormAlert } from "./callflow/ui";
 import { Can } from "../role";
+import { MOHSelect } from "./media/MohSelect";
 
 const FORM_ID = "group-form";
 
@@ -367,6 +368,8 @@ interface GroupDraft {
   ignoreDnd: boolean;
   failureKind: FailureKind;
   failureTarget: string;
+  mohClassId: Id | null;
+  mohRingback: boolean;
   members: MemberDraft[];
 }
 
@@ -380,6 +383,8 @@ function groupDraft(group: RingGroup | null): GroupDraft {
     ignoreDnd: group?.ignoreDnd ?? false,
     failureKind: group?.failureKind ?? "none",
     failureTarget: group?.failureTarget ?? "",
+    mohClassId: group?.mohClassId ?? null,
+    mohRingback: group?.mohRingback ?? false,
     members: (group?.members ?? [])
       .slice()
       .sort((a, b) => a.position - b.position)
@@ -401,6 +406,8 @@ function groupBody(d: GroupDraft): RingGroupFields {
     ignoreDnd: d.ignoreDnd,
     failureKind: d.failureKind,
     failureTarget: d.failureKind === "none" ? "" : d.failureTarget.trim(),
+    mohClassId: d.mohClassId,
+    mohRingback: d.mohRingback,
     members: d.members.map((m, i) => ({
       extensionId: m.extensionId,
       position: i + 1,
@@ -421,6 +428,8 @@ function groupKeys(d: GroupDraft): string[] {
     "ignoreDnd",
     "failureKind",
     "failureTarget",
+    "mohClassId",
+    "mohRingback",
     "members",
     ...d.members.flatMap((_, i) => [
       `members[${i}]`,
@@ -642,6 +651,21 @@ function RingGroupDrawer({
             onChange={(e) => set("ignoreDnd", e.target.checked)}
           />
         </div>
+        <MOHSelect
+          id={fid("mohClassId")}
+          label="Music on hold"
+          hint="What callers to this group hear when it holds them. Default uses the global class."
+          value={d.mohClassId}
+          error={errors.mohClassId}
+          onChange={(v) => set("mohClassId", v)}
+        />
+        <Switch
+          label="Play music instead of ringback"
+          hint="The caller hears the class while the group rings, not a ringing tone"
+          labelPosition="end"
+          checked={d.mohRingback}
+          onChange={(e) => set("mohRingback", e.target.checked)}
+        />
 
         <fieldset
           className="cf-form__section"

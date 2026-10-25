@@ -12,13 +12,12 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// ACD call queues (migration 00023): the configuration (CRUD), the agents'
+// ACD call queues (migration 00031): the configuration (CRUD), the agents'
 // login and pause state, and the live status the wallboard reads. Reads are
 // open to a viewer; changes need the write scope, like ring groups.
 
 var (
 	queueNumberRe = regexp.MustCompile(`^([0-9]{2,16})?$`)
-	mohClassRe    = regexp.MustCompile(`^[A-Za-z0-9._-]{0,64}$`)
 	digitsPrefix  = regexp.MustCompile(`^[A-Za-z0-9._-]{0,32}$`)
 	breakoutKeyRe = regexp.MustCompile(`^[0-9*#]?$`)
 	pauseReasonRe = regexp.MustCompile(`^[A-Za-z0-9 ._-]{0,32}$`)
@@ -41,7 +40,7 @@ type queueBody struct {
 	Timeout           *ivrDestBody       `json:"timeout"`
 	Full              *ivrDestBody       `json:"full"`
 	NoAgents          *ivrDestBody       `json:"noAgents"`
-	MOHClass          *string            `json:"mohClass"`
+	MOHClassID        *int64             `json:"mohClassId"`
 	AnnounceFrequency *int               `json:"announceFrequency"`
 	AnnouncePosition  *bool              `json:"announcePosition"`
 	AnnounceWait      *bool              `json:"announceWait"`
@@ -103,7 +102,7 @@ func (b queueBody) toInput() store.QueueInput {
 	setD(&in.Timeout, b.Timeout)
 	setD(&in.Full, b.Full)
 	setD(&in.NoAgents, b.NoAgents)
-	setS(&in.MOHClass, b.MOHClass)
+	in.MOHClassID = b.MOHClassID
 	setI(&in.AnnounceFrequency, b.AnnounceFrequency)
 	setB(&in.AnnouncePosition, b.AnnouncePosition)
 	setB(&in.AnnounceWait, b.AnnounceWait)
@@ -146,8 +145,8 @@ func validateQueue(in *store.QueueInput) fieldErrs {
 	between("maxCallers", in.MaxCallers, 0, 1000)
 	between("maxWait", in.MaxWait, 0, 86400)
 	between("announceFrequency", in.AnnounceFrequency, 0, 600)
-	if !mohClassRe.MatchString(in.MOHClass) {
-		f.add("mohClass", "must be at most 64 of A-Z a-z 0-9 . _ -")
+	if in.MOHClassID != nil && *in.MOHClassID <= 0 {
+		f.add("mohClassId", "must be a music on hold class id or null")
 	}
 	if !digitsPrefix.MatchString(in.DigitsPrefix) {
 		f.add("digitsPrefix", "must be at most 32 of A-Z a-z 0-9 . _ -")

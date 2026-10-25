@@ -36,10 +36,9 @@ CREATE TABLE queues (
     no_agents_kind      TEXT        NOT NULL DEFAULT 'hangup'
         CHECK (no_agents_kind IN ('hangup','extension','ring_group','voicemail','announcement','paging','ivr','external','queue')),
     no_agents_target    TEXT        NOT NULL DEFAULT '',
-    -- The MOH class (migration 00021, music-on-hold) the waiting caller
-    -- hears; empty means the default. Not a foreign key: the class table
-    -- belongs to another migration.
-    moh_class           TEXT        NOT NULL DEFAULT '' CHECK (moh_class ~ '^[A-Za-z0-9._-]{0,64}$'),
+    -- The music on hold class (migration 00029) the waiting caller hears;
+    -- NULL means the global default.
+    moh_class_id        BIGINT               REFERENCES moh_classes (id) ON DELETE SET NULL,
     -- Periodic announcements: every announce_frequency seconds (0 = never)
     -- the caller hears the periodic prompt, their position and the estimated
     -- wait. Numbers are spoken digit by digit from the announcements
