@@ -315,7 +315,7 @@ func (p *Party) push(samples []int16) {
 	p.buf = append(p.buf, samples...)
 	if len(p.buf) > partyMaxBuffer {
 		drop := len(p.buf) - partyTrimTo
-		p.dropped.Add(uint64(drop))
+		p.dropped.Add(uint64(drop)) //nolint:gosec // drop is positive here
 		p.buf = append(p.buf[:0], p.buf[drop:]...)
 	}
 }

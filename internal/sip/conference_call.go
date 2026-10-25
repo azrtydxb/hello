@@ -55,7 +55,7 @@ type confFwd struct {
 
 func (s *Server) confMAC(callID, room, node string, ts int64) string {
 	m := hmac.New(sha256.New, s.cfg.NonceSecret)
-	fmt.Fprintf(m, "hello-conference-forward|%s|%s|%s|%d", callID, room, node, ts)
+	_, _ = fmt.Fprintf(m, "hello-conference-forward|%s|%s|%s|%d", callID, room, node, ts) // a hash write cannot fail
 	return hex.EncodeToString(m.Sum(nil))
 }
 

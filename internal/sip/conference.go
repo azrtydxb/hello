@@ -127,14 +127,13 @@ func newConfMetrics(reg prometheus.Registerer) *confMetrics {
 
 // confPart is one participant of a room this node mixes.
 type confPart struct {
-	id      string
-	c       *call
-	party   *media.Party
-	number  string
-	name    string
-	joined  time.Time
-	admit   chan struct{} // closed when the participant leaves the wait
-	removed bool
+	id     string
+	c      *call
+	party  *media.Party
+	number string
+	name   string
+	joined time.Time
+	admit  chan struct{} // closed when the participant leaves the wait
 
 	// Guarded by the room's mu.
 	leader        bool

@@ -144,7 +144,7 @@ func (s *Store) ConfStates(ctx context.Context, numbers []string) (map[string]Co
 		}
 		var st ConfRoomState
 		if json.Unmarshal([]byte(str), &st) == nil {
-			out[numbers[i]] = st
+			out[numbers[i]] = st //nolint:gosec // MGET returns one reply per key
 		}
 	}
 	return out, nil
