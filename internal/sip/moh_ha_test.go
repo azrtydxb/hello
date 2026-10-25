@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cluster"
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo/sip"
 )
@@ -22,7 +23,12 @@ func TestMusicOnHoldTakeover(t *testing.T) {
 	ha, mem := newFakeHA(), &fakeMembership{}
 	owner := startPBX(t, ringAllDevices(), withNodeID("sip-1"), withHA(ha, mem), withMedia(false), withFeatures(feats), withVoicemail(newVMStore(), objs))
 	taker := startPBX(t, ringAllDevices(), withNodeID("sip-2"), withHA(ha, mem), withMedia(false), withFeatures(feats), withVoicemail(newVMStore(), objs))
+	t.Cleanup(func() { taker.srv.HangupAll("test end") }) // its relay must not outlive the test
 	a, b := newPhone(t, owner, "a1", "pa"), newPhone(t, owner, "b1", "pb1")
+	// The phones answer the takeover re-INVITE with their own media
+	// address, as real phones do. Echoing the offer instead aims the taker's
+	// relay at its own port, so its music never reaches the held phone.
+	a.reinviteOwnSDP, b.reinviteOwnSDP = true, true
 	a.register(t)
 	b.register(t)
 	listenRTP(t, a)
@@ -58,17 +64,42 @@ func TestMusicOnHoldTakeover(t *testing.T) {
 
 	haReinviteTimeout = time.Second
 	owner.stop()
+	killMedia(owner)
 	mem.set(
 		cluster.Member{ID: "sip-1", Kind: cluster.KindSIP, State: cluster.Offline, ActiveCalls: 1},
 		cluster.Member{ID: "sip-2", Kind: cluster.KindSIP, State: cluster.Ready},
 	)
 	taker.srv.takeoverPass(t.Context())
 	waitReq(t, a.reinvites, "takeover re-INVITE to the holder")
-	waitReq(t, b.reinvites, "takeover re-INVITE to the held callee")
+	bInv := waitReq(t, b.reinvites, "takeover re-INVITE to the held callee")
+	takerSDP, err := media.ParseAudioSDP(bInv.Body())
+	if err != nil {
+		t.Fatalf("takeover re-INVITE SDP: %v", err)
+	}
 	waitReq(t, a.acks, "ACK to the holder")
 	waitReq(t, b.acks, "ACK to the held callee")
-	rtpCount(bRTP, 100*time.Millisecond)
-	if n, peak := rtpCount(bRTP, 1500*time.Millisecond); n < 40 || peak < 500 {
+	// Only the taker's relay counts: whatever else sends to this port (a
+	// dead owner's stream, another test's leftover) is not the takeover.
+	rtpCountFrom(bRTP, takerSDP.Port, 100*time.Millisecond)
+	if n, peak := rtpCountFrom(bRTP, takerSDP.Port, 1500*time.Millisecond); n < 40 || peak < 500 {
 		t.Fatalf("after the takeover the held callee heard %d packets (peak %d), want the music again", n, peak)
+	}
+}
+
+// killMedia stops the RTP of every call p anchors, as a crashed node's
+// would stop. Cancelling a test PBX's Serve context leaves its calls' relays
+// running, and a surviving music stream keeps sending RTP to the phone's
+// port (and, once that port closes, to whichever test binds it next).
+func killMedia(p *testPBX) {
+	p.srv.mu.Lock()
+	calls := make([]*call, 0, len(p.srv.calls))
+	for c := range p.srv.calls {
+		calls = append(calls, c)
+	}
+	p.srv.mu.Unlock()
+	for _, c := range calls {
+		if r := c.anchorRelay(); r != nil {
+			r.Close()
+		}
 	}
 }

@@ -145,7 +145,9 @@ func TestPagingGroup(t *testing.T) {
 	expectAutoAnswer(t, "300", ci)
 	for who, req := range map[string]*sip.Request{"200": bi, "300": ci} {
 		body := string(req.Body())
-		if media.SDPDirection(req.Body()) != "sendonly" || !strings.Contains(body, "RTP/AVP 0\r\n") || strings.Contains(body, "101") {
+		// Check the m= line's payload types, not the whole body: the o=
+		// line's session id/version are timestamps that can contain "101".
+		if media.SDPDirection(req.Body()) != "sendonly" || !slices.Equal(audioPayloadTypes(body), []string{"0"}) {
 			t.Errorf("%s: offer %q, want sendonly with PCMU only", who, body)
 		}
 	}
@@ -664,5 +666,29 @@ func TestAutoAnswerHeaders(t *testing.T) {
 		if got["Call-Info"] != "<sip:pbx.example>;answer-after=0" {
 			t.Errorf("%q: Call-Info = %q", ua, got["Call-Info"])
 		}
+	}
+}
+
+// audioPayloadTypes returns the payload types listed on the SDP m=audio
+// line (the fields after the proto), in order.
+func audioPayloadTypes(sdp string) []string {
+	for _, line := range strings.Split(sdp, "\n") {
+		f := strings.Fields(strings.TrimSpace(line))
+		if len(f) >= 4 && f[0] == "m=audio" {
+			return f[3:]
+		}
+	}
+	return nil
+}
+
+// TestAudioPayloadTypes: a "101" in the o= line (a timestamp session id)
+// is not a telephone-event payload type; only the m=audio line counts.
+func TestAudioPayloadTypes(t *testing.T) {
+	sdp := "v=0\r\no=hello 1710101101 1710101101 IN IP4 10.0.0.1\r\ns=-\r\nc=IN IP4 10.0.0.1\r\nt=0 0\r\nm=audio 4000 RTP/AVP 0\r\na=sendonly\r\n"
+	if got := audioPayloadTypes(sdp); !slices.Equal(got, []string{"0"}) {
+		t.Errorf("payload types = %v, want [0]", got)
+	}
+	if got := audioPayloadTypes(strings.Replace(sdp, "RTP/AVP 0", "RTP/AVP 0 101", 1)); !slices.Equal(got, []string{"0", "101"}) {
+		t.Errorf("payload types = %v, want [0 101]", got)
 	}
 }
