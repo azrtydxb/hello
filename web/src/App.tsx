@@ -26,8 +26,10 @@ import {
   EXACT_PATHS,
   NAV_ITEMS,
   navGroupsFor,
+  activeGroupLabel,
   pageTitle,
 } from "./nav";
+import { useNavGroups } from "./useNavGroups";
 import { AIAccess } from "./pages/AIAccess";
 import {
   IntegrationsApiAccess,
@@ -127,6 +129,15 @@ function Shell() {
   // Call detail belongs to Call history in the nav.
   const historyDetail = /^\/history\/[^/]+$/.test(location.pathname);
 
+  const navGroups = navGroupsFor(
+    state.status === "signedIn" ? state.role : undefined,
+    aiEnabled,
+  );
+  const { isExpanded, toggle } = useNavGroups(
+    state.status === "signedIn" ? state.username : "",
+    activeGroupLabel(navGroups, location.pathname),
+  );
+
   function onLogout() {
     // Leave first, so the sign-in page carries no ?next= back into the app.
     navigate("/login", { replace: true });
@@ -156,11 +167,14 @@ function Shell() {
         onSignOut={onLogout}
       >
         <SidebarNav label="Primary">
-          {navGroupsFor(
-            state.status === "signedIn" ? state.role : undefined,
-            aiEnabled,
-          ).map((group) => (
-            <SidebarNavGroup key={group.label} label={group.label}>
+          {navGroups.map((group) => (
+            <SidebarNavGroup
+              key={group.label}
+              label={group.label}
+              expanded={isExpanded(group.label)}
+              onToggle={() => toggle(group.label)}
+              alert={group.items.some((i) => badges[i.path] != null)}
+            >
               {group.items.map((item) => (
                 // NavLink sets aria-current="page" on the active link.
                 <NavLink

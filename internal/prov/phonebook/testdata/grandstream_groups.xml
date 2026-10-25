@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AddressBook>
+  <version>1</version>
+  <pbgroup>
+    <id>1</id>
+    <name>Extensions</name>
+  </pbgroup>
+  <pbgroup>
+    <id>2</id>
+    <name>Company</name>
+  </pbgroup>
+  <Contact>
+    <LastName>Lee</LastName>
+    <FirstName>Ann</FirstName>
+    <Phone type="Work">
+      <phonenumber>1002</phonenumber>
+      <accountindex>1</accountindex>
+    </Phone>
+    <Group>1</Group>
+  </Contact>
+  <Contact>
+    <LastName>Smith</LastName>
+    <FirstName>Tom</FirstName>
+    <Phone type="Work">
+      <phonenumber>0471 22 33 44</phonenumber>
+      <accountindex>1</accountindex>
+    </Phone>
+    <Company>R&amp;D</Company>
+    <Group>2</Group>
+  </Contact>
+</AddressBook>
