@@ -16,6 +16,7 @@ import {
   type TableColumn,
 } from "../design/azrty/components";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
+import { isGone } from "./platform/health";
 import {
   callDuration,
   callState,
@@ -48,7 +49,10 @@ export function callsPerNode(
 ): NodeCount[] {
   const out = new Map<string, NodeCount>();
   for (const m of members ?? []) {
-    if (m.kind === "sip") out.set(m.id, { id: m.id, calls: 0, state: m.state });
+    // A node that left cleanly or was replaced is no node to list (its
+    // calls, if any, still are, below).
+    if (m.kind === "sip" && !isGone(m))
+      out.set(m.id, { id: m.id, calls: 0, state: m.state });
   }
   for (const c of calls) {
     const n = out.get(c.node) ?? { id: c.node, calls: 0 };

@@ -32,6 +32,22 @@ func testNodeHealth(t *testing.T) {
 		{"ready", nodeSamples(func(int) nodeSample { return ready }, 10), nil},
 		{"not ready 1 minute", nodeSamples(notReady("starting"), 2), nil},
 		{"not ready 2 minutes", nodeSamples(notReady("starting"), 3), []string{"node_health:sip-1:not_ready/warning"}},
+		{"crashed, no replacement, 3 minutes", nodeSamples(func(int) nodeSample {
+			return nodeSample{Offline: true, Reason: "no heartbeat", StartedAt: ready.StartedAt}
+		}, 3), []string{"node_health:sip-1:not_ready/warning"}},
+		{"left cleanly or replaced, 30 minutes", nodeSamples(func(int) nodeSample {
+			return nodeSample{Offline: true, Gone: true, Reason: "no heartbeat", StartedAt: ready.StartedAt}
+		}, 30), nil},
+		{"crashed, then replaced: the alert clears", nodeSamples(func(i int) nodeSample {
+			return nodeSample{Offline: true, Gone: i >= 4, Reason: "no heartbeat", StartedAt: ready.StartedAt}
+		}, 6), nil},
+		{"3 clean tombstones are no flapping", nodeSamples(func(i int) nodeSample {
+			s := ready
+			s.Offline = i%2 == 1 && i < 6
+			s.Gone = s.Offline
+			s.Ready = !s.Offline
+			return s
+		}, 10), nil},
 		{"dependency 1 minute", nodeSamples(notReady("PostgreSQL unreachable"), 2), nil},
 		{"dependency 2 minutes", nodeSamples(notReady("PostgreSQL unreachable"), 3), []string{"node_health:sip-1:not_ready/critical"}},
 		{"valkey dependency", nodeSamples(notReady("valkey: timeout"), 3), []string{"node_health:sip-1:not_ready/critical"}},

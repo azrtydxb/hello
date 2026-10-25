@@ -577,6 +577,30 @@ func TestClusterOverviewConcurrentReads(t *testing.T) {
 	}
 }
 
+// TestClusterMetricsLeftIsNotOffline fails if a node that left cleanly, or a
+// tombstone superseded by its replacement pod, is counted as OFFLINE (an
+// alert rule on hello_cluster_members{state="OFFLINE"} would fire at every
+// deploy), or if a crash nobody replaced stops counting as OFFLINE.
+func TestClusterMetricsLeftIsNotOffline(t *testing.T) {
+	m := NewClusterMetrics(prometheus.NewRegistry())
+	m.update([]cluster.Member{
+		{ID: "hello-sip-1-aaaaaaa-bbbbb", Kind: cluster.KindSIP, State: cluster.Offline, Left: true},
+		{ID: "hello-sip-2-ccccccc-ddddd", Kind: cluster.KindSIP, State: cluster.Offline, Superseded: true},
+		{ID: "hello-sip-3-eeeeeee-fffff", Kind: cluster.KindSIP, State: cluster.Offline},
+		{ID: "hello-sip-1-ggggggg-hhhhh", Kind: cluster.KindSIP, State: cluster.Ready},
+	}, nil)
+	gauge := func(state string) float64 {
+		var out dto.Metric
+		if err := m.Members.WithLabelValues("sip", state).Write(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out.GetGauge().GetValue()
+	}
+	if gauge("OFFLINE") != 1 || gauge("LEFT") != 2 || gauge("READY") != 1 {
+		t.Fatalf("OFFLINE %v LEFT %v READY %v, want 1, 2, 1", gauge("OFFLINE"), gauge("LEFT"), gauge("READY"))
+	}
+}
+
 // TestClusterPollerConcurrentReads fails if a blocked configuration-revision
 // read starves the membership read in the background poller: the gauges
 // must still refresh (with the lags kept, not reset to a false zero).

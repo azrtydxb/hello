@@ -66,7 +66,19 @@ type Member struct {
 	// from the process that owned its calls before. Empty from older
 	// nodes.
 	Incarnation string `json:"incarnation,omitempty"`
+	// Left and Superseded are derived for an OFFLINE member, never
+	// published. Left: the node shut down cleanly (it called Leave), so its
+	// absence is no failure. Superseded: a live node of the same kind and
+	// slot (hello-sip-1's replacement pod) started after it. Neither is a
+	// problem to alert on; the member stays OFFLINE (its unclaimed calls are
+	// still taken over) and listed as history until the tombstone expires.
+	Left       bool `json:"left,omitempty"`
+	Superseded bool `json:"superseded,omitempty"`
 }
+
+// Gone reports an OFFLINE member that is no failure: it left cleanly or was
+// replaced by a live node of its slot. A crash nobody replaced is not Gone.
+func (m Member) Gone() bool { return m.State == Offline && (m.Left || m.Superseded) }
 
 // podSuffix is what a Deployment appends to its name for a pod:
 // "-<replica set hash>-<5 characters>".
@@ -122,6 +134,7 @@ func (s *Store) Publish(ctx context.Context, m Member) error {
 	if m.State == Offline {
 		return fmt.Errorf("cluster: OFFLINE is derived, not published")
 	}
+	m.Left, m.Superseded = false, false // derived, never published
 	v, err := json.Marshal(m)
 	if err != nil {
 		return err
@@ -138,10 +151,32 @@ func (s *Store) Publish(ctx context.Context, m Member) error {
 }
 
 // Leave removes a node's live record and any drain request for it at clean
-// shutdown, so a restart reusing the ID is not drained again; its tombstone
-// stays so it is listed OFFLINE.
+// shutdown, so a restart reusing the ID is not drained again. Its tombstone
+// stays, marked Left, so it is listed OFFLINE as history but does not alert:
+// a crash (no Leave) keeps an unmarked tombstone and does.
 func (s *Store) Leave(ctx context.Context, id string) error {
-	return s.c.Do(ctx, s.c.B().Del().Key(memberKey(id), drainKey(id)).Build()).Error()
+	if err := s.c.Do(ctx, s.c.B().Del().Key(memberKey(id), drainKey(id)).Build()).Error(); err != nil {
+		return err
+	}
+	raw, err := s.c.Do(ctx, s.c.B().Get().Key(tombKey(id)).Build()).ToString()
+	if valkey.IsValkeyNil(err) {
+		return nil // never published: nothing to list
+	}
+	if err != nil {
+		return fmt.Errorf("cluster: leave %s: %w", id, err)
+	}
+	var m Member
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return nil // unreadable tombstone: left as a crash would leave it
+	}
+	m.Left = true
+	v, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	// The clock restarts: the node left now, so it is history for the full
+	// tombstone period from now.
+	return s.c.Do(ctx, s.c.B().Set().Key(tombKey(id)).Value(string(v)).Px(TombstoneTTL).Build()).Error()
 }
 
 // Members lists every live member plus tombstoned ones as OFFLINE, sorted
@@ -168,6 +203,7 @@ func (s *Store) Members(ctx context.Context) ([]Member, error) {
 			out = append(out, m)
 		}
 	}
+	markSuperseded(out)
 	slices.SortFunc(out, func(a, b Member) int {
 		if c := strings.Compare(string(a.Kind), string(b.Kind)); c != 0 {
 			return c
@@ -175,6 +211,24 @@ func (s *Store) Members(ctx context.Context) ([]Member, error) {
 		return strings.Compare(a.ID, b.ID)
 	})
 	return out, nil
+}
+
+// markSuperseded flags every OFFLINE member that a live node of the same
+// kind and slot has replaced (a Deployment's new pod has a new name) and that
+// started no earlier: no failure, the node is back. A member that left
+// cleanly is already Left.
+func markSuperseded(ms []Member) {
+	for i, m := range ms {
+		if m.State != Offline || m.Left {
+			continue
+		}
+		for _, l := range ms {
+			if l.State != Offline && l.Kind == m.Kind && l.ID != m.ID && Slot(l.ID) == Slot(m.ID) && !l.StartedAt.Before(m.StartedAt) {
+				ms[i].Superseded = true
+				break
+			}
+		}
+	}
 }
 
 // AcquireRollout takes (or, when id already holds it, renews) the restart

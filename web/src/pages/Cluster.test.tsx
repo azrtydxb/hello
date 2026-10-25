@@ -192,6 +192,35 @@ describe("Cluster", () => {
     expect(within(dialog).getByText("lobby")).toBeVisible();
   });
 
+  it("lists nodes that left or were replaced as Left, without drawing them or counting them down", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cluster": () =>
+        cluster([
+          member("hello-sip-1"),
+          member("hello-sip-1-aaaaaaa-bbbbb", { state: "OFFLINE", left: true }),
+          member("hello-sip-2-ccccccc-ddddd", {
+            state: "OFFLINE",
+            superseded: true,
+          }),
+        ]),
+    });
+    renderApp("/cluster");
+
+    expect(
+      await screen.findByRole("button", { name: "hello-sip-1: Ready" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^hello-sip-1-aaaaaaa-bbbbb/ }),
+    ).toBeNull();
+    expect(
+      screen.getByText(/Left \(shut down cleanly or replaced\):/),
+    ).toHaveTextContent(
+      "hello-sip-1-aaaaaaa-bbbbb (left), hello-sip-2-ccccccc-ddddd (left)",
+    );
+    expect(screen.queryByText("No SIP node is READY")).toBeNull();
+  });
+
   it("shows unknown revision while PostgreSQL is down, and the Valkey error", async () => {
     mockApi({
       ...ME,
