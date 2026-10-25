@@ -98,6 +98,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/paging-groups/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getPagingGroup},
 		{"PUT", "/api/v1/paging-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPagingGroup},
 		{"DELETE", "/api/v1/paging-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deletePagingGroup},
+		{"POST", "/api/v1/paging-groups/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testPagingGroup},
 		{"GET", "/api/v1/feature-codes", auth.ScopeRead, auth.RoleViewer, false, s.listFeatureCodes},
 		{"PUT", "/api/v1/feature-codes", auth.ScopeWrite, auth.RoleOperator, false, s.putFeatureCodes},
 

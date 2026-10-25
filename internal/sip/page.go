@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"slices"
 	"strings"
 	"sync"
@@ -65,10 +66,28 @@ type pageState struct {
 	pt     uint8
 	events chan pageEvent
 
+	// The tone the caller hears until the first member answers (early
+	// media); toneStop ends it. callerAddr is where the caller's SDP wants
+	// it.
+	callerAddr *net.UDPAddr
+	toneStop   context.CancelFunc
+	toneDone   chan struct{}
+
 	mu      sync.Mutex
 	legs    []*pageLeg
 	skipped []pageResult
 	closed  bool
+	// report is every member's outcome, one row per leg or skipped member,
+	// set once by pageStop for the CDR.
+	report []cdr.PageLeg
+}
+
+// results returns the per-member results for the CDR (nil for a page that
+// never started).
+func (ps *pageState) results() []cdr.PageLeg {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	return slices.Clone(ps.report)
 }
 
 // autoAnswerHeaders are the headers that make a phone answer by itself
@@ -113,12 +132,18 @@ func (l *leg) addPagingHeaders(req *sip.Request) {
 	if l.pl == nil && !auto {
 		return
 	}
-	for _, h := range autoAnswerHeaders(s.cfg.Domain, l.binding.UserAgent) {
+	for _, h := range pagingHeaders(s.cfg.Domain, l.binding.UserAgent, c.callerName, c.callerNum) {
 		req.AppendHeader(h)
 	}
-	name := strings.NewReplacer(`"`, ``, `\`, ``, "\r", ``, "\n", ``).Replace(c.callerName)
-	req.AppendHeader(sip.NewHeader("P-Asserted-Identity",
-		fmt.Sprintf(`"%s" <sip:%s@%s>`, name, c.callerNum, s.cfg.Domain)))
+}
+
+// pagingHeaders are the headers a page or intercom INVITE carries beyond a
+// plain call's: the vendor's auto-answer headers and the caller's identity
+// in P-Asserted-Identity.
+func pagingHeaders(domain, userAgent, callerName, callerNum string) []sip.Header {
+	name := strings.NewReplacer(`"`, ``, `\`, ``, "\r", ``, "\n", ``).Replace(callerName)
+	return append(autoAnswerHeaders(domain, userAgent),
+		sip.NewHeader("P-Asserted-Identity", fmt.Sprintf(`"%s" <sip:%s@%s>`, name, callerNum, domain)))
 }
 
 // isPageOrIntercomCode reports whether dialled is a paging group's code or
@@ -281,7 +306,7 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 	}
 	emergency := g.Priority == snapshot.PagingEmergency
 	busy := s.busyExtensions()
-	ps := &pageState{group: g, host: s.anchorHostOr(off.Address), pt: off.PayloadType}
+	ps := &pageState{group: g, host: s.anchorHostOr(off.Address), pt: off.PayloadType, callerAddr: udpAddr(off.Address, off.Port)}
 	var targets []pageBinding
 	for _, ext := range g.Members {
 		if ext == c.callerNum {
@@ -349,7 +374,7 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 	ps.events = make(chan pageEvent, len(targets)+1)
 	offer := media.BuildAudioSDPDir(ps.host, fan.MemberPort(), off.PayloadType, 0, 0, "sendonly")
 	c.addTrace(fmt.Sprintf("Paging group %s (%s): %d legs", g.Name, g.Priority, len(targets)))
-	c.respondA(sip.StatusRinging, "Ringing")
+	c.pageEarlyMedia(ps)
 	c.mu.Lock()
 	for _, t := range targets {
 		pl := &pageLeg{ext: t.ext, offer: offer}
@@ -364,6 +389,39 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 		go pl.l.runPage()
 	}
 	c.pageSetup(len(legs))
+}
+
+// pageEarlyMedia answers the caller's INVITE with 183 Session Progress and
+// starts the page tone, which the caller hears instead of ringback until the
+// first member answers. The SDP is sendrecv, the same as the final answer,
+// so the phone's media does not change when the page connects; Hello only
+// ever sends the tone and never sends a member's audio back. A phone that
+// ignores early media just hears nothing until the answer.
+func (c *call) pageEarlyMedia(ps *pageState) {
+	body := media.BuildAudioSDPDir(ps.host, ps.fan.CallerPort(), ps.pt, 0, 0, "sendrecv")
+	c.s.m.response(sip.StatusSessionInProgress)
+	err := c.dss.Respond(sip.StatusSessionInProgress, "Session Progress", body, sip.NewHeader("Content-Type", "application/sdp"))
+	if err != nil {
+		c.s.log.Debug("page early media failed", "correlation_id", c.id, "error", err)
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ps.toneStop, ps.toneDone = cancel, make(chan struct{})
+	go func() {
+		defer close(ps.toneDone)
+		defer contain(c.s.log, "page tone")
+		_ = ps.fan.PlayCaller(ctx, media.PageTonePCM(), ps.callerAddr, true)
+	}()
+	c.addTrace("Page tone to the caller")
+}
+
+// pageToneStop ends the page tone and waits for it, so it never overlaps
+// the answer or outlives the media. Safe to call any number of times.
+func (ps *pageState) pageToneStop() {
+	if ps.toneStop != nil {
+		ps.toneStop()
+		<-ps.toneDone
+	}
 }
 
 // pageAdmit takes the group's single active-page slot and one of the node's
@@ -455,9 +513,11 @@ func (c *call) pageFailCaller(reason, result string) {
 }
 
 // pageAnswerCaller answers the caller once a member answered. The answer
-// is recvonly: Hello takes the caller's audio and sends nothing back.
+// is sendrecv like the early media's (the phone's media does not change),
+// but Hello takes the caller's audio and sends nothing back.
 func (c *call) pageAnswerCaller() {
 	ps := c.page
+	ps.pageToneStop()
 	c.mu.Lock()
 	cancelled := c.isCancelled
 	aborted := closed(c.aborted)
@@ -480,7 +540,7 @@ func (c *call) pageAnswerCaller() {
 	c.addTrace("Page established")
 	c.s.m.PagingTotal.WithLabelValues("answered").Inc()
 	c.publish()
-	body := media.BuildAudioSDPDir(ps.host, ps.fan.CallerPort(), ps.pt, 0, 0, "recvonly")
+	body := media.BuildAudioSDPDir(ps.host, ps.fan.CallerPort(), ps.pt, 0, 0, "sendrecv")
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
@@ -609,7 +669,15 @@ func (c *call) pageStop() {
 		}
 		c.s.m.PagingLegs.WithLabelValues(pl.result).Inc()
 	}
+	ps.report = ps.report[:0]
+	for _, sk := range ps.skipped {
+		ps.report = append(ps.report, cdr.PageLeg{Extension: sk.ext, Result: sk.result})
+	}
+	for _, pl := range legs {
+		ps.report = append(ps.report, cdr.PageLeg{Extension: pl.ext, Device: pl.l.binding.Device, Result: pl.result})
+	}
 	ps.mu.Unlock()
+	ps.pageToneStop()
 	for _, pl := range legs {
 		if !pl.answered {
 			pl.l.cancel()

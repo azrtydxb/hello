@@ -168,7 +168,7 @@ func run(args []string) error {
 		MailboxEvents: mailboxEvents{cfg: cfg.Database, log: log.With("component", "mailbox")},
 		Voicemails:    voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings,
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
-		HAState: live, Membership: members,
+		HAState: live, Membership: members, PageTests: live,
 	})
 	if err != nil {
 		return err
