@@ -34,11 +34,15 @@ type Binding struct {
 type Call struct {
 	ID        string `json:"id"` // correlation ID
 	SIPCallID string `json:"sipCallId"`
-	From      string `json:"from"`  // caller extension number
-	To        string `json:"to"`    // dialled number
-	State     string `json:"state"` // ringing | connected
-	Node      string `json:"node"`
-	Media     string `json:"media"` // direct
+	From      string `json:"from"` // caller extension number
+	To        string `json:"to"`   // dialled number
+	// Callee is the extension whose device answered, when that differs from
+	// the dialled number (a ring group member, a forward target); it makes
+	// the extension count as busy. Empty from older nodes and before answer.
+	Callee string `json:"callee,omitempty"`
+	State  string `json:"state"` // ringing | connected
+	Node   string `json:"node"`
+	Media  string `json:"media"` // direct
 	// Direction is internal, inbound or outbound, as the call's CDR will
 	// record it. Records written by nodes predating the field read as "".
 	Direction  string    `json:"direction,omitempty"`

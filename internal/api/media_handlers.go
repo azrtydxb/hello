@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/azrtydxb/hello/internal/media"
 )
 
 // Announcement upload bounds: a 10 MiB WAV (spec S-5) at most, plus headroom
@@ -142,7 +144,7 @@ func (s *server) createAnnouncement(w http.ResponseWriter, r *http.Request) {
 	if !usernameRe.MatchString(name) {
 		f.add("name", "must be 1-64 of A-Z a-z 0-9 . _ -")
 	}
-	checkAnnouncementAudio(&f, data)
+	data = checkAnnouncementAudio(&f, data)
 	if len(f) > 0 {
 		writeFields(w, f)
 		return
@@ -215,7 +217,7 @@ func (s *server) replaceAnnouncement(w http.ResponseWriter, r *http.Request) {
 	if name != "" && name != a.Name {
 		f.add("name", "cannot change; upload a new announcement under the other name")
 	}
-	checkAnnouncementAudio(&f, data)
+	data = checkAnnouncementAudio(&f, data)
 	if len(f) > 0 {
 		writeFields(w, f)
 		return
@@ -260,14 +262,25 @@ func (s *server) announcementAudio(w http.ResponseWriter, r *http.Request) {
 	s.serveAudio(w, r, AnnouncementsBucket, a.Object, "", "media: announcement audio")
 }
 
-// checkAnnouncementAudio adds the file errors of an upload: required, and
-// RIFF/WAVE by its bytes.
-func checkAnnouncementAudio(f *fieldErrs, data []byte) {
+// checkAnnouncementAudio adds the file errors of an upload: required, RIFF/WAVE
+// by its bytes, and playable. It returns the audio to store: a WAV at another
+// sample rate is resampled to the 8 kHz the call plane plays at; anything that
+// is not 16-bit mono PCM is refused with the reason.
+func checkAnnouncementAudio(f *fieldErrs, data []byte) []byte {
 	if len(data) == 0 {
 		f.add("file", "a WAV file is required")
-	} else if !isWAV(data) {
-		f.add("file", "the audio must be a RIFF/WAVE file")
+		return data
 	}
+	if !isWAV(data) {
+		f.add("file", "the audio must be a RIFF/WAVE file")
+		return data
+	}
+	out, err := media.NormalizeWAV(data)
+	if err != nil {
+		f.add("file", "%s; upload a 16-bit mono PCM WAV file", strings.TrimPrefix(err.Error(), "media: "))
+		return data
+	}
+	return out
 }
 
 // deleteAnnouncement removes the row and then the MinIO object (the row

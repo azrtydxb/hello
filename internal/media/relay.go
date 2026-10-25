@@ -3,7 +3,11 @@
 // range, its own receive goroutine feeding a bounded queue, and its own
 // pump goroutine that rewrites sequence, timestamp and SSRC per direction
 // and sends to the leg's latched peer address. Audio flows leg to leg; no
-// transcoding: payload types pass through untouched.
+// transcoding: payload types pass through untouched, so whatever the two
+// ends negotiated between themselves (G.722, Opus on a dynamic payload type,
+// PCMU, PCMA) flows through the relay as it is; the relay only needs to know
+// the negotiated codecs (SetCodecs) to count audio packets, pace its own
+// announcement streams and let the recording tap decode.
 //
 // Queues are bounded with drop-oldest, counted (spec S-3). Every relay
 // goroutine recovers its own panics: one panicking session falls back to
@@ -103,7 +107,16 @@ type relayLeg struct {
 	// only in the recv goroutine, so it needs no lock.
 	filter  DTMFFilter
 	dtmfPT  uint8 // telephone-event payload type, 0 when none offered
-	audioPT uint8 // negotiated audio payload type, 0 when anything goes
+	audioPT uint8 // first negotiated audio payload type, 0 when anything goes
+
+	// codecs are the leg's negotiated audio codecs (first = preferred);
+	// accept is the set of their payload types, empty when unknown. Both
+	// are written at setup and at answer time, before media flows in
+	// earnest, and read from the leg's goroutines; codecMu guards them.
+	codecMu sync.RWMutex
+	codecs  []Codec
+	accept  [128]bool
+	anyPT   bool
 
 	// stats is the leg's inbound-stream counters (locked).
 	stats legStats
@@ -253,8 +266,95 @@ func (r *Relay) SetPayloadTypes(name string, audio, dtmf uint8) {
 	if l == nil {
 		return
 	}
-	l.audioPT = audio
+	var codecs []Codec
+	if c, ok := StaticCodec(audio); ok {
+		codecs = []Codec{c}
+	}
+	l.setCodecs(codecs, audio, dtmf)
+}
+
+// SetCodecs tells the relay the audio codecs a leg negotiated (dynamic
+// payload types included) and its telephone-event payload type. The first
+// codec is the one the relay speaks itself when it plays an announcement
+// into the leg.
+func (r *Relay) SetCodecs(name string, codecs []Codec, dtmf uint8) {
+	l := r.findLeg(name)
+	if l == nil {
+		return
+	}
+	var first uint8
+	if len(codecs) > 0 {
+		first = codecs[0].PT
+	}
+	l.setCodecs(codecs, first, dtmf)
+}
+
+func (l *relayLeg) setCodecs(codecs []Codec, first, dtmf uint8) {
+	l.codecMu.Lock()
+	defer l.codecMu.Unlock()
+	l.codecs = append([]Codec(nil), codecs...)
+	l.accept = [128]bool{}
+	for _, c := range codecs {
+		l.accept[c.PT&0x7f] = true
+	}
+	l.anyPT = len(codecs) == 0
+	l.audioPT = first
 	l.dtmfPT = dtmf
+}
+
+// eventType is the leg's telephone-event payload type, 0 when none.
+func (l *relayLeg) eventType() uint8 {
+	l.codecMu.RLock()
+	defer l.codecMu.RUnlock()
+	return l.dtmfPT
+}
+
+// carries reports whether pt is a negotiated audio payload type of the leg.
+func (l *relayLeg) carries(pt uint8) bool {
+	l.codecMu.RLock()
+	defer l.codecMu.RUnlock()
+	return l.anyPT || l.accept[pt&0x7f]
+}
+
+// clockRate is the RTP clock rate of the leg's preferred codec, 8000 when
+// none is known.
+func (l *relayLeg) clockRate() float64 {
+	l.codecMu.RLock()
+	defer l.codecMu.RUnlock()
+	if len(l.codecs) > 0 && l.codecs[0].ClockRate > 0 {
+		return float64(l.codecs[0].ClockRate)
+	}
+	return 8000
+}
+
+// speaks returns the codec the relay itself uses toward the leg: the first
+// negotiated codec it can encode, PCMU when none is known.
+func (l *relayLeg) speaks() Codec {
+	l.codecMu.RLock()
+	defer l.codecMu.RUnlock()
+	for _, c := range l.codecs {
+		if c.Supported() {
+			return c
+		}
+	}
+	if l.audioPT == 8 {
+		c, _ := StaticCodec(8)
+		return c
+	}
+	c, _ := StaticCodec(0)
+	return c
+}
+
+// Codecs returns the audio codecs the leg negotiated, nil when none were
+// set.
+func (r *Relay) Codecs(name string) []Codec {
+	l := r.findLeg(name)
+	if l == nil {
+		return nil
+	}
+	l.codecMu.RLock()
+	defer l.codecMu.RUnlock()
+	return append([]Codec(nil), l.codecs...)
 }
 
 // OnDTMF delivers one deduplicated DTMF digit per press on leg, ending
@@ -342,10 +442,11 @@ func (r *Relay) recv(l *relayLeg) {
 		if !ok {
 			continue // a malformed datagram is a dropped packet, never fatal
 		}
-		if (l.audioPT == 0 || pkt.PayloadType == l.audioPT) && pkt.PayloadType != l.dtmfPT {
+		dtmfPT := l.eventType()
+		if l.carries(pkt.PayloadType) && pkt.PayloadType != dtmfPT {
 			r.noteAudio(l, pkt)
 		}
-		if l.dtmfPT != 0 && pkt.PayloadType == l.dtmfPT {
+		if dtmfPT != 0 && pkt.PayloadType == dtmfPT {
 			if ev, ok := ParseTelephoneEvent(pkt.Payload); ok {
 				ev.Sequence = pkt.Sequence
 				if code, deliver := l.filter.Observe(ev, pkt.Marker); deliver && r.onDTMF != nil {
@@ -395,7 +496,7 @@ func (r *Relay) noteAudio(l *relayLeg, pkt *RTPPacket) {
 			st.lost += uint64(gap - 1)
 		}
 		arrivalDelta := time.Since(st.lastArrival)
-		tsDelta := float64(int32(pkt.Timestamp-st.lastTS)) / 8000.0 //nolint:gosec // RTP wraparound
+		tsDelta := float64(int32(pkt.Timestamp-st.lastTS)) / l.clockRate() //nolint:gosec // RTP wraparound
 		d := arrivalDelta.Seconds() - tsDelta
 		if d < 0 {
 			d = -d
@@ -642,8 +743,16 @@ func (r *Relay) LegPort(name string) int {
 // PlayTo plays PCM (16-bit mono, 8 kHz) into one leg in real time, as its
 // own announcement stream: a fresh SSRC with its own sequence and
 // timestamp space, so the bridged stream's rewrite state is untouched.
-// It returns ctx.Err() when ctx is cancelled mid-way.
+// The stream is encoded in the leg's negotiated codec (G.722 and Opus legs
+// get the 8 kHz audio resampled up). It returns ctx.Err() when ctx is
+// cancelled mid-way.
 func (r *Relay) PlayTo(ctx context.Context, legName string, pcm []byte) error {
+	return r.PlayPCMTo(ctx, legName, pcm, sampleRateHz)
+}
+
+// PlayPCMTo is PlayTo for PCM at an explicit sample rate (WAV assets are 8
+// or 16 kHz).
+func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate int) error {
 	l := r.findLeg(legName)
 	if l == nil {
 		return errors.New("media: unknown relay leg " + legName)
@@ -651,26 +760,38 @@ func (r *Relay) PlayTo(ctx context.Context, legName string, pcm []byte) error {
 	if len(pcm)%2 != 0 {
 		pcm = pcm[:len(pcm)-1]
 	}
+	codec := l.speaks()
+	if want := codec.SampleRate(); want != rate {
+		out, err := Resample(pcm, rate, want)
+		if err != nil {
+			return fmt.Errorf("media: announcement resample: %w", err)
+		}
+		pcm = out
+	}
+	enc, err := NewEncoder(codec)
+	if err != nil {
+		return err
+	}
+	defer enc.Close()
 	var b [10]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return fmt.Errorf("media: announcement stream: %w", err)
 	}
-	encode := EncodePCMU
-	pt := uint8(0)
-	if l.audioPT == 8 {
-		encode, pt = EncodePCMA, 8
-	}
 	seq := binary.BigEndian.Uint16(b[0:2])
 	ts := binary.BigEndian.Uint32(b[2:6])
 	ssrc := binary.BigEndian.Uint32(b[6:10])
+	frame := 2 * codec.FrameSamples()
 	ticker := time.NewTicker(frameDur)
 	defer ticker.Stop()
-	for off := 0; off < len(pcm); off += frameBytes {
-		end := min(off+frameBytes, len(pcm))
-		payload := encode(pcm[off:end])
-		pkt := BuildRTP(pt, seq, ts, ssrc, false, payload)
+	for off := 0; off < len(pcm); off += frame {
+		end := min(off+frame, len(pcm))
+		chunk := pcm[off:end]
+		if len(chunk) < frame {
+			chunk = append(append([]byte(nil), chunk...), make([]byte, frame-len(chunk))...)
+		}
+		pkt := BuildRTP(codec.PT, seq, ts, ssrc, false, enc.Encode(chunk))
 		seq++
-		ts += frameSamples
+		ts += codec.TimestampStep()
 		l.remoteMu.Lock()
 		dst := l.remote
 		l.remoteMu.Unlock()

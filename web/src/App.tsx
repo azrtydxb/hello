@@ -63,6 +63,7 @@ import { usePolling } from "./usePolling";
 import { usePlatformBadges } from "./pages/platform/ui";
 import { Recordings } from "./pages/Recordings";
 import { Announcements } from "./pages/Announcements";
+import { VoiceSettings } from "./pages/VoiceSettings";
 import { Registrations } from "./pages/Registrations";
 import { RouteTest } from "./pages/RouteTest";
 import { RoutesPage } from "./pages/Routes";
@@ -95,6 +96,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/recordings": Recordings,
   "/announcements": Announcements,
   "/system": System,
+  "/settings/voice": VoiceSettings,
   "/routes/test": RouteTest,
   "/ai": AIAccess,
   "/ai/assistant": AIAssistant,

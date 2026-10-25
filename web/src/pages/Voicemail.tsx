@@ -18,6 +18,8 @@ import {
   type VoicemailBoxDetail,
   type VoicemailBoxSummary,
 } from "../api/media";
+import { type Announcement, listAnnouncements } from "../api";
+import { MAX_TTS_CHARS, putVoicemailGreeting } from "../api/tts";
 import {
   Alert,
   Badge,
@@ -30,6 +32,7 @@ import {
   Input,
   Modal,
   navItemClassName,
+  Select,
   PageHeader,
   Spinner,
   Table,
@@ -39,6 +42,7 @@ import {
 import { formatDuration, formatTime } from "../format";
 import { mapFieldErrors } from "../forms";
 import { NowPlaying, usePlayback } from "./media/MediaParts";
+import { ModelVoiceFields, useTtsModels } from "./media/TtsParts";
 import { Can } from "../role";
 
 type Load<T> =
@@ -433,6 +437,10 @@ function BoxPanel({
           box={box}
           detail={d}
           onClose={() => setSettingsOpen(false)}
+          onGreeting={(value, message) => {
+            setDetail({ status: "ready", value });
+            onToast(message);
+          }}
           onSaved={(value) => {
             setDetail({ status: "ready", value });
             setSettingsOpen(false);
@@ -457,11 +465,14 @@ function BoxSettings({
   detail,
   onClose,
   onSaved,
+  onGreeting,
 }: {
   box: VoicemailBoxSummary;
   detail: VoicemailBoxDetail;
   onClose: () => void;
   onSaved: (detail: VoicemailBoxDetail) => void;
+  /** A greeting was set from an announcement or text; the modal stays open. */
+  onGreeting: (detail: VoicemailBoxDetail, message: string) => void;
 }) {
   const [email, setEmail] = useState(detail.email);
   const [password, setPassword] = useState("");
@@ -567,27 +578,27 @@ function BoxSettings({
           }
           onChange={(e) => setPassword(e.target.value)}
         />
-        <FileField
+        <GreetingSource
           id={`${formId}-greeting`}
-          label="Greeting audio (WAV)"
+          slot="greeting"
+          label="Greeting"
           error={errors.greeting}
-          hint={
-            detail.greetingObject
-              ? "A greeting is set; uploading replaces it."
-              : "Played before the beep."
-          }
+          box={box}
+          detail={detail}
+          disabled={busy}
           onFile={setGreeting}
+          onApplied={onGreeting}
         />
-        <FileField
+        <GreetingSource
           id={`${formId}-unreachable`}
-          label="Unreachable greeting audio (WAV)"
+          slot="unreachable"
+          label="Unreachable greeting"
           error={errors.unreachable}
-          hint={
-            detail.unreachableObject
-              ? "An unreachable greeting is set; uploading replaces it."
-              : "Played when the extension is unreachable."
-          }
+          box={box}
+          detail={detail}
+          disabled={busy}
           onFile={setUnreachable}
+          onApplied={onGreeting}
         />
         {(formError || unmatched.length > 0) && (
           <Alert tone="bad" title="Could not save the box">
@@ -637,5 +648,230 @@ function FileField({
         {error || hint}
       </span>
     </div>
+  );
+}
+
+type GreetingMode = "upload" | "announcement" | "text";
+
+/**
+ * One greeting's source: upload a WAV (saved with the box), pick an existing
+ * announcement, or write text and generate it once. The last two apply at
+ * once, on their own button; generating is always an explicit click and the
+ * same text, voice and model never generate twice.
+ */
+function GreetingSource({
+  id,
+  slot,
+  label,
+  error,
+  box,
+  detail,
+  disabled,
+  onFile,
+  onApplied,
+}: {
+  id: string;
+  slot: "greeting" | "unreachable";
+  label: string;
+  error?: string;
+  box: VoicemailBoxSummary;
+  detail: VoicemailBoxDetail;
+  disabled?: boolean;
+  onFile: (file: File | null) => void;
+  onApplied: (detail: VoicemailBoxDetail, message: string) => void;
+}) {
+  const object =
+    slot === "greeting" ? detail.greetingObject : detail.unreachableObject;
+  const record =
+    slot === "greeting" ? detail.greetingTts : detail.unreachableTts;
+  const [mode, setMode] = useState<GreetingMode>("upload");
+  const [announcements, setAnnouncements] = useState<Announcement[] | null>(
+    null,
+  );
+  const [annId, setAnnId] = useState("");
+  const [text, setText] = useState(record?.text ?? "");
+  const [modelId, setModelId] = useState(record?.model ?? "");
+  const [voiceId, setVoiceId] = useState(record?.voice ?? "");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { models, error: modelsError } = useTtsModels(mode === "text");
+
+  useEffect(() => {
+    if (mode !== "announcement" || announcements) return;
+    const controller = new AbortController();
+    listAnnouncements(controller.signal)
+      .then(setAnnouncements)
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) setProblem(errorMessage(err));
+      });
+    return () => controller.abort();
+  }, [mode, announcements]);
+
+  async function apply(
+    body:
+      | { source: "announcement"; announcementId: string }
+      | { source: "text"; text: string; voiceId?: string; modelId?: string },
+    done: (regenerated: boolean) => string,
+  ) {
+    setProblem(null);
+    setBusy(true);
+    try {
+      const res = await putVoicemailGreeting(box.extensionId, {
+        slot,
+        ...body,
+      });
+      onApplied({ ...detail, ...res.box }, done(res.regenerated));
+    } catch (err: unknown) {
+      setProblem(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const trimmed = text.trim();
+  const tooLong = [...trimmed].length > MAX_TTS_CHARS;
+  const edited =
+    record !== null &&
+    record !== undefined &&
+    (record.text !== trimmed ||
+      record.model !== modelId ||
+      record.voice !== voiceId);
+  const current = object
+    ? record
+      ? "Generated from text."
+      : "A greeting is set."
+    : slot === "greeting"
+      ? "Played before the beep."
+      : "Played when the extension is unreachable.";
+
+  return (
+    <fieldset className="media-modal-form" style={{ border: 0, padding: 0 }}>
+      <legend className="az-field__label">{label}</legend>
+      <Select
+        id={`${id}-source`}
+        label={`${label} source`}
+        value={mode}
+        disabled={disabled || busy}
+        options={[
+          { value: "upload", label: "Upload a WAV" },
+          { value: "announcement", label: "Use an existing announcement" },
+          { value: "text", label: "Generate from text" },
+        ]}
+        onChange={(e) => {
+          setMode(e.target.value as GreetingMode);
+          setProblem(null);
+        }}
+      />
+      {mode === "upload" && (
+        <FileField
+          id={id}
+          label={`${label} audio (WAV)`}
+          error={error}
+          hint={
+            object
+              ? `${current} Uploading replaces it; other sample rates are converted to 8 kHz.`
+              : current
+          }
+          onFile={onFile}
+        />
+      )}
+      {mode === "announcement" && (
+        <>
+          <Select
+            id={`${id}-announcement`}
+            label="Announcement"
+            value={annId}
+            disabled={disabled || busy || !announcements}
+            options={[
+              { value: "", label: announcements ? "Choose…" : "Loading…" },
+              ...(announcements ?? []).map((a) => ({
+                value: String(a.id),
+                label: a.name,
+              })),
+            ]}
+            onChange={(e) => setAnnId(e.target.value)}
+            hint={`${current} The audio is copied, so later changes to the announcement do not alter the greeting.`}
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={disabled || busy || annId === ""}
+            onClick={() =>
+              void apply(
+                { source: "announcement", announcementId: annId },
+                () => `${label} of box ${box.number} set.`,
+              )
+            }
+          >
+            Use this announcement
+          </Button>
+        </>
+      )}
+      {mode === "text" && (
+        <>
+          <div className="az-field">
+            <label className="az-field__label" htmlFor={`${id}-text`}>
+              Text to speak
+            </label>
+            <textarea
+              id={`${id}-text`}
+              className="az-input media-textarea"
+              rows={4}
+              value={text}
+              disabled={disabled || busy}
+              onChange={(e) => setText(e.target.value)}
+            />
+            <span className="az-field__hint">
+              {tooLong
+                ? `At most ${String(MAX_TTS_CHARS)} characters.`
+                : `${current} Generated once; the stored audio plays from then on.`}
+            </span>
+          </div>
+          <ModelVoiceFields
+            idPrefix={id}
+            models={models}
+            modelId={modelId}
+            voiceId={voiceId}
+            onModel={setModelId}
+            onVoice={setVoiceId}
+            disabled={disabled || busy}
+          />
+          {modelsError && (
+            <Alert tone="warn" title="Could not load the voice list">
+              {modelsError}
+            </Alert>
+          )}
+          {edited && (
+            <Badge tone="warn">Text edited since the last generation</Badge>
+          )}
+          <Button
+            size="sm"
+            icon="wand-sparkles"
+            disabled={disabled || busy || trimmed === "" || tooLong}
+            onClick={() =>
+              void apply(
+                {
+                  source: "text",
+                  text: trimmed,
+                  voiceId: voiceId || undefined,
+                  modelId: modelId || undefined,
+                },
+                (regenerated) =>
+                  regenerated
+                    ? `${label} of box ${box.number} generated.`
+                    : `${label} of box ${box.number} is already generated from this text.`,
+              )
+            }
+          >
+            {record ? "Regenerate greeting" : "Generate greeting"}
+          </Button>
+        </>
+      )}
+      {problem && (
+        <Alert tone="bad" title="Could not set the greeting">
+          {problem}
+        </Alert>
+      )}
+    </fieldset>
   );
 }

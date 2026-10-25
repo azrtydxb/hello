@@ -221,6 +221,32 @@ func TestApplyFeatureUpdate(t *testing.T) {
 		t.Fatalf("extension after second update = %+v", got)
 	}
 
+	// Call waiting defaults on; a feature-code change flips it and a nil
+	// field leaves it alone (spec S-18).
+	if !got.CallWaiting {
+		t.Fatal("a new extension must have call waiting on")
+	}
+	off := false
+	if err := s.ApplyFeatureUpdate(ctx, "hello-sip", FeatureUpdate{Number: e.Number, CallWaiting: &off}); err != nil {
+		t.Fatalf("call waiting off: %v", err)
+	}
+	if got, err = s.GetExtension(ctx, e.ID); err != nil || got.CallWaiting || !got.DND {
+		t.Fatalf("after call waiting off: %+v, %v (DND must stay)", got, err)
+	}
+	if err := s.ApplyFeatureUpdate(ctx, "hello-sip", FeatureUpdate{Number: e.Number, DND: &dnd}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.GetExtension(ctx, e.ID); err != nil || got.CallWaiting {
+		t.Fatalf("an update without the field changed call waiting: %+v, %v", got, err)
+	}
+	on := true
+	if _, err := s.UpdateExtension(ctx, "test", e.ID, ExtensionChange{CallWaiting: &on}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.GetExtension(ctx, e.ID); err != nil || !got.CallWaiting {
+		t.Fatalf("after the API update: %+v, %v", got, err)
+	}
+
 	// An unknown extension number is a not-found, like every other store path.
 	if err := s.ApplyFeatureUpdate(ctx, "hello-sip", FeatureUpdate{Number: "999"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown number: err=%v, want ErrNotFound", err)

@@ -88,6 +88,12 @@ describe("System", () => {
     expect(
       within(action).getByRole("option", { name: "Intercom (auto-answer)" }),
     ).toBeInTheDocument();
+    expect(
+      within(action).getByRole("option", { name: "Call waiting on" }),
+    ).toBeInTheDocument();
+    expect(
+      within(action).getByRole("option", { name: "Call waiting off" }),
+    ).toBeInTheDocument();
 
     fireEvent.change(action, { target: { value: "announcement" } });
     const pick = await screen.findByRole("combobox", { name: "Argument 1" });
