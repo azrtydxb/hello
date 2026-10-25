@@ -79,7 +79,6 @@ type Store interface {
 	CreateIVRMenu(ctx context.Context, actor string, in store.IVRMenuInput, check store.Check) (store.IVRMenu, error)
 	UpdateIVRMenu(ctx context.Context, actor string, id int64, in store.IVRMenuInput, check store.Check) (store.IVRMenu, error)
 	DeleteIVRMenu(ctx context.Context, actor string, id int64, check store.Check) error
-	IVRMenuNameExists(ctx context.Context, name string) (bool, error)
 
 	ListFeatureCodes(ctx context.Context) ([]store.FeatureCode, error)
 	PutFeatureCodes(ctx context.Context, actor string, codes []store.FeatureCode, check store.Check) error

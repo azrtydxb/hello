@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -176,5 +178,104 @@ func TestIVRNamedObjectsAreProtected(t *testing.T) {
 	}
 	if err := s.DeleteExtension(ctx, "t", ext, nil); err != nil {
 		t.Fatalf("delete extension after release: %v", err)
+	}
+}
+
+// TestIVRReferencesCheckedInTransaction: a ring group failover and an "ivr"
+// feature code must name an existing menu, checked by the store inside the
+// configuration change (under the configuration lock), so a menu deleted at
+// the same moment cannot leave a dangling reference. It fails if the store
+// accepts a reference to a missing menu, or if a concurrent delete and
+// create ever leave a group whose failover names a deleted menu.
+func TestIVRReferencesCheckedInTransaction(t *testing.T) {
+	s := scratchStore(t)
+	ctx := context.Background()
+	greet, err := s.CreateAnnouncement(ctx, "t", "greet", "ann/greet.wav", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ve *ValidationError
+	group := func(name, menu string) RingGroupInput {
+		return RingGroupInput{Name: name, Strategy: "ring-all", RingTimeout: 30, FailureKind: "ivr", FailureTarget: menu}
+	}
+	if _, err := s.CreateRingGroup(ctx, "t", group("g0", "nope"), nil); !errors.As(err, &ve) ||
+		ve.Fields[0].Path != "failureTarget" {
+		t.Fatalf("group failing over to a missing menu: %v", err)
+	}
+	if err := s.PutFeatureCodes(ctx, "t", []FeatureCode{{Code: "*55", Action: "ivr", Argument: "nope"}}, nil); !errors.As(err, &ve) ||
+		ve.Fields[0].Path != "items[0].argument" {
+		t.Fatalf("feature code naming a missing menu: %v", err)
+	}
+
+	for i := range 20 {
+		name := fmt.Sprintf("m%d", i)
+		m, err := s.CreateIVRMenu(ctx, "t", ivrInput(name, greet.ID), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		var gErr, dErr error
+		var g RingGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			g, gErr = s.CreateRingGroup(ctx, "t", group(fmt.Sprintf("g%d", i+1), name), nil)
+		}()
+		go func() { defer wg.Done(); dErr = s.DeleteIVRMenu(ctx, "t", m.ID, nil) }()
+		wg.Wait()
+		if gErr == nil && dErr == nil {
+			t.Fatalf("round %d: group %s fails over to menu %s, which was deleted", i, g.Name, name)
+		}
+		if gErr == nil {
+			if err := s.DeleteRingGroup(ctx, "t", g.ID, nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+// TestIVRNumberNotShadowed: an IVR menu's number is matched before
+// extensions and ring groups, so an extension or group must not take it. It
+// fails if an extension can be created or renumbered onto a menu's number,
+// or a ring group created or renamed to it.
+func TestIVRNumberNotShadowed(t *testing.T) {
+	s := scratchStore(t)
+	ctx := context.Background()
+	greet, err := s.CreateAnnouncement(ctx, "t", "greet", "ann/greet.wav", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := ivrInput("main", greet.ID)
+	in.Number = "800"
+	if _, err := s.CreateIVRMenu(ctx, "t", in, nil); err != nil {
+		t.Fatal(err)
+	}
+	var ve *ValidationError
+	want := func(what string, err error, path string) {
+		t.Helper()
+		if !errors.As(err, &ve) || ve.Fields[0].Path != path || !strings.Contains(ve.Fields[0].Message, "IVR menu main") {
+			t.Errorf("%s: %v, want a %s error naming the menu", what, err, path)
+		}
+	}
+	_, err = s.CreateExtension(ctx, "t", "800", "Clash", "", nil)
+	want("create extension", err, "number")
+	e, err := s.CreateExtension(ctx, "t", "801", "Fine", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := "800"
+	_, err = s.UpdateExtension(ctx, "t", e.ID, ExtensionChange{Number: &n}, nil)
+	want("renumber extension", err, "number")
+	_, err = s.CreateRingGroup(ctx, "t", RingGroupInput{Name: "800", Strategy: "ring-all", RingTimeout: 30, FailureKind: "none"}, nil)
+	want("create ring group", err, "name")
+	g, err := s.CreateRingGroup(ctx, "t", RingGroupInput{Name: "sales", Strategy: "ring-all", RingTimeout: 30, FailureKind: "none"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.UpdateRingGroup(ctx, "t", g.ID, RingGroupInput{Name: "800", Strategy: "ring-all", RingTimeout: 30, FailureKind: "none"}, nil)
+	want("rename ring group", err, "name")
+	// The group keeps its own name through an unrelated change.
+	if _, err := s.UpdateRingGroup(ctx, "t", g.ID, RingGroupInput{Name: "sales", Strategy: "sequential", RingTimeout: 30, FailureKind: "none"}, nil); err != nil {
+		t.Fatalf("unrelated group change: %v", err)
 	}
 }

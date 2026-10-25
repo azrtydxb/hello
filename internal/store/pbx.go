@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -519,6 +520,9 @@ func (s *Store) GetRingGroup(ctx context.Context, id int64) (RingGroup, error) {
 func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupInput, check Check) (RingGroup, error) {
 	var g RingGroup
 	err := s.configChange(ctx, actor, "create", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		if err := checkRingGroupIVR(ctx, tx, "", in); err != nil {
+			return 0, err
+		}
 		var id int64
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO ring_groups (name, strategy, hunt, ring_timeout, member_delay, ignore_dnd, failure_kind, failure_target)
@@ -549,6 +553,9 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 				return id, err
 			}
 		}
+		if err := checkRingGroupIVR(ctx, tx, cur, in); err != nil {
+			return id, err
+		}
 		res, err := tx.ExecContext(ctx, `
 			UPDATE ring_groups SET name = $2, strategy = $3, hunt = $4, ring_timeout = $5, member_delay = $6,
 			       ignore_dnd = $7, failure_kind = $8, failure_target = $9, updated_at = now()
@@ -568,6 +575,22 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 		return id, err2
 	})
 	return g, err
+}
+
+// checkRingGroupIVR checks a ring group's IVR interplay inside the change's
+// transaction: a new name must not be an IVR menu's number, and an IVR
+// failure destination must name an existing menu. cur is the stored name ("" on
+// create).
+func checkRingGroupIVR(ctx context.Context, tx *sql.Tx, cur string, in RingGroupInput) error {
+	if in.Name != cur {
+		if err := refuseIVRNumber(ctx, tx, "name", in.Name); err != nil {
+			return err
+		}
+	}
+	if in.FailureKind == "ivr" {
+		return requireIVRMenuTx(ctx, tx, "failureTarget", in.FailureTarget)
+	}
+	return nil
 }
 
 // DeleteRingGroup removes a group and, by cascade, its members.
@@ -650,6 +673,13 @@ func (s *Store) PutFeatureCodes(ctx context.Context, actor string, codes []Featu
 	return s.configChangeID(ctx, actor, "update", "feature_code", check, func(tx *sql.Tx) (string, error) {
 		if err := checkFeatureCodesAgainstPaging(ctx, tx, codes); err != nil {
 			return "", err
+		}
+		for i, c := range codes {
+			if c.Action == "ivr" {
+				if err := requireIVRMenuTx(ctx, tx, fmt.Sprintf("items[%d].argument", i), c.Argument); err != nil {
+					return "", err
+				}
+			}
 		}
 		for _, c := range codes {
 			if _, err := tx.ExecContext(ctx, `

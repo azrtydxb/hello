@@ -818,6 +818,10 @@ func (c *call) ivrDial(ctx context.Context, snap *snapshot.Snapshot, m snapshot.
 	return res
 }
 
+// ivrLaunch starts a fork's INVITE; tests replace it to script a fork's
+// outcome.
+var ivrLaunch = func(l *leg) { go l.run() }
+
 // ivrFork is one leg to try.
 type ivrFork struct {
 	mk    func(stage int) *leg // called with c.mu held
@@ -855,7 +859,7 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 		c.mu.Lock()
 		l := f.mk(stage)
 		c.mu.Unlock()
-		go l.run()
+		ivrLaunch(l)
 		return l
 	}
 	var (
@@ -893,7 +897,7 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 				}
 				c.mu.Unlock()
 				if l != nil {
-					go l.run()
+					ivrLaunch(l)
 				}
 			}))
 		}
@@ -935,8 +939,12 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 				}
 			}
 		case <-memberT:
-			if cur != nil {
-				c.abandon(cur)
+			memberT = nil
+			if cur != nil && !c.abandon(cur) {
+				// The member answered just as its turn ended: it has won,
+				// and its answer is on the way. Moving on would leave that
+				// answered dialog up with nobody on it.
+				continue
 			}
 			if legFailed() {
 				giveUp()

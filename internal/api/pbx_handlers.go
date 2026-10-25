@@ -550,11 +550,9 @@ func (s *server) createRingGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, _ := b.toInput(defaultsRingGroup())
-	f := validateRingGroup(&in)
-	if len(f) == 0 && in.FailureKind == "ivr" {
-		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
-	}
-	if len(f) > 0 {
+	// The store checks that an IVR failure destination exists, inside the
+	// change's transaction (a menu deleted meanwhile cannot slip through).
+	if f := validateRingGroup(&in); len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
@@ -590,11 +588,9 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 		FailureKind: current.FailureKind, FailureTarget: current.FailureTarget, Members: current.Members,
 	}
 	in, _ := b.toInput(base)
-	f := validateRingGroup(&in)
-	if len(f) == 0 && in.FailureKind == "ivr" {
-		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
-	}
-	if len(f) > 0 {
+	// The store checks that an IVR failure destination exists, inside the
+	// change's transaction (a menu deleted meanwhile cannot slip through).
+	if f := validateRingGroup(&in); len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
@@ -653,9 +649,8 @@ func (s *server) putFeatureCodes(w http.ResponseWriter, r *http.Request) {
 			f.add(p+".code", "must be a distinct code")
 		}
 		seen[c.Code] = true
-		if c.Action == "ivr" {
-			s.requireIVRMenu(r.Context(), &f, p+".argument", c.Argument)
-		}
+		// An "ivr" argument must name a menu: the store checks it inside
+		// the change's transaction.
 	}
 	if len(f) > 0 {
 		writeFields(w, f)

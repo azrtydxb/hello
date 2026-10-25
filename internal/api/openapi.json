@@ -3194,7 +3194,7 @@
       "post": {
         "operationId": "createIVRMenu",
         "summary": "Create an IVR menu",
-        "description": "Creates an IVR menu: it answers, plays its greeting (an announcement), collects digits and routes the call to the option's destination. Validation failures list each failing field in error.fields; digits must be unique, referenced announcements and destinations must exist and automatic exits (timeout, invalid) must not loop back to the menu.",
+        "description": "Creates an IVR menu: it answers, plays its greeting (an announcement), collects digits and routes the call to the option's destination. Validation failures list each failing field in error.fields; digits must be unique, referenced announcements and destinations must exist and automatic exits (timeout, invalid) must not loop back to the menu. A menu with a paging destination (an option, the timeout or the invalid exit) needs the admin role and scope, like paging groups; otherwise 403.",
         "tags": ["ivr-menus"],
         "requestBody": {
           "required": true,
@@ -3280,7 +3280,7 @@
       "put": {
         "operationId": "putIVRMenu",
         "summary": "Replace an IVR menu",
-        "description": "Replaces an IVR menu as a whole, options included. A menu that a route, ring group, feature code or another menu names cannot be renamed. Calls already in the menu finish with the settings they started with.",
+        "description": "Replaces an IVR menu as a whole, options included. A menu that a route, ring group, feature code or another menu names cannot be renamed. Calls already in the menu finish with the settings they started with. A menu with a paging destination (an option, the timeout or the invalid exit) needs the admin role and scope, like paging groups; otherwise 403.",
         "tags": ["ivr-menus"],
         "parameters": [
           {

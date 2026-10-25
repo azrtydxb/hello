@@ -67,7 +67,15 @@ A menu that something names cannot be deleted or renamed. What a menu names
 cannot be removed from under it: an extension (also as a voicemail box), ring
 group, paging group or announcement that a key or an exit points at cannot be
 deleted or renumbered (409, listing the menus), and a menu's own greeting and
-prompts cannot be deleted while it plays them.
+prompts cannot be deleted while it plays them. An extension or ring group
+cannot take a menu's number: the menu answers that number first. The names a
+ring group failover or a feature code give are checked in the same
+transaction as the change, under the configuration lock.
+
+Paging from a menu lets anyone who reaches it page the group, so a menu with
+a paging destination (a key, the silence or the wrong-key exit) needs the
+admin role and scope to create or replace, like the paging groups (403
+otherwise). Operators manage every other menu.
 
 ## Call flow
 

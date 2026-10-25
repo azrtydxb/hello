@@ -542,3 +542,32 @@ func refuseIfIVRPoints(ctx context.Context, tx *sql.Tx, what, target string, kin
 	}
 	return nil
 }
+
+// requireIVRMenuTx refuses a reference to a menu that does not exist. It runs
+// in the configuration change's transaction, under the configuration lock,
+// so a menu cannot be deleted between the check and the write that names it.
+func requireIVRMenuTx(ctx context.Context, tx *sql.Tx, path, name string) error {
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ivr_menus WHERE name = $1`, name).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return fieldError(path, fmt.Sprintf("IVR menu %q does not exist", name))
+	}
+	return nil
+}
+
+// refuseIVRNumber refuses an extension number or ring group name that an IVR
+// menu already answers on: the menu's number is matched first, so the
+// extension or group would never ring.
+func refuseIVRNumber(ctx context.Context, tx *sql.Tx, path, number string) error {
+	var name string
+	err := tx.QueryRowContext(ctx, `SELECT name FROM ivr_menus WHERE number = $1 AND number <> ''`, number).Scan(&name)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	}
+	return fieldError(path, "is already the number of IVR menu "+name)
+}
