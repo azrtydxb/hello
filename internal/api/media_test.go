@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/azrtydxb/hello/internal/media"
 )
 
 // seedRecording inserts a recordings row the way hello-sip's media stream
@@ -347,7 +349,7 @@ func TestAnnouncementReplace(t *testing.T) {
 	}
 
 	// Accepted: the same key holds the new bytes; the name may be repeated.
-	replacement := append(append([]byte{}, wav...), []byte("data-new")...)
+	replacement := media.EncodeWAV(bytes.Repeat([]byte{1, 2}, 800), 8000)
 	got := c.must(http.StatusOK, "PUT", path, annMultipart("closing", replacement)).json(t)
 	c.header.Del("Content-Type")
 	if got["name"] != "closing" || got["id"] != created["id"] {

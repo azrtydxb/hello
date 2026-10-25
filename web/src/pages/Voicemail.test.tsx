@@ -309,6 +309,55 @@ describe("Voicemail", () => {
     expect(screen.getByRole("row", { name: /201/ })).toBeInTheDocument();
   });
 
+  it("generates a greeting from text through its own button", async () => {
+    const calls = setup({
+      "GET /api/v1/tts/voices": () => json({ models: [] }),
+      "PUT /api/v1/extensions/1/voicemail/greeting": () =>
+        json({
+          box: {
+            ...DETAIL,
+            greetingTts: {
+              text: "Leave a message.",
+              voice: "",
+              model: "",
+              hash: "h",
+              generatedAt: CREATED,
+            },
+          },
+          regenerated: true,
+        }),
+    });
+    renderApp("/voicemail");
+    await screen.findByText("reception@hello.lab");
+    fireEvent.click(screen.getByRole("button", { name: "Box settings" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "Box settings for 100",
+    });
+    fireEvent.change(within(dialog).getByLabelText("Greeting source"), {
+      target: { value: "text" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Text to speak"), {
+      target: { value: "Leave a message." },
+    });
+    // Typing alone never generates.
+    expect(calls.some((c) => c.url.endsWith("/greeting"))).toBe(false);
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Generate greeting" }),
+    );
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "PUT",
+        url: "/api/v1/extensions/1/voicemail/greeting",
+        body: { slot: "greeting", source: "text", text: "Leave a message." },
+      }),
+    );
+    expect(
+      await within(dialog).findByRole("button", {
+        name: "Regenerate greeting",
+      }),
+    ).toBeVisible();
+  });
+
   it("saves the box settings", async () => {
     const calls = setup({
       "PUT /api/v1/extensions/1/voicemail": () =>
