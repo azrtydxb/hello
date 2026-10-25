@@ -12864,6 +12864,8 @@
                 "type": "string",
                 "enum": [
                   "bad_request",
+                  "graph_too_large",
+                  "config_changing",
                   "unauthorized",
                   "not_found",
                   "conflict",
