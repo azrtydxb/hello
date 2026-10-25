@@ -619,6 +619,9 @@ func (s *Store) ListFeatureCodes(ctx context.Context) ([]FeatureCode, error) {
 // complete configuration.
 func (s *Store) PutFeatureCodes(ctx context.Context, actor string, codes []FeatureCode, check Check) error {
 	return s.configChangeID(ctx, actor, "update", "feature_code", check, func(tx *sql.Tx) (string, error) {
+		if err := checkFeatureCodesAgainstPaging(ctx, tx, codes); err != nil {
+			return "", err
+		}
 		for _, c := range codes {
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO feature_codes (code, action, argument) VALUES ($1, $2, $3)
@@ -652,6 +655,7 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*92", Action: "forward_no_answer", Argument: "set"},
 		{Code: "*93", Action: "forward_no_answer", Argument: "clear"},
 		{Code: "*97", Action: "voicemail"},
+		{Code: "*80", Action: "intercom"},
 		{Code: "##", Action: "attended_transfer"},
 	}
 }

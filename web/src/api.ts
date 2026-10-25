@@ -1060,6 +1060,58 @@ export const updateRingGroup = (groupId: Id, patch: RingGroupFields) =>
 export const deleteRingGroup = (groupId: Id) =>
   request<void>("DELETE", `/api/v1/ring-groups/${id(groupId)}`);
 
+// --- paging groups ---------------------------------------------------------------
+
+export type PagingPriority = "normal" | "emergency";
+
+/** An extension in a paging group's member or caller list. */
+export interface PagingExtension {
+  extensionId: Id;
+  /** The extension's number and name (read-only). */
+  number: string;
+  name: string;
+}
+
+/** The writable fields of a paging group (PUT replaces the whole group). */
+export interface PagingGroupFields {
+  name: string;
+  /** The dialled page code, `*` plus 2 to 4 digits. */
+  code: string;
+  priority: PagingPriority;
+  enabled: boolean;
+  /** Extension ids paged together. */
+  members: Id[];
+  /** Extension ids allowed to page; empty means any internal extension. */
+  callers: Id[];
+}
+
+/** A paging group as returned. */
+export interface PagingGroup {
+  id: Id;
+  name: string;
+  code: string;
+  priority: PagingPriority;
+  enabled: boolean;
+  members: PagingExtension[];
+  callers: PagingExtension[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listPagingGroups = (signal?: AbortSignal) =>
+  list<PagingGroup>("/api/v1/paging-groups", signal);
+
+export const createPagingGroup = (input: PagingGroupFields) =>
+  request<PagingGroup>("POST", "/api/v1/paging-groups", { body: input });
+
+export const putPagingGroup = (groupId: Id, input: PagingGroupFields) =>
+  request<PagingGroup>("PUT", `/api/v1/paging-groups/${id(groupId)}`, {
+    body: input,
+  });
+
+export const deletePagingGroup = (groupId: Id) =>
+  request<void>("DELETE", `/api/v1/paging-groups/${id(groupId)}`);
+
 // --- feature codes and presence -------------------------------------------------
 
 /** A DTMF feature code (GET/PUT /api/v1/feature-codes). */

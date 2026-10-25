@@ -54,6 +54,9 @@ type Extension struct {
 	// RecordDefault records this extension's calls unless the caller
 	// already records them (migration 00005; spec S-4).
 	RecordDefault bool
+	// AllowIntercom lets an intercom call auto-answer on the extension
+	// (migration 00013, spec P-13); false rings it normally.
+	AllowIntercom bool
 }
 
 // RingGroup is a ring or hunt group (contract 2). Strategy is one of
@@ -82,6 +85,26 @@ type RingGroupMember struct {
 	Delay       int // this member's extra delay in seconds
 }
 
+// PagingGroup is a server paging group (migration 00013, spec P-12): dialling
+// Code pages every member at once. Members and Callers are extension numbers;
+// no Callers means any internal extension may page. Priority is "normal" or
+// "emergency".
+type PagingGroup struct {
+	ID       int64
+	Name     string
+	Code     string
+	Priority string
+	Enabled  bool
+	Members  []string
+	Callers  []string
+}
+
+// Paging priorities.
+const (
+	PagingNormal    = "normal"
+	PagingEmergency = "emergency"
+)
+
 // FeatureCode is one DTMF feature code and the action it performs. Action
 // is one of forward_always, forward_busy, forward_no_answer, dnd_on,
 // dnd_off, voicemail, blind_transfer, attended_transfer and, since
@@ -107,6 +130,7 @@ type Snapshot struct {
 	exts   map[string]Extension
 	groups map[string]groupEntry
 	codes  map[string]FeatureCode
+	pages  map[string]PagingGroup
 	anns   map[string]string
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
@@ -122,7 +146,7 @@ type groupEntry struct {
 // domain are skipped and listed in Skipped.
 func New(revision int64, domain string, devices []Device) *Snapshot {
 	s := &Snapshot{Revision: revision, byUser: map[string]Device{}, byExt: map[string][]Device{},
-		exts: map[string]Extension{}, groups: map[string]groupEntry{}, codes: map[string]FeatureCode{},
+		exts: map[string]Extension{}, groups: map[string]groupEntry{}, codes: map[string]FeatureCode{}, pages: map[string]PagingGroup{},
 		anns: map[string]string{}, known: map[string]bool{}}
 	for _, d := range devices {
 		if d.Realm != domain {
@@ -161,6 +185,20 @@ func (s *Snapshot) WithFeatureCodes(codes []FeatureCode) *Snapshot {
 		s.codes[c.Code] = c
 	}
 	return s
+}
+
+// WithPagingGroups installs the paging groups (tests and Load).
+func (s *Snapshot) WithPagingGroups(groups []PagingGroup) *Snapshot {
+	for _, g := range groups {
+		s.pages[g.Code] = g
+	}
+	return s
+}
+
+// PagingGroup returns the paging group dialled as code (exact match).
+func (s *Snapshot) PagingGroup(code string) (PagingGroup, bool) {
+	g, ok := s.pages[code]
+	return g, ok
 }
 
 // WithAnnouncements installs the announcement set: name -> MinIO object
@@ -252,7 +290,7 @@ type Querier interface {
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
        d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name,
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
-       e.record_default
+       e.record_default, e.allow_intercom
 FROM extensions e
 LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
 LEFT JOIN voicemail_boxes v ON v.extension_id = e.id
@@ -285,7 +323,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 		)
 		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
-			&e.RecordDefault); err != nil {
+			&e.RecordDefault, &e.AllowIntercom); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}
@@ -329,9 +367,13 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	pages, err := loadPagingGroups(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	return New(rev, domain, devices).WithExtensions(bare...).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithAnnouncements(anns), nil
+		WithPagingGroups(pages).WithAnnouncements(anns), nil
 }
 
 // loadAnnouncements reads the announcement set (name -> MinIO object), so
@@ -351,6 +393,57 @@ func loadAnnouncements(ctx context.Context, db Querier) (map[string]string, erro
 		anns[name] = obj
 	}
 	return anns, rows.Err()
+}
+
+// loadPagingGroups reads the paging groups with their member and allowed
+// caller extension numbers, so a page never touches the database.
+func loadPagingGroups(ctx context.Context, db Querier) ([]PagingGroup, error) {
+	rows, err := db.Query(ctx, `SELECT id, name, code, priority, enabled FROM paging_groups ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot: paging groups: %w", err)
+	}
+	var groups []PagingGroup
+	for rows.Next() {
+		var g PagingGroup
+		if err := rows.Scan(&g.ID, &g.Name, &g.Code, &g.Priority, &g.Enabled); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("snapshot: scan paging group: %w", err)
+		}
+		groups = append(groups, g)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("snapshot: paging groups: %w", err)
+	}
+	for i := range groups {
+		for _, q := range []struct {
+			sql string
+			dst *[]string
+		}{
+			{`SELECT e.number FROM paging_group_members m JOIN extensions e ON e.id = m.extension_id
+WHERE m.group_id = $1 ORDER BY m.position`, &groups[i].Members},
+			{`SELECT e.number FROM paging_group_callers m JOIN extensions e ON e.id = m.extension_id
+WHERE m.group_id = $1 ORDER BY e.number`, &groups[i].Callers},
+		} {
+			mr, err := db.Query(ctx, q.sql, groups[i].ID)
+			if err != nil {
+				return nil, fmt.Errorf("snapshot: paging group lists: %w", err)
+			}
+			for mr.Next() {
+				var n string
+				if err := mr.Scan(&n); err != nil {
+					mr.Close()
+					return nil, fmt.Errorf("snapshot: scan paging member: %w", err)
+				}
+				*q.dst = append(*q.dst, n)
+			}
+			mr.Close()
+			if err := mr.Err(); err != nil {
+				return nil, fmt.Errorf("snapshot: paging group lists: %w", err)
+			}
+		}
+	}
+	return groups, nil
 }
 
 // loadRingGroups reads the groups and their members (in position order) as

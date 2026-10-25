@@ -386,3 +386,17 @@ Decision: accepted "Merge PR #114 and start phase 1".
 Spec: `.procoder/specs/phone-feature-parity.md`. The user asked to implement ALL missing WP822/WP8x6 features plus distinctive ringing and doorbell integration: every row of both Grandstream gap analyses marked missing, partial or unverified, at every priority, including the WP8x6-only features (3 accounts, PTT channels and group paging, park codes, E911/HELD, alarm calls, check-sync reboot control, DTLS-SRTP/ICE, account sharing, roaming mode, side key, IM account, the 1000-entry phonebook cap, firmware pinning to 1.0.3.x), with a traceability table mapping every gap row to a spec item and a phase. LDAP stays out under the earlier decision of this date.
 
 Decision: accepted by the user (2026-10-25), all of the above.
+
+## Phase E ahead of B-D (2026-10-25)
+
+Decision: User approved moving phase E (server paging/intercom) ahead of B–D.
+
+## 2026-10-25: When to deploy the merged dashboard and phonebook A changes
+
+Each deploy restarts Kamailio and both SIP nodes, which drops active calls until the hitless-upgrade fixes land.
+
+- Wait: deploy only after the hitless-upgrade fixes (Kamailio pin, one-at-a-time SIP rollout) are merged (recommended)
+- Deploy now: the dashboard fixes and phonebook A go live now, and active calls may drop
+- Deploy now, but only at a time the user confirms no calls are active
+
+Decision: accepted "Wait: deploy only after the hitless-upgrade fixes are merged".
