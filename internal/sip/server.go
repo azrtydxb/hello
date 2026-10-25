@@ -743,6 +743,9 @@ func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why 
 		s.challenge(tx, req, false)
 		return
 	}
+	if req.IsInvite() {
+		s.logInviteReject(req, "", sip.StatusForbidden, why)
+	}
 	s.respond(tx, req, sip.StatusForbidden, "Forbidden")
 }
 
