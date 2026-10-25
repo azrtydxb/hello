@@ -7,4 +7,9 @@
     <prov_polling_mode perm="R">rel</prov_polling_mode>
     <prov_polling_period perm="R">{{.Prov.ResyncSeconds}}</prov_polling_period>
   </phone-settings>
+{{- with .Prov.CACertBase64}}
+  <certificates>
+    <certificate type="base64">{{.}}</certificate>
+  </certificates>
+{{- end}}
 </settings>
