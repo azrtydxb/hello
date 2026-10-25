@@ -132,7 +132,7 @@ const (
 	PagingEmergency = "emergency"
 )
 
-// ParkLot is a range of park slots (migration 00030, spec S-6): a parked call
+// ParkLot is a range of park slots (migration 00031, spec S-6): a parked call
 // holds one slot number, retrieved by dialling the retrieve code and the
 // number (or the number itself). ReturnSecs is how long it waits before it
 // rings the parker again; VoicemailSecs how long it then rings before it goes
@@ -160,7 +160,7 @@ func (l ParkLot) Has(slot string) bool {
 	return err == nil && strconv.Itoa(n) == slot && n >= l.Start && n <= l.End
 }
 
-// PickupGroup is a call pickup group (migration 00030, spec S-50): a member
+// PickupGroup is a call pickup group (migration 00031, spec S-50): a member
 // may answer a call ringing any other member. Members are extension numbers.
 type PickupGroup struct {
 	ID      int64
@@ -196,7 +196,7 @@ type Snapshot struct {
 	pages  map[string]PagingGroup
 	anns   map[string]string
 	// parkLots are the enabled park lots in slot order; pickups the pickup
-	// groups (migration 00030).
+	// groups (migration 00031).
 	parkLots []ParkLot
 	pickups  []PickupGroup
 	// mohs maps a music on hold class ID to its playlist; mohDefault is the

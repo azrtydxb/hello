@@ -1427,7 +1427,7 @@ func (s *Server) handleAck(req *sip.Request, tx sip.ServerTransaction) {
 		return // a taken-over call's ACKs need no relay (its 200s are terminal)
 	}
 	c := ref.c
-	if c.isLinked() && !(ref.leg == nil && req.CSeq().SeqNo == c.inv.CSeq().SeqNo) {
+	if c.isLinked() && (ref.leg != nil || req.CSeq().SeqNo != c.inv.CSeq().SeqNo) {
 		return // a linked call has no peer dialog to relay an ACK to
 	}
 	inviteAck := ref.leg == nil && req.CSeq().SeqNo == c.inv.CSeq().SeqNo

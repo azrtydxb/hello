@@ -232,6 +232,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Emergency, err = s.emergencyNumbers(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
+	if d.Codes, err = s.featureCodes(ctx); err != nil {
+		return d, prov.Template{}, err
+	}
 	host, port := splitHostPort(s.prov.SIPServer)
 	d.Server = prov.Server{Host: host, Port: port, Transport: "udp", Expiry: int(s.prov.Expiry / time.Second)}
 	d.Prov = s.prov.info(token, d.Phone.MAC)
@@ -301,6 +304,30 @@ func (n *nullString) Scan(v any) error {
 	}
 	*n.s = ns.String
 	return nil
+}
+
+// featureCodes reads the star codes a phone's own DND, forward and pickup
+// keys dial (Snom, Fanvil and Yealink's BLF pickup).
+func (s *Store) featureCodes(ctx context.Context) (prov.FeatureCodes, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT code, action, argument FROM feature_codes
+		WHERE action IN ('dnd_on', 'dnd_off', 'forward_always', 'forward_busy', 'forward_no_answer', 'pickup_directed')`)
+	if err != nil {
+		return prov.FeatureCodes{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	var all []prov.FeatureCodeRow
+	for rows.Next() {
+		var r prov.FeatureCodeRow
+		if err := rows.Scan(&r.Code, &r.Action, &r.Argument); err != nil {
+			return prov.FeatureCodes{}, err
+		}
+		all = append(all, r)
+	}
+	if err := rows.Err(); err != nil {
+		return prov.FeatureCodes{}, err
+	}
+	return prov.NewFeatureCodes(all), nil
 }
 
 func (s *Store) blfKeys(ctx context.Context, raw []byte) ([]prov.BLFKey, error) {

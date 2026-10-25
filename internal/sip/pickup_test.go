@@ -112,6 +112,7 @@ func TestCallPickup(t *testing.T) {
 
 	// 4. Directed pickup answers the named extension's call.
 	ch, cancel, _ = ringing(t, a, b, "200")
+	defer cancel()
 	rc = waitCall(t, dial(t.Context(), c, "*41200"))
 	if rc.err != nil {
 		t.Fatalf("directed pickup: %v", rc.err)

@@ -648,6 +648,20 @@ func (c *call) toggleRecording() {
 	c.startRecordingFlow("dtmf")
 }
 
+// setRecording is the phone's Record key (SIP INFO "Record: on" / "Record:
+// off"): it runs the *1 toggle only when the recording is not already in the
+// requested state, so a repeated "on" or an "off" with nothing recording
+// changes nothing.
+func (c *call) setRecording(on bool) {
+	c.mu.Lock()
+	rec := c.rec
+	c.mu.Unlock()
+	if active := rec != nil && rec.isActive(); active == on {
+		return
+	}
+	c.toggleRecording()
+}
+
 // playRecordingNotice plays the recording-notice announcement to both
 // parties when the announcement set has it (contract 5). A missing WAV is
 // skipped (spec failure mode).

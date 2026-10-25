@@ -26,7 +26,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 )
 
-// Park actions (feature-code rows, migration 00030).
+// Park actions (feature-code rows, migration 00031).
 const (
 	ActionPark            = "park"
 	ActionParkRetrieve    = "park_retrieve"

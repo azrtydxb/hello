@@ -131,7 +131,7 @@
           }
         },
         "x-hello-scope": "read",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "ends a browser session"
         }
@@ -165,7 +165,7 @@
           }
         },
         "x-hello-scope": "read",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": true
       }
     },
@@ -292,17 +292,56 @@
         }
       }
     },
+    "/api/v1/auth/password": {
+      "post": {
+        "operationId": "changePassword",
+        "summary": "Change my password",
+        "description": "Sets a new password for the signed-in user after checking the current one. Only a browser session may do it, not a token, and it ends the user's other sessions. Clears the forced-change flag an administrator set, which blocks every other operation until it is changed. Needs a password of 10 to 128 characters that differs from the current one.",
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Changed"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "credentials are changed in the console only"
+        }
+      }
+    },
     "/api/v1/users": {
       "get": {
         "operationId": "listUsers",
-        "summary": "Every management user with their role",
-        "description": "Admin only. Users are created and deleted with `hello-control user add`; the console and the API only change roles.",
-        "tags": ["users"],
-        "x-hello-scope": "admin",
-        "x-hello-role": "admin",
-        "x-hello-mcp": {
-          "exclude": "user and role management stays in the console"
-        },
+        "summary": "Every user with their role and linked extensions",
+        "description": "Admin only. Lists every user with their role, state, email, linked extensions and voicemail email options; never a password or its hash.",
+        "tags": [
+          "users"
+        ],
         "responses": {
           "200": {
             "description": "Users, by id",
@@ -323,20 +362,114 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
-      }
-    },
-    "/api/v1/users/{id}": {
-      "patch": {
-        "operationId": "updateUser",
-        "summary": "Change a user's role or linked extension",
-        "description": "Admin only, audited. The new role applies on the user's next request, whatever credential it carries. Demoting the last admin answers 409 last_admin. extensionId links the user to an extension (409 when another user has it, 400 when it does not exist) or unlinks with null; when both fields are given, the link is changed first.",
-        "tags": ["users"],
+        },
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
           "exclude": "user and role management stays in the console"
+        }
+      },
+      "post": {
+        "operationId": "createUser",
+        "summary": "Create a user",
+        "description": "Admin only, audited. Creates a local user with an initial password the administrator sets (10 to 128 characters; argon2id-hashed, never returned). The user must choose a new password at first login unless mustChangePassword is false. extensionIds links the user to extensions, at most one user per extension (409 when taken, 400 when one does not exist); the first is the primary extension whose phones receive the user's personal contacts. Role user is the extension self-service role.",
+        "tags": [
+          "users"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          }
         },
+        "responses": {
+          "201": {
+            "description": "The created user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "user and role management stays in the console"
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "get": {
+        "operationId": "getUser",
+        "summary": "One user",
+        "description": "Admin only. Returns one user with their role, state and linked extensions.",
+        "tags": [
+          "users"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "user and role management stays in the console"
+        }
+      },
+      "patch": {
+        "operationId": "updateUser",
+        "summary": "Change a user",
+        "description": "Admin only, audited. Changes the role, display name, email, enabled state, extensions, voicemail email options or password. The new role applies on the user's next request, whatever credential it carries. A disabled user cannot sign in, their sessions end and their tokens stop working. Setting password resets it (10 to 128 characters) and makes the user choose a new one at next login unless mustChangePassword is false. Demoting or disabling the last enabled admin answers 409 last_admin, and an administrator cannot disable their own account (409 self_disable). extensionIds replaces the user's extensions (409 when another user has one, 400 when one does not exist); the legacy extensionId links exactly one extension or, with null, none; give one of them, not both.",
+        "tags": [
+          "users"
+        ],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -366,17 +499,11 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The change would leave no admin (last_admin)",
+            "description": "The change would leave no admin (last_admin), disable the caller (self_disable) or take an extension another user has",
             "content": {
               "application/json": {
                 "schema": {
@@ -385,9 +512,757 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "user and role management stays in the console"
+        }
+      },
+      "delete": {
+        "operationId": "deleteUser",
+        "summary": "Delete a user",
+        "description": "Admin only, audited. Deletes the user with their sessions, tokens and personal contacts. Deleting the last enabled admin answers 409 last_admin and an administrator cannot delete their own account (409 self_delete).",
+        "tags": [
+          "users"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The last admin (last_admin) or the caller (self_delete)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "user and role management stays in the console"
+        }
+      }
+    },
+    "/api/v1/me/profile": {
+      "patch": {
+        "operationId": "updateMyProfile",
+        "summary": "Change my profile",
+        "description": "Changes the signed-in user's display name, email address and voicemail email options (notify, attach the recording, and what happens to a message after it was mailed: nothing, mark as read or delete). At least one field is required. Returns the profile as auth/me does.",
+        "tags": [
+          "me"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/extensions": {
+      "get": {
+        "operationId": "listMyExtensions",
+        "summary": "My extensions",
+        "description": "Lists the extensions the signed-in user is linked to, with the display label and the DND and forwarding settings they may change; nothing else about the extension, no SIP credentials and no devices.",
+        "tags": [
+          "me"
+        ],
+        "responses": {
+          "200": {
+            "description": "The user's extensions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfExtensionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/extensions/{id}": {
+      "patch": {
+        "operationId": "updateMyExtension",
+        "summary": "Change my extension's label, DND or forwarding",
+        "description": "Changes the display label, do-not-disturb and the always, busy and no-answer forwarding of one of the signed-in user's own extensions. An extension that is not the user's answers 404, exactly like one that does not exist. At least one field is required; a forwarding target is empty (off) or 2 to 32 of 0-9 * # with an optional leading +.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelfExtensionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The extension",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfExtension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/extensions/{id}/voicemail": {
+      "get": {
+        "operationId": "getMyVoicemail",
+        "summary": "My voicemail box",
+        "description": "Returns whether the voicemail box of one of the signed-in user's own extensions has a PIN and greetings. An extension that is not the user's answers 404.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The box",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfVoicemailBox"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      },
+      "put": {
+        "operationId": "updateMyVoicemail",
+        "summary": "Change my voicemail PIN or greetings",
+        "description": "Changes the PIN and uploads or replaces greetings of the signed-in user's own voicemail box. JSON with pin (4 to 10 digits), or multipart/form-data with pin plus optional greeting and unreachable PCM WAV files of at most 5 MiB, such as a recording made in the browser. The box email address is not settable here. An extension that is not the user's answers 404.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelfVoicemailUpdate"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "pin": {
+                    "type": "string",
+                    "pattern": "^[0-9]{4,10}$",
+                    "description": "The new PIN; stored as a hash."
+                  },
+                  "greeting": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The busy and no-answer greeting, a PCM WAV of at most 5 MiB."
+                  },
+                  "unreachable": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The greeting played when the extension is unreachable, a PCM WAV of at most 5 MiB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The box",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfVoicemailBox"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/extensions/{id}/voicemail/messages": {
+      "get": {
+        "operationId": "listMyVoicemailMessages",
+        "summary": "My voicemail messages",
+        "description": "Lists the messages in the voicemail box of one of the signed-in user's own extensions, newest first. An extension that is not the user's answers 404.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "unheard",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Only messages not played yet."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailMessageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/voicemail/messages/{id}/heard": {
+      "post": {
+        "operationId": "markMyVoicemailMessageHeard",
+        "summary": "Mark my message heard",
+        "description": "Marks a message in one of the signed-in user's own boxes as heard, or unheard with {\"heard\": false}. A message in anyone else's box answers 404, exactly like one that does not exist.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoicemailMarkHeard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailMessageHeard"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/voicemail/messages/{id}": {
+      "delete": {
+        "operationId": "deleteMyVoicemailMessage",
+        "summary": "Delete my message",
+        "description": "Deletes a message from one of the signed-in user's own boxes with its audio. A message in anyone else's box answers 404.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/voicemail/messages/{id}/audio": {
+      "get": {
+        "operationId": "getMyVoicemailMessageAudio",
+        "summary": "Play or download my message",
+        "description": "Streams a message of one of the signed-in user's own boxes (WAV, Range supported); with download=1 the browser saves it as a file. A message in anyone else's box answers 404.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "download",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            },
+            "description": "Send as an attachment."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The audio",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested byte range of the audio",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/calls": {
+      "get": {
+        "operationId": "listMyCalls",
+        "summary": "My call history",
+        "description": "Lists the calls in which one of the signed-in user's own extensions was the caller or the callee, newest first, without routes, trunks or signalling detail.",
+        "tags": [
+          "me"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The next of the previous page; omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of calls",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfCallPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/settings/smtp": {
+      "get": {
+        "operationId": "getSmtpSettings",
+        "summary": "System email (SMTP) settings",
+        "description": "Admin only. Returns the SMTP settings voicemail email is sent with and where they come from: the console (database), the deployment's SMTP_* environment, or none. The password is never returned; passwordSet says whether one is stored.",
+        "tags": [
+          "settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmtpSettings"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "system email settings stay in the console"
+        }
+      },
+      "put": {
+        "operationId": "putSmtpSettings",
+        "summary": "Save the system email (SMTP) settings",
+        "description": "Admin only, audited. Saves the SMTP host, port, transport security (none, starttls or tls), username, from address and password. The password is sealed in the database; omit it to keep the stored one, or send an empty string to clear it. An empty host clears the saved settings, and the deployment's environment settings apply again. Changes apply to the next send, without a restart.",
+        "tags": [
+          "settings"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpSettingsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmtpSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "system email settings stay in the console"
+        }
+      }
+    },
+    "/api/v1/settings/smtp/test": {
+      "post": {
+        "operationId": "testSmtpSettings",
+        "summary": "Send a test email",
+        "description": "Admin only. Sends one test email to the given address with the settings in force and answers when the server accepted it or why it did not (502 smtp_failed). The test runs now and is not queued.",
+        "tags": [
+          "settings"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpTest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Sent"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "system email settings stay in the console"
         }
       }
     },
@@ -9759,7 +10634,7 @@
           }
         },
         "x-hello-scope": "read",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "personal data: a user's own contacts are not exposed to an agent"
         }
@@ -9810,7 +10685,7 @@
           }
         },
         "x-hello-scope": "write",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "personal data: a user's own contacts are not exposed to an agent"
         }
@@ -9907,7 +10782,7 @@
           }
         },
         "x-hello-scope": "write",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "multipart CSV upload"
         }
@@ -9944,7 +10819,7 @@
           }
         },
         "x-hello-scope": "read",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "CSV download"
         }
@@ -10002,7 +10877,7 @@
           }
         },
         "x-hello-scope": "write",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "personal data: a user's own contacts are not exposed to an agent"
         }
@@ -10038,7 +10913,7 @@
           }
         },
         "x-hello-scope": "write",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "personal data: a user's own contacts are not exposed to an agent"
         }
@@ -11547,7 +12422,7 @@
           },
           "emailStatus": {
             "type": "string",
-            "description": "pending, sent or failed."
+            "description": "pending (not queued yet), queued (waiting to be mailed), sent, failed, or skipped (nobody to email)."
           },
           "createdAt": {
             "type": "string",
@@ -12979,6 +13854,12 @@
                   "forbidden_role",
                   "insufficient_scope",
                   "last_admin",
+                  "self_disable",
+                  "self_delete",
+                  "password_change_required",
+                  "session_required",
+                  "not_configured",
+                  "smtp_failed",
                   "no_user",
                   "no_extension",
                   "ai_disabled",
@@ -13021,7 +13902,17 @@
       },
       "Me": {
         "type": "object",
-        "required": ["username", "role"],
+        "required": [
+          "username",
+          "role",
+          "displayName",
+          "email",
+          "authMethod",
+          "mustChangePassword",
+          "extensions",
+          "voicemailEmail",
+          "emailDelivery"
+        ],
         "properties": {
           "username": {
             "type": "string",
@@ -13029,36 +13920,167 @@
           },
           "role": {
             "$ref": "#/components/schemas/Role"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "description": "The user's email address, empty when none."
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "local"
+            ],
+            "description": "How the user signs in."
+          },
+          "mustChangePassword": {
+            "type": "boolean",
+            "description": "True while an administrator-set password is in force; every operation but this one, logout and the password change answers 403 password_change_required."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeExtension"
+            },
+            "description": "The extensions the user is linked to."
+          },
+          "voicemailEmail": {
+            "$ref": "#/components/schemas/VoicemailEmailPrefs"
+          },
+          "emailDelivery": {
+            "type": "boolean",
+            "description": "Whether the system can send email at all."
+          }
+        }
+      },
+      "MeExtension": {
+        "type": "object",
+        "required": [
+          "id",
+          "number",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "VoicemailEmailPrefs": {
+        "type": "object",
+        "required": [
+          "notify",
+          "attach",
+          "after"
+        ],
+        "properties": {
+          "notify": {
+            "type": "boolean",
+            "description": "Email the user when a new voicemail arrives."
+          },
+          "attach": {
+            "type": "boolean",
+            "description": "Attach the recording to the email."
+          },
+          "after": {
+            "type": "string",
+            "enum": [
+              "none",
+              "mark_read",
+              "delete"
+            ],
+            "description": "What happens to the message once the email was sent: nothing, mark as read, or delete."
           }
         }
       },
       "Role": {
         "type": "string",
-        "enum": ["viewer", "operator", "admin"],
-        "description": "viewer: every read operation; operator: also every write operation; admin: also every admin and secrets operation"
+        "enum": [
+          "user",
+          "viewer",
+          "operator",
+          "admin"
+        ],
+        "description": "user: only the self-service operations on the user's own linked extensions; viewer: every read operation; operator: also every write operation; admin: also every admin and secrets operation"
       },
       "User": {
         "type": "object",
-        "required": ["id", "username", "role", "createdAt", "extensionId"],
+        "required": [
+          "id",
+          "username",
+          "displayName",
+          "email",
+          "authMethod",
+          "role",
+          "enabled",
+          "mustChangePassword",
+          "extensionId",
+          "extensionIds",
+          "voicemailEmail",
+          "createdAt"
+        ],
         "properties": {
           "id": {
             "type": "integer",
             "format": "int64"
           },
           "username": {
+            "type": "string",
+            "description": "The login."
+          },
+          "displayName": {
             "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "local"
+            ]
           },
           "role": {
             "$ref": "#/components/schemas/Role"
           },
+          "enabled": {
+            "type": "boolean",
+            "description": "A disabled user cannot sign in."
+          },
+          "mustChangePassword": {
+            "type": "boolean"
+          },
+          "extensionId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The primary extension, whose phones receive the user's personal contacts; null when unlinked."
+          },
+          "extensionIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Every extension the user manages, the primary first."
+          },
+          "voicemailEmail": {
+            "$ref": "#/components/schemas/VoicemailEmailPrefs"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
-          },
-          "extensionId": {
-            "type": ["integer", "null"],
-            "format": "int64",
-            "description": "The extension the user is linked to (their personal contacts are delivered to its phones); null when unlinked."
           }
         }
       },
@@ -13074,21 +14096,498 @@
           }
         }
       },
+      "PasswordChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The current password."
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 128,
+            "x-hello-secret": true,
+            "description": "The new password, 10 to 128 characters."
+          }
+        }
+      },
+      "UserCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "username",
+          "role",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._@+-]{1,254}$",
+            "description": "The login: a username or an email address."
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The name shown for the user."
+          },
+          "email": {
+            "type": "string",
+            "description": "Empty or an email address; voicemail email goes here."
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": [
+              "local"
+            ],
+            "default": "local",
+            "description": "How the user signs in; local passwords only."
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 128,
+            "x-hello-secret": true,
+            "description": "The initial password."
+          },
+          "mustChangePassword": {
+            "type": "boolean",
+            "default": true,
+            "description": "Make the user choose a new password at first login."
+          },
+          "extensionIds": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Extensions to link, the first is the primary one."
+          },
+          "voicemailEmail": {
+            "$ref": "#/components/schemas/VoicemailEmailPrefsUpdate"
+          }
+        }
+      },
+      "VoicemailEmailPrefsUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Voicemail email options; a field left out keeps its value.",
+        "properties": {
+          "notify": {
+            "type": "boolean",
+            "description": "Email the user when a new voicemail arrives."
+          },
+          "attach": {
+            "type": "boolean",
+            "description": "Attach the recording to the email."
+          },
+          "after": {
+            "type": "string",
+            "enum": [
+              "none",
+              "mark_read",
+              "delete"
+            ],
+            "description": "What happens to the message once the email was sent."
+          }
+        }
+      },
       "UserUpdate": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "role": {
-            "$ref": "#/components/schemas/Role",
-            "description": "The new role."
+            "$ref": "#/components/schemas/Role"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The name shown for the user."
+          },
+          "email": {
+            "type": "string",
+            "description": "Empty or an email address."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "False disables the user: no sign-in, sessions end, tokens stop working."
+          },
+          "password": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 128,
+            "x-hello-secret": true,
+            "description": "Reset the password."
+          },
+          "mustChangePassword": {
+            "type": "boolean",
+            "default": true,
+            "description": "With password: make the user choose a new one at next login."
+          },
+          "extensionIds": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Replaces the user's extensions."
           },
           "extensionId": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
-            "description": "Link the user to this extension, at most one user per extension; null unlinks."
+            "description": "Link exactly this extension (replacing others); null unlinks all. Use extensionIds instead."
+          },
+          "voicemailEmail": {
+            "$ref": "#/components/schemas/VoicemailEmailPrefsUpdate"
           }
         },
-        "description": "At least one of role and extensionId."
+        "description": "At least one field."
+      },
+      "ProfileUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The name shown for the user."
+          },
+          "email": {
+            "type": "string",
+            "description": "Empty or an email address."
+          },
+          "voicemailEmail": {
+            "$ref": "#/components/schemas/VoicemailEmailPrefsUpdate"
+          }
+        },
+        "description": "At least one field."
+      },
+      "SelfExtension": {
+        "type": "object",
+        "required": [
+          "id",
+          "number",
+          "name",
+          "dnd",
+          "forwardAlways",
+          "forwardBusy",
+          "forwardNoAnswer",
+          "voicemailEnabled"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "The display label."
+          },
+          "dnd": {
+            "type": "boolean"
+          },
+          "forwardAlways": {
+            "type": "string"
+          },
+          "forwardBusy": {
+            "type": "string"
+          },
+          "forwardNoAnswer": {
+            "type": "string"
+          },
+          "voicemailEnabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SelfExtensionList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SelfExtension"
+            }
+          }
+        }
+      },
+      "SelfExtensionUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "The display label."
+          },
+          "dnd": {
+            "type": "boolean",
+            "description": "Do not disturb."
+          },
+          "forwardAlways": {
+            "type": "string",
+            "description": "Forward every call to this number; empty is off."
+          },
+          "forwardBusy": {
+            "type": "string",
+            "description": "Forward when busy to this number; empty is off."
+          },
+          "forwardNoAnswer": {
+            "type": "string",
+            "description": "Forward when unanswered to this number; empty is off."
+          }
+        },
+        "description": "At least one field."
+      },
+      "SelfVoicemailBox": {
+        "type": "object",
+        "required": [
+          "extensionId",
+          "boxId",
+          "hasPin",
+          "hasGreeting",
+          "hasUnreachableGreeting"
+        ],
+        "properties": {
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "boxId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "0 while the box does not exist yet."
+          },
+          "hasPin": {
+            "type": "boolean"
+          },
+          "hasGreeting": {
+            "type": "boolean"
+          },
+          "hasUnreachableGreeting": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SelfVoicemailUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pin"
+        ],
+        "properties": {
+          "pin": {
+            "type": "string",
+            "pattern": "^[0-9]{4,10}$",
+            "description": "The new PIN, 4 to 10 digits."
+          }
+        }
+      },
+      "VoicemailMessageList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoicemailMessage"
+            }
+          }
+        }
+      },
+      "SelfCall": {
+        "type": "object",
+        "required": [
+          "id",
+          "startTime",
+          "durationMs",
+          "direction",
+          "kind",
+          "source",
+          "destination",
+          "answered"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "startTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "direction": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "answered": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SelfCallPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "next"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SelfCall"
+            }
+          },
+          "next": {
+            "type": "string"
+          }
+        }
+      },
+      "SmtpSettings": {
+        "type": "object",
+        "required": [
+          "host",
+          "port",
+          "security",
+          "username",
+          "from",
+          "passwordSet",
+          "source",
+          "updatedAt"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "security": {
+            "type": "string",
+            "description": "none, starttls, tls, or opportunistic for environment settings."
+          },
+          "username": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "passwordSet": {
+            "type": "boolean",
+            "description": "Whether a password is stored. The password itself is never returned."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "database",
+              "environment",
+              "none"
+            ]
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "SmtpSettingsUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "host",
+          "port",
+          "security",
+          "from"
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Empty clears the saved settings."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "The SMTP port, 587 for STARTTLS or 465 for TLS."
+          },
+          "security": {
+            "type": "string",
+            "enum": [
+              "none",
+              "starttls",
+              "tls"
+            ],
+            "description": "Transport security."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login name; empty for a server without authentication."
+          },
+          "from": {
+            "type": "string",
+            "description": "The sender address."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 512,
+            "x-hello-secret": true,
+            "description": "Omit to keep the stored password; an empty string clears it."
+          }
+        }
+      },
+      "SmtpTest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "to"
+        ],
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "The address to send the test email to."
+          }
+        }
       },
       "TokenCreate": {
         "type": "object",

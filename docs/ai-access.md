@@ -108,6 +108,7 @@ that place calls or follow them:
 
 | Role       | May grant                                                            |
 | ---------- | -------------------------------------------------------------------- |
+| `user`     | `read`, `write` (own extensions only)                                |
 | `viewer`   | `read`, `events`                                                     |
 | `operator` | `read`, `write`, `calls`, `events`, `recordings`                     |
 | `admin`    | `read`, `write`, `admin`, `secrets`, `calls`, `events`, `recordings` |
