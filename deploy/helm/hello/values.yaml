@@ -16,6 +16,11 @@ global:
   clusterDomain: cluster.local
   # The SIP domain (HELLO_SIP_DOMAIN): the host part of the phones' AOR.
   sipDomain: ""
+  # Voicemail voice (docs/voicemail.md): the language of the spoken prompts
+  # (HELLO_VOICEMAIL_LANGUAGE: en or nl) and the IANA time zone message times
+  # are spoken in (HELLO_TIMEZONE on hello-sip).
+  voicemailLanguage: en
+  timezone: UTC
   # Public HTTPS URL of the console and API (HELLO_PUBLIC_URL); enables
   # the OAuth/MCP issuer. Empty leaves it unset.
   publicUrl: ""

@@ -51,7 +51,9 @@ offered G.722 (it is answered with G.722), 8 kHz G.711 otherwise; an
 Opus-only caller is answered with Opus. Prompts and recordings are WAV files
 at 8 or 16 kHz; the rate a file has is resampled to the session's, so
 existing 8 kHz assets keep working and voicemail left over a G.722 call is
-stored at 16 kHz.
+stored at 16 kHz. Spoken voicemail prompts are cached 8 kHz WAVs
+(`tts/<sha256>.wav` in the voicemail bucket) resampled to the session's rate
+like any asset; see [voicemail.md](voicemail.md) for the key layout.
 
 **Recording** decodes G.711, G.722 and Opus to PCM and mixes the two
 directions into one WAV at the higher of their sample rates; any other

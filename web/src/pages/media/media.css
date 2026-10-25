@@ -255,3 +255,11 @@
 .media-audio {
   width: 100%;
 }
+
+/* A greeting slot's status and its preview and revert buttons. */
+.vm-greeting-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--az-space-2, 8px);
+}

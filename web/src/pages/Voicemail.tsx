@@ -14,7 +14,12 @@ import {
 import {
   getVoicemailBoxDetail,
   greetingLabel,
+  greetingStatus,
+  isCustomGreeting,
   listVoicemailBoxes,
+  previewDefaultGreeting,
+  revertGreeting,
+  type GreetingSlot,
   type VoicemailBoxDetail,
   type VoicemailBoxSummary,
 } from "../api/media";
@@ -289,7 +294,9 @@ function BoxPanel({
       mono: true,
       render: (m) => (
         <span className={m.heard ? undefined : "media-unheard"}>
-          {m.caller || "—"}
+          {m.callerName
+            ? `${m.callerName} (${m.caller || "—"})`
+            : m.caller || "—"}
         </span>
       ),
     },
@@ -456,10 +463,12 @@ interface SettingsErrors {
   email?: string;
   password?: string;
   greeting?: string;
+  busy?: string;
   unreachable?: string;
+  name?: string;
 }
 
-/** Box settings: email address, PIN and the two greetings. */
+/** Box settings: email address, PIN and the greetings. */
 function BoxSettings({
   box,
   detail,
@@ -477,7 +486,9 @@ function BoxSettings({
   const [email, setEmail] = useState(detail.email);
   const [password, setPassword] = useState("");
   const [greeting, setGreeting] = useState<File | null>(null);
+  const [busyFile, setBusyFile] = useState<File | null>(null);
   const [unreachable, setUnreachable] = useState<File | null>(null);
+  const [nameFile, setNameFile] = useState<File | null>(null);
   const [errors, setErrors] = useState<SettingsErrors>({});
   const [unmatched, setUnmatched] = useState<FieldError[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
@@ -504,7 +515,9 @@ function BoxSettings({
         email: address,
         ...(password !== "" ? { password } : {}),
         ...(greeting ? { greeting } : {}),
+        ...(busyFile ? { busy: busyFile } : {}),
         ...(unreachable ? { unreachable } : {}),
+        ...(nameFile ? { name: nameFile } : {}),
       })) as unknown as VoicemailBoxDetail;
       onSaved({ ...detail, ...saved });
     } catch (err: unknown) {
@@ -512,7 +525,9 @@ function BoxSettings({
         "email",
         "password",
         "greeting",
+        "busy",
         "unreachable",
+        "name",
       ]);
       setErrors(mapped.byKey);
       setUnmatched(mapped.unmatched);
@@ -590,6 +605,17 @@ function BoxSettings({
           onApplied={onGreeting}
         />
         <GreetingSource
+          id={`${formId}-busy`}
+          slot="busy"
+          label="Busy greeting"
+          error={errors.busy}
+          box={box}
+          detail={detail}
+          disabled={busy}
+          onFile={setBusyFile}
+          onApplied={onGreeting}
+        />
+        <GreetingSource
           id={`${formId}-unreachable`}
           slot="unreachable"
           label="Unreachable greeting"
@@ -598,6 +624,17 @@ function BoxSettings({
           detail={detail}
           disabled={busy}
           onFile={setUnreachable}
+          onApplied={onGreeting}
+        />
+        <GreetingSource
+          id={`${formId}-name`}
+          slot="name"
+          label="Recorded name"
+          error={errors.name}
+          box={box}
+          detail={detail}
+          disabled={busy}
+          onFile={setNameFile}
           onApplied={onGreeting}
         />
         {(formError || unmatched.length > 0) && (
@@ -671,7 +708,7 @@ function GreetingSource({
   onApplied,
 }: {
   id: string;
-  slot: "greeting" | "unreachable";
+  slot: GreetingSlot;
   label: string;
   error?: string;
   box: VoicemailBoxSummary;
@@ -680,10 +717,21 @@ function GreetingSource({
   onFile: (file: File | null) => void;
   onApplied: (detail: VoicemailBoxDetail, message: string) => void;
 }) {
-  const object =
-    slot === "greeting" ? detail.greetingObject : detail.unreachableObject;
-  const record =
-    slot === "greeting" ? detail.greetingTts : detail.unreachableTts;
+  const object = {
+    greeting: detail.greetingObject,
+    busy: detail.busyObject,
+    unreachable: detail.unreachableObject,
+    name: detail.nameObject,
+  }[slot];
+  const record = {
+    greeting: detail.greetingTts,
+    busy: detail.busyTts,
+    unreachable: detail.unreachableTts,
+    name: null,
+  }[slot];
+  // Only the three greetings can be written as text or picked from an
+  // announcement; a recorded name is audio only.
+  const spoken = slot !== "name";
   const [mode, setMode] = useState<GreetingMode>("upload");
   const [announcements, setAnnouncements] = useState<Announcement[] | null>(
     null,
@@ -713,6 +761,7 @@ function GreetingSource({
       | { source: "text"; text: string; voiceId?: string; modelId?: string },
     done: (regenerated: boolean) => string,
   ) {
+    if (slot === "name") return;
     setProblem(null);
     setBusy(true);
     try {
@@ -739,29 +788,111 @@ function GreetingSource({
   const current = object
     ? record
       ? "Generated from text."
-      : "A greeting is set."
-    : slot === "greeting"
-      ? "Played before the beep."
-      : "Played when the extension is unreachable.";
+      : slot === "name"
+        ? "A name is recorded."
+        : "A greeting is set."
+    : {
+        greeting: "Played before the beep when nobody answers.",
+        busy: "Played before the beep when the extension is busy.",
+        unreachable: "Played when the extension is unreachable.",
+        name: "Spoken in the default greeting; the display name is used without one.",
+      }[slot];
+  const [preview, setPreview] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+
+  useEffect(
+    () => () => {
+      if (preview) URL.revokeObjectURL(preview);
+    },
+    [preview],
+  );
+
+  async function onPreview() {
+    if (slot === "name") return;
+    setProblem(null);
+    setPreviewing(true);
+    try {
+      const blob = await previewDefaultGreeting(box.extensionId, slot);
+      setPreview(URL.createObjectURL(blob));
+    } catch (err: unknown) {
+      setProblem(errorMessage(err));
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  async function onRevert() {
+    setProblem(null);
+    setBusy(true);
+    try {
+      const res = await revertGreeting(box.extensionId, slot);
+      setPreview(null);
+      onApplied(
+        { ...detail, ...res },
+        `${label} of box ${box.number} is back to the default.`,
+      );
+    } catch (err: unknown) {
+      setProblem(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <fieldset className="media-modal-form" style={{ border: 0, padding: 0 }}>
       <legend className="az-field__label">{label}</legend>
-      <Select
-        id={`${id}-source`}
-        label={`${label} source`}
-        value={mode}
-        disabled={disabled || busy}
-        options={[
-          { value: "upload", label: "Upload a WAV" },
-          { value: "announcement", label: "Use an existing announcement" },
-          { value: "text", label: "Generate from text" },
-        ]}
-        onChange={(e) => {
-          setMode(e.target.value as GreetingMode);
-          setProblem(null);
-        }}
-      />
+      <div className="vm-greeting-status">
+        <Badge tone={isCustomGreeting(detail, slot) ? "good" : "info"}>
+          {greetingStatus(detail, slot)}
+        </Badge>
+        {spoken && (
+          <Button
+            size="sm"
+            variant="secondary"
+            icon="volume-2"
+            disabled={disabled || busy || previewing}
+            onClick={() => void onPreview()}
+          >
+            {`Preview default ${label.toLowerCase()}`}
+          </Button>
+        )}
+        {isCustomGreeting(detail, slot) && (
+          <Button
+            size="sm"
+            variant="secondary"
+            icon="rotate-ccw"
+            disabled={disabled || busy}
+            onClick={() => void onRevert()}
+          >
+            {`Revert ${label.toLowerCase()} to default`}
+          </Button>
+        )}
+      </div>
+      {preview && (
+        <audio
+          controls
+          autoPlay
+          src={preview}
+          aria-label={`Preview of the default ${label.toLowerCase()}`}
+        />
+      )}
+      {spoken && (
+        <Select
+          id={`${id}-source`}
+          label={`${label} source`}
+          value={mode}
+          disabled={disabled || busy}
+          options={[
+            { value: "upload", label: "Upload a WAV" },
+            { value: "announcement", label: "Use an existing announcement" },
+            { value: "text", label: "Generate from text" },
+          ]}
+          onChange={(e) => {
+            setMode(e.target.value as GreetingMode);
+            setProblem(null);
+          }}
+        />
+      )}
       {mode === "upload" && (
         <FileField
           id={id}

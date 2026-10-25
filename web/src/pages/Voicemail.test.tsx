@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { apiError, json, ME, mockApi, noContent, renderApp } from "../test/api";
 
 const CREATED = "2026-10-01T10:00:00Z";
@@ -432,5 +432,206 @@ describe("Voicemail", () => {
       await screen.findByText("The PIN must be at least 4 characters."),
     ).toBeVisible();
     expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+  // The drawer says, per slot, whether callers hear the AI voice or the box's
+  // own audio.
+  it("shows each greeting as Default (AI voice) or Custom", async () => {
+    setup({
+      "GET /api/v1/extensions/1/voicemail": () =>
+        json({
+          ...DETAIL,
+          aiVoice: true,
+          busyObject: "box/11/busy.wav",
+          nameObject: "",
+        }),
+    });
+    renderApp("/voicemail");
+    await screen.findByText("reception@hello.lab");
+    fireEvent.click(screen.getByRole("button", { name: "Box settings" }));
+    const dialog = screen.getByRole("dialog", { name: "Box settings for 100" });
+    const slot = (name: string) =>
+      within(within(dialog).getByRole("group", { name }));
+    expect(slot("Greeting").getByText("Custom")).toBeVisible();
+    expect(slot("Busy greeting").getByText("Custom")).toBeVisible();
+    expect(slot("Unreachable greeting").getByText("Default (AI voice)")).toBeVisible();
+    expect(slot("Recorded name").getByText("Default (AI voice)")).toBeVisible();
+  });
+
+  it("says when there is no voice to fall back on", async () => {
+    setup({
+      "GET /api/v1/extensions/1/voicemail": () =>
+        json({ ...DETAIL, aiVoice: false, greetingObject: "" }),
+    });
+    renderApp("/voicemail");
+    await screen.findByText("reception@hello.lab");
+    fireEvent.click(screen.getByRole("button", { name: "Box settings" }));
+    const dialog = screen.getByRole("dialog", { name: "Box settings for 100" });
+    expect(
+      within(within(dialog).getByRole("group", { name: "Greeting" })).getByText(
+        "Default (no voice set)",
+      ),
+    ).toBeVisible();
+  });
+
+  it("previews the default greeting by asking the server to speak it", async () => {
+    const created: Blob[] = [];
+    // jsdom has no object URLs; give it just these two, and take them away
+    // again afterwards.
+    const url = URL as unknown as Record<string, unknown>;
+    url.createObjectURL = (b: Blob) => {
+      created.push(b);
+      return "blob:preview";
+    };
+    url.revokeObjectURL = vi.fn();
+    onTestFinished(() => {
+      delete url.createObjectURL;
+      delete url.revokeObjectURL;
+    });
+    const calls = setup({
+      "GET /api/v1/extensions/1/voicemail": () =>
+        json({ ...DETAIL, aiVoice: true }),
+      "POST /api/v1/extensions/1/voicemail/greeting/preview": () =>
+        new Response(new Uint8Array([82, 73, 70, 70]), {
+          status: 200,
+          headers: { "Content-Type": "audio/wav" },
+        }),
+    });
+    renderApp("/voicemail");
+    await screen.findByText("reception@hello.lab");
+    fireEvent.click(screen.getByRole("button", { name: "Box settings" }));
+    const dialog = screen.getByRole("dialog", { name: "Box settings for 100" });
+    // Nothing is spoken until the button is pressed.
+    expect(calls.some((c) => c.url.endsWith("/preview"))).toBe(false);
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Preview default greeting" }),
+    );
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "POST",
+        url: "/api/v1/extensions/1/voicemail/greeting/preview",
+        body: { slot: "greeting" },
+      }),
+    );
+    const player = await within(dialog).findByLabelText(
+      "Preview of the default greeting",
+    );
+    expect(player).toHaveAttribute("src", "blob:preview");
+    expect(created).toHaveLength(1);
+    // The busy variant previews its own wording.
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: "Preview default busy greeting",
+      }),
+    );
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "POST",
+        url: "/api/v1/extensions/1/voicemail/greeting/preview",
+        body: { slot: "busy" },
+      }),
+    );
+    // A recorded name has no spoken default to preview.
+    expect(
+      within(dialog).queryByRole("button", {
+        name: /Preview default recorded name/,
+      }),
+    ).toBeNull();
+  });
+
+  it("explains a preview that cannot be spoken", async () => {
+    setup({
+      "POST /api/v1/extensions/1/voicemail/greeting/preview": () =>
+        apiError(409, "conflict", "no OpenRouter API key is configured"),
+    });
+    renderApp("/voicemail");
+    await screen.findByText("reception@hello.lab");
+    fireEvent.click(screen.getByRole("button", { name: "Box settings" }));
+    const dialog = screen.getByRole("dialog", { name: "Box settings for 100" });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Preview default greeting" }),
+    );
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "no OpenRouter API key is configured",
+    );
+  });
+
+  it("reverts a custom greeting to the default", async () => {
+    const calls = setup({
+      "GET /api/v1/extensions/1/voicemail": () =>
+        json({ ...DETAIL, aiVoice: true }),
+      "DELETE /api/v1/extensions/1/voicemail/greeting/greeting": () =>
+        json({ ...DETAIL, aiVoice: true, greetingObject: "" }),
+    });
+    renderApp("/voicemail");
+    await screen.findByText("reception@hello.lab");
+    fireEvent.click(screen.getByRole("button", { name: "Box settings" }));
+    const dialog = screen.getByRole("dialog", { name: "Box settings for 100" });
+    // Only a custom slot offers the revert.
+    expect(
+      within(dialog).queryByRole("button", {
+        name: "Revert busy greeting to default",
+      }),
+    ).toBeNull();
+    fireEvent.click(
+      within(dialog).getByRole("button", {
+        name: "Revert greeting to default",
+      }),
+    );
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "DELETE",
+        url: "/api/v1/extensions/1/voicemail/greeting/greeting",
+        body: undefined,
+      }),
+    );
+    expect(
+      await screen.findByText("Greeting of box 100 is back to the default."),
+    ).toBeInTheDocument();
+    const group = within(dialog).getByRole("group", { name: "Greeting" });
+    expect(await within(group).findByText("Default (AI voice)")).toBeVisible();
+    expect(
+      within(dialog).queryByRole("button", {
+        name: "Revert greeting to default",
+      }),
+    ).toBeNull();
+  });
+
+  it("uploads the busy greeting and the recorded name", async () => {
+    const calls = setup({
+      "PUT /api/v1/extensions/1/voicemail": () => json(DETAIL),
+    });
+    renderApp("/voicemail");
+    await screen.findByText("reception@hello.lab");
+    fireEvent.click(screen.getByRole("button", { name: "Box settings" }));
+    const attach = (label: string, name: string) => {
+      const input = screen.getByLabelText(label) as HTMLInputElement;
+      Object.defineProperty(input, "files", {
+        value: [new File(["RIFF...."], name, { type: "audio/wav" })],
+      });
+      fireEvent.change(input);
+    };
+    attach("Busy greeting audio (WAV)", "busy.wav");
+    attach("Recorded name audio (WAV)", "name.wav");
+    fireEvent.click(screen.getByRole("button", { name: "Save box settings" }));
+    const put = await waitFor(() => {
+      const found = calls.find(
+        (c) => c.method === "PUT" && c.url === "/api/v1/extensions/1/voicemail",
+      );
+      expect(found).toBeDefined();
+      return found!;
+    });
+    const form = put.body as FormData;
+    expect((form.get("busy") as File).name).toBe("busy.wav");
+    expect((form.get("name") as File).name).toBe("name.wav");
+    expect(form.get("greeting")).toBeNull();
+  });
+
+  it("names a caller by the caller-ID name when the message has one", async () => {
+    setup({
+      "GET /api/v1/voicemail/messages?box=11": () =>
+        json({ items: [{ ...UNHEARD, callerName: "Acme Ltd" }] }),
+    });
+    renderApp("/voicemail");
+    expect(await screen.findByText("Acme Ltd (201)")).toBeVisible();
   });
 });

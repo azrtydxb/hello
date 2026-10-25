@@ -1005,6 +1005,9 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		if box != "" {
 			c.mu.Lock()
 			c.dialled = box
+			if mode == vmRetrieve {
+				c.vmTarget = box
+			}
 			c.mu.Unlock()
 		}
 		c.addTrace("Voicemail restarts from its greeting after the takeover")

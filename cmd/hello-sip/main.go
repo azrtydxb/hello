@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	_ "time/tzdata" // message times are spoken in the configured zone, with or without a system zoneinfo
 
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/cluster"
@@ -141,6 +142,8 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("HELLO_SECRET_KEY: %w", err)
 	}
+	// The same box seals the text-to-speech key the voicemail voice reads.
+	controlStore.WithSecretBox(box)
 	live := livestate.New(vk)
 	members := cluster.New(vk)
 	watcher := &snapshot.Watcher{Config: cfg.Database, Domain: cfg.SIPDomain, Log: log.With("component", "snapshot"),
@@ -159,6 +162,7 @@ func run(args []string) error {
 		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
+		PromptLanguage: cfg.VoicePromptLanguage, Timezone: cfg.Timezone,
 		HADialogHeartbeat: cfg.MemberHeartbeat, HATakeoverEnabled: cfg.HATakeoverEnabled,
 		HATakeoverPoll: cfg.HATakeoverPoll, HATakeoverJitter: cfg.HATakeoverJitter, PushRate: cfg.PushRate,
 	}, sip.Deps{
@@ -168,7 +172,8 @@ func run(args []string) error {
 		Presence:      sip.ValkeyPresence{Client: vk},
 		MailboxEvents: mailboxEvents{cfg: cfg.Database, log: log.With("component", "mailbox")},
 		Pushes:        pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
-		Voicemails:    voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings,
+		Voicemails:    voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings,
+		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
 		HAState: live, Membership: members, PageTests: live,
 	})

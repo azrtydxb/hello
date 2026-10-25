@@ -133,11 +133,11 @@ func TestInsertVoicemailMessage(t *testing.T) {
 		t.Fatalf("box by number: ok=%v err=%v", ok, err)
 	}
 
-	first, err := s.InsertVoicemailMessage(ctx, box.ID, "box/1/1-a.wav", "102", 8000)
+	first, err := s.InsertVoicemailMessage(ctx, box.ID, "box/1/1-a.wav", "102", "Jan", 8000)
 	if err != nil {
 		t.Fatalf("insert message: %v", err)
 	}
-	second, err := s.InsertVoicemailMessage(ctx, box.ID, "box/1/2-b.wav", "102", 9000)
+	second, err := s.InsertVoicemailMessage(ctx, box.ID, "box/1/2-b.wav", "102", "", 9000)
 	if err != nil {
 		t.Fatalf("insert message: %v", err)
 	}
@@ -250,5 +250,91 @@ func TestApplyFeatureUpdate(t *testing.T) {
 	// An unknown extension number is a not-found, like every other store path.
 	if err := s.ApplyFeatureUpdate(ctx, "hello-sip", FeatureUpdate{Number: "999"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown number: err=%v, want ErrNotFound", err)
+	}
+}
+
+// TestVoicemailCallPlaneWrites covers what the *97 menus write from the phone:
+// recorded greetings per slot, the revert to the spoken defaults, the PIN, a
+// deleted message, and the caller-ID name kept with a message.
+func TestVoicemailCallPlaneWrites(t *testing.T) {
+	s := scratchStore(t)
+	ctx := context.Background()
+	e := mustExtension(t, s, "101")
+	if _, err := s.UpdateVoicemailBox(ctx, "test", e.ID, VoicemailBoxChange{}, nil); err != nil {
+		t.Fatalf("create box: %v", err)
+	}
+	box, ok, err := s.VoicemailBoxByNumber(ctx, "101")
+	if err != nil || !ok {
+		t.Fatalf("box by number: ok=%v err=%v", ok, err)
+	}
+	if box.GreetingObject != "" || box.BusyObject != "" || box.NameObject != "" {
+		t.Fatalf("fresh box = %+v", box)
+	}
+
+	// Each slot points at its own object; the replaced one is returned.
+	for slot, obj := range map[string]string{"greeting": "box/1/g.wav", "busy": "box/1/b.wav", "unreachable": "box/1/u.wav", "name": "box/1/n.wav"} {
+		prev, err := s.SetVoicemailGreeting(ctx, box.ID, slot, obj)
+		if err != nil || prev != "" {
+			t.Fatalf("set %s: prev=%q err=%v", slot, prev, err)
+		}
+	}
+	prev, err := s.SetVoicemailGreeting(ctx, box.ID, "busy", "box/1/b2.wav")
+	if err != nil || prev != "box/1/b.wav" {
+		t.Fatalf("replace busy: prev=%q err=%v", prev, err)
+	}
+	box, _, _ = s.VoicemailBoxByNumber(ctx, "101")
+	if box.GreetingObject != "box/1/g.wav" || box.BusyObject != "box/1/b2.wav" ||
+		box.UnreachableObject != "box/1/u.wav" || box.NameObject != "box/1/n.wav" {
+		t.Fatalf("box = %+v", box)
+	}
+	if _, err := s.SetVoicemailGreeting(ctx, box.ID, "nonsense", "x"); err == nil {
+		t.Fatal("an unknown slot was accepted")
+	}
+	if _, err := s.SetVoicemailGreeting(ctx, 999999, "busy", "x"); err == nil {
+		t.Fatal("an unknown box was accepted")
+	}
+
+	// Reverting drops greeting, busy and unreachable but keeps the name.
+	dropped, err := s.ResetVoicemailGreetings(ctx, box.ID)
+	if err != nil || len(dropped) != 3 {
+		t.Fatalf("reset: dropped=%v err=%v", dropped, err)
+	}
+	box, _, _ = s.VoicemailBoxByNumber(ctx, "101")
+	if box.GreetingObject != "" || box.BusyObject != "" || box.UnreachableObject != "" || box.NameObject != "box/1/n.wav" {
+		t.Fatalf("after reset = %+v", box)
+	}
+
+	// The PIN.
+	if err := s.SetVoicemailPIN(ctx, box.ID, "4321"); err != nil {
+		t.Fatalf("set PIN: %v", err)
+	}
+	if ok, err := s.VerifyVoicemailPassword(ctx, box.ID, "4321"); err != nil || !ok {
+		t.Fatalf("new PIN rejected: ok=%v err=%v", ok, err)
+	}
+	if ok, _ := s.VerifyVoicemailPassword(ctx, box.ID, "1234"); ok {
+		t.Fatal("old PIN still accepted")
+	}
+	if err := s.SetVoicemailPIN(ctx, 999999, "4321"); err == nil {
+		t.Fatal("PIN set on an unknown box")
+	}
+
+	// Messages keep the caller-ID name; delete is scoped to the box.
+	id, err := s.InsertVoicemailMessage(ctx, box.ID, "box/1/m.wav", "0471234567", "Jan Peeters", 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := s.ListVoicemailMessages(ctx, box.ID, false)
+	if err != nil || len(msgs) != 1 || msgs[0].CallerName != "Jan Peeters" {
+		t.Fatalf("messages = %+v err=%v", msgs, err)
+	}
+	if _, err := s.RemoveVoicemailMessage(ctx, box.ID+1, id); err == nil {
+		t.Fatal("a message was deleted through another box")
+	}
+	obj, err := s.RemoveVoicemailMessage(ctx, box.ID, id)
+	if err != nil || obj != "box/1/m.wav" {
+		t.Fatalf("remove: obj=%q err=%v", obj, err)
+	}
+	if _, total, _ := s.VoicemailCounts(ctx, box.ID); total != 0 {
+		t.Fatalf("total = %d after delete", total)
 	}
 }
