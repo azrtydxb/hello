@@ -91,3 +91,53 @@ func TestQueueSurvivesNodeFailover(t *testing.T) {
 	hangupHomed(t, a, taker, raFirst, rec.Legs[0])
 	waitReq(t, b.byes, "the caller's BYE reaches the agent")
 }
+
+// TestQueueTransferAttended: the transferor consults the queue (its second
+// call waits there) and completes an attended transfer with Replaces. The
+// transferee takes the consultation call's place in the queue and the
+// consultation call ends. It fails if the transferee is not rung to an agent
+// as the original caller, the consultation dialog stays up, or the transfer
+// is not counted as an attended one.
+func TestQueueTransferAttended(t *testing.T) {
+	st := queue.NewMemStore()
+	pbx, _ := queuePBX(t, st, nil, testQueue("sales", "600", queue.RingAll, static("300", 0, 1)))
+	a, b, c := registerABC(t, pbx)
+	b.setCallee(answerAfter(nil))
+	answer := make(chan struct{})
+	c.setCallee(answerAfter(answer))
+	r1 := waitCall(t, dial(t.Context(), a, "200"))
+	if r1.err != nil {
+		t.Fatal(r1.err)
+	}
+	waitReq(t, b.invites, "INVITE to b")
+	waitReq(t, b.acks, "ACK to b")
+	dssAB := <-serversOf(b)
+	// The consultation call: b waits in the queue.
+	r2 := waitCall(t, dial(t.Context(), b, "600"))
+	if r2.err != nil {
+		t.Fatal(r2.err)
+	}
+	waitReq(t, c.invites, "the agent rings for the consultation call")
+	refer := "<sip:600@" + testDomain + "?Replaces=" + r2.dcs.InviteRequest.CallID().Value() + ">"
+	if res := b.sendReferFromCallee(t, dssAB, refer); res.StatusCode != 202 {
+		t.Fatalf("REFER = %d, want 202", res.StatusCode)
+	}
+	waitReq(t, b.notifies, "progress NOTIFY")
+	final := waitReq(t, b.notifies, "final NOTIFY")
+	if !strings.Contains(string(final.Body()), "200 OK") {
+		t.Fatalf("final NOTIFY = %q", final.Body())
+	}
+	waitReq(t, b.byes, "the consultation call ends")
+	inv := waitReq(t, c.invites, "the agent rings for the transferee")
+	if inv.From().Address.User != "100" {
+		t.Fatalf("agent INVITE From = %s, want the transferee 100", inv.From().Address.User)
+	}
+	close(answer)
+	eventually(t, "the transferee is answered by the agent", func() bool {
+		return pbx.metric(t, "hello_queue_calls_total", map[string]string{"queue": "sales", "event": "answered"}) == 1
+	})
+	if v := pbx.metric(t, "hello_transfers_total", map[string]string{"kind": "attended", "result": "answered"}); v != 1 {
+		t.Fatalf("transfers{attended,answered} = %v", v)
+	}
+	hangup(t, r1.dcs)
+}

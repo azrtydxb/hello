@@ -15016,6 +15016,54 @@
                     }
                   }
                 }
+              },
+              "queueLegs": {
+                "type": "array",
+                "description": "For a call that waited in a call queue, what it did there, in order: enter, agent (a ring), wait, answered, abandon, exit",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "event",
+                    "queue",
+                    "extension",
+                    "waitMs",
+                    "result",
+                    "at"
+                  ],
+                  "properties": {
+                    "event": {
+                      "type": "string",
+                      "enum": [
+                        "enter",
+                        "agent",
+                        "answered",
+                        "wait",
+                        "abandon",
+                        "exit"
+                      ]
+                    },
+                    "queue": {
+                      "type": "string"
+                    },
+                    "extension": {
+                      "type": "string",
+                      "description": "The agent, for agent and answered events"
+                    },
+                    "waitMs": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "Time waited, for wait, answered, abandon and exit events"
+                    },
+                    "result": {
+                      "type": "string",
+                      "description": "agent: answered, no_answer or busy; wait and exit: the outcome (answered, abandoned, timeout, full, no_agents, breakout)"
+                    },
+                    "at": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
               }
             }
           }
