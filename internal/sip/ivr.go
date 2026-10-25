@@ -190,6 +190,12 @@ func (c *call) ivrAnswer(m snapshot.IVRMenu) bool {
 	res.AppendHeader(sip.NewHeader("Allow", allow))
 	s.m.response(sip.StatusOK)
 	if err := c.dss.WriteResponse(res); err != nil {
+		if c.dss.LoadState() == sip.DialogStateEnded {
+			// The caller's BYE overtook its ACK: handleBye has accepted it
+			// and ends the call as the caller's hangup.
+			c.addTrace("Caller hung up before acknowledging the answer")
+			return false
+		}
 		c.mu.Lock()
 		cancelled = c.isCancelled
 		c.connected = false

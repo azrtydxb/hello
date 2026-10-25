@@ -353,7 +353,7 @@ func TestIVRCallerHangsUpInMenu(t *testing.T) {
 	}
 	rec := lastCDRFor(t, pbx, "800")
 	if rec.TerminationSide != cdr.SideCaller {
-		t.Fatalf("side %q", rec.TerminationSide)
+		t.Fatalf("side %q status %d trace:\n%s", rec.TerminationSide, rec.FinalStatus, traceText(rec.Trace))
 	}
 	eventually(t, "no live calls", func() bool { return len(liveCalls(t, pbx)) == 0 })
 }
