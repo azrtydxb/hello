@@ -67,6 +67,54 @@ describe("System", () => {
     });
   });
 
+  it("offers announcement and intercom with an action-shaped argument", async () => {
+    const calls = setup({
+      "GET /api/v1/announcements": () =>
+        json({
+          items: [
+            { id: 1, name: "welcome", createdAt: "2026-10-01T09:00:00Z" },
+            { id: 2, name: "closed", createdAt: "2026-10-01T09:00:00Z" },
+          ],
+        }),
+      "PUT /api/v1/feature-codes": noContent,
+    });
+    renderApp("/system");
+    await screen.findByLabelText("Argument 1");
+
+    const action = screen.getByLabelText("Action 1");
+    expect(
+      within(action).getByRole("option", { name: "Play announcement" }),
+    ).toBeInTheDocument();
+    expect(
+      within(action).getByRole("option", { name: "Intercom (auto-answer)" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(action, { target: { value: "announcement" } });
+    const pick = await screen.findByRole("combobox", { name: "Argument 1" });
+    expect(
+      within(pick).getByRole("option", { name: "closed" }),
+    ).toBeInTheDocument();
+    fireEvent.change(pick, { target: { value: "closed" } });
+
+    fireEvent.change(screen.getByLabelText("Action 2"), {
+      target: { value: "intercom" },
+    });
+    expect(screen.getByLabelText("Argument 2")).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save feature codes" }));
+    await screen.findByText("Feature codes saved.");
+    expect(calls).toContainEqual({
+      method: "PUT",
+      url: "/api/v1/feature-codes",
+      body: {
+        items: [
+          { code: "*72", action: "announcement", argument: "closed" },
+          { code: "*97", action: "intercom", argument: "" },
+        ],
+      },
+    });
+  });
+
   it("rejects an invalid or duplicated code before sending", async () => {
     const calls = setup();
     renderApp("/system");

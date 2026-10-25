@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import {
   errorMessage,
+  FEATURE_CODE_ACTION_LABELS,
   FEATURE_CODE_ACTIONS,
   FEATURE_CODE_PATTERN,
   fieldErrors,
+  listAnnouncements,
   listFeatureCodes,
   listPresence,
   updateFeatureCodes,
@@ -68,6 +70,19 @@ function FeatureCodes({ onSaved }: { onSaved: () => void }) {
   const [errors, setErrors] = useState<ErrorMap>({});
   const [unmatched, setUnmatched] = useState<FieldError[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  // Announcement names for the announcement action's argument; null until
+  // loaded (or when they cannot be), which falls back to a free-text name.
+  const [announcements, setAnnouncements] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listAnnouncements(controller.signal)
+      .then((items) => setAnnouncements(items.map((a) => a.name)))
+      .catch(() => {
+        // Not fatal: the argument stays a free-text announcement name.
+      });
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -198,23 +213,26 @@ function FeatureCodes({ onSaved }: { onSaved: () => void }) {
                   id={`fc-action-${i}`}
                   aria-label={`Action ${i + 1}`}
                   size="sm"
-                  options={FEATURE_CODE_ACTIONS}
+                  options={actionOptions(r.action)}
                   value={r.action}
                   error={errors[`items[${i}].action`]}
-                  onChange={(e) =>
-                    setRow(i, { action: e.target.value as FeatureCodeAction })
-                  }
+                  onChange={(e) => {
+                    const action = e.target.value as FeatureCodeAction;
+                    // The argument means something different per action
+                    // (forwarding mode, announcement name, unused for
+                    // intercom), so it does not carry over.
+                    setRow(i, {
+                      action,
+                      argument: action === r.action ? r.argument : "",
+                    });
+                  }}
                 />
-                <Input
-                  id={`fc-argument-${i}`}
-                  aria-label={`Argument ${i + 1}`}
-                  size="sm"
-                  mono
-                  placeholder="—"
-                  spellCheck={false}
-                  value={r.argument}
+                <ArgumentField
+                  index={i}
+                  row={r}
+                  announcements={announcements}
                   error={errors[`items[${i}].argument`]}
-                  onChange={(e) => setRow(i, { argument: e.target.value })}
+                  onChange={(argument) => setRow(i, { argument })}
                 />
                 <Can>
                   <IconButton
@@ -259,6 +277,93 @@ function FeatureCodes({ onSaved }: { onSaved: () => void }) {
         </>
       )}
     </form>
+  );
+}
+
+/** The action picker's options, labelled; an unknown stored action stays. */
+function actionOptions(current: string) {
+  const opts = FEATURE_CODE_ACTIONS.map((a) => ({
+    value: a as string,
+    label: FEATURE_CODE_ACTION_LABELS[a],
+  }));
+  if (current !== "" && !opts.some((o) => o.value === current)) {
+    opts.push({ value: current, label: current });
+  }
+  return opts;
+}
+
+/**
+ * A feature code's argument, shaped by its action: the announcement action
+ * names the announcement it plays (left empty, the caller dials the name
+ * after the code); intercom takes none, the extension being dialled after
+ * the code; every other action takes free text (e.g. set or clear).
+ */
+function ArgumentField({
+  index,
+  row,
+  announcements,
+  error,
+  onChange,
+}: {
+  index: number;
+  row: FeatureCode;
+  announcements: string[] | null;
+  error?: string;
+  onChange: (argument: string) => void;
+}) {
+  const id = `fc-argument-${index}`;
+  const label = `Argument ${index + 1}`;
+  if (row.action === "announcement" && announcements !== null) {
+    const names =
+      row.argument !== "" && !announcements.includes(row.argument)
+        ? [...announcements, row.argument]
+        : announcements;
+    return (
+      <Select
+        id={id}
+        aria-label={label}
+        size="sm"
+        options={[
+          { value: "", label: "Dialled after the code" },
+          ...names.map((n) => ({
+            value: n,
+            label: announcements.includes(n) ? n : `${n} (missing)`,
+          })),
+        ]}
+        value={row.argument}
+        error={error}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  if (row.action === "intercom") {
+    return (
+      <Input
+        id={id}
+        aria-label={label}
+        size="sm"
+        mono
+        placeholder="Code + extension"
+        title="Dial the code followed by the extension to intercom"
+        disabled
+        value={row.argument}
+        error={error}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  return (
+    <Input
+      id={id}
+      aria-label={label}
+      size="sm"
+      mono
+      placeholder={row.action === "announcement" ? "Announcement name" : "—"}
+      spellCheck={false}
+      value={row.argument}
+      error={error}
+      onChange={(e) => onChange(e.target.value)}
+    />
   );
 }
 
