@@ -92,9 +92,9 @@ func TestConferenceRooms(t *testing.T) {
 
 	// A route can target the room; a missing room is refused.
 	route := map[string]any{"name": "meet", "didKind": "exact", "did": "5551234", "destinationKind": "conference", "destination": "800"}
-	routeID := c.must(http.StatusCreated, "POST", "/api/v1/inbound-routes", route).json(t)["id"].(float64)
+	routeID := c.must(http.StatusCreated, "POST", "/api/v1/routes/inbound", route).json(t)["id"].(float64)
 	route["name"], route["did"], route["destination"] = "ghost", "5559999", "899"
-	c.must(http.StatusBadRequest, "POST", "/api/v1/inbound-routes", route)
+	c.must(http.StatusBadRequest, "POST", "/api/v1/routes/inbound", route)
 	// The room cannot be deleted or renumbered while the route targets it.
 	c.must(http.StatusConflict, "DELETE", idPath, nil)
 	c.must(http.StatusConflict, "PUT", idPath, map[string]any{"name": "Weekly", "number": "802"})
@@ -133,7 +133,7 @@ func TestConferenceRooms(t *testing.T) {
 		t.Fatalf("audit rows = %d, %v", audited, err)
 	}
 
-	c.must(http.StatusNoContent, "DELETE", fmt.Sprintf("/api/v1/inbound-routes/%d", int64(routeID)), nil)
+	c.must(http.StatusNoContent, "DELETE", fmt.Sprintf("/api/v1/routes/inbound/%d", int64(routeID)), nil)
 	c.must(http.StatusNoContent, "DELETE", idPath, nil)
 	c.must(http.StatusNotFound, "GET", idPath, nil)
 }

@@ -373,8 +373,13 @@ func TestConferenceCapacity(t *testing.T) {
 	}
 	seats[0].leave()
 	eventually(t, "a seat frees", func() bool {
-		st := pbx.srv.conf.get("800")
-		return st != nil && st.count() == 9
+		r := pbx.srv.conf.get("800")
+		if r == nil {
+			return false
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return r.seats == 9
 	})
 	s, err := seatJoin(t, a, "800")
 	if err != nil {
