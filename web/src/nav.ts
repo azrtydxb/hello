@@ -130,6 +130,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "stethoscope",
       },
       { label: "System", path: "/system", phase: 3, icon: "settings" },
+      {
+        label: "Voice (TTS)",
+        path: "/settings/voice",
+        phase: 5,
+        icon: "audio-lines",
+        // The page holds the provider key (admin-only routes).
+        minRole: "admin",
+      },
       { label: "AI access", path: "/ai", phase: 5, icon: "bot" },
       {
         label: "Users",
@@ -183,4 +191,26 @@ export function pageTitle(pathname: string): string | null {
     (i) => i.path !== "/" && pathname.startsWith(i.path + "/"),
   ).sort((a, b) => b.path.length - a.path.length)[0];
   return parent ? parent.label : null;
+}
+
+/**
+ * The label of the group holding the nav item for `pathname` (the longest
+ * matching path), or null. Call detail belongs to Call history.
+ */
+export function activeGroupLabel(
+  groups: readonly NavGroup[],
+  pathname: string,
+): string | null {
+  const path = /^\/history\/[^/]+$/.test(pathname) ? "/history" : pathname;
+  let best: { label: string; len: number } | null = null;
+  for (const g of groups) {
+    for (const i of g.items) {
+      const hit =
+        i.path === path || (i.path !== "/" && path.startsWith(i.path + "/"));
+      if (hit && (!best || i.path.length > best.len)) {
+        best = { label: g.label, len: i.path.length };
+      }
+    }
+  }
+  return best ? best.label : null;
 }

@@ -113,9 +113,9 @@ var fanvilKeys = map[string]keyModel{
 // carries "--Dsskey Config1--:", "--Dsskey Config2--:" and so on.
 const fanvilSection = "Dsskey"
 
-// normModel upper-cases a model and drops spaces, dashes and the vendor
+// keyModelName upper-cases a model and drops spaces, dashes and the vendor
 // prefix phones add ("SIP-T54W", "snomD785").
-func normModel(v Vendor, model string) string {
+func keyModelName(v Vendor, model string) string {
 	m := strings.ToUpper(strings.Map(func(r rune) rune {
 		switch r {
 		case ' ', '-', '_', '.':
@@ -150,7 +150,7 @@ type blfSlot struct {
 // blfSlots lists the keys a BLF can take on the model, in the order they are
 // filled. bounded is false for a model not in the table.
 func blfSlots(v Vendor, model string) (slots []blfSlot, bounded bool) {
-	m := normModel(v, model)
+	m := keyModelName(v, model)
 	switch v {
 	case Yealink:
 		km, ok := yealinkKeys[yealinkFamilyRE.FindString(m)]

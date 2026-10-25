@@ -363,13 +363,20 @@ func newEnvWith(t *testing.T, s *fakeStore, mkLimiter func(*slog.Logger) *Limite
 	}
 	e.l = mkLimiter(log)
 	opt := Options{PublicURL: e.s.public, TrustedProxies: []netip.Prefix{trustedProxy}, Resync: 24 * time.Hour,
-		Audit: e.audit, Metrics: e.m, Log: log}
+		Audit: e.audit, Metrics: e.m, Log: log, RenderBudget: testRenderBudget}
 	for _, f := range mod {
 		f(&opt)
 	}
 	e.h = NewHandler(e.s, e.l, e.o, opt)
 	return e
 }
+
+// testRenderBudget replaces the 100 ms render deadline in tests that assert
+// what a request returns, not how fast it renders: a CPU-starved CI runner
+// (CFS throttling, parallel test binaries) can stall a render past 100 ms of
+// wall clock, and the handler then answers an empty 404 render_error. The
+// deadline itself is asserted in TestTemplateResolutionAndValidation with a 1 ns budget.
+const testRenderBudget = 10 * time.Second
 
 type syncWriter struct{ w *bytes.Buffer }
 

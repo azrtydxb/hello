@@ -10,8 +10,12 @@
     <user_realname idx="1" perm="R">{{xml .Line.DisplayName}}</user_realname>
     <user_idle_text idx="1" perm="R">{{xml .Line.AccountLabel}}</user_idle_text>
     <user_expiry idx="1" perm="R">{{.Server.Expiry}}</user_expiry>
+{{- /* HD voice: codec_priority_list of identity 1 in order of preference (Snom Service Hub, codec_priority_list; D3xx/D7xx/D8xx): G.722, Opus (D7xx and D8xx), PCMU, PCMA, then telephone-event for DTMF. Another identity of a multi-line model has the same setting with its own idx. Unverified on hardware (verify). */}}
+    <codec_priority_list idx="1" perm="R">g722,{{if .Codecs.Opus}}opus,{{end}}pcmu,pcma,telephone-event</codec_priority_list>
 {{- /* MWI (spec S-1): user_mailbox names the mailbox the phone ties MWI to and dials for voicemail (Snom Service Hub, user_mailbox, D-series); Snom documents no separate subscribe flag. Unverified on hardware (lab item 1). */}}
     <user_mailbox idx="1" perm="R">{{xml (or .Line.VoicemailCode "*97")}}</user_mailbox>
+{{- /* Call waiting (phone-feature-parity S-18): call_waiting per line is on (waiting tone), visual (no tone) or off; Hello writes on or off from the extension's flag. Key and values as in Snom's own settings reference and the Tancredi snom template. Unverified on hardware (verify, lab item 26). */}}
+    <call_waiting idx="1" perm="R">{{if .Line.CallWaiting}}on{{else}}off{{end}}</call_waiting>
     <admin_mode_password perm="R">{{xml .Phone.AdminPassword}}</admin_mode_password>
 {{- /* Web UI password. admin_mode_password is the keypad/admin-mode PIN only. The D3xx/D7xx web UI is protected by http_user with http_pass (Snom Service Hub, http_user and http_pass); the D86x/D89x replace them with webserver_admin_password (Hub, since 10.1.115.0). The same per-phone password every other vendor gets (Phone.AdminPassword). */}}
     <http_user perm="R">admin</http_user>

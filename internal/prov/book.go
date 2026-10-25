@@ -119,7 +119,7 @@ func (h *handler) serveBook(w http.ResponseWriter, r *http.Request, ev *event, r
 	ctx := r.Context()
 	ev.rec.Kind = KindPhonebook
 	ev.rec.MACClaimed = ""
-	f, ok := phonebook.FormatFor(string(rec.Vendor))
+	f, ok := phonebook.FormatForModel(string(rec.Vendor), rec.Model)
 	if !ok {
 		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
 		return
@@ -166,6 +166,8 @@ func (h *handler) bookBody(ctx context.Context, w http.ResponseWriter, ev *event
 		h.outage(w, ev, "delivered version", err)
 		return nil, false
 	}
+	// The capacity depends on the model, so it is part of the version.
+	v.Key += "\x00max:" + strconv.Itoa(f.MaxEntries)
 	key := bookCacheKey(string(rec.Vendor), slot, v, rec.ID)
 	if body, ok := h.opt.BookCache.Get(ctx, key); ok {
 		return body, true
@@ -204,7 +206,7 @@ func (h *handler) renderBook(ctx context.Context, w http.ResponseWriter, ev *eve
 		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
 		return nil, false
 	}
-	body, truncated, err := phonebook.Render(string(rec.Vendor), phonebook.Merge(books))
+	body, truncated, err := phonebook.RenderBooks(string(rec.Vendor), rec.Model, books)
 	if err != nil || len(body) > MaxBookBytes {
 		h.opt.Log.Error("provisioning: directory not served", "phone", rec.ID, "vendor", rec.Vendor, "bytes", len(body), "error", err)
 		h.empty(w, ev, http.StatusNotFound, ResultRenderError)

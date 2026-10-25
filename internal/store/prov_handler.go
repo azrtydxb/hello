@@ -189,10 +189,10 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	)
 	err := s.db.QueryRowContext(ctx, `
 		SELECT p.mac, p.vendor, p.model, p.label, p.token_enc, p.admin_password_enc, p.template_id, p.blf,
-		       d.id, d.sip_username, d.secret_enc, e.name, e.number
+		       d.id, d.sip_username, d.secret_enc, e.name, e.number, COALESCE(e.call_waiting, TRUE)
 		FROM phones p LEFT JOIN devices d ON d.id = p.device_id LEFT JOIN extensions e ON e.id = d.extension_id
 		WHERE p.id = $1`, phoneID).Scan(&d.Phone.MAC, &d.Phone.Vendor, &d.Phone.Model, &d.Phone.Label, &tokenEnc, &adminEnc,
-		&tplID, &blfJSON, &devID, nullStr(&d.Line.Username), &secEnc, nullStr(&d.Line.DisplayName), nullStr(&d.Line.Label))
+		&tplID, &blfJSON, &devID, nullStr(&d.Line.Username), &secEnc, nullStr(&d.Line.DisplayName), nullStr(&d.Line.Label), &d.Line.CallWaiting)
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, prov.Template{}, prov.ErrNotFound
 	}
@@ -207,6 +207,7 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	}
 	d.Phone.MACUpper = strings.ToUpper(d.Phone.MAC)
 	d.Phone.PTTCapable = prov.SupportsPTT(d.Phone.Vendor, d.Phone.Model)
+	d.Codecs = prov.NewCodecInfo(d.Phone.Vendor, d.Phone.Model)
 	token, err := s.openToken(phoneID, tokenEnc)
 	if err != nil {
 		return d, prov.Template{}, err
@@ -220,6 +221,15 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	d.Line.AuthName, d.Line.Domain = d.Line.Username, s.prov.Domain
 	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(min(code), '') FROM feature_codes WHERE action = 'voicemail' AND argument = ''`).
 		Scan(&d.Line.VoicemailCode); err != nil {
+		return d, prov.Template{}, err
+	}
+	// Park and park-retrieve codes: empty until those feature actions exist
+	// (the phone then keeps its own empty setting).
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(min(code) FILTER (WHERE action = 'park'), ''), COALESCE(min(code) FILTER (WHERE action = 'park_retrieve'), '') FROM feature_codes`).
+		Scan(&d.Line.ParkCode, &d.Line.ParkRetrieveCode); err != nil {
+		return d, prov.Template{}, err
+	}
+	if d.Emergency, err = s.emergencyNumbers(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
 	if d.Codes, err = s.featureCodes(ctx); err != nil {
@@ -259,6 +269,27 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		return d, prov.Template{}, prov.ErrNoTemplate
 	}
 	return d, t, nil
+}
+
+// emergencyNumbers lists the numbers of the enabled emergency-flagged
+// outbound routes that match by prefix and are plain dial strings, comma
+// separated: the phone dials these without the usual dial-plan delay. A
+// regex route has no fixed number to hand the phone and is skipped.
+func (s *Store) emergencyNumbers(ctx context.Context) (string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT match FROM outbound_routes WHERE emergency AND enabled AND match_kind = 'prefix' ORDER BY position, id`)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	var nums []string
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return "", err
+		}
+		nums = prov.AddEmergencyNumber(nums, m)
+	}
+	return strings.Join(nums, ","), rows.Err()
 }
 
 // nullStr scans a nullable text column into s ("" for NULL).

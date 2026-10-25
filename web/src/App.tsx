@@ -26,8 +26,10 @@ import {
   EXACT_PATHS,
   NAV_ITEMS,
   navGroupsFor,
+  activeGroupLabel,
   pageTitle,
 } from "./nav";
+import { useNavGroups } from "./useNavGroups";
 import { AIAccess } from "./pages/AIAccess";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
@@ -61,6 +63,7 @@ import { usePolling } from "./usePolling";
 import { usePlatformBadges } from "./pages/platform/ui";
 import { Recordings } from "./pages/Recordings";
 import { Announcements } from "./pages/Announcements";
+import { VoiceSettings } from "./pages/VoiceSettings";
 import { Registrations } from "./pages/Registrations";
 import { RouteTest } from "./pages/RouteTest";
 import { RoutesPage } from "./pages/Routes";
@@ -91,6 +94,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/recordings": Recordings,
   "/announcements": Announcements,
   "/system": System,
+  "/settings/voice": VoiceSettings,
   "/routes/test": RouteTest,
   "/ai": AIAccess,
   "/ai/assistant": AIAssistant,
@@ -118,6 +122,15 @@ function Shell() {
   const title = pageTitle(location.pathname);
   // Call detail belongs to Call history in the nav.
   const historyDetail = /^\/history\/[^/]+$/.test(location.pathname);
+
+  const navGroups = navGroupsFor(
+    state.status === "signedIn" ? state.role : undefined,
+    aiEnabled,
+  );
+  const { isExpanded, toggle } = useNavGroups(
+    state.status === "signedIn" ? state.username : "",
+    activeGroupLabel(navGroups, location.pathname),
+  );
 
   function onLogout() {
     // Leave first, so the sign-in page carries no ?next= back into the app.
@@ -148,11 +161,14 @@ function Shell() {
         onSignOut={onLogout}
       >
         <SidebarNav label="Primary">
-          {navGroupsFor(
-            state.status === "signedIn" ? state.role : undefined,
-            aiEnabled,
-          ).map((group) => (
-            <SidebarNavGroup key={group.label} label={group.label}>
+          {navGroups.map((group) => (
+            <SidebarNavGroup
+              key={group.label}
+              label={group.label}
+              expanded={isExpanded(group.label)}
+              onToggle={() => toggle(group.label)}
+              alert={group.items.some((i) => badges[i.path] != null)}
+            >
               {group.items.map((item) => (
                 // NavLink sets aria-current="page" on the active link.
                 <NavLink

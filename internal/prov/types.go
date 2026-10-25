@@ -111,6 +111,12 @@ type RenderData struct {
 	// DND and forward keys dial them; a code the PBX does not define is
 	// empty.
 	Codes FeatureCodes
+	// Codecs is the HD voice codec plan: G.722 first, Opus where the model
+	// has it, then PCMU and PCMA (see CodecInfo).
+	Codecs CodecInfo
+	// Emergency is the comma-separated emergency numbers of Hello's
+	// emergency-flagged outbound routes (digits only), empty when none.
+	Emergency string
 }
 
 // Phone is the phone itself, as templates and resolution see it.
@@ -124,6 +130,13 @@ type Phone struct {
 	// PTTCapable is set for a phone with the PTT and group paging feature
 	// set (SupportsPTT): the Grandstream WP816, WP826 and WP836.
 	PTTCapable bool
+	// CWInverted is set for the Grandstream WP856, whose published template
+	// reads P26063 the other way round (1 = off, 2 = on). Render fills it
+	// from Vendor and Model.
+	CWInverted bool
+	// Family is the Grandstream WP family of the model ("8x6", "856",
+	// "8xx"), empty for any other phone. Render fills it from Model.
+	Family string
 }
 
 // Line is the SIP account of the phone's bound device.
@@ -141,6 +154,14 @@ type Line struct {
 	// VoicemailCode is the feature code the message key dials (spec S-5);
 	// empty when no voicemail feature code is configured.
 	VoicemailCode string
+	// CallWaiting is the extension's call-waiting flag (spec S-18): the
+	// templates write the phone's own call-waiting (and tone) setting from
+	// it, so the phone and Hello agree about a second call. False means the
+	// phone must not announce one.
+	CallWaiting bool
+	// ParkCode and ParkRetrieveCode are the call-park and park-retrieve
+	// feature codes, empty when none is configured.
+	ParkCode, ParkRetrieveCode string
 }
 
 // Server is the registrar the phone registers with.

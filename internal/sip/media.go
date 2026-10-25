@@ -53,6 +53,22 @@ type recording struct {
 	rec     *media.Recorder
 	by      string // dtmf, default, api
 	started time.Time
+	// codecs are the call's negotiated audio codecs: the recorder needs
+	// them to decode a dynamic payload type (Opus).
+	codecs []media.Codec
+}
+
+// setCodecs records the call's negotiated codecs, for the recorder running
+// now and any later one.
+func (r *recording) setCodecs(codecs []media.Codec) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.codecs = append([]media.Codec(nil), codecs...)
+	if r.rec != nil {
+		for _, c := range r.codecs {
+			r.rec.SetCodec(c)
+		}
+	}
 }
 
 // start activates the recording; false when it already ran (one recording
@@ -65,6 +81,9 @@ func (r *recording) start(by string) bool {
 	}
 	r.active = true
 	r.rec = media.NewRecorder()
+	for _, c := range r.codecs {
+		r.rec.SetCodec(c)
+	}
 	r.by = by
 	r.started = time.Now()
 	return true
@@ -83,8 +102,9 @@ func (r *recording) stop() (*media.Recorder, string) {
 	return rec, by
 }
 
-// capture is the relay's packet tap: active recording, not held, G.711 or
-// pass-through payload.
+// capture is the relay's packet tap: active recording, not held; the
+// recorder decodes G.711, G.722 and Opus and stores any other payload
+// pass-through.
 func (r *recording) capture(leg string, pkt *media.RTPPacket) {
 	r.mu.Lock()
 	rec, active := r.rec, r.active
@@ -215,7 +235,10 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 		c.anchorFailed("bind leg a", err)
 		return
 	}
-	relay.SetPayloadTypes(legCaller, off.PayloadType, off.DTMFPayloadType)
+	// Until the callee answers, both legs carry whatever the caller offered
+	// (supported codecs only); the answer narrows them (applyNegotiated).
+	offered := off.Filter(nil)
+	relay.SetCodecs(legCaller, offered.Codecs, offered.DTMFPayloadType)
 	relay.SetTarget(legCaller, udpAddr(off.Address, off.Port))
 	portB, err := relay.AddLeg(legCallee)
 	if err != nil {
@@ -223,7 +246,7 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 		c.anchorFailed("bind leg b", err)
 		return
 	}
-	relay.SetPayloadTypes(legCallee, off.PayloadType, off.DTMFPayloadType)
+	relay.SetCodecs(legCallee, offered.Codecs, offered.DTMFPayloadType)
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
 	c.mu.Lock()
@@ -232,7 +255,7 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	trigger := c.policyTrigger
 	c.relay = relay
 	c.mediaMode = "anchored"
-	c.rec = &recording{}
+	c.rec = &recording{codecs: offered.Codecs}
 	c.mu.Unlock()
 	if trigger == AnchorNone {
 		c.addTrace(fmt.Sprintf("Media anchored (%s)", reason))
@@ -290,25 +313,97 @@ func (c *call) recTap(leg string, pkt *media.RTPPacket) {
 	}
 }
 
-// anchoredAnswerA is the SDP answer for the caller: the anchor's leg-a
-// port with the offer's negotiated payload types.
-func (c *call) anchoredAnswerA(offer media.AudioSDP) []byte {
+// anchoredAnswerA is the SDP answer for the caller: the anchor's leg-a port
+// with the codec the callee chose (calleeAnswer, the parsed 200 of the B
+// leg; the zero value when there is none, as for a call Hello answers
+// itself, in which case the answer is G.722 if the caller offered it, else
+// G.711). The negotiated codecs are noted for the relay and the recording
+// tap.
+func (c *call) anchoredAnswerA(offer, calleeAnswer media.AudioSDP) []byte {
 	r := c.relay
 	if r == nil {
 		return nil
 	}
-	port := r.LegPort(legCaller)
-	return media.BuildAudioSDP(c.anchorHost, port, offer.PayloadType, offer.DTMFPayloadType, offer.DTMFRate)
+	ans := media.AnswerFor(offer, calleeAnswer)
+	c.applyNegotiated(ans)
+	return ans.Build(c.anchorHost, r.LegPort(legCaller), "sendrecv")
 }
 
-// anchoredOfferB is the SDP offer for a B leg: the anchor's leg-b port.
-func (c *call) anchoredOfferB(offer media.AudioSDP) []byte {
+// applyNegotiated records the codecs the call settled on: the relay's two
+// legs, the recording tap and the replicated dialog state all follow.
+func (c *call) applyNegotiated(ans media.AudioSDP) {
+	c.mu.Lock()
+	c.negotiated = ans
+	r, rec := c.relay, c.rec
+	c.mu.Unlock()
+	if r != nil {
+		r.SetCodecs(legCaller, ans.Codecs, ans.DTMFPayloadType)
+		r.SetCodecs(legCallee, ans.Codecs, ans.DTMFPayloadType)
+	}
+	if rec != nil {
+		rec.setCodecs(ans.Codecs)
+	}
+}
+
+// negotiatedOr is the codec set the call runs on: what applyNegotiated
+// recorded, else the first codec of offer (a call that has not been
+// answered yet).
+func (c *call) negotiatedOr(offer media.AudioSDP) media.AudioSDP {
+	c.mu.Lock()
+	n := c.negotiated
+	c.mu.Unlock()
+	if len(n.Codecs) > 0 {
+		return n
+	}
+	return offer.Narrow(offer.PayloadType)
+}
+
+// midCallOffer reduces a re-INVITE's offer to the codec the call is running
+// (hold, resume and refreshes keep it; a re-INVITE that drops the codec
+// switches the whole call to its first supported one), and notes it.
+func (c *call) midCallOffer(offer media.AudioSDP) media.AudioSDP {
+	c.mu.Lock()
+	pt := c.negotiated.PayloadType
+	c.mu.Unlock()
+	n := offer.Narrow(pt)
+	c.applyNegotiated(n)
+	return n
+}
+
+// legCodecs is the codec allow-list offered to a B leg: a trunk's own list
+// (G.711 unless the operator allowed more), nil (every supported codec) for
+// phones and URI destinations.
+func legCodecs(l *leg) []string {
+	if l == nil || l.trunk == nil {
+		return nil
+	}
+	if len(l.trunk.Codecs) == 0 {
+		return media.DefaultTrunkCodecs
+	}
+	return l.trunk.Codecs
+}
+
+// anchoredOfferB is the SDP offer for a B leg: the anchor's leg-b port with
+// the caller's codec list filtered to what the leg may be offered (the
+// caller's order, rtpmap and fmtp lines kept). When the filter leaves
+// nothing (a G.722-only caller calling a G.711-only trunk) the offer is
+// the caller's unfiltered list: the callee decides.
+func (c *call) anchoredOfferB(offer media.AudioSDP, allow []string) []byte {
 	r := c.relay
 	if r == nil {
 		return nil
 	}
-	port := r.LegPort(legCallee)
-	return media.BuildAudioSDP(c.anchorHost, port, offer.PayloadType, offer.DTMFPayloadType, offer.DTMFRate)
+	return filteredOffer(offer, allow).Build(c.anchorHost, r.LegPort(legCallee), "sendrecv")
+}
+
+// filteredOffer is offer restricted to allow, or to every supported codec
+// when that leaves nothing.
+func filteredOffer(offer media.AudioSDP, allow []string) media.AudioSDP {
+	f := offer.Filter(allow)
+	if len(f.Codecs) == 0 {
+		f = offer.Filter(nil)
+	}
+	return f
 }
 
 // isAnchored reports whether the call's media anchors (locked read).
@@ -434,8 +529,6 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 	c.relay = relay
 	c.anchored = true
 	c.mu.Unlock()
-	relay.SetPayloadTypes(legCaller, off.PayloadType, off.DTMFPayloadType)
-	relay.SetPayloadTypes(legCallee, off.PayloadType, off.DTMFPayloadType)
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
 	relay.SetTarget(legCallee, nil)
@@ -450,16 +543,22 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 		relay.Close()
 		return false
 	}
-	if ansB, ok := reinvite(w, c.anchoredOfferB(off)); ok {
+	// The call already runs on one codec: offer it, nothing else, so the
+	// two ends keep it across the move.
+	cur := c.negotiatedOr(off)
+	c.applyNegotiated(cur)
+	var calleeAns media.AudioSDP
+	if ansB, ok := reinvite(w, cur.Build(host, relay.LegPort(legCallee), "sendrecv")); ok {
 		if a, err := media.ParseAudioSDP(ansB); err == nil {
 			relay.SetTarget(legCallee, udpAddr(a.Address, a.Port))
+			calleeAns = a
 		}
 	} else {
 		relay.Close()
 		c.anchorFailed("re-anchor re-INVITE to the callee", errors.New("no answer"))
 		return false
 	}
-	if ansA, ok := reinviteA(dss, c.anchoredAnswerA(off)); ok {
+	if ansA, ok := reinviteA(dss, c.anchoredAnswerA(cur, calleeAns)); ok {
 		if a, err := media.ParseAudioSDP(ansA); err == nil {
 			relay.SetTarget(legCaller, udpAddr(a.Address, a.Port))
 		}
@@ -474,7 +573,7 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 		relay.OnFail(func(string) { m.AnchorFailures.Inc() })
 	}
 	c.mu.Lock()
-	c.rec = &recording{}
+	c.rec = &recording{codecs: c.negotiated.Codecs}
 	c.mu.Unlock()
 	c.addTrace(fmt.Sprintf("Media anchored mid-call (%s)", reason))
 	relay.Start()
@@ -595,7 +694,7 @@ func (c *call) playAnnouncementObject(obj string) {
 		c.addTrace(fmt.Sprintf("Announcement %q unavailable: skipped", obj))
 		return
 	}
-	pcm, _, err := media.DecodeWAV(raw)
+	pcm, wavRate, err := media.DecodeWAV(raw)
 	if err != nil {
 		c.addTrace(fmt.Sprintf("Announcement %q is not a WAV: skipped", obj))
 		return
@@ -604,7 +703,8 @@ func (c *call) playAnnouncementObject(obj string) {
 	pctx, pcancel := context.WithTimeout(context.Background(), time.Minute)
 	defer pcancel()
 	for _, legName := range []string{legCaller, legCallee} {
-		if err := r.PlayTo(pctx, legName, pcm); err != nil {
+		// Each leg gets the asset resampled to its own codec's rate.
+		if err := r.PlayPCMTo(pctx, legName, pcm, wavRate); err != nil {
 			c.s.log.Debug("announcement playback failed", "leg", legName, "error", err)
 		}
 	}
@@ -707,10 +807,11 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	c.setHADirs(fromCaller, dir)
 	c.haRefresh() // the hold's directions are in the snapshot before the change replicates
 	c.setHeld(dir == "sendonly" || dir == "inactive")
-	// The answer to the offer's side: our SDP with the mirrored direction.
+	// The answer to the offer's side: our SDP with the mirrored direction,
+	// on the codec the call is running.
+	off = c.midCallOffer(off)
 	ansDir := mirrorDirection(dir)
-	ans := media.BuildAudioSDPDir(c.anchorHost, c.legPortFor(fromCaller), off.PayloadType,
-		off.DTMFPayloadType, off.DTMFRate, ansDir)
+	ans := off.Build(c.anchorHost, c.legPortFor(fromCaller), ansDir)
 	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", ans)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.HeaderClone(&s.contact))
@@ -718,8 +819,7 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	// The peer gets our SDP in the same direction (a held side hears
 	// silence because the held side stopped sending).
 	peerDir := dir
-	peer := media.BuildAudioSDPDir(c.anchorHost, c.legPortFor(!fromCaller), off.PayloadType,
-		off.DTMFPayloadType, off.DTMFRate, peerDir)
+	peer := off.Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir)
 	c.mu.Lock()
 	w := c.winner
 	c.mu.Unlock()
@@ -827,7 +927,7 @@ func (c *call) announcementDestination(name string) {
 			return
 		}
 	}
-	answer := c.anchoredAnswerA(parsedOffer(c))
+	answer := c.anchoredAnswerA(parsedOffer(c), media.AudioSDP{})
 	if !c.answerSelf(answer) {
 		return
 	}

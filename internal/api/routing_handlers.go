@@ -94,6 +94,7 @@ type trunkBody struct {
 	Enabled         *bool                  `json:"enabled"`
 	Destinations    *[]routing.Destination `json:"destinations"`
 	InternalDialing *dialingBody           `json:"internalDialing"`
+	Codecs          *[]string              `json:"codecs"`
 }
 
 // dialingBody is an internalDialing request field (trunk plan contract 5).
@@ -146,6 +147,14 @@ func (b trunkBody) applyTo(in *store.TrunkInput) {
 	setIf(&in.DefaultCallerID, b.DefaultCallerID)
 	setIf(&in.Enabled, b.Enabled)
 	setIf(&in.Destinations, b.Destinations)
+	if b.Codecs != nil {
+		// Canonical spelling; validateTrunk refuses what does not normalise.
+		if canon, why := routing.NormalizeCodecs(*b.Codecs); why == "" {
+			in.Codecs = canon
+		} else {
+			in.Codecs = slices.Clone(*b.Codecs)
+		}
+	}
 }
 
 // validPassword checks a new trunk password without echoing it.
@@ -183,7 +192,8 @@ func (s *server) createTrunk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := store.TrunkInput{RegisterExpires: 3600, OptionsInterval: 30, Enabled: true, SourceCIDRs: []string{},
-		InternalDialing: store.Dialing{Mode: "off", Patterns: []string{}}}
+		InternalDialing: store.Dialing{Mode: "off", Patterns: []string{}},
+		Codecs:          slices.Clone(routing.DefaultTrunkCodecs)}
 	b.applyTo(&in)
 	if b.InternalDialing != nil {
 		d, f := dialingPolicy(b.InternalDialing)

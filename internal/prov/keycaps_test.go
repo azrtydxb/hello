@@ -234,7 +234,7 @@ func TestSnomWebPasswordAndCA(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		boot, err := renderBody(context.Background(), bootBodies[Snom].common, RenderData{Phone: d.Phone, Prov: d.Prov})
+		boot, err := renderBody(context.Background(), bootBodies[Snom].common, RenderData{Phone: d.Phone, Prov: d.Prov}, testRenderBudget)
 		if err != nil {
 			t.Fatal(err)
 		}

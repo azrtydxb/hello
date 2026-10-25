@@ -1,6 +1,7 @@
 // Media API client for the console's Voicemail, Recordings and Announcements
 // pages: the calls and fields the shared client in ../api.ts does not carry.
 
+import type { TtsRecord } from "./tts";
 import {
   list,
   recordingAudioPath,
@@ -41,6 +42,10 @@ export interface VoicemailBoxDetail {
   unreachableObject?: string;
   createdAt: string;
   updatedAt: string;
+  /** How the greeting was generated from text; null for uploaded audio. */
+  greetingTts?: TtsRecord | null;
+  /** How the unreachable greeting was generated; null for uploaded audio. */
+  unreachableTts?: TtsRecord | null;
   /** Whether this deployment can email voicemail (SMTP is configured). */
   emailDelivery?: boolean;
 }

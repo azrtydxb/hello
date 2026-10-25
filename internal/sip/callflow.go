@@ -96,6 +96,27 @@ func (c *call) ringExtension(req *sip.Request, tx sip.ServerTransaction, snap *s
 		c.record(sip.StatusGlobalDecline, cdr.SideCallee, "DND", ResultBusy)
 		return
 	}
+	if e.NoCallWaiting && c.s.busyExtensions()[ext] {
+		// Call waiting is off and the extension is in a call (S-18): its
+		// devices are not rung. The forward-busy target applies, else
+		// voicemail, else the caller hears busy.
+		s.m.Forwarded.WithLabelValues(ForwardBusy).Inc()
+		switch {
+		case e.ForwardBusy != "":
+			c.addTrace(fmt.Sprintf("Extension %s is busy and has call waiting off: forward to %s", ext, e.ForwardBusy))
+			c.forward(req, tx, snap, e.ForwardBusy, c.stages.visited)
+		case c.voicemailConfigured(e):
+			c.addTrace(fmt.Sprintf("Extension %s is busy and has call waiting off: to voicemail", ext))
+			if c.begin(req, tx) {
+				c.startVoicemail(vmLeave, "busy")
+			}
+		default:
+			c.addTrace(fmt.Sprintf("Extension %s is busy and has call waiting off: busy", ext))
+			s.respond(tx, req, sip.StatusBusyHere, statusText(sip.StatusBusyHere))
+			c.record(sip.StatusBusyHere, cdr.SideCallee, "busy (call waiting off)", ResultBusy)
+		}
+		return
+	}
 	targets := c.bindingsForDevices(tx, req, snap, ext)
 	if len(targets) > 0 {
 		// The anchoring decision (contract 2): NAT on either side

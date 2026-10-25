@@ -19,8 +19,9 @@ chart is tested against (see [How kw differs](#how-kw-differs)).
 Requirements: Kubernetes 1.27 or later, Helm 3.14 or later (4.x works), a
 node address phones can reach for Kamailio, and the images (the CI of this
 repository publishes `hello-control`, `hello-sip`, `hello-ui` and `kamailio`
-to `192.168.10.131:5000/azrtydxb`; mirror them and set
-`global.imageRegistry` for any other registry).
+to `ant.azrty.com/oci-hosted/azrtydxb`, which kw pulls from its Ant replica
+`ant.kw.watteel.lab/oci-hosted/azrtydxb`, the chart default; mirror them and
+set `global.imageRegistry` for any other registry).
 
 1. Create the credentials Secret. The chart never creates or reads
    credentials from values; it only references this Secret

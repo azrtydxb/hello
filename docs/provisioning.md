@@ -313,6 +313,29 @@ five pages). A model not in the table keeps every key, from the vendor's
 first free key, as before; Poly has no table (no limit could be cited) and
 keeps its unlimited attendant list.
 
+### HD voice codec order
+
+Every built-in template puts G.722 first, then Opus on the models that have
+it, then PCMU and PCMA, and leaves the other codecs (G.729, G.726, G.723,
+iLBC) off. Hello offers phones G.722, Opus, PCMU and PCMA only, so two phones
+that both do G.722 talk wideband and anything else falls back to G.711 (see
+[Media anchoring](media.md#codecs-hd-voice)). The keys, for account 1 (the
+account Hello provisions); another account of a multi-account model takes
+the same keys with its own number:
+
+| Vendor      | Keys                                                                                                                                                                                              |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.N.codec.g722.enable` and `.priority = 1`, then `opus`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0` |
+| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 9 (G.722), 123 (Opus, models that have it), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...) |
+| Snom        | `codec_priority_list idx="N"` = `g722,opus,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                             |
+| Fanvil      | `SIPN Voice Codec Map` = `G722,opus,G711U,G711A`                                                                                                                                                  |
+| Poly        | `voice.codecPref.G722="1"`, `.Opus="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                  |
+
+Opus is listed only for models known to support it (`internal/prov/codecs.go`);
+an unknown model gets G.722, PCMU and PCMA. The keys are from the vendors'
+administrator guides and configuration templates and are unverified on
+hardware, like the other keys marked so on this page.
+
 ### Still to verify on a phone
 
 No vendor document confirms these; the phone emulator models the documented
@@ -893,6 +916,59 @@ unverified on a phone.
   (default the system's route) with `HELLO_PAGE_MULTICAST_TTL` (1) hops, so
   that node must be on the phones' LAN: in Kubernetes, host networking or a
   secondary interface on that VLAN.
+
+## Call waiting and busy handling
+
+Each extension has a **Call waiting** switch (`callWaiting`, on by default;
+the extension's page in the console or `PATCH /api/v1/extensions/{id}`).
+
+- **On.** A call to an extension that is in a call still rings its phones,
+  and the phone shows its own call-waiting indication and tone.
+- **Off.** A call to an extension that is in a call does not ring: the caller
+  gets the extension's forward-busy target when one is set, otherwise the
+  extension's voicemail when it has one, otherwise `486 Busy Here`. An
+  extension that is not busy rings as usual.
+- **Ring groups and hunt groups** skip a member that is in a call and has
+  call waiting off, as they skip a DND member; a member with call waiting on
+  is still rung. A group left with no member follows its failure destination.
+- **Paging and intercom.** Paging already skips every member in a call (a
+  page never interrupts a call), whatever the switch says. An intercom call
+  to an extension in a call rings it as a normal call instead of
+  auto-answering, whatever the switch says; the call-waiting flag is not
+  consulted on that path. Call parking and pickup do not exist in Hello yet;
+  when they do, they must not consult the flag either (a pickup answers a
+  call that is already ringing).
+- **How busy is decided.** An extension is busy while any connected call of
+  the cluster has it as caller, as the dialled number, or as the extension
+  whose phone answered (a ring group member, a forward target). Every node
+  publishes its calls to Valkey with a heartbeat and a TTL (the same live
+  call record the dashboard and paging use), so the state is cluster-wide,
+  is released when the call ends (BYE, CANCEL, failure, takeover) and
+  expires by itself when the owning node dies. Nothing extra is counted. If
+  Valkey is unreachable the extension is treated as idle and rings.
+- **Feature codes.** `*71` turns call waiting on and `*70` turns it off for
+  the extension of the phone that dials it, like `*78` and `*79` do for DND
+  (also mid-call as DTMF). The defaults are added by migration 00026 to
+  existing installs unless the code is already used; change them under
+  System, Feature codes.
+- **Phone settings.** The built-in templates write the phone's own switch
+  and tone from the flag, so the phone and Hello agree. **A change reaches a
+  phone at its next resync** (use Resync on the Phones page, or wait for the
+  resync interval); a toggle by feature code does the same. All keys are
+  from the vendor's documentation or published configuration templates and
+  **none is confirmed on hardware yet** (lab item 26):
+
+  | Vendor      | Keys written (on / off)                                                                                                                                                                                               | Source                                                                                                                                                                                                                                       |
+  | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Grandstream | `P26063` account 1 call waiting: 1 / 2 (WP856: 2 / 1, its template reads it the other way round); `P91` phone-wide: 0 / 1; `P186` call-waiting tone: 0 / 1 (WP8x6; the WP822 template has no such key and ignores it) | `wp8x6_config_1.0.3.39` ("Enable Call Waiting", 0 Default, 1 Yes, 2 No) and `wp810_822_825_config_1.0.11.83` ("Disable Call Waiting", 0 Default, 1 No, 2 Yes) in config-template_09302026: the wording is inverted, the values mean the same |
+  | Yealink     | `call_waiting.enable` 1 / 0, `call_waiting.tone` 1 / 0                                                                                                                                                                | Yealink SIP IP Phones Administrator Guide, "Call Waiting"; the same keys in third-party provisioning templates                                                                                                                               |
+  | Snom        | `call_waiting idx=1` `on` / `off` (`visual` would show it without a tone)                                                                                                                                             | Snom settings reference and the Tancredi snom template                                                                                                                                                                                       |
+  | Poly        | `call.callWaiting.enable` 1 / 0, `call.callWaiting.ring` `beep`                                                                                                                                                       | Poly UC Software Administrator Guide; provisioning templates for VVX                                                                                                                                                                         |
+  | Fanvil      | `P1 CallWaiting` 1 / 0 and `P1 CWaiting Tone` 1 / 0 in `<CALL FEATURE MODULE>`                                                                                                                                        | Fanvil X-series exported configuration (a real phone export; the XML form is `CallWaiting` and `CWaitingTone`)                                                                                                                               |
+
+  The WP822 and WP836 call-waiting tone is the phone's own
+  (`P347` and its gain `P1555`, left at their defaults); the lab check
+  listens for it with the flag on and expects silence with it off.
 
 ## Security model and its limits
 
