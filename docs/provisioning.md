@@ -194,16 +194,20 @@ Menu names vary a little between firmware versions.
 Model T54W and the other T4x/T5x models. Files: `y000000000000.boot`
 (optional, answered `404`), the model's common file `y0000000000XX.cfg`
 (`XX` is the model ID, `96` for the T54W), then `<mac>.cfg` with the
-account; `<mac>-local.cfg` and `<mac>-contact.xml` are answered `404`. The
-User-Agent carries the MAC, which Hello checks against the phone's.
+account; `<mac>-local.cfg` and `<mac>-contact.xml` are answered `404`
+(`-contact.xml` is the phone's local contact backup, which Hello's template
+does not switch on; the address book is a remote phonebook, see
+[Address books](#address-books)). The User-Agent carries the MAC, which
+Hello checks against the phone's.
 
 ### Poly
 
 VVX (UC Software) and Edge E / CCX (PolyOS). The phone asks for
 `<mac>.cfg`, which Hello serves as a per-MAC master naming
 `<mac>-hello.cfg`; a phone that falls back to `000000000000.cfg` gets the
-same. The phone's own uploads (`<mac>-phone.cfg`, logs) are accepted and
-discarded.
+same. The phone's own uploads (`<mac>-phone.cfg`, logs, and a `PUT` of
+`<mac>-directory.xml`) are accepted and discarded; a `GET` of
+`<mac>-directory.xml` is the phone's address book.
 
 ### Grandstream
 
@@ -329,36 +333,99 @@ The token in the per-device URL is the phone's credential.
 
 ## Address books
 
-Hello keeps the contact data that phones will show as a directory. This
-part is the data and its API; phones are not yet pointed at a directory, so
-nothing changes on a phone until delivery lands.
+Hello keeps the contact data that phones show as a directory, and serves it
+to each phone in its vendor's remote phonebook XML over the provisioning
+endpoint, with the phone's own token. Manage it under **Phonebooks** and
+**Phones > Groups** in the console, or through the API below.
 
 - **Books.** The **company** book and the **extensions** book exist once.
   The extensions book is computed from the extensions (name and number) and
-  is read-only; hide an extension from it with `directoryHidden` on the
-  extension (`PATCH /api/v1/extensions/{id}`). **Named** books are created
-  by an admin (at most 100). An entry has a first name, last name, company
-  (any one is enough), one to three numbers labelled `work`, `mobile`,
-  `home` or `other`, and a note; a book holds at most 5,000 entries.
+  is read-only; hide an extension from it with the switch on the Phonebooks
+  page or `directoryHidden` on the extension
+  (`PATCH /api/v1/extensions/{id}`). **Named** books are created by an admin
+  (at most 100). An entry has a first name, last name, company (any one is
+  enough), one to three numbers labelled `work`, `mobile`, `home` or
+  `other`, and a note; a book holds at most 5,000 entries.
 - **Who can do what.** Viewers read books, entries and groups. Operators
   also change the entries of the company and named books and import and
   export CSV. Admins also create, rename and delete books, and manage phone
   groups.
 - **Phone groups** decide which books a phone is delivered: the extensions
-  and company books (on by default) and up to five named books, in order.
-  Put a phone in a group with `groupId` on `PATCH /api/v1/phones/{id}`.
+  and company books (on by default) and up to five named books, in order. A
+  phone with no group gets the extensions and company books. Put a phone in
+  a group in its form (**Phone group**), with `groupId` on
+  `POST /api/v1/phones` or `PATCH /api/v1/phones/{id}`.
 - **Link a user to an extension** with `extensionId` on
   `PATCH /api/v1/users/{id}` (admin; one user per extension). It is what
-  ties a user's personal contacts to the phones of that extension.
-- **CSV.** `POST /api/v1/phonebooks/{id}/import` takes a multipart `file`
-  with the header `first_name,last_name,company,work,mobile,home,other,note`
-  (UTF-8 with or without a byte order mark, comma or semicolon, up to 2 MiB
-  and 5,000 rows). `dry_run=true` reports every failing row with its row,
-  column and reason and writes nothing; an import is all or nothing, and
-  `mode=replace` swaps the book's content instead of appending.
-  `GET /api/v1/phonebooks/{id}/export` writes the same format; a cell
-  starting with `=`, `+`, `-` or `@` gets a leading apostrophe so a
-  spreadsheet does not evaluate it, and the import removes it again.
+  will tie a user's personal contacts to the phones of that extension;
+  personal books are not delivered yet.
+- **CSV.** On the Phonebooks page, **Import CSV** checks the file first
+  (every failing row with its row, column and reason) and imports only a
+  clean file; **Export CSV** downloads the book. Over the API,
+  `POST /api/v1/phonebooks/{id}/import` takes a multipart `file` with the
+  header `first_name,last_name,company,work,mobile,home,other,note` (UTF-8
+  with or without a byte order mark, comma or semicolon, up to 2 MiB and
+  5,000 rows). `dry_run=true` reports every failing row and writes nothing;
+  an import is all or nothing, and `mode=replace` swaps the book's content
+  instead of appending. `GET /api/v1/phonebooks/{id}/export` writes the same
+  format; a cell starting with `=`, `+`, `-` or `@` gets a leading
+  apostrophe so a spreadsheet does not evaluate it, and the import removes
+  it again.
+
+### How phones get the directory
+
+A phone's directory is the union of its books in order (extensions,
+company, the group's named books); a number already in an earlier book is
+dropped from a later one. The built-in templates point each phone at it, so
+a phone that already provisions from Hello picks it up on its next
+configuration fetch; nothing is typed into the phone.
+
+The directory is `GET https://<provisioning host>/p/<token>/pb/<n>.xml`
+(slot `0` is every book merged; slots `1` to `5` are the books separately,
+for Yealink). It follows the same rules as the other per-device files: the
+token, HTTPS, the phone and its device enabled, the rate limit per source
+address, an `ETag` (a `304` on `If-None-Match`) and an empty `404` for any
+denial, and the fetch shows in the phone's fetch log with the kind
+`phonebook`. The slot is mapped to books through the token's phone, so a
+phone cannot ask for another group's book. The output is sorted by last
+name, first name and number, so it is byte-identical for the same data.
+Text is XML-escaped, control characters are dropped and a name is cut to
+the vendor's limit.
+
+A phone with no books is given no directory settings. A directory above
+2 MiB is not served (an empty `404`, with a log line), so the phone keeps
+what it has.
+
+|                  | Yealink                                                                                                                                               | Poly                                                                      | Grandstream                                                              | Snom                             | Fanvil                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------- | ----------------------------------------------------------------------------- |
+| Format           | `YealinkIPPhoneDirectory`                                                                                                                             | `directory` / `item_list`                                                 | `AddressBook`                                                            | `SnomIPPhoneDirectory`           | `IPPhoneDirectory`                                                            |
+| Settings written | `features.remote_phonebook.enable = 1`, `remote_phonebook.data.N.url` / `.name` (N 1 to 5; unused ones empty), `features.remote_phonebook.flash_time` | `dir.local.readonly = 1`; the phone requests `<mac>-directory.xml` itself | `P330 = 3` (HTTPS), `P331` (host and path), `P332` (minutes), `P333 = 1` | `dkey_directory = url <URL>`     | `<PHONEBOOK CONFIG MODULE>` with `Remote Phonebook1 URL`, `Name` and `Update` |
+| Refresh          | `flash_time` (seconds)                                                                                                                                | at boot and at the provisioning re-check                                  | `P332`                                                                   | when the directory key is opened | `Update` (minutes)                                                            |
+| Sources          | up to 5 (a sixth book and later are merged into the fifth)                                                                                            | one merged file                                                           | one merged file                                                          | one merged file                  | one merged file                                                               |
+| Name limit       | 99                                                                                                                                                    | 40                                                                        | 64                                                                       | 64                               | 64                                                                            |
+| Capacity         |                                                                                                                                                       |                                                                           | 1,000 entries (WP8x6)                                                    |                                  |                                                                               |
+
+Where a vendor holds one number per entry (Poly, Snom, Fanvil), an entry
+with several numbers becomes one record per number; Snom and Fanvil add the
+label to the name (`Tom Smith (mobile)`). Past 1,000 entries a Grandstream
+directory keeps the first 1,000 of the delivery order (extensions, company,
+group books), so earlier books win, and logs it.
+
+**Not yet confirmed on a phone.** The keys come from the vendor guides
+(Yealink Auto Provisioning Guide, "remote phonebook"; Poly UC Software
+Administrator Guide, "contact directory"; Grandstream GXP/GRP/WP phonebook
+XML and provisioning guides, P330 to P333; snom wiki, "XML directory" and
+`dkey_directory`; Fanvil auto-provisioning guide, remote phonebook) and have
+not been checked on real phones yet. Treat these as **verify**: the Poly
+reload behaviour after a change, the Yealink `flash_time` range (the phone
+may only accept a minimum of an hour and ignore a shorter interval), the
+Grandstream P-values (P331 without the `https://` scheme, P333), the Snom
+`dkey_directory` setting, and the whole Fanvil section name and keys. If a
+phone shows no directory, look at its fetch log: no `phonebook` request means
+the key is wrong for that model; correct it in a copy of the built-in
+template (the directory itself does not change). `HELLO_PROV_BOOK_REFRESH`
+(default `15m`, at least `1m`) sets the refresh interval where the phone
+has such a setting.
 
 ## Security model and its limits
 

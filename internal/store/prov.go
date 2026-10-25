@@ -38,12 +38,14 @@ type ProvSettings struct {
 	// SIPServer is the host:port rendered configs register with.
 	SIPServer string
 	// Domain is HELLO_SIP_DOMAIN.
-	Domain     string
-	Expiry     time.Duration
-	Resync     time.Duration
-	Timezone   string
-	NTP        string
-	TokenGrace time.Duration
+	Domain string
+	Expiry time.Duration
+	Resync time.Duration
+	// BookRefresh is HELLO_PROV_BOOK_REFRESH; zero means 15 minutes.
+	BookRefresh time.Duration
+	Timezone    string
+	NTP         string
+	TokenGrace  time.Duration
 	// CACertFile is HELLO_PROV_CA_CERT, read per render into
 	// ProvInfo.CACertPEM.
 	CACertFile string
@@ -241,7 +243,9 @@ type PhoneInput struct {
 	BLF         []string
 	Enabled     bool
 	TemplateID  *int64
-	Realm       string
+	// GroupID is the phone group the phone belongs to, nil for none.
+	GroupID *int64
+	Realm   string
 }
 
 // CreatedPhone is a new phone with the one thing shown once: its token.
@@ -350,6 +354,15 @@ func (s *Store) createPhone(ctx context.Context, tx *sql.Tx, actor string, in Ph
 	if err := checkPhoneRefs(ctx, tx, in.BLF, in.TemplateID); err != nil {
 		return out, err
 	}
+	if in.GroupID != nil {
+		var one int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1`, *in.GroupID).Scan(&one); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return out, fieldError("groupId", "no such phone group")
+			}
+			return out, err
+		}
+	}
 	var id int64
 	if err := tx.QueryRowContext(ctx, `SELECT nextval('phones_id_seq')`).Scan(&id); err != nil {
 		return out, err
@@ -375,10 +388,10 @@ func (s *Store) createPhone(ctx context.Context, tx *sql.Tx, actor string, in Ph
 	blf, _ := json.Marshal(nonNil(in.BLF))
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO phones (id, mac, serial, vendor, model, label, device_id, template_id, blf, enabled,
-		                    token_hash, token_enc, admin_password_enc, redirect_status)
-		VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+		                    token_hash, token_enc, admin_password_enc, redirect_status, group_id)
+		VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
 		id, in.MAC, in.Serial, in.Vendor, in.Model, in.Label, devID, in.TemplateID, string(blf), in.Enabled,
-		hash, tokenEnc, adminEnc, string(statusJSON)); err != nil {
+		hash, tokenEnc, adminEnc, string(statusJSON), in.GroupID); err != nil {
 		return out, err
 	}
 	p, err := scanPhone(tx.QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1`, id))

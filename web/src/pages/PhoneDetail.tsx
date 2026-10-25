@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { errorMessage } from "../api";
 import {
   getPhone,
@@ -205,6 +205,17 @@ export function PhoneDetail() {
                     phone.templateId === null
                       ? "Automatic"
                       : `Override #${phone.templateId}`,
+                },
+                {
+                  label: "Phone group",
+                  value:
+                    phone.groupId == null ? (
+                      "None"
+                    ) : (
+                      <Link to="/phones/groups">
+                        Group #{String(phone.groupId)}
+                      </Link>
+                    ),
                 },
                 {
                   label: "BLF keys",

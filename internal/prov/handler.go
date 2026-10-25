@@ -104,6 +104,8 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveCA(w, r, ev, rest)
 	case seg == "boot":
 		h.serveBoot(ctx, w, ev, name)
+	case strings.HasPrefix(name, "pb/") && readOnly:
+		h.serveBookSlot(w, r, ev, seg, strings.TrimPrefix(name, "pb/"), https)
 	case strings.HasPrefix(name, "fw/") && readOnly:
 		h.serveFirmware(w, r, ev, seg, strings.TrimPrefix(name, "fw/"), https)
 	default:
@@ -273,6 +275,10 @@ func (h *handler) serveDevice(w http.ResponseWriter, r *http.Request, ev *event,
 		n, _ := io.Copy(io.Discard, io.LimitReader(r.Body, MaxUpload))
 		ev.rec.Bytes = n
 		h.empty(w, ev, http.StatusNoContent, ResultUploadDiscarded)
+		return
+	}
+	if kind == KindPhonebook { // Poly's <mac>-directory.xml: the merged set
+		h.serveBook(w, r, ev, rec, token, 0)
 		return
 	}
 	if kind == KindUpload || kind == KindOther {
