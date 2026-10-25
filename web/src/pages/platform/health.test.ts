@@ -4,6 +4,9 @@ import {
   clusterIssues,
   destinationConfig,
   healthChecks,
+  isGone,
+  memberState,
+  stateLabel,
   trunkIssues,
 } from "./health";
 
@@ -30,6 +33,36 @@ describe("platform health", () => {
         }),
       ),
     ).toBe(4);
+  });
+
+  it("does not count nodes that left cleanly or were replaced, but counts a crash", () => {
+    const flagged = (id: string, flag: object) =>
+      ({ id, kind: "sip", state: "OFFLINE", ...flag }) as never;
+    const left = flagged("sip-1-aaaaaaa-bbbbb", { left: true });
+    const replaced = flagged("sip-2-ccccccc-ddddd", { superseded: true });
+    const crashed = member("sip-3-eeeeeee-fffff", "OFFLINE");
+    const live = member("sip-1", "READY");
+    expect(isGone(left)).toBe(true);
+    expect(isGone(replaced)).toBe(true);
+    expect(isGone(crashed)).toBe(false);
+    // A flag on a node that is not OFFLINE means nothing.
+    expect(isGone(flagged("sip-1", { state: "READY", left: true }))).toBe(
+      false,
+    );
+    expect(memberState(left)).toBe("LEFT");
+    expect(memberState(crashed)).toBe("OFFLINE");
+    expect(stateLabel("LEFT")).toBe("Left");
+    expect(clusterIssues(cluster({ members: [live, left, replaced] }))).toBe(0);
+    expect(
+      clusterIssues(cluster({ members: [live, left, replaced, crashed] })),
+    ).toBe(1);
+    const checks = healthChecks({
+      cluster: cluster({ members: [live, left, replaced] }),
+    });
+    expect(checks.find((c) => c.id === "sip")).toMatchObject({
+      tone: "good",
+      title: "SIP nodes ready: 1 of 1",
+    });
   });
 
   it("counts trunk destinations that are down", () => {

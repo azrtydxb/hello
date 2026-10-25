@@ -10,10 +10,8 @@
     <user_realname idx="1" perm="R">{{xml .Line.DisplayName}}</user_realname>
     <user_idle_text idx="1" perm="R">{{xml .Line.Label}}</user_idle_text>
     <user_expiry idx="1" perm="R">{{.Server.Expiry}}</user_expiry>
-{{- /* MWI (spec S-1): snom subscribes to user_mailbox for message-summary; no separate subscribe flag known, verify (lab item 1). */}}
-{{- with .Line.VoicemailCode}}
-    <user_mailbox idx="1" perm="R">{{xml .}}</user_mailbox>
-{{- end}}
+{{- /* MWI (spec S-1): user_mailbox names the mailbox the phone ties MWI to and dials for voicemail (Snom Service Hub, user_mailbox, D-series); Snom documents no separate subscribe flag. Unverified on hardware (lab item 1). */}}
+    <user_mailbox idx="1" perm="R">{{xml (or .Line.VoicemailCode "*97")}}</user_mailbox>
     <admin_mode_password perm="R">{{xml .Phone.AdminPassword}}</admin_mode_password>
     <setting_server perm="R">{{xml .Prov.URL}}{mac}</setting_server>
     <prov_polling_enabled perm="R">on</prov_polling_enabled>

@@ -87,6 +87,20 @@ func TestPhonebookEndpointAuth(t *testing.T) {
 			t.Errorf("%s: %d with %d bytes", name, w.Code, w.Body.Len())
 		}
 	}
+	// A Grandstream WP822 appends /phonebook.xml to the P331 path.
+	want := e.do(req{path: devPath(tok, "pb/0.xml")}).Body.String()
+	for _, name := range []string{"pb/0.xml/phonebook.xml", "pb/0/phonebook.xml"} {
+		w = e.do(req{path: devPath(tok, name)})
+		if w.Code != http.StatusOK || w.Body.String() != want {
+			t.Errorf("%s: %d %s", name, w.Code, w.Body.String())
+		}
+	}
+	for _, name := range []string{"pb/0.xml/other.xml", "pb/0/phonebook.xml/x", "pb/6/phonebook.xml"} {
+		w = e.do(req{path: devPath(tok, name)})
+		if w.Code != http.StatusNotFound || w.Body.Len() != 0 {
+			t.Errorf("%s: %d with %d bytes", name, w.Code, w.Body.Len())
+		}
+	}
 	// Yealink's slots: 1 and 2 are the two books, 3 does not exist.
 	for slot, want := range map[string]string{"1": "Alice", "2": "Carol"} {
 		w = e.do(req{path: devPath(tok, "pb/"+slot+".xml")})

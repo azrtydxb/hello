@@ -68,6 +68,11 @@ func plural(n int, one, many string) string {
 // with the new revision as payload.
 const NotifyChannel = "hello_config"
 
+// MailboxChannel is the PostgreSQL channel a voicemail message change
+// notifies, with the box id as payload. SIP nodes LISTEN on it to send MWI
+// at once instead of waiting for their safety-net re-read.
+const MailboxChannel = "hello_mwi"
+
 // Store wraps the hello-control database.
 type Store struct {
 	db   *sql.DB

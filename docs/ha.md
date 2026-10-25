@@ -96,6 +96,22 @@ at most a third of the 4 s record TTL). The Cluster page and
 | UNHEALTHY | A required dependency (Valkey; PostgreSQL for hello-control) fails     | 503       | No              |
 | OFFLINE   | No heartbeat for 4 seconds; listed for 10 minutes                      | —         | No              |
 
+An OFFLINE node is a failure only if it crashed and nothing replaced it. The
+API marks the two harmless cases on the member, which stays OFFLINE (its
+unclaimed calls are still taken over) and listed for the 10 minutes:
+`left: true` when the node shut down cleanly (it called Leave at exit), and
+`superseded: true` when a live node of the same kind and slot started after it
+(on kw a node's ID is its pod name, so a Deployment's replacement pod has a new
+one; the slot is the ID without that generated suffix, `hello-sip-1` for both).
+kw's hello-sip-1 and hello-sip-2 now run under fixed IDs of those names, so a
+replacement process reuses the ID (its incarnation tells the processes apart,
+see the takeover rules below) and leaves no stale member at all; hello-control
+replicas still have pod-name IDs and rely on the two flags.
+The dashboard, the sidebar badge, Diagnostics, the node-health AI detector and
+`hello_cluster_members` (state `LEFT` instead of `OFFLINE`) do not alert on
+them; the Cluster page lists them as Left. A crash keeps alerting until the
+tombstone expires or a replacement starts.
+
 ## Failure table
 
 This table is normative: it is what Hello does. The Test column names the test that checks each row (`test/integration/failure_test.go` unless noted); rows marked "documented, not automated" describe behaviour no test proves yet.

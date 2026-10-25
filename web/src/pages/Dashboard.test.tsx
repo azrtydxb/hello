@@ -57,7 +57,7 @@ function cdr(id: number, status: number, from: string, to: string) {
   };
 }
 
-function routes(degraded: boolean) {
+function routes(degraded: boolean, history: object[] = []) {
   return {
     ...ME,
     ...VERSION,
@@ -92,6 +92,7 @@ function routes(degraded: boolean) {
             "Valkey state timeout",
           ),
           member("hello-control-1", "control", "READY"),
+          ...history,
         ],
         postgres: { up: true },
         valkey: { up: true, mode: "single" },
@@ -219,6 +220,38 @@ describe("Dashboard", () => {
     // Nothing is degraded, so there are no health alerts.
     expect(screen.queryByText(/is UNHEALTHY/)).toBeNull();
     expect(screen.queryByText(/is down/)).toBeNull();
+  });
+
+  it("raises no alert for nodes that left cleanly or were replaced, but one for a crash", async () => {
+    mockApi(
+      routes(false, [
+        {
+          ...member("hello-sip-1-aaaaaaa-bbbbb", "sip", "OFFLINE"),
+          left: true,
+        },
+        {
+          ...member("hello-sip-2-ccccccc-ddddd", "sip", "OFFLINE"),
+          superseded: true,
+        },
+        member("hello-sip-3-eeeeeee-fffff", "sip", "OFFLINE", "no heartbeat"),
+      ]),
+    );
+    renderApp("/");
+
+    const crash = await screen.findByText(
+      "hello-sip-3-eeeeeee-fffff is OFFLINE",
+    );
+    expect(crash.closest(".az-alert")).toHaveTextContent("no heartbeat");
+    expect(
+      screen.queryByText("hello-sip-1-aaaaaaa-bbbbb is OFFLINE"),
+    ).toBeNull();
+    expect(
+      screen.queryByText("hello-sip-2-ccccccc-ddddd is OFFLINE"),
+    ).toBeNull();
+    // Only the crash is a node problem: the left and replaced pods are not
+    // counted among the SIP nodes either.
+    expect(screen.getByText("hello-sip-3-eeeeeee-fffff offline")).toBeVisible();
+    expect(screen.queryByText(/hello-sip-1-aaaaaaa-bbbbb/)).toBeNull();
   });
 
   it("raises the health alerts when a SIP node or a trunk destination is down", async () => {
