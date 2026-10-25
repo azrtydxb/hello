@@ -51,7 +51,11 @@ func (m *ClusterMetrics) update(ms []cluster.Member, rev *int64) {
 	defer m.mu.Unlock()
 	counts := map[[2]string]int{}
 	for _, mem := range ms {
-		counts[[2]string{string(mem.Kind), string(mem.State)}]++
+		state := string(mem.State)
+		if mem.Gone() {
+			state = "LEFT" // no failure: a state an OFFLINE alert rule does not match
+		}
+		counts[[2]string{string(mem.Kind), state}]++
 	}
 	for k, n := range counts {
 		m.Members.WithLabelValues(k[0], k[1]).Set(float64(n))

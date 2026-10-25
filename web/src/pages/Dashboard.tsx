@@ -42,6 +42,7 @@ import {
   type TableColumn,
 } from "../design/azrty/components";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
+import { activeMembers } from "./platform/health";
 import {
   callDuration,
   callState,
@@ -398,10 +399,11 @@ function DestinationsCard({
 }
 
 function NodesCard({ cluster }: { cluster?: ClusterStatus }) {
-  const sip = cluster?.members.filter((m) => m.kind === "sip") ?? [];
+  const members = activeMembers(cluster?.members ?? []);
+  const sip = members.filter((m) => m.kind === "sip");
   const ready = sip.filter((m) => m.state === "READY");
   const notReady = sip.filter((m) => m.state !== "READY");
-  const control = cluster?.members.filter(
+  const control = members.filter(
     (m) => m.kind === "control" && m.state === "READY",
   );
   let sub = "Loading…";
@@ -456,7 +458,9 @@ export function HealthAlerts({
       </Alert>,
     );
   }
-  for (const m of cluster?.members ?? []) {
+  // A node that left cleanly, or whose slot a replacement took over, is
+  // history: only a crash nobody replaced (or an UNHEALTHY node) alerts.
+  for (const m of activeMembers(cluster?.members ?? [])) {
     if (m.kind !== "sip" || (m.state !== "UNHEALTHY" && m.state !== "OFFLINE"))
       continue;
     alerts.push(

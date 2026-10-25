@@ -38,9 +38,12 @@ import {
 } from "../design/azrty/components";
 import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import {
+  activeMembers,
   ago,
   count,
+  isGone,
   lagText,
+  memberState,
   memberTone,
   stateLabel,
   type Tone,
@@ -112,8 +115,15 @@ export function Cluster() {
   const [selected, setSelected] = useState<string | null>(null);
   const returnTo = useRef<HTMLElement | null>(null);
 
-  const data: ClusterStatus | undefined =
+  const raw: ClusterStatus | undefined =
     state.status === "loading" ? undefined : state.data;
+  // Nodes that left cleanly or were replaced are history: listed below, not
+  // drawn, counted or alerted on.
+  const data: ClusterStatus | undefined = raw && {
+    ...raw,
+    members: activeMembers(raw.members),
+  };
+  const left = raw?.members.filter(isGone) ?? [];
   const extra: Around = around.status === "loading" ? {} : (around.data ?? {});
   const now = state.status === "ready" ? state.updatedAt : new Date();
 
@@ -170,6 +180,15 @@ export function Cluster() {
         </Alert>
       )}
       {data && <Topology services={services} sip={sip} onSelect={open} />}
+      {left.length > 0 && (
+        <p className="pf-notice">
+          Left (shut down cleanly or replaced):{" "}
+          {left
+            .map((m) => `${m.id} (${stateLabel(memberState(m)).toLowerCase()})`)
+            .join(", ")}
+          .
+        </p>
+      )}
       {sel && (
         <ServiceModal
           service={sel}

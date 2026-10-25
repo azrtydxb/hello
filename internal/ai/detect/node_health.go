@@ -20,8 +20,11 @@ const (
 
 // nodeSample is what one run saw of one cluster member.
 type nodeSample struct {
-	Ready     bool      `json:"ready"`
-	Offline   bool      `json:"offline"` // listed from a tombstone
+	Ready   bool `json:"ready"`
+	Offline bool `json:"offline"` // listed from a tombstone
+	// Gone: the tombstone is no failure (the node left cleanly or its slot
+	// has a live replacement), so it neither alerts nor counts as a flap.
+	Gone      bool      `json:"gone,omitempty"`
 	Reason    string    `json:"reason,omitempty"`
 	StartedAt time.Time `json:"startedAt"`
 	Lag       bool      `json:"lag"`
@@ -47,7 +50,7 @@ func nodeHealth(ctx context.Context, r *Run) ([]Candidate, error) {
 	}
 	for _, m := range members {
 		s := nodeSample{
-			Ready: m.State == cluster.Ready, Offline: m.State == cluster.Offline, Reason: m.Reason, StartedAt: m.StartedAt.UTC(),
+			Ready: m.State == cluster.Ready, Offline: m.State == cluster.Offline, Gone: m.Gone(), Reason: m.Reason, StartedAt: m.StartedAt.UTC(),
 			Lag: m.State != cluster.Offline && m.ConfigRevision > 0 && m.ConfigRevision < rev,
 		}
 		if err := r.putSample(ctx, kindNode, m.ID, s); err != nil {
@@ -74,7 +77,7 @@ func evalNode(id, kind string, ss []Sample[nodeSample], now time.Time) []Candida
 	var out []Candidate
 	cur := ss[len(ss)-1].V
 	base := func() map[string]any { return map[string]any{"node": id, "kind": kind} }
-	if from, ok := since(ss, func(s nodeSample) bool { return !s.Ready }); ok && now.Sub(from) >= nodeNotReadyFor {
+	if from, ok := since(ss, func(s nodeSample) bool { return !s.Ready && !s.Gone }); ok && now.Sub(from) >= nodeNotReadyFor {
 		sev := Warning
 		if dependencyReason(cur.Reason) {
 			sev = Critical
@@ -92,7 +95,7 @@ func evalNode(id, kind string, ss []Sample[nodeSample], now time.Time) []Candida
 	var tombs int
 	for i, s := range ss {
 		starts[s.V.StartedAt] = true
-		if s.V.Offline && (i == 0 || !ss[i-1].V.Offline) {
+		if s.V.Offline && !s.V.Gone && (i == 0 || !ss[i-1].V.Offline || ss[i-1].V.Gone) {
 			tombs++
 		}
 	}

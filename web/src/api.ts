@@ -809,6 +809,16 @@ export interface ClusterMember {
   revisionLag?: number;
   startedAt: string;
   heartbeat: string;
+  /**
+   * An OFFLINE node that shut down cleanly: history, not a failure
+   * (cluster.Member.Left).
+   */
+  left?: boolean;
+  /**
+   * An OFFLINE node whose slot a live node (its replacement pod) took over:
+   * history, not a failure (cluster.Member.Superseded).
+   */
+  superseded?: boolean;
 }
 
 /** GET /api/v1/cluster */

@@ -20,6 +20,7 @@ const STATE_TONE: Record<string, Tone> = {
   UNHEALTHY: "bad",
   JOINING: "neutral",
   OFFLINE: "neutral",
+  LEFT: "neutral",
 };
 
 /** The tone of a node's lifecycle state. */
@@ -33,6 +34,7 @@ const STATE_LABEL: Record<string, string> = {
   DRAINING: "Draining",
   UNHEALTHY: "Unhealthy",
   OFFLINE: "Offline",
+  LEFT: "Left",
 };
 
 /** "Ready", "Draining", …; an unknown state as the server sent it. */
@@ -41,12 +43,34 @@ export function stateLabel(state: string): string {
 }
 
 /**
- * Cluster problems: every node that is not READY, plus Valkey and
- * PostgreSQL when down. The sidebar's Cluster badge shows the count.
+ * A node that is OFFLINE but no failure: it shut down cleanly or a live node
+ * of its slot replaced it (a deploy's old pod). It is history, not an alert.
+ * A crash nobody replaced is not gone.
+ */
+export function isGone(m: ClusterMember): boolean {
+  return m.state === "OFFLINE" && (m.left === true || m.superseded === true);
+}
+
+/** The members that count: everything but nodes that left or were replaced. */
+export function activeMembers(
+  members: readonly ClusterMember[],
+): ClusterMember[] {
+  return members.filter((m) => !isGone(m));
+}
+
+/** A node's state for display: LEFT for a node that is gone, else its state. */
+export function memberState(m: ClusterMember): string {
+  return isGone(m) ? "LEFT" : m.state;
+}
+
+/**
+ * Cluster problems: every node that is not READY (nodes that left cleanly or
+ * were replaced are not problems), plus Valkey and PostgreSQL when down. The
+ * sidebar's Cluster badge shows the count.
  */
 export function clusterIssues(c: ClusterStatus): number {
   return (
-    c.members.filter((m) => m.state !== "READY").length +
+    activeMembers(c.members).filter((m) => m.state !== "READY").length +
     (c.valkey.up ? 0 : 1) +
     (c.postgres.up ? 0 : 1)
   );
@@ -124,7 +148,10 @@ const sipMembers = (ms: readonly ClusterMember[]) =>
  */
 export function healthChecks(input: HealthInput): HealthCheck[] {
   const out: HealthCheck[] = [];
-  const { cluster } = input;
+  const cluster = input.cluster && {
+    ...input.cluster,
+    members: activeMembers(input.cluster.members),
+  };
   const openCluster = { label: "Open cluster", to: "/cluster" };
   if (cluster) {
     const sip = sipMembers(cluster.members);
