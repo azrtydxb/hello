@@ -134,6 +134,7 @@ type Phone struct {
 	ExtensionID     *int64          `json:"extensionId"`
 	ExtensionNumber string          `json:"extensionNumber"`
 	TemplateID      *int64          `json:"templateId"`
+	GroupID         *int64          `json:"groupId"`
 	BLF             []string        `json:"blf"`
 	Enabled         bool            `json:"enabled"`
 	TokenExposed    bool            `json:"tokenExposed"`
@@ -160,23 +161,24 @@ const phoneSelect = `
 	       COALESCE(p.firmware_seen, ''),
 	       COALESCE((SELECT f.result = 'render_error' FROM prov_fetches f WHERE f.phone_id = p.id
 	                 ORDER BY f.at DESC, f.id DESC LIMIT 1), FALSE),
-	       p.created_at, p.updated_at
+	       p.created_at, p.updated_at, p.group_id
 	FROM phones p LEFT JOIN devices d ON d.id = p.device_id LEFT JOIN extensions e ON e.id = d.extension_id`
 
 func scanPhone(r interface{ Scan(...any) error }) (Phone, error) {
 	var (
 		p             Phone
 		dev, ext, tpl sql.NullInt64
+		group         sql.NullInt64
 		blf, status   []byte
 		first, last   sql.NullTime
 	)
 	err := r.Scan(&p.ID, &p.MAC, &p.Serial, &p.Vendor, &p.Model, &p.Label, &dev, &ext, &p.ExtensionNumber, &tpl,
 		&blf, &p.Enabled, &p.TokenExposed, &p.UAMismatch, &p.BootArmed, &p.BootReclaimed, &status, &first, &last,
-		&p.LastFetchIP, &p.LastFetchUA, &p.LastFetchFile, &p.FirmwareSeen, &p.RenderError, &p.CreatedAt, &p.UpdatedAt)
+		&p.LastFetchIP, &p.LastFetchUA, &p.LastFetchFile, &p.FirmwareSeen, &p.RenderError, &p.CreatedAt, &p.UpdatedAt, &group)
 	if err != nil {
 		return p, err
 	}
-	p.DeviceID, p.ExtensionID, p.TemplateID = nullInt(dev), nullInt(ext), nullInt(tpl)
+	p.DeviceID, p.ExtensionID, p.TemplateID, p.GroupID = nullInt(dev), nullInt(ext), nullInt(tpl), nullInt(group)
 	p.FirstFetchAt, p.LastFetchAt = nullTime(first), nullTime(last)
 	if err := json.Unmarshal(blf, &p.BLF); err != nil {
 		return p, fmt.Errorf("phone %d blf: %w", p.ID, err)
@@ -539,9 +541,11 @@ type PhoneChange struct {
 	BLF        *[]string
 	Enabled    *bool
 	TemplateID **int64
-	Bind       *Binding
-	Unbind     bool
-	Realm      string
+	// GroupID sets the phone group; a pointer to nil removes it.
+	GroupID **int64
+	Bind    *Binding
+	Unbind  bool
+	Realm   string
 }
 
 // Binding names the device a phone provisions: an existing one, or 0 to
@@ -572,6 +576,17 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 		}
 		if err := checkPhoneRefs(ctx, tx, blf, tpl); err != nil {
 			return sid, false, err
+		}
+		setGroup, groupArg := c.GroupID != nil, any(nil)
+		if setGroup && *c.GroupID != nil {
+			var one int
+			if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1`, **c.GroupID).Scan(&one); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return sid, false, fieldError("groupId", "no such phone group")
+				}
+				return sid, false, err
+			}
+			groupArg = **c.GroupID
 		}
 		device, bumped := cur.DeviceID, false
 		switch {
@@ -641,8 +656,10 @@ func (s *Store) UpdatePhone(ctx context.Context, actor string, id int64, c Phone
 			       vendor = $3, model = COALESCE($4, model), label = COALESCE($5, label),
 			       blf = COALESCE($6::jsonb, blf), enabled = $7,
 			       template_id = CASE WHEN $8 THEN $9::bigint ELSE template_id END,
+			       group_id = CASE WHEN $11 THEN $12::bigint ELSE group_id END,
 			       device_id = $10, updated_at = now()
-			WHERE id = $1`, id, serial, vendor, c.Model, c.Label, blfArg, enabled, setTpl, tplArg, device); err != nil {
+			WHERE id = $1`, id, serial, vendor, c.Model, c.Label, blfArg, enabled, setTpl, tplArg, device,
+			setGroup, groupArg); err != nil {
 			return sid, false, err
 		}
 		p, err = scanPhone(tx.QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1`, id))
