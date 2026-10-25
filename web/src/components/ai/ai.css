@@ -144,6 +144,13 @@
 .aix-cardlink {
   text-decoration: none;
   color: inherit;
+  /* A grid item that stretches to the row; its card fills it. */
+  display: flex;
+  min-width: 0;
+}
+.aix-cardlink > * {
+  flex: 1;
+  min-width: 0;
 }
 .aix-ops {
   margin: 0;
