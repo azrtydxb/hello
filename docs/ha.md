@@ -103,6 +103,10 @@ unclaimed calls are still taken over) and listed for the 10 minutes:
 `superseded: true` when a live node of the same kind and slot started after it
 (on kw a node's ID is its pod name, so a Deployment's replacement pod has a new
 one; the slot is the ID without that generated suffix, `hello-sip-1` for both).
+kw's hello-sip-1 and hello-sip-2 now run under fixed IDs of those names, so a
+replacement process reuses the ID (its incarnation tells the processes apart,
+see the takeover rules below) and leaves no stale member at all; hello-control
+replicas still have pod-name IDs and rely on the two flags.
 The dashboard, the sidebar badge, Diagnostics, the node-health AI detector and
 `hello_cluster_members` (state `LEFT` instead of `OFFLINE`) do not alert on
 them; the Cluster page lists them as Left. A crash keeps alerting until the

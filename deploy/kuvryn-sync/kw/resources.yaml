@@ -1083,9 +1083,10 @@ spec:
           imagePullPolicy: Always
           env:
             - name: HELLO_NODE_ID
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
+              # Fixed, not the pod name: a Deployment pod gets a new name on every
+              # rollout, which left a stale OFFLINE member per deploy. A node
+              # restarted under the same ID is told apart by its incarnation.
+              value: hello-sip-1
             - name: HELLO_DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -1301,9 +1302,10 @@ spec:
           imagePullPolicy: Always
           env:
             - name: HELLO_NODE_ID
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
+              # Fixed, not the pod name: a Deployment pod gets a new name on every
+              # rollout, which left a stale OFFLINE member per deploy. A node
+              # restarted under the same ID is told apart by its incarnation.
+              value: hello-sip-2
             - name: HELLO_DATABASE_URL
               valueFrom:
                 secretKeyRef:
