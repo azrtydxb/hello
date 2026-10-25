@@ -35,7 +35,7 @@ func (s *Service) pruneLoop(ctx context.Context) {
 // pg_try_advisory_lock(hashtext('hello:ai:prune')); ran is false when
 // another replica holds the lock.
 func (s *Service) Prune(ctx context.Context) (ran bool, err error) {
-	unlock, ok, err := s.st.TryAILock(ctx, "hello:ai:prune")
+	unlock, ok, err := s.st.TryLock(ctx, "hello:ai:prune")
 	if err != nil || !ok {
 		return false, err
 	}

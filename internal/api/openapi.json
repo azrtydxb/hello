@@ -6576,7 +6576,7 @@
                     "description": "The scopes to grant.",
                     "items": {
                       "type": "string",
-                      "enum": ["read", "write", "admin", "secrets"]
+                      "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
                     }
                   }
                 }
@@ -6905,7 +6905,7 @@
       "patch": {
         "operationId": "updateServiceAccount",
         "summary": "Change a service account",
-        "description": "Changes a service account's description, role, scopes or enabled state. Changing the role, scopes or enabled state revokes its live tokens.",
+        "description": "Changes a service account's description, role, scopes, extension limit or enabled state. Changing the role, scopes, extension limit or enabled state revokes its live tokens.",
         "tags": ["service-accounts"],
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
@@ -11816,7 +11816,7 @@
             "description": "The token's scopes, at most the caller's; absent means read, write and admin (secrets must be named).",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets"]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "expiresAt": {
@@ -11865,7 +11865,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets"]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "expiresAt": {
@@ -11914,7 +11914,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets"]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "expiresAt": {
@@ -14341,7 +14341,7 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "enum": ["read", "write", "admin", "secrets"]
+                  "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
                 },
                 "description": {
                   "type": "string"
@@ -14400,7 +14400,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets"]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "resources": {
@@ -14418,7 +14418,7 @@
             "description": "The scopes the caller's role may grant.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets"]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           }
         }
@@ -14466,7 +14466,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets"]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "resources": {
@@ -14544,7 +14544,8 @@
           "enabled",
           "createdAt",
           "lastUsedAt",
-          "secrets"
+          "secrets",
+          "extensionScope"
         ],
         "properties": {
           "id": {
@@ -14565,7 +14566,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets"]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "enabled": {
@@ -14584,6 +14585,14 @@
             "description": "Live secrets, metadata only.",
             "items": {
               "$ref": "#/components/schemas/ClientSecret"
+            }
+          },
+          "extensionScope": {
+            "type": ["array", "null"],
+            "description": "The extension numbers the account may place calls for or receive events about. null is every extension; an empty list is none.",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
             }
           }
         }
@@ -14613,12 +14622,20 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets"]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "enabled": {
             "type": "boolean",
             "description": "Default true."
+          },
+          "extensionScope": {
+            "type": ["array", "null"],
+            "description": "Limits the account to these extension numbers; omitted or null is every extension.",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            }
           }
         }
       },
@@ -14640,12 +14657,20 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets"]
+              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
             }
           },
           "enabled": {
             "type": "boolean",
             "description": "False stops its tokens on the next request."
+          },
+          "extensionScope": {
+            "type": ["array", "null"],
+            "description": "Omitted leaves the limit as it is; null removes it (every extension); a list sets it. Changing it revokes the account's live tokens.",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            }
           }
         }
       },

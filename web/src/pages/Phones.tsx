@@ -22,6 +22,7 @@ import {
   pushPhone,
   rearmPhone,
   rotatePhoneToken,
+  supportsBlf,
   updatePhone,
   VENDORS,
   vendorLabel,
@@ -826,6 +827,9 @@ function PhoneForm({
   );
   const bindsExisting =
     deviceId !== NEW_DEVICE && deviceId !== "" && deviceId !== originalDevice;
+  const blfOk = supportsBlf(vendor, model);
+  // A model without BLF keys is saved with none.
+  const blfKeys = blfOk ? blf : [];
   const blfChoices = extensions.filter((x) => !blf.includes(x.number));
 
   const idOf = (value: string): Id | undefined =>
@@ -858,7 +862,7 @@ function PhoneForm({
       const dev = idOf(deviceId);
       if (dev !== undefined) patch.deviceId = dev;
     }
-    if (JSON.stringify(blf) !== JSON.stringify(p.blf)) patch.blf = blf;
+    if (JSON.stringify(blfKeys) !== JSON.stringify(p.blf)) patch.blf = blfKeys;
     if (templateId !== String(p.templateId ?? "")) {
       patch.templateId = templateId === "" ? null : (idOf(templateId) ?? null);
     }
@@ -895,7 +899,7 @@ function PhoneForm({
           model: model.trim(),
           label,
           extensionId: ext,
-          blf,
+          blf: blfKeys,
           enabled,
         };
         if (serial.trim() !== "") input.serial = serial.trim();
@@ -1060,9 +1064,11 @@ function PhoneForm({
           </Alert>
         )}
 
-        <fieldset className="inv-blf">
+        <fieldset className="inv-blf" disabled={!blfOk}>
           <legend className="az-field__label">BLF keys</legend>
-          {blf.length === 0 ? (
+          {!blfOk ? (
+            <p className="prov-muted">This model has no BLF keys.</p>
+          ) : blf.length === 0 ? (
             <p className="prov-muted">No BLF keys.</p>
           ) : (
             <ol className="inv-blf__list" aria-label="BLF keys">

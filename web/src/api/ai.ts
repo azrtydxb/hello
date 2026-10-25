@@ -7,10 +7,33 @@ import type { Role } from "../role";
 export type { Role };
 
 /** An OAuth scope (internal/auth Scope). */
-export type Scope = "read" | "write" | "admin" | "secrets" | "session";
+export type Scope =
+  | "read"
+  | "write"
+  | "admin"
+  | "secrets"
+  | "calls"
+  | "events"
+  | "recordings"
+  | "session";
 
 /** The scopes a credential can hold, weakest first. */
-export const SCOPES: readonly Scope[] = ["read", "write", "admin", "secrets"];
+export const SCOPES: readonly Scope[] = [
+  "read",
+  "write",
+  "admin",
+  "secrets",
+  "calls",
+  "events",
+  "recordings",
+];
+
+/** The integration scopes (spec integrations I-31). */
+export const INTEGRATION_SCOPES: readonly Scope[] = [
+  "calls",
+  "events",
+  "recordings",
+];
 
 /** Plain-language lines for each scope, shown on consent and on /ai. */
 export const SCOPE_TEXT: Record<Scope, string> = {
@@ -21,6 +44,11 @@ export const SCOPE_TEXT: Record<Scope, string> = {
     "Manage credentials and the cluster: API tokens, service accounts, other users' apps, vendor redirect accounts and node drain.",
   secrets:
     "Reveal and rotate secrets in plaintext: device SIP secrets, phone provisioning tokens and phone admin passwords.",
+  calls:
+    "Place and hang up calls from your own extensions (click-to-call) and see the state of the calls you started.",
+  events:
+    "Receive live call events (ringing, answered, ended, missed) for the extensions you may see.",
+  recordings: "Create and revoke expiring links to call recordings.",
   session: "Approve or deny access requests in the console.",
 };
 
@@ -37,9 +65,9 @@ export function grantableScopes(role: Role): readonly Scope[] {
     case "admin":
       return SCOPES;
     case "operator":
-      return ["read", "write"];
+      return ["read", "write", "calls", "events", "recordings"];
     default:
-      return ["read"];
+      return ["read", "events"];
   }
 }
 
@@ -172,6 +200,8 @@ export interface ServiceAccount {
   lastUsedAt: string | null;
   /** Live secrets only. */
   secrets: ServiceSecret[];
+  /** Extension numbers the account may act for; null is every extension. */
+  extensionScope: string[] | null;
 }
 
 /** POST /api/v1/service-accounts/{id}/secrets response (schema CreatedClientSecret). */
@@ -192,6 +222,7 @@ export const createServiceAccount = (input: {
   description?: string;
   role: Role;
   scopes: Scope[];
+  extensionScope?: string[];
 }) =>
   request<ServiceAccount>("POST", "/api/v1/service-accounts", {
     body: { ...input, enabled: true },
@@ -199,7 +230,12 @@ export const createServiceAccount = (input: {
 
 export const updateServiceAccount = (
   accountId: Id,
-  patch: Partial<Pick<ServiceAccount, "enabled" | "description" | "scopes">>,
+  patch: Partial<
+    Pick<
+      ServiceAccount,
+      "enabled" | "description" | "scopes" | "extensionScope"
+    >
+  >,
 ) =>
   request<ServiceAccount>(
     "PATCH",
