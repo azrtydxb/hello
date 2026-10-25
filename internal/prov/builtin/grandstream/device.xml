@@ -30,11 +30,11 @@
          plain "Auto Answer" option (P90) is deliberately not set: it would answer every call. -->
     <P298>1</P298>
     <P2>{{xml .Phone.AdminPassword}}</P2>
-    <P212>2</P212>
+    <P212>{{urlvia .Prov.URL}}</P212>
 {{- with .Prov.CACertPEM}}
     <P8433>{{xml .}}</P8433>
 {{- end}}
-    <P237>{{xml .Prov.URL}}</P237>
+    <P237>{{xml (noscheme .Prov.URL)}}</P237>
     <P145>0</P145>
     <P194>1</P194>
     <P193>{{div .Prov.ResyncSeconds 60}}</P193>
@@ -48,10 +48,13 @@
     <P333>1</P333>
 {{- end}}
     <P30>{{xml .Time.NTP}}</P30>
-    <P246>{{xml .Time.Zone}}</P246>
+{{- with .Time.TZ.POSIX}}
+    <P64>{{xml .}}</P64>
+    <P246>{{xml .}}</P246>
+{{- end}}
 {{- with .Firmware}}
     <P6767>{{.Via}}</P6767>
-    <P192>{{xml .Dir}}</P192>
+    <P192>{{xml (noscheme .Dir)}}</P192>
     <P232></P232>
     <P233></P233>
     <P238>0</P238>

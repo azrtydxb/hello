@@ -390,7 +390,10 @@ func startPBX(t *testing.T, devices []snapshot.Device, opts ...pbxOpt) *testPBX 
 	t.Cleanup(func() {
 		cancel()
 		select {
-		case <-done:
+		case serr := <-done:
+			if serr != nil {
+				t.Logf("Serve returned at teardown: %v", serr)
+			}
 		case <-time.After(10 * time.Second):
 			t.Error("Serve did not return")
 		}

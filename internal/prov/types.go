@@ -197,10 +197,20 @@ func UpgradeVia(u string) int {
 	return 1
 }
 
+// noScheme is a URL without its scheme and trailing slashes:
+// "https://h:8/p/x/" gives "h:8/p/x".
+func noScheme(u string) string {
+	if i := strings.Index(u, "://"); i >= 0 {
+		u = u[i+3:]
+	}
+	return strings.TrimRight(u, "/")
+}
+
 // TimeInfo is the phone's clock setup.
 type TimeInfo struct {
 	Zone string // HELLO_PROV_TIMEZONE
 	NTP  string // HELLO_PROV_NTP
+	TZ   TZInfo // Zone in each vendor's terms, see ZoneInfo
 }
 
 // Template is a set of files rendered for the phones it matches (spec S-8).

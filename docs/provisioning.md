@@ -209,6 +209,12 @@ same. The phone's own uploads (`<mac>-phone.cfg`, logs, and a `PUT` of
 `<mac>-directory.xml`) are accepted and discarded; a `GET` of
 `<mac>-directory.xml` is the phone's address book.
 
+`device.dhcp.bootSrvUseOpt` is `Static` in the boot file and the hand-off:
+the phone then ignores every DHCP option for the provisioning server and
+keeps `device.prov.serverName`. Poly's configuration examples (BootServer-
+Static.cfg) and FusionPBX write the values as the words `Default`, `Custom`
+and `Static`; the number `2` Hello used before is in no document.
+
 ### Grandstream
 
 GXP, GRP, GXV and WP. The phone tries `cfg<mac>`, `cfg<mac>.bin` (both
@@ -217,16 +223,35 @@ GXP, GRP, GXV and WP. The phone tries `cfg<mac>`, `cfg<mac>.bin` (both
 Firmware: Grandstream treats P192 as a firmware server _directory_ and
 appends the model's own file name (`wp810fw.bin` for the WP822,
 `wp8x6fw.bin` for the WP836), so the file sets P192 to
-`.Firmware.Dir`, `<prov URL>fw` with no trailing slash, and the phone
+`.Firmware.Dir` without its scheme (`host/p/<token>/fw`, no trailing
+slash; Grandstream's firmware upgrade guide says not to include a leading
+`http://`, and the HTTPS example is `x.x.x.x/xampp`), and the phone
 fetches `/p/<token>/fw/<file>`, which Hello serves from the pinned file of
 that name. Pin the firmware under the exact file name the phone asks for.
-P6767 (firmware upgrade via) follows the scheme of that URL, `2` for HTTPS
-and `1` for HTTP; P232 and P233 (file prefix and postfix) stay empty;
+P6767 (firmware upgrade via) carries the scheme instead: `2` for HTTPS and
+`1` for HTTP, taken from the URL (`UpgradeVia`; Grandstream's codes are
+0 TFTP, 1 HTTP, 2 HTTPS, 3 FTP, 4 FTPS); P232 and P233 (file prefix and postfix) stay empty;
 P238 is `0`, so the phone checks for firmware at every boot. These values
 come from the Grandstream WP8xx administration guides (Maintenance →
 Upgrade and Provisioning) and are unconfirmed on a phone, so verify them.
 The phone also asks for `ring<N>.bin` and `ring<N>.ogg` in that directory;
 Hello answers those with an empty `404` (`not_found`, no block counted).
+
+Config server: P237 (Config Server Path) is likewise `host/p/<token>`, no
+scheme and no trailing slash, and P212 (Config Upgrade Via) is `2` for the
+HTTPS device path (`1` if Hello is ever served over HTTP). The SIP device
+provisioning guide describes P237 as the config server's FQDN or IP, the
+phone appends `/cfg<mac>.xml`, and the firmware guide says server paths take
+no scheme; the protocol is only ever chosen by the via setting. The
+templates use the `noscheme` and `urlvia` functions for this. The previous
+form (a scheme and a trailing slash in P237) worked on phones in the field;
+if a model is found that needs the scheme, copy the template and put
+`{{xml .Prov.URL}}` back.
+
+Time zone: P64 and P246 (Self-Defined Time Zone) carry a POSIX TZ string
+(`CET-1CEST,M3.5.0,M10.5.0/3`); the guide's syntax is
+`std offset dst [offset],start[/time],end[/time]`. Whether a given model
+reads the string from P64 or only from P246 is unconfirmed (verify).
 
 ### Snom
 
@@ -252,21 +277,47 @@ No vendor document confirms these; the phone emulator models the documented
 or most likely behaviour and the settings stay as they are until a phone
 shows otherwise.
 
-- Poly `device.dhcp.bootSrvUseOpt="2"`: FusionPBX writes the values as the
-  words `Default`, `Custom` and `Static`; if the hand-off does not stop the
-  phone from taking the boot URL from DHCP, try `Static`.
 - Poly `device.prov.serverName` with a scheme and a trailing slash, and a
   full URL in the master's `APP_FILE_PATH`.
-- Grandstream `P237` with a scheme (Grandstream's firmware guide says the
-  firmware path takes no leading `http://`), the `P212`, `P6767` and `P330`
-  protocol codes, and the BLF key numbers.
+- Grandstream: `P237` without a scheme on every model (the guides say so,
+  and the protocol codes `P212`, `P6767` and `P330` are unconfirmed on a
+  phone), the BLF key numbers, and P64 against P246 for the zone string.
 - Snom `firmware` is the firmware's full URL from firmware 10.1.38; older
   firmware ignores it (`firmware_status`, an XML file naming the URL, is the
   way there). `admin_mode_password` is the keypad PIN, not the web password.
 - Fanvil `CACertURL`, the web password, the BLF keys and the phonebook keys.
-- The time zone: `HELLO_PROV_TIMEZONE` is an IANA name, which Yealink
-  (`local_time.time_zone_name` wants `Belgium(Brussels)`) and Grandstream
-  (`P246`) do not accept; set the zone on the phone or in a template copy.
+- Time zones on a phone: see [Time zones](#time-zones); the Fanvil keys
+  (`Time Zone`, `DST Type` and the rule fields) and the Poly daylight-saving
+  keys are unconfirmed on hardware.
+
+## Time zones
+
+`HELLO_PROV_TIMEZONE` is an IANA name (`Europe/Brussels`), which no vendor
+accepts. Hello derives each vendor's form from the IANA rules in the binary
+(`internal/prov/zones.go`, `ZoneInfo`, for the year of the render; the
+rules are read from the zone database, not copied from a table). A daylight
+rule is the nth weekday of a month at a wall-clock hour, which covers the
+zones in use; a zone whose offset changes any other way is sent as its
+standard offset with daylight saving off, and an unknown name sends no zone
+at all, leaving the phone's own.
+
+| Vendor      | Setting                                                                                                                                                                                                                 | Europe/Brussels                                        |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Yealink     | `local_time.time_zone`, `time_zone_name` (a label, sent when known), `summer_time` 0/1, `dst_time_type` 1, `start_time`, `end_time` (month/week/weekday/hour, week 5 = last, weekday 7 = Sunday), `offset_time` minutes | `+1`, `Belgium(Brussels)`, `3/5/7/2`, `10/5/7/3`, `60` |
+| Grandstream | `P64` and `P246`, a POSIX TZ string                                                                                                                                                                                     | `CET-1CEST,M3.5.0,M10.5.0/3`                           |
+| Poly        | `tcpIpApp.sntp.gmtOffset` seconds, `daylightSavings.*` (month, date, time, dayOfWeek 1 = Sunday, `lastInMonth`)                                                                                                         | `3600`, March, last Sunday, 2                          |
+| Fanvil      | `Time Zone` in quarter hours, `Time Zone Name`, `DST Type` and the rule fields (Sunday = 0)                                                                                                                             | `4`, `UTC+1`                                           |
+| Snom        | `timezone`, a country code and the offset, for the zones in `snomCodes` (the country sets the daylight rules)                                                                                                           | `BEL+1`                                                |
+
+Sources: Yealink administrator guide (Time and Date) and Nethesis
+Tancredi `yealink.tmpl` (`summer_time`, `dst_time_type`, `start_time` and
+`end_time` as `3/5/7/2`), Grandstream's Self-Defined Time Zone syntax in the
+GXP/GRP/WP administration guides, Poly UC Software Administrator Guide
+(`tcpIpApp.sntp`) with FusionPBX's polycom template, Tancredi
+`fanvil-X5.tmpl` and `snom.tmpl` (`BEL+1`, `USA-5`). Yealink labels outside
+the few in `yealinkNames` are not sent; the rules make the switch correct
+without them. Unconfirmed on a phone: Fanvil's DST keys, Snom zones outside
+the table, and Grandstream models that read only one of P64 and P246.
 
 ## Voicemail indicator (MWI)
 
@@ -424,12 +475,14 @@ Templates see only these values:
 | `.BLF`      | a list of `Number`, `Label`, `URI`                                                                                                |
 | `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `ResyncSeconds`                                                                       |
 | `.Firmware` | `URL` (the file), `Dir` (its directory, no trailing slash), `Version`, `Via` (1 HTTP, 2 HTTPS), or nil when no firmware is pinned |
-| `.Time`     | `Zone`, `NTP`                                                                                                                     |
+| `.Time`     | `Zone`, `NTP`, `TZ` (the zone per vendor, see [Time zones](#time-zones))                                                          |
 
 Functions: `xml` (escape), `upper`, `lower`, `default`, `add`, `mul`, `div`,
 `urlhost` (`https://h:8/p/x/` gives `h:8`) and `urlpath` (the same gives
 `p/x/`, no leading slash), for a phone that takes the server and the path in
-separate settings. For example, a key/value phone:
+separate settings; `noscheme` (`https://h:8/p/x/` gives `h:8/p/x`) and
+`urlvia` (`2` for HTTPS, else `1`), for Grandstream's scheme-less server
+paths. For example, a key/value phone:
 
 ```text
 sip.server = {{.Server.Host}}:{{.Server.Port}}
@@ -464,7 +517,9 @@ phone of each vendor through the real handler: the DHCP boot path, the
 hand-off, the per-device files, the pinned firmware and the CA, with and
 without a pinned firmware, and asserts every URL the phone derives answers
 `200` with the right content. `TestPhoneEmulatorCatchesKnownBugs` proves it
-fails on the old Grandstream firmware setting and similar.
+fails on the old Grandstream firmware setting and similar, on a scheme in a
+Grandstream server path, an IANA time zone name, and a Poly boot server option
+that is not `Static`.
 
 When you add or change a built-in setting that carries a URL, path, server, file
 name or scheme code (a phonebook URL, a ringtone, a wallpaper, a language file,

@@ -656,7 +656,8 @@ func TestKillSIPNodeDuringRinging(t *testing.T) {
 	killed := kill(t, node)
 	rec.by(killed.Add(20 * time.Second))
 	select {
-	case <-result: // a final response or a transaction timeout: not left hanging
+	case derr := <-result: // a final response or a transaction timeout: not left hanging
+		t.Logf("caller call ended: %v", derr)
 	case <-time.After(time.Until(killed.Add(45 * time.Second))):
 		t.Fatal("caller left hanging 45s after the node handling the ringing call died")
 	}
