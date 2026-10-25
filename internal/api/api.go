@@ -149,6 +149,10 @@ type Config struct {
 	// health. nil behaves as Valkey unreachable.
 	Cluster ClusterStore
 	Valkey  ValkeyStatus
+	// PageTests carries paging-group test pages to hello-sip; nil answers
+	// 503. PageTestWait bounds the wait for the result (0 means 20 s).
+	PageTests    PageTester
+	PageTestWait time.Duration
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects

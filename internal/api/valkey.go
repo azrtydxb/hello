@@ -306,3 +306,21 @@ func (l *LazyValkey) ClearAuthFailures(ctx context.Context, ip string) error {
 	}
 	return c.live.ClearAuthFailures(ctx, ip)
 }
+
+// EnqueuePageTest implements PageTester.
+func (l *LazyValkey) EnqueuePageTest(ctx context.Context, r livestate.PageTestRequest) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.live.EnqueuePageTest(ctx, r)
+}
+
+// GetPageTestResult implements PageTester.
+func (l *LazyValkey) GetPageTestResult(ctx context.Context, id string) (livestate.PageTestResult, bool, error) {
+	c, err := l.get()
+	if err != nil {
+		return livestate.PageTestResult{}, false, err
+	}
+	return c.live.GetPageTestResult(ctx, id)
+}

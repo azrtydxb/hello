@@ -3354,6 +3354,77 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/paging-groups/{id}/test": {
+      "post": {
+        "operationId": "testPagingGroup",
+        "summary": "Test-page one member of a paging group",
+        "description": "Pages one member extension of the group like a real page, with the vendor's auto-answer headers, plays a short tone and hangs up. The result lists each registered contact's outcome and the headers sent, so a phone's auto-answer can be checked without a second person. Needs a running hello-sip node.",
+        "tags": ["paging-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "extension": {
+                    "type": "string",
+                    "description": "The member extension number to page; omitted means the group's first member"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The outcome of the test page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageTestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "504": {
+            "description": "No hello-sip node reported the test page in time"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "rings a physical phone"
+        }
+      }
+    },
     "/api/v1/feature-codes": {
       "get": {
         "operationId": "listFeatureCodes",
@@ -9219,6 +9290,39 @@
           }
         }
       },
+      "PageTestResult": {
+        "type": "object",
+        "required": ["id", "extension", "result", "contacts", "node"],
+        "description": "The outcome of a paging-group test page.",
+        "properties": {
+          "id": {"type": "string"},
+          "extension": {"type": "string", "description": "The member that was paged"},
+          "result": {
+            "type": "string",
+            "enum": ["answered", "busy", "dnd", "no_answer", "no_registration", "failed"],
+            "description": "Overall result; answered when any contact answered and heard the tone"
+          },
+          "detail": {"type": "string", "description": "Why the test failed, when it did"},
+          "node": {"type": "string", "description": "The hello-sip node that ran the test"},
+          "contacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["device", "userAgent", "result", "headers"],
+              "properties": {
+                "device": {"type": "string"},
+                "userAgent": {"type": "string"},
+                "result": {"type": "string", "enum": ["answered", "busy", "no_answer", "failed"]},
+                "headers": {
+                  "type": "array",
+                  "items": {"type": "string"},
+                  "description": "The auto-answer headers the INVITE carried, as Name: value"
+                }
+              }
+            }
+          }
+        }
+      },
       "PagingGroup": {
         "type": "object",
         "required": [
@@ -11580,6 +11684,19 @@
               "note": {
                 "type": "string",
                 "description": "For an answered call that failed over, the trunk response that caused it and the trunk that answered; empty otherwise"
+              },
+              "pageLegs": {
+                "type": "array",
+                "description": "For a page (kind page), the outcome per member, in the order they were paged",
+                "items": {
+                  "type": "object",
+                  "required": ["extension", "device", "result"],
+                  "properties": {
+                    "extension": {"type": "string"},
+                    "device": {"type": "string", "description": "The member contact's device; empty when the member was never rung"},
+                    "result": {"type": "string", "enum": ["answered", "busy", "dnd", "no_answer", "no_registration"]}
+                  }
+                }
               }
             }
           }

@@ -402,6 +402,28 @@ describe("Extensions", () => {
     );
   });
 
+  it("toggles intercom auto-answer, on unless the server says otherwise", async () => {
+    const calls = api([EXT], {
+      "GET /api/v1/devices": () => json({ items: [DEVICE] }),
+      "GET /api/v1/registrations": () => json({ items: [] }),
+      "GET /api/v1/presence": () => json({ items: [] }),
+      "PATCH /api/v1/extensions/1": () =>
+        json({ ...EXT, allowIntercom: false }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer();
+    const sw = within(drawer).getByRole("switch", { name: /Allow intercom/ });
+    expect(sw).toBeChecked();
+    fireEvent.click(sw);
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Extension 100 saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/1",
+      body: { allowIntercom: false },
+    });
+  });
+
   it("validates forwarding targets before sending", async () => {
     const calls = api([EXT]);
     renderApp("/extensions");

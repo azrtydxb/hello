@@ -58,6 +58,8 @@ export interface Extension {
   recordDefault?: boolean;
   /** Left out of the automatic extensions address book; false by default. */
   directoryHidden?: boolean;
+  /** An intercom call (`*80` plus the number) auto-answers; true by default. */
+  allowIntercom?: boolean;
   /** The extension's voicemail box, when it has one. */
   voicemailBoxId?: Id | null;
   createdAt: string;
@@ -148,8 +150,20 @@ export interface TraceStep {
   text: string;
 }
 
+/** One paged member's outcome. */
+export interface PageLegResult {
+  extension: string;
+  /** The member contact's device; "" when the member was never rung. */
+  device: string;
+  result: "answered" | "busy" | "dnd" | "no_answer" | "no_registration";
+}
+
 /** GET /api/v1/cdrs/{id}: the CDR plus its routing trace. */
 export interface CdrDetail extends Cdr {
+  /** call, page or intercom. */
+  kind?: "call" | "page" | "intercom";
+  /** A page's outcome per member, in the order they were paged. */
+  pageLegs?: PageLegResult[];
   trace: TraceStep[];
   /** For failed calls, the reason of the last trace step. */
   explanation?: string;
@@ -641,6 +655,7 @@ export const updateExtension = (
     voicemailEnabled?: boolean;
     recordDefault?: boolean;
     directoryHidden?: boolean;
+    allowIntercom?: boolean;
   },
 ) =>
   request<Extension>("PATCH", `/api/v1/extensions/${id(extensionId)}`, {
@@ -1107,6 +1122,37 @@ export const createPagingGroup = (input: PagingGroupFields) =>
 export const putPagingGroup = (groupId: Id, input: PagingGroupFields) =>
   request<PagingGroup>("PUT", `/api/v1/paging-groups/${id(groupId)}`, {
     body: input,
+  });
+
+/** One registered contact's outcome in a test page. */
+export interface PageTestContact {
+  device: string;
+  userAgent: string;
+  result: "answered" | "busy" | "no_answer" | "failed";
+  /** The auto-answer headers the INVITE carried, as "Name: value". */
+  headers: string[];
+}
+
+/** POST /api/v1/paging-groups/{id}/test: what paging one member did. */
+export interface PageTestResult {
+  id: string;
+  extension: string;
+  result:
+    | "answered"
+    | "busy"
+    | "dnd"
+    | "no_answer"
+    | "no_registration"
+    | "failed";
+  detail?: string;
+  node: string;
+  contacts: PageTestContact[];
+}
+
+/** Pages one member of the group (the first when omitted) as a test. */
+export const testPagingGroup = (groupId: Id, extension?: string) =>
+  request<PageTestResult>("POST", `/api/v1/paging-groups/${id(groupId)}/test`, {
+    body: extension === undefined ? {} : { extension },
   });
 
 export const deletePagingGroup = (groupId: Id) =>

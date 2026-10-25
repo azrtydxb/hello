@@ -1033,6 +1033,9 @@ func (c *call) record(status int, side, reason, result string) {
 	if !answer.IsZero() {
 		r.BillableMs = end.Sub(answer).Milliseconds()
 	}
+	if ps := c.page; ps != nil {
+		r.PageLegs = ps.results()
+	}
 	c.s.m.Calls.WithLabelValues(result).Inc()
 	if c.groupName != "" {
 		c.s.m.GroupCalls.WithLabelValues(c.groupName, c.groupStrategy, result).Inc()
@@ -1278,30 +1281,10 @@ func (l *leg) invite() (*sip.Request, error) {
 		req.SetDestination(l.addr)
 	case l.uri != nil:
 		// sipgo resolves the URI's host.
-	case len(l.binding.Path) > 0 && !strings.Contains(l.binding.Path[0], "hflow="):
-		// Registered through a trusted edge proxy (Kamailio): its Path
-		// reaches the phone's NAT flow from any node (plan contract 7).
-		var first sip.Uri
-		if err := sip.ParseUri(strings.Trim(l.binding.Path[0], "<> "), &first); err != nil {
+	default:
+		if err := s.routeToBinding(req, l.binding); err != nil {
 			return nil, err
 		}
-		for _, p := range l.binding.Path {
-			req.AppendHeader(sip.NewHeader("Route", p))
-		}
-		req.SetDestination(hostPort(first))
-	case l.binding.ReceivedNode != s.cfg.NodeID && len(l.binding.Path) > 0:
-		// Registered through another node: only that node's flow reaches
-		// the phone, so route via its Path (it edge-proxies the INVITE).
-		var first sip.Uri
-		if err := sip.ParseUri(strings.Trim(l.binding.Path[0], "<> "), &first); err != nil {
-			return nil, err
-		}
-		for _, p := range l.binding.Path {
-			req.AppendHeader(sip.NewHeader("Route", p))
-		}
-		req.SetDestination(hostPort(first))
-	case l.binding.Source != "":
-		req.SetDestination(l.binding.Source)
 	}
 	return req, nil
 }
@@ -1649,4 +1632,36 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	s.send(tx, relayed)
 	c.haRefresh()
+}
+
+// routeToBinding points an INVITE built for a registered contact at the
+// phone: through the Path of the edge proxy it registered through (a
+// trusted proxy, or another node whose flow alone reaches the phone's NAT,
+// plan contract 7), else straight at the source address it registered from.
+func (s *Server) routeToBinding(req *sip.Request, b livestate.Binding) error {
+	switch {
+	case len(b.Path) > 0 && !strings.Contains(b.Path[0], "hflow="):
+		// Registered through a trusted edge proxy (Kamailio): its Path
+		// reaches the phone's NAT flow from any node (plan contract 7).
+		return routeViaPath(req, b)
+	case b.ReceivedNode != s.cfg.NodeID && len(b.Path) > 0:
+		// Registered through another node: only that node's flow reaches
+		// the phone, so route via its Path (it edge-proxies the INVITE).
+		return routeViaPath(req, b)
+	case b.Source != "":
+		req.SetDestination(b.Source)
+	}
+	return nil
+}
+
+func routeViaPath(req *sip.Request, b livestate.Binding) error {
+	var first sip.Uri
+	if err := sip.ParseUri(strings.Trim(b.Path[0], "<> "), &first); err != nil {
+		return err
+	}
+	for _, p := range b.Path {
+		req.AppendHeader(sip.NewHeader("Route", p))
+	}
+	req.SetDestination(hostPort(first))
+	return nil
 }
