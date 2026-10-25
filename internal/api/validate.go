@@ -238,6 +238,12 @@ func validateTrunk(in *store.TrunkInput, hasPassword bool) fieldErrs {
 	if len(in.SourceCIDRs) > 100 {
 		f.add("sourceCidrs", "at most 100 entries")
 	}
+	// nil is "not set" (the default applies); an empty list is refused.
+	if in.Codecs != nil {
+		if _, why := routing.NormalizeCodecs(in.Codecs); why != "" {
+			f.add("codecs", "%s", why)
+		}
+	}
 	for i, c := range in.SourceCIDRs {
 		p, err := netip.ParsePrefix(c)
 		if err != nil {

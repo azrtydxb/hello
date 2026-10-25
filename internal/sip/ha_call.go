@@ -129,6 +129,7 @@ func (c *call) haRefresh() {
 		return
 	}
 	offer, _ := media.ParseAudioSDP(c.inv.Body())
+	offer = c.negotiatedOr(offer) // replicate the SDP each dialog was given: the negotiated codec
 	host := c.anchorHost
 	dirs := c.haDirs
 	s := c.s
@@ -612,10 +613,7 @@ func relaySDPDir(host string, r *media.Relay, leg string, off media.AudioSDP, di
 	if r == nil {
 		return ""
 	}
-	if dir == "" || dir == "sendrecv" {
-		return string(media.BuildAudioSDP(host, r.LegPort(leg), off.PayloadType, off.DTMFPayloadType, off.DTMFRate))
-	}
-	return string(media.BuildAudioSDPDir(host, r.LegPort(leg), off.PayloadType, off.DTMFPayloadType, off.DTMFRate, dir))
+	return string(off.Build(host, r.LegPort(leg), dir))
 }
 
 // userOf is the user part of a URI string ("" when absent).

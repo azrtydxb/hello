@@ -116,6 +116,9 @@ type call struct {
 	haLegs [2]haLegSnap
 	relay  *media.Relay
 	rec    *recording
+	// negotiated is the codec set the call runs on (the callee's choice as
+	// the caller was answered, see anchoredAnswerA); zero before the answer.
+	negotiated media.AudioSDP
 	// anchorHost is the advertised IPv4 for relay SDP answers.
 	anchorHost string
 
@@ -743,15 +746,17 @@ func (c *call) answer(w *leg) {
 	}
 	body := bres.Body()
 	if c.isAnchored() {
+		var calleeAns media.AudioSDP
 		// The caller's answer is the anchor's leg-a SDP, never the
 		// callee's body (spec S-2); the callee's answer aims leg b.
 		if len(bres.Body()) > 0 {
 			if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
 				c.relay.SetTarget(legCallee, udpAddr(ans.Address, ans.Port))
+				calleeAns = ans
 			}
 		}
 		off, _ := media.ParseAudioSDP(c.inv.Body())
-		body = c.anchoredAnswerA(off)
+		body = c.anchoredAnswerA(off, calleeAns)
 	}
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
 	if ct := bres.ContentType(); ct != nil {
@@ -1339,7 +1344,7 @@ func (l *leg) invite() (*sip.Request, error) {
 	// leg-b port, not the caller's SDP (spec S-2).
 	if l.c.isAnchored() {
 		if off, err := media.ParseAudioSDP(c.inv.Body()); err == nil {
-			if body := l.c.anchoredOfferB(off); len(body) > 0 {
+			if body := l.c.anchoredOfferB(off, legCodecs(l)); len(body) > 0 {
 				req.SetBody(body)
 				req.RemoveHeader("Content-Type")
 				req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
