@@ -6,6 +6,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -23,6 +24,7 @@ type fakeTTS struct {
 	lastKey  string
 	lastText string
 	err      error
+	voiceErr error
 	checkErr error
 	seconds  int
 }
@@ -51,6 +53,12 @@ func (f *fakeTTS) CheckKey(_ context.Context, key string) error {
 }
 
 func (f *fakeTTS) Voices(context.Context, string) ([]tts.Model, error) {
+	f.mu.Lock()
+	err := f.voiceErr
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	return []tts.Model{{ID: "elevenlabs/eleven-v3", Name: "v3", Voices: []string{"sarah", "george"}}}, nil
 }
 
@@ -402,4 +410,23 @@ func TestGenerateParkAnnouncement(t *testing.T) {
 	}
 	vw, _ := e.asRole("vic", auth.RoleViewer)
 	vw.must(http.StatusForbidden, "POST", path, nil)
+}
+
+// TestTTSUpstreamFailures fails if a provider failure is not a 502 on every
+// route that calls it (new announcement, voice list, greeting from text), or
+// if saving a prompt for a missing announcement is not a 404.
+func TestTTSUpstreamFailures(t *testing.T) {
+	_, fake, _, c, key := newTTSEnv(t)
+	c.must(http.StatusOK, "PUT", "/api/v1/tts/settings", map[string]string{"apiKey": key, "voice": "sarah"})
+	ext := c.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]string{"number": "101", "name": "Sales"}).json(t)
+	fake.mu.Lock()
+	fake.err = errors.New("provider down")
+	fake.voiceErr = errors.New("provider down")
+	fake.mu.Unlock()
+
+	c.must(http.StatusBadGateway, "POST", "/api/v1/announcements/generate", map[string]any{"name": "welcome", "text": "Welcome."})
+	c.must(http.StatusBadGateway, "GET", "/api/v1/tts/voices", nil)
+	c.must(http.StatusBadGateway, "PUT", fmt.Sprintf("/api/v1/extensions/%v/voicemail/greeting", ext["id"]),
+		map[string]any{"slot": "greeting", "source": "text", "text": "Leave a message."})
+	c.must(http.StatusNotFound, "PATCH", "/api/v1/announcements/999999", map[string]any{"text": "Hello."})
 }

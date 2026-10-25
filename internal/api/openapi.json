@@ -297,9 +297,7 @@
         "operationId": "changePassword",
         "summary": "Change my password",
         "description": "Sets a new password for the signed-in user after checking the current one. Only a browser session may do it, not a token, and it ends the user's other sessions. Clears the forced-change flag an administrator set, which blocks every other operation until it is changed. Needs a password of 10 to 128 characters that differs from the current one.",
-        "tags": [
-          "auth"
-        ],
+        "tags": ["auth"],
         "requestBody": {
           "required": true,
           "content": {
@@ -339,9 +337,7 @@
         "operationId": "listUsers",
         "summary": "Every user with their role and linked extensions",
         "description": "Admin only. Lists every user with their role, state, email, linked extensions and voicemail email options; never a password or its hash.",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "responses": {
           "200": {
             "description": "Users, by id",
@@ -373,9 +369,7 @@
         "operationId": "createUser",
         "summary": "Create a user",
         "description": "Admin only, audited. Creates a local user with an initial password the administrator sets (10 to 128 characters; argon2id-hashed, never returned). The user must choose a new password at first login unless mustChangePassword is false. extensionIds links the user to extensions, at most one user per extension (409 when taken, 400 when one does not exist); the first is the primary extension whose phones receive the user's personal contacts. Role user is the extension self-service role.",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "requestBody": {
           "required": true,
           "content": {
@@ -425,9 +419,7 @@
         "operationId": "getUser",
         "summary": "One user",
         "description": "Admin only. Returns one user with their role, state and linked extensions.",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -467,9 +459,7 @@
         "operationId": "updateUser",
         "summary": "Change a user",
         "description": "Admin only, audited. Changes the role, display name, email, enabled state, extensions, voicemail email options or password. The new role applies on the user's next request, whatever credential it carries. A disabled user cannot sign in, their sessions end and their tokens stop working. Setting password resets it (10 to 128 characters) and makes the user choose a new one at next login unless mustChangePassword is false. Demoting or disabling the last enabled admin answers 409 last_admin, and an administrator cannot disable their own account (409 self_disable). extensionIds replaces the user's extensions (409 when another user has one, 400 when one does not exist); the legacy extensionId links exactly one extension or, with null, none; give one of them, not both.",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -532,9 +522,7 @@
         "operationId": "deleteUser",
         "summary": "Delete a user",
         "description": "Admin only, audited. Deletes the user with their sessions, tokens and personal contacts. Deleting the last enabled admin answers 409 last_admin and an administrator cannot delete their own account (409 self_delete).",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -579,9 +567,7 @@
         "operationId": "updateMyProfile",
         "summary": "Change my profile",
         "description": "Changes the signed-in user's display name, email address and voicemail email options (notify, attach the recording, and what happens to a message after it was mailed: nothing, mark as read or delete). At least one field is required. Returns the profile as auth/me does.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "requestBody": {
           "required": true,
           "content": {
@@ -628,9 +614,7 @@
         "operationId": "listMyExtensions",
         "summary": "My extensions",
         "description": "Lists the extensions the signed-in user is linked to, with the display label and the DND and forwarding settings they may change; nothing else about the extension, no SIP credentials and no devices.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "responses": {
           "200": {
             "description": "The user's extensions",
@@ -664,9 +648,7 @@
         "operationId": "updateMyExtension",
         "summary": "Change my extension's label, DND or forwarding",
         "description": "Changes the display label, do-not-disturb and the always, busy and no-answer forwarding of one of the signed-in user's own extensions. An extension that is not the user's answers 404, exactly like one that does not exist. At least one field is required; a forwarding target is empty (off) or 2 to 32 of 0-9 * # with an optional leading +.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -721,9 +703,7 @@
         "operationId": "getMyVoicemail",
         "summary": "My voicemail box",
         "description": "Returns whether the voicemail box of one of the signed-in user's own extensions has a PIN and greetings. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -763,9 +743,7 @@
         "operationId": "updateMyVoicemail",
         "summary": "Change my voicemail PIN or greetings",
         "description": "Changes the PIN and uploads or replaces greetings of the signed-in user's own voicemail box. JSON with pin (4 to 10 digits), or multipart/form-data with pin plus optional greeting and unreachable PCM WAV files of at most 5 MiB, such as a recording made in the browser. The box email address is not settable here. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -849,9 +827,7 @@
         "operationId": "listMyVoicemailMessages",
         "summary": "My voicemail messages",
         "description": "Lists the messages in the voicemail box of one of the signed-in user's own extensions, newest first. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -904,9 +880,7 @@
         "operationId": "markMyVoicemailMessageHeard",
         "summary": "Mark my message heard",
         "description": "Marks a message in one of the signed-in user's own boxes as heard, or unheard with {\"heard\": false}. A message in anyone else's box answers 404, exactly like one that does not exist.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -961,9 +935,7 @@
         "operationId": "deleteMyVoicemailMessage",
         "summary": "Delete my message",
         "description": "Deletes a message from one of the signed-in user's own boxes with its audio. A message in anyone else's box answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -998,9 +970,7 @@
         "operationId": "getMyVoicemailMessageAudio",
         "summary": "Play or download my message",
         "description": "Streams a message of one of the signed-in user's own boxes (WAV, Range supported); with download=1 the browser saves it as a file. A message in anyone else's box answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1010,9 +980,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": [
-                "1"
-              ]
+              "enum": ["1"]
             },
             "description": "Send as an attachment."
           }
@@ -1071,9 +1039,7 @@
         "operationId": "listMyCalls",
         "summary": "My call history",
         "description": "Lists the calls in which one of the signed-in user's own extensions was the caller or the callee, newest first, without routes, trunks or signalling detail.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "name": "limit",
@@ -1131,9 +1097,7 @@
         "operationId": "getSmtpSettings",
         "summary": "System email (SMTP) settings",
         "description": "Admin only. Returns the SMTP settings voicemail email is sent with and where they come from: the console (database), the deployment's SMTP_* environment, or none. The password is never returned; passwordSet says whether one is stored.",
-        "tags": [
-          "settings"
-        ],
+        "tags": ["settings"],
         "responses": {
           "200": {
             "description": "The settings",
@@ -1168,9 +1132,7 @@
         "operationId": "putSmtpSettings",
         "summary": "Save the system email (SMTP) settings",
         "description": "Admin only, audited. Saves the SMTP host, port, transport security (none, starttls or tls), username, from address and password. The password is sealed in the database; omit it to keep the stored one, or send an empty string to clear it. An empty host clears the saved settings, and the deployment's environment settings apply again. Changes apply to the next send, without a restart.",
-        "tags": [
-          "settings"
-        ],
+        "tags": ["settings"],
         "requestBody": {
           "required": true,
           "content": {
@@ -1220,9 +1182,7 @@
         "operationId": "testSmtpSettings",
         "summary": "Send a test email",
         "description": "Admin only. Sends one test email to the given address with the settings in force and answers when the server accepted it or why it did not (502 smtp_failed). The test runs now and is not queued.",
-        "tags": [
-          "settings"
-        ],
+        "tags": ["settings"],
         "requestBody": {
           "required": true,
           "content": {
@@ -2875,9 +2835,7 @@
         "operationId": "getFlowCatalogue",
         "summary": "Read the flow node and port catalogue",
         "description": "Returns every node kind of the flow canvas with its ports, each port's type (and the colour and shape that type is drawn with) and, for every output, the inputs it may connect to. An entry whose `requires` is set is allowed in principle but cannot be stored until what it names exists. Use it to learn which objects can be joined before changing the configuration.",
-        "tags": [
-          "flow"
-        ],
+        "tags": ["flow"],
         "responses": {
           "200": {
             "description": "Read the flow node and port catalogue",
@@ -2909,9 +2867,7 @@
         "operationId": "getFlowGraph",
         "summary": "Read the call flow as a graph",
         "description": "Draws the saved configuration as nodes (trunks, routes, extensions, ring groups, announcements, paging groups, feature codes and the terminals calls end in) and edges between their ports. Every edge names the owner: the one field of one object it is stored in, so connecting or disconnecting is one update of that object. A target that resolves to nothing is a `missing` node with a `dangling_reference` warning. Targets resolve as hello-sip does: ring group name, then extension number. Each node's `version` changes whenever the object does. Nothing is stored: the graph is built from the live tables.",
-        "tags": [
-          "flow"
-        ],
+        "tags": ["flow"],
         "parameters": [
           {
             "name": "scope",
@@ -2929,9 +2885,7 @@
             "description": "`devices` adds devices and phones, which are left out by default.",
             "schema": {
               "type": "string",
-              "enum": [
-                "devices"
-              ]
+              "enum": ["devices"]
             }
           }
         ],
@@ -2985,9 +2939,7 @@
         "operationId": "getFlowRevision",
         "summary": "Read the configuration revision",
         "description": "Returns the revision every configuration change advances. Poll it to know when a graph read earlier is out of date.",
-        "tags": [
-          "flow"
-        ],
+        "tags": ["flow"],
         "responses": {
           "200": {
             "description": "Read the configuration revision",
@@ -3711,9 +3663,7 @@
         "operationId": "getTtsSettings",
         "summary": "The text-to-speech settings",
         "description": "Returns the text-to-speech provider settings: whether an OpenRouter API key is set (never the key), the last four characters of it, and the default model and voice.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Settings",
@@ -3743,9 +3693,7 @@
         "operationId": "putTtsSettings",
         "summary": "Set the OpenRouter key and the default model and voice",
         "description": "Sets the OpenRouter API key (write-only, sealed in the database and never returned) and the default ElevenLabs model and voice used when a prompt does not name its own.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "requestBody": {
           "required": true,
           "content": {
@@ -3806,9 +3754,7 @@
         "operationId": "deleteTtsKey",
         "summary": "Remove the stored OpenRouter key",
         "description": "Removes the stored OpenRouter API key. Prompts already generated keep playing; new ones cannot be generated until a key is set again.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Settings",
@@ -3840,9 +3786,7 @@
         "operationId": "testTtsKey",
         "summary": "Test the OpenRouter connection",
         "description": "Checks with OpenRouter that the stored API key is accepted. Spends no credits.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "The key is accepted",
@@ -3850,9 +3794,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "ok"
-                  ],
+                  "required": ["ok"],
                   "properties": {
                     "ok": {
                       "type": "boolean"
@@ -3890,9 +3832,7 @@
         "operationId": "listTtsVoices",
         "summary": "List the ElevenLabs models and voices",
         "description": "Lists the ElevenLabs text-to-speech models OpenRouter offers and the voices of each, for the model and voice pickers.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Models",
@@ -3900,9 +3840,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "models"
-                  ],
+                  "required": ["models"],
                   "properties": {
                     "models": {
                       "type": "array",
@@ -3938,19 +3876,14 @@
         "operationId": "generateNewAnnouncement",
         "summary": "Create an announcement from text",
         "description": "Creates an announcement and generates its audio once from text through the text-to-speech provider; the WAV is stored and played from storage ever after.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name",
-                  "text"
-                ],
+                "required": ["name", "text"],
                 "properties": {
                   "name": {
                     "type": "string",
@@ -4023,9 +3956,7 @@
         "operationId": "putVoicemailGreeting",
         "summary": "Set a greeting from an announcement or from text",
         "description": "Sets a voicemail box's greeting or unreachable audio from an existing announcement, or from text generated once through the text-to-speech provider. Uploading a WAV stays on the voicemail box update.",
-        "tags": [
-          "voicemail"
-        ],
+        "tags": ["voicemail"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4037,25 +3968,16 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "slot",
-                  "source"
-                ],
+                "required": ["slot", "source"],
                 "properties": {
                   "slot": {
                     "type": "string",
-                    "enum": [
-                      "greeting",
-                      "unreachable"
-                    ],
+                    "enum": ["greeting", "unreachable"],
                     "description": "Which audio to set."
                   },
                   "source": {
                     "type": "string",
-                    "enum": [
-                      "announcement",
-                      "text"
-                    ],
+                    "enum": ["announcement", "text"],
                     "description": "Where the audio comes from."
                   },
                   "announcementId": {
@@ -4231,9 +4153,7 @@
         "operationId": "saveAnnouncementPrompt",
         "summary": "Save an announcement's prompt text",
         "description": "Saves the authored text, voice and model of an announcement without generating audio. The announcement then shows as edited since its last generation until it is generated again.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4245,9 +4165,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "text"
-                ],
+                "required": ["text"],
                 "properties": {
                   "text": {
                     "type": "string",
@@ -4410,9 +4328,7 @@
         "operationId": "generateAnnouncement",
         "summary": "Generate or regenerate an announcement's audio from text",
         "description": "Generates the announcement's audio from its text through the text-to-speech provider and stores it. Idempotent: when the stored audio already came from the same text, voice and model nothing is generated unless force is set. Playback never calls the provider.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4754,9 +4670,7 @@
         "operationId": "listMOHClasses",
         "summary": "List music on hold classes",
         "description": "Lists every music on hold class with its playlist. A class is a named playlist of announcements played in a loop or shuffled to a held or parked party, and optionally to a caller instead of ringback.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Classes ordered by name",
@@ -4786,9 +4700,7 @@
         "operationId": "createMOHClass",
         "summary": "Create a music on hold class",
         "description": "Creates a class from announcement ids. Marking it default clears the flag on the previous default. A class with no announcements plays the built-in tone. Validation failures list each failing field in error.fields.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "requestBody": {
           "required": true,
           "content": {
@@ -4836,9 +4748,7 @@
         "operationId": "getMOHClass",
         "summary": "One music on hold class",
         "description": "Returns one class by id.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4876,9 +4786,7 @@
         "operationId": "putMOHClass",
         "summary": "Replace a music on hold class",
         "description": "Replaces a class as a whole, playlist included. A hold already playing keeps its music until it resumes.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4932,9 +4840,7 @@
         "operationId": "deleteMOHClass",
         "summary": "Delete a music on hold class",
         "description": "Deletes a class. Extensions, ring groups and inbound routes that named it fall back to the global default class, or the built-in tone.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -6626,9 +6532,6 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -6673,9 +6576,6 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -6706,9 +6606,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6755,9 +6652,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6828,9 +6722,6 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -6889,9 +6780,6 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -7993,7 +7881,15 @@
                     "description": "The scopes to grant.",
                     "items": {
                       "type": "string",
-                      "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+                      "enum": [
+                        "read",
+                        "write",
+                        "admin",
+                        "secrets",
+                        "calls",
+                        "events",
+                        "recordings"
+                      ]
                     }
                   }
                 }
@@ -12891,10 +12787,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "loop",
-              "shuffle"
-            ],
+            "enum": ["loop", "shuffle"],
             "description": "loop plays the tracks in order and starts over; shuffle plays them in a fresh random order each pass."
           },
           "isDefault": {
@@ -12905,10 +12798,7 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": [
-                "announcementId",
-                "name"
-              ],
+              "required": ["announcementId", "name"],
               "properties": {
                 "announcementId": {
                   "type": "integer",
@@ -12932,9 +12822,7 @@
       },
       "MOHClassInput": {
         "type": "object",
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -12945,10 +12833,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "loop",
-              "shuffle"
-            ],
+            "enum": ["loop", "shuffle"],
             "description": "Default loop."
           },
           "isDefault": {
@@ -12968,9 +12853,7 @@
       },
       "MOHClassList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -13374,9 +13257,7 @@
       },
       "FlowRevision": {
         "type": "object",
-        "required": [
-          "configRevision"
-        ],
+        "required": ["configRevision"],
         "properties": {
           "configRevision": {
             "type": "integer",
@@ -13386,10 +13267,7 @@
       },
       "FlowTarget": {
         "type": "object",
-        "required": [
-          "kind",
-          "port"
-        ],
+        "required": ["kind", "port"],
         "properties": {
           "kind": {
             "type": "string"
@@ -13409,23 +13287,14 @@
       },
       "FlowPort": {
         "type": "object",
-        "required": [
-          "id",
-          "direction",
-          "type",
-          "many",
-          "label"
-        ],
+        "required": ["id", "direction", "type", "many", "label"],
         "properties": {
           "id": {
             "type": "string"
           },
           "direction": {
             "type": "string",
-            "enum": [
-              "in",
-              "out"
-            ]
+            "enum": ["in", "out"]
           },
           "type": {
             "type": "string",
@@ -13460,11 +13329,7 @@
       },
       "FlowNodeType": {
         "type": "object",
-        "required": [
-          "kind",
-          "label",
-          "ports"
-        ],
+        "required": ["kind", "label", "ports"],
         "properties": {
           "kind": {
             "type": "string"
@@ -13491,12 +13356,7 @@
       },
       "FlowPortStyle": {
         "type": "object",
-        "required": [
-          "type",
-          "label",
-          "colour",
-          "shape"
-        ],
+        "required": ["type", "label", "colour", "shape"],
         "properties": {
           "type": {
             "type": "string"
@@ -13514,10 +13374,7 @@
       },
       "FlowCatalogue": {
         "type": "object",
-        "required": [
-          "portTypes",
-          "nodes"
-        ],
+        "required": ["portTypes", "nodes"],
         "properties": {
           "portTypes": {
             "type": "array",
@@ -13535,10 +13392,7 @@
       },
       "FlowRef": {
         "type": "object",
-        "required": [
-          "node",
-          "port"
-        ],
+        "required": ["node", "port"],
         "properties": {
           "node": {
             "type": "string"
@@ -13550,10 +13404,7 @@
       },
       "FlowOwner": {
         "type": "object",
-        "required": [
-          "node",
-          "field"
-        ],
+        "required": ["node", "field"],
         "properties": {
           "node": {
             "type": "string"
@@ -13565,12 +13416,7 @@
       },
       "FlowNode": {
         "type": "object",
-        "required": [
-          "id",
-          "kind",
-          "label",
-          "summary"
-        ],
+        "required": ["id", "kind", "label", "summary"],
         "properties": {
           "id": {
             "type": "string",
@@ -13594,12 +13440,7 @@
       },
       "FlowEdge": {
         "type": "object",
-        "required": [
-          "id",
-          "source",
-          "target",
-          "owner"
-        ],
+        "required": ["id", "source", "target", "owner"],
         "properties": {
           "id": {
             "type": "string"
@@ -13626,11 +13467,7 @@
       },
       "FlowWarning": {
         "type": "object",
-        "required": [
-          "node",
-          "code",
-          "message"
-        ],
+        "required": ["node", "code", "message"],
         "properties": {
           "node": {
             "type": "string"
@@ -13650,12 +13487,7 @@
       },
       "FlowGraph": {
         "type": "object",
-        "required": [
-          "configRevision",
-          "nodes",
-          "edges",
-          "warnings"
-        ],
+        "required": ["configRevision", "nodes", "edges", "warnings"],
         "properties": {
           "configRevision": {
             "type": "integer",
@@ -13843,6 +13675,8 @@
                 "type": "string",
                 "enum": [
                   "bad_request",
+                  "graph_too_large",
+                  "config_changing",
                   "unauthorized",
                   "not_found",
                   "conflict",
@@ -13930,9 +13764,7 @@
           },
           "authMethod": {
             "type": "string",
-            "enum": [
-              "local"
-            ],
+            "enum": ["local"],
             "description": "How the user signs in."
           },
           "mustChangePassword": {
@@ -13957,11 +13789,7 @@
       },
       "MeExtension": {
         "type": "object",
-        "required": [
-          "id",
-          "number",
-          "name"
-        ],
+        "required": ["id", "number", "name"],
         "properties": {
           "id": {
             "type": "integer",
@@ -13977,11 +13805,7 @@
       },
       "VoicemailEmailPrefs": {
         "type": "object",
-        "required": [
-          "notify",
-          "attach",
-          "after"
-        ],
+        "required": ["notify", "attach", "after"],
         "properties": {
           "notify": {
             "type": "boolean",
@@ -13993,23 +13817,14 @@
           },
           "after": {
             "type": "string",
-            "enum": [
-              "none",
-              "mark_read",
-              "delete"
-            ],
+            "enum": ["none", "mark_read", "delete"],
             "description": "What happens to the message once the email was sent: nothing, mark as read, or delete."
           }
         }
       },
       "Role": {
         "type": "string",
-        "enum": [
-          "user",
-          "viewer",
-          "operator",
-          "admin"
-        ],
+        "enum": ["user", "viewer", "operator", "admin"],
         "description": "user: only the self-service operations on the user's own linked extensions; viewer: every read operation; operator: also every write operation; admin: also every admin and secrets operation"
       },
       "User": {
@@ -14045,9 +13860,7 @@
           },
           "authMethod": {
             "type": "string",
-            "enum": [
-              "local"
-            ]
+            "enum": ["local"]
           },
           "role": {
             "$ref": "#/components/schemas/Role"
@@ -14060,10 +13873,7 @@
             "type": "boolean"
           },
           "extensionId": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "format": "int64",
             "description": "The primary extension, whose phones receive the user's personal contacts; null when unlinked."
           },
@@ -14099,10 +13909,7 @@
       "PasswordChange": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "currentPassword",
-          "newPassword"
-        ],
+        "required": ["currentPassword", "newPassword"],
         "properties": {
           "currentPassword": {
             "type": "string",
@@ -14121,11 +13928,7 @@
       "UserCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "username",
-          "role",
-          "password"
-        ],
+        "required": ["username", "role", "password"],
         "properties": {
           "username": {
             "type": "string",
@@ -14143,9 +13946,7 @@
           },
           "authMethod": {
             "type": "string",
-            "enum": [
-              "local"
-            ],
+            "enum": ["local"],
             "default": "local",
             "description": "How the user signs in; local passwords only."
           },
@@ -14193,11 +13994,7 @@
           },
           "after": {
             "type": "string",
-            "enum": [
-              "none",
-              "mark_read",
-              "delete"
-            ],
+            "enum": ["none", "mark_read", "delete"],
             "description": "What happens to the message once the email was sent."
           }
         }
@@ -14244,10 +14041,7 @@
             "description": "Replaces the user's extensions."
           },
           "extensionId": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "format": "int64",
             "description": "Link exactly this extension (replacing others); null unlinks all. Use extensionIds instead."
           },
@@ -14319,9 +14113,7 @@
       },
       "SelfExtensionList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -14393,9 +14185,7 @@
       "SelfVoicemailUpdate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "pin"
-        ],
+        "required": ["pin"],
         "properties": {
           "pin": {
             "type": "string",
@@ -14406,9 +14196,7 @@
       },
       "VoicemailMessageList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -14462,10 +14250,7 @@
       },
       "SelfCallPage": {
         "type": "object",
-        "required": [
-          "items",
-          "next"
-        ],
+        "required": ["items", "next"],
         "properties": {
           "items": {
             "type": "array",
@@ -14513,17 +14298,10 @@
           },
           "source": {
             "type": "string",
-            "enum": [
-              "database",
-              "environment",
-              "none"
-            ]
+            "enum": ["database", "environment", "none"]
           },
           "updatedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           }
         }
@@ -14531,12 +14309,7 @@
       "SmtpSettingsUpdate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "host",
-          "port",
-          "security",
-          "from"
-        ],
+        "required": ["host", "port", "security", "from"],
         "properties": {
           "host": {
             "type": "string",
@@ -14550,11 +14323,7 @@
           },
           "security": {
             "type": "string",
-            "enum": [
-              "none",
-              "starttls",
-              "tls"
-            ],
+            "enum": ["none", "starttls", "tls"],
             "description": "Transport security."
           },
           "username": {
@@ -14566,10 +14335,7 @@
             "description": "The sender address."
           },
           "password": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "maxLength": 512,
             "x-hello-secret": true,
             "description": "Omit to keep the stored password; an empty string clears it."
@@ -14579,9 +14345,7 @@
       "SmtpTest": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "to"
-        ],
+        "required": ["to"],
         "properties": {
           "to": {
             "type": "string",
@@ -14606,7 +14370,15 @@
             "description": "The token's scopes, at most the caller's; absent means read, write and admin (secrets must be named).",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "expiresAt": {
@@ -14655,7 +14427,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "expiresAt": {
@@ -14704,7 +14484,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "expiresAt": {
@@ -15019,11 +14807,7 @@
       },
       "TtsModel": {
         "type": "object",
-        "required": [
-          "id",
-          "name",
-          "voices"
-        ],
+        "required": ["id", "name", "voices"],
         "properties": {
           "id": {
             "type": "string"
@@ -15041,10 +14825,7 @@
       },
       "GenerationResult": {
         "type": "object",
-        "required": [
-          "announcement",
-          "regenerated"
-        ],
+        "required": ["announcement", "regenerated"],
         "properties": {
           "announcement": {
             "$ref": "#/components/schemas/Announcement"
@@ -15056,10 +14837,7 @@
         }
       },
       "TtsRecord": {
-        "type": [
-          "object",
-          "null"
-        ],
+        "type": ["object", "null"],
         "properties": {
           "text": {
             "type": "string"
@@ -15081,10 +14859,7 @@
       },
       "VoicemailGreetingResult": {
         "type": "object",
-        "required": [
-          "box",
-          "regenerated"
-        ],
+        "required": ["box", "regenerated"],
         "properties": {
           "box": {
             "$ref": "#/components/schemas/VoicemailBox"
@@ -15666,7 +15441,8 @@
           "defaultCallerId",
           "enabled",
           "destinations",
-          "internalDialing"
+          "internalDialing",
+          "codecs"
         ],
         "properties": {
           "id": {
@@ -15747,6 +15523,16 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "codecs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "enum": ["PCMU", "PCMA", "G722", "opus"]
+            },
+            "description": "Audio codec allow-list offered to the carrier, in preference order. Names are case-insensitive and stored as PCMU, PCMA, G722 or opus; none may repeat. Default PCMU, PCMA."
           },
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing"
@@ -15836,6 +15622,13 @@
             "maxLength": 256,
             "description": "Sealed with AES-256-GCM under HELLO_SECRET_KEY and never returned. On PATCH: omitted keeps it, \"\" clears it, a value replaces it."
           },
+          "codecs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": { "type": "string" },
+            "description": "Audio codec allow-list offered to the carrier, in preference order. Names are case-insensitive and stored as PCMU, PCMA, G722 or opus; none may repeat. Default PCMU, PCMA."
+          },
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing",
             "description": "The trunk's internal-number dialing policy: what it may dial in the extension namespace. Default mode \"off\" dials no internal number, so a new trunk reaches nothing internal. Set whole: a body that carries internalDialing replaces the policy."
@@ -15924,6 +15717,13 @@
             "writeOnly": true,
             "maxLength": 256,
             "description": "Sealed with AES-256-GCM under HELLO_SECRET_KEY and never returned. On PATCH: omitted keeps it, \"\" clears it, a value replaces it."
+          },
+          "codecs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": { "type": "string" },
+            "description": "Audio codec allow-list offered to the carrier, in preference order. Names are case-insensitive and stored as PCMU, PCMA, G722 or opus; none may repeat. Default PCMU, PCMA."
           },
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing",
@@ -17203,7 +17003,15 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+                  "enum": [
+                    "read",
+                    "write",
+                    "admin",
+                    "secrets",
+                    "calls",
+                    "events",
+                    "recordings"
+                  ]
                 },
                 "description": {
                   "type": "string"
@@ -17262,7 +17070,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "resources": {
@@ -17280,7 +17096,15 @@
             "description": "The scopes the caller's role may grant.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           }
         }
@@ -17328,7 +17152,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "resources": {
@@ -17428,7 +17260,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "enabled": {
@@ -17484,7 +17324,15 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "enabled": {
@@ -17519,7 +17367,15 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "enabled": {

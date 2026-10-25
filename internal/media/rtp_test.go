@@ -88,7 +88,7 @@ func TestParseTelephoneEvent(t *testing.T) {
 	// Short 4-byte form: E flag in bit 7 of byte 1.
 	short := []byte{0x01, 0x0A, 0x03, 0xE8}
 	ev, ok := ParseTelephoneEvent(short)
-	if !ok || ev.Code != 1 || ev.End {
+	if !ok || ev.Code != '1' || ev.End {
 		t.Errorf("short start: %+v ok=%v", ev, ok)
 	}
 	short[1] |= 0x80
@@ -97,7 +97,7 @@ func TestParseTelephoneEvent(t *testing.T) {
 	}
 	// Long form: E flag in bit 7 of the last byte.
 	long := []byte{0x02, 0x00, 0x03, 0xE8, 0x01, 0x80}
-	if ev, ok = ParseTelephoneEvent(long); !ok || ev.Code != 2 || !ev.End {
+	if ev, ok = ParseTelephoneEvent(long); !ok || ev.Code != '2' || !ev.End {
 		t.Errorf("long end: %+v ok=%v", ev, ok)
 	}
 	long[5] = 0x00
@@ -148,4 +148,49 @@ func TestDTMFFilterOncePerPress(t *testing.T) {
 			t.Error("a mid-press packet must not deliver")
 		}
 	})
+}
+
+// TestDTMFDigit pins the RFC 4733 event-code to ASCII mapping: 10 is '*',
+// 11 is '#', 12-15 are A-D. The raw code used to pass through, so a real
+// phone's '*' never matched the "*1" feature sequence.
+func TestDTMFDigit(t *testing.T) {
+	for code := byte(0); code <= 9; code++ {
+		if got, ok := DTMFDigit(code); !ok || got != '0'+code {
+			t.Errorf("code %d = %q ok=%v", code, got, ok)
+		}
+	}
+	for code, want := range map[byte]byte{10: '*', 11: '#', 12: 'A', 13: 'B', 14: 'C', 15: 'D'} {
+		if got, ok := DTMFDigit(code); !ok || got != want {
+			t.Errorf("code %d = %q ok=%v, want %q", code, got, ok, want)
+		}
+	}
+	// ASCII in stays ASCII, so a second mapping is harmless.
+	for _, c := range []byte("0123456789*#ABCD") {
+		if got, ok := DTMFDigit(c); !ok || got != c {
+			t.Errorf("ascii %q = %q ok=%v", c, got, ok)
+		}
+	}
+	for _, code := range []byte{16, 32, 'E', 'x', 255} {
+		if _, ok := DTMFDigit(code); ok {
+			t.Errorf("code %d must not be a digit", code)
+		}
+	}
+}
+
+// TestParseTelephoneEventMapsToASCII covers the decode boundary: wire codes
+// 10 and 11 leave ParseTelephoneEvent as '*' and '#', through the filter too.
+func TestParseTelephoneEventMapsToASCII(t *testing.T) {
+	for wire, want := range map[byte]byte{0: '0', 1: '1', 9: '9', 10: '*', 11: '#', 12: 'A', 15: 'D'} {
+		ev, ok := ParseTelephoneEvent([]byte{wire, 0x80, 0x00, 0xA0})
+		if !ok || ev.Code != want {
+			t.Fatalf("wire %d: %+v ok=%v, want %q", wire, ev, ok, want)
+		}
+		var f DTMFFilter
+		if got, deliver := f.Observe(ev, false); !deliver || got != want {
+			t.Errorf("wire %d delivered %q/%v, want %q", wire, got, deliver, want)
+		}
+	}
+	if _, ok := ParseTelephoneEvent([]byte{16, 0, 0, 0}); ok {
+		t.Error("a flash event (16) is not a digit")
+	}
 }

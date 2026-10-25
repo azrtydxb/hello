@@ -5,10 +5,12 @@
 package sip
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo/sip"
 )
@@ -226,7 +228,7 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 		return
 	}
-	if h := req.ContentType(); h != nil && strings.Contains(h.Value(), "dtmf-relay") {
+	if h := req.ContentType(); h != nil && isDTMFInfo(h.Value()) {
 		if d, ok := dtmfDigit(req.Body()); ok {
 			s.dispatchDigit(ref.c, ref.leg == nil, d)
 		}
@@ -278,17 +280,41 @@ func (s *Server) handleMessage(req *sip.Request, tx sip.ServerTransaction) {
 	s.respond(tx, req, sip.StatusOK, "OK")
 }
 
-// dtmfDigit reads a digit from a dtmf-relay body ("Signal=2", "Signal: #").
+// isDTMFInfo reports whether an INFO Content-Type carries a DTMF digit:
+// application/dtmf-relay or application/dtmf.
+func isDTMFInfo(contentType string) bool {
+	ct := strings.ToLower(contentType)
+	return strings.Contains(ct, "dtmf-relay") || strings.HasPrefix(strings.TrimSpace(ct), "application/dtmf")
+}
+
+// dtmfDigit reads an ASCII digit from an INFO DTMF body: dtmf-relay
+// ("Signal=2", "Signal: #", "Signal=10" for '*') or a bare application/dtmf
+// body ("*", "#", "5"). A numeric signal of 10-15 is an RFC 4733 event code
+// and is mapped like an RFC 2833 event, so every path yields the same
+// ASCII.
 func dtmfDigit(body []byte) (byte, bool) {
 	for _, line := range strings.Split(string(body), "\n") {
 		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-		if !strings.HasPrefix(strings.ToLower(line), "signal") {
+		if line == "" {
 			continue
 		}
-		rest := strings.TrimLeft(strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(line), "signal"), ":"), " =")
-		if rest != "" {
-			return rest[0], true
+		val := line
+		if strings.HasPrefix(strings.ToLower(line), "signal") {
+			val = strings.TrimLeft(strings.TrimPrefix(line[len("signal"):], ":"), " =")
+		} else if strings.ContainsAny(line, "=:") {
+			continue // another dtmf-relay field such as Duration
 		}
+		val = strings.TrimSpace(val)
+		if val == "" {
+			continue
+		}
+		if n, err := strconv.Atoi(val); err == nil && len(val) > 1 {
+			if n >= 10 && n <= 15 {
+				return media.DTMFDigit(byte(n))
+			}
+			return 0, false
+		}
+		return media.DTMFDigit(val[0])
 	}
 	return 0, false
 }
