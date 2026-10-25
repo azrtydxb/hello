@@ -104,6 +104,10 @@ type NewAccount struct {
 // (never the password or its hash).
 func (s *Store) CreateAccount(ctx context.Context, actor string, in NewAccount) (User, error) {
 	var u User
+	if in.Voicemail.After == "" {
+		// The zero value is not a valid column value; "none" is the default.
+		in.Voicemail.After = "none"
+	}
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `

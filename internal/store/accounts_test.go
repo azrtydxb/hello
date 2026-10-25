@@ -56,8 +56,7 @@ func TestUserAccounts(t *testing.T) {
 	if alice.ExtensionID == nil || *alice.ExtensionID != e1.ID || len(alice.ExtensionIDs) != 2 || alice.ExtensionIDs[1] != e2.ID {
 		t.Fatalf("alice = %+v; want primary %d and extensions [%d %d]", alice, e1.ID, e1.ID, e2.ID)
 	}
-	if _, err := s.CreateAccount(ctx, "test", NewAccount{Username: "alice", Role: auth.RoleUser, PasswordHash: "x",
-		Voicemail: VoicemailEmailPrefs{Notify: true, Attach: true, After: "none"}}); !errors.Is(err, ErrConflict) {
+	if _, err := s.CreateAccount(ctx, "test", NewAccount{Username: "alice", Role: auth.RoleUser, PasswordHash: "x"}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate login = %v, want ErrConflict", err)
 	}
 	var inUse *InUseError
