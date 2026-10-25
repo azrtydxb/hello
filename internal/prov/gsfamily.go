@@ -52,7 +52,7 @@ func GrandstreamFamily(model string) string {
 // key app, and the WP8x6 and WP8xx have no BLF key type), so a WP phone
 // takes none. Every other phone does.
 func SupportsBLF(v Vendor, model string) bool {
-	return !(v == Grandstream && GrandstreamFamily(model) != "")
+	return v != Grandstream || GrandstreamFamily(model) == ""
 }
 
 // wp856RefreshMinutes are the only phonebook download intervals (P332) the
