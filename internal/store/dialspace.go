@@ -10,8 +10,8 @@ package store
 //   - a paging code is dialled as is, but shares the prefix rule so a paging
 //     group never shadows, or is shadowed by, a feature code;
 //   - a park slot is a number (701) dialled to retrieve the call or watched by
-//     a BLF key, so it collides with an extension number, a ring group name
-//     or another lot's slot of the same value.
+//     a BLF key, so it collides with an extension number, a ring group name,
+//     a queue number or another lot's slot of the same value.
 //
 // Every write that can introduce an overlap runs dialGuard, which compares
 // the overlaps before and after the change and refuses only the new ones, so
@@ -87,10 +87,20 @@ func loadDialItems(ctx context.Context, tx *sql.Tx) ([]dialItem, map[string]stri
 	if err := rows.Err(); err != nil {
 		return nil, nil, err
 	}
-	// Extension numbers and ring group names a slot must not equal.
+	// Extension numbers, ring group names and queue numbers a slot must not
+	// equal. The queues table comes with its own migration, which may not
+	// be applied yet.
+	var hasQueues bool
+	if err := tx.QueryRowContext(ctx, `SELECT to_regclass('queues') IS NOT NULL`).Scan(&hasQueues); err != nil {
+		return nil, nil, err
+	}
+	q := `SELECT number, 'extension ' || number FROM extensions
+		UNION ALL SELECT name, 'ring group ' || name FROM ring_groups`
+	if hasQueues {
+		q += ` UNION ALL SELECT number, 'queue ' || name FROM queues WHERE number <> ''`
+	}
 	names := map[string]string{}
-	rows, err = tx.QueryContext(ctx, `SELECT number, 'extension ' || number FROM extensions
-		UNION ALL SELECT name, 'ring group ' || name FROM ring_groups`)
+	rows, err = tx.QueryContext(ctx, q)
 	if err != nil {
 		return nil, nil, err
 	}

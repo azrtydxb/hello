@@ -39,11 +39,40 @@ CREATE TABLE pickup_group_members (
 
 CREATE INDEX pickup_group_members_ext ON pickup_group_members (extension_id);
 
-ALTER TABLE feature_codes DROP CONSTRAINT feature_codes_action_check;
-ALTER TABLE feature_codes ADD CONSTRAINT feature_codes_action_check
-  CHECK (action IN ('forward_always','forward_busy','forward_no_answer','dnd_on','dnd_off',
-                    'voicemail','blind_transfer','attended_transfer','announcement','page','intercom',
-                    'park','park_retrieve','pickup_group','pickup_directed','call_waiting_on','call_waiting_off'));
+-- Widen the feature-code action list. The list is read from the live
+-- constraint, so actions other migrations added (applied in either order)
+-- are kept. The helper is dropped again so a later migration on the same
+-- session can define its own.
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION pg_temp.hello_check_values(tbl regclass, cname text, add_vals text[], drop_vals text[])
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+    def  text;
+    col  text;
+    vals text[];
+BEGIN
+    SELECT pg_get_constraintdef(c.oid) INTO def
+      FROM pg_constraint c WHERE c.conrelid = tbl AND c.conname = cname;
+    IF def IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % not found', cname, tbl;
+    END IF;
+    col := substring(def FROM '^CHECK \(+([a-z_]+) = ANY');
+    IF col IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % has an unexpected form: %', cname, tbl, def;
+    END IF;
+    SELECT array_agg(m[1]) INTO vals FROM regexp_matches(def, '''([^'']*)''', 'g') AS t(m);
+    SELECT array_agg(DISTINCT v ORDER BY v) INTO vals
+      FROM unnest(vals || add_vals) AS u(v) WHERE v <> ALL (drop_vals);
+    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', tbl, cname);
+    EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I CHECK (%I IN (%s))', tbl, cname, col,
+        (SELECT string_agg(quote_literal(v), ',') FROM unnest(vals) AS u(v)));
+END
+$fn$;
+-- +goose StatementEnd
+
+SELECT pg_temp.hello_check_values('feature_codes', 'feature_codes_action_check',
+    ARRAY['park', 'park_retrieve', 'pickup_group', 'pickup_directed'], ARRAY[]::text[]);
+DROP FUNCTION pg_temp.hello_check_values(regclass, text, text[], text[]);
 
 -- Existing installs get the default codes (park *74, retrieve *75, group
 -- pickup *40, directed pickup *41<ext>) unless one would overlap a feature
@@ -67,10 +96,35 @@ WHERE NOT EXISTS (SELECT 1 FROM extensions WHERE length(number) = 3 AND number B
 
 -- +goose Down
 DELETE FROM feature_codes WHERE action IN ('park', 'park_retrieve', 'pickup_group', 'pickup_directed');
-ALTER TABLE feature_codes DROP CONSTRAINT feature_codes_action_check;
-ALTER TABLE feature_codes ADD CONSTRAINT feature_codes_action_check
-  CHECK (action IN ('forward_always','forward_busy','forward_no_answer','dnd_on','dnd_off',
-                    'voicemail','blind_transfer','attended_transfer','announcement','page','intercom','call_waiting_on','call_waiting_off'));
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION pg_temp.hello_check_values(tbl regclass, cname text, add_vals text[], drop_vals text[])
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+    def  text;
+    col  text;
+    vals text[];
+BEGIN
+    SELECT pg_get_constraintdef(c.oid) INTO def
+      FROM pg_constraint c WHERE c.conrelid = tbl AND c.conname = cname;
+    IF def IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % not found', cname, tbl;
+    END IF;
+    col := substring(def FROM '^CHECK \(+([a-z_]+) = ANY');
+    IF col IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % has an unexpected form: %', cname, tbl, def;
+    END IF;
+    SELECT array_agg(m[1]) INTO vals FROM regexp_matches(def, '''([^'']*)''', 'g') AS t(m);
+    SELECT array_agg(DISTINCT v ORDER BY v) INTO vals
+      FROM unnest(vals || add_vals) AS u(v) WHERE v <> ALL (drop_vals);
+    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', tbl, cname);
+    EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I CHECK (%I IN (%s))', tbl, cname, col,
+        (SELECT string_agg(quote_literal(v), ',') FROM unnest(vals) AS u(v)));
+END
+$fn$;
+-- +goose StatementEnd
+SELECT pg_temp.hello_check_values('feature_codes', 'feature_codes_action_check',
+    ARRAY[]::text[], ARRAY['park', 'park_retrieve', 'pickup_group', 'pickup_directed']);
+DROP FUNCTION pg_temp.hello_check_values(regclass, text, text[], text[]);
 DROP TABLE pickup_group_members;
 DROP TABLE pickup_groups;
 DROP TABLE park_lots;

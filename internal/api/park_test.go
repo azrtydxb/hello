@@ -159,8 +159,8 @@ func TestPickupGroupCRUD(t *testing.T) {
 }
 
 // TestDialSpaceOverlap: no feature code, paging code or park slot may
-// overlap another (spec: the pickup defaults must not collide with a paging
-// group). It fails if any of the overlapping writes is accepted, or if a
+// overlap another, and no slot may equal an extension, ring group or queue
+// number (spec: the pickup defaults must not collide with a paging group). It fails if any of the overlapping writes is accepted, or if a
 // write that adds no new overlap is blocked.
 func TestDialSpaceOverlap(t *testing.T) {
 	e := newPBXEnv(t, newMemObjects())
@@ -203,6 +203,17 @@ func TestDialSpaceOverlap(t *testing.T) {
 	c.must(http.StatusCreated, "POST", "/api/v1/ring-groups", map[string]any{"name": "980", "strategy": "ring-all",
 		"members": []map[string]any{{"extensionId": json.RawMessage(fmt.Sprint(e.ext101["id"])), "position": 1}}})
 	c.must(http.StatusBadRequest, "POST", "/api/v1/park-lots", map[string]any{"name": "clash2", "slotStart": 975, "slotEnd": 985})
+	// A park lot over a queue number. The queues table comes with the call
+	// queues migration; stand in a minimal one when it is not there yet.
+	if _, err := e.db.Exec(`CREATE TABLE IF NOT EXISTS queues (id BIGSERIAL PRIMARY KEY,
+		name TEXT NOT NULL UNIQUE, number TEXT NOT NULL DEFAULT '')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.Exec(`INSERT INTO queues (name, number) VALUES ('sales', '990')`); err != nil {
+		t.Fatal(err)
+	}
+	c.must(http.StatusBadRequest, "POST", "/api/v1/park-lots", map[string]any{"name": "clash3", "slotStart": 986, "slotEnd": 995})
+	c.must(http.StatusCreated, "POST", "/api/v1/park-lots", map[string]any{"name": "clear", "slotStart": 991, "slotEnd": 995})
 }
 
 // TestParkedCalls: the live parked-calls view lists what the store holds.

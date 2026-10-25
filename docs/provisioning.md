@@ -1054,7 +1054,7 @@ paging group on `*60`, so Hello uses `*40` and `*41<ext>` instead. Hello
 refuses (400, with the colliding items named) any feature code, paging code
 or park slot that overlaps another: equal, or one a prefix of the other
 (a code takes its argument after it, so `*8` would shadow `*80`), or a park
-slot that equals an extension number or ring group name. A write that adds
+slot that equals an extension number, ring group name or queue number. A write that adds
 no new overlap is never blocked by an overlap that already existed. A
 migration on an existing install adds the four defaults only where none of
 them overlaps what is there.

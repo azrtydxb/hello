@@ -348,7 +348,8 @@ func TestRenderInputsFirmwareAndFetches(t *testing.T) {
 
 // TestRenderInputsFeatureCodes fails if the render data does not carry the
 // PBX's DND and forward star codes (Snom and Fanvil dial them from the
-// phone's keys), or carries a directed-pickup code the PBX does not have.
+// phone's keys), or misses the directed-pickup code the park migration
+// seeds.
 func TestRenderInputsFeatureCodes(t *testing.T) {
 	st, _, ext := provStore(t)
 	ctx := context.Background()
@@ -365,7 +366,7 @@ func TestRenderInputsFeatureCodes(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := prov.FeatureCodes{DNDOn: "*78", DNDOff: "*79", ForwardOn: "*72", ForwardOff: "*73",
-		ForwardBusyOn: "*90", ForwardBusyOff: "*91", ForwardNoAnswerOn: "*92", ForwardNoAnswerOff: "*93"}
+		ForwardBusyOn: "*90", ForwardBusyOff: "*91", ForwardNoAnswerOn: "*92", ForwardNoAnswerOff: "*93", PickupDirected: "*41"}
 	if d.Codes != want {
 		t.Fatalf("codes = %+v, want %+v", d.Codes, want)
 	}

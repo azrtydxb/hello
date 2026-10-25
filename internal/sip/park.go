@@ -661,7 +661,6 @@ func (c *call) parkReturn(ctx context.Context, pk *parkState, relay *media.Relay
 			switch ev.kind {
 			case evAnswered:
 				rc.cancelForks(ev.leg)
-				ev.leg.ack(nil, "")
 				c.parkReturnAnswered(rc, ev.leg, pk, partyLeg, parkerLeg)
 				return
 			case evFailed:
@@ -725,10 +724,12 @@ func (c *call) parkReturnLegs(snap *snapshot.Snapshot, pk *parkState, relay *med
 	return rc, legs
 }
 
-// parkReturnAnswered bridges the parker's answer with the held party.
+// parkReturnAnswered bridges the parker's answer with the held party. The
+// returned call is connected before its ACK goes out, so a BYE the parker
+// sends right after answering finds the dialog; the music stops last, as
+// stopping it can wait for the player.
 func (c *call) parkReturnAnswered(rc *call, l *leg, pk *parkState, partyLeg, parkerLeg string) {
 	s := c.s
-	c.stopParkMusic(pk)
 	if ans, err := media.ParseAudioSDP(l.session().InviteResponse.Body()); err == nil {
 		c.mu.Lock()
 		relay := c.relay
@@ -750,6 +751,8 @@ func (c *call) parkReturnAnswered(rc *call, l *leg, pk *parkState, partyLeg, par
 		c.link.peer = rc
 	}
 	c.mu.Unlock()
+	l.ack(nil, "")
+	c.stopParkMusic(pk)
 	c.addTrace(fmt.Sprintf("Returned to %s from slot %s", pk.parker, pk.slot))
 	s.parkMetric("return", "answered")
 }
