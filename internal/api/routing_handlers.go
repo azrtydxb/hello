@@ -433,12 +433,14 @@ type inboundBody struct {
 	DestinationKind   *string                    `json:"destinationKind"`
 	Destination       *string                    `json:"destination"`
 	Enabled           *bool                      `json:"enabled"`
+	MOHClassID        nullable[int64]            `json:"mohClassId"`
+	MOHRingback       *bool                      `json:"mohRingback"`
 }
 
 func (b inboundBody) empty() bool {
 	return b.Name == nil && b.DIDKind == nil && b.DID == nil && !b.TrunkID.Set && b.SIPDomain == nil &&
 		b.HeaderName == nil && b.HeaderRegex == nil && !b.Schedule.Set && b.CallerIDTransform == nil &&
-		b.DestinationKind == nil && b.Destination == nil && b.Enabled == nil
+		b.DestinationKind == nil && b.Destination == nil && b.Enabled == nil && !b.MOHClassID.Set && b.MOHRingback == nil
 }
 
 func (b inboundBody) applyTo(in *store.InboundRoute) {
@@ -458,6 +460,10 @@ func (b inboundBody) applyTo(in *store.InboundRoute) {
 	setIf(&in.DestinationKind, b.DestinationKind)
 	setIf(&in.Destination, b.Destination)
 	setIf(&in.Enabled, b.Enabled)
+	if b.MOHClassID.Set {
+		in.MOHClassID = b.MOHClassID.Value
+	}
+	setIf(&in.MOHRingback, b.MOHRingback)
 }
 
 func (s *server) listInbound(w http.ResponseWriter, r *http.Request) {

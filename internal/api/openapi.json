@@ -3874,6 +3874,219 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/moh-classes": {
+      "get": {
+        "operationId": "listMOHClasses",
+        "summary": "List music on hold classes",
+        "description": "Lists every music on hold class with its playlist. A class is a named playlist of announcements played in a loop or shuffled to a held or parked party, and optionally to a caller instead of ringback.",
+        "tags": [
+          "media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Classes ordered by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClassList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createMOHClass",
+        "summary": "Create a music on hold class",
+        "description": "Creates a class from announcement ids. Marking it default clears the flag on the previous default. A class with no announcements plays the built-in tone. Validation failures list each failing field in error.fields.",
+        "tags": [
+          "media"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MOHClassInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClass"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/moh-classes/{id}": {
+      "get": {
+        "operationId": "getMOHClass",
+        "summary": "One music on hold class",
+        "description": "Returns one class by id.",
+        "tags": [
+          "media"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The class",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClass"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putMOHClass",
+        "summary": "Replace a music on hold class",
+        "description": "Replaces a class as a whole, playlist included. A hold already playing keeps its music until it resumes.",
+        "tags": [
+          "media"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MOHClassInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MOHClass"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteMOHClass",
+        "summary": "Delete a music on hold class",
+        "description": "Deletes a class. Extensions, ring groups and inbound routes that named it fall back to the global default class, or the built-in tone.",
+        "tags": [
+          "media"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/paging-groups": {
       "get": {
         "operationId": "listPagingGroups",
@@ -11918,6 +12131,22 @@
             "type": "string",
             "enum": ["none", "voicemail", "external"]
           },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls to this group; null uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
+          },
           "failureTarget": {
             "type": "string"
           },
@@ -11982,6 +12211,22 @@
             "type": "string",
             "enum": ["none", "voicemail", "external"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls to this group; null or absent uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "failureTarget": {
             "type": "string",
@@ -12068,6 +12313,22 @@
             "type": "string",
             "enum": ["none", "voicemail", "external"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls to this group; null clears it."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "failureTarget": {
             "type": "string",
@@ -12186,6 +12447,118 @@
                   "description": "The auto-answer headers the INVITE carried, as Name: value"
                 }
               }
+            }
+          }
+        }
+      },
+      "MOHClass": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "isDefault",
+          "tracks",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "loop",
+              "shuffle"
+            ],
+            "description": "loop plays the tracks in order and starts over; shuffle plays them in a fresh random order each pass."
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "The global default class: what a hold plays when no extension, group or route picks one."
+          },
+          "tracks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "announcementId",
+                "name"
+              ],
+              "properties": {
+                "announcementId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MOHClassInput": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The class name, unique."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "loop",
+              "shuffle"
+            ],
+            "description": "Default loop."
+          },
+          "isDefault": {
+            "type": "boolean",
+            "description": "Default false."
+          },
+          "announcementIds": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Announcements to play, in order. Empty plays the built-in tone."
+          }
+        }
+      },
+      "MOHClassList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MOHClass"
             }
           }
         }
@@ -13125,6 +13498,18 @@
             "type": "boolean",
             "description": "Call waiting. On (the default): a call to this extension while it is in a call rings its devices and the phone shows call waiting. Off: the caller gets the forwardBusy target, or 486 Busy Here without one; ring groups skip the extension while it is busy. Provisioned into the phone's own call-waiting setting, so a phone resync applies a change."
           },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class callers hear while this extension holds them; null uses the global default."
+          },
           "directoryHidden": {
             "type": "boolean",
             "description": "Kept out of the automatic extensions address book."
@@ -13211,6 +13596,18 @@
           "callWaiting": {
             "type": "boolean",
             "description": "Call waiting. On (the default): a call to this extension while it is in a call rings its devices and the phone shows call waiting. Off: the caller gets the forwardBusy target, or 486 Busy Here without one; ring groups skip the extension while it is busy. Provisioned into the phone's own call-waiting setting, so a phone resync applies a change."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class callers hear while this extension holds them; null clears it (global default)."
           },
           "directoryHidden": {
             "type": "boolean",
@@ -14650,6 +15047,22 @@
             "type": "string",
             "enum": ["extension", "external", "sip_uri", "internal"]
           },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls this route delivers; null uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
+          },
           "destination": {
             "type": "string",
             "example": "101",
@@ -14725,6 +15138,22 @@
             "type": "string",
             "enum": ["extension", "external", "sip_uri", "internal"],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls this route delivers; null or absent uses the global default."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "destination": {
             "type": "string",
@@ -14802,6 +15231,22 @@
             "type": "string",
             "enum": ["extension", "external", "sip_uri", "internal"],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
+          },
+          "mohClassId": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "format": "int64"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Music on hold class of calls this route delivers; null clears it."
+          },
+          "mohRingback": {
+            "type": "boolean",
+            "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
           "destination": {
             "type": "string",

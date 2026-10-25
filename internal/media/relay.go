@@ -120,6 +120,10 @@ type relayLeg struct {
 
 	// stats is the leg's inbound-stream counters (locked).
 	stats legStats
+
+	// muted drops what this leg receives instead of forwarding it to the
+	// peer (a holder's stream while music plays to the held party).
+	muted atomic.Bool
 }
 
 // legStats is one leg's inbound counters; the direction label comes from
@@ -466,6 +470,9 @@ func (r *Relay) recv(l *relayLeg) {
 			if h != nil {
 				h(l.name, pkt)
 			}
+		}
+		if l.muted.Load() {
+			continue
 		}
 		r.forward(l, buf[:n])
 	}

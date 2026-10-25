@@ -40,6 +40,7 @@ import { mapFieldErrors, type ErrorMap } from "../forms";
 import { UNKNOWN } from "./callflow/format";
 import { FormAlert } from "./callflow/ui";
 import { Can } from "../role";
+import { MOHSelect } from "./media/MohSelect";
 
 const FORM_ID = "group-form";
 
@@ -297,10 +298,7 @@ function GroupCard({
                   {i + 1}
                 </span>
                 <span className="cf-member__who">
-                  <Avatar
-                    name={ext?.name || ext?.number || "?"}
-                    size={26}
-                  />
+                  <Avatar name={ext?.name || ext?.number || "?"} size={26} />
                   <span>
                     <span className="cf-mono">
                       {memberLabel(m, extensions)}
@@ -361,6 +359,8 @@ interface GroupDraft {
   ignoreDnd: boolean;
   failureKind: FailureKind;
   failureTarget: string;
+  mohClassId: Id | null;
+  mohRingback: boolean;
   members: MemberDraft[];
 }
 
@@ -374,6 +374,8 @@ function groupDraft(group: RingGroup | null): GroupDraft {
     ignoreDnd: group?.ignoreDnd ?? false,
     failureKind: group?.failureKind ?? "none",
     failureTarget: group?.failureTarget ?? "",
+    mohClassId: group?.mohClassId ?? null,
+    mohRingback: group?.mohRingback ?? false,
     members: (group?.members ?? [])
       .slice()
       .sort((a, b) => a.position - b.position)
@@ -395,6 +397,8 @@ function groupBody(d: GroupDraft): RingGroupFields {
     ignoreDnd: d.ignoreDnd,
     failureKind: d.failureKind,
     failureTarget: d.failureKind === "none" ? "" : d.failureTarget.trim(),
+    mohClassId: d.mohClassId,
+    mohRingback: d.mohRingback,
     members: d.members.map((m, i) => ({
       extensionId: m.extensionId,
       position: i + 1,
@@ -415,6 +419,8 @@ function groupKeys(d: GroupDraft): string[] {
     "ignoreDnd",
     "failureKind",
     "failureTarget",
+    "mohClassId",
+    "mohRingback",
     "members",
     ...d.members.flatMap((_, i) => [
       `members[${i}]`,
@@ -622,6 +628,21 @@ function RingGroupDrawer({
             onChange={(e) => set("ignoreDnd", e.target.checked)}
           />
         </div>
+        <MOHSelect
+          id={fid("mohClassId")}
+          label="Music on hold"
+          hint="What callers to this group hear when it holds them. Default uses the global class."
+          value={d.mohClassId}
+          error={errors.mohClassId}
+          onChange={(v) => set("mohClassId", v)}
+        />
+        <Switch
+          label="Play music instead of ringback"
+          hint="The caller hears the class while the group rings, not a ringing tone"
+          labelPosition="end"
+          checked={d.mohRingback}
+          onChange={(e) => set("mohRingback", e.target.checked)}
+        />
 
         <fieldset
           className="cf-form__section"
@@ -767,23 +788,23 @@ function RingGroupDrawer({
             onChange={(e) => set("failureKind", e.target.value as FailureKind)}
           />
           {d.failureKind !== "none" && (
-              <Input
-                id={fid("failureTarget")}
-                label={
-                  d.failureKind === "voicemail"
-                    ? "Box extension"
-                    : "External number"
-                }
-                mono
-                value={d.failureTarget}
-                error={errors.failureTarget}
-                hint={
-                  d.failureKind === "voicemail"
-                    ? "The extension whose box takes the call."
-                    : "2 to 20 digits, optionally starting with +."
-                }
-                onChange={(e) => set("failureTarget", e.target.value)}
-              />
+            <Input
+              id={fid("failureTarget")}
+              label={
+                d.failureKind === "voicemail"
+                  ? "Box extension"
+                  : "External number"
+              }
+              mono
+              value={d.failureTarget}
+              error={errors.failureTarget}
+              hint={
+                d.failureKind === "voicemail"
+                  ? "The extension whose box takes the call."
+                  : "2 to 20 digits, optionally starting with +."
+              }
+              onChange={(e) => set("failureTarget", e.target.value)}
+            />
           )}
         </fieldset>
         <FormAlert message={formError} unmatched={unmatched} />
