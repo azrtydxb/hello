@@ -79,7 +79,6 @@ func (s *Server) pageTestLoop(ctx context.Context) {
 // testContact is one contact's INVITE state during a test page.
 type testContact struct {
 	b       livestate.Binding
-	headers []string
 	res     livestate.PageTestContact
 	l       *leg
 }
