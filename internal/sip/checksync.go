@@ -39,6 +39,12 @@ const (
 	PushFailed        = "failed"
 )
 
+// rejectedHint is the detail of an auth_failed push: the phone received the
+// NOTIFY but would not act on it. A phone provisioned before remote control
+// existed (or still on an older config) challenges or refuses it until it has
+// been rebooted once to load the current config.
+const rejectedHint = "Phone rejected the request; it needs one manual reboot to load the remote-control config"
+
 // PushJob is one claimed push.
 type PushJob struct {
 	ID     int64
@@ -226,7 +232,7 @@ func (s *Server) checkSyncContact(ctx context.Context, user, realm, ha1MD5, ha1S
 		cred, err := answerChallenge(res.GetHeaders(hdr), req.Method.String(), req.Recipient.String(), user, realm, ha1MD5, ha1SHA256)
 		if err != nil {
 			s.log.Warn("check-sync challenge not answerable", "device", user, "error", err)
-			return PushResult{Status: PushAuthFailed, Detail: err.Error()}
+			return PushResult{Status: PushAuthFailed, Detail: rejectedHint + " (" + err.Error() + ")"}
 		}
 		req.RemoveHeader(authHdr)
 		req.AppendHeader(sip.NewHeader(authHdr, cred.String()))
@@ -241,7 +247,7 @@ func (s *Server) checkSyncContact(ctx context.Context, user, realm, ha1MD5, ha1S
 	case c >= 200 && c < 300:
 		return PushResult{Status: PushOK, Detail: strconv.Itoa(c)}
 	case c == sip.StatusUnauthorized || c == sip.StatusProxyAuthRequired || c == sip.StatusForbidden:
-		return PushResult{Status: PushAuthFailed, Detail: strconv.Itoa(c) + " " + res.Reason}
+		return PushResult{Status: PushAuthFailed, Detail: rejectedHint + " (" + strconv.Itoa(c) + " " + res.Reason + ")"}
 	case c == sip.StatusNotFound || c == sip.StatusCallTransactionDoesNotExists:
 		return PushResult{Status: PushNotRegistered, Detail: strconv.Itoa(c) + " " + res.Reason}
 	}

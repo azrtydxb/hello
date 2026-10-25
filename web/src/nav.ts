@@ -131,6 +131,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "stethoscope",
       },
       { label: "System", path: "/system", phase: 3, icon: "settings" },
+      {
+        label: "Voice (TTS)",
+        path: "/settings/voice",
+        phase: 5,
+        icon: "audio-lines",
+        // The page holds the provider key (admin-only routes).
+        minRole: "admin",
+      },
       { label: "AI access", path: "/ai", phase: 5, icon: "bot" },
       {
         label: "Users",

@@ -388,6 +388,11 @@ push reports `auth_failed`). The template also writes `P95030 = 0`, so a plain
 check-sync re-provisions without a reboot (WP8x6, firmware 1.0.3.20 and
 later).
 
+A phone that still runs a config provisioned before `P4428`/`P95030` were
+written rejects the NOTIFY. The push then reports `auth_failed` with the
+detail "Phone rejected the request; it needs one manual reboot to load the
+remote-control config"; reboot the phone once by hand and push again.
+
 **Console.** Phone page: Resync and Reboot (reboot asks for confirmation) and
 the last pushes with their result. Phones page: a resync and a reboot button
 per row, "Resync all" and "Reboot all", and the newest result per phone.

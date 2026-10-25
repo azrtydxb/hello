@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/valkey-io/valkey-go"
 )
 
@@ -248,8 +249,9 @@ func newPBXEnv(t *testing.T, objects Objects) *env {
 	return e
 }
 
-// wav is a minimal RIFF/WAVE payload; the API checks the container header.
-var wav = append([]byte("RIFF"), append([]byte{36, 0, 0, 0}, []byte("WAVEfmt ")...)...)
+// wav is a short valid 8 kHz 16-bit mono WAV; uploads are decoded, so a
+// header stub no longer passes.
+var wav = media.EncodeWAV(make([]byte, 1600), 8000)
 
 // TestVoicemailBoxEmailDelivery: with SMTP configured, GET and PUT both
 // report emailDelivery, so the console's settings form keeps it after a save.

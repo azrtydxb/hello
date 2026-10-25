@@ -252,8 +252,12 @@ func TestCheckSyncNotify(t *testing.T) {
 		p.notifyRealm = "other.example"
 		p.mu.Unlock()
 	}
-	if r := push("grandstream", PushResync); r.Status != PushAuthFailed {
+	r = push("grandstream", PushResync)
+	if r.Status != PushAuthFailed {
 		t.Fatalf("unknown realm result = %+v, want auth_failed", r)
+	}
+	if !strings.Contains(r.Detail, rejectedHint) {
+		t.Fatalf("detail %q lacks the reboot hint", r.Detail)
 	}
 	// A phone that rejects the credentials is auth_failed too.
 	for _, p := range []*phone{b1, b2} {
@@ -261,8 +265,12 @@ func TestCheckSyncNotify(t *testing.T) {
 		p.notifyPass, p.notifyRealm = "different", testDomain
 		p.mu.Unlock()
 	}
-	if r := push("grandstream", PushResync); r.Status != PushAuthFailed {
+	r = push("grandstream", PushResync)
+	if r.Status != PushAuthFailed {
 		t.Fatalf("wrong password result = %+v, want auth_failed", r)
+	}
+	if !strings.Contains(r.Detail, rejectedHint) {
+		t.Fatalf("detail %q lacks the reboot hint", r.Detail)
 	}
 
 	// 481 is not_registered, silence is a timeout, and the best contact

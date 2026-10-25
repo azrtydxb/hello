@@ -19,17 +19,21 @@ import (
 // VoicemailBox is an extension's voicemail box. The password hash is never
 // read into this type; HasPassword reports whether one is set.
 type VoicemailBox struct {
-	ID                int64     `json:"id"`
-	ExtensionID       int64     `json:"extensionId"`
-	HasPassword       bool      `json:"hasPassword"`
-	Email             string    `json:"email"`
-	GreetingObject    string    `json:"greetingObject"`
-	UnreachableObject string    `json:"unreachableObject"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID                int64  `json:"id"`
+	ExtensionID       int64  `json:"extensionId"`
+	HasPassword       bool   `json:"hasPassword"`
+	Email             string `json:"email"`
+	GreetingObject    string `json:"greetingObject"`
+	UnreachableObject string `json:"unreachableObject"`
+	// GreetingTTS and UnreachableTTS describe how a greeting was generated
+	// from text; nil for uploaded or picked audio.
+	GreetingTTS    *TTSMeta  `json:"greetingTts"`
+	UnreachableTTS *TTSMeta  `json:"unreachableTts"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
-const boxCols = `id, extension_id, password_hash <> '', email, greeting_object, unreachable_object, created_at, updated_at`
+const boxCols = `id, extension_id, password_hash <> '', email, greeting_object, unreachable_object, greeting_tts, unreachable_tts, created_at, updated_at`
 
 // GetVoicemailBox returns the box of extensionID.
 func (s *Store) GetVoicemailBox(ctx context.Context, extensionID int64) (VoicemailBox, error) {
@@ -40,8 +44,10 @@ func (s *Store) GetVoicemailBox(ctx context.Context, extensionID int64) (Voicema
 
 func scanBox(r interface{ Scan(...any) error }) (VoicemailBox, error) {
 	var b VoicemailBox
+	var gt, ut []byte
 	err := r.Scan(&b.ID, &b.ExtensionID, &b.HasPassword, &b.Email, &b.GreetingObject, &b.UnreachableObject,
-		&b.CreatedAt, &b.UpdatedAt)
+		&gt, &ut, &b.CreatedAt, &b.UpdatedAt)
+	b.GreetingTTS, b.UnreachableTTS = parseTTSMeta(gt), parseTTSMeta(ut)
 	return b, err
 }
 
@@ -53,6 +59,11 @@ type VoicemailBoxChange struct {
 	Password    *string
 	Greeting    *string
 	Unreachable *string
+	// GreetingTTS and UnreachableTTS accompany a new Greeting or Unreachable
+	// object: the prompt it was generated from, or nil for uploaded audio
+	// (which clears an earlier record).
+	GreetingTTS    *TTSMeta
+	UnreachableTTS *TTSMeta
 }
 
 // UpdateVoicemailBox changes the box of extensionID, creating the box if the
@@ -79,9 +90,12 @@ func (s *Store) UpdateVoicemailBox(ctx context.Context, actor string, extensionI
 				password_hash = COALESCE($3, password_hash),
 				greeting_object = COALESCE($4, greeting_object),
 				unreachable_object = COALESCE($5, unreachable_object),
+				greeting_tts = CASE WHEN $4::text IS NOT NULL THEN $6::jsonb ELSE greeting_tts END,
+				unreachable_tts = CASE WHEN $5::text IS NOT NULL THEN $7::jsonb ELSE unreachable_tts END,
 				updated_at = now()
 			WHERE extension_id = $1`,
-			extensionID, c.Email, hash, c.Greeting, c.Unreachable); err != nil {
+			extensionID, c.Email, hash, c.Greeting, c.Unreachable,
+			metaJSON(c.GreetingTTS), metaJSON(c.UnreachableTTS)); err != nil {
 			return "", err
 		}
 		var err error

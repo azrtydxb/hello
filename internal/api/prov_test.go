@@ -384,7 +384,7 @@ func TestPhoneAdminPassword(t *testing.T) {
 	pub, _ := url.Parse(testPublicURL)
 	boot := httptest.NewServer(prov.NewHandler(p.st,
 		prov.NewLimiter(nil, prov.Limits{IPPerMin: 1000, DeniedPer10Min: 1000, PhonePerHour: 1000}, log), nil,
-		prov.Options{PublicURL: pub, Resync: time.Hour, Log: log}))
+		prov.Options{PublicURL: pub, Resync: time.Hour, Log: log, RenderBudget: 10 * time.Second}))
 	t.Cleanup(boot.Close)
 	for _, name := range []string{"y000000000096.cfg", "0015650000aa.cfg"} {
 		resp, err := http.Get(boot.URL + "/p/boot/" + name)

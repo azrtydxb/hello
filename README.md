@@ -14,8 +14,9 @@ limits, and every call carries a routing trace in its record. A route tester
 explains any number before it goes live. Media flows directly between the
 endpoints; anchoring arrives in Phase 5. See [docs/phones.md](docs/phones.md)
 for phones, [docs/provisioning.md](docs/provisioning.md) for configuring
-them automatically, [docs/trunks.md](docs/trunks.md) for trunks, and
-[docs/ai-access.md](docs/ai-access.md) for connecting AI agents over MCP and
+them automatically, [docs/trunks.md](docs/trunks.md) for trunks,
+[docs/voice-prompts.md](docs/voice-prompts.md) for generating announcements and
+voicemail greetings from text, [docs/ai-access.md](docs/ai-access.md) for connecting AI agents over MCP and
 [docs/ai-agent.md](docs/ai-agent.md) for the in-product AI agent (assistant,
 findings and proposals). For the IVR / auto-attendant see
 [docs/ivr.md](docs/ivr.md). To run Hello on Kubernetes (Helm chart, SIP
