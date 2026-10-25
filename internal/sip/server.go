@@ -460,7 +460,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 		stopTrunks()
 		<-trunksDone
 		_ = conn.Close()
-		<-errc
+		if serr := <-errc; serr != nil {
+			s.log.Debug("serve ended during shutdown", "err", serr)
+		}
 		err = nil
 	case err = <-errc:
 		_ = conn.Close()

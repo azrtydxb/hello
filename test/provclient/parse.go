@@ -190,6 +190,19 @@ func ParsePoly(master, device []byte) (Config, error) {
 	return c, nil
 }
 
+// gsURL is a Grandstream server path as the phone reads it: the path has no
+// scheme, the via code (1 HTTP, 2 HTTPS) is the protocol. "" stays "".
+func gsURL(via, path, suffix string) string {
+	if path == "" {
+		return ""
+	}
+	scheme := "http"
+	if via == "2" {
+		scheme = "https"
+	}
+	return scheme + "://" + strings.TrimRight(path, "/") + suffix
+}
+
 // ParseGrandstream reads a Grandstream cfg<mac>.xml (P-values); mac is
 // what the phone checks the <mac> element against.
 func ParseGrandstream(b []byte, mac string) (Config, error) {
@@ -208,7 +221,7 @@ func ParseGrandstream(b []byte, mac string) (Config, error) {
 	}
 	c := Config{
 		User: p["P35"], AuthUser: p["P36"], Password: p["P34"], DisplayName: p["P3"],
-		ProvURL: p["P237"], CAURL: caFromComment(b), FirmwareURL: p["P192"], AdminPassword: p["P2"],
+		ProvURL: gsURL(p["P212"], p["P237"], "/"), CAURL: caFromComment(b), FirmwareURL: gsURL(p["P6767"], p["P192"], ""), AdminPassword: p["P2"],
 	}
 	if c.Server, c.Port, err = hostPort(p["P47"]); err != nil {
 		return Config{}, fmt.Errorf("grandstream: P47: %w", err)

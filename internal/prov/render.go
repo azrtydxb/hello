@@ -61,8 +61,13 @@ var templateFuncs = template.FuncMap{
 	// "https://h:8/p/x/" gives "h:8" and "p/x/" (no leading slash).
 	"urlhost": func(s string) string { return urlParts(s).Host },
 	"urlpath": func(s string) string { return strings.TrimPrefix(urlParts(s).Path, "/") },
-	"add":     func(a, b int) int { return a + b },
-	"mul":     func(a, b int) int { return a * b },
+	// noscheme drops the scheme and a trailing slash: Grandstream takes its
+	// server paths as "host/path" and chooses the protocol with a separate
+	// setting. urlvia is that setting for a URL (see UpgradeVia).
+	"noscheme": noScheme,
+	"urlvia":   UpgradeVia,
+	"add":      func(a, b int) int { return a + b },
+	"mul":      func(a, b int) int { return a * b },
 	"div": func(a, b int) (int, error) {
 		if b == 0 {
 			return 0, errors.New("div by zero")
@@ -80,6 +85,7 @@ var allowedIdents = map[string]bool{
 	"le": true, "gt": true, "ge": true, "len": true, "index": true,
 	"xml": true, "upper": true, "lower": true, "default": true,
 	"add": true, "mul": true, "div": true, "urlhost": true, "urlpath": true,
+	"noscheme": true, "urlvia": true,
 }
 
 // urlParts parses a URL, or returns the zero URL for one that does not.
@@ -476,7 +482,7 @@ func SampleData(full bool) RenderData {
 		Server: Server{Host: "sip.hello.example", Port: 5060, Transport: "udp", Expiry: 3600},
 		Prov: ProvInfo{URL: "https://prov.hello.example/p/sample/", CAURL: "http://prov.hello.example/p/ca.crt", ResyncSeconds: 86400,
 			CACertPEM: "-----BEGIN CERTIFICATE-----\nU0FNUExF\n-----END CERTIFICATE-----"},
-		Time: TimeInfo{Zone: "UTC", NTP: "pool.ntp.org"},
+		Time: NewTimeInfo("UTC", "pool.ntp.org", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 	}
 	if full {
 		d.Phone.Label = "Reception"
