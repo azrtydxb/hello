@@ -396,9 +396,20 @@ export const TEMPLATE_VARIABLES: readonly { name: string; doc: string }[] = [
   { name: ".Server.Port", doc: "registrar port" },
   { name: ".Server.Transport", doc: "always udp" },
   { name: ".Server.Expiry", doc: "registration expiry, seconds" },
-  { name: ".BLF", doc: "list of {Number, Label, URI}" },
+  {
+    name: ".BLF",
+    doc: "list of {Number, Label, URI} placed on the model's keys: Slot (vendor key number), Module (Yealink expansion), Page, Section, PageStart (Fanvil), Pickup",
+  },
+  {
+    name: ".Codes",
+    doc: "PBX star codes: DNDOn, DNDOff, ForwardOn/Off, ForwardBusyOn/Off, ForwardNoAnswerOn/Off, PickupDirected (empty when not defined)",
+  },
   { name: ".Prov.URL", doc: "the phone's own URL (masked in previews)" },
   { name: ".Prov.CAURL", doc: "plain-HTTP CA certificate URL" },
+  {
+    name: ".Prov.CACertBase64",
+    doc: "the CA certificate as base64 text, without the PEM lines",
+  },
   { name: ".Prov.ResyncSeconds", doc: "re-check interval" },
   { name: ".Firmware", doc: "{URL, Version}, or nil when none is pinned" },
   { name: ".Time.Zone", doc: "time zone" },

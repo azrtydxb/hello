@@ -172,8 +172,10 @@ func featureUpdate(fc snapshot.FeatureCode, arg, ext string) (ExtUpdate, bool) {
 }
 
 // handleInfo relays nothing: an INFO with a DTMF digit (application/
-// dtmf-relay) feeds the call's feature-code collection; anything else is
-// answered 200 and ignored.
+// dtmf-relay) feeds the call's feature-code collection, an INFO that carries
+// "Record: on" or "Record: off" (the phone's Record key) starts or stops the
+// call's recording like the *1 code does; anything else is answered 200 and
+// ignored.
 func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 	ref, ok := s.matchDialog(req)
 	if !ok {
@@ -184,8 +186,46 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 		if d, ok := dtmfDigit(req.Body()); ok {
 			s.dispatchDigit(ref.c, ref.leg == nil, d)
 		}
+	} else if on, ok := recordInfo(req); ok {
+		ref.c.setRecording(on)
 	}
 	s.respond(tx, req, sip.StatusOK, "OK")
+}
+
+// recordInfo reads the recording request of a phone's Record key: Snom
+// sends SIP INFO "Record: on" / "Record: off" (recording_mechanism SIP, the
+// default) and Fanvil the bodies of SIP1 Record Start and Record Stop
+// ("Record:on", "Record:off"). The word is taken from a Record header or a
+// body line, in any content type, with or without a space after the colon.
+func recordInfo(req *sip.Request) (on, ok bool) {
+	if h := req.GetHeader("Record"); h != nil {
+		if on, ok = recordWord(h.Value()); ok {
+			return on, true
+		}
+	}
+	for _, line := range strings.Split(string(req.Body()), "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) < 7 || !strings.EqualFold(line[:6], "record") {
+			continue
+		}
+		if rest, found := strings.CutPrefix(strings.TrimSpace(line[6:]), ":"); found {
+			if on, ok = recordWord(rest); ok {
+				return on, true
+			}
+		}
+	}
+	return false, false
+}
+
+// recordWord reads "on" or "off".
+func recordWord(v string) (on, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "on":
+		return true, true
+	case "off":
+		return false, true
+	}
+	return false, false
 }
 
 // handleMessage answers an inbound MESSAGE 200; the MWI MESSAGEs are

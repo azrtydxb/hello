@@ -107,6 +107,10 @@ type RenderData struct {
 	Multicast *MulticastInfo
 	PTT       *PTTInfo
 	Time      TimeInfo
+	// Codes are the PBX's star codes (feature_codes), for phones whose own
+	// DND and forward keys dial them; a code the PBX does not define is
+	// empty.
+	Codes FeatureCodes
 }
 
 // Phone is the phone itself, as templates and resolution see it.
@@ -147,11 +151,33 @@ type Server struct {
 	Expiry    int    // registration expiry, seconds
 }
 
-// BLFKey is one busy-lamp-field key.
+// BLFKey is one busy-lamp-field key. Render places the keys of a Yealink,
+// Snom or Fanvil phone on the model's keys (see PlaceBLF) and fills the
+// placement fields; keys the model has no room for are dropped.
 type BLFKey struct {
 	Number string // extension number
 	Label  string // the extension's name
 	URI    string // sip:<number>@<domain>
+
+	// Slot is the vendor's own key number for this key: Yealink linekey.N
+	// (or the key inside expansion module Module), Snom fkey idx (an
+	// absolute index, expansion keys included), Fanvil Fkey N within its
+	// Page. A phone whose vendor or model is unknown gets 1, 2, 3, ... (Snom
+	// and Fanvil) or 2, 3, 4, ... (Yealink: key 1 is the account's line).
+	Slot int
+	// Module is the Yealink expansion module (1 to 3) holding the key; 0 is
+	// the phone itself.
+	Module int
+	// Page and Section are the Fanvil key page (1 up) and its section name
+	// ("Dsskey"); PageStart marks the first key of a page, where the
+	// template writes the section header. Zero and empty for other vendors.
+	Page      int
+	Section   string
+	PageStart bool
+	// Pickup is the directed-pickup code the key sends to pick up the
+	// monitored extension's ringing call (Yealink BLF line keys); empty
+	// when the PBX has none.
+	Pickup string
 }
 
 // ProvInfo is the phone's own provisioning URL and re-check settings.
@@ -161,7 +187,11 @@ type ProvInfo struct {
 	// CACertPEM is the CA certificate itself (one PEM block, trailing
 	// newline trimmed; empty when none is configured), for vendors whose
 	// CA setting takes the certificate, not a URL (Poly, Grandstream).
-	CACertPEM     string
+	CACertPEM string
+	// CACertBase64 is CACertPEM without its BEGIN/END lines: the base64
+	// text of the DER certificate, one line, for Snom's <certificate
+	// type="base64"> element. Render fills it from CACertPEM.
+	CACertBase64  string
 	ResyncSeconds int // re-check interval, jitter from the MAC included
 }
 
