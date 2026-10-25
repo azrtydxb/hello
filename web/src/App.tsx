@@ -29,6 +29,10 @@ import {
   pageTitle,
 } from "./nav";
 import { AIAccess } from "./pages/AIAccess";
+import {
+  IntegrationsApiAccess,
+  IntegrationsOverview,
+} from "./pages/Integrations";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
 import { AIProposalDetail } from "./pages/AIProposalDetail";
@@ -98,6 +102,8 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/ai/proposals": AIProposals,
   "/ai/status": AIStatus,
   "/users": Users,
+  "/integrations": IntegrationsOverview,
+  "/integrations/api-access": IntegrationsApiAccess,
 };
 
 const ROLE_LABELS = {

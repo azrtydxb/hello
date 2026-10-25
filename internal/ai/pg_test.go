@@ -225,7 +225,7 @@ func TestPrune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	unlock, ok, err := st.TryAILock(ctx, "hello:ai:prune")
+	unlock, ok, err := st.TryLock(ctx, "hello:ai:prune")
 	if err != nil || !ok {
 		t.Fatal("take the prune lock", err)
 	}
