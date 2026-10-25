@@ -23,12 +23,21 @@ func TestRoutesTable(t *testing.T) {
 		"POST /api/v1/phones/{id}/admin-password/reveal": true,
 		"POST /api/v1/phones/{id}/admin-password/rotate": true,
 	}
-	// Self-service routes (spec P-19) write with the write scope but ask
-	// only the viewer role: any user with a linked extension edits their own
-	// contacts. A session holds every scope; a viewer's token can only hold
-	// read, so a viewer changes contacts from the console.
+	// Self-service routes (spec P-19, user accounts) ask only the user role,
+	// which ranks below viewer: the signed-in user's own profile, contacts,
+	// voicemail, extensions and calls, and the auth basics. Every route a
+	// role user can reach must be listed here on purpose; the handlers
+	// derive the owner from the credential and resolve ids through the
+	// caller's own extensions (see TestSelfServiceIsolation).
 	selfService := func(r RouteInfo) bool {
-		return r.Scope == auth.ScopeWrite && r.Role == auth.RoleViewer && (strings.HasPrefix(r.Pattern, "/api/v1/me/contacts") || strings.HasPrefix(r.Pattern, "/api/v1/me/messages"))
+		if r.Role != auth.RoleUser {
+			return false
+		}
+		switch r.Pattern {
+		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
+			return true
+		}
+		return strings.HasPrefix(r.Pattern, "/api/v1/me/")
 	}
 	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true}
 	seen := map[string]bool{}

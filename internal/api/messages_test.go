@@ -51,10 +51,11 @@ func TestMessageBodyValidation(t *testing.T) {
 func TestMessagesAPI(t *testing.T) {
 	e := newEnv(t, noLive{})
 	admin := e.login()
-	viewer, viewerID := e.asRole("vera", auth.RoleViewer)
+	viewer, viewerID := e.asRole("vera", auth.RoleUser)
 	operator, _ := e.asRole("otto", auth.RoleOperator)
-	other, otherID := e.asRole("olga", auth.RoleViewer)
-	unlinked, _ := e.asRole("uma", auth.RoleViewer)
+	other, otherID := e.asRole("olga", auth.RoleUser)
+	unlinked, _ := e.asRole("uma", auth.RoleUser)
+	plain, _ := e.asRole("vic", auth.RoleViewer)
 
 	e101 := admin.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]string{"number": "101", "name": "Sales"}).json(t)
 	e102 := admin.must(http.StatusCreated, "POST", "/api/v1/extensions", map[string]string{"number": "102", "name": "Support"}).json(t)
@@ -67,6 +68,7 @@ func TestMessagesAPI(t *testing.T) {
 	t.Run("roles", func(t *testing.T) {
 		send := map[string]any{"targetKind": "extension", "target": "101", "body": "hello"}
 		viewer.must(http.StatusForbidden, "POST", "/api/v1/messages", send)
+		plain.must(http.StatusForbidden, "POST", "/api/v1/messages", send)
 		operator.must(http.StatusAccepted, "POST", "/api/v1/messages", send)
 		operator.must(http.StatusForbidden, "GET", "/api/v1/messages", nil)
 		operator.must(http.StatusForbidden, "GET", "/api/v1/messages/conversations", nil)
@@ -111,10 +113,13 @@ func TestMessagesAPI(t *testing.T) {
 	t.Run("my messages", func(t *testing.T) {
 		unlinked.must(http.StatusForbidden, "GET", "/api/v1/me/messages", nil)
 		unlinked.must(http.StatusForbidden, "POST", "/api/v1/me/messages", map[string]any{"targetKind": "extension", "target": "102", "body": "x"})
+		// Choosing the sender: only among one's own extensions.
+		viewer.must(http.StatusBadRequest, "POST", "/api/v1/me/messages", map[string]any{"targetKind": "extension", "target": "102", "body": "x", "from": "102"})
 		// A user cannot broadcast.
 		viewer.must(http.StatusBadRequest, "POST", "/api/v1/me/messages", map[string]any{"targetKind": "broadcast", "body": "x", "confirm": true})
 		// The sender is the user's own extension, never taken from the body.
 		viewer.must(http.StatusBadRequest, "POST", "/api/v1/me/messages", map[string]any{"targetKind": "extension", "target": "102", "body": "from vera", "sender": "999"})
+
 		viewer.must(http.StatusAccepted, "POST", "/api/v1/me/messages", map[string]any{"targetKind": "extension", "target": "102", "body": "from vera"})
 
 		mine := listItems(t, viewer.must(http.StatusOK, "GET", "/api/v1/me/messages", nil))
@@ -148,6 +153,20 @@ func TestMessagesAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("bad queries and requests", func(t *testing.T) {
+		admin.must(http.StatusBadRequest, "GET", "/api/v1/messages?status=bogus", nil)
+		admin.must(http.StatusBadRequest, "GET", "/api/v1/messages/conversations?limit=0", nil)
+		admin.must(http.StatusBadRequest, "POST", "/api/v1/messages/purge", map[string]any{"olderThanDays": -1})
+		operator.must(http.StatusForbidden, "PUT", "/api/v1/messages/settings", map[string]any{"enabled": true})
+		viewer.must(http.StatusBadRequest, "GET", "/api/v1/me/messages?status=bogus", nil)
+		viewer.must(http.StatusBadRequest, "GET", "/api/v1/me/messages/conversations?limit=0", nil)
+		viewer.must(http.StatusNotFound, "POST", "/api/v1/me/messages", map[string]any{"targetKind": "extension", "target": "999", "body": "x"})
+		unlinked.must(http.StatusForbidden, "GET", "/api/v1/me/messages/conversations", nil)
+		if got := listItems(t, viewer.must(http.StatusOK, "GET", "/api/v1/me/messages/conversations", nil)); len(got) == 0 {
+			t.Error("vera has no conversations")
+		}
+	})
+
 	t.Run("settings", func(t *testing.T) {
 		cur := admin.must(http.StatusOK, "GET", "/api/v1/messages/settings", nil).json(t)
 		if cur["ttlHours"] != float64(24) || cur["retentionDays"] != float64(30) || cur["enabled"] != true {
@@ -165,6 +184,7 @@ func TestMessagesAPI(t *testing.T) {
 		next["enabled"] = false
 		admin.must(http.StatusOK, "PUT", "/api/v1/messages/settings", next)
 		admin.must(http.StatusConflict, "POST", "/api/v1/messages", map[string]any{"targetKind": "extension", "target": "101", "body": "x"})
+		viewer.must(http.StatusConflict, "POST", "/api/v1/me/messages", map[string]any{"targetKind": "extension", "target": "102", "body": "x"})
 		next["enabled"] = true
 		admin.must(http.StatusOK, "PUT", "/api/v1/messages/settings", next)
 	})

@@ -27,6 +27,8 @@ export interface MessageSend {
   body: string;
   /** Must be true for a broadcast. */
   confirm?: boolean;
+  /** Only on /me/messages: which of the user's extensions sends. */
+  from?: string;
 }
 
 export interface MessageSent {

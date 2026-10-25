@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -31,7 +32,7 @@ type MessageStore interface {
 	GetMessageSettings(ctx context.Context) (store.MessageSettings, error)
 	PutMessageSettings(ctx context.Context, actor string, m store.MessageSettings) (store.MessageSettings, error)
 	PurgeMessages(ctx context.Context, actor string, olderThanDays int) (int64, error)
-	UserExtensionNumber(ctx context.Context, userID int64) (string, error)
+	UserExtensionNumbers(ctx context.Context, userID int64) ([]string, error)
 	MessageExtensionName(ctx context.Context, number string) string
 }
 
@@ -46,6 +47,9 @@ type messageBody struct {
 	Body   string `json:"body"`
 	// Confirm must be true for a broadcast to every phone.
 	Confirm bool `json:"confirm"`
+	// From picks which of the user's extensions sends (/me/messages only);
+	// the first one when empty.
+	From string `json:"from"`
 }
 
 // messageSettingsBody is the settings replace request.
@@ -190,13 +194,20 @@ func messageQuery(w http.ResponseWriter, r *http.Request, defaultLimit int) (f s
 	return f, before, limit, true
 }
 
-func (s *server) listMessagesCommon(w http.ResponseWriter, r *http.Request, ms MessageStore, own string) {
+func (s *server) listMessagesCommon(w http.ResponseWriter, r *http.Request, ms MessageStore, own []string) {
 	f, before, limit, ok := messageQuery(w, r, defaultCDRLimit)
 	if !ok {
 		return
 	}
-	if own != "" {
-		f.Extension = own
+	if own != nil {
+		// A user sees only their own extensions' messages; a narrower
+		// extension filter is allowed, a wider one is not.
+		if f.Extension != "" && !slices.Contains(own, f.Extension) {
+			f.Extension = ""
+			f.Extensions = []string{"none"}
+		} else if f.Extension == "" {
+			f.Extensions = own
+		}
 	}
 	// Status "pending" also matches rows being sent right now.
 	items, err := ms.ListMessages(r.Context(), f, before, limit)
@@ -211,13 +222,20 @@ func (s *server) listMessagesCommon(w http.ResponseWriter, r *http.Request, ms M
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "next": next})
 }
 
-func (s *server) listConversationsCommon(w http.ResponseWriter, r *http.Request, ms MessageStore, own string) {
+func (s *server) listConversationsCommon(w http.ResponseWriter, r *http.Request, ms MessageStore, own []string) {
 	f, _, limit, ok := messageQuery(w, r, defaultCDRLimit)
 	if !ok {
 		return
 	}
-	if own != "" {
-		f.Extension = own
+	if own != nil {
+		// A user sees only their own extensions' messages; a narrower
+		// extension filter is allowed, a wider one is not.
+		if f.Extension != "" && !slices.Contains(own, f.Extension) {
+			f.Extension = ""
+			f.Extensions = []string{"none"}
+		} else if f.Extension == "" {
+			f.Extensions = own
+		}
 	}
 	convs, err := ms.ListMessageConversations(r.Context(), f, limit)
 	if err != nil {
@@ -229,13 +247,13 @@ func (s *server) listConversationsCommon(w http.ResponseWriter, r *http.Request,
 
 func (s *server) listMessages(w http.ResponseWriter, r *http.Request) {
 	if ms, ok := s.messageStore(w); ok {
-		s.listMessagesCommon(w, r, ms, "")
+		s.listMessagesCommon(w, r, ms, nil)
 	}
 }
 
 func (s *server) listMessageConversations(w http.ResponseWriter, r *http.Request) {
 	if ms, ok := s.messageStore(w); ok {
-		s.listConversationsCommon(w, r, ms, "")
+		s.listConversationsCommon(w, r, ms, nil)
 	}
 }
 
@@ -320,47 +338,47 @@ func (s *server) purgeMessages(w http.ResponseWriter, r *http.Request) {
 
 // My messages: the caller's own extension only.
 
-// messageOwner returns the extension the caller's user is linked to. A
-// credential that is not a user, or a user with no linked extension, gets
-// 403 here, so nothing below can be reached without an owner.
-func (s *server) messageOwner(w http.ResponseWriter, r *http.Request) (MessageStore, string, bool) {
+// messageOwner returns the extensions the caller's user manages. A
+// credential that is not a user, or a user with no extension, gets 403 here,
+// so nothing below can be reached without an owner.
+func (s *server) messageOwner(w http.ResponseWriter, r *http.Request) (MessageStore, []string, bool) {
 	ms, ok := s.messageStore(w)
 	if !ok {
-		return nil, "", false
+		return nil, nil, false
 	}
 	a := actor(r)
 	if a.Kind == auth.KindService || a.UserID <= 0 {
 		writeError(w, http.StatusForbidden, "no_user", "your messages belong to a user; this credential has none")
-		return nil, "", false
+		return nil, nil, false
 	}
-	ext, err := ms.UserExtensionNumber(r.Context(), a.UserID)
+	exts, err := ms.UserExtensionNumbers(r.Context(), a.UserID)
 	switch {
 	case errors.Is(err, store.ErrNoExtensionLink):
 		writeError(w, http.StatusForbidden, "no_extension", "your account is not linked to an extension, so you have no messages; ask an administrator to link it")
-		return nil, "", false
+		return nil, nil, false
 	case err != nil:
 		s.internal(w, "message owner", err)
-		return nil, "", false
+		return nil, nil, false
 	}
-	return ms, ext, true
+	return ms, exts, true
 }
 
-func (s *server) listMyMessages(w http.ResponseWriter, r *http.Request) {
-	if ms, ext, ok := s.messageOwner(w, r); ok {
-		s.listMessagesCommon(w, r, ms, ext)
-	}
-}
-
-func (s *server) listMyMessageConversations(w http.ResponseWriter, r *http.Request) {
-	if ms, ext, ok := s.messageOwner(w, r); ok {
-		s.listConversationsCommon(w, r, ms, ext)
+func (s *server) listMyTexts(w http.ResponseWriter, r *http.Request) {
+	if ms, exts, ok := s.messageOwner(w, r); ok {
+		s.listMessagesCommon(w, r, ms, exts)
 	}
 }
 
-// sendMyMessage sends from the caller's own extension; the sender is never
-// taken from the request.
-func (s *server) sendMyMessage(w http.ResponseWriter, r *http.Request) {
-	ms, ext, ok := s.messageOwner(w, r)
+func (s *server) listMyTextConversations(w http.ResponseWriter, r *http.Request) {
+	if ms, exts, ok := s.messageOwner(w, r); ok {
+		s.listConversationsCommon(w, r, ms, exts)
+	}
+}
+
+// sendMyText sends from one of the caller's own extensions; the sender is
+// never taken from anywhere else.
+func (s *server) sendMyText(w http.ResponseWriter, r *http.Request) {
+	ms, exts, ok := s.messageOwner(w, r)
 	if !ok {
 		return
 	}
@@ -368,12 +386,20 @@ func (s *server) sendMyMessage(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &b) {
 		return
 	}
-	if f := b.validate(false); len(f) > 0 {
+	f := b.validate(false)
+	from := exts[0]
+	if b.From != "" {
+		if !slices.Contains(exts, b.From) {
+			f.add("from", "must be one of your extensions")
+		}
+		from = b.From
+	}
+	if len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
 	sent, err := ms.SendMessage(r.Context(), store.MessageInput{
-		Sender: ext, SenderKind: store.MsgKindExtension, SenderName: ms.MessageExtensionName(r.Context(), ext),
+		Sender: from, SenderKind: store.MsgKindExtension, SenderName: ms.MessageExtensionName(r.Context(), from),
 		Actor: actor(r).String(), TargetKind: b.TargetKind, Target: b.Target, ContentType: "text/plain", Body: []byte(b.Body),
 	})
 	if err != nil {

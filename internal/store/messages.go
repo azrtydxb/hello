@@ -187,7 +187,10 @@ type MessageSent struct {
 // MessageFilter selects messages for a listing.
 type MessageFilter struct {
 	// Extension keeps messages the extension sent or received.
-	Extension    string
+	Extension string
+	// Extensions keeps messages any of these extensions sent or received (a
+	// user who manages several).
+	Extensions   []string
 	Conversation string
 	Status       string
 	Query        string
@@ -495,19 +498,30 @@ func (s *Store) ExternalMessagingEnabled(ctx context.Context) (bool, error) {
 	return ok, err
 }
 
-// UserExtensionNumber returns the number of the extension a user is linked
-// to, or ErrNoExtensionLink.
-func (s *Store) UserExtensionNumber(ctx context.Context, userID int64) (string, error) {
-	var n sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT e.number FROM users u LEFT JOIN extensions e ON e.id = u.extension_id
-		WHERE u.id = $1`, userID).Scan(&n)
+// UserExtensionNumbers returns the numbers of the extensions a user manages,
+// the primary one first, or ErrNoExtensionLink.
+func (s *Store) UserExtensionNumbers(ctx context.Context, userID int64) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT e.number FROM user_extensions ue JOIN extensions e ON e.id = ue.extension_id
+		WHERE ue.user_id = $1 ORDER BY ue.position, e.number`, userID)
 	if err != nil {
-		return "", mapErr(err)
+		return nil, err
 	}
-	if !n.Valid {
-		return "", ErrNoExtensionLink
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
 	}
-	return n.String, nil
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, ErrNoExtensionLink
+	}
+	return out, nil
 }
 
 // MessageExtensionName returns an extension's display name ("" if unknown).
@@ -715,6 +729,9 @@ func messageWhere(f MessageFilter, args *[]any) string {
 	}
 	if f.Extension != "" {
 		add("(m.sender = ? OR m.recipient = ?)", f.Extension)
+	}
+	if len(f.Extensions) > 0 {
+		add("(m.sender = ANY(?) OR m.recipient = ANY(?))", f.Extensions)
 	}
 	if f.Conversation != "" {
 		add("("+convKey+") = ?", f.Conversation)

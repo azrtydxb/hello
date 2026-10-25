@@ -28,16 +28,20 @@ function api(role: string, more: Routes = {}) {
   return mockApi({
     "GET /api/v1/auth/me": () => json({ username: "u", role }),
     "GET /api/v1/me/messages/conversations": () => json({ items: [conv] }),
-    "GET /api/v1/extensions": () => json({ items: [] }),
-    "GET /api/v1/ring-groups": () => json({ items: [] }),
-    "GET /api/v1/paging-groups": () => json({ items: [] }),
+    "GET /api/v1/me/extensions": () =>
+      json({
+        items: [
+          { id: 1, number: "100", name: "Sales" },
+          { id: 2, number: "101", name: "Desk" },
+        ],
+      }),
     ...more,
   });
 }
 
 describe("MyMessages", () => {
   it("shows a viewer their own conversations and lets them reply", async () => {
-    const calls = api("viewer", {
+    const calls = api("user", {
       "GET /api/v1/me/messages?conversation=100%3E200": () =>
         json({
           items: [
@@ -86,6 +90,10 @@ describe("MyMessages", () => {
     expect(
       within(dialog).queryByRole("option", { name: "All phones" }),
     ).toBeNull();
+    // A user with two extensions picks which one sends.
+    fireEvent.change(await within(dialog).findByLabelText("Send from"), {
+      target: { value: "101" },
+    });
     fireEvent.change(within(dialog).getByLabelText("Send to"), {
       target: { value: "external" },
     });
@@ -97,14 +105,20 @@ describe("MyMessages", () => {
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Send message" }));
     await screen.findByText("Message queued for 1 recipient.");
-    expect(calls.find((c) => c.method === "POST")?.url).toBe(
-      "/api/v1/me/messages",
-    );
+    const post = calls.find((c) => c.method === "POST");
+    expect(post?.url).toBe("/api/v1/me/messages");
+    expect(post?.body).toMatchObject({
+      targetKind: "external",
+      target: "+32475000000",
+      from: "101",
+    });
+    // A user never reaches the directory lists of the admin area.
+    expect(calls.some((c) => c.url === "/api/v1/extensions")).toBe(false);
   });
 
   it("explains an account that is not linked to an extension", async () => {
     mockApi({
-      "GET /api/v1/auth/me": () => json({ username: "u", role: "viewer" }),
+      "GET /api/v1/auth/me": () => json({ username: "u", role: "user" }),
       "GET /api/v1/me/messages/conversations": () =>
         apiError(403, "no_extension", "not linked"),
     });

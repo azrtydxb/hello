@@ -42,7 +42,7 @@ export function MyMessages() {
   return (
     <section aria-labelledby="page-title">
       <PageHeader
-        eyebrow="Directory"
+        eyebrow="My phone"
         title="My messages"
         description="Text messages to and from your extension. They arrive on your desk phone too; a phone that is switched off gets them when it registers again."
       />
@@ -65,6 +65,7 @@ export function MyMessages() {
           canRead
           canSend
           allowBroadcast={false}
+          self
           heading="My conversations"
         />
       )}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { listMyExtensions, type SelfExtension } from "../../api/self";
 import {
   ApiError,
   errorMessage,
@@ -107,7 +108,7 @@ type Directory = {
 };
 
 /** The extensions and groups a message can be addressed to. */
-function useDirectory(): Directory {
+function useDirectory(skip: boolean): Directory {
   const [dir, setDir] = useState<Directory>({
     extensions: [],
     ringGroups: [],
@@ -115,6 +116,7 @@ function useDirectory(): Directory {
     error: null,
   });
   useEffect(() => {
+    if (skip) return;
     const controller = new AbortController();
     Promise.all([
       listExtensions(controller.signal),
@@ -130,7 +132,7 @@ function useDirectory(): Directory {
         }
       });
     return () => controller.abort();
-  }, []);
+  }, [skip]);
   return dir;
 }
 
@@ -146,16 +148,29 @@ const KIND_LABELS: Record<TargetKind, string> = {
 export function ComposeDialog({
   api,
   allowBroadcast,
+  self,
   onClose,
   onSent,
 }: {
   api: MessagesApi;
   allowBroadcast: boolean;
+  /** The self-service area: free-text recipients, sends from the user's own extension. */
+  self: boolean;
   onClose: () => void;
   onSent: (recipients: number) => void;
 }) {
   useRestoreFocus();
-  const dir = useDirectory();
+  const dir = useDirectory(self);
+  const [mine, setMine] = useState<SelfExtension[]>([]);
+  const [from, setFrom] = useState("");
+  useEffect(() => {
+    if (!self) return;
+    const controller = new AbortController();
+    listMyExtensions(controller.signal)
+      .then(setMine)
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [self]);
   const [kind, setKind] = useState<TargetKind>("extension");
   const [target, setTarget] = useState("");
   const [body, setBody] = useState("");
@@ -210,6 +225,7 @@ export function ComposeDialog({
         target: kind === "broadcast" ? "" : target.trim(),
         body,
         ...(kind === "broadcast" ? { confirm: true } : {}),
+        ...(self && from ? { from } : {}),
       });
       onSent(sent.recipients);
     } catch (err: unknown) {
@@ -255,7 +271,32 @@ export function ComposeDialog({
           options={kinds.map((k) => ({ value: k, label: KIND_LABELS[k] }))}
           onChange={(e) => pickKind(e.target.value as TargetKind)}
         />
-        {options.length > 0 || kind === "extension" ? (
+        {self && mine.length > 1 && (
+          <Select
+            label="Send from"
+            value={from}
+            options={mine.map((x) => ({
+              value: x.number,
+              label: `${x.number} ${x.name}`,
+            }))}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+        )}
+        {self && kind !== "broadcast" && (
+          <Input
+            label={
+              kind === "extension"
+                ? "Extension number"
+                : kind === "external"
+                  ? "Phone number"
+                  : "Group name"
+            }
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            mono
+          />
+        )}
+        {self ? null : options.length > 0 || kind === "extension" ? (
           kind !== "broadcast" &&
           kind !== "external" && (
             <Select
@@ -273,7 +314,7 @@ export function ComposeDialog({
             </Alert>
           )
         )}
-        {kind === "external" && (
+        {!self && kind === "external" && (
           <Input
             label="Phone number"
             hint="With the country code, for example +32475000000. Goes out through a trunk that has SMS over SIP turned on."
@@ -357,12 +398,14 @@ export function Workspace({
   canRead,
   canSend,
   allowBroadcast,
+  self = false,
   heading,
 }: {
   api: MessagesApi;
   canRead: boolean;
   canSend: boolean;
   allowBroadcast: boolean;
+  self?: boolean;
   heading: string;
 }) {
   const [conv, setConv] = useState<ConvState>({ status: "loading" });
@@ -571,6 +614,7 @@ export function Workspace({
         <ComposeDialog
           api={api}
           allowBroadcast={allowBroadcast}
+          self={self}
           onClose={() => setComposing(false)}
           onSent={(n) => {
             setComposing(false);
