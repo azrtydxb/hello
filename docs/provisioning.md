@@ -452,8 +452,23 @@ endpoint, with the phone's own token. Manage it under **Phonebooks** and
   `POST /api/v1/phones` or `PATCH /api/v1/phones/{id}`.
 - **Link a user to an extension** with `extensionId` on
   `PATCH /api/v1/users/{id}` (admin; one user per extension). It is what
-  will tie a user's personal contacts to the phones of that extension;
-  personal books are not delivered yet.
+  ties a user's personal contacts to the phones of that extension (see
+  _Personal contacts_ below).
+- **Check a number.** `GET /api/v1/phonebooks/lookup?number=&callee=`
+  (admin) says which entry would name a caller: the number is reduced to
+  its lookup key (`+41 79 123 45 67`, `0041791234567`, `079 123 45 67` and
+  `sip:+41791234567@host` are one key) and looked up in the extensions
+  book, the named books of the groups of the callee's phones (`callee` is
+  an extension number; leave it out to skip them) and the company book, in
+  that order. An exact match on the key wins; failing that, the last nine
+  digits match when exactly one entry has them (`ambiguous` names nobody).
+  Anonymous, feature codes (`*72`), short codes and non-numbers are
+  `unresolvable`. Personal books are never read. How `+` and a leading `0`
+  are read depends on `HELLO_DIAL_INTL_PREFIX` (default `00`, the digits a
+  dialled international number starts with) and `HELLO_DIAL_COUNTRY_CODE`
+  (default unset; `41` or `+41` makes `079 123 45 67` the same number as
+  `+41 79 123 45 67`). A number is stored with its key when it is saved, so
+  after changing either, re-import or re-save the entries that matter.
 - **CSV.** On the Phonebooks page, **Import CSV** checks the file first
   (every failing row with its row, column and reason) and imports only a
   clean file; **Export CSV** downloads the book. Over the API,
@@ -490,6 +505,46 @@ the vendor's limit.
 A phone with no books is given no directory settings. A directory above
 2 MiB is not served (an empty `404`, with a log line), so the phone keeps
 what it has.
+
+**Caching.** Each rendered directory is kept in Valkey under
+`hello:pb:render:<vendor>:<hash>` for an hour (five minutes when it holds a
+personal book, and then under a key of that phone alone), so every replica
+answers a repeat fetch without reading the books. The hash covers the vendor,
+the slot and the _version_ of the phone's delivered set: each book carries a
+version that every entry, import or rename of it bumps in the same
+transaction, the set names its books in order (so a phone group change is a
+new set), and the extensions book is fingerprinted by how many extensions
+there are, how many are hidden and the latest change. A change anywhere
+therefore names a new key and the old render is simply never asked for
+again; nothing is invalidated by hand, and a Valkey flush or outage costs
+a render from PostgreSQL, never a stale directory.
+
+### Personal contacts
+
+Any signed-in user whose account is linked to an extension keeps their own
+contacts on **My contacts** (`/me/contacts`): add, edit, delete, CSV import
+and export, up to 1,000. The personal book is the last book of the
+directory of the phones bound to that user's extension, after the
+extensions, company and group books (a number an earlier book has is not
+repeated), and shows at the phone's next refresh. Over the API:
+`GET|POST /api/v1/me/contacts`, `PUT|DELETE /api/v1/me/contacts/{id}`,
+`POST /api/v1/me/contacts/import` and `GET /api/v1/me/contacts/export`,
+with the same body and CSV format as a shared book.
+
+- The owner is always the caller. No route takes a user id, and no route
+  reads another user's contacts, an administrator's included; the book does
+  not appear in the book list, the phonebook routes or the lookup check, and
+  the MCP tools do not cover it.
+- A service account has no contacts (`403`, code `no_user`). A user with no
+  linked extension gets `403` with code `no_extension`, and the page tells
+  them to ask an administrator.
+- Unlinking the user (or deleting them) stops the delivery at the phone's
+  next fetch; the contacts are kept for a later relink, and deleted with the
+  user.
+- The audit log records that a user created, changed, deleted or imported
+  contacts, with the user and the number of imported rows, never a contact.
+- A viewer's API token can only read, so a viewer changes contacts from the
+  console (a session); an operator's token can write.
 
 |                  | Yealink                                                                                                                                               | Poly                                                                      | Grandstream                                                              | Snom                             | Fanvil                                                                        |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------- | ----------------------------------------------------------------------------- |

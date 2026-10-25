@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cluster"
+	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/jackc/pgx/v5"
@@ -74,6 +75,9 @@ type Control struct {
 	SecretKey string
 	// Prov is the phone provisioning listener (HELLO_PROV_*).
 	Prov Prov
+	// Dial is the numbering context of the address books (HELLO_DIAL_*,
+	// spec P-8): how a stored or dialled number reduces to a lookup key.
+	Dial phonebook.Dialing
 	// AI is external AI access: OAuth and MCP (spec ai-external-access).
 	AI AI
 	// AIAgent is the in-product AI agent (HELLO_AI_*, spec ai-agent).
@@ -370,6 +374,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
 	c.Prov = r.prov()
+	c.Dial = r.dialing()
 	c.AI = r.ai()
 	c.AIAgent = r.aiAgent()
 	return c, r.err()
@@ -505,6 +510,28 @@ var ntpRe = regexp.MustCompile(`^[A-Za-z0-9.:-]{1,253}$`)
 // tzRe is the shape of a time zone name (IANA, e.g. Europe/Brussels). The
 // phones interpret it, so it is not loaded here.
 var tzRe = regexp.MustCompile(`^[A-Za-z0-9_+./-]{1,64}$`)
+
+// digitsRe is a run of digits: a dialling prefix or a country code.
+var digitsRe = regexp.MustCompile(`^[0-9]+$`)
+
+// dialing reads HELLO_DIAL_INTL_PREFIX (default 00: the digits a dialled
+// international number starts with, which stand for "+") and
+// HELLO_DIAL_COUNTRY_CODE (default unset: the country code, such as 41 or
+// +41, that a number with the trunk prefix 0 belongs to; unset leaves such
+// a number national).
+func (r *reader) dialing() phonebook.Dialing {
+	d := phonebook.Dialing{
+		IntlPrefix:  r.optional("HELLO_DIAL_INTL_PREFIX", "00"),
+		CountryCode: strings.TrimPrefix(r.getenv("HELLO_DIAL_COUNTRY_CODE"), "+"),
+	}
+	if !digitsRe.MatchString(d.IntlPrefix) || len(d.IntlPrefix) > 4 {
+		r.fail("HELLO_DIAL_INTL_PREFIX", errors.New("must be 1-4 digits such as 00 or 011"))
+	}
+	if d.CountryCode != "" && (!digitsRe.MatchString(d.CountryCode) || len(d.CountryCode) > 3 || d.CountryCode[0] == '0') {
+		r.fail("HELLO_DIAL_COUNTRY_CODE", errors.New("must be a country calling code of 1-3 digits such as 41 or +41"))
+	}
+	return d
+}
 
 // prov reads the HELLO_PROV_* settings.
 func (r *reader) prov() Prov {

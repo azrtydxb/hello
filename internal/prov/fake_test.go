@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -35,6 +36,7 @@ type fakeStore struct {
 	outage    error // returned by every read when set
 	insertErr error
 	nextID    int64
+	bookReads int // DeliveredBooks calls: what a cache hit saves
 	// beforeMark, when set, runs as MarkFetched starts: the race window
 	// between PhoneByToken and the write.
 	beforeMark func()
@@ -62,6 +64,8 @@ type fakePhone struct {
 	handoffIP                  netip.Addr
 	admin, secret, user, label string
 	books                      []phonebook.Book // the phone's delivered set
+	bookVersion                int              // bumped by a test to stand for a book change
+	personalBook               bool             // the set holds a personal book
 }
 
 func newFakeStore() *fakeStore {
@@ -264,7 +268,21 @@ func (s *fakeStore) DeliveredBooks(_ context.Context, id int64) ([]phonebook.Boo
 	if !ok {
 		return nil, ErrNotFound
 	}
+	s.bookReads++
 	return p.books, nil
+}
+
+func (s *fakeStore) DeliveredVersion(_ context.Context, id int64) (BooksVersion, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.outage != nil {
+		return BooksVersion{}, s.outage
+	}
+	p, ok := s.phones[id]
+	if !ok {
+		return BooksVersion{}, ErrNotFound
+	}
+	return BooksVersion{Key: fmt.Sprintf("v%d/%d", p.bookVersion, len(p.books)), Personal: p.personalBook}, nil
 }
 
 func (s *fakeStore) FirmwareByName(_ context.Context, v Vendor, name string) (Firmware, error) {

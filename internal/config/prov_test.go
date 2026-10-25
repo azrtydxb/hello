@@ -126,6 +126,28 @@ func TestLoadProvBookRefresh(t *testing.T) {
 	}
 }
 
+// TestLoadDialing fails if HELLO_DIAL_INTL_PREFIX does not default to 00 or
+// HELLO_DIAL_COUNTRY_CODE to unset, if a country code with or without its
+// "+" is not read as digits, or if a malformed value is accepted (spec P-8).
+func TestLoadDialing(t *testing.T) {
+	c, err := LoadControl(env(nil))
+	if err != nil || c.Dial.IntlPrefix != "00" || c.Dial.CountryCode != "" {
+		t.Fatalf("default = %+v, %v", c.Dial, err)
+	}
+	for _, cc := range []string{"41", "+41"} {
+		c, err = LoadControl(env(map[string]string{"HELLO_DIAL_INTL_PREFIX": "011", "HELLO_DIAL_COUNTRY_CODE": cc}))
+		if err != nil || c.Dial.IntlPrefix != "011" || c.Dial.CountryCode != "41" {
+			t.Fatalf("011 / %s = %+v, %v", cc, c.Dial, err)
+		}
+	}
+	for _, bad := range []string{"+", "0x", "00000", "oo"} {
+		wantProvErr(t, env(map[string]string{"HELLO_DIAL_INTL_PREFIX": bad}), "HELLO_DIAL_INTL_PREFIX", bad)
+	}
+	for _, bad := range []string{"++41", "0041", "4141", "ch", "-1"} {
+		wantProvErr(t, env(map[string]string{"HELLO_DIAL_COUNTRY_CODE": bad}), "HELLO_DIAL_COUNTRY_CODE", bad)
+	}
+}
+
 // TestLoadProvRegisterExpiry fails if the rendered expiry is not
 // HELLO_SIP_REGISTER_MAX_EXPIRES or an inverted or sub-second window is
 // accepted.

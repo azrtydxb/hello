@@ -1,7 +1,11 @@
 package prov
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -18,6 +22,41 @@ const MaxBookBytes = 2 << 20
 
 // DefaultBookRefresh is HELLO_PROV_BOOK_REFRESH's default.
 const DefaultBookRefresh = 15 * time.Minute
+
+// BooksVersion identifies one state of a phone's delivered set.
+type BooksVersion struct {
+	// Key changes with the set's books, their versions and the extensions.
+	Key string
+	// Personal reports that the set holds the phone's user's personal book.
+	Personal bool
+}
+
+// BookCache keeps rendered directories (spec P-11). It is best effort: a
+// Get that cannot answer is a miss and a Set that fails is dropped, so a
+// cache that is down only costs a render.
+type BookCache interface {
+	Get(ctx context.Context, key string) ([]byte, bool)
+	Set(ctx context.Context, key string, body []byte, ttl time.Duration)
+}
+
+// Cache entry lifetimes (spec P-11): a personal book's render is short-lived
+// because its owner edits it often and the version is the only guard.
+const (
+	bookCacheTTL         = time.Hour
+	personalBookCacheTTL = 5 * time.Minute
+)
+
+// bookCacheKey names a render: the vendor and slot and the set's version
+// hashed, so the key is a fixed size. A set with a personal book also names
+// the phone, so no key of a personal render is shared with another phone.
+func bookCacheKey(vendor string, slot int, v BooksVersion, phoneID int64) string {
+	h := sha256.New()
+	_, _ = io.WriteString(h, vendor+"\x00"+strconv.Itoa(slot)+"\x00"+v.Key)
+	if v.Personal {
+		_, _ = io.WriteString(h, "\x00phone:"+strconv.FormatInt(phoneID, 10))
+	}
+	return phonebook.RenderKeyPrefix + vendor + ":" + hex.EncodeToString(h.Sum(nil))
+}
 
 // bookSlotRE is the name after /p/<token>/pb/: a slot, 0 the merged set and
 // 1 to 5 the separate sources. A Grandstream WP810/WP822 treats P331 as a
@@ -85,35 +124,9 @@ func (h *handler) serveBook(w http.ResponseWriter, r *http.Request, ev *event, r
 		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
 		return
 	}
-	books, err := h.s.DeliveredBooks(ctx, rec.ID)
-	switch {
-	case errors.Is(err, ErrNotFound):
-		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
+	body, ok := h.bookBody(ctx, w, ev, rec, f, slot)
+	if !ok {
 		return
-	case err != nil:
-		h.outage(w, ev, "delivered books", err)
-		return
-	}
-	if slot > 0 {
-		books = phonebook.Group(books, f.Sources)
-		if f.Sources < 2 || slot > len(books) {
-			h.empty(w, ev, http.StatusNotFound, ResultNotFound)
-			return
-		}
-		books = books[slot-1 : slot]
-	}
-	if len(books) == 0 {
-		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
-		return
-	}
-	body, truncated, err := phonebook.Render(string(rec.Vendor), phonebook.Merge(books))
-	if err != nil || len(body) > MaxBookBytes {
-		h.opt.Log.Error("provisioning: directory not served", "phone", rec.ID, "vendor", rec.Vendor, "bytes", len(body), "error", err)
-		h.empty(w, ev, http.StatusNotFound, ResultRenderError)
-		return
-	}
-	if truncated {
-		h.opt.Log.Warn("provisioning: directory cut to the vendor's capacity", "phone", rec.ID, "vendor", rec.Vendor, "max", f.MaxEntries)
 	}
 	ua := r.UserAgent()
 	hash := HashToken(token)
@@ -135,4 +148,70 @@ func (h *handler) serveBook(w http.ResponseWriter, r *http.Request, ev *event, r
 		return
 	}
 	h.body(w, ev, ResultServed, f.ContentType, body)
+}
+
+// bookBody returns the phone's rendered directory for a slot: from the
+// cache when the set's version has been rendered before, else rendered and
+// cached. It answers the failure itself and reports false.
+func (h *handler) bookBody(ctx context.Context, w http.ResponseWriter, ev *event, rec PhoneRecord, f phonebook.Format, slot int) ([]byte, bool) {
+	if h.opt.BookCache == nil {
+		return h.renderBook(ctx, w, ev, rec, f, slot)
+	}
+	v, err := h.s.DeliveredVersion(ctx, rec.ID)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
+		return nil, false
+	case err != nil:
+		h.outage(w, ev, "delivered version", err)
+		return nil, false
+	}
+	key := bookCacheKey(string(rec.Vendor), slot, v, rec.ID)
+	if body, ok := h.opt.BookCache.Get(ctx, key); ok {
+		return body, true
+	}
+	body, ok := h.renderBook(ctx, w, ev, rec, f, slot)
+	if ok {
+		ttl := bookCacheTTL
+		if v.Personal {
+			ttl = personalBookCacheTTL
+		}
+		h.opt.BookCache.Set(ctx, key, body, ttl)
+	}
+	return body, ok
+}
+
+// renderBook reads the phone's delivered set and renders one slot of it.
+func (h *handler) renderBook(ctx context.Context, w http.ResponseWriter, ev *event, rec PhoneRecord, f phonebook.Format, slot int) ([]byte, bool) {
+	books, err := h.s.DeliveredBooks(ctx, rec.ID)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
+		return nil, false
+	case err != nil:
+		h.outage(w, ev, "delivered books", err)
+		return nil, false
+	}
+	if slot > 0 {
+		books = phonebook.Group(books, f.Sources)
+		if f.Sources < 2 || slot > len(books) {
+			h.empty(w, ev, http.StatusNotFound, ResultNotFound)
+			return nil, false
+		}
+		books = books[slot-1 : slot]
+	}
+	if len(books) == 0 {
+		h.empty(w, ev, http.StatusNotFound, ResultNotFound)
+		return nil, false
+	}
+	body, truncated, err := phonebook.Render(string(rec.Vendor), phonebook.Merge(books))
+	if err != nil || len(body) > MaxBookBytes {
+		h.opt.Log.Error("provisioning: directory not served", "phone", rec.ID, "vendor", rec.Vendor, "bytes", len(body), "error", err)
+		h.empty(w, ev, http.StatusNotFound, ResultRenderError)
+		return nil, false
+	}
+	if truncated {
+		h.opt.Log.Warn("provisioning: directory cut to the vendor's capacity", "phone", rec.ID, "vendor", rec.Vendor, "max", f.MaxEntries)
+	}
+	return body, true
 }
