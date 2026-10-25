@@ -32,13 +32,16 @@ type Binding struct {
 
 // Call is one active call, published by the node that owns its dialogs.
 type Call struct {
-	ID         string    `json:"id"` // correlation ID
-	SIPCallID  string    `json:"sipCallId"`
-	From       string    `json:"from"`  // caller extension number
-	To         string    `json:"to"`    // dialled number
-	State      string    `json:"state"` // ringing | connected
-	Node       string    `json:"node"`
-	Media      string    `json:"media"` // direct
+	ID        string `json:"id"` // correlation ID
+	SIPCallID string `json:"sipCallId"`
+	From      string `json:"from"`  // caller extension number
+	To        string `json:"to"`    // dialled number
+	State     string `json:"state"` // ringing | connected
+	Node      string `json:"node"`
+	Media     string `json:"media"` // direct
+	// Direction is internal, inbound or outbound, as the call's CDR will
+	// record it. Records written by nodes predating the field read as "".
+	Direction  string    `json:"direction,omitempty"`
 	StartedAt  time.Time `json:"startedAt"`
 	AnsweredAt time.Time `json:"answeredAt,omitzero"`
 	// HA is the call's in-call HA state (incall-ha S-6): "owned" while the
