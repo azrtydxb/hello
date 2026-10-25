@@ -1,0 +1,221 @@
+# phonebooks-ptt
+
+Status: approved
+
+Source: `hello-pbx-spec.md`; extends `.procoder/specs/phone-auto-provisioning-service.md` (which listed phone-book provisioning as out of scope) and `.procoder/specs/pbx-features.md` (feature codes, ring groups). Decided 2026-10-25 (`.procoder/ask/decisions.md`, "Address books and PTT / paging / intercom"):
+
+- **address books for all five vendors** (Yealink, Poly, Grandstream, Snom, Fanvil), delivered as each vendor's native remote phonebook / directory XML over the existing provisioning HTTPS endpoint with the phone's existing credentials, pointed at from the provisioned config so the phone fetches and refreshes it periodically; no LDAP
+- **book kinds, all four:** a shared company book (admin-managed, CSV import/export), an automatic extensions list, multiple named books assignable to phone groups, per-user personal contacts in a self-service UI
+- **server-side caller-name lookup** on inbound and internal calls (SIP display name, web UI, CDRs)
+- **PTT, all three:** (a) server paging groups with one-way auto-answer, cross-subnet; (b) provisioning of the phones' own multicast paging/PTT channels (LAN only); (c) 1-to-1 intercom with two-way auto-answer by prefix code or DSS key
+
+## Problem
+
+Phones on Hello show only what a user types into them: no company directory, no names for incoming callers (a call from a colleague's mobile or a known customer shows a number), and no way to page a warehouse or buzz a desk. Every vendor supports a remote phonebook fetched over HTTP(S) and auto-answer for paging, and the provisioning service already has the authenticated channel to deliver one. Hello needs to own the contact data, serve it in each vendor's format, use the same data to name callers, and offer paging and intercom both through Hello (works across subnets, appears in CDRs) and through the phones' own multicast (no server load, LAN only).
+
+## Users
+
+- **Administrators:** keep a company book (by hand or CSV), define named books and assign them to phone groups, define paging groups, set a phone group's multicast channels, and see paging and intercom calls in CDRs.
+- **Phone users:** search a directory on the phone that is always current, see who is calling, keep their own contacts, press a key to page a group or buzz a colleague.
+- **Operators:** watch directory fetch rates, lookup results and paging outcomes in metrics.
+- **Developers:** run each vendor's directory fetch and a paging call in the lab and check the parsed result.
+
+## In scope
+
+- [P-1] **Books and entries.** Four kinds, one entry shape. A **book** has a kind (`company`, `named`, `extensions`, `personal`), a name, and for `personal` an owner user. `company` and `extensions` exist exactly once (created by the migration; the extensions book cannot be edited or deleted). An **entry** has a first name, last name, company (optional), up to three numbers (label `work`, `mobile`, `home` or `other`, plus the number as typed) and an optional note. Limits are in P-17.
+  - **Extensions book (automatic):** not stored; computed from `extensions` (name and number) whenever it is rendered or the lookup index is rebuilt, so it is always in sync. An extension is hidden from it with a new `extensions.directory_hidden bool` (default false).
+  - **Named books:** zero or more, each assignable to phone groups (P-2). **Personal books:** one per user, edited only by that user (P-9), delivered only to phones bound to that user's extension (P-5).
+- [P-2] **Phone groups and the delivered set.** Hello has no site concept today, so a new `phone_groups` table (name, description) and `phones.group_id` (nullable) are added. A group carries an ordered list of assigned named books (`phone_group_books`), switches for the extensions and company books (both default on) and optional multicast channels (P-15). The directory delivered to a phone is the **union**, in this order: extensions book, company book, the group's named books, then the personal book of the user linked to the phone's extension. Vendors that can take several sources get one per book where the vendor table says so, and a single merged file otherwise; merging de-duplicates by lookup key and the earlier book wins.
+- [P-3] **User to extension link.** Personal books need to know which extension is a user's. A new nullable unique `users.extension_id` links a user to an extension (set by an admin). A user without the link has no personal book and no personal contacts are delivered.
+- [P-4] **Delivery over provisioning.** `internal/prov` gains directory file kinds served as per-device requests, `GET /p/<token>/pb/<n>.xml`, under exactly the same token, allowlist, HTTPS, rate-limit, fetch-audit, ETag/`If-None-Match` (`304`) and empty-`404` denial rules as other provisioning files. `n` is a **slot** (0 the merged set, 1 to 5 the separate sources for vendors that take several).
+  - The provisioned config writes the full HTTPS URL of the slot (with the phone's token) into the vendor's key (vendor table), so no new discovery mechanism exists, and sets the vendor's refresh interval to `HELLO_PROV_BOOK_REFRESH` (default 15 minutes) where the vendor has such a key. Where it has none the phone reloads at boot and at its provisioning re-check (`HELLO_PROV_RESYNC`).
+  - **Vendor-fixed names:** Poly requests `<mac>-directory.xml`; Hello serves the phone's merged set under that name (it is a `GET`), while Poly's `PUT` of the same name stays accepted and discarded. Yealink's `<mac>-contact.xml` request, answered with an empty `404` today, is also served from slot 0 only if the lab shows the phone requests it (P-6).
+  - **Rendering** is Go code in `internal/prov/phonebook` (an encoder per vendor), not admin templates: the format is vendor-fixed and the data set large. Output is deterministic (sorted by last name, first name, number) so the ETag is stable; text is XML-escaped, control characters are dropped, and names are truncated by rune count to the vendor's display limit.
+  - The delivered set is computed per request from the phone's group, bound extension and linked user; nothing about it is stored on the phone.
+- [P-5] **Authorisation of what a phone may fetch.** A phone fetches only the books in its own delivered set (P-2). The slot in the URL is mapped to a book through the token's phone, never through a book id in the URL, so a phone cannot name another group's or user's book. A personal book is served only to phones whose bound extension is linked to the book's owner; if the link is removed, the next fetch no longer includes it.
+- [P-6] **Per-vendor formats and keys.** The vendor reference below lists the XML and the provisioning keys that point each phone at its book, refresh it, and set up auto-answer and multicast. Entries marked **verify** come from vendor guides and integrator templates and are confirmed by the lab test (acceptance, `TestPhonebookAndPagingAsVendors`) on a real phone or the vendor's simulator before the phase that depends on them closes. A lab result that differs corrects the built-in template and the table, not the design.
+- [P-7] **CSV import and export.** `POST /api/v1/phonebooks/{id}/import` (multipart CSV, `?dry_run=true`, `?mode=append|replace`) and `GET /api/v1/phonebooks/{id}/export`. Columns: `first_name,last_name,company,work,mobile,home,other,note` (header required, UTF-8 with or without BOM, comma or semicolon detected, CRLF or LF). A dry run reports errors per row (row, column, reason) and writes nothing; an import is all-or-nothing in one transaction; more than 2 MiB or 5,000 rows is refused. Export of company and named books is operator and above; the extensions book exports read-only; a personal book exports only for its owner (P-9). On export, cells starting `=`, `+`, `-` or `@` get a leading apostrophe so a spreadsheet does not evaluate them.
+- [P-8] **Number normalisation for lookup.** Stored numbers and call numbers reduce to a **lookup key** by one pure function, `phonebook.Key(number)`:
+  - drop spaces, dots, dashes and parentheses, keep one leading `+` and digits; a SIP URI is reduced to its user part first (parameters dropped); anything else non-digit makes the number unresolvable (the display number keeps what was typed)
+  - the international prefix `HELLO_DIAL_INTL_PREFIX` (default `00`) becomes `+`; a number with the trunk prefix `0` gets `HELLO_DIAL_COUNTRY_CODE` (default unset, leaving it national) to become E.164
+  - a 2 to 10 digit number equal to a known extension stays as is
+  - matching is **exact on the key**; if there is none, on the **last 9 digits** when both sides have at least 9 digits and exactly one entry matches. An ambiguous suffix does not resolve, so a wrong name is never shown. Short codes under 4 digits that are not extensions, feature codes (`*...`), and anonymous never resolve.
+  - table-tested with the same cases for stored and dialled forms (`+41 79 123 45 67`, `0041791234567`, `079 123 45 67`, `(079) 123-45-67`, extension `599`, `*72599`, `anonymous`, `sip:+41791234567@host;user=phone`).
+- [P-9] **Self-service and personal contacts.** A signed-in user with a linked extension (P-3) gets a "My contacts" page: list, add, edit, delete, CSV import and export of their own book, capped at 1,000 entries. API: `GET|POST /api/v1/me/contacts`, `PUT|DELETE /api/v1/me/contacts/{id}`, `POST /api/v1/me/contacts/import`, `GET /api/v1/me/contacts/export`. The owner is always the caller, no route takes a user id, and a token without a user (service account) gets `403`. A change reaches the phone at its next fetch and the lookup index within `HELLO_BOOK_INDEX_TTL` (P-10).
+- [P-10] **Caller-name lookup.** On every call hello-sip resolves the caller's number (P-8) and sets the **display name** of the caller toward the callee.
+  - **Order for the callee extension:** extensions book, the callee's personal book, the named books of the callee's phone group, the company book. First match wins. No match leaves what the sender gave (a trunk's caller-ID name) or the number.
+  - **Where it appears:** the display name of `From` and `P-Asserted-Identity` in the INVITE to the callee, the live call view, the CDR (P-14), the call-flow trace and web events. It is never placed in the URI user, never sent on an outbound trunk leg, and never replaces the name of an authenticated internal caller's own extension.
+  - **No PostgreSQL call on the SIP path:** books are compiled into the existing configuration snapshot as an immutable index (key to name and source, plus a suffix index for the last-9 fallback), rebuilt on the same change notifications as the rest of the snapshot with `HELLO_BOOK_INDEX_TTL` (default 60 s) as the staleness bound. A lookup is a map read and never blocks a call; before the first index build the name is left as sent.
+  - **Privacy:** a personal contact names a caller only on calls to that user's own extension.
+  - A per-trunk flag `lookup_names` (default true) turns lookup off for a trunk whose carrier name the administrator prefers.
+- [P-11] **HA and caching.** Everything derives from PostgreSQL; nothing is replica-local.
+  - Rendered directories are cached in Valkey under `hello:pb:render:<vendor>:<hash>`, keyed by a **book version** held in PostgreSQL (`phonebooks.version`, incremented in the writing transaction) and mirrored in `hello:pb:ver:{book}`, so a Valkey flush loses nothing. The extensions book's version is a hash of the count and the latest `updated_at` of `extensions`. A personal book is never cached under a key shared with another phone and its entry expires after 5 minutes; other entries expire after 1 hour.
+  - **Valkey down:** render from PostgreSQL per request (bounded by the limits of P-17); the provisioning rate limits already fall back to memory.
+  - **Snapshot:** books ride the existing snapshot distribution, so every hello-sip replica converges within `HELLO_BOOK_INDEX_TTL`.
+- [P-12] **Server paging groups.** `/api/v1/paging-groups` CRUD. A group has a name, a **page code** (a feature code, default `*8<n>`, unique among feature codes), members (extensions, up to 200), allowed callers (extensions; empty means any internal extension), a priority (`normal` or `emergency`) and an enabled flag. A page is always one-way.
+  - **Trigger:** a user dials the page code, or presses a PTT/DSS key that dials it; hello-sip dispatches it through the existing feature-code path as a new action `page` (the `feature_codes.action` check is widened in the migration, as migration 00005 did for `announcement`).
+  - **Behaviour:** Hello INVITEs every registered contact of every member that is not on DND and not in a call, each INVITE carrying the auto-answer headers of the member's vendor (vendor table), SDP direction `sendonly` from Hello, and the caller's resolved name in `P-Asserted-Identity`. The caller is answered when the first member answers (a tone plays until then). Media is anchored through the existing media layer, so a page works across subnets and NAT. `emergency` ignores DND but never interrupts a call.
+  - **Lifetime:** the page ends when the caller hangs up, after `HELLO_PAGE_MAX_SECONDS` (default 120), or if no member answers within 10 seconds (the caller hears busy). A group has one active page; a second caller gets busy unless it is `emergency` and the active page is `normal`, which it preempts.
+  - **Load:** at most `HELLO_PAGE_FANOUT` (default 200) legs per page and `HELLO_PAGE_CONCURRENT` (default 5) pages per node; beyond that the caller hears busy and a metric increments.
+  - **CDR:** one CDR per page (`kind=page`, answered if any member answered) and one leg row per member with its result (`answered`, `busy`, `dnd`, `no_answer`, `no_registration`).
+- [P-13] **Intercom (1 to 1).** A prefix feature code (default `*80`, configurable) followed by an extension number (`*80599`) places a call with the target's vendor auto-answer headers and **two-way** audio. A DSS key can dial the same string: the provisioning spec's BLF keys gain an optional `intercom` flag that provisions the key as the vendor's speed-dial/DSS key with value `*80<number>` instead of a BLF key.
+  - It respects DND, and a callee already in a call gets a normal ring (an intercom never cuts into a call).
+  - `extensions.allow_intercom` (default true) controls whether the extension auto-answers; when false it rings normally.
+  - The CDR has `kind=intercom`.
+- [P-14] **CDR and live view.** CDRs gain `caller_name`, `caller_name_source` (`sender`, `extensions`, `company`, `named`, `personal`; never a book id) and `kind` (`call`, `page`, `intercom`; default `call`). The live view, call detail and CDR export show them.
+- [P-15] **Multicast PTT and paging (phone-native).** A phone group carries zero or more **multicast channels**: label, multicast IP and port (administratively scoped addresses accepted, `224.0.0.0/24` refused), codec (`PCMU`, `PCMA`, `G722`), role (`listen`, `send`, `both`) and priority (1 to 25 where the vendor has priorities). The built-in templates write each phone's multicast settings from its group. Hello is not in the media path: this works only on a LAN where multicast is delivered, and the UI and guide say so; cross-subnet use is a server paging group (P-12). Poly additionally gets PTT channels and paging groups (`ptt.*`). Validation: IP in range, port 1024 to 65535, at most 10 channels per group, listen addresses unique per group.
+- [P-16] **Security of paging and intercom.** Auto-answer turns a phone into a listening device, so:
+  - Hello adds auto-answer headers only on calls it originates for a page or intercom, never on forwarded or transferred calls, and strips `Alert-Info`, `Call-Info` and `Answer-After`-style headers from every request received from a trunk or phone before forwarding, so nobody outside can request auto-answer on another phone.
+  - A page and an intercom require a registered, authenticated internal caller; a trunk call dialling a page or intercom code is answered `403`.
+  - Page audio is `sendonly` by construction; Hello drops any RTP a page member sends back.
+  - Provisioned phones accept auto-answer headers only where the vendor needs it for this feature, restricted to the server where the vendor has a key for that (vendor table); a vendor without such a restriction is a documented limitation.
+  - Multicast has no authentication (a property of multicast); the guide says so.
+  - Paging group, intercom and multicast changes are audited like other configuration.
+- [P-17] **Limits.** Entries per book 5,000; named books 100, per phone group 5; paging groups 100; members per paging group 200; multicast channels per group 10; lookup index at most 200,000 entries in total (a write exceeding it is refused `409`); one rendered directory at most 2 MiB and 100 ms (above either, the previous cached version is served, or `503` with `Retry-After: 300` when there is none); CSV 2 MiB and 5,000 rows; field lengths name 60, company 60, number 32, note 255 characters; personal books 1,000 entries; directory fetches share the existing provisioning rate limits.
+- [P-18] **API and OpenAPI.** Every route is in `internal/api/routes.go` with scope and role and in `internal/api/openapi.json` (the conformance test checks they agree). Lists are paginated (`limit`, `cursor`), errors use the standard body.
+  - `GET|POST /api/v1/phonebooks`, `GET|PUT|DELETE /api/v1/phonebooks/{id}`, `GET|POST /api/v1/phonebooks/{id}/entries`, `PUT|DELETE /api/v1/phonebooks/{id}/entries/{entry}`, import and export (P-7)
+  - `GET|POST /api/v1/phone-groups`, `GET|PUT|DELETE /api/v1/phone-groups/{id}`, `PUT /api/v1/phone-groups/{id}/books` (ordered), `PUT /api/v1/phone-groups/{id}/multicast`; `PUT /api/v1/phones/{id}` gains `group_id`; `PUT /api/v1/users/{id}` gains `extension_id`
+  - `GET /api/v1/phonebooks/lookup?number=&callee=` (admin diagnostic: which book and entry would name that number; never reads personal books)
+  - `GET|POST /api/v1/paging-groups`, `GET|PUT|DELETE /api/v1/paging-groups/{id}`, `POST /api/v1/paging-groups/{id}/test` (pages one extension, to check headers)
+  - the `/api/v1/me/contacts` routes (P-9)
+- [P-19] **RBAC.** Existing roles and scopes:
+  - **viewer:** read books, entries, groups and paging groups.
+  - **operator:** also write entries of the company and named books, import and export CSV.
+  - **admin:** also create, rename, delete books; assign books to phone groups; manage phone groups, multicast, paging groups, intercom settings and `users.extension_id`.
+  - **self-service user** (any role with a linked extension): only `/api/v1/me/contacts`. No endpoint reads another user's personal book, admins included. API tokens act as their user; a service account has no personal book.
+- [P-20] **UI.** New pages under `web/src/pages`, each with a Vitest test like `Phones.tsx`, using the existing table, empty-state, error and loading components:
+  - **Phonebooks** (`/phonebooks`): books, entries table with search, add/edit dialog, CSV import with per-row dry-run result, export; the extensions book is read-only with a hide toggle per extension.
+  - **Phone groups** (`/phones/groups`): group list, ordered book assignment, multicast channel editor, member phones; the phone form gains a group selector.
+  - **Paging & intercom** (`/paging`): paging groups (members, allowed callers, code, priority), intercom prefix, test button; the extension form gains the intercom toggle.
+  - **My contacts** (`/me/contacts`, user menu), with an explanatory empty state for a user without a linked extension.
+  - The Calls and CDR pages show the caller name and its source.
+- [P-21] **Migration `00011_phonebooks_paging.sql`** (goose, owned by hello-control, additive so a rolling upgrade works). Creates `phonebooks` (id, kind, name, owner_user_id null references users on delete cascade, version, timestamps; partial unique indexes: one company, one extensions, one personal per owner), `phonebook_entries` (book_id references phonebooks on delete cascade, first_name, last_name, company, numbers jsonb of label/number/key, note, timestamps; index on (book_id, lower(last_name), lower(first_name))), `phone_groups`, `phone_group_books` (group_id, book_id, position), `paging_groups`, `paging_group_members`; alters `phones` (group_id), `users` (extension_id unique), `extensions` (directory_hidden, allow_intercom), `trunks` (lookup_names), `cdrs` (caller_name, caller_name_source, kind default `call`) and widens the `feature_codes.action` check with `page` and `intercom`. Seeds the company and extensions books and the default intercom feature code. The Down migration removes all of it.
+
+## Out of scope
+
+- LDAP and LDAPS directories (decided: no LDAP), including Poly's `dir.corp.*`.
+- A live phone-side search service (XML application); only fetched books.
+- Sync with Google, Microsoft 365 or CardDAV, and vCard import.
+- Contact photos, per-contact ringtones, favourites, contact groups inside a book.
+- Storing what a phone uploads (Poly `-directory.xml` PUTs stay discarded; local contacts are made read-only where the vendor has a key).
+- Multicast across routed networks or VLANs (Hello does not configure routers or IGMP).
+- Recording of pages and intercom calls; paging through trunks or to external numbers; DECT handsets; SRTP for these legs.
+- Several users per phone.
+
+## Constraints
+
+- No PostgreSQL call on the SIP path: lookup and paging membership ride the snapshot, paging legs use existing registration data. Directory delivery lives in hello-control's provisioning listener.
+- Personal data: personal contacts never appear in logs, metric labels, shared cache keys, the lookup diagnostic or admin exports; audit rows of a personal-book change carry the user and a count, not the contacts.
+- Determinism: the same data renders byte-identical directories for a vendor.
+- Performance: a cached directory answers in under 5 ms p99, an uncached render of 5,000 entries in under 100 ms p99 (benchmark in `internal/prov/phonebook`); a lookup adds under 5 microseconds to call setup; page fan-out to 200 members starts within 500 ms.
+- Compatibility: phones with no group, no linked user and no books provision as before apart from the default extensions and company books; `HELLO_PROV_BOOKS=false` turns directory delivery off globally.
+- No new dependencies (stdlib `encoding/xml`, `encoding/csv`; existing Valkey and Postgres clients).
+- Deployment: kw via Kuvryn Sync; no workloads on the user's Mac; CI on the Arc runners.
+- Gate per task: gofmt, `go vet`, golangci-lint (0), `go test -race ./...` green, `procoder check` 0 blocking, mutation checks, web lint and tests; REVIEW.md applies.
+
+## Interfaces
+
+- **Provisioning (phone-facing):** `GET /p/<token>/pb/<n>.xml` (P-4) and the vendor-fixed Poly name `<mac>-directory.xml`.
+- **REST:** P-18; OpenAPI updated.
+- **Feature codes:** actions `page` and `intercom` through the existing `matchFeatureCode` dispatch.
+- **Config (environment):** `HELLO_PROV_BOOKS`, `HELLO_PROV_BOOK_REFRESH`, `HELLO_BOOK_INDEX_TTL`, `HELLO_DIAL_INTL_PREFIX`, `HELLO_DIAL_COUNTRY_CODE`, `HELLO_PAGE_MAX_SECONDS`, `HELLO_PAGE_FANOUT`, `HELLO_PAGE_CONCURRENT`.
+- **Metrics:** `hello_phonebook_fetch_total{vendor,result}`, `hello_phonebook_render_seconds`, `hello_phonebook_entries{kind}`, `hello_name_lookup_total{result,source}`, `hello_paging_total{result}`, `hello_paging_legs_total{result}`, `hello_intercom_total{result}`.
+- **UI routes:** `/phonebooks`, `/phones/groups`, `/paging`, `/me/contacts`.
+
+## Data
+
+- **PostgreSQL:** migration `00011_phonebooks_paging.sql` (P-21).
+- **Valkey:** `hello:pb:ver:{book}` and `hello:pb:render:<vendor>:<hash>` (P-11).
+- **Snapshot:** a compiled name index and paging membership, rebuilt with the snapshot.
+- **MinIO:** unchanged.
+
+## Vendor reference
+
+Compiled 2026-10-25 from vendor guides and integrator templates (the provisioning spec's sources, plus each vendor's phonebook, multicast and PTT chapters). **verify** marks a key or behaviour the lab test must confirm before the dependent phase closes; a cell that gives no key name is one to look up in the vendor guide at implementation time and confirm in the lab.
+
+|                                  | Yealink                                                                                      | Poly (VVX)                                                                                                                                                | Grandstream                                                                                             | Snom                                                                      | Fanvil                                                                         |
+| -------------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Directory XML                    | `<YealinkIPPhoneDirectory>`, `<DirectoryEntry>` with `<Name>`, `<Telephone>` (repeated)      | the phone's local directory format: `<directory><item_list><item>` with `<fn>`, `<ln>`, `<ct>`                                                            | `<AddressBook>`, `<Contact>` with `<LastName>`, `<FirstName>`, `<Phone><phonenumber>`, `<accountindex>` | `<SnomIPPhoneDirectory>`, `<DirectoryEntry>` with `<Name>`, `<Telephone>` | `<IPPhoneDirectory>`, `<DirectoryEntry>` with `<Name>`, `<Telephone>` (verify) |
+| Points at the book               | `remote_phonebook.data.N.url` and `.name` (N 1 to 5), `features.remote_phonebook.enable = 1` | the per-MAC `<mac>-directory.xml` named by `CONTACTS_DIRECTORY` in the master, `dir.local.readonly = 1` (verify the reload behaviour)                     | `P330 = 3` (HTTPS download), `P331` server path (verify)                                                | directory URL setting of the directory key (verify the name)              | remote phonebook URL in the config's phonebook section (verify)                |
+| Refresh                          | `features.remote_phonebook.flash_time` (seconds)                                             | boot and re-check only (verify `prov.polling.*`)                                                                                                          | `P332` interval in minutes (verify)                                                                     | fetched when the directory key is opened                                  | refresh interval key (verify)                                                  |
+| Sources                          | up to 5                                                                                      | one merged file                                                                                                                                           | one merged file                                                                                         | one per directory key (verify)                                            | one merged file (verify)                                                       |
+| Name limit (runes)               | 99                                                                                           | 40 (verify)                                                                                                                                               | 64 (verify)                                                                                             | 64 (verify)                                                               | 64 (verify)                                                                    |
+| Auto-answer on page and intercom | `Alert-Info: Ring Answer` with `Call-Info: <sip:host>;answer-after=0` (verify both)          | `Call-Info: ;answer-after=0` or `Alert-Info: Auto Answer`, enabled by `call.autoAnswer.*` and the alert-info rules of `voIpProt.SIP.alertInfo.*` (verify) | `Alert-Info: info=<host>;answer-after=0` or `Call-Info` (verify; account auto-answer P-value to verify) | `Alert-Info: info=alert-autoanswer` with `Call-Info` (verify)             | `Alert-Info: info=Auto Answer` with `Call-Info` (verify)                       |
+| Accept only from server          | `features.allow_intercom`, `features.intercom.allow` (verify; no source restriction known)   | `call.autoAnswer.*` (verify)                                                                                                                              | verify                                                                                                  | verify                                                                    | verify                                                                         |
+| Multicast listen                 | `multicast.listen_address.N.ip_address`, `.label`; `multicast.receive_priority.enable`       | `ptt.pageMode.enable`, `ptt.pageMode.group.N.label`, `.subscribed`; `ptt.address`, `ptt.port` (verify)                                                    | multicast listening list (verify P-values)                                                              | limited, model dependent (verify)                                         | multicast listening list (verify)                                              |
+| Multicast send                   | `multicast.paging_address.N.ip_address`, `.label`, `.channel`                                | `ptt.pageMode.*`, `ptt.channel.N.*` (verify)                                                                                                              | multicast paging key (verify)                                                                           | none known (verify)                                                       | multicast function key (verify)                                                |
+| Codec                            | `multicast.codec`                                                                            | `ptt.pageMode.codec` / `ptt.codec` (verify)                                                                                                               | verify                                                                                                  | not provisioned (verify)                                                  | not provisioned (verify)                                                       |
+| PTT or page key                  | DSS/line key of type speed dial, value `*8N` (verify type per model)                         | resource list or soft key with `*8N` (verify)                                                                                                             | DSS key speed dial (verify)                                                                             | function key speed dial (verify)                                          | function key speed dial (verify)                                               |
+
+Sources: Yealink Auto Provisioning and Administrator Guides (remote phonebook, multicast paging, intercom); Poly UC Software Administrator Guide (contact directory, PTT and group paging); Grandstream Provisioning Guide and phonebook XML guide; snom wiki (XML directory, auto-answer); Fanvil Administrator and Auto Provisioning Guides; FusionPBX provisioning templates.
+
+## Edge cases
+
+- The same number is in two books: de-duplicated by key within one delivered file; lookup uses P-10's order.
+- Two entries in one book share a number: allowed; lookup picks the lower id and the CSV dry run warns.
+- An ambiguous last-9 match: no name is set and `hello_name_lookup_total{result="ambiguous"}` increments.
+- Anonymous or withheld caller ID: never resolves.
+- An internal caller: the extensions book wins and the name is the extension's `name`.
+- An extension is renamed: directory and index follow within a refresh interval or `HELLO_BOOK_INDEX_TTL`.
+- The linked user is deleted or unlinked: the personal book stops being delivered at the next fetch; deletion cascades to the book.
+- A phone moves to another group: the next fetch reflects it, and Yealink sources it no longer has are re-rendered with an empty URL.
+- A page member has no registration: leg `no_registration`; the page proceeds if any member is reachable, else the caller hears busy. A member in a call is skipped and never interrupted.
+- A caller dials a disabled group's code or is not allowed: `403` with a short announcement; CDR `failed`.
+- A paging group is edited during a page: the running page keeps its member set.
+- Two multicast channels with the same address: refused by validation.
+- A Valkey flush with cached directories: the version is in PostgreSQL, so caches rebuild with correct content.
+- A CSV with a BOM or quoted newlines parses; a formula cell is stored as text and neutralised on export.
+- RTL names and emoji are stored as UTF-8; limits count runes.
+- An intercom to an extension with several registered phones: all are called with the headers, the first to answer wins, the others are cancelled.
+
+## Failure modes
+
+- **PostgreSQL unavailable:** directory fetches serve the cached render if present, else `503` with `Retry-After: 300`; calls are unaffected (snapshot).
+- **Valkey unavailable:** render from PostgreSQL per request.
+- **Snapshot cold or stale:** the name is left as sent; paging uses the last known membership; a call never fails because of lookup.
+- **A vendor key is wrong for a model (lab-found):** the phone shows no directory; the fetch log has no `pb/` request for that phone, which the phone page shows as "directory not fetched"; the template is corrected.
+- **A rendered book exceeds a limit:** the previous cached version is kept, a metric and log line report it, and the UI marks the book over limit.
+- **A phone ignores the auto-answer header:** the member's phone rings as an ordinary call; the CDR shows `no_answer`; the guide's troubleshooting section lists the per-vendor keys.
+- **A hello-sip pod restarts during a page:** the page ends (best effort, established-call handoff does not cover pages) and the caller can redial.
+
+## Acceptance criteria
+
+- [ ] [P-1] [P-21] `TestPhonebookMigration` in `internal/store` passes. It fails if the company and extensions books are missing after migration, a second company book can be created, deleting a book leaves entries, the extensions book is stored, or Down leaves any new object.
+- [ ] [P-2] [P-5] `TestDeliveredSet` in `internal/prov/phonebook` passes. It fails if the set is not extensions, company, group books, personal in that order, if a phone is served a book outside its own set (a slot or id of another group or user), if a personal book is served to a phone not bound to the linked user's extension, or if an unlinked user's book is delivered.
+- [ ] [P-3] `TestUserExtensionLink` in `internal/api` passes. It fails if an extension can be linked to two users, unlinking leaves the personal book deliverable, or a non-admin sets the link.
+- [ ] [P-4] `TestPhonebookEndpointAuth` in `internal/prov` passes. It fails if an unknown token, disabled phone, plain-HTTP request or MAC mismatch is served a directory; if a denial answers other than an empty `404`; if `If-None-Match` with the current ETag does not give `304`; if the fetch is not audited with kind `phonebook`; or if two renders of the same data differ by a byte.
+- [ ] [P-4] [P-6] `TestPhonebookVendorRender` in `internal/prov/phonebook` passes. For each of five vendors it renders a golden XML for a fixed data set (accents, an ampersand, a control character, an over-limit name) and fails if the output differs from the golden file, is not well-formed, drops an in-limit entry, or exceeds the name limit by rune count.
+- [ ] [P-6] `TestProvisionedPhonebookKeys` in `internal/prov` passes. It fails if any vendor's built-in template omits the key that points at the book URL (with the current token) or the refresh setting where one exists, leaves unused Yealink sources set, or writes the keys for a phone with no books.
+- [ ] [P-7] `TestPhonebookCSV` in `internal/api` passes. It fails if a dry run writes anything, an error row lacks row and column, one failing row lets others be stored, a file above 2 MiB or 5,000 rows is accepted, an export cell starting `=` is not neutralised, or import then export does not round-trip.
+- [ ] [P-8] `TestPhonebookKey` in `internal/phonebook` passes. It fails if stored and dialled forms of one number in the table give different keys, an ambiguous last-9 match resolves, a short code or feature code resolves, or the lookup path allocates (benchmark).
+- [ ] [P-9] [P-19] `TestMeContactsScope` in `internal/api` passes. It fails if a user can read, change, import or export another user's contacts through any route, an admin token can read a personal book, a service account reaches `/me/contacts`, or a user without a linked extension can add contacts.
+- [ ] [P-10] `TestCallerNameLookup` in `internal/sip` passes. It fails if the source order is wrong, a personal contact names a caller for anyone but its owner, an outbound trunk leg carries the resolved name, an authenticated internal caller's name is overridden, a cold index delays or fails the call, or a lookup touches PostgreSQL (the test's store fails on any call).
+- [ ] [P-11] `TestPhonebookCacheHA` in `internal/prov/phonebook` passes against Valkey and with Valkey stopped. It fails if a write through one instance is not visible through another on the next request, a Valkey flush yields stale content, a personal book is cached under a shared key, or Valkey being down fails a request.
+- [ ] [P-12] `TestPagingGroup` in `internal/sip` passes. It fails if the page does not INVITE every registered contact of every non-DND, non-busy member with the vendor's auto-answer headers and `sendonly` SDP, a busy member is interrupted, the caller is answered before any member answers, a second caller gets through on a `normal` page, the page outlives its maximum, a trunk caller triggers it, or the CDR lacks `kind=page` and a leg row per member.
+- [ ] [P-13] `TestIntercom` in `internal/sip` passes. It fails if a call to an idle extension lacks the auto-answer headers or has one-way SDP, a busy extension is auto-answered, `allow_intercom=false` still auto-answers, or the CDR is not `kind=intercom`.
+- [ ] [P-14] `TestCDRCallerName` in `internal/store` passes. It fails if a resolved call's CDR lacks `caller_name`, `caller_name_source` or `kind`, or a personal match's source carries a book id.
+- [ ] [P-15] `TestMulticastProvisioning` in `internal/prov` passes. It fails if a group's channels do not render each vendor's listen and send keys, an address in `224.0.0.0/24` or a duplicate listen address is saved, or a phone outside the group gets multicast keys.
+- [ ] [P-16] `TestAutoAnswerHardening` in `internal/sip` passes. It fails if an `Alert-Info`, `Call-Info` or `Answer-After` header from a trunk or phone reaches another phone, a forwarded or transferred call carries auto-answer, or a trunk call to a page or intercom code is not answered `403`.
+- [ ] [P-17] `TestPhonebookLimits` in `internal/api` passes. It fails if any limit of P-17 is exceeded without `400` or `409`, or a render above 2 MiB replaces the previous cached version.
+- [ ] [P-18] The existing OpenAPI conformance test in `internal/api` passes with every route of P-18 in both `openapi.json` and `routes.go`.
+- [ ] [P-19] `TestPhonebookRBAC` in `internal/api` passes. It fails if a viewer can write, an operator can create or delete a book, assign books to a group or touch a paging group, or an admin-only route accepts an operator.
+- [ ] [P-20] `procoder test` and `procoder lint` pass over `web/`. `Phonebooks.test.tsx`, `PhoneGroups.test.tsx`, `Paging.test.tsx` and `MyContacts.test.tsx` fail if CSV dry-run errors are not shown per row, the extensions book is editable, a group's books cannot be reordered, a multicast validation error is not shown at its field, a user without a linked extension sees an add form, or the CDR page omits the caller name and its source.
+- [ ] [P-6] [P-12] [P-13] [P-15] `TestPhonebookAndPagingAsVendors` in `test/integration` (`HELLO_DOCKER=1`) passes. For each vendor it fetches its directory through the provisioning path in the vendor's request sequence with its User-Agent, parses it with that vendor's parser in `test/provclient`, and compares it with the stored entries; it registers two phones through Kamailio, dials a page code and an intercom code, and fails if the INVITEs lack the vendor's headers, media is not one-way for a page and two-way for an intercom, or the CDRs have the wrong kind. Every **verify** item of the vendor table is listed in the test output as confirmed or "needs hardware", so each is tracked.
+- [ ] [P-6] `TestProvclientDirectoryParsers` in `test/provclient` passes. It fails if any of five parsers rejects its vendor's golden file, accepts another vendor's file, or loses an entry.
+- [ ] [P-9] [P-10] `TestNoPersonalDataInLogs` passes. It fails if a contact name or number from a personal book appears in any log line, metric label or audit row after the integration test's fetches and lookups.
+- [ ] [P-21] Each phase of the plan leaves `go test -race ./...` green and `TestProvisioningAsVendors` of the provisioning spec passing.
+
+## Phased delivery
+
+1. **Phase A, data and API:** migration `00011`, `internal/phonebook` (key function, models, store), books, entries, groups, CSV, RBAC, extensions book, `users.extension_id`, OpenAPI. No phone-visible change.
+2. **Phase B, delivery:** `internal/prov/phonebook` renderers, `pb/<n>.xml` and the Poly name, template keys for all five vendors, cache and versions, provclient parsers, books and groups UI, lab verification of the **verify** keys (Yealink and Poly first, then Grandstream, Snom, Fanvil).
+3. **Phase C, caller name:** snapshot index, hello-sip lookup, trunk flag, CDR columns, UI display.
+4. **Phase D, personal contacts:** `/me/contacts`, personal-book delivery, privacy tests.
+5. **Phase E, paging and intercom (server):** `page` and `intercom` actions, fan-out with auto-answer headers, hardening, CDR kinds, paging UI.
+6. **Phase F, multicast:** group channels, vendor keys, validation, UI, lab verification.
+
+Each phase is its own PR, merged in order, and updates `docs/provisioning.md` ("Address books" and "Paging and intercom", including the multicast LAN limitation).
+
+## Open questions
+
+<!-- None. Decisions of 2026-10-25 are in .procoder/ask/decisions.md and folded into Source and P-1 to P-21; items marked verify are lab-test items, not questions. -->
