@@ -71,11 +71,13 @@ type conf struct {
 
 // urlKey is, per vendor, the names of settings that carry a URL, path,
 // server, file name or scheme code. Any value holding "://" is flagged too.
+// Snom's "server" is anchored at a word start so webserver_admin_password,
+// a password, is not taken for a server setting.
 var urlKey = map[Vendor]*regexp.Regexp{
 	Yealink:     regexp.MustCompile(`(?i)url|server|path|ntp|firmware|voice_mail`),
 	Poly:        regexp.MustCompile(`(?i)servername|servertype|bootsrv|url|path|\.address$|sntp|callback|_files$|_directory$|customcacert`),
 	Grandstream: regexp.MustCompile(`^P(47|30|33|145|192|193|194|212|232|233|234|235|237|238|330|331|6767|8433)$`),
-	Snom:        regexp.MustCompile(`(?i)server|url|firmware|ntp|host|mailbox|custom|status|directory|update_policy|prov_polling`),
+	Snom:        regexp.MustCompile(`(?i)(^|_)server|url|firmware|ntp|host|mailbox|custom|status|directory|update_policy|prov_polling`),
 	Fanvil:      regexp.MustCompile(`(?i)server|url|file name|protocol|image|sntp|register addr|mwi|upgrade|flash`),
 }
 
