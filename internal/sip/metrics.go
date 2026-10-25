@@ -64,6 +64,9 @@ type Metrics struct {
 	PagingTotal   *prometheus.CounterVec // result
 	PagingLegs    *prometheus.CounterVec // result
 	IntercomTotal *prometheus.CounterVec // result
+	// IVRTotal counts IVR menu events: entered, option, direct_dial,
+	// timeout, invalid, dial, dial_failed, connected and exit_<kind>.
+	IVRTotal *prometheus.CounterVec // event
 
 	// Phase 7 (in-call HA, spec S-13). DialogReplicated counts replication
 	// writes by result; DialogTakeovers the calls this node took over;
@@ -191,6 +194,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.PagingTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_paging_total", Help: "Server pages by result (answered, no_answer, busy, denied, capacity, failed).",
 	}, []string{"result"})
+	m.IVRTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_ivr_total", Help: "IVR menu events (entered, option, direct_dial, timeout, invalid, dial, dial_failed, connected, exit_<kind>).",
+	}, []string{"event"})
 	m.PagingLegs = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_paging_legs_total", Help: "Page member legs by result (answered, busy, dnd, no_answer, no_registration).",
 	}, []string{"result"})
@@ -209,7 +215,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Forwarded, m.GroupCalls,
-		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	return m
 }

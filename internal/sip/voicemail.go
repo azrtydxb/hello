@@ -243,6 +243,9 @@ func (c *call) boxDetails() VoicemailBox {
 	}
 	c.mu.Lock()
 	dialled := c.dialled
+	if c.vmExt != "" {
+		dialled = c.vmExt
+	}
 	c.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout)
 	defer cancel()
@@ -503,6 +506,9 @@ func collectDigits(ctx context.Context, sess media.Session, dtmf chan byte) []by
 func (c *call) sendMWI() {
 	c.mu.Lock()
 	ext := c.dialled
+	if c.vmExt != "" {
+		ext = c.vmExt
+	}
 	c.mu.Unlock()
 	c.s.notifyMWI(ext)
 }

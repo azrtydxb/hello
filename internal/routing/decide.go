@@ -434,6 +434,9 @@ func (t *Table) fromTrunk(d *Decision, c Call, usable TrunkUsability) {
 		}
 		d.Trace.Add(fmt.Sprintf("Internal lookup %s -> extension %s", show(did), show(ext)))
 		d.Kind, d.Extension = KindInbound, ext
+	case "ivr":
+		d.Trace.Add("Destination: IVR menu " + show(r.r.Destination))
+		d.Kind, d.IVR = KindInbound, r.r.Destination
 	case "sip_uri":
 		d.Trace.Add("Destination: SIP URI " + r.r.Destination)
 		d.Kind, d.SIPURI = KindInbound, r.r.Destination

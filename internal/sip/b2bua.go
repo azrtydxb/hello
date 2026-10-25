@@ -173,6 +173,19 @@ type call struct {
 	// transferNotify reports a transfer's outcome to the transferee's
 	// dialog (set by transferBlindVia for the rethreaded call).
 	transferNotify func(fragment string, final bool)
+
+	// IVR state (ivr.go). ivr is the menu session, ivrCancel stops its
+	// flow with the call, ivrAnswered is when the menu answered (billing
+	// starts there), vmExt names the voicemail box a menu hands the call to
+	// (empty: the dialled extension's), vmTap taps the caller's RTP for that
+	// recording and bridgedExt is the extension the menu connected the call
+	// to, whose presence the end of the call restores. All guarded by mu.
+	ivr         *ivrState
+	ivrCancel   context.CancelFunc
+	ivrAnswered time.Time
+	vmExt       string
+	vmTap       func(leg string, pkt *media.RTPPacket)
+	bridgedExt  string
 }
 
 // callStages is the forwarding/DND context of the extension a call is
@@ -289,6 +302,11 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		c.handlePage(tx, snap, g)
 		return
 	}
+	// An IVR menu's number answers and runs the menu.
+	if m, ok := snap.IVRMenuByNumber(c.dialled); ok {
+		c.startIVR(tx, snap, m)
+		return
+	}
 	// A feature code dialled as a call (*78, *72599, *97) is dispatched here
 	// and never reaches routing.
 	if fc, arg, ok := matchFeatureCode(snap, c.dialled); ok {
@@ -380,6 +398,14 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 		// a phone's own call the two are the same.
 		c.rewritten = dec.Extension
 		c.ringTarget(req, tx, snap, dec.Extension)
+	case dec.Kind == routing.KindInbound && dec.IVR != "":
+		m, ok := snap.IVRMenu(dec.IVR)
+		if !ok {
+			s.respond(tx, req, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "IVR menu "+dec.IVR+" does not exist", ResultNotFound)
+			return
+		}
+		c.startIVR(tx, snap, m)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
 		c.considerAnchor(snap, EndpointInfo{}) // external URI: caller-side triggers only
 		c.ringURI(req, tx, dec)
@@ -959,6 +985,7 @@ func (c *call) end(status int, side, reason, result string) {
 		}
 		c.mu.Unlock()
 		c.closeMedia()
+		c.stopIVR()
 		c.pageStop()
 		if held {
 			c.s.m.HoldActive.Dec()
@@ -968,6 +995,12 @@ func (c *call) end(status int, side, reason, result string) {
 		cn, cd, de := c.callerNum, c.callerDevice, c.dialled
 		c.mu.Unlock()
 		c.s.restorePresenceOf(cn, cd, de)
+		c.mu.Lock()
+		be := c.bridgedExt
+		c.mu.Unlock()
+		if be != "" && be != de {
+			c.s.restorePresenceOf("", "", be)
+		}
 		if c.haStop != nil {
 			close(c.haStop)
 		}
@@ -1223,9 +1256,12 @@ func (l *leg) drive(report func(legEvent)) {
 // report hands a fork's outcome to setup, or drops it when setup has
 // already returned (so the fork's goroutine never blocks on a full queue).
 func (c *call) report(ev legEvent) {
+	c.mu.Lock()
+	done := c.setupDone // an IVR menu replaces it with its own
+	c.mu.Unlock()
 	select {
 	case c.events <- ev:
-	case <-c.setupDone:
+	case <-done:
 	}
 }
 
@@ -1343,6 +1379,9 @@ func (l *leg) ack(body []byte, contentType string) {
 // bye ends this fork's dialog; a 2xx not yet acknowledged is ACKed first,
 // as RFC 3261 requires and sipgo enforces.
 func (l *leg) bye() {
+	if l == nil {
+		return
+	}
 	dcs := l.session()
 	if dcs == nil || dcs.InviteResponse == nil || !dcs.InviteResponse.IsSuccess() {
 		return
