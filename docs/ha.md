@@ -353,7 +353,7 @@ in `internal/sip`):
 | The node dies during                   | What the users see                                                                                                                    |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | A connected call                       | An audio gap per the table at the top (about 4 s after a crash), call continues, hang up normally                                     |
-| A held call                            | The hold direction survives the takeover                                                                                              |
+| A held call                            | The hold direction survives the takeover, and the held party's music on hold restarts on the taker                                    |
 | A blind transfer, target still ringing | The original call continues untransferred; the transferor gets a final NOTIFY (503); Kamailio's INVITE timer stops the target ringing |
 | A blind transfer, target answered      | The transferred call (caller and target) continues                                                                                    |
 | An attended transfer's consultation    | Both calls (the held original and the consultation) continue                                                                          |

@@ -62,6 +62,12 @@ import { ProvSettings } from "./pages/ProvSettings";
 import { ProvTemplates } from "./pages/ProvTemplates";
 import { Placeholder } from "./pages/Placeholder";
 import { Users } from "./pages/Users";
+import { EmailSettings } from "./pages/EmailSettings";
+import { MyForwarding } from "./pages/myphone/MyForwarding";
+import { MyHistory } from "./pages/myphone/MyHistory";
+import { MyPhoneHome } from "./pages/myphone/MyPhoneHome";
+import { MyProfile } from "./pages/myphone/MyProfile";
+import { MyVoicemail } from "./pages/myphone/MyVoicemail";
 import { Can } from "./role";
 import { getAIStatus } from "./api/aiagent";
 import { usePolling } from "./usePolling";
@@ -70,6 +76,7 @@ import { usePlatformBadges } from "./pages/platform/ui";
 import { Recordings } from "./pages/Recordings";
 import { Announcements } from "./pages/Announcements";
 import { VoiceSettings } from "./pages/VoiceSettings";
+import { MusicOnHold } from "./pages/MusicOnHold";
 import { Registrations } from "./pages/Registrations";
 import { RouteTest } from "./pages/RouteTest";
 import { RoutesPage } from "./pages/Routes";
@@ -89,6 +96,11 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/onboarding": Onboarding,
   "/phonebooks": Phonebooks,
   "/me/contacts": MyContacts,
+  "/me/voicemail": MyVoicemail,
+  "/me/forwarding": MyForwarding,
+  "/me/history": MyHistory,
+  "/me/profile": MyProfile,
+  "/settings/email": EmailSettings,
   "/registrations": Registrations,
   "/calls": Calls,
   "/history": History,
@@ -102,6 +114,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/ivr": Ivr,
   "/recordings": Recordings,
   "/announcements": Announcements,
+  "/moh": MusicOnHold,
   "/system": System,
   "/settings/voice": VoiceSettings,
   "/routes/test": RouteTest,
@@ -115,7 +128,11 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations/api-access": IntegrationsApiAccess,
 };
 
+/** A load that never answers, for what a self-service user may not read. */
+const idleStatus = () => new Promise<never>(() => undefined);
+
 const ROLE_LABELS = {
+  user: "User",
   viewer: "Viewer",
   operator: "Operator",
   admin: "Administrator",
@@ -126,11 +143,15 @@ function Shell() {
   const navigate = useNavigate();
   const location = useLocation();
   const controlPlane = useControlPlane();
-  const platformBadges = usePlatformBadges();
+  const isUser = state.status === "signedIn" && state.role === "user";
+  const platformBadges = usePlatformBadges(!isUser);
   const onboardingBadges = useOnboardingBadge();
   const badges = { ...platformBadges, ...onboardingBadges };
-  const aiStatus = usePolling(getAIStatus, 60_000);
+  // The AI status is a viewer-level read; a self-service user has no access.
+  const aiStatus = usePolling(isUser ? idleStatus : getAIStatus, 60_000);
   const aiEnabled = aiStatus.status !== "loading" && !!aiStatus.data?.enabled;
+  const hasExtensions =
+    state.status === "signedIn" && (state.me.extensions?.length ?? 0) > 0;
   const reachable = controlPlane.status === "reachable";
   const title = pageTitle(location.pathname);
   // Call detail belongs to Call history in the nav.
@@ -139,6 +160,7 @@ function Shell() {
   const navGroups = navGroupsFor(
     state.status === "signedIn" ? state.role : undefined,
     aiEnabled,
+    hasExtensions,
   );
   const { isExpanded, toggle } = useNavGroups(
     state.status === "signedIn" ? state.username : "",
@@ -227,6 +249,16 @@ function Shell() {
   );
 }
 
+/** The landing page: the dashboard, or the self-service home for a user. */
+function Home() {
+  const { state } = useAuth();
+  return state.status === "signedIn" && state.role === "user" ? (
+    <MyPhoneHome />
+  ) : (
+    <Dashboard />
+  );
+}
+
 /** The app: sign-in route plus the authenticated shell and its pages. */
 export function App() {
   return (
@@ -250,7 +282,7 @@ export function App() {
               </RequireAuth>
             }
           >
-            <Route index element={<Dashboard />} />
+            <Route index element={<Home />} />
             {NAV_ITEMS.filter((item) => item.path !== "/").map((item) => {
               const Page = PAGES[item.path];
               const element =

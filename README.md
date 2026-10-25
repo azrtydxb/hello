@@ -154,7 +154,7 @@ The UI container proxies `/api/`, `/mcp`, `/oauth/` (except the console's `/oaut
 Every SIP node must share the same `HELLO_SIP_NONCE_SECRET`. A node with a
 different one rejects digest challenges issued by the others.
 
-Commands: `hello-control serve | migrate up | migrate status | user add [--role viewer|operator|admin] <username>` (password on stdin; the role defaults to `viewer`, the first user is always `admin`), `hello-sip serve`.
+Commands: `hello-control serve | migrate up | migrate status | user add [--role user|viewer|operator|admin] <username>` (password on stdin; the role defaults to `viewer`, the first user is always `admin`), `hello-sip serve`. Users, their roles and extension self-service, and voicemail email are described in [docs/user-accounts.md](docs/user-accounts.md); the `SMTP_*` variables are only the fallback for settings saved in Platform → Email.
 
 ## License
 

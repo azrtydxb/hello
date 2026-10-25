@@ -13,11 +13,38 @@ export interface VersionInfo {
   configRevision: number;
 }
 
+/** What happens to a voicemail message once it was emailed. */
+export type VoicemailEmailAfter = "none" | "mark_read" | "delete";
+
+/** A user's voicemail-to-email options. */
+export interface VoicemailEmailPrefs {
+  notify: boolean;
+  attach: boolean;
+  after: VoicemailEmailAfter;
+}
+
+/** An extension as the signed-in user's profile lists it. */
+export interface MeExtension {
+  id: Id;
+  number: string;
+  name: string;
+}
+
 /** GET /api/v1/auth/me */
 export interface Me {
   username: string;
   /** The caller's role (spec S-23); read fresh on every request. */
-  role: "viewer" | "operator" | "admin";
+  role: "user" | "viewer" | "operator" | "admin";
+  displayName?: string;
+  email?: string;
+  authMethod?: string;
+  /** An administrator set the password: nothing else works until it is changed. */
+  mustChangePassword?: boolean;
+  /** The extensions the user manages. */
+  extensions?: MeExtension[];
+  voicemailEmail?: VoicemailEmailPrefs;
+  /** Whether the system can send email at all. */
+  emailDelivery?: boolean;
 }
 
 /** An API token as listed; the token itself is never returned. */
@@ -68,6 +95,8 @@ export interface Extension {
   callWaiting?: boolean;
   /** The extension's voicemail box, when it has one. */
   voicemailBoxId?: Id | null;
+  /** Music on hold class callers hear while this extension holds them; null = the default. */
+  mohClassId?: Id | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -330,6 +359,10 @@ export interface InboundRouteFields {
   destinationKind: "extension" | "internal" | "external" | "sip_uri" | "ivr";
   destination: string;
   enabled: boolean;
+  /** Music on hold class of the calls this route delivers; null = the default. */
+  mohClassId?: Id | null;
+  /** Play the class to the caller instead of ringback while the destination rings. */
+  mohRingback?: boolean;
 }
 
 /** An inbound route as stored, with its match-order position. */
@@ -669,6 +702,8 @@ export const updateExtension = (
     directoryHidden?: boolean;
     allowIntercom?: boolean;
     callWaiting?: boolean;
+    /** null clears the pick (the global default plays). */
+    mohClassId?: Id | null;
   },
 ) =>
   request<Extension>("PATCH", `/api/v1/extensions/${id(extensionId)}`, {
@@ -919,7 +954,7 @@ export interface VoicemailMessage {
   caller: string;
   durationMs: number;
   heard: boolean;
-  /** pending | sent | failed, when the server reports it. */
+  /** pending | queued | sent | failed | skipped, when the server reports it. */
   emailStatus?: string;
   createdAt: string;
 }
@@ -1065,6 +1100,10 @@ export interface RingGroupFields {
   /** Voicemail box (extension number) or external number; "" for none. */
   failureTarget: string;
   members: RingGroupMember[];
+  /** Music on hold class of calls to the group; null = the default. */
+  mohClassId?: Id | null;
+  /** Play the class to the caller instead of ringback while the group rings. */
+  mohRingback?: boolean;
 }
 
 /** A ring group as returned. */
@@ -1440,6 +1479,55 @@ export function uploadAnnouncement(
 /** DELETE /api/v1/announcements/{id}. */
 export const deleteAnnouncement = (announcementId: Id) =>
   request<void>("DELETE", `/api/v1/announcements/${id(announcementId)}`);
+
+// --- music on hold ------------------------------------------------------------
+
+export type MOHMode = "loop" | "shuffle";
+
+/** One announcement in a class's playlist. */
+export interface MOHTrack {
+  announcementId: Id;
+  name: string;
+}
+
+/** The writable fields of a music on hold class (PUT replaces the class). */
+export interface MOHClassFields {
+  name: string;
+  mode: MOHMode;
+  /** The global default: what plays when no extension, group or route picks. */
+  isDefault: boolean;
+  /** Announcement ids in play order; empty plays the built-in tone. */
+  announcementIds: Id[];
+}
+
+/** A music on hold class as returned. */
+export interface MOHClass {
+  id: Id;
+  name: string;
+  mode: MOHMode;
+  isDefault: boolean;
+  tracks: MOHTrack[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /api/v1/moh-classes. */
+export const listMOHClasses = (signal?: AbortSignal) =>
+  list<MOHClass>("/api/v1/moh-classes", signal);
+
+/** POST /api/v1/moh-classes. */
+export const createMOHClass = (input: MOHClassFields) =>
+  request<MOHClass>("POST", "/api/v1/moh-classes", { body: input });
+
+/** PUT /api/v1/moh-classes/{id}. */
+export const putMOHClass = (classId: Id, input: MOHClassFields) =>
+  request<MOHClass>("PUT", `/api/v1/moh-classes/${id(classId)}`, {
+    body: input,
+  });
+
+/** DELETE /api/v1/moh-classes/{id}. */
+export const deleteMOHClass = (classId: Id) =>
+  request<void>("DELETE", `/api/v1/moh-classes/${id(classId)}`);
 
 /** A human-readable message for any thrown value. */
 export function errorMessage(err: unknown): string {
