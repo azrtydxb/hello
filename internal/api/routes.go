@@ -111,6 +111,7 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/paging-groups/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testPagingGroup},
 		{"GET", "/api/v1/park-lots", auth.ScopeRead, auth.RoleViewer, false, s.listParkLots},
 		{"POST", "/api/v1/park-lots", auth.ScopeWrite, auth.RoleOperator, false, s.createParkLot},
+		{"POST", "/api/v1/park-lots/announcement/generate", auth.ScopeWrite, auth.RoleOperator, false, s.generateParkAnnouncement},
 		{"GET", "/api/v1/park-lots/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getParkLot},
 		{"PUT", "/api/v1/park-lots/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.putParkLot},
 		{"DELETE", "/api/v1/park-lots/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteParkLot},

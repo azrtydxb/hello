@@ -722,11 +722,20 @@ func (p *phone) onBye(req *sip.Request, tx sip.ServerTransaction) {
 func answerAfter(ch <-chan struct{}) calleeFn {
 	return func(p *phone, req *sip.Request, tx sip.ServerTransaction, dss *sipgo.DialogServerSession) {
 		if ch != nil {
+			// The CANCEL itself is reported (a test may read its Reason);
+			// the INVITE stands in when the dialog ended otherwise.
+			cancelReq := make(chan *sip.Request, 1)
+			tx.OnCancel(func(r *sip.Request) { cancelReq <- r })
 			_ = dss.Respond(180, "Ringing", nil)
 			select {
 			case <-ch:
 			case <-dss.Context().Done():
-				push(p.cancels, req)
+				got := req
+				select {
+				case got = <-cancelReq:
+				case <-time.After(time.Second):
+				}
+				push(p.cancels, got)
 				return
 			}
 		}

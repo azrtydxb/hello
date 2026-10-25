@@ -60,7 +60,7 @@ func TestCallPickup(t *testing.T) {
 	if ra.err != nil {
 		t.Fatalf("the picked-up call was not answered: %v", ra.err)
 	}
-	waitReq(t, b.cancels, "CANCEL to the phone that was ringing")
+	cancelElsewhere(t, waitReq(t, b.cancels, "CANCEL to the phone that was ringing"))
 	feedA := startRTPFeed(t, ra.dcs.InviteResponse.Body())
 	feedC := startRTPFeed(t, rc.dcs.InviteResponse.Body())
 	feedA.packet(0, make([]byte, 160), false)
@@ -119,7 +119,7 @@ func TestCallPickup(t *testing.T) {
 	if ra = waitCall(t, ch); ra.err != nil {
 		t.Fatalf("directed pickup: the call was not answered: %v", ra.err)
 	}
-	waitReq(t, b.cancels, "CANCEL to the phone that was ringing")
+	cancelElsewhere(t, waitReq(t, b.cancels, "CANCEL to the phone that was ringing"))
 	hangup(t, ra.dcs)
 	waitReq(t, c.byes, "BYE to the picker")
 	pbx.nextCDR(t)
@@ -186,5 +186,15 @@ func TestCallPickup(t *testing.T) {
 	}
 	if ra = waitCall(t, ch); ra.err != nil {
 		t.Fatalf("the contested call was not answered: %v", ra.err)
+	}
+}
+
+// cancelElsewhere fails if a picked-up call's CANCEL does not say it was
+// completed elsewhere (RFC 3326), which keeps it off the missed-call list.
+func cancelElsewhere(t *testing.T, req *sip.Request) {
+	t.Helper()
+	h := req.GetHeader("Reason")
+	if h == nil || h.Value() != `SIP;cause=200;text="Call completed elsewhere"` {
+		t.Fatalf("pickup CANCEL Reason = %v, want cause=200 completed elsewhere", h)
 	}
 }

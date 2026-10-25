@@ -885,9 +885,8 @@ the extension's page in the console or `PATCH /api/v1/extensions/{id}`).
   page never interrupts a call), whatever the switch says. An intercom call
   to an extension in a call rings it as a normal call instead of
   auto-answering, whatever the switch says; the call-waiting flag is not
-  consulted on that path. Call parking and pickup do not exist in Hello yet;
-  when they do, they must not consult the flag either (a pickup answers a
-  call that is already ringing).
+  consulted on that path. Call parking and pickup do not consult the flag
+  either (a pickup answers a call that is already ringing).
 - **How busy is decided.** An extension is busy while any connected call of
   the cluster has it as caller, as the dialled number, or as the extension
   whose phone answered (a ring group member, a forward target). Every node
@@ -959,11 +958,15 @@ is the parker:
   `P2336` for the retrieve softkey, on those models;
 - a blind REFER to the park code plus a slot.
 
-The parker hears the slot as DTMF tones (one tone pair per digit, no spoken
-announcement is installed) and its dialog is released. The parked party stays
-on Hello's media anchor and hears hold audio. Until music on hold is
-configured that is a short tone every ten seconds; the hold audio is an
-interface (`sip.HoldAudio`), so music on hold replaces it without touching park.
+The parker hears the slot spoken ("Your call is parked in slot seven zero
+one") and its dialog is released. The spoken slot is built from eleven
+announcements (`park.slot` and `park.digit.0` to `park.digit.9`). An operator
+creates them once with the text-to-speech provider (Park and pickup in the
+console, Generate spoken slot announcement, or
+`POST /api/v1/park-lots/announcement/generate`); any of them can be replaced
+by an uploaded recording, which a later generate keeps. While one is missing
+the parker hears the slot as DTMF tones instead (one tone pair per digit).
+The parked party stays on Hello's media anchor and hears music on hold.
 The parked call's slot is one record in Valkey (`hello:park:slot:<slot>`), kept
 alive by the node holding the call and visible to every node.
 
@@ -1013,9 +1016,15 @@ feature code is configured.
 
 **Limits.** A parked or picked-up call does not follow the in-call HA takeover
 of an ordinary call: if the node holding it dies, the parked party's call is
-lost and its slot lapses within 20 seconds (see `docs/ha.md`). A re-INVITE
-from either side of a retrieved call (a hold) is answered on that side only; the
-other party is not told, and hears no hold audio.
+lost and its slot lapses within 20 seconds (see `docs/ha.md`).
+
+**Hold on a retrieved call.** A hold from either side of a retrieved call is
+passed on to the other party as a `sendonly` re-INVITE (on another node too),
+and a resume as `sendrecv`, as on any bridged call.
+
+**Pickup cancels.** The ringing phones a pickup cancels get
+`Reason: SIP;cause=200;text="Call completed elsewhere"` on the CANCEL, so they
+do not log the call as missed.
 
 ## Security model and its limits
 

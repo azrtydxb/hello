@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { json, ME, mockApi, noContent, renderApp } from "../test/api";
+import { apiError, json, ME, mockApi, noContent, renderApp } from "../test/api";
 
 const CREATED = "2026-10-25T10:00:00Z";
 const ext = (id: number, number: string, name: string) => ({
@@ -248,7 +248,9 @@ describe("Park and pickup", () => {
     });
     // No member yet: refused before anything is sent.
     fireEvent.click(screen.getByRole("button", { name: "Create group" }));
-    expect(await screen.findByText("Choose at least one member.")).toBeVisible();
+    expect(
+      await screen.findByText("Choose at least one member."),
+    ).toBeVisible();
     expect(calls.some((c) => c.method === "POST")).toBe(false);
 
     const pick = await screen.findByLabelText("Add to members");
@@ -295,6 +297,36 @@ describe("Park and pickup", () => {
     expect(calls.some((c) => c.method === "DELETE")).toBe(true);
   });
 
+  it("generates the spoken slot announcement, and says why when it cannot", async () => {
+    let answer = () =>
+      apiError(409, "conflict", "tts: no OpenRouter API key is configured");
+    const calls = setup({
+      "POST /api/v1/park-lots/announcement/generate": () => answer(),
+    });
+    renderApp("/park");
+    const gen = await screen.findByRole("button", {
+      name: "Generate spoken slot announcement",
+    });
+    fireEvent.click(gen);
+    expect(
+      await screen.findByText("tts: no OpenRouter API key is configured"),
+    ).toBeVisible();
+    answer = () =>
+      json({ announcements: new Array(11).fill({}), generated: 11 });
+    fireEvent.click(gen);
+    expect(
+      await screen.findByText(
+        "Spoken slot announcement ready: 11 of 11 clips generated.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("tts: no OpenRouter API key is configured"),
+    ).toBeNull();
+    expect(
+      calls.filter((c) => c.url === "/api/v1/park-lots/announcement/generate"),
+    ).toHaveLength(2);
+  });
+
   it("is read only for a viewer", async () => {
     setup({
       "GET /api/v1/auth/me": () => json({ username: "v", role: "viewer" }),
@@ -305,6 +337,11 @@ describe("Park and pickup", () => {
     await screen.findByRole("listitem", { name: "default" });
     await screen.findByRole("listitem", { name: "front" });
     expect(screen.queryByRole("button", { name: "New park lot" })).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: "Generate spoken slot announcement",
+      }),
+    ).toBeNull();
     expect(
       screen.queryByRole("button", { name: "New pickup group" }),
     ).toBeNull();

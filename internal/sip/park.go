@@ -394,8 +394,14 @@ func (c *call) parkRun(pk *parkState, relay *media.Relay, partyLeg, parkerLeg st
 		case <-ctx.Done():
 		}
 	}()
-	// The parker hears the slot (one tone per digit), then its dialog goes.
-	_ = relay.PlayTo(ctx, parkerLeg, slotTones(pk.slot))
+	// The parker hears the slot, spoken when the console generated the park
+	// clips and as one tone per digit otherwise, then its dialog goes.
+	if pcm, rate, ok := s.slotSpeech(pk.slot); ok {
+		c.addTrace("Slot " + pk.slot + " announced by voice")
+		_ = relay.PlayPCMTo(ctx, parkerLeg, pcm, rate)
+	} else {
+		_ = relay.PlayTo(ctx, parkerLeg, slotTones(pk.slot))
+	}
 	if parkerIsCaller {
 		c.byeA()
 	} else {
@@ -833,12 +839,15 @@ func (c *call) parkVoicemail(ctx context.Context, pk *parkState, relay *media.Re
 // linkedReinvite answers a re-INVITE or UPDATE from a linked call's party
 // (a hold, or a new media address after a roam): the relay leg is re-aimed
 // at the offer and the answer carries the relay port, direction mirrored.
-// The peer is not re-INVITEd: it is behind another call.
+// A change of direction (hold or resume) is then passed to the peer, whose
+// party is re-INVITEd in the same direction, as an anchored bridged call
+// does (handleAnchoredInDialog), so the other phone shows the hold too.
 func (s *Server) linkedReinvite(c *call, req *sip.Request, tx sip.ServerTransaction) {
 	c.mu.Lock()
 	lk := c.link
 	c.mu.Unlock()
 	body := req.Body()
+	dir := media.SDPDirection(body)
 	var ans []byte
 	if lk != nil && lk.relayOwner != nil {
 		owner := lk.relayOwner
@@ -848,10 +857,10 @@ func (s *Server) linkedReinvite(c *call, req *sip.Request, tx sip.ServerTransact
 		if off, err := media.ParseAudioSDP(body); err == nil && relay != nil {
 			relay.SetTarget(lk.relayLeg, udpAddr(off.Address, off.Port))
 			ans = media.BuildAudioSDPDir(host, relay.LegPort(lk.relayLeg), off.PayloadType, off.DTMFPayloadType,
-				off.DTMFRate, mirrorDirection(media.SDPDirection(body)))
+				off.DTMFRate, mirrorDirection(dir))
 		}
 	} else if lk != nil {
-		ans = lk.answer
+		ans = withDirection(lk.answer, mirrorDirection(dir))
 	}
 	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", ans)
 	if len(ans) > 0 {
@@ -859,6 +868,159 @@ func (s *Server) linkedReinvite(c *call, req *sip.Request, tx sip.ServerTransact
 	}
 	res.AppendHeader(sip.HeaderClone(&s.contact))
 	s.send(tx, res)
+	if lk == nil || len(body) == 0 {
+		return
+	}
+	held := dir == "sendonly" || dir == "inactive"
+	c.mu.Lock()
+	changed := c.held != held
+	c.mu.Unlock()
+	if !changed {
+		return // a refresh or a roam: the peer has nothing to learn
+	}
+	c.setHeld(held)
+	s.holdPeer(c, lk, dir)
+}
+
+// withDirection rewrites an SDP body's media direction. A body that does
+// not parse is returned unchanged.
+func withDirection(body []byte, dir string) []byte {
+	sdp, err := media.ParseAudioSDP(body)
+	if err != nil {
+		return body
+	}
+	return sdp.Build(sdp.Address, sdp.Port, dir)
+}
+
+// holdPeer tells the other side of a link that this call's party held
+// (dir sendonly or inactive) or resumed (sendrecv) the call: a same-node
+// peer re-INVITEs its party directly, a peer on another node is sent the
+// hold command.
+func (s *Server) holdPeer(from *call, lk *callLink, dir string) {
+	from.mu.Lock()
+	peer, node, callID := lk.peer, lk.node, lk.callID
+	from.mu.Unlock()
+	switch {
+	case peer != nil:
+		peer.holdParty(dir)
+	case node != "" && s.deps.Park != nil:
+		ctx, cancel := s.stateCtx()
+		defer cancel()
+		if err := s.deps.Park.ParkSend(ctx, node, livestate.ParkCommand{
+			ID: newID(), Op: livestate.ParkOpHold, From: s.cfg.NodeID, CallID: callID, Dir: dir}); err != nil {
+			s.log.Warn("could not tell the linked call's node about the hold", "node", node, "error", err)
+		}
+	}
+}
+
+// holdParty re-INVITEs this linked call's own party with its media in dir:
+// the peer held (sendonly, so this side is offered sendonly too and its
+// phone shows the call as held by the other party) or resumed (sendrecv).
+// The SDP is the relay leg the party already talks to.
+func (c *call) holdParty(dir string) {
+	s := c.s
+	defer contain(s.log, "linked hold")
+	c.mu.Lock()
+	lk, w, dss := c.link, c.winner, c.dss
+	ended := c.ended || c.hungUp
+	c.mu.Unlock()
+	if lk == nil || ended {
+		return
+	}
+	var body []byte
+	if owner := lk.relayOwner; owner != nil {
+		owner.mu.Lock()
+		relay, host := owner.relay, owner.anchorHost
+		base := lk.base
+		if len(base.Codecs) == 0 && owner.link != nil {
+			base = owner.link.base
+		}
+		owner.mu.Unlock()
+		if relay == nil || len(base.Codecs) == 0 {
+			return
+		}
+		body = base.Build(host, relay.LegPort(lk.relayLeg), dir)
+	} else {
+		body = withDirection(lk.answer, dir)
+	}
+	if len(body) == 0 {
+		return
+	}
+	ok := false
+	switch hom := c.homed(); {
+	case hom != nil:
+		_, ok = s.haReinvite(hom.leg(false), body)
+	case lk.selfSide == cdr.SideCaller:
+		_, ok = reinviteA(dss, body)
+	case w != nil:
+		_, ok = reinvite(w.session(), body)
+		if ok {
+			ackLate(w.session(), nil)
+		}
+	}
+	if !ok {
+		c.addTrace("The other party's hold could not be signalled to this phone")
+	}
+}
+
+// --- slot announcement -----------------------------------------------------
+
+// The spoken slot announcement is built from announcements the console
+// generates once from text (POST /api/v1/park-lots/announcement/generate):
+// the lead-in, then one clip per digit. Nothing is synthesized at call time.
+const parkSlotPrompt = "park.slot"
+
+// parkDigitPrompt is the announcement name of one spoken digit.
+func parkDigitPrompt(d byte) string { return "park.digit." + string(d) }
+
+// slotSpeech returns the spoken announcement of slot: the lead-in and its
+// digits, joined. ok is false (and the caller plays tones) when object
+// storage is not configured, or any clip is missing, unreadable or at a
+// different sample rate than the lead-in.
+func (s *Server) slotSpeech(slot string) (pcm []byte, rate int, ok bool) {
+	objs := s.deps.Objects
+	if objs == nil || s.deps.Snapshots == nil || slot == "" {
+		return nil, 0, false
+	}
+	snap := s.deps.Snapshots.Current()
+	if snap == nil {
+		return nil, 0, false
+	}
+	names := []string{parkSlotPrompt}
+	for i := 0; i < len(slot); i++ {
+		if slot[i] < '0' || slot[i] > '9' {
+			return nil, 0, false
+		}
+		names = append(names, parkDigitPrompt(slot[i]))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout)
+	defer cancel()
+	clips := map[string][]byte{} // a slot like 707 fetches each digit once
+	for i, name := range names {
+		obj, found := snap.Announcement(name)
+		if !found {
+			return nil, 0, false
+		}
+		clip, seen := clips[name]
+		if !seen {
+			raw, err := objs.GetAnnouncement(ctx, obj)
+			if err != nil {
+				s.log.Warn("park: slot announcement clip unavailable, playing tones", "announcement", name, "error", err)
+				return nil, 0, false
+			}
+			var r int
+			clip, r, err = media.DecodeWAV(raw)
+			if err != nil || (i > 0 && r != rate) {
+				s.log.Warn("park: slot announcement clip unusable, playing tones", "announcement", name)
+				return nil, 0, false
+			}
+			rate = r
+			clips[name] = clip
+		}
+		pcm = append(pcm, clip...)
+		pcm = append(pcm, make([]byte, rate/10*2)...) // 100 ms between words
+	}
+	return pcm, rate, true
 }
 
 // --- tones -----------------------------------------------------------------

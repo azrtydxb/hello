@@ -39,6 +39,7 @@ import {
   useRestoreFocus,
   useToast,
 } from "../design/azrty/components";
+import { generateParkAnnouncement } from "../api/tts";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { FormAlert } from "./callflow/ui";
 import { Can } from "../role";
@@ -67,7 +68,9 @@ function useList<T>(load: (signal: AbortSignal) => Promise<T[]>) {
   }, [load]);
   const replace = (fn: (items: T[]) => T[]) =>
     setState((prev) =>
-      prev.status === "ready" ? { status: "ready", items: fn(prev.items) } : prev,
+      prev.status === "ready"
+        ? { status: "ready", items: fn(prev.items) }
+        : prev,
     );
   return [state, replace] as const;
 }
@@ -165,6 +168,51 @@ function ParkedNow() {
 
 // --- park lots ------------------------------------------------------------------
 
+/**
+ * SlotVoice generates the spoken slot announcement once through the
+ * text-to-speech provider. Without it the parker hears the slot as tones.
+ */
+function SlotVoice({ toast }: { toast: (message: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onGenerate() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await generateParkAnnouncement();
+      toast(
+        res.generated === 0
+          ? "The spoken slot announcement is already up to date."
+          : `Spoken slot announcement ready: ${res.generated} of ${res.announcements.length} clips generated.`,
+      );
+    } catch (err: unknown) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Can min="operator">
+      <Button
+        variant="secondary"
+        icon="megaphone"
+        disabled={busy}
+        onClick={() => void onGenerate()}
+        title="Speak the slot number to the parker instead of playing tones. Uses the text-to-speech settings and spends credits once."
+      >
+        {busy ? "Generating…" : "Generate spoken slot announcement"}
+      </Button>
+      {error && (
+        <Alert tone="bad" title="Could not generate the slot announcement">
+          {error}
+        </Alert>
+      )}
+    </Can>
+  );
+}
+
 function ParkLots({ toast }: { toast: (message: string) => void }) {
   const [list, replace] = useList(listParkLots);
   const [editing, setEditing] = useState<
@@ -201,7 +249,12 @@ function ParkLots({ toast }: { toast: (message: string) => void }) {
       <h2 className="az-eyebrow" id="park-lots-title">
         Park lots
       </h2>
-      <div style={{ margin: "8px 0" }}>{add}</div>
+      <div
+        style={{ margin: "8px 0", display: "flex", gap: 8, flexWrap: "wrap" }}
+      >
+        {add}
+        <SlotVoice toast={toast} />
+      </div>
       {list.status === "loading" && <Spinner label="Loading park lots…" />}
       {list.status === "error" && (
         <Alert tone="bad" title="Could not load the park lots">
@@ -226,7 +279,10 @@ function ParkLots({ toast }: { toast: (message: string) => void }) {
             >
               <div className="cf-card__head cf-card__head--top">
                 <div style={{ minWidth: 0 }}>
-                  <h3 className="cf-card__group-name" id={`lot-${String(l.id)}`}>
+                  <h3
+                    className="cf-card__group-name"
+                    id={`lot-${String(l.id)}`}
+                  >
                     {l.name}
                   </h3>
                   <div className="cf-card__sub">
@@ -351,7 +407,8 @@ function validateLot(d: LotDraft): {
   if (!(start >= 1)) errors.slotStart = "Enter the first slot number.";
   if (!(end >= 1)) errors.slotEnd = "Enter the last slot number.";
   else if (end < start || end - start >= 100) {
-    errors.slotEnd = "Use a range of at most 100 slots, ending at or after the first.";
+    errors.slotEnd =
+      "Use a range of at most 100 slots, ending at or after the first.";
   }
   if (!(back >= 10 && back <= 3600)) {
     errors.returnSecs = "Use 10 to 3600 seconds.";
@@ -801,7 +858,9 @@ function PickupDrawer({
               options={[
                 { value: "", label: extReady ? "Choose…" : "Loading…" },
                 ...extensions
-                  .filter((e) => !members.some((m) => String(m) === String(e.id)))
+                  .filter(
+                    (e) => !members.some((m) => String(m) === String(e.id)),
+                  )
                   .map((e) => ({
                     value: String(e.id),
                     label: e.name ? `${e.number} · ${e.name}` : e.number,

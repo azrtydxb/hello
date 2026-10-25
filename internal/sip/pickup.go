@@ -97,7 +97,7 @@ func (c *call) pickupBy(req *pickupReq) pickupRes {
 // answerPickup connects the caller of the picked-up call to the picker.
 func (c *call) answerPickup(req *pickupReq) {
 	s := c.s
-	c.cancelForks(nil)
+	c.cancelForksElsewhere()
 	c.mu.Lock()
 	cancelled := c.isCancelled || closed(c.aborted)
 	relay := c.relay
@@ -375,6 +375,11 @@ func (s *Server) runParkCommand(cmd livestate.ParkCommand) {
 	case livestate.ParkOpBye:
 		if ref, ok := s.lookup(cmd.CallID); ok {
 			ref.c.linkedHangup(cdr.SideSystem, "the other party hung up")
+		}
+		return
+	case livestate.ParkOpHold:
+		if ref, ok := s.lookup(cmd.CallID); ok {
+			ref.c.holdParty(cmd.Dir)
 		}
 		return
 	case livestate.ParkOpRetrieve:

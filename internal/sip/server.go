@@ -186,7 +186,10 @@ type Server struct {
 	client  *sipgo.Client
 	uas     *sipgo.DialogUA // A legs: callers
 	uac     *sipgo.DialogUA // B legs: forks
-	bg      sync.WaitGroup
+	// uacElsewhere is uac with "Call completed elsewhere" on its CANCELs,
+	// for the ringing legs of a picked-up call.
+	uacElsewhere *sipgo.DialogUA
+	bg           sync.WaitGroup
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
 	// (a call ending as the node stops) must not start more work on it.
 	bgMu     sync.Mutex
@@ -415,6 +418,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.refreshPeers(ctx) // before serving, so the edge knows its peers
 	s.uas = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
 	s.uac = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
+	s.uacElsewhere = newElsewhereUA(ua, client, s.uac)
 
 	s.handle(srv, sip.OPTIONS, s.handleOptions)
 	s.handle(srv, sip.REGISTER, s.handleRegister)

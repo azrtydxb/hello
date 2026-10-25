@@ -660,3 +660,133 @@ func TestCallParkTakeover(t *testing.T) {
 	hangupHomed(t, b, taker, re, rec.Legs[0])
 	waitReq(t, c.byes, "BYE to the retriever")
 }
+
+// TestCallParkHold: a hold on a retrieved call reaches the other party, as
+// on a bridged call. It fails if the retriever's sendonly re-INVITE is not
+// answered recvonly, if the parked party is not re-INVITEd sendonly (and
+// sendrecv on resume), or if the parked party's hold does not reach the
+// retriever, on one node and across two.
+func TestCallParkHold(t *testing.T) {
+	for _, across := range []bool{false, true} {
+		name := "one node"
+		if across {
+			name = "across nodes"
+		}
+		t.Run(name, func(t *testing.T) {
+			st := parkStore(t)
+			pbx1 := startPBX(t, threeDevices(), withMedia(false), withPark(st, "sip-a", testLot))
+			pbx2 := pbx1
+			if across {
+				pbx2 = startPBX(t, threeDevices(), withMedia(false), withPark(st, "sip-b", testLot))
+			}
+			a, b := newPhone(t, pbx1, "a1", "pa"), newPhone(t, pbx1, "b1", "pb1")
+			c := newPhone(t, pbx2, "c1", "pc")
+			for _, p := range []*phone{a, b, c} {
+				p.register(t)
+				p.setCallee(answerAfter(nil))
+			}
+			pc := establish(t, a, b)
+			parkBy(t, a, pc, "*74")
+			occupied(t, st, "701", "100")
+			r := waitCall(t, dial(t.Context(), c, "*75701"))
+			if r.err != nil {
+				t.Fatalf("retrieve: %v", r.err)
+			}
+
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			// The retriever holds, then resumes.
+			for _, step := range []struct{ offer, answer, peer string }{
+				{"sendonly", "recvonly", "sendonly"},
+				{"sendrecv", "sendrecv", "sendrecv"},
+			} {
+				re := sip.NewRequest(sip.INVITE, r.dcs.InviteResponse.Contact().Address)
+				re.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+				re.SetBody([]byte(c.sdp + "a=" + step.offer + "\r\n"))
+				res, err := r.dcs.Do(ctx, re)
+				if err != nil || res.StatusCode != 200 {
+					t.Fatalf("%s re-INVITE = %v, %v", step.offer, res, err)
+				}
+				if got := media.SDPDirection(res.Body()); got != step.answer {
+					t.Fatalf("%s answered %q, want %s", step.offer, got, step.answer)
+				}
+				if err := r.dcs.WriteRequest(sip.NewRequest(sip.ACK, r.dcs.InviteResponse.Contact().Address)); err != nil {
+					t.Fatal(err)
+				}
+				got := waitReq(t, b.reinvites, step.offer+" re-INVITE to the parked party")
+				if dir := media.SDPDirection(got.Body()); dir != step.peer {
+					t.Fatalf("parked party re-INVITEd %q, want %s: %q", dir, step.peer, got.Body())
+				}
+			}
+
+			// The parked party holds: the retriever is re-INVITEd sendonly.
+			re := sip.NewRequest(sip.INVITE, pc.dssB.InviteRequest.Contact().Address)
+			re.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+			re.SetBody([]byte(b.sdp + "a=sendonly\r\n"))
+			res, err := pc.dssB.Do(ctx, re)
+			if err != nil || res.StatusCode != 200 {
+				t.Fatalf("parked party's hold = %v, %v", res, err)
+			}
+			if got := media.SDPDirection(res.Body()); got != "recvonly" {
+				t.Fatalf("parked party's hold answered %q, want recvonly", got)
+			}
+			got := waitReq(t, c.reinvites, "hold re-INVITE to the retriever")
+			if dir := media.SDPDirection(got.Body()); dir != "sendonly" {
+				t.Fatalf("retriever re-INVITEd %q, want sendonly", dir)
+			}
+			hangup(t, r.dcs)
+			waitReq(t, b.byes, "BYE to the parked party")
+		})
+	}
+}
+
+// TestCallParkSpokenSlot: with the park clips generated, the parker hears
+// the slot spoken (the lead-in, then each digit) instead of tones. It fails
+// if the clips are not fetched, if the parker hears the short tone sequence
+// instead of the 2 s lead-in plus digits, or if the call trace does not say
+// the slot was announced by voice.
+func TestCallParkSpokenSlot(t *testing.T) {
+	objs := &fakeObjects{}
+	anns := map[string]string{parkSlotPrompt: "ann/park.slot.wav"}
+	_ = objs.Put(context.Background(), "ann/park.slot.wav", media.EncodeWAV(make([]byte, 2*8000*2), 8000)) // 2 s
+	for _, d := range []byte("0123456789") {
+		obj := "ann/" + parkDigitPrompt(d) + ".wav"
+		anns[parkDigitPrompt(d)] = obj
+		_ = objs.Put(context.Background(), obj, media.EncodeWAV(make([]byte, 2*8000/5), 8000)) // 200 ms
+	}
+	st := parkStore(t)
+	pbx := startPBX(t, threeDevices(), withMedia(false), withPark(st, "sip-a", testLot),
+		withVoicemail(newVMStore(), objs), withFeatures(func(s *snapshot.Snapshot) { s.WithAnnouncements(anns) }))
+	a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
+	for _, p := range []*phone{a, b} {
+		p.register(t)
+		p.setCallee(answerAfter(nil))
+	}
+	pc := establish(t, a, b)
+	stop := make(chan struct{})
+	heard := countRTP(pc.feedA.conn, stop)
+	parkBy(t, a, pc, "*74")
+	occupied(t, st, "701", "100")
+	waitReq(t, a.byes, "BYE to the parker")
+	close(stop)
+	// Tones for 701 last under a second (< 50 packets); the spoken
+	// announcement is over 3 s.
+	if n := heard.Load(); n < 120 {
+		t.Fatalf("the parker heard %d RTP packets, want the spoken slot (>= 120)", n)
+	}
+	gets := strings.Join(objs.snapshotGets(), " ")
+	for _, want := range []string{"ann/park.slot.wav", "ann/park.digit.7.wav", "ann/park.digit.0.wav", "ann/park.digit.1.wav"} {
+		if !strings.Contains(gets, want) {
+			t.Fatalf("clip %s not fetched: %s", want, gets)
+		}
+	}
+	byeFrom(t, pc.dssB)
+	cd := pbx.nextCDR(t)
+	var traces []string
+	for _, s := range cd.Trace {
+		traces = append(traces, s.Text)
+	}
+	if joined := strings.Join(traces, "\n"); !strings.Contains(joined, "Slot 701 announced by voice") {
+		t.Fatalf("CDR trace lacks the spoken announcement:\n%s", joined)
+	}
+}

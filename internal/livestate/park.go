@@ -67,6 +67,10 @@ const (
 	ParkOpPickup = "pickup"
 	// ParkOpBye ends the call a linked peer on another node was part of.
 	ParkOpBye = "bye"
+	// ParkOpHold tells the linked peer on another node that its party was
+	// put on hold (Dir sendonly or inactive) or resumed (sendrecv), so the
+	// peer's phone is re-INVITEd the same way.
+	ParkOpHold = "hold"
 )
 
 // ParkCommand asks the node holding a call to do something to it.
@@ -87,6 +91,9 @@ type ParkCommand struct {
 	// Retriever is the extension taking the call (for scope checks and the
 	// trace).
 	Retriever string `json:"retriever,omitempty"`
+	// Dir is the media direction of a hold command, as the holding party
+	// offered it.
+	Dir string `json:"dir,omitempty"`
 }
 
 // ParkReply is the holder's answer to a ParkCommand.
