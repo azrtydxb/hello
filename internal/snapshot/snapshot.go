@@ -152,7 +152,7 @@ type Snapshot struct {
 	anns   map[string]string
 	// ivrByName and ivrByNumber are the IVR menus (migration 00018).
 	ivrByName, ivrByNumber map[string]IVRMenu
-	// tcByName and tcByToggle are the time conditions (migration 00020).
+	// tcByName and tcByToggle are the time conditions (migration 00027).
 	tcByName, tcByToggle map[string]TimeCondition
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState

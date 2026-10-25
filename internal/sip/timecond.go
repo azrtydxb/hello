@@ -1,4 +1,4 @@
-// Time conditions (migration 00020). A time condition is a destination that
+// Time conditions (migration 00027). A time condition is a destination that
 // picks one of three destinations from a schedule (open, closed, holiday)
 // or a manual override, then hands the call to it. The decision and the
 // reason are written to the call's trace (the CDR) and the INFO log, and

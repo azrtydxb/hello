@@ -1,7 +1,7 @@
 -- +goose Up
 -- Feature codes for time conditions: the action time_condition routes a
 -- dialled code to a time condition (the argument names it) and tc_override
--- is the day/night toggle *28<n>. This is separate from 00020 because
+-- is the day/night toggle *28<n>. This is separate from 00027 because
 -- 00026 (call waiting) re-creates the feature_codes CHECK from its own list;
 -- this migration widens it again with every action added meanwhile, the IVR
 -- action of 00018 included. Additive, so a rolling upgrade works.
