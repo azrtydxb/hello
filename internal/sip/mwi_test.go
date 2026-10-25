@@ -132,3 +132,65 @@ func TestMailboxOf(t *testing.T) {
 		}
 	}
 }
+
+// fakeMailboxEvents is a MailboxEvents the test drives by hand.
+type fakeMailboxEvents struct {
+	ch chan int64
+}
+
+func (f *fakeMailboxEvents) Watch(ctx context.Context, changed func(int64)) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case b := <-f.ch:
+			changed(b)
+		}
+	}
+}
+
+// TestMailboxEventNotifies fails if a mailbox event from the control plane
+// (a message heard through the HTTP API) does not NOTIFY the box owner's
+// subscription well before the safety-net re-read, or if an event for an
+// unrelated box NOTIFYs it.
+func TestMailboxEventNotifies(t *testing.T) {
+	vm := newVMStore()
+	vm.boxes["200"] = VoicemailBox{ID: 5, Extension: "200"}
+	if _, err := vm.InsertMessage(context.Background(), 5, "obj1", "100", 2000); err != nil {
+		t.Fatal(err)
+	}
+	feats := func(s *snapshot.Snapshot) {
+		s.WithExtensionData([]snapshot.Extension{{Number: "200", VoicemailEnabled: true, VoicemailBoxID: 5}})
+	}
+	ev := &fakeMailboxEvents{ch: make(chan int64, 4)}
+	pbx := startPBX(t, callerDevices(), withFeatures(feats), withVoicemail(vm, &fakeObjects{}),
+		func(_ *Config, d *Deps) { d.MailboxEvents = ev })
+	b := newPhone(t, pbx, "b1", "pb1")
+	b.register(t)
+	if res := b.subscribeEvent(t, "200", "message-summary", 120); res.StatusCode != 200 {
+		t.Fatalf("SUBSCRIBE = %d", res.StatusCode)
+	}
+	wait := func(want string) {
+		t.Helper()
+		deadline := time.After(5 * time.Second) // the safety-net poll is 60 s
+		for {
+			select {
+			case r := <-b.notifies:
+				if strings.Contains(string(r.Body()), want) {
+					return
+				}
+			case <-deadline:
+				t.Fatalf("no NOTIFY with %q after the mailbox event", want)
+			}
+		}
+	}
+	wait("Messages-Waiting: yes")
+
+	if err := vm.MarkHeard(context.Background(), vm.snapshotMsgs()[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	ev.ch <- 99 // another box: nothing for this phone
+	noReq(t, b.notifies, 300*time.Millisecond, "NOTIFY for an unrelated box")
+	ev.ch <- 5
+	wait("Messages-Waiting: no")
+}
