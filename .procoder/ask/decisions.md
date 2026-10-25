@@ -417,3 +417,5 @@ The IVR part, since Hello has no IVR yet:
 - Prompts only for now
 
 Decision: accepted "Build an IVR/auto-attendant too".
+
+Update (2026-10-25): the user asked to reach ElevenLabs through OpenRouter instead of directly, and will provide an OpenRouter key later. The key is still stored encrypted in the DB and set in the GUI.
