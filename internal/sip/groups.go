@@ -133,8 +133,19 @@ func splitmix64(state *uint64) uint64 {
 func (c *call) ringGroup(req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot, g snapshot.RingGroup, members []snapshot.RingGroupMember) {
 	s := c.s
 	var ms []groupMember
+	var busy map[string]bool // fetched once, and only when a member has call waiting off
 	for _, m := range members {
 		e, _ := snap.Extension(m.Extension)
+		if e.NoCallWaiting {
+			if busy == nil {
+				busy = s.busyExtensions()
+			}
+			if busy[m.Extension] {
+				// A busy member with call waiting off is unavailable (S-18).
+				c.addTrace(fmt.Sprintf("Group %s: member %s is busy with call waiting off: skipped", g.Name, m.Extension))
+				continue
+			}
+		}
 		ms = append(ms, groupMember{ext: m.Extension, weight: m.Weight, delay: m.Delay, dnd: e.DND, lastEnd: s.lastEndOf(m.Extension)})
 	}
 	ordered := orderGroup(g.Strategy, ms, g.IgnoreDND, s.rotation(g.ID), groupSeed(g.Name, c.id))

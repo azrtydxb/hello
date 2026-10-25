@@ -19,6 +19,7 @@ import (
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/hello/internal/tts"
 	"github.com/azrtydxb/hello/internal/version"
 )
 
@@ -80,7 +81,6 @@ type Store interface {
 	CreateIVRMenu(ctx context.Context, actor string, in store.IVRMenuInput, check store.Check) (store.IVRMenu, error)
 	UpdateIVRMenu(ctx context.Context, actor string, id int64, in store.IVRMenuInput, check store.Check) (store.IVRMenu, error)
 	DeleteIVRMenu(ctx context.Context, actor string, id int64, check store.Check) error
-	IVRMenuNameExists(ctx context.Context, name string) (bool, error)
 
 	ListQueues(ctx context.Context) ([]store.Queue, error)
 	GetQueue(ctx context.Context, id int64) (store.Queue, error)
@@ -114,6 +114,14 @@ type Store interface {
 	CreateAnnouncement(ctx context.Context, actor, name, object string, check store.Check) (store.Announcement, error)
 	ReplaceAnnouncement(ctx context.Context, actor string, id int64) (store.Announcement, error)
 	DeleteAnnouncement(ctx context.Context, actor string, id int64, check store.Check) (string, error)
+	SaveAnnouncementPrompt(ctx context.Context, actor string, id int64, text, voice, model string) (store.Announcement, error)
+	CreateGeneratedAnnouncement(ctx context.Context, actor, name, object, text, voice, model string, check store.Check) (store.Announcement, error)
+	MarkAnnouncementGenerated(ctx context.Context, actor string, id int64, text, voice, model string) (store.Announcement, error)
+
+	GetTTSSettings(ctx context.Context) (store.TTSSettings, error)
+	PutTTSSettings(ctx context.Context, actor string, c store.TTSChange) (store.TTSSettings, error)
+	ClearTTSKey(ctx context.Context, actor string) (store.TTSSettings, error)
+	TTSKey(ctx context.Context) (string, error)
 
 	ListTrunks(ctx context.Context) ([]store.Trunk, error)
 	GetTrunk(ctx context.Context, id int64) (store.Trunk, error)
@@ -215,6 +223,9 @@ type Config struct {
 	// Proposals serves the AI proposal routes (spec ai-agent); nil answers
 	// 503 ai_disabled.
 	Proposals ProposalService
+	// TTS generates prompt audio through OpenRouter; nil means the real
+	// client. Generation only happens on an operator's explicit request.
+	TTS Synthesizer
 	// AIAgent is the in-product AI agent (spec ai-agent); nil or off makes
 	// every AI agent operation but getAIStatus answer 503 ai_disabled.
 	AIAgent *ai.Service
@@ -230,6 +241,9 @@ func Handler(c Config) http.Handler {
 	}
 	if c.Router == nil {
 		c.Router = engineRouter{}
+	}
+	if c.TTS == nil {
+		c.TTS = &tts.Client{}
 	}
 	s := &server{c}
 	opts := auth.Options{Cookies: true}

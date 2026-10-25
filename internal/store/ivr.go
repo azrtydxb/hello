@@ -510,3 +510,67 @@ func (s *Store) IVRMenuNameExists(ctx context.Context, name string) (bool, error
 	}
 	return n > 0, nil
 }
+
+// refuseIfIVRPoints returns an *InUseError naming the IVR menus whose
+// options or timeout and invalid exits point at target with one of kinds. It
+// guards the extension, ring group, paging group and announcement a menu
+// names against being deleted or renumbered under it.
+func refuseIfIVRPoints(ctx context.Context, tx *sql.Tx, what, target string, kinds ...string) error {
+	k2 := kinds[0]
+	if len(kinds) > 1 {
+		k2 = kinds[1]
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT m.name FROM ivr_menus m WHERE
+		(m.timeout_kind IN ($1, $2) AND m.timeout_target = $3)
+		OR (m.invalid_kind IN ($1, $2) AND m.invalid_target = $3)
+		OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = m.id AND o.dest_kind IN ($1, $2) AND o.dest_target = $3)
+		ORDER BY m.name`, kinds[0], k2, target)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	var refs []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return err
+		}
+		refs = append(refs, "IVR menu "+n)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(refs) > 0 {
+		return inUseBy(what, refs)
+	}
+	return nil
+}
+
+// requireIVRMenuTx refuses a reference to a menu that does not exist. It runs
+// in the configuration change's transaction, under the configuration lock,
+// so a menu cannot be deleted between the check and the write that names it.
+func requireIVRMenuTx(ctx context.Context, tx *sql.Tx, path, name string) error {
+	var n int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ivr_menus WHERE name = $1`, name).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return fieldError(path, fmt.Sprintf("IVR menu %q does not exist", name))
+	}
+	return nil
+}
+
+// refuseIVRNumber refuses an extension number or ring group name that an IVR
+// menu already answers on: the menu's number is matched first, so the
+// extension or group would never ring.
+func refuseIVRNumber(ctx context.Context, tx *sql.Tx, path, number string) error {
+	var name string
+	err := tx.QueryRowContext(ctx, `SELECT name FROM ivr_menus WHERE number = $1 AND number <> ''`, number).Scan(&name)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	}
+	return fieldError(path, "is already the number of IVR menu "+name)
+}

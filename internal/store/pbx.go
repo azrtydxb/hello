@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -18,17 +19,21 @@ import (
 // VoicemailBox is an extension's voicemail box. The password hash is never
 // read into this type; HasPassword reports whether one is set.
 type VoicemailBox struct {
-	ID                int64     `json:"id"`
-	ExtensionID       int64     `json:"extensionId"`
-	HasPassword       bool      `json:"hasPassword"`
-	Email             string    `json:"email"`
-	GreetingObject    string    `json:"greetingObject"`
-	UnreachableObject string    `json:"unreachableObject"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID                int64  `json:"id"`
+	ExtensionID       int64  `json:"extensionId"`
+	HasPassword       bool   `json:"hasPassword"`
+	Email             string `json:"email"`
+	GreetingObject    string `json:"greetingObject"`
+	UnreachableObject string `json:"unreachableObject"`
+	// GreetingTTS and UnreachableTTS describe how a greeting was generated
+	// from text; nil for uploaded or picked audio.
+	GreetingTTS    *TTSMeta  `json:"greetingTts"`
+	UnreachableTTS *TTSMeta  `json:"unreachableTts"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
-const boxCols = `id, extension_id, password_hash <> '', email, greeting_object, unreachable_object, created_at, updated_at`
+const boxCols = `id, extension_id, password_hash <> '', email, greeting_object, unreachable_object, greeting_tts, unreachable_tts, created_at, updated_at`
 
 // GetVoicemailBox returns the box of extensionID.
 func (s *Store) GetVoicemailBox(ctx context.Context, extensionID int64) (VoicemailBox, error) {
@@ -39,8 +44,10 @@ func (s *Store) GetVoicemailBox(ctx context.Context, extensionID int64) (Voicema
 
 func scanBox(r interface{ Scan(...any) error }) (VoicemailBox, error) {
 	var b VoicemailBox
+	var gt, ut []byte
 	err := r.Scan(&b.ID, &b.ExtensionID, &b.HasPassword, &b.Email, &b.GreetingObject, &b.UnreachableObject,
-		&b.CreatedAt, &b.UpdatedAt)
+		&gt, &ut, &b.CreatedAt, &b.UpdatedAt)
+	b.GreetingTTS, b.UnreachableTTS = parseTTSMeta(gt), parseTTSMeta(ut)
 	return b, err
 }
 
@@ -52,6 +59,11 @@ type VoicemailBoxChange struct {
 	Password    *string
 	Greeting    *string
 	Unreachable *string
+	// GreetingTTS and UnreachableTTS accompany a new Greeting or Unreachable
+	// object: the prompt it was generated from, or nil for uploaded audio
+	// (which clears an earlier record).
+	GreetingTTS    *TTSMeta
+	UnreachableTTS *TTSMeta
 }
 
 // UpdateVoicemailBox changes the box of extensionID, creating the box if the
@@ -78,9 +90,12 @@ func (s *Store) UpdateVoicemailBox(ctx context.Context, actor string, extensionI
 				password_hash = COALESCE($3, password_hash),
 				greeting_object = COALESCE($4, greeting_object),
 				unreachable_object = COALESCE($5, unreachable_object),
+				greeting_tts = CASE WHEN $4::text IS NOT NULL THEN $6::jsonb ELSE greeting_tts END,
+				unreachable_tts = CASE WHEN $5::text IS NOT NULL THEN $7::jsonb ELSE unreachable_tts END,
 				updated_at = now()
 			WHERE extension_id = $1`,
-			extensionID, c.Email, hash, c.Greeting, c.Unreachable); err != nil {
+			extensionID, c.Email, hash, c.Greeting, c.Unreachable,
+			metaJSON(c.GreetingTTS), metaJSON(c.UnreachableTTS)); err != nil {
 			return "", err
 		}
 		var err error
@@ -355,6 +370,7 @@ type FeatureUpdate struct {
 	ForwardAlways   *string
 	ForwardBusy     *string
 	ForwardNoAnswer *string
+	CallWaiting     *bool
 }
 
 // ApplyFeatureUpdate applies one feature-code change the same way every
@@ -370,9 +386,10 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 				forward_always = COALESCE($3, forward_always),
 				forward_busy = COALESCE($4, forward_busy),
 				forward_no_answer = COALESCE($5, forward_no_answer),
+				call_waiting = COALESCE($6, call_waiting),
 				updated_at = now()
 			WHERE number = $1`,
-			u.Number, u.DND, u.ForwardAlways, u.ForwardBusy, u.ForwardNoAnswer)
+			u.Number, u.DND, u.ForwardAlways, u.ForwardBusy, u.ForwardNoAnswer, u.CallWaiting)
 		if err != nil {
 			return "", err
 		}
@@ -519,6 +536,9 @@ func (s *Store) GetRingGroup(ctx context.Context, id int64) (RingGroup, error) {
 func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupInput, check Check) (RingGroup, error) {
 	var g RingGroup
 	err := s.configChange(ctx, actor, "create", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		if err := checkRingGroupIVR(ctx, tx, "", in); err != nil {
+			return 0, err
+		}
 		var id int64
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO ring_groups (name, strategy, hunt, ring_timeout, member_delay, ignore_dnd, failure_kind, failure_target)
@@ -540,6 +560,18 @@ func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupI
 func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in RingGroupInput, check Check) (RingGroup, error) {
 	var g RingGroup
 	err := s.configChange(ctx, actor, "update", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		var cur string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = $1`, id).Scan(&cur); err != nil {
+			return id, err
+		}
+		if cur != in.Name {
+			if err := refuseIfIVRPoints(ctx, tx, "ring group "+cur+", which cannot be renamed while it is named by", cur, IVRRingGroup); err != nil {
+				return id, err
+			}
+		}
+		if err := checkRingGroupIVR(ctx, tx, cur, in); err != nil {
+			return id, err
+		}
 		res, err := tx.ExecContext(ctx, `
 			UPDATE ring_groups SET name = $2, strategy = $3, hunt = $4, ring_timeout = $5, member_delay = $6,
 			       ignore_dnd = $7, failure_kind = $8, failure_target = $9, updated_at = now()
@@ -561,9 +593,32 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 	return g, err
 }
 
+// checkRingGroupIVR checks a ring group's IVR interplay inside the change's
+// transaction: a new name must not be an IVR menu's number, and an IVR
+// failure destination must name an existing menu. cur is the stored name ("" on
+// create).
+func checkRingGroupIVR(ctx context.Context, tx *sql.Tx, cur string, in RingGroupInput) error {
+	if in.Name != cur {
+		if err := refuseIVRNumber(ctx, tx, "name", in.Name); err != nil {
+			return err
+		}
+	}
+	if in.FailureKind == "ivr" {
+		return requireIVRMenuTx(ctx, tx, "failureTarget", in.FailureTarget)
+	}
+	return nil
+}
+
 // DeleteRingGroup removes a group and, by cascade, its members.
 func (s *Store) DeleteRingGroup(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		var name string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = $1`, id).Scan(&name); err != nil {
+			return id, err
+		}
+		if err := refuseIfIVRPoints(ctx, tx, "ring group "+name, name, IVRRingGroup); err != nil {
+			return id, err
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM ring_groups WHERE id = $1`, id)
 		if err != nil {
 			return id, err
@@ -635,6 +690,13 @@ func (s *Store) PutFeatureCodes(ctx context.Context, actor string, codes []Featu
 		if err := checkFeatureCodesAgainstPaging(ctx, tx, codes); err != nil {
 			return "", err
 		}
+		for i, c := range codes {
+			if c.Action == "ivr" {
+				if err := requireIVRMenuTx(ctx, tx, fmt.Sprintf("items[%d].argument", i), c.Argument); err != nil {
+					return "", err
+				}
+			}
+		}
 		for _, c := range codes {
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO feature_codes (code, action, argument) VALUES ($1, $2, $3)
@@ -669,6 +731,8 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*93", Action: "forward_no_answer", Argument: "clear"},
 		{Code: "*97", Action: "voicemail"},
 		{Code: "*80", Action: "intercom"},
+		{Code: "*70", Action: "call_waiting_off"},
+		{Code: "*71", Action: "call_waiting_on"},
 		{Code: "##", Action: "attended_transfer"},
 		{Code: "*45", Action: ActionQueueLogin},
 		{Code: "*46", Action: ActionQueueLogout},

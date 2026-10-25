@@ -419,3 +419,26 @@ The IVR part, since Hello has no IVR yet:
 Decision: accepted "Build an IVR/auto-attendant too".
 
 Update (2026-10-25): the user asked to reach ElevenLabs through OpenRouter instead of directly, and will provide an OpenRouter key later. The key is still stored encrypted in the DB and set in the GUI.
+
+## Integrations: distribution, recordings, SSO, click-to-call (2026-10-25)
+
+Spec: `.procoder/specs/integrations.md` (directory sync, SCIM, OIDC SSO, webhooks, event stream, click-to-call, CRM connectors).
+
+1. Distribution: private apps per customer only. No Hello-hosted relay and no marketplace listings; the marketplace/vendor path is "not planned".
+2. Recordings to CRMs: opt-in per connector, using opaque 256-bit link tokens with a 30-day TTL, revocable.
+3. SSO: required for synced users. They sign in only through their IdP (OIDC for Google/Entra, LDAP bind for AD-only sites), have no local password, and directory- and SCIM-synced accounts cannot fall back to one. At least one local break-glass admin must always exist and the system refuses to remove the last one. (This differs from the recommended default of optional SSO.)
+4. Click-to-call: ring-first only, auto-answer off, `user` credentials dial from their own extension, operators/admins and allow-listed service accounts may dial for others, emergency numbers refused, destinations inherit the outbound routes plus rate limits.
+
+Decision: accepted by the user (2026-10-25).
+
+## Flow canvas: decisions on the five open questions (2026-10-25)
+
+Spec: `.procoder/specs/flow-canvas.md`. The user answered all five:
+
+- **Canvases (2026-10-25):** many named, shared canvases, such as "Main office" and "After hours"; an object may appear on several, plus a computed "everything" view that is never stored. Rationale: one PBX has several call flows (opening hours, after hours) that an operator wants to look at separately.
+- **AI access (2026-10-25):** full access. The in-product assistant and write-scoped MCP clients may build, change and apply canvas changes directly, for any object type including devices, phones and trunks. Rationale: the user wants the agent to do the work, not only suggest it. Safety: every AI change uses the same transactional batch endpoint, is audited with actor AI, is shown on the canvas and can be reverted; secrets are never returned to the model, which may set or generate them but reads redacted values.
+- **Destinations (2026-10-25):** unify. Every "call goes to..." output accepts every call target kind (extension, ring group, queue, IVR, voicemail, announcement, paging, time condition, external number, park and so on), and a migration extends inbound routes and ring-group fallback. Rationale: one meaning for every call port keeps the canvas rules simple and removes the "numeric ring group name" workarounds.
+- **Renames (2026-10-25):** the batch cascades renames to every referencing object. Rationale: references are by name today, so a rename would otherwise leave dangling targets; moving to ID references is a separate later spec.
+- **Saving (2026-10-25):** always a draft plus Apply with a diff, undo/redo, live validation, one transaction and a later revert. Rationale: a call flow changes live calls, so no silent auto-save.
+
+Decision: accepted by the user (2026-10-25), all of the above. Migration numbers 00017-00023 belong to other in-flight branches (tts, ivr, codecs, time-conditions, moh, park-pickup, queues); the flow canvas uses 00024 and up.

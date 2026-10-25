@@ -196,12 +196,11 @@ type call struct {
 	qWrap  time.Duration
 	qLegs  []cdr.QueueLeg
 	qDepth int
-	// takenOffer is the caller's SDP of a call a survivor took over, which
-	// has no INVITE: the offer a queued caller's agent legs are built from.
-	takenOffer []byte
 	// qWaiting is true while the caller waits in a queue, since qEnteredAt.
 	qWaiting   bool
 	qEnteredAt time.Time
+	// ivrUnrecoverable is set when a dial-out cannot be done after a takeover.
+	ivrUnrecoverable bool
 }
 
 // callStages is the forwarding/DND context of the extension a call is
@@ -1082,7 +1081,7 @@ func (c *call) release() {
 	}
 	if hom != nil {
 		// A taken-over call's callee dialog is bound outside c.legs.
-		for _, l := range hom.pair() {
+		for _, l := range hom.legs {
 			if l != nil {
 				c.s.unbind(l.callID, c)
 			}
@@ -1157,8 +1156,12 @@ func (c *call) live() livestate.Call {
 	if c.homedCall != nil {
 		ha = livestate.HATakenOver
 	}
+	callee := ""
+	if c.winner != nil {
+		callee = c.winner.binding.Extension
+	}
 	return livestate.Call{
-		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, State: state,
+		ID: c.id, SIPCallID: c.callID, From: c.callerNum, To: c.dialled, Callee: callee, State: state,
 		Node: c.s.cfg.NodeID, Media: "direct", StartedAt: c.start, AnsweredAt: answered, HA: ha, Direction: c.direction,
 	}
 }
@@ -1344,29 +1347,26 @@ func (l *leg) invite() (*sip.Request, error) {
 	req.AppendHeader(&callID)
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: 1, MethodName: sip.INVITE})
 	maxFwd := sip.MaxForwardsHeader(70)
-	if c.inv != nil {
-		if mf := c.inv.MaxForwards(); mf != nil && mf.Val() > 1 {
-			maxFwd = sip.MaxForwardsHeader(mf.Val() - 1)
-		}
+	if c.inv == nil {
+		// A call a survivor took over (an IVR menu dialling out) has no INVITE.
+	} else if mf := c.inv.MaxForwards(); mf != nil && mf.Val() > 1 {
+		maxFwd = sip.MaxForwardsHeader(mf.Val() - 1)
 	}
 	req.AppendHeader(&maxFwd)
 	req.AppendHeader(sip.HeaderClone(&s.contact))
 	req.AppendHeader(sip.NewHeader("Allow", allow))
-	callerSDP := c.callerOffer()
-	if len(callerSDP) > 0 {
+	if body := c.offerSDP(); len(body) > 0 {
 		if c.inv != nil {
 			if ct := c.inv.ContentType(); ct != nil {
 				req.AppendHeader(sip.HeaderClone(ct))
 			}
-		} else {
-			req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 		}
-		req.SetBody(callerSDP)
+		req.SetBody(body)
 	}
 	// An anchored call terminates media: the fork's offer is the anchor's
 	// leg-b port, not the caller's SDP (spec S-2).
 	if l.c.isAnchored() {
-		if off, err := media.ParseAudioSDP(callerSDP); err == nil {
+		if off, err := media.ParseAudioSDP(c.offerSDP()); err == nil {
 			if body := l.c.anchoredOfferB(off); len(body) > 0 {
 				req.SetBody(body)
 				req.RemoveHeader("Content-Type")

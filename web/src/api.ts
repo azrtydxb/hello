@@ -60,6 +60,12 @@ export interface Extension {
   directoryHidden?: boolean;
   /** An intercom call (`*80` plus the number) auto-answers; true by default. */
   allowIntercom?: boolean;
+  /**
+   * Call waiting; true by default. Off: a call to the extension while it is in
+   * a call goes to forward-busy (else busy), and the phone's own call-waiting
+   * setting is switched off at the next resync.
+   */
+  callWaiting?: boolean;
   /** The extension's voicemail box, when it has one. */
   voicemailBoxId?: Id | null;
   createdAt: string;
@@ -656,6 +662,7 @@ export const updateExtension = (
     recordDefault?: boolean;
     directoryHidden?: boolean;
     allowIntercom?: boolean;
+    callWaiting?: boolean;
   },
 ) =>
   request<Extension>("PATCH", `/api/v1/extensions/${id(extensionId)}`, {
@@ -1266,7 +1273,10 @@ export interface FeatureCode {
 
 export const FEATURE_CODE_PATTERN = /^(\*[0-9#]{2,4}|##)$/;
 
-/** The actions a feature code can perform (migration 00004's action column). */
+/**
+ * The actions a feature code can perform (migration 00004's action column,
+ * widened by 00005 with announcement, 00013 with intercom and 00026 with call waiting).
+ */
 export const FEATURE_CODE_ACTIONS = [
   "forward_always",
   "forward_busy",
@@ -1276,11 +1286,32 @@ export const FEATURE_CODE_ACTIONS = [
   "voicemail",
   "blind_transfer",
   "attended_transfer",
+  "announcement",
+  "intercom",
   "ivr",
+  "call_waiting_on",
+  "call_waiting_off",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
 export type FeatureCodeAction = (typeof FEATURE_CODE_ACTIONS)[number];
+
+/** A human label for each feature-code action. */
+export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
+  forward_always: "Forward always",
+  forward_busy: "Forward when busy",
+  forward_no_answer: "Forward on no answer",
+  dnd_on: "Do not disturb on",
+  dnd_off: "Do not disturb off",
+  voicemail: "Voicemail",
+  blind_transfer: "Blind transfer",
+  attended_transfer: "Attended transfer",
+  announcement: "Play announcement",
+  intercom: "Intercom (auto-answer)",
+  ivr: "IVR menu",
+  call_waiting_on: "Call waiting on",
+  call_waiting_off: "Call waiting off",
+};
 
 /** GET /api/v1/feature-codes. */
 export const listFeatureCodes = (signal?: AbortSignal) =>
@@ -1365,6 +1396,16 @@ export interface Announcement {
   name: string;
   createdAt: string;
   updatedAt?: string;
+  /** The authored text-to-speech prompt; "" for an uploaded recording. */
+  sourceText?: string;
+  voiceId?: string;
+  modelId?: string;
+  /** When audio was last generated from the text; null/absent when never. */
+  generatedAt?: string | null;
+  /** Whether the stored audio was generated from text. */
+  generated?: boolean;
+  /** The text, voice or model changed since the audio was generated. */
+  textEdited?: boolean;
 }
 
 /** GET /api/v1/announcements. */

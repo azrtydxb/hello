@@ -27,6 +27,10 @@ type Extension struct {
 	// AllowIntercom lets an intercom call auto-answer on this extension
 	// (migration 00013); false rings it normally.
 	AllowIntercom bool `json:"allowIntercom"`
+	// CallWaiting rings a busy extension's devices (the phone shows call
+	// waiting); false answers the caller with the forward-busy target or
+	// 486 (migration 00026, spec S-18).
+	CallWaiting bool `json:"callWaiting"`
 	// DirectoryHidden keeps the extension out of the automatic extensions
 	// book (spec P-1).
 	DirectoryHidden bool      `json:"directoryHidden"`
@@ -35,12 +39,12 @@ type Extension struct {
 }
 
 const extensionCols = `id, number, name, external_number, dnd, forward_always, forward_busy, forward_no_answer,
-	voicemail_enabled, record_default, allow_intercom, directory_hidden, created_at, updated_at`
+	voicemail_enabled, record_default, allow_intercom, call_waiting, directory_hidden, created_at, updated_at`
 
 func scanExtension(r interface{ Scan(...any) error }) (Extension, error) {
 	var e Extension
 	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.ExternalNumber, &e.DND, &e.ForwardAlways, &e.ForwardBusy,
-		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.DirectoryHidden, &e.CreatedAt, &e.UpdatedAt)
+		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CallWaiting, &e.DirectoryHidden, &e.CreatedAt, &e.UpdatedAt)
 	return e, err
 }
 
@@ -73,6 +77,9 @@ func (s *Store) GetExtension(ctx context.Context, id int64) (Extension, error) {
 func (s *Store) CreateExtension(ctx context.Context, actor, number, name, externalNumber string, check Check) (Extension, error) {
 	var e Extension
 	err := s.configChange(ctx, actor, "create", "extension", check, func(tx *sql.Tx) (int64, error) {
+		if err := refuseIVRNumber(ctx, tx, "number", number); err != nil {
+			return 0, err
+		}
 		var err error
 		e, err = scanExtension(tx.QueryRowContext(ctx,
 			`INSERT INTO extensions (number, name, external_number) VALUES ($1, $2, $3) RETURNING `+extensionCols,
@@ -96,6 +103,7 @@ type ExtensionChange struct {
 	VoicemailEnabled             *bool
 	RecordDefault                *bool
 	AllowIntercom                *bool
+	CallWaiting                  *bool
 	DirectoryHidden              *bool
 }
 
@@ -112,15 +120,25 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 		if c.Number != nil && *c.Number != number && len(routes) != 0 {
 			return id, inUse("extension "+number, routes)
 		}
+		if c.Number != nil && *c.Number != number {
+			if err := refuseIfIVRPoints(ctx, tx, "extension "+number+", which cannot be renumbered while it is named by", number,
+				IVRExtension, IVRVoicemail); err != nil {
+				return id, err
+			}
+			if err := refuseIVRNumber(ctx, tx, "number", *c.Number); err != nil {
+				return id, err
+			}
+		}
 		e, err = scanExtension(tx.QueryRowContext(ctx, `
 			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name),
 			       external_number = COALESCE($4, external_number), dnd = COALESCE($5, dnd),
 			       forward_always = COALESCE($6, forward_always), forward_busy = COALESCE($7, forward_busy),
 			       forward_no_answer = COALESCE($8, forward_no_answer), voicemail_enabled = COALESCE($9, voicemail_enabled),
 			       record_default = COALESCE($10, record_default), allow_intercom = COALESCE($11, allow_intercom),
-			       directory_hidden = COALESCE($12, directory_hidden), updated_at = now()
+			       directory_hidden = COALESCE($12, directory_hidden), call_waiting = COALESCE($13, call_waiting),
+			       updated_at = now()
 			WHERE id = $1 RETURNING `+extensionCols, id, c.Number, c.Name, c.ExternalNumber,
-			c.DND, c.ForwardAlways, c.ForwardBusy, c.ForwardNoAnswer, c.VoicemailEnabled, c.RecordDefault, c.AllowIntercom, c.DirectoryHidden))
+			c.DND, c.ForwardAlways, c.ForwardBusy, c.ForwardNoAnswer, c.VoicemailEnabled, c.RecordDefault, c.AllowIntercom, c.DirectoryHidden, c.CallWaiting))
 		return id, err
 	})
 	return e, err
@@ -137,6 +155,9 @@ func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, che
 		}
 		if len(routes) > 0 {
 			return id, inUse("extension "+number, routes)
+		}
+		if err := refuseIfIVRPoints(ctx, tx, "extension "+number, number, IVRExtension, IVRVoicemail); err != nil {
+			return id, err
 		}
 		if err := boundPhone(ctx, tx, `d.extension_id = $1`, id); err != nil {
 			return id, err

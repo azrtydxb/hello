@@ -407,7 +407,6 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 		c.queueLog("queue answered", q.Name, "agent", ext, "wait", wait.String())
 		c.addTrace(fmt.Sprintf("Queue %s: answered by %s after %s", q.Name, ext, wait.Round(time.Second)))
 		c.ivrConnect(w, ext)
-		c.queueHomeAgent(w)
 		release() // the agent shows as busy now
 		return
 	}

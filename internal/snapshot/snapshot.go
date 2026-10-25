@@ -57,6 +57,11 @@ type Extension struct {
 	// AllowIntercom lets an intercom call auto-answer on the extension
 	// (migration 00013, spec P-13); false rings it normally.
 	AllowIntercom bool
+	// NoCallWaiting is true when the extension has call waiting off
+	// (migration 00026, spec S-18): a call to it while it is busy is not
+	// rung. The inverted sense keeps the zero value (and every extension
+	// built without the flag) on the default, call waiting on.
+	NoCallWaiting bool
 }
 
 // RingGroup is a ring or hunt group (contract 2). Strategy is one of
@@ -321,7 +326,7 @@ type Querier interface {
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
        d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name,
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
-       e.record_default, e.allow_intercom
+       e.record_default, e.allow_intercom, e.call_waiting
 FROM extensions e
 LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
 LEFT JOIN voicemail_boxes v ON v.extension_id = e.id
@@ -351,14 +356,16 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 			user, realm, ha1MD5, ha1SHA256 *string
 			e                              Extension
 			boxID                          *int64
+			callWaiting                    bool
 		)
 		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
-			&e.RecordDefault, &e.AllowIntercom); err != nil {
+			&e.RecordDefault, &e.AllowIntercom, &callWaiting); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}
 		e.Number, e.Name = d.Extension, d.ExtensionName
+		e.NoCallWaiting = !callWaiting
 		if boxID != nil {
 			e.VoicemailBoxID = *boxID
 		} else {

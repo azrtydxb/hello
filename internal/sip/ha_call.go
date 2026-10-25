@@ -317,19 +317,18 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 	caller, dest := c.callerNum, c.dialled
 	contact := contactURI(c.s)
 	c.mu.Unlock()
-	legs := hom.pair()
-	solo := legs[1] == nil
+	solo := hom.legs[1] == nil
 	// A voicemail call's media is its anchor session, not a relay.
 	voicemail := solo && phase == haPhaseVoicemail
 	if yielded || (relay == nil && !voicemail) || (solo && !haSoloPhase(phase)) {
 		return livestate.DialogState{}, false
 	}
-	off, ok := haOffer(legs[0], legs[1])
+	off, ok := haOffer(hom.legs[0], hom.legs[1])
 	if !ok {
 		return livestate.DialogState{}, false
 	}
 	st := livestate.DialogState{
-		CallID:      legs[0].callID,
+		CallID:      hom.legs[0].callID,
 		OwnerNode:   c.s.cfg.NodeID,
 		Correlation: c.id,
 		State:       c.haStateName(),
@@ -343,7 +342,7 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 	if relay != nil {
 		st.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
 	}
-	for i, l := range legs {
+	for i, l := range hom.legs {
 		if l == nil {
 			continue
 		}
@@ -536,7 +535,7 @@ func (c *call) haYield(taker string) {
 		legs = append(legs, w.callID)
 	}
 	if hom := c.homedCall; hom != nil {
-		for _, l := range hom.pair() {
+		for _, l := range hom.legs {
 			if l != nil {
 				legs = append(legs, l.callID)
 			}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -40,6 +41,7 @@ var (
 	strategies = []string{"ring-all", "sequential", "round-robin", "longest-idle", "weighted"}
 	fcActions  = []string{"forward_always", "forward_busy", "forward_no_answer", "dnd_on", "dnd_off",
 		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr",
+		"call_waiting_on", "call_waiting_off",
 		"queue_login", "queue_logout", "queue_pause", "queue_unpause"}
 )
 
@@ -236,6 +238,13 @@ func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, gree
 			if !isWAV(data) {
 				return fmt.Errorf("%s must be a PCM WAV file", name)
 			}
+			// Playback assumes 8 kHz 16-bit mono: other rates are resampled,
+			// other layouts refused with the reason.
+			norm, err := media.NormalizeWAV(data)
+			if err != nil {
+				return fmt.Errorf("%s: %s; upload a 16-bit mono PCM WAV file", name, strings.TrimPrefix(err.Error(), "media: "))
+			}
+			data = norm
 			if name == "greeting" {
 				*greeting = data
 			} else {
@@ -555,10 +564,9 @@ func (s *server) createRingGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, _ := b.toInput(defaultsRingGroup())
+	// The store checks that an IVR failure destination exists, inside the
+	// change's transaction (a menu deleted meanwhile cannot slip through).
 	f := validateRingGroup(&in)
-	if len(f) == 0 && in.FailureKind == "ivr" {
-		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
-	}
 	if len(f) == 0 && in.FailureKind == "queue" {
 		s.requireQueue(r.Context(), &f, "failureTarget", in.FailureTarget)
 	}
@@ -598,10 +606,9 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 		FailureKind: current.FailureKind, FailureTarget: current.FailureTarget, Members: current.Members,
 	}
 	in, _ := b.toInput(base)
+	// The store checks that an IVR failure destination exists, inside the
+	// change's transaction (a menu deleted meanwhile cannot slip through).
 	f := validateRingGroup(&in)
-	if len(f) == 0 && in.FailureKind == "ivr" {
-		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
-	}
 	if len(f) == 0 && in.FailureKind == "queue" {
 		s.requireQueue(r.Context(), &f, "failureTarget", in.FailureTarget)
 	}
@@ -664,9 +671,8 @@ func (s *server) putFeatureCodes(w http.ResponseWriter, r *http.Request) {
 			f.add(p+".code", "must be a distinct code")
 		}
 		seen[c.Code] = true
-		if c.Action == "ivr" {
-			s.requireIVRMenu(r.Context(), &f, p+".argument", c.Argument)
-		}
+		// An "ivr" argument must name a menu: the store checks it inside
+		// the change's transaction.
 		if c.Action == "queue_pause" && len(c.Argument) > 32 {
 			f.add(p+".argument", "the pause reason is at most 32 characters")
 		}

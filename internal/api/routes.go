@@ -70,6 +70,7 @@ func (s *server) routes() []route {
 
 		{"GET", "/api/v1/extensions/{id}/voicemail", auth.ScopeRead, auth.RoleViewer, false, s.getVoicemailBox},
 		{"PUT", "/api/v1/extensions/{id}/voicemail", auth.ScopeWrite, auth.RoleOperator, false, s.putVoicemailBox},
+		{"PUT", "/api/v1/extensions/{id}/voicemail/greeting", auth.ScopeWrite, auth.RoleOperator, false, s.putVoicemailGreeting},
 
 		{"GET", "/api/v1/voicemail/boxes", auth.ScopeRead, auth.RoleViewer, false, s.listVoicemailBoxes},
 		{"GET", "/api/v1/voicemail/messages", auth.ScopeRead, auth.RoleViewer, false, s.listVoicemailMessages},
@@ -86,6 +87,15 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/announcements/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.replaceAnnouncement},
 		{"DELETE", "/api/v1/announcements/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteAnnouncement},
 		{"GET", "/api/v1/announcements/{id}/audio", auth.ScopeRead, auth.RoleViewer, false, s.announcementAudio},
+		{"POST", "/api/v1/announcements/generate", auth.ScopeWrite, auth.RoleOperator, false, s.createGeneratedAnnouncement},
+		{"PATCH", "/api/v1/announcements/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.saveAnnouncementPrompt},
+		{"POST", "/api/v1/announcements/{id}/generate", auth.ScopeWrite, auth.RoleOperator, false, s.generateAnnouncement},
+
+		{"GET", "/api/v1/tts/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.ttsSettings},
+		{"PUT", "/api/v1/tts/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putTTSSettings},
+		{"DELETE", "/api/v1/tts/settings/key", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteTTSKey},
+		{"POST", "/api/v1/tts/settings/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testTTS},
+		{"GET", "/api/v1/tts/voices", auth.ScopeWrite, auth.RoleOperator, false, s.ttsVoices},
 
 		{"GET", "/api/v1/ring-groups", auth.ScopeRead, auth.RoleViewer, false, s.listRingGroups},
 		{"POST", "/api/v1/ring-groups", auth.ScopeWrite, auth.RoleOperator, false, s.createRingGroup},
@@ -145,6 +155,10 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/routes/inbound/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getInbound},
 		{"PATCH", "/api/v1/routes/inbound/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.updateInbound},
 		{"DELETE", "/api/v1/routes/inbound/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteInbound},
+
+		{"GET", "/api/v1/flow/catalogue", auth.ScopeRead, auth.RoleViewer, false, s.getFlowCatalogue},
+		{"GET", "/api/v1/flow/graph", auth.ScopeRead, auth.RoleViewer, false, s.getFlowGraph},
+		{"GET", "/api/v1/flow/revision", auth.ScopeRead, auth.RoleViewer, false, s.getFlowRevision},
 
 		{"POST", "/api/v1/routing/test", auth.ScopeWrite, auth.RoleOperator, false, s.routingTest},
 

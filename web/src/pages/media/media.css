@@ -226,3 +226,32 @@
   flex-direction: column;
   gap: var(--az-space-4);
 }
+
+.media-settings {
+  max-width: 560px;
+}
+
+.media-hint {
+  margin: 0;
+  color: var(--az-muted);
+  font-size: var(--az-text-sm);
+}
+
+.media-textarea {
+  font-family: var(--az-font-sans);
+  font-size: var(--az-text-sm);
+  line-height: 1.5;
+  min-height: 120px;
+  resize: vertical;
+}
+
+.media-prompt-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--az-space-2);
+}
+
+.media-audio {
+  width: 100%;
+}

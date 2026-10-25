@@ -245,9 +245,18 @@ lost), an announcement plays from the top and then hangs up as before. A
 caller in an IVR menu is recovered the same way (the relay carries the
 caller): the menu restarts from its greeting on the taker. Once the menu has
 connected the caller to a phone the call is an ordinary two-leg call and is
-taken over as one. A taker cannot ring a new destination for a menu it
-restarted (it has no INVITE to build the legs from): a key that dials out
-there is answered as a destination that did not answer, and the menu repeats.
+taken over as one. The taker can dial out from a restarted menu too. The caller's number and
+media offer come from the replicated dialog and the routing context from the
+snapshot, so it rings the option's extension, ring group or external number
+with new legs offered the taker's own relay, and the answering leg becomes the
+callee dialog of the taken-over call (the caller's BYE reaches it). The
+caller's display name and device name are not replicated; the caller's own
+phone is skipped by its replicated contact instead. What cannot be recovered
+is not treated as a no-answer: a paging destination (a page's member dialogs
+are not replicated, so a survivor could not hang them up) and a dial-out whose
+replicated state lacks the caller's offer send the call to the menu's
+invalid-choice exit instead (`TestIVRTakeoverDialsOut`,
+`TestIVRTakeoverUnrecoverableFallsBack`).
 
 Each claim is counted against the dead node in Valkey. Past the dialog TTL,
 exactly one survivor counts the dead node's calls that nobody claimed (its
