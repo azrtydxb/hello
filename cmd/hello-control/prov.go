@@ -109,6 +109,7 @@ func startProv(ctx context.Context, cfg config.Control, st *store.Store, objs *a
 	plog := log.With("component", "prov")
 	limiter := prov.NewLazyLimiter(vk.Client, prov.Limits{
 		IPPerMin: cfg.Prov.RateIPPerMin, DeniedPer10Min: cfg.Prov.RateDeniedPer10Min, PhonePerHour: cfg.Prov.RatePhonePerHour,
+		OnboardPerMin: prov.DefaultOnboardPerMin,
 	}, plog)
 	// The fetch audit writes off the request path; it runs (and flushes
 	// what is queued) until shutdown.
@@ -117,7 +118,7 @@ func startProv(ctx context.Context, cfg config.Control, st *store.Store, objs *a
 	handler := prov.NewHandler(st, limiter, objs, prov.Options{
 		PublicURL: cfg.Prov.PublicURL, TrustedProxies: cfg.Prov.TrustedProxies, BootCIDRs: cfg.Prov.BootCIDRs,
 		CACertFile: cfg.Prov.CACert, Resync: cfg.Prov.Resync, Audit: audit, Metrics: metrics, Log: plog,
-		BookCache: provbook.NewCache(vk.Client, plog),
+		BookCache: provbook.NewCache(vk.Client, plog), Onboarding: st,
 	})
 	srv := &http.Server{
 		Handler:           handler,
@@ -142,6 +143,7 @@ func startProv(ctx context.Context, cfg config.Control, st *store.Store, objs *a
 	go pruneFetches(ctx, st, vk, cfg.NodeID, cfg.Prov.AuditRetention, log)
 	go runRedirectWorker(ctx, st, vk, cfg.NodeID, deployment, metrics, log)
 	go publishPhoneStates(ctx, st, metrics, cfg.Prov.Resync, log)
+	go maintainOnboarding(ctx, st, metrics, log)
 	if cfg.Prov.AutoResync {
 		go autoSync(ctx, st, plog)
 	}
@@ -182,6 +184,43 @@ func setPhoneStates(ctx context.Context, c phoneCounter, m *prov.Metrics, resync
 	}
 	m.SetPhones(never, fetched, stale)
 	return nil
+}
+
+// onboardingEvery is how often the onboarding queue is counted and its
+// expired candidates removed.
+const onboardingEvery = time.Minute
+
+// onboardingQueue is the part of the store the onboarding upkeep uses.
+type onboardingQueue interface {
+	CountCandidates(ctx context.Context) (int, error)
+	PruneCandidates(ctx context.Context) (int64, error)
+}
+
+// maintainOnboarding keeps the hello_onboarding_candidates gauge current and
+// deletes candidates unseen for 30 days, on every replica: the count is a
+// read and the delete is idempotent, so no lease is needed.
+func maintainOnboarding(ctx context.Context, q onboardingQueue, m *prov.Metrics, log *slog.Logger) {
+	t := time.NewTicker(onboardingEvery)
+	defer t.Stop()
+	for {
+		if n, err := q.PruneCandidates(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("prune onboarding candidates", "error", err)
+		} else if n > 0 {
+			log.Info("pruned expired onboarding candidates", "count", n)
+		}
+		if n, err := q.CountCandidates(ctx); err != nil {
+			if ctx.Err() == nil {
+				log.Warn("count onboarding candidates", "error", err)
+			}
+		} else {
+			m.OnboardingCandidates.Set(float64(n))
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 // Lease is the one-replica lock of a background job.

@@ -49,6 +49,9 @@ type Options struct {
 	// RenderBudget bounds each config and boot-body render; 0 is the
 	// spec's 100 ms (S-8). Tests that are not about the deadline widen it.
 	RenderBudget time.Duration
+	// Onboarding records the MACs of unadopted phones that ask for their
+	// configuration (spec phone-onboarding); nil records none.
+	Onboarding Onboarding
 }
 
 type handler struct {
@@ -501,6 +504,11 @@ func (h *handler) serveBoot(ctx context.Context, w http.ResponseWriter, ev *even
 	ev.rec.MACClaimed = claimed
 	if claimed == "" {
 		ev.vendor = string(v)
+		// A common file carries no MAC, but some vendors put theirs in the
+		// User-Agent; the response is the same boot body either way.
+		if mac := uaMAC(ev.rec.UserAgent); mac != "" {
+			h.capture(ctx, ev, v, mac)
+		}
 		bb, ok := bootBodies[v]
 		if !ok {
 			h.empty(w, ev, http.StatusNotFound, ResultNotFound)
@@ -515,6 +523,13 @@ func (h *handler) serveBoot(ctx context.Context, w http.ResponseWriter, ev *even
 	}
 	rec, err := h.s.PhoneByMAC(ctx, claimed)
 	if errors.Is(err, ErrNotFound) {
+		if h.capture(ctx, ev, v, claimed) {
+			// A phone waiting to be adopted retries by design; it must not
+			// count towards blocking its source, which may host adopted
+			// phones too.
+			h.empty(w, ev, http.StatusNotFound, ResultNotAllowlisted)
+			return
+		}
 		h.deny(ctx, w, ev, ResultNotAllowlisted)
 		return
 	}
@@ -605,4 +620,41 @@ func (h *handler) bootBody(ctx context.Context, w http.ResponseWriter, ev *event
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	h.body(w, ev, res, ctype, out)
+}
+
+// captureTimeout bounds the candidate write, so a slow database delays the
+// 404 by at most this much.
+const captureTimeout = 2 * time.Second
+
+// capture records an unadopted phone's request as an onboarding candidate
+// (best effort: a failure is logged and never changes the response). It
+// reports whether the request was handled as an onboarding sighting: false
+// when onboarding is off, the MAC is not one a device can have, or the
+// source is over its write limit.
+func (h *handler) capture(ctx context.Context, ev *event, pathVendor Vendor, mac string) bool {
+	if h.opt.Onboarding == nil || !CandidateMAC(mac) {
+		return false
+	}
+	count := h.opt.Metrics.OnboardingCaptures
+	if !h.l.Onboard(ctx, ev.rec.IP) {
+		count.WithLabelValues("rate_limited").Inc()
+		return false
+	}
+	vendor, model, firmware := ParseUserAgent(ev.rec.UserAgent, pathVendor)
+	path := ev.rec.PathRedacted
+	if len(path) > 256 {
+		path = strings.ToValidUTF8(path[:256], "")
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), captureTimeout)
+	defer cancel()
+	out, err := h.opt.Onboarding.CaptureCandidate(cctx, Candidate{
+		MAC: mac, Vendor: vendor, Model: model, Firmware: firmware, IP: ev.rec.IP, Path: path, At: ev.rec.At,
+	})
+	if err != nil {
+		count.WithLabelValues("error").Inc()
+		h.opt.Log.Warn("provisioning: record onboarding candidate", "error", err)
+		return true
+	}
+	count.WithLabelValues(string(out)).Inc()
+	return true
 }

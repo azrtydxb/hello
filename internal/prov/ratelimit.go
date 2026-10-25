@@ -19,6 +19,7 @@ type Limits struct {
 	IPPerMin       int // requests per source IP per minute
 	DeniedPer10Min int // denied requests per source IP per 10 minutes, then a block
 	PhonePerHour   int // config files per phone per hour
+	OnboardPerMin  int // onboarding candidate writes per source IP per minute
 }
 
 // Rate-limit windows and the block that follows too many denials.
@@ -34,10 +35,11 @@ const (
 
 // Valkey keys (spec Data).
 const (
-	keyIP     = "hello:prov:rl:ip:"
-	keyDenied = "hello:prov:rl:denied:"
-	keyPhone  = "hello:prov:rl:phone:"
-	keyBlock  = "hello:prov:block:"
+	keyIP      = "hello:prov:rl:ip:"
+	keyDenied  = "hello:prov:rl:denied:"
+	keyPhone   = "hello:prov:rl:phone:"
+	keyOnboard = "hello:prov:rl:onboard:"
+	keyBlock   = "hello:prov:block:"
 )
 
 // Limiter enforces the limits cluster-wide in Valkey: sliding windows kept
@@ -171,6 +173,21 @@ func (l *Limiter) Phone(ctx context.Context, phoneID int64) bool {
 		return allowed
 	}
 	return l.mem.window("phone:"+k, l.lim.PhonePerHour, phoneWindow, time.Now())
+}
+
+// Onboard counts a candidate write from ip and reports whether it may be
+// made: false once ip has made OnboardPerMin writes in the last minute. It
+// is cluster-wide in Valkey and falls back to memory like the other limits.
+func (l *Limiter) Onboard(ctx context.Context, ip netip.Addr) bool {
+	if l.lim.OnboardPerMin <= 0 {
+		return true
+	}
+	k := ip.String()
+	if allowed, ok := l.exec(ctx, requestScript, []string{keyBlock + "onboard:" + k, keyOnboard + k},
+		[]string{strconv.Itoa(l.lim.OnboardPerMin), ms(ipWindow), l.member()}); ok {
+		return allowed
+	}
+	return l.mem.window("onboard:"+k, l.lim.OnboardPerMin, ipWindow, time.Now())
 }
 
 // memLimiter is the per-replica fallback with the same windows.
