@@ -4,7 +4,7 @@
   <mac>{{.Phone.MAC}}</mac>
   <config version="1">
     <P271>1</P271>
-    <P270>{{xml .Line.Label}}</P270>
+    <P270>{{xml .Line.AccountLabel}}</P270>
     <P47>{{xml .Server.Host}}:{{.Server.Port}}</P47>
     <P35>{{xml .Line.Username}}</P35>
     <P36>{{xml .Line.AuthName}}</P36>

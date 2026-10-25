@@ -386,6 +386,10 @@ export const TEMPLATE_VARIABLES: readonly { name: string; doc: string }[] = [
   { name: ".Line.Password", doc: "SIP secret (masked in previews)" },
   { name: ".Line.DisplayName", doc: "the extension's name" },
   { name: ".Line.Label", doc: "the extension number" },
+  {
+    name: ".Line.AccountLabel",
+    doc: 'Account name shown on the phone, e.g. "101 (Office)"',
+  },
   { name: ".Line.Domain", doc: "SIP domain" },
   { name: ".Line.VoicemailCode", doc: "message key feature code" },
   { name: ".Server.Host", doc: "registrar host" },
