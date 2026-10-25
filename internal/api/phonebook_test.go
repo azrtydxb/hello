@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -829,4 +830,110 @@ func TestPhonebookRBAC(t *testing.T) {
 	company := bookID(t, operator, "company")
 	operator.must(http.StatusCreated, "POST", books+"/"+company+"/entries", entryBody("Co", "7777"))
 	alice.must(http.StatusOK, "GET", books+"/"+book+"/export", nil)
+}
+
+// TestPhoneGroupMulticastAndPTT fails if a group's multicast channels or PTT
+// settings are not stored and returned in order, an address outside the
+// multicast range or inside 224.0.0.0/24, a port below 1024, a duplicate
+// listen address, an eleventh channel, a PTT default channel the phone does
+// not take or a PTT channel twice is accepted, if a paging group can name a
+// channel that sends only, uses G.722 or does not exist, or if a paging
+// group with a channel needs members; or if removing a channel leaves a
+// paging group pointing at it.
+func TestPhoneGroupMulticastAndPTT(t *testing.T) {
+	p := newProvEnv(t, ProvConfig{})
+	c := p.c
+	g := c.must(http.StatusCreated, "POST", "/api/v1/phone-groups", map[string]any{"name": "Warehouse"}).json(t)
+	path := "/api/v1/phone-groups/" + rowID(g)
+	if mc := g["multicast"].([]any); len(mc) != 0 {
+		t.Fatalf("new group multicast = %v", mc)
+	}
+	ch := func(label, addr string, port int, codec, role string, prio int) map[string]any {
+		return map[string]any{"label": label, "address": addr, "port": port, "codec": codec, "role": role, "priority": prio}
+	}
+	put := func(want int, channels ...map[string]any) response {
+		return c.must(want, "PUT", path+"/multicast", map[string]any{"channels": channels})
+	}
+
+	got := put(http.StatusOK, ch("Dock", "239.255.0.1", 5004, "PCMU", "both", 1), ch("Out", "239.255.0.2", 5006, "G722", "listen", 2)).json(t)
+	mc := got["multicast"].([]any)
+	if len(mc) != 2 || mc[0].(map[string]any)["label"] != "Dock" || mc[1].(map[string]any)["codec"] != "G722" {
+		t.Fatalf("multicast = %v", mc)
+	}
+	dock := rowID(mc[0].(map[string]any))
+	for name, bad := range map[string]map[string]any{
+		"unicast":  ch("a", "10.0.0.1", 5004, "PCMU", "both", 1),
+		"reserved": ch("a", "224.0.0.251", 5004, "PCMU", "both", 1),
+		"ipv6":     ch("a", "ff02::1", 5004, "PCMU", "both", 1),
+		"low port": ch("a", "239.1.1.1", 80, "PCMU", "both", 1),
+		"codec":    ch("a", "239.1.1.1", 5004, "OPUS", "both", 1),
+		"role":     ch("a", "239.1.1.1", 5004, "PCMU", "talk", 1),
+		"priority": ch("a", "239.1.1.1", 5004, "PCMU", "both", 26),
+		"no label": ch("", "239.1.1.1", 5004, "PCMU", "both", 1),
+	} {
+		if r := put(http.StatusBadRequest, bad); len(r.body) == 0 {
+			t.Errorf("%s: empty error body", name)
+		}
+	}
+	put(http.StatusBadRequest, ch("a", "239.1.1.1", 5004, "PCMU", "both", 1), ch("b", "239.1.1.1", 5004, "PCMA", "listen", 2))
+	var many []map[string]any
+	for i := range 11 {
+		many = append(many, ch(fmt.Sprintf("c%d", i), fmt.Sprintf("239.1.1.%d", i+1), 5004, "PCMU", "both", 1))
+	}
+	put(http.StatusBadRequest, many...)
+	c.must(http.StatusBadRequest, "PUT", path+"/multicast", map[string]any{})
+	c.must(http.StatusNotFound, "PUT", "/api/v1/phone-groups/999999/multicast", map[string]any{"channels": []any{}})
+
+	// PTT.
+	pttPath := path + "/ptt"
+	good := map[string]any{"enabled": true, "address": "224.0.1.116:5001", "codec": "PCMU", "defaultChannel": 1,
+		"channels": []map[string]any{{"channel": 1, "label": "All", "transmit": true, "subscribe": true}, {"channel": 24, "label": "Priority", "transmit": true, "subscribe": false}}}
+	pg := c.must(http.StatusOK, "PUT", pttPath, good).json(t)
+	ptt := pg["ptt"].(map[string]any)
+	if ptt["enabled"] != true || len(ptt["channels"].([]any)) != 2 || ptt["defaultChannel"] != float64(1) {
+		t.Fatalf("ptt = %v", ptt)
+	}
+	if len(pg["multicast"].([]any)) != 2 {
+		t.Fatalf("setting PTT dropped the multicast channels: %v", pg["multicast"])
+	}
+	for name, mutate := range map[string]func(m map[string]any){
+		"address": func(m map[string]any) { m["address"] = "10.0.0.1:5001" },
+		"default": func(m map[string]any) { m["defaultChannel"] = 5 },
+		"codec":   func(m map[string]any) { m["codec"] = "PCMA" },
+		"twice": func(m map[string]any) {
+			m["channels"] = []map[string]any{{"channel": 1, "label": "a", "transmit": true}, {"channel": 1, "label": "b", "transmit": true}}
+		},
+		"no transmit": func(m map[string]any) {
+			m["channels"] = []map[string]any{{"channel": 1, "label": "a", "transmit": false}}
+		},
+	} {
+		body := map[string]any{}
+		for k, v := range good {
+			body[k] = v
+		}
+		mutate(body)
+		if r := c.do("PUT", pttPath, body); r.code != http.StatusBadRequest {
+			t.Errorf("ptt %s: status %d, want 400", name, r.code)
+		}
+	}
+
+	// A paging group may page a listening G.711 channel, with no members.
+	grp := func(channel any, want int) response {
+		body := map[string]any{"name": "dock", "code": "*61", "members": []int{}, "multicastChannelId": channel}
+		return c.must(want, "POST", "/api/v1/paging-groups", body)
+	}
+	c.must(http.StatusBadRequest, "POST", "/api/v1/paging-groups", map[string]any{"name": "none", "code": "*62", "members": []int{}})
+	grp(999999, http.StatusBadRequest)
+	chans := mc
+	grp(json.Number(rowID(chans[1].(map[string]any))), http.StatusBadRequest) // G.722
+	made := grp(json.Number(dock), http.StatusCreated).json(t)
+	if made["multicastChannelId"] == nil || made["multicastChannel"].(map[string]any)["address"] != "239.255.0.1" {
+		t.Fatalf("paging group = %v", made)
+	}
+	// Dropping the channel unlinks the paging group (its channel set to null).
+	put(http.StatusOK, ch("Out", "239.255.0.2", 5006, "G722", "listen", 2))
+	after := c.must(http.StatusOK, "GET", "/api/v1/paging-groups/"+rowID(made), nil).json(t)
+	if after["multicastChannelId"] != nil {
+		t.Fatalf("paging group still points at the removed channel: %v", after)
+	}
 }

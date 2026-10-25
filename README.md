@@ -116,6 +116,8 @@ naming the key, if one is missing or malformed.
 | `HELLO_PAGE_MAX_SECONDS`                          | sip     | `120`; a server page ends after this many seconds                                                                             |
 | `HELLO_PAGE_CONCURRENT`                           | sip     | `5`; pages one node runs at once, beyond that the caller hears busy                                                           |
 | `HELLO_PAGE_FANOUT`                               | sip     | `200`; legs of one page, beyond that the caller hears busy                                                                    |
+| `HELLO_PAGE_MULTICAST_IFACE`                      | sip     | empty (the system route); the interface a paging group's multicast packets leave on, which must be on the phones' LAN         |
+| `HELLO_PAGE_MULTICAST_TTL`                        | sip     | `1`; routers a page's multicast packets may cross                                                                             |
 | `HELLO_SIP_AUTH_FAIL_LIMIT` / `_WINDOW`           | sip     | `10` failures per `5m` per source IP; set the limit on control too (Diagnostics shows which sources it blocks)                |
 | `HELLO_SIP_STATE_TIMEOUT`                         | sip     | `200ms`; Valkey calls while handling SIP                                                                                      |
 | `HELLO_SIP_TRUSTED_PROXIES`                       | sip     | unset (trust none); CIDRs of the SIP balancers (Kamailio) whose `Path` and client address are believed                        |
@@ -131,6 +133,8 @@ naming the key, if one is missing or malformed.
 | `HELLO_PROV_BOOT_CIDRS`                           | control | unset (any); sources allowed the DHCP trust-on-first-use hand-off                                                             |
 | `HELLO_PROV_TOKEN_GRACE` / `_RESYNC`              | control | `7d` / `24h`; old-token grace after a rotation; the phones' re-check interval                                                 |
 | `HELLO_PROV_BOOK_REFRESH`                         | control | `15m`; how often phones with a refresh setting re-fetch their address book (at least `1m`)                                    |
+| `HELLO_PROV_PUSH_RATE`                            | sip     | `20`; check-sync pushes (resync, reboot) claimed per minute across the cluster                                                |
+| `HELLO_PROV_AUTO_RESYNC`                          | control | `false`; push a resync to a phone 30 s after a change to what its configuration renders from                                  |
 | `HELLO_DIAL_INTL_PREFIX` / `_COUNTRY_CODE`        | control | `00` / unset; digits standing for `+`, and the country code a leading `0` belongs to (lookup keys)                            |
 | `HELLO_PROV_TIMEZONE` / `_NTP`                    | control | `UTC` / `pool.ntp.org`                                                                                                        |
 | `HELLO_PROV_AUDIT_RETENTION`                      | control | `90d`; how long the fetch audit is kept                                                                                       |

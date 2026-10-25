@@ -18,6 +18,11 @@
     <prov_polling_mode perm="R">rel</prov_polling_mode>
     <prov_polling_period perm="R">{{.Prov.ResyncSeconds}}</prov_polling_period>
     <ntp_server perm="R">{{xml .Time.NTP}}</ntp_server>
+{{- with .Time.TZ.SnomCode}}
+    <timezone perm="R">{{xml .}}</timezone>
+{{- end}}
+{{- /* Paging and intercom (phonebooks-ptt P-12, P-13): answer an Alert-Info info=alert-autoanswer call by itself only when the phone is idle (Snom Service Hub, answer_after_policy: off, idle, always, not_busy; D series). Unverified on hardware (verify). */}}
+    <answer_after_policy perm="R">idle</answer_after_policy>
 {{- with .Book}}
     <dkey_directory perm="R">url {{xml .URL}}</dkey_directory>
 {{- end}}

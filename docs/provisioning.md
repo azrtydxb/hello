@@ -209,6 +209,12 @@ same. The phone's own uploads (`<mac>-phone.cfg`, logs, and a `PUT` of
 `<mac>-directory.xml`) are accepted and discarded; a `GET` of
 `<mac>-directory.xml` is the phone's address book.
 
+`device.dhcp.bootSrvUseOpt` is `Static` in the boot file and the hand-off:
+the phone then ignores every DHCP option for the provisioning server and
+keeps `device.prov.serverName`. Poly's configuration examples (BootServer-
+Static.cfg) and FusionPBX write the values as the words `Default`, `Custom`
+and `Static`; the number `2` Hello used before is in no document.
+
 ### Grandstream
 
 GXP, GRP, GXV and WP. The phone tries `cfg<mac>`, `cfg<mac>.bin` (both
@@ -217,16 +223,35 @@ GXP, GRP, GXV and WP. The phone tries `cfg<mac>`, `cfg<mac>.bin` (both
 Firmware: Grandstream treats P192 as a firmware server _directory_ and
 appends the model's own file name (`wp810fw.bin` for the WP822,
 `wp8x6fw.bin` for the WP836), so the file sets P192 to
-`.Firmware.Dir`, `<prov URL>fw` with no trailing slash, and the phone
+`.Firmware.Dir` without its scheme (`host/p/<token>/fw`, no trailing
+slash; Grandstream's firmware upgrade guide says not to include a leading
+`http://`, and the HTTPS example is `x.x.x.x/xampp`), and the phone
 fetches `/p/<token>/fw/<file>`, which Hello serves from the pinned file of
 that name. Pin the firmware under the exact file name the phone asks for.
-P6767 (firmware upgrade via) follows the scheme of that URL, `2` for HTTPS
-and `1` for HTTP; P232 and P233 (file prefix and postfix) stay empty;
+P6767 (firmware upgrade via) carries the scheme instead: `2` for HTTPS and
+`1` for HTTP, taken from the URL (`UpgradeVia`; Grandstream's codes are
+0 TFTP, 1 HTTP, 2 HTTPS, 3 FTP, 4 FTPS); P232 and P233 (file prefix and postfix) stay empty;
 P238 is `0`, so the phone checks for firmware at every boot. These values
 come from the Grandstream WP8xx administration guides (Maintenance →
 Upgrade and Provisioning) and are unconfirmed on a phone, so verify them.
 The phone also asks for `ring<N>.bin` and `ring<N>.ogg` in that directory;
 Hello answers those with an empty `404` (`not_found`, no block counted).
+
+Config server: P237 (Config Server Path) is likewise `host/p/<token>`, no
+scheme and no trailing slash, and P212 (Config Upgrade Via) is `2` for the
+HTTPS device path (`1` if Hello is ever served over HTTP). The SIP device
+provisioning guide describes P237 as the config server's FQDN or IP, the
+phone appends `/cfg<mac>.xml`, and the firmware guide says server paths take
+no scheme; the protocol is only ever chosen by the via setting. The
+templates use the `noscheme` and `urlvia` functions for this. The previous
+form (a scheme and a trailing slash in P237) worked on phones in the field;
+if a model is found that needs the scheme, copy the template and put
+`{{xml .Prov.URL}}` back.
+
+Time zone: P64 and P246 (Self-Defined Time Zone) carry a POSIX TZ string
+(`CET-1CEST,M3.5.0,M10.5.0/3`); the guide's syntax is
+`std offset dst [offset],start[/time],end[/time]`. Whether a given model
+reads the string from P64 or only from P246 is unconfirmed (verify).
 
 ### Snom
 
@@ -252,21 +277,47 @@ No vendor document confirms these; the phone emulator models the documented
 or most likely behaviour and the settings stay as they are until a phone
 shows otherwise.
 
-- Poly `device.dhcp.bootSrvUseOpt="2"`: FusionPBX writes the values as the
-  words `Default`, `Custom` and `Static`; if the hand-off does not stop the
-  phone from taking the boot URL from DHCP, try `Static`.
 - Poly `device.prov.serverName` with a scheme and a trailing slash, and a
   full URL in the master's `APP_FILE_PATH`.
-- Grandstream `P237` with a scheme (Grandstream's firmware guide says the
-  firmware path takes no leading `http://`), the `P212`, `P6767` and `P330`
-  protocol codes, and the BLF key numbers.
+- Grandstream: `P237` without a scheme on every model (the guides say so,
+  and the protocol codes `P212`, `P6767` and `P330` are unconfirmed on a
+  phone), the BLF key numbers, and P64 against P246 for the zone string.
 - Snom `firmware` is the firmware's full URL from firmware 10.1.38; older
   firmware ignores it (`firmware_status`, an XML file naming the URL, is the
   way there). `admin_mode_password` is the keypad PIN, not the web password.
 - Fanvil `CACertURL`, the web password, the BLF keys and the phonebook keys.
-- The time zone: `HELLO_PROV_TIMEZONE` is an IANA name, which Yealink
-  (`local_time.time_zone_name` wants `Belgium(Brussels)`) and Grandstream
-  (`P246`) do not accept; set the zone on the phone or in a template copy.
+- Time zones on a phone: see [Time zones](#time-zones); the Fanvil keys
+  (`Time Zone`, `DST Type` and the rule fields) and the Poly daylight-saving
+  keys are unconfirmed on hardware.
+
+## Time zones
+
+`HELLO_PROV_TIMEZONE` is an IANA name (`Europe/Brussels`), which no vendor
+accepts. Hello derives each vendor's form from the IANA rules in the binary
+(`internal/prov/zones.go`, `ZoneInfo`, for the year of the render; the
+rules are read from the zone database, not copied from a table). A daylight
+rule is the nth weekday of a month at a wall-clock hour, which covers the
+zones in use; a zone whose offset changes any other way is sent as its
+standard offset with daylight saving off, and an unknown name sends no zone
+at all, leaving the phone's own.
+
+| Vendor      | Setting                                                                                                                                                                                                                 | Europe/Brussels                                        |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Yealink     | `local_time.time_zone`, `time_zone_name` (a label, sent when known), `summer_time` 0/1, `dst_time_type` 1, `start_time`, `end_time` (month/week/weekday/hour, week 5 = last, weekday 7 = Sunday), `offset_time` minutes | `+1`, `Belgium(Brussels)`, `3/5/7/2`, `10/5/7/3`, `60` |
+| Grandstream | `P64` and `P246`, a POSIX TZ string                                                                                                                                                                                     | `CET-1CEST,M3.5.0,M10.5.0/3`                           |
+| Poly        | `tcpIpApp.sntp.gmtOffset` seconds, `daylightSavings.*` (month, date, time, dayOfWeek 1 = Sunday, `lastInMonth`)                                                                                                         | `3600`, March, last Sunday, 2                          |
+| Fanvil      | `Time Zone` in quarter hours, `Time Zone Name`, `DST Type` and the rule fields (Sunday = 0)                                                                                                                             | `4`, `UTC+1`                                           |
+| Snom        | `timezone`, a country code and the offset, for the zones in `snomCodes` (the country sets the daylight rules)                                                                                                           | `BEL+1`                                                |
+
+Sources: Yealink administrator guide (Time and Date) and Nethesis
+Tancredi `yealink.tmpl` (`summer_time`, `dst_time_type`, `start_time` and
+`end_time` as `3/5/7/2`), Grandstream's Self-Defined Time Zone syntax in the
+GXP/GRP/WP administration guides, Poly UC Software Administrator Guide
+(`tcpIpApp.sntp`) with FusionPBX's polycom template, Tancredi
+`fanvil-X5.tmpl` and `snom.tmpl` (`BEL+1`, `USA-5`). Yealink labels outside
+the few in `yealinkNames` are not sent; the rules make the switch correct
+without them. Unconfirmed on a phone: Fanvil's DST keys, Snom zones outside
+the table, and Grandstream models that read only one of P64 and P246.
 
 ## Voicemail indicator (MWI)
 
@@ -311,6 +362,78 @@ key could not be found in any public document, so Hello does not guess one;
 Fanvil phones get MWI from the unsolicited `NOTIFY`. Neither vendor has been
 tested on hardware.
 
+## Remote resync and reboot (check-sync)
+
+A phone can be told to re-fetch its configuration, or to reboot, without
+touching it. Hello sends an out-of-dialog `NOTIFY` with `Event: check-sync`
+to every registered contact of the phone's device, through the same path as
+a call to it (the registration's `Path`, so the edge proxy reaches the
+phone's NAT flow). Hello never sends `Event: reset`; a factory reset stays
+on the phone, and the Grandstream template does not enable "Allow SIP Reset".
+
+| Vendor      | Resync                    | Reboot                   | Status                                            |
+| ----------- | ------------------------- | ------------------------ | ------------------------------------------------- |
+| Yealink     | `check-sync;reboot=false` | `check-sync;reboot=true` | verify on hardware                                |
+| Snom        | `check-sync;reboot=false` | `check-sync;reboot=true` | verify on hardware                                |
+| Poly        | `check-sync`              | `check-sync;reboot=true` | verify on hardware                                |
+| Grandstream | `check-sync`              | `check-sync;reboot=true` | WP8x6 documented; the reboot form is to verify    |
+| Fanvil      | `check-sync`              | `check-sync;reboot=true` | `resync` is the other documented event; to verify |
+| Generic     | `check-sync`              | `check-sync;reboot=true` |                                                   |
+
+Grandstream phones challenge the `NOTIFY` with digest when `P4428 = 1`
+(NOTIFY authentication), which the template writes; Hello answers the
+challenge with the device's stored digest hash, preferring SHA-256, only in
+the device's own realm (a challenge in any other realm is not answered and the
+push reports `auth_failed`). The template also writes `P95030 = 0`, so a plain
+check-sync re-provisions without a reboot (WP8x6, firmware 1.0.3.20 and
+later).
+
+**Console.** Phone page: Resync and Reboot (reboot asks for confirmation) and
+the last pushes with their result. Phones page: a resync and a reboot button
+per row, "Resync all" and "Reboot all", and the newest result per phone.
+Phone groups page: resync and reboot for every phone in a group. Operators
+and admins can push; viewers cannot.
+
+**API.** `POST /api/v1/phones/{id}/resync` and `.../reboot` (202, the queued
+push), `POST /api/v1/phone-groups/{id}/resync|reboot` and
+`POST /api/v1/phones/resync|reboot` (202, `{queued, skipped}`; phones with no
+device or disabled are skipped), `GET /api/v1/phones/{id}/pushes` and
+`GET /api/v1/phone-pushes` (the newest per phone). A phone with no enabled
+device answers `409`. Every request is audited (`resync` or `reboot` on the
+phone, the group, or `all`).
+
+**How it runs.** The request is a row in `phone_pushes`, and hello-control
+sends PostgreSQL `NOTIFY hello_checksync`. Any hello-sip node claims it (a
+row is claimed once), at most `HELLO_PROV_PUSH_RATE` claims per minute across
+the cluster (default 20), so a push to 500 phones takes 25 minutes at the
+default; raise the rate for big sites. A claim that stays "sending" for two
+minutes (its node died) is written off as `failed`.
+
+**Results.**
+
+| Result           | Meaning                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------- |
+| `pending`        | Queued, waiting for a node or for the rate                                                      |
+| `sending`        | Claimed; the NOTIFY is out                                                                      |
+| `ok`             | The phone answered 2xx. The phone's next fetch in the fetch log confirms it                     |
+| `not_registered` | No registration, or the phone answered `481` or `404`; the change waits for the periodic resync |
+| `timeout`        | No answer ("push not acknowledged"); the change lands at the periodic resync                    |
+| `auth_failed`    | The phone's challenge was in an unknown realm, or it rejected the credentials                   |
+| `failed`         | Any other answer or a send error                                                                |
+
+A phone registered from two contacts gets the NOTIFY on both, and the result
+is the best of them (`ok`, then `auth_failed`, `timeout`, `failed`,
+`not_registered`). Watch `hello_checksync_total{event,result}`.
+
+**Automatic resync.** With `HELLO_PROV_AUTO_RESYNC=true` (default off)
+hello-control fingerprints what each bound phone's configuration renders from
+(the account, server, BLF keys, address book assignment, firmware pin, time
+settings and the template that resolves for it) every 30 seconds. A change
+that is the same at two scans in a row queues a resync for that phone, so a
+burst of edits pushes once; pushes still go out at `HELLO_PROV_PUSH_RATE`. A
+phone seen for the first time is only recorded. Automatic pushes show as
+"(automatic)" and are audited as `auto_resync` by `system`.
+
 ## Redirect services
 
 A vendor redirect service sends a factory-new phone to Hello from anywhere
@@ -352,12 +475,14 @@ Templates see only these values:
 | `.BLF`      | a list of `Number`, `Label`, `URI`                                                                                                |
 | `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `ResyncSeconds`                                                                       |
 | `.Firmware` | `URL` (the file), `Dir` (its directory, no trailing slash), `Version`, `Via` (1 HTTP, 2 HTTPS), or nil when no firmware is pinned |
-| `.Time`     | `Zone`, `NTP`                                                                                                                     |
+| `.Time`     | `Zone`, `NTP`, `TZ` (the zone per vendor, see [Time zones](#time-zones))                                                          |
 
 Functions: `xml` (escape), `upper`, `lower`, `default`, `add`, `mul`, `div`,
 `urlhost` (`https://h:8/p/x/` gives `h:8`) and `urlpath` (the same gives
 `p/x/`, no leading slash), for a phone that takes the server and the path in
-separate settings. For example, a key/value phone:
+separate settings; `noscheme` (`https://h:8/p/x/` gives `h:8/p/x`) and
+`urlvia` (`2` for HTTPS, else `1`), for Grandstream's scheme-less server
+paths. For example, a key/value phone:
 
 ```text
 sip.server = {{.Server.Host}}:{{.Server.Port}}
@@ -392,7 +517,9 @@ phone of each vendor through the real handler: the DHCP boot path, the
 hand-off, the per-device files, the pinned firmware and the CA, with and
 without a pinned firmware, and asserts every URL the phone derives answers
 `200` with the right content. `TestPhoneEmulatorCatchesKnownBugs` proves it
-fails on the old Grandstream firmware setting and similar.
+fails on the old Grandstream firmware setting and similar, on a scheme in a
+Grandstream server path, an IANA time zone name, and a Poly boot server option
+that is not `Static`.
 
 When you add or change a built-in setting that carries a URL, path, server, file
 name or scheme code (a phonebook URL, a ringtone, a wallpaper, a language file,
@@ -639,29 +766,78 @@ answer by themselves on the speaker.
   Provisioned phones accept auto-answer requests from any source: the
   vendors offer no restriction to the server.
 - **Provisioning.** The built-in templates enable what each vendor
-  documents:
+  documents. Everything below is from the vendor's own documentation and is
+  **not yet verified on hardware** (the lab test marks each as "needs
+  hardware"):
 
-  | Vendor       | Key written                                                                                           | Status                                                                                                                    |
-  | ------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-  | Grandstream  | `P298 = 1`, Allow Auto Answer by Call-Info/Alert-Info (the plain account Auto Answer, P90, stays off) | the setting is in the WP8xx Administration Guide, the P-value is from GXP/GRP templates and is to be confirmed on a WP822 |
-  | Yealink      | `features.intercom.allow = 1`, `features.intercom.tone = 1`, `features.intercom.mute = 0`             | Administrator Guide, "Intercom"; Alert-Info value to be confirmed                                                         |
-  | Poly         | `voIpProt.SIP.alertInfo.1.value = "Auto Answer"`, class `ringAutoAnswer`                              | to be confirmed on a VVX                                                                                                  |
-  | Snom, Fanvil | none: enable auto answer by Call-Info/Alert-Info on the phone                                         | no documented provisioning key found                                                                                      |
+  | Vendor      | Key written                                                                                                                                                                                   | Source                                                                                                                                                                                                                  |
+  | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Grandstream | `P298 = 1` Allow Auto Answer by Call-Info/Alert-Info (the plain Auto Answer, P90, stays off); WP8x6 only: `P26072 = 1` warning beep before an auto answer, `P26071 = 0` do not mute on answer | Grandstream config templates `wp810_822_825_config_1.0.11.83` and `wp8x6_config_1.0.3.39` (config-template_09302026); WP8x6 Administration Guide, "Call Settings". Barge by header (`P26019`) stays at its default, off |
+  | Yealink     | `features.intercom.allow = 1`, `features.intercom.tone = 1`, `features.intercom.mute = 0`, `features.intercom.barge = 0`                                                                      | Yealink SIP IP Phones Administrator Guide, "Intercom"; the `Alert-Info: Ring Answer` value is still to be confirmed                                                                                                     |
+  | Poly        | `voIpProt.SIP.alertInfo.1.value = "Auto Answer"`, class `ringAutoAnswer`                                                                                                                      | Poly UC Software Administrator Guide, `voIpProt.SIP.alertInfo`                                                                                                                                                          |
+  | Snom        | `answer_after_policy = idle`: answer an intercom call by itself only on an idle phone; Hello sends `Alert-Info: <http://www.notused.com>;info=alert-autoanswer;delay=0`                       | Snom Service Hub, "Intercom - Paging feature" (the header form) and `answer_after_policy` (off, idle, always, not_busy; D series); the PBX must pass the header unaltered                                               |
+  | Fanvil      | none: enable Intercom/auto answer on the phone                                                                                                                                                | Fanvil's published guides give no provisioning key for it that could be confirmed; Hello sends `Call-Info: answer-after=0` and `Alert-Info: info=Auto Answer`, unverified                                               |
 
-  Grandstream publishes no WP8xx config template any more, and neither the
-  WP8xx guide nor its release notes give P-values for the speaker volume or
-  the warning beep (the beep before an auto answer is on by default). Set
-  them in a copied template if you need other values. The WP822 has a PTT
-  button instead of programmable keys: dial the page code on the handset.
+  The Grandstream speaker volume for pages has no P-value in these
+  templates (only the PTT emergency channel volume, `P22181`); the warning
+  beep is the setting above.
 
 - **Troubleshooting.** A phone that ignores the headers rings as an
   ordinary call and the CDR shows `no_answer` for it: check the key above on
   that phone. Hello decides the `Alert-Info` value from the phone's
   `User-Agent` at registration (`auto-answer` for Grandstream and unknown
   phones).
-- **Multicast.** This is Hello's server paging, through Hello, so it works
-  across subnets. The phones' own multicast paging (LAN only, no server)
-  is separate and not yet provisioned.
+
+### Multicast paging and push-to-talk (phone groups)
+
+A phone group can have **multicast paging channels** (`PUT
+/api/v1/phone-groups/{id}/multicast`, or the group's dialog under Phones,
+Groups): a label, an IPv4 multicast address and port, a codec (PCMU, PCMA or
+G.722), a role (listen, send or both) and a priority (1 to 25), at most ten,
+no listen address twice, and none in `224.0.0.0/24`. Every phone of the group
+is provisioned to listen on the channels that listen and to send to those
+that send. The audio is the phones' own: Hello is not in the media path, so
+it works only on a LAN where multicast is delivered (IGMP snooping and the
+router must pass it), it does not cross subnets, and multicast has no
+authentication, so anyone on the LAN can send to the group. For paging across
+subnets use a server paging group.
+
+| Vendor       | Keys written                                                                                                                                                                                | Source                                                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Grandstream  | `P22208 = 1` multicast paging, `P1568` codec (0 PCMU, 8 PCMA, 9 G.722; the first channel's), `P1569` onward address:port and label pairs in priority order, ten slots (unused ones cleared) | config templates `wp8x6_config_1.0.3.39`, `wp810_822_825_config_1.0.11.83`; WP8x6 Administration Guide, "Multicast Paging" |
+| Yealink      | `multicast.codec`, `multicast.receive_priority.enable = 1`, `multicast.listen_address.N.ip_address` and `.label`, `multicast.paging_address.N.ip_address`, `.label`, `.channel`             | Yealink Administrator Guide, "Multicast Paging"; unverified                                                                |
+| Poly         | `ptt.pageMode.enable`, `.address` and `.port` of the first listening channel, `.codec`, `ptt.pageMode.group.N.label` and `.subscribed`                                                      | Poly UC Software Administrator Guide, "Group Paging"; unverified                                                           |
+| Snom, Fanvil | none                                                                                                                                                                                        | no provisioning key found                                                                                                  |
+
+**Grandstream paging button.** The WP822 and the WP8x6 report "not configured
+on the phone" when you press the PTT/paging button until multicast paging has
+a listening address (the button sends to it). The WP8x6 side key also needs
+the PTT/Paging feature on: Hello writes `P22556 = 1` and the side key
+function `P82317 = 0` (PTT/Paging). A WP822 has no PTT channel settings in
+its template and gets the multicast keys only.
+
+**Push-to-talk (WP8x6 only)** (`PUT /api/v1/phone-groups/{id}/ptt`): when on,
+Hello writes `P22177 = 1`, the PTT/group paging address `P22183` (default
+`224.0.1.116:5001`, one address for every channel), the default channel
+`P22184` (1, 2, 24 or 25, and it must transmit), accept while busy `P22179`,
+the codec `P22180` (PCMU or G.722) and, for each channel 1 to 25 at
+`P82001 + 5 (n - 1)`, Available, Transmit, Subscribe, Join and Name (channels
+not defined are switched off). Pressing the button talks on the default
+channel, and every phone of the group that subscribes to it hears it.
+Source: the WP8x6 config template and Administration Guide, "PTT/Paging";
+unverified on a phone.
+
+- **Multicast from a paging group.** A paging group can name one listening
+  G.711 channel of a phone group (the paging group's "Also page a multicast
+  channel", `multicastChannelId`). Dialling its code then also sends the
+  caller's audio to the channel's address, converted to the channel's G.711
+  law, so the phones that listen on the channel hear the page with the codec
+  they are set to. A group with a channel may have no members: the caller is
+  connected at once (multicast has no answer to wait for) and hears no tone.
+  The packets leave `hello-sip` on the interface `HELLO_PAGE_MULTICAST_IFACE`
+  (default the system's route) with `HELLO_PAGE_MULTICAST_TTL` (1) hops, so
+  that node must be on the phones' LAN: in Kubernetes, host networking or a
+  secondary interface on that VLAN.
 
 ## Security model and its limits
 

@@ -84,6 +84,9 @@ func (s *Server) refuseIfNotReady(req *sip.Request, tx sip.ServerTransaction) bo
 	if st, _ := s.state(); st == cluster.Ready {
 		return false
 	}
+	if req.IsInvite() {
+		s.logInviteReject(req, "", sip.StatusServiceUnavailable, "node not ready")
+	}
 	s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable", sip.NewHeader("Retry-After", "5"))
 	return true
 }

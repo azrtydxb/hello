@@ -59,6 +59,11 @@ type Config struct {
 	PageAnswerTimeout time.Duration
 	PageFanout        int
 	PageConcurrent    int
+	// PageMulticastIface and PageMulticastTTL are the interface and TTL of
+	// the multicast a paging group with a channel sends (iface "" is the
+	// system's choice; TTL 1 when unset).
+	PageMulticastIface string
+	PageMulticastTTL   int
 	// PeerRefresh is how often this node announces itself and reloads the
 	// peer set (10s); NodeTTL is how long its announcement lives (30s).
 	PeerRefresh time.Duration
@@ -106,6 +111,10 @@ type Config struct {
 	HATakeoverEnabled bool
 	HATakeoverPoll    time.Duration
 	HATakeoverJitter  time.Duration
+
+	// PushRate is how many check-sync pushes the cluster claims per minute
+	// (HELLO_PROV_PUSH_RATE; zero means 20).
+	PushRate int
 }
 
 // Deps are the Server's collaborators.
@@ -133,6 +142,9 @@ type Deps struct {
 	// MailboxEvents carries mailbox changes made by the control plane so
 	// MWI NOTIFYs go out at once; nil leaves only the safety-net re-read.
 	MailboxEvents MailboxEvents
+	// Pushes is the check-sync push queue hello-control fills; nil
+	// disables pushes.
+	Pushes PushQueue
 	// Settings applies feature-code mutations (DND, forwarding) by queueing
 	// them to PostgreSQL and bumping the configuration revision; nil makes
 	// the mutating feature codes answer 503.
@@ -421,6 +433,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	if s.deps.MailboxEvents != nil {
 		s.bg.Go(func() { s.deps.MailboxEvents.Watch(rctx, s.mailboxChanged) })
 	}
+	if s.deps.Pushes != nil {
+		s.bg.Go(func() { s.pushLoop(rctx) })
+	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
 	}
@@ -460,7 +475,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 		stopTrunks()
 		<-trunksDone
 		_ = conn.Close()
-		<-errc
+		if serr := <-errc; serr != nil {
+			s.log.Debug("serve ended during shutdown", "err", serr)
+		}
 		err = nil
 	case err = <-errc:
 		_ = conn.Close()
@@ -732,6 +749,9 @@ func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why 
 	if rechallenge && n <= int64(s.cfg.AuthFailLimit) {
 		s.challenge(tx, req, false)
 		return
+	}
+	if req.IsInvite() {
+		s.logInviteReject(req, "", sip.StatusForbidden, why)
 	}
 	s.respond(tx, req, sip.StatusForbidden, "Forbidden")
 }

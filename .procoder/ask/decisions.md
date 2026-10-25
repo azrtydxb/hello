@@ -400,3 +400,22 @@ Each deploy restarts Kamailio and both SIP nodes, which drops active calls until
 - Deploy now, but only at a time the user confirms no calls are active
 
 Decision: accepted "Wait: deploy only after the hitless-upgrade fixes are merged".
+
+## 2026-10-25: ElevenLabs text-to-speech prompts
+
+The operator writes prompt text in the GUI and generates the audio once with ElevenLabs. It is stored and replayed with no live TTS during calls.
+
+Where the ElevenLabs API key lives:
+- SOPS secret, like the AI key (recommended)
+- Encrypted in the DB and set in the GUI
+- Both, with the GUI value winning
+
+Decision: accepted "Encrypted in the DB and set in the GUI". It is sealed with HELLO_SECRET_KEY.
+
+The IVR part, since Hello has no IVR yet:
+- Build an IVR/auto-attendant too (recommended)
+- Prompts only for now
+
+Decision: accepted "Build an IVR/auto-attendant too".
+
+Update (2026-10-25): the user asked to reach ElevenLabs through OpenRouter instead of directly, and will provide an OpenRouter key later. The key is still stored encrypted in the DB and set in the GUI.

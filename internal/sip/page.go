@@ -95,7 +95,9 @@ func (ps *pageState) results() []cdr.PageLeg {
 // ("Allow Auto Answer by Call-Info/Alert-Info"), is Call-Info answer-after=0
 // with Alert-Info auto-answer. The other vendors' Alert-Info values are the
 // ones their administrator guides name and are still to be confirmed on
-// hardware (spec: verify). The vendor is read from the User-Agent of the
+// hardware (spec: verify), except Snom's, which the Snom Service Hub
+// ("Intercom - Paging feature") gives in full:
+// Alert-Info: <http://www.notused.com>;info=alert-autoanswer;delay=0. The vendor is read from the User-Agent of the
 // contact's registration.
 func autoAnswerHeaders(domain, userAgent string) []sip.Header {
 	alert := "auto-answer"
@@ -106,7 +108,7 @@ func autoAnswerHeaders(domain, userAgent string) []sip.Header {
 	case strings.Contains(ua, "polycom"), strings.HasPrefix(ua, "poly"):
 		alert = "Auto Answer"
 	case strings.Contains(ua, "snom"):
-		alert = "info=alert-autoanswer"
+		alert = "<http://www.notused.com>;info=alert-autoanswer;delay=0"
 	case strings.Contains(ua, "fanvil"):
 		alert = "info=Auto Answer"
 	}
@@ -339,7 +341,7 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 		c.addTrace(fmt.Sprintf("Page member %s skipped: %s", sk.ext, sk.result))
 		s.m.PagingLegs.WithLabelValues(sk.result).Inc()
 	}
-	if len(targets) == 0 {
+	if len(targets) == 0 && g.Multicast == nil {
 		deny(sip.StatusBusyHere, "no reachable page member", "no_answer", ResultBusy)
 		return
 	}
@@ -371,10 +373,24 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 		return
 	}
 	ps.fan = fan
+	if mc := g.Multicast; mc != nil {
+		err := fan.EnableMulticast(udpAddr(mc.Address, mc.Port), mc.PT, s.cfg.PageMulticastIface, s.cfg.PageMulticastTTL)
+		if err != nil {
+			fan.Close()
+			ps.fan = nil
+			c.addTrace("Page multicast failed: " + err.Error())
+			c.respondA(sip.StatusServiceUnavailable, "Service Unavailable")
+			c.end(sip.StatusServiceUnavailable, cdr.SideSystem, "multicast paging is unavailable", ResultFailed)
+			return
+		}
+		c.addTrace(fmt.Sprintf("Page also sent to multicast %s:%d", mc.Address, mc.Port))
+	}
 	ps.events = make(chan pageEvent, len(targets)+1)
 	offer := media.BuildAudioSDPDir(ps.host, fan.MemberPort(), off.PayloadType, 0, 0, "sendonly")
 	c.addTrace(fmt.Sprintf("Paging group %s (%s): %d legs", g.Name, g.Priority, len(targets)))
-	c.pageEarlyMedia(ps)
+	if g.Multicast == nil {
+		c.pageEarlyMedia(ps)
+	}
 	c.mu.Lock()
 	for _, t := range targets {
 		pl := &pageLeg{ext: t.ext, offer: offer}
@@ -387,6 +403,13 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 	c.mu.Unlock()
 	for _, pl := range legs {
 		go pl.l.runPage()
+	}
+	if g.Multicast != nil {
+		// Multicast has no answer to wait for: the caller is connected at
+		// once and the member legs, if any, join as they answer.
+		defer close(c.setupDone)
+		c.pageAnswerCaller()
+		return
 	}
 	c.pageSetup(len(legs))
 }
@@ -822,7 +845,7 @@ func (c *call) pageMemberGone(l *leg) {
 	}
 	ps.mu.Unlock()
 	c.addTrace(fmt.Sprintf("Page member %s hung up", l.pl.ext))
-	if !pending {
+	if !pending && ps.group.Multicast == nil {
 		go c.endBoth("every page member hung up")
 	}
 }

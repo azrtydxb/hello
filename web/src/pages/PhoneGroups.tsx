@@ -7,11 +7,16 @@ import {
   listBooks,
   listGroups,
   setGroupBooks,
+  setGroupMulticast,
+  setGroupPtt,
   updateGroup,
   type Book,
   type Group,
+  type MulticastChannel,
+  type MulticastInput,
+  type Ptt,
 } from "../api/phonebook";
-import { listPhones, type Phone } from "../api/prov";
+import { listPhones, pushGroup, type Phone } from "../api/prov";
 import {
   Alert,
   Badge,
@@ -30,8 +35,15 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatMac, PhonesTabs } from "./phones/ui";
+import { bulkMessage, RebootDialog } from "./phones/push";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { Can } from "../role";
+import {
+  emptyPtt,
+  MulticastEditor,
+  PttEditor,
+  type PathErrors,
+} from "./phonebooks/GroupPaging";
 import "./phones/phones.css";
 import "./phonebooks/phonebooks.css";
 
@@ -47,11 +59,31 @@ type State =
 
 const sameId = (a: Id, b: Id) => String(a) === String(b);
 
+/** A group's channels as they are written back: without the id. */
+function channelInputs(
+  channels: MulticastChannel[] | undefined,
+): MulticastInput[] {
+  return (channels ?? []).map((c) => ({
+    label: c.label,
+    address: c.address,
+    port: c.port,
+    codec: c.codec,
+    role: c.role,
+    priority: c.priority,
+  }));
+}
+
+/** The API's field errors by path. */
+function pathErrors(err: unknown): PathErrors {
+  return Object.fromEntries(fieldErrors(err).map((f) => [f.path, f.message]));
+}
+
 /** Phone groups: which address books a set of phones is delivered. */
 export function PhoneGroups() {
   const [state, setState] = useState<State>({ status: "loading" });
   const [editing, setEditing] = useState<Group | "new" | null>(null);
   const [deleting, setDeleting] = useState<Group | null>(null);
+  const [rebooting, setRebooting] = useState<Group | null>(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -92,6 +124,16 @@ export function PhoneGroups() {
     replaceGroups((gs) => gs.filter((x) => !sameId(x.id, g.id)));
     setDeleting(null);
     toast.show(`Phone group ${g.name} deleted.`);
+  }
+
+  async function onResync(g: Group) {
+    try {
+      toast.show(
+        `${g.name}: ${bulkMessage("resync", await pushGroup(g.id, "resync"))}`,
+      );
+    } catch (err: unknown) {
+      toast.show(`Could not queue a resync: ${errorMessage(err)}`);
+    }
   }
 
   const bookName = (id: Id) =>
@@ -142,6 +184,24 @@ export function PhoneGroups() {
             size={15}
             onClick={() => setEditing(g)}
           />
+          <Can>
+            <IconButton
+              icon="refresh-cw"
+              label={`Resync every phone in ${g.name}`}
+              size={15}
+              disabled={g.phoneCount === 0}
+              onClick={() => void onResync(g)}
+            />
+          </Can>
+          <Can>
+            <IconButton
+              icon="power"
+              label={`Reboot every phone in ${g.name}`}
+              size={15}
+              disabled={g.phoneCount === 0}
+              onClick={() => setRebooting(g)}
+            />
+          </Can>
           <Can min="admin">
             <IconButton
               icon="trash-2"
@@ -220,6 +280,20 @@ export function PhoneGroups() {
           }}
         />
       )}
+      {rebooting && (
+        <RebootDialog
+          title={`Reboot every phone in ${rebooting.name}?`}
+          description="Each phone in the group restarts and drops any call it is in. Pushes go out at the configured push rate."
+          run={async () =>
+            `${rebooting.name}: ${bulkMessage("reboot", await pushGroup(rebooting.id, "reboot"))}`
+          }
+          onDone={(m) => {
+            setRebooting(null);
+            toast.show(m);
+          }}
+          onClose={() => setRebooting(null)}
+        />
+      )}
       {deleting && (
         <ConfirmDialog
           title={`Delete phone group ${deleting.name}?`}
@@ -265,6 +339,12 @@ function GroupModal({
   );
   const [bookIds, setBookIds] = useState<Id[]>(group?.bookIds ?? []);
   const [pick, setPick] = useState("");
+  const [channels, setChannels] = useState<MulticastInput[]>(
+    channelInputs(group?.multicast),
+  );
+  const [ptt, setPtt] = useState<Ptt>(group?.ptt ?? emptyPtt());
+  const [mcErrors, setMcErrors] = useState<PathErrors>({});
+  const [pttErrors, setPttErrors] = useState<PathErrors>({});
   const [errors, setErrors] = useState<ErrorMap>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -294,6 +374,8 @@ function GroupModal({
     e.preventDefault();
     setFormError(null);
     setErrors({});
+    setMcErrors({});
+    setPttErrors({});
     setBusy(true);
     const input = {
       name: name.trim(),
@@ -307,6 +389,33 @@ function GroupModal({
         : await createGroup(input);
       if (JSON.stringify(saved.bookIds) !== JSON.stringify(bookIds)) {
         saved = await setGroupBooks(saved.id, bookIds);
+      }
+      // The group exists now: a failure below leaves it saved, so the modal
+      // stays open on the fields that were refused.
+      const before = channelInputs(saved.multicast);
+      if (JSON.stringify(before) !== JSON.stringify(channels)) {
+        try {
+          saved = await setGroupMulticast(saved.id, channels);
+        } catch (err) {
+          setMcErrors(pathErrors(err));
+          setFormError(
+            `The group was saved, but its multicast channels were not: ${errorMessage(err)}`,
+          );
+          setBusy(false);
+          return;
+        }
+      }
+      if (JSON.stringify(saved.ptt ?? emptyPtt()) !== JSON.stringify(ptt)) {
+        try {
+          saved = await setGroupPtt(saved.id, ptt);
+        } catch (err) {
+          setPttErrors(pathErrors(err));
+          setFormError(
+            `The group was saved, but its push-to-talk settings were not: ${errorMessage(err)}`,
+          );
+          setBusy(false);
+          return;
+        }
       }
       onSaved(saved, group === null);
     } catch (err) {
@@ -461,6 +570,13 @@ function GroupModal({
             extensions book, the company book, then these, in this order.
           </p>
         </fieldset>
+
+        <MulticastEditor
+          channels={channels}
+          errors={mcErrors}
+          onChange={setChannels}
+        />
+        <PttEditor ptt={ptt} errors={pttErrors} onChange={setPtt} />
 
         {group && (
           <div className="prov-stack">

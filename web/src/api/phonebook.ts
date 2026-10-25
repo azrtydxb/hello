@@ -51,9 +51,50 @@ export interface Group {
   includeCompany: boolean;
   /** The named books assigned to the group, in delivery order. */
   bookIds: Id[];
+  /** Multicast paging channels the group's phones listen on and send to. */
+  multicast?: MulticastChannel[];
+  /** Push-to-talk settings (Grandstream WP8x6 phones only). */
+  ptt?: Ptt;
   phoneCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export type MulticastCodec = "PCMU" | "PCMA" | "G722";
+export type MulticastRole = "listen" | "send" | "both";
+
+/** A multicast paging channel as written; the list replaces the group's. */
+export interface MulticastInput {
+  label: string;
+  /** IPv4 multicast address outside 224.0.0.0/24. */
+  address: string;
+  port: number;
+  codec: MulticastCodec;
+  role: MulticastRole;
+  /** 1 (highest) to 25. */
+  priority: number;
+}
+
+export interface MulticastChannel extends MulticastInput {
+  id: Id;
+}
+
+export interface PttChannel {
+  channel: number;
+  label: string;
+  transmit: boolean;
+  subscribe: boolean;
+}
+
+/** Push-to-talk of a phone group: one multicast address, channels 1 to 25. */
+export interface Ptt {
+  enabled: boolean;
+  /** host:port, default 224.0.1.116:5001. */
+  address: string;
+  codec: "PCMU" | "G722";
+  defaultChannel: number;
+  acceptWhileBusy: boolean;
+  channels: PttChannel[];
 }
 
 export interface GroupInput {
@@ -275,6 +316,18 @@ export const deleteGroup = (groupId: Id) =>
 export const setGroupBooks = (groupId: Id, bookIds: Id[]) =>
   request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/books`, {
     body: { bookIds },
+  });
+
+/** PUT /api/v1/phone-groups/{id}/multicast: replaces the group's multicast paging channels. */
+export const setGroupMulticast = (groupId: Id, channels: MulticastInput[]) =>
+  request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/multicast`, {
+    body: { channels },
+  });
+
+/** PUT /api/v1/phone-groups/{id}/ptt: replaces the group's push-to-talk settings. */
+export const setGroupPtt = (groupId: Id, ptt: Ptt) =>
+  request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/ptt`, {
+    body: ptt,
   });
 
 // --- display -------------------------------------------------------------------------

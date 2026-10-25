@@ -222,6 +222,10 @@ type Prov struct {
 	// BootCIDRs (HELLO_PROV_BOOT_CIDRS) limits the trust-on-first-use
 	// hand-off to these sources; empty allows any.
 	BootCIDRs []netip.Prefix
+	// AutoResync (HELLO_PROV_AUTO_RESYNC, default false) makes
+	// hello-control push a check-sync to a phone, debounced 30s, after a
+	// change to what its configuration renders from.
+	AutoResync bool
 	// Redirect holds vendor redirect credentials set by the deployment.
 	Redirect ProvRedirect
 }
@@ -264,6 +268,9 @@ type SIP struct {
 	AuthFailLimit      int
 	AuthFailWindow     time.Duration
 	StateTimeout       time.Duration
+	// PushRate (HELLO_PROV_PUSH_RATE, default 20) is how many check-sync
+	// pushes the cluster sends per minute.
+	PushRate int
 	// SecretKey (HELLO_SECRET_KEY) opens trunk passwords sealed by
 	// hello-control.
 	SecretKey      string
@@ -292,6 +299,13 @@ type SIP struct {
 	PageMaxDuration time.Duration
 	PageConcurrent  int
 	PageFanout      int
+	// A paging group with a multicast channel also sends the page there:
+	// PageMulticastIface (HELLO_PAGE_MULTICAST_IFACE, default the system's
+	// choice) is the network interface the packets leave on, which must be on
+	// the phones' LAN, and PageMulticastTTL (HELLO_PAGE_MULTICAST_TTL, 1)
+	// how many routers they may cross.
+	PageMulticastIface string
+	PageMulticastTTL   int
 	// RTPPortMin and RTPPortMax (HELLO_RTP_PORT_MIN/MAX, default
 	// 20000-21000) are the UDP port range anchored media sessions draw
 	// their relay sockets from.
@@ -552,6 +566,7 @@ func (r *reader) prov() Prov {
 		TLSCert:            r.getenv("HELLO_PROV_TLS_CERT"),
 		TLSKey:             r.getenv("HELLO_PROV_TLS_KEY"),
 		BootCIDRs:          r.prefixes("HELLO_PROV_BOOT_CIDRS"),
+		AutoResync:         r.boolean("HELLO_PROV_AUTO_RESYNC"),
 	}
 	minExp := r.duration("HELLO_SIP_REGISTER_MIN_EXPIRES", 60*time.Second)
 	p.RegisterExpiry = r.duration("HELLO_SIP_REGISTER_MAX_EXPIRES", time.Hour)
@@ -705,10 +720,13 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		AuthFailWindow:     r.duration("HELLO_SIP_AUTH_FAIL_WINDOW", 5*time.Minute),
 		StateTimeout:       r.duration("HELLO_SIP_STATE_TIMEOUT", 200*time.Millisecond),
 		MaxCallDuration:    r.duration("HELLO_SIP_MAX_CALL_DURATION", 4*time.Hour),
+		PushRate:           r.positiveInt("HELLO_PROV_PUSH_RATE", 20),
 	}
 	c.PageMaxDuration = time.Duration(r.positiveInt("HELLO_PAGE_MAX_SECONDS", 120)) * time.Second
 	c.PageConcurrent = r.positiveInt("HELLO_PAGE_CONCURRENT", 5)
 	c.PageFanout = r.positiveInt("HELLO_PAGE_FANOUT", 200)
+	c.PageMulticastIface = r.getenv("HELLO_PAGE_MULTICAST_IFACE")
+	c.PageMulticastTTL = r.positiveInt("HELLO_PAGE_MULTICAST_TTL", 1)
 	c.RTPPortMin = r.port("HELLO_RTP_PORT_MIN", 20000)
 	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
 	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"

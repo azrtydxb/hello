@@ -64,6 +64,8 @@ type fakePhone struct {
 	handoffIP                  netip.Addr
 	admin, secret, user, label string
 	books                      []phonebook.Book // the phone's delivered set
+	multicast                  *MulticastInfo   // the phone group's multicast paging
+	ptt                        *PTTInfo         // its PTT, for a phone that supports it
 	bookVersion                int              // bumped by a test to stand for a book change
 	personalBook               bool             // the set holds a personal book
 }
@@ -241,13 +243,14 @@ func (s *fakeStore) RenderInputs(_ context.Context, id int64) (RenderData, Templ
 		Server: Server{Host: "192.168.10.101", Port: 30508, Transport: "udp", Expiry: 3600},
 		BLF:    p.blf,
 		Prov:   ProvInfo{URL: DeviceURL(s.public, p.plain), CAURL: CAURL(s.public), ResyncSeconds: ResyncSeconds(p.mac, 24*time.Hour)},
-		Time:   TimeInfo{Zone: "Europe/Brussels", NTP: "pool.ntp.org"},
+		Time:   NewTimeInfo("Europe/Brussels", "pool.ntp.org", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)),
 	}
 	names := make([]string, len(p.books))
 	for i, b := range p.books {
 		names[i] = b.Name
 	}
 	d.Book = NewBookInfo(DeviceURL(s.public, p.plain), names, DefaultBookRefresh)
+	d.Multicast, d.PTT = p.multicast, p.ptt
 	if p.pinned != nil {
 		d.Firmware = &FirmwareInfo{URL: FirmwareURL(s.public, p.plain, p.pinned.Filename), Dir: strings.TrimSuffix(DeviceURL(s.public, p.plain), "/") + "/fw", Via: UpgradeVia(s.public.Scheme + "://"), Version: p.pinned.Version}
 	}

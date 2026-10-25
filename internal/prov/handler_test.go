@@ -394,6 +394,9 @@ func TestBootTrustOnFirstUse(t *testing.T) {
 		w = e.do(req{path: "/p/boot/" + vd.claim, proto: "http"})
 		body := w.Body.String()
 		own := "https://prov.hello.test/p/" + tok + "/"
+		if vd.v == Grandstream { // P237 is host/path, the scheme is the P212 code
+			own = "prov.hello.test/p/" + tok + "</P237>"
+		}
 		if vd.v == Fanvil { // Flash Server IP is the host alone, Flash File Name the path
 			own = "p/" + tok + "/$mac.cfg"
 		}

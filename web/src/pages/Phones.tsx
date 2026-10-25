@@ -15,8 +15,11 @@ import {
   deletePhone,
   importErrorText,
   importPhones,
+  listLatestPushes,
   listPhones,
   listTemplates,
+  pushAllPhones,
+  pushPhone,
   rearmPhone,
   rotatePhoneToken,
   updatePhone,
@@ -50,6 +53,7 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { usePolling } from "../usePolling";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import {
   CopyField,
@@ -59,6 +63,12 @@ import {
   RedirectBadge,
   vendorModel,
 } from "./phones/ui";
+import {
+  bulkMessage,
+  PushBadge,
+  RebootDialog,
+  useLatestByPhone,
+} from "./phones/push";
 import "./phones/inventory.css";
 import { Can } from "../role";
 
@@ -100,7 +110,10 @@ export interface IssuedUrl {
 }
 
 /** An action on one phone waiting for confirmation. */
-type Pending = { kind: "rotate" | "rearm" | "delete"; phone: Phone } | null;
+type Pending =
+  | { kind: "rotate" | "rearm" | "delete" | "reboot"; phone: Phone }
+  | { kind: "reboot-all" }
+  | null;
 
 /** Drop the one-time URL from a create/rotate/re-arm response before keeping the phone. */
 export function withoutUrl(issued: IssuedPhone): Phone {
@@ -203,6 +216,30 @@ export function Phones() {
   // Component state only: gone when the dialog closes or the page unmounts.
   const [issued, setIssued] = useState<IssuedUrl | null>(null);
   const toast = useToast();
+  // The newest resync or reboot of each phone, refreshed while any is open.
+  const pushes = usePolling(listLatestPushes, 5000);
+  const latest = useLatestByPhone(
+    pushes.status === "loading" ? undefined : pushes.data,
+  );
+
+  async function onResync(p: Phone) {
+    try {
+      await pushPhone(p.id, "resync");
+      pushes.reload();
+      toast.show(`Resync queued for ${phoneName(p)}.`);
+    } catch (err) {
+      toast.show(`Could not queue a resync: ${errorMessage(err)}`);
+    }
+  }
+
+  async function onResyncAll() {
+    try {
+      toast.show(bulkMessage("resync", await pushAllPhones("resync")));
+      pushes.reload();
+    } catch (err) {
+      toast.show(`Could not queue a resync: ${errorMessage(err)}`);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -306,6 +343,18 @@ export function Phones() {
     },
     { key: "flags", label: "Flags", render: (p) => <PhoneFlags phone={p} /> },
     {
+      key: "push",
+      label: "Resync / reboot",
+      render: (p) => {
+        const push = latest.get(String(p.id));
+        return push ? (
+          <PushBadge push={push} />
+        ) : (
+          <span className="prov-muted">—</span>
+        );
+      },
+    },
+    {
       key: "enabled",
       label: "Enabled",
       render: (p) =>
@@ -327,6 +376,24 @@ export function Phones() {
             size={15}
             onClick={() => setEditing(p)}
           />
+          <Can>
+            <IconButton
+              icon="refresh-cw"
+              label={`Resync ${formatMac(p.mac)}`}
+              size={15}
+              disabled={p.deviceId === null || !p.enabled}
+              onClick={() => void onResync(p)}
+            />
+          </Can>
+          <Can>
+            <IconButton
+              icon="power"
+              label={`Reboot ${formatMac(p.mac)}`}
+              size={15}
+              disabled={p.deviceId === null || !p.enabled}
+              onClick={() => setPending({ kind: "reboot", phone: p })}
+            />
+          </Can>
           <Can min="admin">
             <IconButton
               icon="key-round"
@@ -364,6 +431,26 @@ export function Phones() {
         description="Phones that fetch their configuration from Hello. Provisioning URLs are shown once."
         actions={
           <>
+            <Can>
+              <Button
+                variant="secondary"
+                icon="refresh-cw"
+                disabled={!ready}
+                onClick={() => void onResyncAll()}
+              >
+                Resync all
+              </Button>
+            </Can>
+            <Can>
+              <Button
+                variant="secondary"
+                icon="power"
+                disabled={!ready}
+                onClick={() => setPending({ kind: "reboot-all" })}
+              >
+                Reboot all
+              </Button>
+            </Can>
             <Can>
               <Button
                 variant="secondary"
@@ -472,6 +559,35 @@ export function Phones() {
             setPending(null);
             setIssued(issuedView("rearm", p));
           }}
+        />
+      )}
+      {pending?.kind === "reboot" && (
+        <RebootDialog
+          title={`Reboot ${phoneName(pending.phone)}?`}
+          description="The phone restarts and drops any call it is in. It fetches its configuration again when it is back."
+          run={async () => {
+            await pushPhone(pending.phone.id, "reboot");
+            return `Reboot queued for ${phoneName(pending.phone)}.`;
+          }}
+          onDone={(m) => {
+            setPending(null);
+            pushes.reload();
+            toast.show(m);
+          }}
+          onClose={() => setPending(null)}
+        />
+      )}
+      {pending?.kind === "reboot-all" && (
+        <RebootDialog
+          title="Reboot every phone?"
+          description="Every bound phone restarts and drops any call it is in. Pushes go out at the configured push rate."
+          run={async () => bulkMessage("reboot", await pushAllPhones("reboot"))}
+          onDone={(m) => {
+            setPending(null);
+            pushes.reload();
+            toast.show(m);
+          }}
+          onClose={() => setPending(null)}
         />
       )}
       {pending?.kind === "delete" && (

@@ -390,7 +390,10 @@ func startPBX(t *testing.T, devices []snapshot.Device, opts ...pbxOpt) *testPBX 
 	t.Cleanup(func() {
 		cancel()
 		select {
-		case <-done:
+		case serr := <-done:
+			if serr != nil {
+				t.Logf("Serve returned at teardown: %v", serr)
+			}
 		case <-time.After(10 * time.Second):
 			t.Error("Serve did not return")
 		}
@@ -498,9 +501,16 @@ type phone struct {
 	// reinviteOwnSDP answers re-INVITEs with the phone's own SDP (its media
 	// address) instead of echoing the offer, as a real phone does.
 	reinviteOwnSDP bool
-	byeAt          time.Time
-	servers        map[string]*sipgo.DialogServerSession
-	clients        map[string]*sipgo.DialogClientSession
+	// notifyPass, when set, makes the phone challenge an out-of-dialog
+	// NOTIFY with digest and accept only that password (check-sync with
+	// P4428 on); notifyStatus answers every NOTIFY with that status
+	// instead, or with no answer at all when negative.
+	notifyPass   string
+	notifyRealm  string
+	notifyStatus int
+	byeAt        time.Time
+	servers      map[string]*sipgo.DialogServerSession
+	clients      map[string]*sipgo.DialogClientSession
 	// pending holds a dialing INVITE's Call-ID until its answer is
 	// confirmed (closed then), so onBye never reads a session WaitAnswer
 	// is still writing.
@@ -597,10 +607,7 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 		push(p.subscribes, req)
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 	})
-	srv.OnNotify(func(req *sip.Request, tx sip.ServerTransaction) {
-		push(p.notifies, req)
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
-	})
+	srv.OnNotify(p.onNotify)
 	go func() { _ = srv.ServeUDP(conn) }()
 	t.Cleanup(func() {
 		_ = conn.Close()

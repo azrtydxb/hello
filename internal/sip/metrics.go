@@ -57,6 +57,8 @@ type Metrics struct {
 	// MWINotify counts message-summary NOTIFYs by kind and result (S-1).
 	MWINotify  *prometheus.CounterVec // kind, result
 	HoldActive prometheus.Gauge
+	// CheckSync counts check-sync NOTIFYs by event and result (S-5).
+	CheckSync *prometheus.CounterVec // event, result
 
 	// Phase E (spec P-12, P-13): server pages and intercom calls.
 	PagingTotal   *prometheus.CounterVec // result
@@ -180,6 +182,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.MWINotify = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_mwi_notify_total", Help: "Message-summary NOTIFYs by kind (initial, refresh, change, terminate, unsolicited) and result.",
 	}, []string{"kind", "result"})
+	m.CheckSync = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_checksync_total", Help: "Check-sync pushes by event and result (ok, not_registered, timeout, auth_failed, failed).",
+	}, []string{"event", "result"})
 	m.HoldActive = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_hold_active", Help: "Calls currently held on this node (either leg sendonly).",
 	})
@@ -204,7 +209,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Forwarded, m.GroupCalls,
-		m.PresenceSubscriptions, m.MWINotify, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	return m
 }
