@@ -387,7 +387,7 @@ type carrier struct {
 	ua    *sipgo.UserAgent
 	srv   *sipgo.Server
 	dua   *sipgo.DialogUA
-	sdp   string
+	sdp   string // guarded by mu
 
 	grant       atomic.Int64 // registration expiry granted, seconds
 	inviteCode  atomic.Int64 // 200 answer, 0 ring forever, -1 stay silent, else that code
@@ -557,10 +557,11 @@ func (cr *carrier) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	cr.mu.Lock()
 	cr.dialogs[req.CallID().Value()] = dss
+	answer := []byte(cr.sdp)
 	cr.mu.Unlock()
 	switch code {
 	case 200:
-		_ = dss.RespondSDP([]byte(cr.sdp))
+		_ = dss.RespondSDP(answer)
 	case 0:
 		_ = dss.Respond(180, "Ringing", nil)
 		<-dss.Context().Done()
