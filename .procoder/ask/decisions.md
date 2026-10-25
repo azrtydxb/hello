@@ -390,3 +390,13 @@ Decision: accepted by the user (2026-10-25), all of the above.
 ## Phase E ahead of B-D (2026-10-25)
 
 Decision: User approved moving phase E (server paging/intercom) ahead of B–D.
+
+## 2026-10-25: When to deploy the merged dashboard and phonebook A changes
+
+Each deploy restarts Kamailio and both SIP nodes, which drops active calls until the hitless-upgrade fixes land.
+
+- Wait: deploy only after the hitless-upgrade fixes (Kamailio pin, one-at-a-time SIP rollout) are merged (recommended)
+- Deploy now: the dashboard fixes and phonebook A go live now, and active calls may drop
+- Deploy now, but only at a time the user confirms no calls are active
+
+Decision: accepted "Wait: deploy only after the hitless-upgrade fixes are merged".
