@@ -158,9 +158,9 @@ type Snapshot struct {
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
 	anns   map[string]string
-	// ivrByName and ivrByNumber are the IVR menus (migration 00030).
+	// ivrByName and ivrByNumber are the IVR menus (migration 00031).
 	ivrByName, ivrByNumber map[string]IVRMenu
-	// queueByName and queueByNumber are the call queues (migration 00023).
+	// queueByName and queueByNumber are the call queues (migration 00032).
 	queueByName, queueByNumber map[string]Queue
 	// mohs maps a music on hold class ID to its playlist; mohDefault is the
 	// global default class (0 when none is set).

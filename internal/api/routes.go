@@ -48,8 +48,9 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/version", "", "", true, s.version},
 		{"GET", "/api/v1/openapi.json", "", "", true, s.openAPI},
 		{"POST", "/api/v1/auth/login", "", "", true, s.login},
-		{"POST", "/api/v1/auth/logout", auth.ScopeRead, auth.RoleViewer, false, s.logout},
-		{"GET", "/api/v1/auth/me", auth.ScopeRead, auth.RoleViewer, false, s.me},
+		{"POST", "/api/v1/auth/logout", auth.ScopeRead, auth.RoleUser, false, s.logout},
+		{"GET", "/api/v1/auth/me", auth.ScopeRead, auth.RoleUser, false, s.me},
+		{"POST", "/api/v1/auth/password", auth.ScopeSession, auth.RoleUser, false, s.changePassword},
 
 		{"GET", "/api/v1/tokens", auth.ScopeAdmin, auth.RoleAdmin, false, s.listTokens},
 		{"POST", "/api/v1/tokens", auth.ScopeAdmin, auth.RoleAdmin, false, s.createToken},
@@ -211,12 +212,29 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/phonebooks/{id}/import", auth.ScopeWrite, auth.RoleOperator, false, s.importPhonebook},
 		{"GET", "/api/v1/phonebooks/{id}/export", auth.ScopeWrite, auth.RoleOperator, false, s.exportPhonebook},
 
-		{"GET", "/api/v1/me/contacts", auth.ScopeRead, auth.RoleViewer, false, s.listContacts},
-		{"POST", "/api/v1/me/contacts", auth.ScopeWrite, auth.RoleViewer, false, s.createContact},
-		{"POST", "/api/v1/me/contacts/import", auth.ScopeWrite, auth.RoleViewer, false, s.importContacts},
-		{"GET", "/api/v1/me/contacts/export", auth.ScopeRead, auth.RoleViewer, false, s.exportContacts},
-		{"PUT", "/api/v1/me/contacts/{id}", auth.ScopeWrite, auth.RoleViewer, false, s.updateContact},
-		{"DELETE", "/api/v1/me/contacts/{id}", auth.ScopeWrite, auth.RoleViewer, false, s.deleteContact},
+		{"GET", "/api/v1/me/contacts", auth.ScopeRead, auth.RoleUser, false, s.listContacts},
+		{"POST", "/api/v1/me/contacts", auth.ScopeWrite, auth.RoleUser, false, s.createContact},
+		{"POST", "/api/v1/me/contacts/import", auth.ScopeWrite, auth.RoleUser, false, s.importContacts},
+		{"GET", "/api/v1/me/contacts/export", auth.ScopeRead, auth.RoleUser, false, s.exportContacts},
+		{"PUT", "/api/v1/me/contacts/{id}", auth.ScopeWrite, auth.RoleUser, false, s.updateContact},
+		{"DELETE", "/api/v1/me/contacts/{id}", auth.ScopeWrite, auth.RoleUser, false, s.deleteContact},
+
+		// Extension self-service (role user): only the caller's own
+		// extensions, never an id of someone else's.
+		{"PATCH", "/api/v1/me/profile", auth.ScopeWrite, auth.RoleUser, false, s.updateProfile},
+		{"GET", "/api/v1/me/extensions", auth.ScopeRead, auth.RoleUser, false, s.listMyExtensions},
+		{"PATCH", "/api/v1/me/extensions/{id}", auth.ScopeWrite, auth.RoleUser, false, s.updateMyExtension},
+		{"GET", "/api/v1/me/extensions/{id}/voicemail", auth.ScopeRead, auth.RoleUser, false, s.getMyVoicemail},
+		{"PUT", "/api/v1/me/extensions/{id}/voicemail", auth.ScopeWrite, auth.RoleUser, false, s.putMyVoicemail},
+		{"GET", "/api/v1/me/extensions/{id}/voicemail/messages", auth.ScopeRead, auth.RoleUser, false, s.listMyMessages},
+		{"POST", "/api/v1/me/voicemail/messages/{id}/heard", auth.ScopeWrite, auth.RoleUser, false, s.markMyMessageHeard},
+		{"DELETE", "/api/v1/me/voicemail/messages/{id}", auth.ScopeWrite, auth.RoleUser, false, s.deleteMyMessage},
+		{"GET", "/api/v1/me/voicemail/messages/{id}/audio", auth.ScopeRead, auth.RoleUser, false, s.myMessageAudio},
+		{"GET", "/api/v1/me/calls", auth.ScopeRead, auth.RoleUser, false, s.listMyCalls},
+
+		{"GET", "/api/v1/settings/smtp", auth.ScopeAdmin, auth.RoleAdmin, false, s.getSMTP},
+		{"PUT", "/api/v1/settings/smtp", auth.ScopeAdmin, auth.RoleAdmin, false, s.putSMTP},
+		{"POST", "/api/v1/settings/smtp/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testSMTP},
 
 		{"GET", "/api/v1/phone-groups", auth.ScopeRead, auth.RoleViewer, false, s.listPhoneGroups},
 		{"POST", "/api/v1/phone-groups", auth.ScopeAdmin, auth.RoleAdmin, false, s.createPhoneGroup},
@@ -271,7 +289,10 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/skills", auth.ScopeRead, auth.RoleViewer, false, s.listSkills},
 		{"GET", "/api/v1/skills/{name}/download", auth.ScopeRead, auth.RoleViewer, false, s.downloadSkill},
 		{"GET", "/api/v1/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.listUsers},
+		{"POST", "/api/v1/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.createUser},
+		{"GET", "/api/v1/users/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getUser},
 		{"PATCH", "/api/v1/users/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updateUser},
+		{"DELETE", "/api/v1/users/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteUser},
 
 		// The in-product AI agent (spec ai-agent). The rows are fixed here;
 		// each stream replaces s.pending with its handler.

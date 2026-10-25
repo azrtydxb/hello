@@ -1,4 +1,4 @@
-// ACD call queues (migration 00031). A queue answers the call through the
+// ACD call queues (migration 00032). A queue answers the call through the
 // media relay, holds the caller with music and periodic announcements and
 // offers the call to the next free agent. The caller's dialog is the
 // ordinary answered B2BUA dialog (like an IVR menu's), so the queue reuses

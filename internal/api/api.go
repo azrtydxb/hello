@@ -15,6 +15,7 @@ import (
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/routing"
@@ -38,11 +39,23 @@ type Store interface {
 	ConfigRevision(ctx context.Context) (int64, error)
 	Audit(ctx context.Context, actor, action, resource, resourceID string) error
 
-	UserByName(ctx context.Context, username string) (int64, string, error)
+	UserForLogin(ctx context.Context, username string) (store.Login, error)
+	UpgradePasswordHash(ctx context.Context, id int64, oldHash, newHash string) error
+	UserPasswordHash(ctx context.Context, id int64) (string, error)
+	ChangeOwnPassword(ctx context.Context, id int64, newHash string, keep []byte) error
+	UpdateProfile(ctx context.Context, actor string, id int64, c store.ProfileChange) (store.User, error)
 	CreateSession(ctx context.Context, userID int64, hash []byte, expires time.Time) error
 	DeleteSession(ctx context.Context, hash []byte) error
 
 	ListUsers(ctx context.Context) ([]store.User, error)
+	GetUser(ctx context.Context, id int64) (store.User, error)
+	CreateAccount(ctx context.Context, actor string, in store.NewAccount) (store.User, error)
+	UpdateAccount(ctx context.Context, actor string, id int64, c store.AccountChange) (store.User, error)
+	DeleteUser(ctx context.Context, actor string, id int64) error
+	UserExtensions(ctx context.Context, userID int64) ([]store.Extension, error)
+	UserExtension(ctx context.Context, userID, id int64) (store.Extension, error)
+	UserVoicemailMessage(ctx context.Context, userID, id int64) (store.VoicemailMessage, error)
+	UserCDRs(ctx context.Context, userID, before int64, limit int) ([]store.CDR, string, error)
 	SetUserRole(ctx context.Context, actor string, id int64, role auth.Role) (store.User, error)
 	SetUserExtension(ctx context.Context, actor string, id int64, extension *int64) (store.User, error)
 
@@ -208,6 +221,10 @@ type Config struct {
 	// set); the voicemail box responses carry it so the console can say
 	// email is not configured instead of showing messages stuck pending.
 	EmailDelivery bool
+	// SMTPEnv is the deployment's SMTP_* settings, used while no settings
+	// are saved in the console; SMTPDeliver replaces the SMTP send in tests.
+	SMTPEnv     mailer.Settings
+	SMTPDeliver func(ctx context.Context, s mailer.Settings, to string, msg []byte) error
 	// ProvStore is the phone provisioning persistence; nil answers 503 on
 	// the provisioning routes. Prov wires the rest of them.
 	ProvStore ProvStore
@@ -262,7 +279,7 @@ func Handler(c Config) http.Handler {
 	for _, rt := range s.routes() {
 		h := s.aiGuard(rt.Pattern, rt.H)
 		if !rt.Public {
-			h = authed(auth.Require(rt.Role, rt.Scope)(h))
+			h = authed(auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, h)))
 		}
 		mux.Handle(rt.Method+" "+rt.Pattern, h)
 	}
@@ -270,6 +287,22 @@ func Handler(c Config) http.Handler {
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.
 	return wrapForTest(http.NewCrossOriginProtection().Handler(mux))
+}
+
+// passwordGate refuses every route but the few a user needs to choose their
+// new password while an admin-set one is still in force.
+func passwordGate(pattern string, next http.Handler) http.Handler {
+	switch pattern {
+	case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if actor(r).MustChangePassword {
+			writeError(w, http.StatusForbidden, "password_change_required", "choose a new password first")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // wrapForTest is the identity; the package tests replace it from TestMain

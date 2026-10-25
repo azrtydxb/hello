@@ -1664,6 +1664,9 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 				return
 			}
 		}
+		if h := s.callerByeHook.Load(); h != nil {
+			(*h)()
+		}
 		s.m.response(sip.StatusOK)
 		c.hangup(cdr.SideCaller)
 	default: // matchDialog only matches the caller's leg or the winner's

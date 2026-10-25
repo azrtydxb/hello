@@ -31,6 +31,7 @@ var (
 	// accepts '*' plus 2-4 digits, or '##'.
 	featureCodeRe = regexp.MustCompile(`^(\*[0-9]{2,4}|##)$`)
 	// forwardRe is a forwarding target: an extension or external number.
+	pinRe     = regexp.MustCompile(`^[0-9]{4,10}$`)
 	forwardRe = regexp.MustCompile(`^(\+?[0-9*#]{2,32})?$`)
 	emailRe   = regexp.MustCompile(`^[^@\s]{1,64}@[^@\s]{1,255}\.[A-Za-z]{2,}$`)
 )
@@ -70,8 +71,8 @@ type voicemailBoxView struct {
 	EmailDelivery bool `json:"emailDelivery"`
 }
 
-func (s *server) boxView(b store.VoicemailBox) voicemailBoxView {
-	return voicemailBoxView{VoicemailBox: b, EmailDelivery: s.EmailDelivery}
+func (s *server) boxView(ctx context.Context, b store.VoicemailBox) voicemailBoxView {
+	return voicemailBoxView{VoicemailBox: b, EmailDelivery: s.emailDelivery(ctx)}
 }
 
 func (s *server) getVoicemailBox(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +85,7 @@ func (s *server) getVoicemailBox(w http.ResponseWriter, r *http.Request) {
 		s.configError(w, "voicemail box", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.boxView(b))
+	writeJSON(w, http.StatusOK, s.boxView(r.Context(), b))
 }
 
 // putVoicemailBox is PUT /api/v1/extensions/{id}/voicemail: JSON with
@@ -95,6 +96,13 @@ func (s *server) putVoicemailBox(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.saveVoicemailBox(w, r, id, false)
+}
+
+// saveVoicemailBox applies a box update to extension id. In self mode (the
+// extension's own user) the box PIN is "pin", digits only, and the box email
+// address is not settable; an administrator sets "password" and "email".
+func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int64, self bool) {
 	var (
 		change   store.VoicemailBoxChange
 		greeting []byte
@@ -105,9 +113,19 @@ func (s *server) putVoicemailBox(w http.ResponseWriter, r *http.Request) {
 		// Streamed (MultipartReader, no spooling to memory or disk) and the
 		// body is bounded first, so an oversized upload cannot exhaust it.
 		r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
-		if err := readVoicemailUpload(r, &change, &greeting, &unreach); err != nil {
+		if err := readVoicemailUpload(r, &change, &greeting, &unreach, self); err != nil {
 			badRequest(w, err.Error())
 			return
+		}
+	case self:
+		var in struct {
+			PIN *string `json:"pin"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.PIN != nil && *in.PIN != "" {
+			change.Password = in.PIN
 		}
 	default:
 		var in struct {
@@ -123,7 +141,11 @@ func (s *server) putVoicemailBox(w http.ResponseWriter, r *http.Request) {
 		change.Email = in.Email
 	}
 	var f fieldErrs
-	if change.Password != nil && (len(*change.Password) < 4 || len(*change.Password) > 72) {
+	if self {
+		if change.Password != nil && !pinRe.MatchString(*change.Password) {
+			f.add("pin", "must be 4-10 digits")
+		}
+	} else if change.Password != nil && (len(*change.Password) < 4 || len(*change.Password) > 72) {
 		f.add("password", "must be 4-72 characters")
 	}
 	if change.Email != nil && *change.Email != "" && !emailRe.MatchString(*change.Email) {
@@ -185,7 +207,13 @@ func (s *server) putVoicemailBox(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, s.boxView(b))
+	if self {
+		// The owner's view carries neither the administrator's notification
+		// address nor storage keys.
+		writeJSON(w, http.StatusOK, selfBox(store.Extension{ID: id}, b, true))
+		return
+	}
+	writeJSON(w, http.StatusOK, s.boxView(r.Context(), b))
 }
 
 // isWAV checks the RIFF/WAVE container header; the caller decides about the
@@ -196,7 +224,7 @@ func isWAV(b []byte) bool {
 
 // readVoicemailUpload walks a multipart body and fills in the box change and
 // the greeting uploads. Every field is bounded; unknown parts are skipped.
-func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, greeting, unreach *[]byte) error {
+func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, greeting, unreach *[]byte, self bool) error {
 	mr, err := r.MultipartReader()
 	if err != nil {
 		return errors.New("invalid multipart body")
@@ -209,7 +237,13 @@ func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, gree
 		if err != nil {
 			return errors.New("invalid multipart body")
 		}
-		switch name := part.FormName(); name {
+		name := part.FormName()
+		if self && (name == "password" || name == "email") || !self && name == "pin" {
+			name = "" // the other mode's field is ignored
+		} else if self && name == "pin" {
+			name = "password"
+		}
+		switch name {
 		case "password":
 			b, err := io.ReadAll(io.LimitReader(part, 73))
 			if err != nil {
@@ -296,6 +330,11 @@ func (s *server) markMessageHeard(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.setHeard(w, r, id)
+}
+
+// setHeard reads the optional {"heard": bool} body and applies it.
+func (s *server) setHeard(w http.ResponseWriter, r *http.Request, id int64) {
 	heard := true
 	if r.ContentLength != 0 {
 		var in struct {
@@ -323,6 +362,10 @@ func (s *server) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.removeMessage(w, r, id)
+}
+
+func (s *server) removeMessage(w http.ResponseWriter, r *http.Request, id int64) {
 	object, err := s.Store.DeleteVoicemailMessage(r.Context(), actor(r).String(), id)
 	if err != nil {
 		s.configError(w, "voicemail message", err)
@@ -344,6 +387,12 @@ func (s *server) messageAudio(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.playMessage(w, r, id, "")
+}
+
+// playMessage streams message id's audio; a non-empty download makes the
+// browser save it under that name.
+func (s *server) playMessage(w http.ResponseWriter, r *http.Request, id int64, download string) {
 	m, err := s.Store.GetVoicemailMessage(r.Context(), id)
 	if err != nil {
 		s.configError(w, "voicemail message", err)
@@ -353,7 +402,7 @@ func (s *server) messageAudio(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "object storage is unavailable; try again shortly")
 		return
 	}
-	s.serveAudio(w, r, VoicemailBucket, m.Object, "", "voicemail: message audio")
+	s.serveAudio(w, r, VoicemailBucket, m.Object, download, "voicemail: message audio")
 }
 
 // serveAudio streams an object of bucket to the browser: its type (WAV when

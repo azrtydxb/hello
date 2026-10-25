@@ -131,7 +131,7 @@
           }
         },
         "x-hello-scope": "read",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "ends a browser session"
         }
@@ -165,7 +165,7 @@
           }
         },
         "x-hello-scope": "read",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": true
       }
     },
@@ -292,17 +292,52 @@
         }
       }
     },
+    "/api/v1/auth/password": {
+      "post": {
+        "operationId": "changePassword",
+        "summary": "Change my password",
+        "description": "Sets a new password for the signed-in user after checking the current one. Only a browser session may do it, not a token, and it ends the user's other sessions. Clears the forced-change flag an administrator set, which blocks every other operation until it is changed. Needs a password of 10 to 128 characters that differs from the current one.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Changed"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "credentials are changed in the console only"
+        }
+      }
+    },
     "/api/v1/users": {
       "get": {
         "operationId": "listUsers",
-        "summary": "Every management user with their role",
-        "description": "Admin only. Users are created and deleted with `hello-control user add`; the console and the API only change roles.",
+        "summary": "Every user with their role and linked extensions",
+        "description": "Admin only. Lists every user with their role, state, email, linked extensions and voicemail email options; never a password or its hash.",
         "tags": ["users"],
-        "x-hello-scope": "admin",
-        "x-hello-role": "admin",
-        "x-hello-mcp": {
-          "exclude": "user and role management stays in the console"
-        },
         "responses": {
           "200": {
             "description": "Users, by id",
@@ -323,20 +358,108 @@
           "500": {
             "$ref": "#/components/responses/Internal"
           }
-        }
-      }
-    },
-    "/api/v1/users/{id}": {
-      "patch": {
-        "operationId": "updateUser",
-        "summary": "Change a user's role or linked extension",
-        "description": "Admin only, audited. The new role applies on the user's next request, whatever credential it carries. Demoting the last admin answers 409 last_admin. extensionId links the user to an extension (409 when another user has it, 400 when it does not exist) or unlinks with null; when both fields are given, the link is changed first.",
-        "tags": ["users"],
+        },
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
           "exclude": "user and role management stays in the console"
+        }
+      },
+      "post": {
+        "operationId": "createUser",
+        "summary": "Create a user",
+        "description": "Admin only, audited. Creates a local user with an initial password the administrator sets (10 to 128 characters; argon2id-hashed, never returned). The user must choose a new password at first login unless mustChangePassword is false. extensionIds links the user to extensions, at most one user per extension (409 when taken, 400 when one does not exist); the first is the primary extension whose phones receive the user's personal contacts. Role user is the extension self-service role.",
+        "tags": ["users"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          }
         },
+        "responses": {
+          "201": {
+            "description": "The created user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "user and role management stays in the console"
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "get": {
+        "operationId": "getUser",
+        "summary": "One user",
+        "description": "Admin only. Returns one user with their role, state and linked extensions.",
+        "tags": ["users"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "user and role management stays in the console"
+        }
+      },
+      "patch": {
+        "operationId": "updateUser",
+        "summary": "Change a user",
+        "description": "Admin only, audited. Changes the role, display name, email, enabled state, extensions, voicemail email options or password. The new role applies on the user's next request, whatever credential it carries. A disabled user cannot sign in, their sessions end and their tokens stop working. Setting password resets it (10 to 128 characters) and makes the user choose a new one at next login unless mustChangePassword is false. Demoting or disabling the last enabled admin answers 409 last_admin, and an administrator cannot disable their own account (409 self_disable). extensionIds replaces the user's extensions (409 when another user has one, 400 when one does not exist); the legacy extensionId links exactly one extension or, with null, none; give one of them, not both.",
+        "tags": ["users"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -366,17 +489,11 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The change would leave no admin (last_admin)",
+            "description": "The change would leave no admin (last_admin), disable the caller (self_disable) or take an extension another user has",
             "content": {
               "application/json": {
                 "schema": {
@@ -385,9 +502,727 @@
               }
             }
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "500": {
             "$ref": "#/components/responses/Internal"
           }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "user and role management stays in the console"
+        }
+      },
+      "delete": {
+        "operationId": "deleteUser",
+        "summary": "Delete a user",
+        "description": "Admin only, audited. Deletes the user with their sessions, tokens and personal contacts. Deleting the last enabled admin answers 409 last_admin and an administrator cannot delete their own account (409 self_delete).",
+        "tags": ["users"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The last admin (last_admin) or the caller (self_delete)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "user and role management stays in the console"
+        }
+      }
+    },
+    "/api/v1/me/profile": {
+      "patch": {
+        "operationId": "updateMyProfile",
+        "summary": "Change my profile",
+        "description": "Changes the signed-in user's display name, email address and voicemail email options (notify, attach the recording, and what happens to a message after it was mailed: nothing, mark as read or delete). At least one field is required. Returns the profile as auth/me does.",
+        "tags": ["me"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/extensions": {
+      "get": {
+        "operationId": "listMyExtensions",
+        "summary": "My extensions",
+        "description": "Lists the extensions the signed-in user is linked to, with the display label and the DND and forwarding settings they may change; nothing else about the extension, no SIP credentials and no devices.",
+        "tags": ["me"],
+        "responses": {
+          "200": {
+            "description": "The user's extensions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfExtensionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/extensions/{id}": {
+      "patch": {
+        "operationId": "updateMyExtension",
+        "summary": "Change my extension's label, DND or forwarding",
+        "description": "Changes the display label, do-not-disturb and the always, busy and no-answer forwarding of one of the signed-in user's own extensions. An extension that is not the user's answers 404, exactly like one that does not exist. At least one field is required; a forwarding target is empty (off) or 2 to 32 of 0-9 * # with an optional leading +.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelfExtensionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The extension",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfExtension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/extensions/{id}/voicemail": {
+      "get": {
+        "operationId": "getMyVoicemail",
+        "summary": "My voicemail box",
+        "description": "Returns whether the voicemail box of one of the signed-in user's own extensions has a PIN and greetings. An extension that is not the user's answers 404.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The box",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfVoicemailBox"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      },
+      "put": {
+        "operationId": "updateMyVoicemail",
+        "summary": "Change my voicemail PIN or greetings",
+        "description": "Changes the PIN and uploads or replaces greetings of the signed-in user's own voicemail box. JSON with pin (4 to 10 digits), or multipart/form-data with pin plus optional greeting and unreachable PCM WAV files of at most 5 MiB, such as a recording made in the browser. The box email address is not settable here. An extension that is not the user's answers 404.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelfVoicemailUpdate"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "pin": {
+                    "type": "string",
+                    "pattern": "^[0-9]{4,10}$",
+                    "description": "The new PIN; stored as a hash."
+                  },
+                  "greeting": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The busy and no-answer greeting, a PCM WAV of at most 5 MiB."
+                  },
+                  "unreachable": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The greeting played when the extension is unreachable, a PCM WAV of at most 5 MiB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The box",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfVoicemailBox"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/extensions/{id}/voicemail/messages": {
+      "get": {
+        "operationId": "listMyVoicemailMessages",
+        "summary": "My voicemail messages",
+        "description": "Lists the messages in the voicemail box of one of the signed-in user's own extensions, newest first. An extension that is not the user's answers 404.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "unheard",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Only messages not played yet."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailMessageList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/voicemail/messages/{id}/heard": {
+      "post": {
+        "operationId": "markMyVoicemailMessageHeard",
+        "summary": "Mark my message heard",
+        "description": "Marks a message in one of the signed-in user's own boxes as heard, or unheard with {\"heard\": false}. A message in anyone else's box answers 404, exactly like one that does not exist.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoicemailMarkHeard"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailMessageHeard"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/voicemail/messages/{id}": {
+      "delete": {
+        "operationId": "deleteMyVoicemailMessage",
+        "summary": "Delete my message",
+        "description": "Deletes a message from one of the signed-in user's own boxes with its audio. A message in anyone else's box answers 404.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/voicemail/messages/{id}/audio": {
+      "get": {
+        "operationId": "getMyVoicemailMessageAudio",
+        "summary": "Play or download my message",
+        "description": "Streams a message of one of the signed-in user's own boxes (WAV, Range supported); with download=1 the browser saves it as a file. A message in anyone else's box answers 404.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "download",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["1"]
+            },
+            "description": "Send as an attachment."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The audio",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested byte range of the audio",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/me/calls": {
+      "get": {
+        "operationId": "listMyCalls",
+        "summary": "My call history",
+        "description": "Lists the calls in which one of the signed-in user's own extensions was the caller or the callee, newest first, without routes, trunks or signalling detail.",
+        "tags": ["me"],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            },
+            "description": "Page size, 1-200."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The next of the previous page; omit for the first page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of calls",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfCallPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "extension self-service belongs to the signed-in user in the console"
+        }
+      }
+    },
+    "/api/v1/settings/smtp": {
+      "get": {
+        "operationId": "getSmtpSettings",
+        "summary": "System email (SMTP) settings",
+        "description": "Admin only. Returns the SMTP settings voicemail email is sent with and where they come from: the console (database), the deployment's SMTP_* environment, or none. The password is never returned; passwordSet says whether one is stored.",
+        "tags": ["settings"],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmtpSettings"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "system email settings stay in the console"
+        }
+      },
+      "put": {
+        "operationId": "putSmtpSettings",
+        "summary": "Save the system email (SMTP) settings",
+        "description": "Admin only, audited. Saves the SMTP host, port, transport security (none, starttls or tls), username, from address and password. The password is sealed in the database; omit it to keep the stored one, or send an empty string to clear it. An empty host clears the saved settings, and the deployment's environment settings apply again. Changes apply to the next send, without a restart.",
+        "tags": ["settings"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpSettingsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SmtpSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "system email settings stay in the console"
+        }
+      }
+    },
+    "/api/v1/settings/smtp/test": {
+      "post": {
+        "operationId": "testSmtpSettings",
+        "summary": "Send a test email",
+        "description": "Admin only. Sends one test email to the given address with the settings in force and answers when the server accepted it or why it did not (502 smtp_failed). The test runs now and is not queued.",
+        "tags": ["settings"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SmtpTest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Sent"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "system email settings stay in the console"
         }
       }
     },
@@ -520,7 +1355,7 @@
       "patch": {
         "operationId": "updateExtension",
         "summary": "Change an extension's number or name",
-        "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields.",
+        "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields. Renumbering an extension an IVR menu names is refused (409).",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -574,7 +1409,7 @@
       "delete": {
         "operationId": "deleteExtension",
         "summary": "Delete an extension and its devices",
-        "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes.",
+        "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes. An extension an IVR menu names (as a destination or voicemail box) cannot be deleted (409).",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -2000,9 +2835,7 @@
         "operationId": "getFlowCatalogue",
         "summary": "Read the flow node and port catalogue",
         "description": "Returns every node kind of the flow canvas with its ports, each port's type (and the colour and shape that type is drawn with) and, for every output, the inputs it may connect to. An entry whose `requires` is set is allowed in principle but cannot be stored until what it names exists. Use it to learn which objects can be joined before changing the configuration.",
-        "tags": [
-          "flow"
-        ],
+        "tags": ["flow"],
         "responses": {
           "200": {
             "description": "Read the flow node and port catalogue",
@@ -2034,9 +2867,7 @@
         "operationId": "getFlowGraph",
         "summary": "Read the call flow as a graph",
         "description": "Draws the saved configuration as nodes (trunks, routes, extensions, ring groups, announcements, paging groups, feature codes and the terminals calls end in) and edges between their ports. Every edge names the owner: the one field of one object it is stored in, so connecting or disconnecting is one update of that object. A target that resolves to nothing is a `missing` node with a `dangling_reference` warning. Targets resolve as hello-sip does: ring group name, then extension number. Each node's `version` changes whenever the object does. Nothing is stored: the graph is built from the live tables.",
-        "tags": [
-          "flow"
-        ],
+        "tags": ["flow"],
         "parameters": [
           {
             "name": "scope",
@@ -2054,9 +2885,7 @@
             "description": "`devices` adds devices and phones, which are left out by default.",
             "schema": {
               "type": "string",
-              "enum": [
-                "devices"
-              ]
+              "enum": ["devices"]
             }
           }
         ],
@@ -2110,9 +2939,7 @@
         "operationId": "getFlowRevision",
         "summary": "Read the configuration revision",
         "description": "Returns the revision every configuration change advances. Poll it to know when a graph read earlier is out of date.",
-        "tags": [
-          "flow"
-        ],
+        "tags": ["flow"],
         "responses": {
           "200": {
             "description": "Read the configuration revision",
@@ -2836,9 +3663,7 @@
         "operationId": "getTtsSettings",
         "summary": "The text-to-speech settings",
         "description": "Returns the text-to-speech provider settings: whether an OpenRouter API key is set (never the key), the last four characters of it, and the default model and voice.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Settings",
@@ -2868,9 +3693,7 @@
         "operationId": "putTtsSettings",
         "summary": "Set the OpenRouter key and the default model and voice",
         "description": "Sets the OpenRouter API key (write-only, sealed in the database and never returned) and the default ElevenLabs model and voice used when a prompt does not name its own.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "requestBody": {
           "required": true,
           "content": {
@@ -2931,9 +3754,7 @@
         "operationId": "deleteTtsKey",
         "summary": "Remove the stored OpenRouter key",
         "description": "Removes the stored OpenRouter API key. Prompts already generated keep playing; new ones cannot be generated until a key is set again.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Settings",
@@ -2965,9 +3786,7 @@
         "operationId": "testTtsKey",
         "summary": "Test the OpenRouter connection",
         "description": "Checks with OpenRouter that the stored API key is accepted. Spends no credits.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "The key is accepted",
@@ -2975,9 +3794,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "ok"
-                  ],
+                  "required": ["ok"],
                   "properties": {
                     "ok": {
                       "type": "boolean"
@@ -3015,9 +3832,7 @@
         "operationId": "listTtsVoices",
         "summary": "List the ElevenLabs models and voices",
         "description": "Lists the ElevenLabs text-to-speech models OpenRouter offers and the voices of each, for the model and voice pickers.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Models",
@@ -3025,9 +3840,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "models"
-                  ],
+                  "required": ["models"],
                   "properties": {
                     "models": {
                       "type": "array",
@@ -3063,19 +3876,14 @@
         "operationId": "generateNewAnnouncement",
         "summary": "Create an announcement from text",
         "description": "Creates an announcement and generates its audio once from text through the text-to-speech provider; the WAV is stored and played from storage ever after.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name",
-                  "text"
-                ],
+                "required": ["name", "text"],
                 "properties": {
                   "name": {
                     "type": "string",
@@ -3148,9 +3956,7 @@
         "operationId": "putVoicemailGreeting",
         "summary": "Set a greeting from an announcement or from text",
         "description": "Sets a voicemail box's greeting or unreachable audio from an existing announcement, or from text generated once through the text-to-speech provider. Uploading a WAV stays on the voicemail box update.",
-        "tags": [
-          "voicemail"
-        ],
+        "tags": ["voicemail"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3162,25 +3968,16 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "slot",
-                  "source"
-                ],
+                "required": ["slot", "source"],
                 "properties": {
                   "slot": {
                     "type": "string",
-                    "enum": [
-                      "greeting",
-                      "unreachable"
-                    ],
+                    "enum": ["greeting", "unreachable"],
                     "description": "Which audio to set."
                   },
                   "source": {
                     "type": "string",
-                    "enum": [
-                      "announcement",
-                      "text"
-                    ],
+                    "enum": ["announcement", "text"],
                     "description": "Where the audio comes from."
                   },
                   "announcementId": {
@@ -3356,9 +4153,7 @@
         "operationId": "saveAnnouncementPrompt",
         "summary": "Save an announcement's prompt text",
         "description": "Saves the authored text, voice and model of an announcement without generating audio. The announcement then shows as edited since its last generation until it is generated again.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3370,9 +4165,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "text"
-                ],
+                "required": ["text"],
                 "properties": {
                   "text": {
                     "type": "string",
@@ -3501,7 +4294,7 @@
       "delete": {
         "operationId": "deleteAnnouncement",
         "summary": "Delete an announcement",
-        "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time.",
+        "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time. An announcement that an IVR menu plays or names as a destination cannot be deleted (409).",
         "tags": ["media"],
         "parameters": [
           {
@@ -3514,6 +4307,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3535,9 +4331,7 @@
         "operationId": "generateAnnouncement",
         "summary": "Generate or regenerate an announcement's audio from text",
         "description": "Generates the announcement's audio from its text through the text-to-speech provider and stores it. Idempotent: when the stored audio already came from the same text, voice and model nothing is generated unless force is set. Playback never calls the provider.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3794,7 +4588,7 @@
       "patch": {
         "operationId": "updateRingGroup",
         "summary": "Change a ring/hunt group",
-        "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored.",
+        "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored. A group that an IVR menu names cannot be renamed (409).",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -3828,6 +4622,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -3845,7 +4642,7 @@
       "delete": {
         "operationId": "deleteRingGroup",
         "summary": "Delete a ring/hunt group",
-        "description": "Deletes a ring or hunt group. The members go with it.",
+        "description": "Deletes a ring or hunt group. The members go with it. A group that an IVR menu names cannot be deleted (409).",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -3858,6 +4655,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -3879,9 +4679,7 @@
         "operationId": "listMOHClasses",
         "summary": "List music on hold classes",
         "description": "Lists every music on hold class with its playlist. A class is a named playlist of announcements played in a loop or shuffled to a held or parked party, and optionally to a caller instead of ringback.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Classes ordered by name",
@@ -3911,9 +4709,7 @@
         "operationId": "createMOHClass",
         "summary": "Create a music on hold class",
         "description": "Creates a class from announcement ids. Marking it default clears the flag on the previous default. A class with no announcements plays the built-in tone. Validation failures list each failing field in error.fields.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "requestBody": {
           "required": true,
           "content": {
@@ -3961,9 +4757,7 @@
         "operationId": "getMOHClass",
         "summary": "One music on hold class",
         "description": "Returns one class by id.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4001,9 +4795,7 @@
         "operationId": "putMOHClass",
         "summary": "Replace a music on hold class",
         "description": "Replaces a class as a whole, playlist included. A hold already playing keeps its music until it resumes.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4057,9 +4849,7 @@
         "operationId": "deleteMOHClass",
         "summary": "Delete a music on hold class",
         "description": "Deletes a class. Extensions, ring groups and inbound routes that named it fall back to the global default class, or the built-in tone.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4071,212 +4861,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "write",
-        "x-hello-role": "operator",
-        "x-hello-mcp": true
-      }
-    },
-    "/api/v1/ivr-menus": {
-      "get": {
-        "operationId": "listIVRMenus",
-        "summary": "List IVR menus",
-        "description": "Lists every IVR / auto-attendant menu with its options.",
-        "tags": ["ivr-menus"],
-        "responses": {
-          "200": {
-            "description": "IVR menus",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IVRMenuList"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "read",
-        "x-hello-role": "viewer",
-        "x-hello-mcp": true
-      },
-      "post": {
-        "operationId": "createIVRMenu",
-        "summary": "Create an IVR menu",
-        "description": "Creates an IVR menu: it answers, plays its greeting (an announcement), collects digits and routes the call to the option's destination. Validation failures list each failing field in error.fields; digits must be unique, referenced announcements and destinations must exist and automatic exits (timeout, invalid) must not loop back to the menu. A menu with a paging destination (an option, the timeout or the invalid exit) needs the admin role and scope, like paging groups; otherwise 403.",
-        "tags": ["ivr-menus"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IVRMenuInput"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IVRMenu"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "write",
-        "x-hello-role": "operator",
-        "x-hello-mcp": true
-      }
-    },
-    "/api/v1/ivr-menus/{id}": {
-      "get": {
-        "operationId": "getIVRMenu",
-        "summary": "One IVR menu",
-        "description": "Returns one IVR menu by id.",
-        "tags": ["ivr-menus"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The IVR menu",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IVRMenu"
-                }
-              }
-            }
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "read",
-        "x-hello-role": "viewer",
-        "x-hello-mcp": true
-      },
-      "put": {
-        "operationId": "putIVRMenu",
-        "summary": "Replace an IVR menu",
-        "description": "Replaces an IVR menu as a whole, options included. A menu that a route, ring group, feature code or another menu names cannot be renamed. Calls already in the menu finish with the settings they started with. A menu with a paging destination (an option, the timeout or the invalid exit) needs the admin role and scope, like paging groups; otherwise 403.",
-        "tags": ["ivr-menus"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IVRMenuInput"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Replaced",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IVRMenu"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "500": {
-            "$ref": "#/components/responses/Internal"
-          }
-        },
-        "x-hello-scope": "write",
-        "x-hello-role": "operator",
-        "x-hello-mcp": true
-      },
-      "delete": {
-        "operationId": "deleteIVRMenu",
-        "summary": "Delete an IVR menu",
-        "description": "Deletes an IVR menu and its options. A menu that an inbound route, ring group, feature code or another menu names cannot be deleted (409).",
-        "tags": ["ivr-menus"],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/id"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Deleted"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -4768,7 +5352,7 @@
       "put": {
         "operationId": "putPagingGroup",
         "summary": "Replace a paging group",
-        "description": "Replaces a paging group as a whole, member and caller lists included. A page already running keeps the member set it started with.",
+        "description": "Replaces a paging group as a whole, member and caller lists included. A page already running keeps the member set it started with. Changing the code of a group an IVR menu names is refused (409).",
         "tags": ["paging-groups"],
         "parameters": [
           {
@@ -4822,7 +5406,7 @@
       "delete": {
         "operationId": "deletePagingGroup",
         "summary": "Delete a paging group",
-        "description": "Deletes a paging group. Its member and caller lists go with it.",
+        "description": "Deletes a paging group. Its member and caller lists go with it. A paging group that an IVR menu names cannot be deleted (409).",
         "tags": ["paging-groups"],
         "parameters": [
           {
@@ -4835,6 +5419,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -4915,7 +5502,9 @@
             "description": "No hello-sip node reported the test page in time",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Error" }
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           }
@@ -7132,7 +7721,15 @@
                     "description": "The scopes to grant.",
                     "items": {
                       "type": "string",
-                      "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+                      "enum": [
+                        "read",
+                        "write",
+                        "admin",
+                        "secrets",
+                        "calls",
+                        "events",
+                        "recordings"
+                      ]
                     }
                   }
                 }
@@ -9773,7 +10370,7 @@
           }
         },
         "x-hello-scope": "read",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "personal data: a user's own contacts are not exposed to an agent"
         }
@@ -9824,7 +10421,7 @@
           }
         },
         "x-hello-scope": "write",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "personal data: a user's own contacts are not exposed to an agent"
         }
@@ -9921,7 +10518,7 @@
           }
         },
         "x-hello-scope": "write",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "multipart CSV upload"
         }
@@ -9958,7 +10555,7 @@
           }
         },
         "x-hello-scope": "read",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "CSV download"
         }
@@ -10016,7 +10613,7 @@
           }
         },
         "x-hello-scope": "write",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "personal data: a user's own contacts are not exposed to an agent"
         }
@@ -10052,7 +10649,7 @@
           }
         },
         "x-hello-scope": "write",
-        "x-hello-role": "viewer",
+        "x-hello-role": "user",
         "x-hello-mcp": {
           "exclude": "personal data: a user's own contacts are not exposed to an agent"
         }
@@ -10465,6 +11062,212 @@
         },
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ivr-menus": {
+      "get": {
+        "operationId": "listIVRMenus",
+        "summary": "List IVR menus",
+        "description": "Lists every IVR / auto-attendant menu with its options.",
+        "tags": ["ivr-menus"],
+        "responses": {
+          "200": {
+            "description": "IVR menus",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenuList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createIVRMenu",
+        "summary": "Create an IVR menu",
+        "description": "Creates an IVR menu: it answers, plays its greeting (an announcement), collects digits and routes the call to the option's destination. Validation failures list each failing field in error.fields; digits must be unique, referenced announcements and destinations must exist and automatic exits (timeout, invalid) must not loop back to the menu. A menu with a paging destination (an option, the timeout or the invalid exit) needs the admin role and scope, like paging groups; otherwise 403.",
+        "tags": ["ivr-menus"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IVRMenuInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenu"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ivr-menus/{id}": {
+      "get": {
+        "operationId": "getIVRMenu",
+        "summary": "One IVR menu",
+        "description": "Returns one IVR menu by id.",
+        "tags": ["ivr-menus"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The IVR menu",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenu"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putIVRMenu",
+        "summary": "Replace an IVR menu",
+        "description": "Replaces an IVR menu as a whole, options included. A menu that a route, ring group, feature code or another menu names cannot be renamed. Calls already in the menu finish with the settings they started with. A menu with a paging destination (an option, the timeout or the invalid exit) needs the admin role and scope, like paging groups; otherwise 403.",
+        "tags": ["ivr-menus"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IVRMenuInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenu"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteIVRMenu",
+        "summary": "Delete an IVR menu",
+        "description": "Deletes an IVR menu and its options. A menu that an inbound route, ring group, feature code or another menu names cannot be deleted (409).",
+        "tags": ["ivr-menus"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
         "x-hello-mcp": true
       }
     }
@@ -11561,7 +12364,7 @@
           },
           "emailStatus": {
             "type": "string",
-            "description": "pending, sent or failed."
+            "description": "pending (not queued yet), queued (waiting to be mailed), sent, failed, or skipped (nobody to email)."
           },
           "createdAt": {
             "type": "string",
@@ -11960,7 +12763,9 @@
         "required": ["id", "extension", "result", "contacts", "node"],
         "description": "The outcome of a paging-group test page.",
         "properties": {
-          "id": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
           "extension": {
             "type": "string",
             "description": "The member that was paged"
@@ -11991,15 +12796,21 @@
               "type": "object",
               "required": ["device", "userAgent", "result", "headers"],
               "properties": {
-                "device": { "type": "string" },
-                "userAgent": { "type": "string" },
+                "device": {
+                  "type": "string"
+                },
+                "userAgent": {
+                  "type": "string"
+                },
                 "result": {
                   "type": "string",
                   "enum": ["answered", "busy", "no_answer", "failed"]
                 },
                 "headers": {
                   "type": "array",
-                  "items": { "type": "string" },
+                  "items": {
+                    "type": "string"
+                  },
                   "description": "The auto-answer headers the INVITE carried, as Name: value"
                 }
               }
@@ -12030,10 +12841,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "loop",
-              "shuffle"
-            ],
+            "enum": ["loop", "shuffle"],
             "description": "loop plays the tracks in order and starts over; shuffle plays them in a fresh random order each pass."
           },
           "isDefault": {
@@ -12044,10 +12852,7 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": [
-                "announcementId",
-                "name"
-              ],
+              "required": ["announcementId", "name"],
               "properties": {
                 "announcementId": {
                   "type": "integer",
@@ -12071,9 +12876,7 @@
       },
       "MOHClassInput": {
         "type": "object",
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -12084,10 +12887,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "loop",
-              "shuffle"
-            ],
+            "enum": ["loop", "shuffle"],
             "description": "Default loop."
           },
           "isDefault": {
@@ -12107,222 +12907,13 @@
       },
       "MOHClassList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/MOHClass"
             }
-          }
-        }
-      },
-      "IVRDestination": {
-        "type": "object",
-        "required": ["kind", "target"],
-        "additionalProperties": false,
-        "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "hangup",
-              "extension",
-              "ring_group",
-              "voicemail",
-              "announcement",
-              "paging",
-              "ivr",
-              "external",
-              "queue"
-            ],
-            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; or an external number routed through the outbound routes."
-          },
-          "target": {
-            "type": "string",
-            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue); a page code such as *60 (paging); a number (external)."
-          }
-        }
-      },
-      "IVROption": {
-        "type": "object",
-        "required": ["digit", "kind", "target"],
-        "additionalProperties": false,
-        "properties": {
-          "digit": {
-            "type": "string",
-            "pattern": "^[0-9*#]$",
-            "description": "The key; each digit may appear once per menu."
-          },
-          "kind": {
-            "$ref": "#/components/schemas/IVRDestination/properties/kind"
-          },
-          "target": {
-            "$ref": "#/components/schemas/IVRDestination/properties/target"
-          }
-        }
-      },
-      "IVRMenu": {
-        "type": "object",
-        "required": [
-          "id",
-          "name",
-          "number",
-          "enabled",
-          "greetingId",
-          "greetingName",
-          "invalidPromptId",
-          "invalidPromptName",
-          "timeoutPromptId",
-          "timeoutPromptName",
-          "digitTimeout",
-          "interDigitTimeout",
-          "maxRetries",
-          "allowDirectDial",
-          "timeout",
-          "invalid",
-          "options",
-          "createdAt",
-          "updatedAt"
-        ],
-        "properties": {
-          "id": { "type": "integer", "format": "int64" },
-          "name": { "type": "string" },
-          "number": {
-            "type": "string",
-            "description": "The number that dials the menu directly; empty when it is only a destination."
-          },
-          "enabled": { "type": "boolean" },
-          "greetingId": {
-            "type": "integer",
-            "format": "int64",
-            "description": "The announcement played first."
-          },
-          "greetingName": { "type": "string" },
-          "invalidPromptId": {
-            "type": ["integer", "null"],
-            "format": "int64",
-            "description": "Announcement played after an invalid choice; null replays the greeting."
-          },
-          "invalidPromptName": { "type": "string" },
-          "timeoutPromptId": {
-            "type": ["integer", "null"],
-            "format": "int64",
-            "description": "Announcement played after a timeout; null replays the greeting."
-          },
-          "timeoutPromptName": { "type": "string" },
-          "digitTimeout": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 60,
-            "description": "Seconds to wait for the first digit after the prompt."
-          },
-          "interDigitTimeout": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 30,
-            "description": "Seconds to wait between the digits of a directly dialled extension."
-          },
-          "maxRetries": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 10,
-            "description": "How often the menu repeats after a timeout or an invalid choice before the matching exit destination applies."
-          },
-          "allowDirectDial": {
-            "type": "boolean",
-            "description": "Whether the caller may dial an extension number from the menu."
-          },
-          "timeout": { "$ref": "#/components/schemas/IVRDestination" },
-          "invalid": { "$ref": "#/components/schemas/IVRDestination" },
-          "options": {
-            "type": "array",
-            "items": { "$ref": "#/components/schemas/IVROption" }
-          },
-          "createdAt": { "type": "string", "format": "date-time" },
-          "updatedAt": { "type": "string", "format": "date-time" }
-        }
-      },
-      "IVRMenuInput": {
-        "type": "object",
-        "required": ["name", "greetingId"],
-        "additionalProperties": false,
-        "properties": {
-          "name": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}$",
-            "description": "Unique menu name (letters, digits, . _ -)."
-          },
-          "number": {
-            "type": "string",
-            "pattern": "^([0-9]{2,16})?$",
-            "description": "Optional number that dials the menu; must not be an extension number or ring group name."
-          },
-          "enabled": {
-            "type": "boolean",
-            "description": "Defaults to true; a disabled menu answers 404."
-          },
-          "greetingId": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Id of the greeting announcement."
-          },
-          "invalidPromptId": {
-            "type": ["integer", "null"],
-            "format": "int64",
-            "description": "Id of the announcement played after an invalid choice; null replays the greeting."
-          },
-          "timeoutPromptId": {
-            "type": ["integer", "null"],
-            "format": "int64",
-            "description": "Id of the announcement played after a timeout; null replays the greeting."
-          },
-          "digitTimeout": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 60,
-            "description": "Defaults to 5."
-          },
-          "interDigitTimeout": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 30,
-            "description": "Defaults to 3."
-          },
-          "maxRetries": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 10,
-            "description": "Defaults to 3."
-          },
-          "allowDirectDial": {
-            "type": "boolean",
-            "description": "Defaults to false."
-          },
-          "timeout": {
-            "$ref": "#/components/schemas/IVRDestination",
-            "description": "Where the call goes once the retries are used up after silence. Defaults to hangup."
-          },
-          "invalid": {
-            "$ref": "#/components/schemas/IVRDestination",
-            "description": "Where the call goes once the retries are used up after invalid choices. Defaults to hangup."
-          },
-          "options": {
-            "type": "array",
-            "maxItems": 12,
-            "items": { "$ref": "#/components/schemas/IVROption" },
-            "description": "The menu's keys and where each sends the call; each digit once."
-          }
-        }
-      },
-      "IVRMenuList": {
-        "type": "object",
-        "required": ["items"],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": { "$ref": "#/components/schemas/IVRMenu" }
           }
         }
       },
@@ -12470,7 +13061,10 @@
             "description": "Where a caller goes when no agent is logged in. Defaults to hangup."
           },
           "mohClassId": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
             "description": "Music on hold class the waiting caller hears; null uses the global default."
           },
@@ -12571,7 +13165,7 @@
           "timeout",
           "full",
           "noAgents",
-          "mohClass",
+          "mohClassId",
           "announceFrequency",
           "announcePosition",
           "announceWait",
@@ -12671,7 +13265,10 @@
             "description": "Where a caller goes when no agent is logged in. Defaults to hangup."
           },
           "mohClassId": {
-            "type": ["integer", "null"],
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
             "description": "Music on hold class the waiting caller hears; null uses the global default."
           },
@@ -13087,13 +13684,29 @@
             "type": ["object", "null"],
             "description": "The multicast channel the page is also sent to (read-only).",
             "properties": {
-              "id": { "type": "integer", "format": "int64" },
-              "groupId": { "type": "integer", "format": "int64" },
-              "groupName": { "type": "string" },
-              "label": { "type": "string" },
-              "address": { "type": "string" },
-              "port": { "type": "integer" },
-              "codec": { "type": "string" }
+              "id": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "groupId": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "groupName": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "address": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer"
+              },
+              "codec": {
+                "type": "string"
+              }
             }
           },
           "createdAt": {
@@ -13169,9 +13782,7 @@
       },
       "FlowRevision": {
         "type": "object",
-        "required": [
-          "configRevision"
-        ],
+        "required": ["configRevision"],
         "properties": {
           "configRevision": {
             "type": "integer",
@@ -13181,10 +13792,7 @@
       },
       "FlowTarget": {
         "type": "object",
-        "required": [
-          "kind",
-          "port"
-        ],
+        "required": ["kind", "port"],
         "properties": {
           "kind": {
             "type": "string"
@@ -13204,23 +13812,14 @@
       },
       "FlowPort": {
         "type": "object",
-        "required": [
-          "id",
-          "direction",
-          "type",
-          "many",
-          "label"
-        ],
+        "required": ["id", "direction", "type", "many", "label"],
         "properties": {
           "id": {
             "type": "string"
           },
           "direction": {
             "type": "string",
-            "enum": [
-              "in",
-              "out"
-            ]
+            "enum": ["in", "out"]
           },
           "type": {
             "type": "string",
@@ -13255,11 +13854,7 @@
       },
       "FlowNodeType": {
         "type": "object",
-        "required": [
-          "kind",
-          "label",
-          "ports"
-        ],
+        "required": ["kind", "label", "ports"],
         "properties": {
           "kind": {
             "type": "string"
@@ -13286,12 +13881,7 @@
       },
       "FlowPortStyle": {
         "type": "object",
-        "required": [
-          "type",
-          "label",
-          "colour",
-          "shape"
-        ],
+        "required": ["type", "label", "colour", "shape"],
         "properties": {
           "type": {
             "type": "string"
@@ -13309,10 +13899,7 @@
       },
       "FlowCatalogue": {
         "type": "object",
-        "required": [
-          "portTypes",
-          "nodes"
-        ],
+        "required": ["portTypes", "nodes"],
         "properties": {
           "portTypes": {
             "type": "array",
@@ -13330,10 +13917,7 @@
       },
       "FlowRef": {
         "type": "object",
-        "required": [
-          "node",
-          "port"
-        ],
+        "required": ["node", "port"],
         "properties": {
           "node": {
             "type": "string"
@@ -13345,10 +13929,7 @@
       },
       "FlowOwner": {
         "type": "object",
-        "required": [
-          "node",
-          "field"
-        ],
+        "required": ["node", "field"],
         "properties": {
           "node": {
             "type": "string"
@@ -13360,12 +13941,7 @@
       },
       "FlowNode": {
         "type": "object",
-        "required": [
-          "id",
-          "kind",
-          "label",
-          "summary"
-        ],
+        "required": ["id", "kind", "label", "summary"],
         "properties": {
           "id": {
             "type": "string",
@@ -13389,12 +13965,7 @@
       },
       "FlowEdge": {
         "type": "object",
-        "required": [
-          "id",
-          "source",
-          "target",
-          "owner"
-        ],
+        "required": ["id", "source", "target", "owner"],
         "properties": {
           "id": {
             "type": "string"
@@ -13421,11 +13992,7 @@
       },
       "FlowWarning": {
         "type": "object",
-        "required": [
-          "node",
-          "code",
-          "message"
-        ],
+        "required": ["node", "code", "message"],
         "properties": {
           "node": {
             "type": "string"
@@ -13445,12 +14012,7 @@
       },
       "FlowGraph": {
         "type": "object",
-        "required": [
-          "configRevision",
-          "nodes",
-          "edges",
-          "warnings"
-        ],
+        "required": ["configRevision", "nodes", "edges", "warnings"],
         "properties": {
           "configRevision": {
             "type": "integer",
@@ -13556,6 +14118,10 @@
                     "announcement",
                     "intercom",
                     "ivr",
+                    "queue_login",
+                    "queue_logout",
+                    "queue_pause",
+                    "queue_unpause",
                     "call_waiting_on",
                     "call_waiting_off"
                   ]
@@ -13647,6 +14213,12 @@
                   "forbidden_role",
                   "insufficient_scope",
                   "last_admin",
+                  "self_disable",
+                  "self_delete",
+                  "password_change_required",
+                  "session_required",
+                  "not_configured",
+                  "smtp_failed",
                   "no_user",
                   "no_extension",
                   "ai_disabled",
@@ -13689,7 +14261,17 @@
       },
       "Me": {
         "type": "object",
-        "required": ["username", "role"],
+        "required": [
+          "username",
+          "role",
+          "displayName",
+          "email",
+          "authMethod",
+          "mustChangePassword",
+          "extensions",
+          "voicemailEmail",
+          "emailDelivery"
+        ],
         "properties": {
           "username": {
             "type": "string",
@@ -13697,36 +14279,143 @@
           },
           "role": {
             "$ref": "#/components/schemas/Role"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "description": "The user's email address, empty when none."
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": ["local"],
+            "description": "How the user signs in."
+          },
+          "mustChangePassword": {
+            "type": "boolean",
+            "description": "True while an administrator-set password is in force; every operation but this one, logout and the password change answers 403 password_change_required."
+          },
+          "extensions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MeExtension"
+            },
+            "description": "The extensions the user is linked to."
+          },
+          "voicemailEmail": {
+            "$ref": "#/components/schemas/VoicemailEmailPrefs"
+          },
+          "emailDelivery": {
+            "type": "boolean",
+            "description": "Whether the system can send email at all."
+          }
+        }
+      },
+      "MeExtension": {
+        "type": "object",
+        "required": ["id", "number", "name"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "VoicemailEmailPrefs": {
+        "type": "object",
+        "required": ["notify", "attach", "after"],
+        "properties": {
+          "notify": {
+            "type": "boolean",
+            "description": "Email the user when a new voicemail arrives."
+          },
+          "attach": {
+            "type": "boolean",
+            "description": "Attach the recording to the email."
+          },
+          "after": {
+            "type": "string",
+            "enum": ["none", "mark_read", "delete"],
+            "description": "What happens to the message once the email was sent: nothing, mark as read, or delete."
           }
         }
       },
       "Role": {
         "type": "string",
-        "enum": ["viewer", "operator", "admin"],
-        "description": "viewer: every read operation; operator: also every write operation; admin: also every admin and secrets operation"
+        "enum": ["user", "viewer", "operator", "admin"],
+        "description": "user: only the self-service operations on the user's own linked extensions; viewer: every read operation; operator: also every write operation; admin: also every admin and secrets operation"
       },
       "User": {
         "type": "object",
-        "required": ["id", "username", "role", "createdAt", "extensionId"],
+        "required": [
+          "id",
+          "username",
+          "displayName",
+          "email",
+          "authMethod",
+          "role",
+          "enabled",
+          "mustChangePassword",
+          "extensionId",
+          "extensionIds",
+          "voicemailEmail",
+          "createdAt"
+        ],
         "properties": {
           "id": {
             "type": "integer",
             "format": "int64"
           },
           "username": {
+            "type": "string",
+            "description": "The login."
+          },
+          "displayName": {
             "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": ["local"]
           },
           "role": {
             "$ref": "#/components/schemas/Role"
           },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
+          "enabled": {
+            "type": "boolean",
+            "description": "A disabled user cannot sign in."
+          },
+          "mustChangePassword": {
+            "type": "boolean"
           },
           "extensionId": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "The extension the user is linked to (their personal contacts are delivered to its phones); null when unlinked."
+            "description": "The primary extension, whose phones receive the user's personal contacts; null when unlinked."
+          },
+          "extensionIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Every extension the user manages, the primary first."
+          },
+          "voicemailEmail": {
+            "$ref": "#/components/schemas/VoicemailEmailPrefs"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -13742,21 +14431,440 @@
           }
         }
       },
+      "PasswordChange": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["currentPassword", "newPassword"],
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The current password."
+          },
+          "newPassword": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 128,
+            "x-hello-secret": true,
+            "description": "The new password, 10 to 128 characters."
+          }
+        }
+      },
+      "UserCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["username", "role", "password"],
+        "properties": {
+          "username": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._@+-]{1,254}$",
+            "description": "The login: a username or an email address."
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The name shown for the user."
+          },
+          "email": {
+            "type": "string",
+            "description": "Empty or an email address; voicemail email goes here."
+          },
+          "authMethod": {
+            "type": "string",
+            "enum": ["local"],
+            "default": "local",
+            "description": "How the user signs in; local passwords only."
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 128,
+            "x-hello-secret": true,
+            "description": "The initial password."
+          },
+          "mustChangePassword": {
+            "type": "boolean",
+            "default": true,
+            "description": "Make the user choose a new password at first login."
+          },
+          "extensionIds": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Extensions to link, the first is the primary one."
+          },
+          "voicemailEmail": {
+            "$ref": "#/components/schemas/VoicemailEmailPrefsUpdate"
+          }
+        }
+      },
+      "VoicemailEmailPrefsUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Voicemail email options; a field left out keeps its value.",
+        "properties": {
+          "notify": {
+            "type": "boolean",
+            "description": "Email the user when a new voicemail arrives."
+          },
+          "attach": {
+            "type": "boolean",
+            "description": "Attach the recording to the email."
+          },
+          "after": {
+            "type": "string",
+            "enum": ["none", "mark_read", "delete"],
+            "description": "What happens to the message once the email was sent."
+          }
+        }
+      },
       "UserUpdate": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "role": {
-            "$ref": "#/components/schemas/Role",
-            "description": "The new role."
+            "$ref": "#/components/schemas/Role"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The name shown for the user."
+          },
+          "email": {
+            "type": "string",
+            "description": "Empty or an email address."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "False disables the user: no sign-in, sessions end, tokens stop working."
+          },
+          "password": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 128,
+            "x-hello-secret": true,
+            "description": "Reset the password."
+          },
+          "mustChangePassword": {
+            "type": "boolean",
+            "default": true,
+            "description": "With password: make the user choose a new one at next login."
+          },
+          "extensionIds": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Replaces the user's extensions."
           },
           "extensionId": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "Link the user to this extension, at most one user per extension; null unlinks."
+            "description": "Link exactly this extension (replacing others); null unlinks all. Use extensionIds instead."
+          },
+          "voicemailEmail": {
+            "$ref": "#/components/schemas/VoicemailEmailPrefsUpdate"
           }
         },
-        "description": "At least one of role and extensionId."
+        "description": "At least one field."
+      },
+      "ProfileUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The name shown for the user."
+          },
+          "email": {
+            "type": "string",
+            "description": "Empty or an email address."
+          },
+          "voicemailEmail": {
+            "$ref": "#/components/schemas/VoicemailEmailPrefsUpdate"
+          }
+        },
+        "description": "At least one field."
+      },
+      "SelfExtension": {
+        "type": "object",
+        "required": [
+          "id",
+          "number",
+          "name",
+          "dnd",
+          "forwardAlways",
+          "forwardBusy",
+          "forwardNoAnswer",
+          "voicemailEnabled"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "The display label."
+          },
+          "dnd": {
+            "type": "boolean"
+          },
+          "forwardAlways": {
+            "type": "string"
+          },
+          "forwardBusy": {
+            "type": "string"
+          },
+          "forwardNoAnswer": {
+            "type": "string"
+          },
+          "voicemailEnabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SelfExtensionList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SelfExtension"
+            }
+          }
+        }
+      },
+      "SelfExtensionUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "The display label."
+          },
+          "dnd": {
+            "type": "boolean",
+            "description": "Do not disturb."
+          },
+          "forwardAlways": {
+            "type": "string",
+            "description": "Forward every call to this number; empty is off."
+          },
+          "forwardBusy": {
+            "type": "string",
+            "description": "Forward when busy to this number; empty is off."
+          },
+          "forwardNoAnswer": {
+            "type": "string",
+            "description": "Forward when unanswered to this number; empty is off."
+          }
+        },
+        "description": "At least one field."
+      },
+      "SelfVoicemailBox": {
+        "type": "object",
+        "required": [
+          "extensionId",
+          "boxId",
+          "hasPin",
+          "hasGreeting",
+          "hasUnreachableGreeting"
+        ],
+        "properties": {
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "boxId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "0 while the box does not exist yet."
+          },
+          "hasPin": {
+            "type": "boolean"
+          },
+          "hasGreeting": {
+            "type": "boolean"
+          },
+          "hasUnreachableGreeting": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SelfVoicemailUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["pin"],
+        "properties": {
+          "pin": {
+            "type": "string",
+            "pattern": "^[0-9]{4,10}$",
+            "description": "The new PIN, 4 to 10 digits."
+          }
+        }
+      },
+      "SelfCall": {
+        "type": "object",
+        "required": [
+          "id",
+          "startTime",
+          "durationMs",
+          "direction",
+          "kind",
+          "source",
+          "destination",
+          "answered"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "startTime": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "direction": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "answered": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SelfCallPage": {
+        "type": "object",
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SelfCall"
+            }
+          },
+          "next": {
+            "type": "string"
+          }
+        }
+      },
+      "SmtpSettings": {
+        "type": "object",
+        "required": [
+          "host",
+          "port",
+          "security",
+          "username",
+          "from",
+          "passwordSet",
+          "source",
+          "updatedAt"
+        ],
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "security": {
+            "type": "string",
+            "description": "none, starttls, tls, or opportunistic for environment settings."
+          },
+          "username": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "passwordSet": {
+            "type": "boolean",
+            "description": "Whether a password is stored. The password itself is never returned."
+          },
+          "source": {
+            "type": "string",
+            "enum": ["database", "environment", "none"]
+          },
+          "updatedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "SmtpSettingsUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["host", "port", "security", "from"],
+        "properties": {
+          "host": {
+            "type": "string",
+            "description": "Empty clears the saved settings."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "The SMTP port, 587 for STARTTLS or 465 for TLS."
+          },
+          "security": {
+            "type": "string",
+            "enum": ["none", "starttls", "tls"],
+            "description": "Transport security."
+          },
+          "username": {
+            "type": "string",
+            "description": "Login name; empty for a server without authentication."
+          },
+          "from": {
+            "type": "string",
+            "description": "The sender address."
+          },
+          "password": {
+            "type": ["string", "null"],
+            "maxLength": 512,
+            "x-hello-secret": true,
+            "description": "Omit to keep the stored password; an empty string clears it."
+          }
+        }
+      },
+      "SmtpTest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["to"],
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "The address to send the test email to."
+          }
+        }
       },
       "TokenCreate": {
         "type": "object",
@@ -13775,7 +14883,15 @@
             "description": "The token's scopes, at most the caller's; absent means read, write and admin (secrets must be named).",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "expiresAt": {
@@ -13824,7 +14940,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "expiresAt": {
@@ -13873,7 +14997,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "expiresAt": {
@@ -14188,11 +15320,7 @@
       },
       "TtsModel": {
         "type": "object",
-        "required": [
-          "id",
-          "name",
-          "voices"
-        ],
+        "required": ["id", "name", "voices"],
         "properties": {
           "id": {
             "type": "string"
@@ -14210,10 +15338,7 @@
       },
       "GenerationResult": {
         "type": "object",
-        "required": [
-          "announcement",
-          "regenerated"
-        ],
+        "required": ["announcement", "regenerated"],
         "properties": {
           "announcement": {
             "$ref": "#/components/schemas/Announcement"
@@ -14225,10 +15350,7 @@
         }
       },
       "TtsRecord": {
-        "type": [
-          "object",
-          "null"
-        ],
+        "type": ["object", "null"],
         "properties": {
           "text": {
             "type": "string"
@@ -14250,10 +15372,7 @@
       },
       "VoicemailGreetingResult": {
         "type": "object",
-        "required": [
-          "box",
-          "regenerated"
-        ],
+        "required": ["box", "regenerated"],
         "properties": {
           "box": {
             "$ref": "#/components/schemas/VoicemailBox"
@@ -15523,7 +16642,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "An extension number, an external number, an IVR menu name, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean"
@@ -15961,7 +17080,9 @@
                   "type": "object",
                   "required": ["extension", "device", "result"],
                   "properties": {
-                    "extension": { "type": "string" },
+                    "extension": {
+                      "type": "string"
+                    },
                     "device": {
                       "type": "string",
                       "description": "The member contact's device; empty when the member was never rung"
@@ -16420,7 +17541,15 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+                  "enum": [
+                    "read",
+                    "write",
+                    "admin",
+                    "secrets",
+                    "calls",
+                    "events",
+                    "recordings"
+                  ]
                 },
                 "description": {
                   "type": "string"
@@ -16479,7 +17608,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "resources": {
@@ -16497,7 +17634,15 @@
             "description": "The scopes the caller's role may grant.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           }
         }
@@ -16545,7 +17690,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "resources": {
@@ -16645,7 +17798,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "enabled": {
@@ -16701,7 +17862,15 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "enabled": {
@@ -16736,7 +17905,15 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "enabled": {
@@ -18122,16 +19299,26 @@
             "enum": ["listen", "send", "both"],
             "description": "Whether the phones listen on it, send to it or both"
           },
-          "priority": { "type": "integer", "description": "1 (highest) to 25" }
+          "priority": {
+            "type": "integer",
+            "description": "1 (highest) to 25"
+          }
         }
       },
       "MulticastChannel": {
         "allOf": [
-          { "$ref": "#/components/schemas/MulticastChannelInput" },
+          {
+            "$ref": "#/components/schemas/MulticastChannelInput"
+          },
           {
             "type": "object",
             "required": ["id"],
-            "properties": { "id": { "type": "integer", "format": "int64" } }
+            "properties": {
+              "id": {
+                "type": "integer",
+                "format": "int64"
+              }
+            }
           }
         ]
       },
@@ -18143,7 +19330,9 @@
           "channels": {
             "type": "array",
             "description": "The group's channels in priority order; replaces the whole list",
-            "items": { "$ref": "#/components/schemas/MulticastChannelInput" }
+            "items": {
+              "$ref": "#/components/schemas/MulticastChannelInput"
+            }
           }
         }
       },
@@ -18203,7 +19392,9 @@
           "channels": {
             "type": "array",
             "description": "The channels, 1 to 25",
-            "items": { "$ref": "#/components/schemas/PTTChannel" }
+            "items": {
+              "$ref": "#/components/schemas/PTTChannel"
+            }
           }
         }
       },
@@ -18250,9 +19441,13 @@
           "multicast": {
             "type": "array",
             "description": "The group's multicast paging channels",
-            "items": { "$ref": "#/components/schemas/MulticastChannel" }
+            "items": {
+              "$ref": "#/components/schemas/MulticastChannel"
+            }
           },
-          "ptt": { "$ref": "#/components/schemas/PhoneGroupPTT" },
+          "ptt": {
+            "$ref": "#/components/schemas/PhoneGroupPTT"
+          },
           "phoneCount": {
             "type": "integer"
           },
@@ -18324,6 +19519,242 @@
               "format": "int64"
             },
             "description": "Named books in delivery order; an empty list removes them all."
+          }
+        }
+      },
+      "IVRDestination": {
+        "type": "object",
+        "required": ["kind", "target"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "hangup",
+              "extension",
+              "ring_group",
+              "voicemail",
+              "announcement",
+              "paging",
+              "ivr",
+              "external",
+              "queue"
+            ],
+            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; or an external number routed through the outbound routes."
+          },
+          "target": {
+            "type": "string",
+            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue); a page code such as *60 (paging); a number (external)."
+          }
+        }
+      },
+      "IVROption": {
+        "type": "object",
+        "required": ["digit", "kind", "target"],
+        "additionalProperties": false,
+        "properties": {
+          "digit": {
+            "type": "string",
+            "pattern": "^[0-9*#]$",
+            "description": "The key; each digit may appear once per menu."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IVRDestination/properties/kind"
+          },
+          "target": {
+            "$ref": "#/components/schemas/IVRDestination/properties/target"
+          }
+        }
+      },
+      "IVRMenu": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "number",
+          "enabled",
+          "greetingId",
+          "greetingName",
+          "invalidPromptId",
+          "invalidPromptName",
+          "timeoutPromptId",
+          "timeoutPromptName",
+          "digitTimeout",
+          "interDigitTimeout",
+          "maxRetries",
+          "allowDirectDial",
+          "timeout",
+          "invalid",
+          "options",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "description": "The number that dials the menu directly; empty when it is only a destination."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "greetingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The announcement played first."
+          },
+          "greetingName": {
+            "type": "string"
+          },
+          "invalidPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement played after an invalid choice; null replays the greeting."
+          },
+          "invalidPromptName": {
+            "type": "string"
+          },
+          "timeoutPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement played after a timeout; null replays the greeting."
+          },
+          "timeoutPromptName": {
+            "type": "string"
+          },
+          "digitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Seconds to wait for the first digit after the prompt."
+          },
+          "interDigitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "description": "Seconds to wait between the digits of a directly dialled extension."
+          },
+          "maxRetries": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "How often the menu repeats after a timeout or an invalid choice before the matching exit destination applies."
+          },
+          "allowDirectDial": {
+            "type": "boolean",
+            "description": "Whether the caller may dial an extension number from the menu."
+          },
+          "timeout": {
+            "$ref": "#/components/schemas/IVRDestination"
+          },
+          "invalid": {
+            "$ref": "#/components/schemas/IVRDestination"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IVROption"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "IVRMenuInput": {
+        "type": "object",
+        "required": ["name", "greetingId"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique menu name (letters, digits, . _ -)."
+          },
+          "number": {
+            "type": "string",
+            "pattern": "^([0-9]{2,16})?$",
+            "description": "Optional number that dials the menu; must not be an extension number or ring group name."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to true; a disabled menu answers 404."
+          },
+          "greetingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Id of the greeting announcement."
+          },
+          "invalidPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Id of the announcement played after an invalid choice; null replays the greeting."
+          },
+          "timeoutPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Id of the announcement played after a timeout; null replays the greeting."
+          },
+          "digitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Defaults to 5."
+          },
+          "interDigitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "description": "Defaults to 3."
+          },
+          "maxRetries": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Defaults to 3."
+          },
+          "allowDirectDial": {
+            "type": "boolean",
+            "description": "Defaults to false."
+          },
+          "timeout": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where the call goes once the retries are used up after silence. Defaults to hangup."
+          },
+          "invalid": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where the call goes once the retries are used up after invalid choices. Defaults to hangup."
+          },
+          "options": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {
+              "$ref": "#/components/schemas/IVROption"
+            },
+            "description": "The menu's keys and where each sends the call; each digit once."
+          }
+        }
+      },
+      "IVRMenuList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IVRMenu"
+            }
           }
         }
       }

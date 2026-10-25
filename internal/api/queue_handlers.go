@@ -12,7 +12,7 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// ACD call queues (migration 00031): the configuration (CRUD), the agents'
+// ACD call queues (migration 00032): the configuration (CRUD), the agents'
 // login and pause state, and the live status the wallboard reads. Reads are
 // open to a viewer; changes need the write scope, like ring groups.
 

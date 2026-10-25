@@ -248,53 +248,6 @@ func (s *Store) ListVoicemailBoxes(ctx context.Context) ([]VoicemailBoxSummary, 
 	return out, rows.Err()
 }
 
-// EmailJob is one message waiting for voicemail-to-email delivery.
-type EmailJob struct {
-	MessageID  int64
-	To         string
-	Caller     string
-	DurationMs int64
-	CreatedAt  time.Time
-	Object     string
-}
-
-// PendingEmails returns messages with email still queued and an address to
-// send to, oldest first. The status stays pending while a worker sends, so a
-// second node's poll can pick the row again in that window: a duplicated
-// email is preferred over a lost one.
-func (s *Store) PendingEmails(ctx context.Context, limit int) ([]EmailJob, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.id, b.email, m.caller, m.duration_ms, m.created_at, m.minio_object
-		FROM voicemail_messages m JOIN voicemail_boxes b ON b.id = m.box_id
-		WHERE m.email_status = 'pending' AND b.email <> ''
-		ORDER BY m.id LIMIT $1`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	out := []EmailJob{}
-	for rows.Next() {
-		var j EmailJob
-		if err := rows.Scan(&j.MessageID, &j.To, &j.Caller, &j.DurationMs, &j.CreatedAt, &j.Object); err != nil {
-			return nil, err
-		}
-		out = append(out, j)
-	}
-	return out, rows.Err()
-}
-
-// MarkEmail records a voicemail email's delivery result: "sent" or "failed".
-// Queue bookkeeping is not a configuration change: it is not audited and
-// does not bump the revision hello-sip reloads on.
-func (s *Store) MarkEmail(ctx context.Context, id int64, status string) error {
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE voicemail_messages SET email_status = $2 WHERE id = $1`, id, status)
-	if err != nil {
-		return err
-	}
-	return requireRow(res)
-}
-
 // The voicemail paths hello-sip uses (the *97 application, MWI). These are
 // call-plane bookkeeping, not configuration: like MarkEmail they are not
 // audited and do not bump the revision hello-sip reloads on — the snapshot

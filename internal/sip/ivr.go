@@ -1,4 +1,4 @@
-// IVR / auto-attendant (migration 00030). A menu answers the call through
+// IVR / auto-attendant (migration 00031). A menu answers the call through
 // the media relay, plays its greeting (an announcement) with barge-in,
 // collects DTMF digits (RFC 4733 through the relay, SIP INFO through the
 // dialog) and sends the call to the destination of the chosen option. The
@@ -198,6 +198,12 @@ func (c *call) soloAnswer(phase, detail, what string) bool {
 	res.AppendHeader(sip.NewHeader("Allow", allow))
 	s.m.response(sip.StatusOK)
 	if err := c.dss.WriteResponse(res); err != nil {
+		if c.dss.LoadState() == sip.DialogStateEnded {
+			// The caller's BYE overtook its ACK: handleBye has accepted it
+			// and ends the call as the caller's hangup.
+			c.addTrace("Caller hung up before acknowledging the answer")
+			return false
+		}
 		c.mu.Lock()
 		cancelled = c.isCancelled
 		c.connected = false

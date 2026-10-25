@@ -54,8 +54,6 @@ func TestValidateIVRMenu(t *testing.T) {
 	}
 }
 
-func ptr[T any](v T) *T { return &v }
-
 // TestIVRMenuCRUD: create, read, replace and delete a menu; the references
 // that must exist do, duplicate digits and loops are refused, and a menu
 // that something names cannot be deleted or renamed. It fails if an unknown
