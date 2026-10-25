@@ -421,7 +421,11 @@ var gsVia = map[string]string{"1": "http", "2": "https"}
 // gsFirmwareFile is the file name a Grandstream model asks its firmware
 // server directory for (Grandstream firmware upgrade guides: grp2600fw.bin;
 // WP8xx: wp810fw.bin).
-var gsFirmwareFile = map[string]string{"WP822": "wp810fw.bin", "GRP2614": "grp2600fw.bin"}
+var gsFirmwareFile = map[string]string{"WP822": "wp810fw.bin", "WP836": "wp8x6fw.bin", "GRP2614": "grp2600fw.bin"}
+
+// gsBookIsDir lists models whose P331 is a directory the phone appends
+// /phonebook.xml to, whatever the path ends in.
+var gsBookIsDir = map[string]bool{"WP822": true}
 
 // emuGrandstream models GXP/GRP/WP: the DHCP URL is a directory the phone
 // appends cfg<mac> (404), cfg<mac>.xml to; P237 (Config Server Path) and P192
@@ -474,8 +478,13 @@ func emuGrandstream(m *emu) {
 		if s, rest := stripScheme(path); s != "" {
 			path = rest
 		}
-		if !strings.HasSuffix(path, ".xml") {
-			path += "/phonebook.xml" // the phone looks for phonebook.xml when given a directory
+		// Per firmware: the WP822 (1.0.11.78) treats P331 as a directory and
+		// appends /phonebook.xml even to a path that names a file (observed:
+		// pb/0.xml/phonebook.xml, 404); the WP836 (1.0.1.80) takes P331 as
+		// the full file URL. Other models: a path ending in .xml is the file,
+		// otherwise a directory (Grandstream XML Phonebook Guide).
+		if gsBookIsDir[m.p.model] || !strings.HasSuffix(path, ".xml") {
+			path += "/phonebook.xml"
 		}
 		m.book("phonebook", scheme+"://"+path, "<AddressBook>")
 		if n, err := strconv.Atoi(c.take("P332")); err != nil || (n != 0 && (n < 5 || n > 720)) {
@@ -668,6 +677,7 @@ var emuCases = []emuCase{
 	{Poly, "VVX 450", "sip.ld", emuPoly},
 	{Grandstream, "WP822", "wp810fw.bin", emuGrandstream},
 	{Grandstream, "GRP2614", "grp2600fw.bin", emuGrandstream},
+	{Grandstream, "WP836", "wp8x6fw.bin", emuGrandstream},
 	{Snom, "D785", "snomD785-10.1.200-SIP-r.bin", emuSnom},
 	{Fanvil, "X6", "X6-2.0.2.z", emuFanvil},
 }
@@ -785,9 +795,9 @@ func TestPhoneEmulatorCatchesKnownBugs(t *testing.T) {
 	for _, tc := range []struct {
 		name, model, old, repl, want string
 	}{
-		{"grandstream P192 as a file URL", "WP822", "<P192>{{xml .Dir}}</P192>", "<P192>{{xml .URL}}</P192>", "wp810fw.bin/wp810fw.bin"},
-		{"grandstream HTTP code for an HTTPS server", "WP822", "<P212>2</P212>", "<P212>1</P212>", "contradicts"},
-		{"grandstream unknown via code", "WP822", "<P212>2</P212>", "<P212>7</P212>", "not a modelled upgrade-via code"},
+		{"grandstream P192 as a file URL", "GRP2614", "<P192>{{xml .Dir}}</P192>", "<P192>{{xml .URL}}</P192>", "grp2600fw.bin/grp2600fw.bin"},
+		{"grandstream HTTP code for an HTTPS server", "GRP2614", "<P212>2</P212>", "<P212>1</P212>", "contradicts"},
+		{"grandstream unknown via code", "GRP2614", "<P212>2</P212>", "<P212>7</P212>", "not a modelled upgrade-via code"},
 		{"yealink unmodelled ringtone URL", "T54W", "static.firmware.url", "ringtone.url = https://x.example/ring.wav\nstatic.firmware.url", "does not model"},
 		{"snom firmware without update policy", "D785", `<update_policy perm="R">auto_update</update_policy>`, "", "must come together"},
 		{"fanvil server as a full URL", "X6", "Flash Server IP    :", "Flash Server IP    :https://x/", "must be a bare host"},
