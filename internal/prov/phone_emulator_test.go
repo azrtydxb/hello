@@ -327,6 +327,7 @@ func emuYealink(m *emu) {
 	}
 	c.takeMatching(`^features\.remote_phonebook\.`)
 	m.hostOnly("local_time.ntp_server1", c.take("local_time.ntp_server1"))
+	m.yealinkZone(c)
 	m.hostOnly("account.1.sip_server.1.address", c.take("account.1.sip_server.1.address"))
 	c.takeMatching(`^account\.1\.sip_server\.`)
 	if v := c.opt("voice_mail.number.1"); strings.Contains(v, "/") || v == "" {
@@ -370,7 +371,12 @@ func emuPoly(m *emu) {
 		}
 		m.hostOnly("device.sntp.serverName", d.take("device.sntp.serverName"))
 		m.hostOnly("tcpIpApp.sntp.address", d.take("tcpIpApp.sntp.address"))
-		d.opt("device.dhcp.bootSrvUseOpt") // verify: enum codes, see the audit
+		m.polyZone(d)
+		// Static: the phone ignores every DHCP option for the boot server
+		// (Poly configuration example BootServer-Static.cfg).
+		if v := d.take("device.dhcp.bootSrvUseOpt"); v != "Static" {
+			m.t.Errorf("Poly: device.dhcp.bootSrvUseOpt = %q; the hand-off needs Static so DHCP cannot override the boot server", v)
+		}
 		d.takeMatching(`^msg\.mwi\.`)
 		d.takeMatching(`^(reg\.1\.|attendant\.|device\.sec\.)`)
 	}
@@ -457,6 +463,10 @@ func emuGrandstream(m *emu) {
 		m.t.Errorf("Grandstream: P47 = %q must be host[:port]", v)
 	}
 	c.takeMatching(`^P(33|145|19[34]|8433)$`)
+	// P64 (time zone) and P246 (self-defined time zone): a POSIX TZ string.
+	for _, k := range []string{"P64", "P246"} {
+		m.zoneValue(k, c.opt(k), posixTZ)
+	}
 	var fw string
 	if _, set := c.kv["P192"]; set {
 		dir := gsBase(m, c, "P6767", "P192")
@@ -498,8 +508,9 @@ func emuGrandstream(m *emu) {
 	m.firmware(fw)
 }
 
-// gsBase is scheme (from the via code) + server path, accepting a server
-// path with or without a leading scheme as the phone does.
+// gsBase is scheme (from the via code) + server path. The server path is
+// host/path with no scheme (Grandstream firmware upgrade guide: "do not
+// include leading http://"; SIP device provisioning guide).
 func gsBase(m *emu, c conf, viaKey, pathKey string) string {
 	via, path := c.take(viaKey), c.take(pathKey)
 	scheme, ok := gsVia[via]
@@ -507,11 +518,10 @@ func gsBase(m *emu, c conf, viaKey, pathKey string) string {
 		m.t.Errorf("Grandstream: %s = %q is not a modelled upgrade-via code (1 HTTP, 2 HTTPS)", viaKey, via)
 		scheme = "https"
 	}
-	if s, rest := stripScheme(path); s != "" {
-		if s != scheme {
-			m.t.Errorf("Grandstream: %s = %q contradicts %s = %s (%s)", pathKey, path, viaKey, via, scheme)
-		}
-		path = rest
+	// Grandstream's guides: the server path is "host/path" without a leading
+	// http:// or https://; the protocol is the via code alone.
+	if s, _ := stripScheme(path); s != "" {
+		m.t.Errorf("Grandstream: %s = %q must not carry a scheme; the protocol is %s = %s (%s)", pathKey, path, viaKey, via, scheme)
 	}
 	return scheme + "://" + path
 }
@@ -545,6 +555,7 @@ func emuSnom(m *emu) {
 		m.t.Errorf("Snom: the settings move setting_server from %q to %q", ss, got)
 	}
 	m.hostOnly("ntp_server", c.take("ntp_server"))
+	m.zoneValue("timezone", c.opt("timezone"), `^[A-Z]{3}[+-][0-9]+$`)
 	if v := c.take("user_host"); strings.Contains(v, "://") || strings.Contains(v, "/") {
 		m.t.Errorf("Snom: user_host = %q must be host[:port]", v)
 	}
@@ -617,6 +628,7 @@ func emuFanvil(m *emu) {
 	}
 	m.caFetch(c.opt("CACertURL"))
 	c.opt("Enable SNTP")
+	m.fanvilZone(c)
 	m.hostOnly("SNTP Server", c.take("SNTP Server"))
 	m.hostOnly("SIP1 Register Addr", c.take("SIP1 Register Addr"))
 	c.takeMatching(`^SIP1 (Register|MWI)`)
@@ -795,9 +807,14 @@ func TestPhoneEmulatorCatchesKnownBugs(t *testing.T) {
 	for _, tc := range []struct {
 		name, model, old, repl, want string
 	}{
-		{"grandstream P192 as a file URL", "GRP2614", "<P192>{{xml .Dir}}</P192>", "<P192>{{xml .URL}}</P192>", "grp2600fw.bin/grp2600fw.bin"},
-		{"grandstream HTTP code for an HTTPS server", "GRP2614", "<P212>2</P212>", "<P212>1</P212>", "contradicts"},
-		{"grandstream unknown via code", "GRP2614", "<P212>2</P212>", "<P212>7</P212>", "not a modelled upgrade-via code"},
+		{"grandstream P192 as a file URL", "GRP2614", "<P192>{{xml (noscheme .Dir)}}</P192>", "<P192>{{xml (noscheme .URL)}}</P192>", "grp2600fw.bin/grp2600fw.bin"},
+		{"grandstream P192 with a scheme", "GRP2614", "<P192>{{xml (noscheme .Dir)}}</P192>", "<P192>{{xml .Dir}}</P192>", "must not carry a scheme"},
+		{"grandstream P237 with a scheme", "GRP2614", "<P237>{{xml (noscheme .Prov.URL)}}</P237>", "<P237>{{xml .Prov.URL}}</P237>", "must not carry a scheme"},
+		{"grandstream HTTP code for an HTTPS server", "GRP2614", "<P212>{{urlvia .Prov.URL}}</P212>", "<P212>1</P212>", "moves the config server"},
+		{"grandstream unknown via code", "GRP2614", "<P212>{{urlvia .Prov.URL}}</P212>", "<P212>7</P212>", "not a modelled upgrade-via code"},
+		{"grandstream IANA time zone", "GRP2614", "<P64>{{xml .}}</P64>", "<P64>Europe/Brussels</P64>", "IANA name"},
+		{"yealink IANA time zone", "T54W", "local_time.time_zone = {{.YealinkOffset}}", "local_time.time_zone = Europe/Brussels", "IANA name"},
+		{"poly boot server left to DHCP", "VVX 450", `device.dhcp.bootSrvUseOpt="Static"`, `device.dhcp.bootSrvUseOpt="2"`, "needs Static"},
 		{"yealink unmodelled ringtone URL", "T54W", "static.firmware.url", "ringtone.url = https://x.example/ring.wav\nstatic.firmware.url", "does not model"},
 		{"snom firmware without update policy", "D785", `<update_policy perm="R">auto_update</update_policy>`, "", "must come together"},
 		{"fanvil server as a full URL", "X6", "Flash Server IP    :", "Flash Server IP    :https://x/", "must be a bare host"},
@@ -844,4 +861,68 @@ func TestPhoneEmulatorFileNames(t *testing.T) {
 	if w := e.do(req{path: bootBase + "cfg.xml/cfg.xml", proto: "http"}); w.Code != http.StatusNotFound {
 		t.Errorf("cfg.xml/cfg.xml answered %d, want 404", w.Code)
 	}
+}
+
+// --- Time zones ---
+
+// ianaZone is the shape of an IANA name ("Europe/Brussels"), which no
+// phone vendor's time zone setting accepts.
+var ianaZone = regexp.MustCompile(`^[A-Za-z_]+/[A-Za-z_+-]+(/[A-Za-z_]+)?$`)
+
+// posixTZ is a POSIX TZ string, "std offset [dst [offset],start[/time],end[/time]]",
+// with Mm.w.d rules (Grandstream "Self-Defined Time Zone" syntax).
+const posixTZ = `^(<[+-]?[0-9A-Za-z]+>|[A-Za-z]{3,})-?[0-9]+(:[0-9]{2})?` +
+	`((<[+-]?[0-9A-Za-z]+>|[A-Za-z]{3,})(-?[0-9]+(:[0-9]{2})?)?` +
+	`,M[0-9]+\.[1-5]\.[0-6](/[0-9]+(:[0-9]{2})?)?,M[0-9]+\.[1-5]\.[0-6](/[0-9]+(:[0-9]{2})?)?)?$`
+
+// zoneValue fails a time zone setting that is an IANA name or does not
+// match the vendor's format; an empty value is a zone left alone.
+func (m *emu) zoneValue(what, v, format string) {
+	m.t.Helper()
+	if v == "" {
+		return
+	}
+	if ianaZone.MatchString(v) {
+		m.t.Errorf("%s: %s = %q is an IANA name, which the phone does not accept", m.vendor, what, v)
+	}
+	if !regexp.MustCompile(format).MatchString(v) {
+		m.t.Errorf("%s: %s = %q does not match the vendor format %s", m.vendor, what, v, format)
+	}
+}
+
+// yealinkZone: local_time.time_zone is "+1" or "+5:30", time_zone_name a
+// label (never an IANA name), summer_time 0 off or 1 on with the rules in
+// dst_time_type 1 (by week): start_time/end_time as month/week/weekday/hour
+// and offset_time in minutes (Yealink administrator guide, Time and Date).
+func (m *emu) yealinkZone(c conf) {
+	m.t.Helper()
+	m.zoneValue("local_time.time_zone", c.opt("local_time.time_zone"), `^[+-]?[0-9]{1,2}(:[0-9]{2})?$`)
+	m.zoneValue("local_time.time_zone_name", c.opt("local_time.time_zone_name"), `^[^/]+$`)
+	if c.opt("local_time.summer_time") == "1" {
+		rule := `^([1-9]|1[0-2])/[1-5]/[1-7]/([0-9]|1[0-9]|2[0-3])$`
+		m.zoneValue("local_time.start_time", c.opt("local_time.start_time"), rule)
+		m.zoneValue("local_time.end_time", c.opt("local_time.end_time"), rule)
+		if c.opt("local_time.dst_time_type") != "1" {
+			m.t.Errorf("Yealink: start_time/end_time are week rules, dst_time_type must be 1")
+		}
+		c.opt("local_time.offset_time")
+	}
+}
+
+// polyZone: tcpIpApp.sntp.gmtOffset is seconds east of UTC, the daylight
+// rules month/date/time/dayOfWeek (1 = Sunday) (Poly UC Software
+// Administrator Guide, tcpIpApp.sntp).
+func (m *emu) polyZone(c conf) {
+	m.t.Helper()
+	m.zoneValue("tcpIpApp.sntp.gmtOffset", c.opt("tcpIpApp.sntp.gmtOffset"), `^-?[0-9]+$`)
+	c.takeMatching(`^tcpIpApp\.sntp\.(gmtOffset\.overrideDHCP|daylightSavings\.)`)
+}
+
+// fanvilZone: Time Zone is the offset in quarter hours, Time Zone Name
+// "UTC+1" (Nethesis Tancredi fanvil-X5.tmpl).
+func (m *emu) fanvilZone(c conf) {
+	m.t.Helper()
+	m.zoneValue("Time Zone", c.opt("Time Zone"), `^-?[0-9]+$`)
+	m.zoneValue("Time Zone Name", c.opt("Time Zone Name"), `^UTC([+-][0-9]+(:[0-9]{2})?)?$`)
+	c.takeMatching(`^DST `)
 }

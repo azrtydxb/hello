@@ -23,7 +23,7 @@ func TestGrandstreamFirmwareDirectory(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := string(out)
-		for _, w := range []string{"<P192>" + c.dir + "</P192>", "<P6767>" + c.via + "</P6767>", "<P232></P232>", "<P233></P233>", "<P238>0</P238>"} {
+		for _, w := range []string{"<P192>" + noScheme(c.dir) + "</P192>", "<P6767>" + c.via + "</P6767>", "<P232></P232>", "<P233></P233>", "<P238>0</P238>"} {
 			if !strings.Contains(s, w) {
 				t.Errorf("missing %q in:\n%s", w, s)
 			}

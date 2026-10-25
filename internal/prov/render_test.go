@@ -21,7 +21,7 @@ func renderSample(firmware bool) RenderData {
 		Server: Server{Host: "192.168.10.101", Port: 30508, Transport: "udp", Expiry: 3600},
 		BLF:    []BLFKey{{Number: "1002", Label: "Bob", URI: "sip:1002@hello.test"}, {Number: "1003", Label: "Carol", URI: "sip:1003@hello.test"}},
 		Prov:   ProvInfo{URL: "https://prov.hello.test/p/" + tok + "/", CAURL: "http://prov.hello.test/p/ca.crt", ResyncSeconds: 86400},
-		Time:   TimeInfo{Zone: "Europe/Brussels", NTP: "pool.ntp.org"},
+		Time:   NewTimeInfo("Europe/Brussels", "pool.ntp.org", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)),
 	}
 	if firmware {
 		d.Firmware = &FirmwareInfo{URL: d.Prov.URL + "fw/T54W-96.86.0.70.rom", Dir: d.Prov.URL + "fw", Via: 2, Version: "96.86.0.70"}
@@ -348,10 +348,10 @@ func TestBootBodiesHandOff(t *testing.T) {
 		commonMustNot []string
 		handoffMust   []string
 	}{
-		{Grandstream, []string{"<P237>", "<P145>", "<P212>"}, []string{"<P237>" + own + "</P237>", "<P212>2</P212>", "<P145>0</P145>"}},
+		{Grandstream, []string{"<P237>", "<P145>", "<P212>"}, []string{"<P237>" + strings.TrimSuffix(strings.TrimPrefix(own, "https://"), "/") + "</P237>", "<P212>2</P212>", "<P145>0</P145>"}},
 		{Yealink, []string{"auto_provision.server.url", "dhcp_option"}, []string{"static.auto_provision.server.url = " + own, "static.auto_provision.dhcp_option.enable = 0"}},
 		{Fanvil, []string{"Flash Server IP"}, []string{"Flash Server IP    :prov.hello.test", "Flash File Name    :p/TOKEN/$mac.cfg", "Flash Protocol     :5"}},
-		{Poly, nil, []string{`device.prov.serverName="` + own + `"`, `device.dhcp.bootSrvUseOpt="2"`}},
+		{Poly, nil, []string{`device.prov.serverName="` + own + `"`, `device.dhcp.bootSrvUseOpt="Static"`}},
 	}
 	for _, c := range cases {
 		bb := bootBodies[c.v]

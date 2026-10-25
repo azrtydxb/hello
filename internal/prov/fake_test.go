@@ -237,7 +237,7 @@ func (s *fakeStore) RenderInputs(_ context.Context, id int64) (RenderData, Templ
 		Server: Server{Host: "192.168.10.101", Port: 30508, Transport: "udp", Expiry: 3600},
 		BLF:    p.blf,
 		Prov:   ProvInfo{URL: DeviceURL(s.public, p.plain), CAURL: CAURL(s.public), ResyncSeconds: ResyncSeconds(p.mac, 24*time.Hour)},
-		Time:   TimeInfo{Zone: "Europe/Brussels", NTP: "pool.ntp.org"},
+		Time:   NewTimeInfo("Europe/Brussels", "pool.ntp.org", time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)),
 	}
 	names := make([]string, len(p.books))
 	for i, b := range p.books {
