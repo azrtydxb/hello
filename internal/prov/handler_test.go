@@ -171,6 +171,34 @@ func TestProvEndpointAuth(t *testing.T) {
 	expectEmpty(t, e, e.do(req{path: devPath(tok, "fw/"+fw.Filename)}), 503, ResultUnavailable)
 }
 
+// TestDoubleSlashPaths fails if a phone that appends its own "/" to a URL
+// ending in one is refused on the boot or the token path, if the token is
+// recorded unredacted, or if a traversal after the doubled slash is served.
+func TestDoubleSlashPaths(t *testing.T) {
+	e := newEnv(t, func(o *Options) { o.BootCIDRs = []netip.Prefix{netip.MustParsePrefix("192.168.10.0/24")} })
+	_, tok := e.s.addPhone(Grandstream, "WP822", "000000000001")
+
+	if w := e.do(req{path: "/p/boot//cfg.xml", proto: "http"}); w.Code != 200 || e.last().Result != ResultBootServed {
+		t.Fatalf("boot common: %d %v", w.Code, e.last().Result)
+	}
+	if w := e.do(req{path: "/p/boot//cfg000000000001.xml", proto: "http"}); w.Code != 200 || e.last().Result != ResultBootHandoff {
+		t.Fatalf("boot claim: %d %v", w.Code, e.last().Result)
+	}
+	path := "/p/" + tok + "//" + "cfg000000000001.xml"
+	if w := e.do(req{path: path}); w.Code != 200 || e.last().Result != ResultServed {
+		t.Fatalf("token path: %d %v", w.Code, e.last().Result)
+	}
+	if row := e.last(); strings.Contains(row.PathRedacted, tok) {
+		t.Fatalf("token recorded: %q", row.PathRedacted)
+	}
+
+	for _, p := range []string{"/p/boot//../x", "/p/boot//..//x", "/p/boot///cfg/../cfg.xml", "/p/" + tok + "//../x", "/p/" + tok + "//..//" + macA + ".cfg"} {
+		if w := e.do(req{path: p, proto: "http"}); w.Code != 404 {
+			t.Fatalf("%s served: %d", p, w.Code)
+		}
+	}
+}
+
 // TestFirmwareRange fails if firmware ignores Range.
 func TestFirmwareRange(t *testing.T) {
 	e := newEnv(t)
@@ -226,7 +254,7 @@ func TestFetchRaceWithRearmAndRotation(t *testing.T) {
 	p, t0 := e.s.addPhone(Yealink, "T54W", macA)
 	file := macA + ".cfg"
 
-	// A re-arm lands between PhoneByToken and MarkFetched.
+	//A re-arm lands between PhoneByToken and MarkFetched.
 	e.s.beforeMark = func() { e.s.rotate(p.id, true, true) }
 	if w := e.do(req{path: devPath(t0, file)}); w.Code != 200 {
 		t.Fatalf("fetch: %d", w.Code)
