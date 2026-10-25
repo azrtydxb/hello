@@ -143,6 +143,7 @@ func (q *settings) apply(u sip.ExtUpdate) {
 		ForwardAlways:   u.ForwardAlways,
 		ForwardBusy:     u.ForwardBusy,
 		ForwardNoAnswer: u.ForwardNoAnswer,
+		CallWaiting:     u.CallWaiting,
 	})
 	if err != nil {
 		q.log.Warn("feature-code update failed", "extension", u.Extension, "error", err)

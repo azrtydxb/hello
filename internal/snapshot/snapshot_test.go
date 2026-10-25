@@ -276,6 +276,9 @@ func TestExtensionAndGroupLoad(t *testing.T) {
 		('100', 'A', true, '200', true, true), ('200', 'B', false, '', true, false)`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := conn.Exec(ctx, `UPDATE extensions SET call_waiting = FALSE WHERE number = '100'`); err != nil {
+		t.Fatal(err)
+	}
 	var a, b int64
 	if err := conn.QueryRow(ctx, "SELECT id FROM extensions WHERE number = '100'").Scan(&a); err != nil {
 		t.Fatal(err)
@@ -312,11 +315,17 @@ func TestExtensionAndGroupLoad(t *testing.T) {
 	if !ea.RecordDefault {
 		t.Fatalf("extension 100 record_default = false, want true")
 	}
+	if !ea.NoCallWaiting {
+		t.Fatalf("extension 100 call_waiting = false, want NoCallWaiting")
+	}
 	var boxB int64
 	if err := conn.QueryRow(ctx, "SELECT id FROM voicemail_boxes WHERE extension_id = $1", b).Scan(&boxB); err != nil {
 		t.Fatal(err)
 	}
 	eb, ok := s.Extension("200")
+	if eb.NoCallWaiting {
+		t.Fatalf("extension 200 has call waiting off, want the default on")
+	}
 	if !ok || eb.DND || eb.ForwardAlways != "" || !eb.VoicemailEnabled || eb.VoicemailBoxID != boxB {
 		t.Fatalf("extension 200 = %+v", eb)
 	}
