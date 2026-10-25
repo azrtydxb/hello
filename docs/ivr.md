@@ -35,6 +35,7 @@ Every key, the silence exit and the wrong-key exit use the same kinds:
 | Paging group | a page code such as `*60` | Pages the group one way, as if the caller had dialled the code. The group's allowed callers apply to the caller's number.                                                                     |
 | IVR menu     | a menu name               | Continues in that menu (nesting).                                                                                                                                                             |
 | External     | a number                  | Routed through the outbound routes as if the menu dialled it (the menu's number, else its name, is the source "extension"; add it to a route's source extensions if the route is restricted). |
+| Queue        | a queue name              | Joins the call queue (see [queues.md](queues.md)); its own failover destinations apply.                                                                                                      |
 
 A destination that does not answer returns the caller to the menu, which says
 the invalid-choice prompt and repeats; it does not end the call.

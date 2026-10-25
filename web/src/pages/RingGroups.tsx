@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { QueueSelect } from "../components/QueueSelect";
 import {
   createRingGroup,
   deleteRingGroup,
@@ -100,6 +101,8 @@ function failureText(g: RingGroup): string {
       return `Announcement ${g.failureTarget || UNKNOWN}`;
     case "ivr":
       return `IVR menu ${g.failureTarget || UNKNOWN}`;
+    case "queue":
+      return `Queue ${g.failureTarget || UNKNOWN}`;
     default:
       return "Hang up";
   }
@@ -463,6 +466,9 @@ function validateGroup(d: GroupDraft): Record<string, string> {
   if (d.failureKind === "ivr" && d.failureTarget.trim() === "") {
     e.failureTarget = "Choose the IVR menu.";
   }
+  if (d.failureKind === "queue" && d.failureTarget.trim() === "") {
+    e.failureTarget = "Choose the call queue.";
+  }
   if (d.failureKind === "voicemail") {
     if (d.failureTarget.trim() === "") {
       e.failureTarget = "Enter the extension whose box takes the call.";
@@ -778,6 +784,7 @@ function RingGroupDrawer({
               { value: "voicemail", label: "Voicemail" },
               { value: "external", label: "External number" },
               { value: "ivr", label: "IVR menu" },
+              { value: "queue", label: "Call queue" },
             ]}
             onChange={(e) => set("failureKind", e.target.value as FailureKind)}
           />
@@ -803,25 +810,36 @@ function RingGroupDrawer({
               onChange={(e) => set("failureTarget", e.target.value)}
             />
           )}
-          {d.failureKind !== "none" && d.failureKind !== "ivr" && (
-            <Input
+          {d.failureKind === "queue" && (
+            <QueueSelect
               id={fid("failureTarget")}
-              label={
-                d.failureKind === "voicemail"
-                  ? "Box extension"
-                  : "External number"
-              }
-              mono
+              label="Call queue"
               value={d.failureTarget}
               error={errors.failureTarget}
-              hint={
-                d.failureKind === "voicemail"
-                  ? "The extension whose box takes the call."
-                  : "2 to 20 digits, optionally starting with +."
-              }
-              onChange={(e) => set("failureTarget", e.target.value)}
+              onChange={(target) => set("failureTarget", target)}
             />
           )}
+          {d.failureKind !== "none" &&
+            d.failureKind !== "ivr" &&
+            d.failureKind !== "queue" && (
+              <Input
+                id={fid("failureTarget")}
+                label={
+                  d.failureKind === "voicemail"
+                    ? "Box extension"
+                    : "External number"
+                }
+                mono
+                value={d.failureTarget}
+                error={errors.failureTarget}
+                hint={
+                  d.failureKind === "voicemail"
+                    ? "The extension whose box takes the call."
+                    : "2 to 20 digits, optionally starting with +."
+                }
+                onChange={(e) => set("failureTarget", e.target.value)}
+              />
+            )}
         </fieldset>
         <FormAlert message={formError} unmatched={unmatched} />
       </form>

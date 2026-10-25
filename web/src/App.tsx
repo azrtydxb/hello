@@ -69,6 +69,8 @@ import { RouteTest } from "./pages/RouteTest";
 import { RoutesPage } from "./pages/Routes";
 import { Paging } from "./pages/Paging";
 import { Ivr } from "./pages/Ivr";
+import { Queues } from "./pages/Queues";
+import { Wallboard } from "./pages/Wallboard";
 import { RingGroups } from "./pages/RingGroups";
 import { System } from "./pages/System";
 import { Trunks } from "./pages/Trunks";
@@ -93,6 +95,8 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/ring-groups": RingGroups,
   "/paging": Paging,
   "/ivr": Ivr,
+  "/queues": Queues,
+  "/wallboard": Wallboard,
   "/recordings": Recordings,
   "/announcements": Announcements,
   "/system": System,

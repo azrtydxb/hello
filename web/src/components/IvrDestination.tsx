@@ -10,6 +10,7 @@ import {
   type RingGroup,
 } from "../api";
 import { Input, Select } from "../design/azrty/components";
+import { QueueSelect } from "./QueueSelect";
 
 /** What the destination pickers choose from; each list loads on its own. */
 export interface DestinationChoices {
@@ -92,6 +93,7 @@ const TARGET_LABEL: Partial<Record<IvrDestinationKind, string>> = {
   paging: "Paging group",
   ivr: "IVR menu",
   external: "Number",
+  queue: "Call queue",
 };
 
 /**
@@ -137,6 +139,15 @@ export function DestinationPicker({
       />
       {value.kind === "hangup" ? (
         <span />
+      ) : value.kind === "queue" ? (
+        <QueueSelect
+          id={`${id}-target`}
+          label="Call queue"
+          value={value.target}
+          error={targetError}
+          exclude={selfName}
+          onChange={(target) => onChange({ ...value, target })}
+        />
       ) : options ? (
         <Select
           id={`${id}-target`}

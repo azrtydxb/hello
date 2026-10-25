@@ -1,3 +1,4 @@
+import { QueueSelect } from "../components/QueueSelect";
 import {
   useEffect,
   useRef,
@@ -409,6 +410,7 @@ const DESTINATION_KIND: Record<
   external: { label: "External", icon: "phone-forwarded" },
   sip_uri: { label: "SIP URI", icon: "at-sign" },
   ivr: { label: "IVR menu", icon: "list-tree" },
+  queue: { label: "Call queue", icon: "headset" },
 };
 
 function Destination({
@@ -1203,6 +1205,7 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   external: "External number",
   sip_uri: "SIP URI",
   ivr: "IVR menu",
+  queue: "Call queue",
 };
 
 function InboundDrawer({
@@ -1346,6 +1349,7 @@ function InboundDrawer({
               { value: "external", label: "External number" },
               { value: "sip_uri", label: "SIP URI" },
               { value: "ivr", label: "IVR menu" },
+              { value: "queue", label: "Call queue" },
             ]}
             onChange={(e) =>
               set(
@@ -1354,7 +1358,15 @@ function InboundDrawer({
               )
             }
           />
-          {d.destinationKind === "ivr" ? (
+          {d.destinationKind === "queue" ? (
+            <QueueSelect
+              id={id("destination")}
+              label={DESTINATION_LABEL.queue}
+              value={d.destination}
+              error={v.errors.destination}
+              onChange={(target) => set("destination", target)}
+            />
+          ) : d.destinationKind === "ivr" ? (
             <Select
               id={id("destination")}
               label={DESTINATION_LABEL.ivr}
