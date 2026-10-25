@@ -299,6 +299,13 @@ type SIP struct {
 	PageMaxDuration time.Duration
 	PageConcurrent  int
 	PageFanout      int
+	// A paging group with a multicast channel also sends the page there:
+	// PageMulticastIface (HELLO_PAGE_MULTICAST_IFACE, default the system's
+	// choice) is the network interface the packets leave on, which must be on
+	// the phones' LAN, and PageMulticastTTL (HELLO_PAGE_MULTICAST_TTL, 1)
+	// how many routers they may cross.
+	PageMulticastIface string
+	PageMulticastTTL   int
 	// RTPPortMin and RTPPortMax (HELLO_RTP_PORT_MIN/MAX, default
 	// 20000-21000) are the UDP port range anchored media sessions draw
 	// their relay sockets from.
@@ -718,6 +725,8 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.PageMaxDuration = time.Duration(r.positiveInt("HELLO_PAGE_MAX_SECONDS", 120)) * time.Second
 	c.PageConcurrent = r.positiveInt("HELLO_PAGE_CONCURRENT", 5)
 	c.PageFanout = r.positiveInt("HELLO_PAGE_FANOUT", 200)
+	c.PageMulticastIface = r.getenv("HELLO_PAGE_MULTICAST_IFACE")
+	c.PageMulticastTTL = r.positiveInt("HELLO_PAGE_MULTICAST_TTL", 1)
 	c.RTPPortMin = r.port("HELLO_RTP_PORT_MIN", 20000)
 	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
 	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"

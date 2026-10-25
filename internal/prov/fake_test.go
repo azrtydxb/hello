@@ -64,6 +64,8 @@ type fakePhone struct {
 	handoffIP                  netip.Addr
 	admin, secret, user, label string
 	books                      []phonebook.Book // the phone's delivered set
+	multicast                  *MulticastInfo   // the phone group's multicast paging
+	ptt                        *PTTInfo         // its PTT, for a phone that supports it
 	bookVersion                int              // bumped by a test to stand for a book change
 	personalBook               bool             // the set holds a personal book
 }
@@ -248,6 +250,7 @@ func (s *fakeStore) RenderInputs(_ context.Context, id int64) (RenderData, Templ
 		names[i] = b.Name
 	}
 	d.Book = NewBookInfo(DeviceURL(s.public, p.plain), names, DefaultBookRefresh)
+	d.Multicast, d.PTT = p.multicast, p.ptt
 	if p.pinned != nil {
 		d.Firmware = &FirmwareInfo{URL: FirmwareURL(s.public, p.plain, p.pinned.Filename), Dir: strings.TrimSuffix(DeviceURL(s.public, p.plain), "/") + "/fw", Via: UpgradeVia(s.public.Scheme + "://"), Version: p.pinned.Version}
 	}

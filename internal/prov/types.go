@@ -116,6 +116,9 @@ type Phone struct {
 	Model         string
 	Label         string
 	AdminPassword string // the phone's web UI password (spec S-20); masked in previews
+	// PTTCapable is set for a phone with the PTT and group paging feature
+	// set (SupportsPTT): the Grandstream WP816, WP826 and WP836.
+	PTTCapable bool
 }
 
 // Line is the SIP account of the phone's bound device.

@@ -34,6 +34,16 @@ type Fanout struct {
 	// callerAddr is where the caller's RTP came from, once seen: the tone
 	// of PlayCaller follows it through NAT.
 	callerAddr atomic.Pointer[net.UDPAddr]
+
+	// mc, once set by EnableMulticast, is where the fanned-out stream is
+	// also sent.
+	mc atomic.Pointer[multicastOut]
+}
+
+// multicastOut is a page's multicast destination and its G.711 payload type.
+type multicastOut struct {
+	addr *net.UDPAddr
+	pt   uint8
 }
 
 // NewFanout binds the caller-side and member-side sockets from the port
@@ -70,7 +80,7 @@ func bindFrom(minPort, maxPort int, other *net.UDPConn) (*net.UDPConn, error) {
 		if p == skip {
 			continue
 		}
-		c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: p})
+		c, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: p})
 		if err != nil {
 			last = err
 			continue
@@ -156,6 +166,9 @@ func (f *Fanout) recvCaller() {
 		for _, a := range targets {
 			// A write error is a transient ICMP or the teardown race.
 			_, _ = f.member.WriteToUDP(out, a)
+		}
+		if mc := f.mc.Load(); mc != nil {
+			_, _ = f.member.WriteToUDP(f.multicastPacket(out, mc.pt), mc.addr)
 		}
 		f.packets.Add(1)
 	}

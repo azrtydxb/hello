@@ -29,7 +29,11 @@
          the GXP/GRP template's value for it and is still to be confirmed on a WP822 (verify). The
          plain "Auto Answer" option (P90) is deliberately not set: it would answer every call. -->
     <P298>1</P298>
-{{- /* Paging button and multicast paging (phone-feature-parity S-30, phonebooks-ptt P-15). Keys from Grandstream's own config templates wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83 (config-template_09302026) and the WP8x6 Administration Guide "PTT/Paging": P22208 multicast paging on, P1568 codec (0 PCMU, 8 PCMA, 9 G.722), P1569 and up listening address and label pairs (ten slots); the WP8x6 only: P22556 PTT/Paging, P82317 side key (0 PTT/Paging), P22177 PTT, P22183 PTT/group paging address, P22184 default channel, P22179 accept while busy, P22180 codec, channels 1 to 25 at P82001 + 5 (n-1): available, transmit, subscribe, join, name. All unverified on a phone (verify). */}}
+{{- /* Paging button and multicast paging (phone-feature-parity S-30, phonebooks-ptt P-15). Keys from Grandstream's own config templates wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83 (config-template_09302026) and the WP8x6 Administration Guide "PTT/Paging": P22208 multicast paging on, P1568 codec (0 PCMU, 8 PCMA, 9 G.722), P1569 and up listening address and label pairs (ten slots); the WP8x6 only: P22556 PTT/Paging, P82317 side key (0 PTT/Paging), P22177 PTT, P22183 PTT/group paging address, P22184 default channel, P22179 accept while busy, P22180 codec, channels 1 to 25 at P82001 + 5 (n-1): available, transmit, subscribe, join, name. P26072 (WP8x6) plays the warning beep before an auto answer and P26071 (WP8x6) does not mute on answer. All unverified on a phone (verify). */}}
+{{- if .Phone.PTTCapable}}
+    <P26072>1</P26072>
+    <P26071>0</P26071>
+{{- end}}
 {{- with .Multicast}}
     <P22208>1</P22208>
     <P1568>{{.GSCodec}}</P1568>

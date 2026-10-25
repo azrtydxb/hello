@@ -206,6 +206,7 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		return d, prov.Template{}, prov.ErrSealed
 	}
 	d.Phone.MACUpper = strings.ToUpper(d.Phone.MAC)
+	d.Phone.PTTCapable = prov.SupportsPTT(d.Phone.Vendor, d.Phone.Model)
 	token, err := s.openToken(phoneID, tokenEnc)
 	if err != nil {
 		return d, prov.Template{}, err
