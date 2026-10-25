@@ -194,6 +194,9 @@ type Prov struct {
 	// Resync (HELLO_PROV_RESYNC, default 24h, at least 1m) is the phones'
 	// re-check interval.
 	Resync time.Duration
+	// BookRefresh (HELLO_PROV_BOOK_REFRESH, default 15m, at least 1m) is how
+	// often phones that have a refresh setting re-fetch their address book.
+	BookRefresh time.Duration
 	// Timezone (HELLO_PROV_TIMEZONE, default UTC) and NTP
 	// (HELLO_PROV_NTP, default pool.ntp.org) set the phones' clocks.
 	Timezone string
@@ -504,6 +507,7 @@ func (r *reader) prov() Prov {
 		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
 		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
 		Resync:             r.days("HELLO_PROV_RESYNC", 24*time.Hour),
+		BookRefresh:        r.days("HELLO_PROV_BOOK_REFRESH", 15*time.Minute),
 		Timezone:           r.optional("HELLO_PROV_TIMEZONE", "UTC"),
 		NTP:                r.optional("HELLO_PROV_NTP", "pool.ntp.org"),
 		AuditRetention:     r.days("HELLO_PROV_AUDIT_RETENTION", 90*24*time.Hour),
@@ -542,6 +546,9 @@ func (r *reader) prov() Prov {
 	}
 	if p.Resync < time.Minute {
 		r.fail("HELLO_PROV_RESYNC", errors.New("must be at least 1m"))
+	}
+	if p.BookRefresh < time.Minute {
+		r.fail("HELLO_PROV_BOOK_REFRESH", errors.New("must be at least 1m"))
 	}
 	if !tzRe.MatchString(p.Timezone) || strings.Contains(p.Timezone, "..") {
 		r.fail("HELLO_PROV_TIMEZONE", errors.New("must be a time zone name such as Europe/Brussels"))

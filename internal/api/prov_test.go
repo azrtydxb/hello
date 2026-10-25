@@ -151,6 +151,23 @@ func TestPhoneCRUD(t *testing.T) {
 		t.Fatalf("updated = %v", upd)
 	}
 
+	// A phone is created in a phone group, which must exist.
+	site, err := p.st.CreatePhoneGroup(context.Background(), "test", store.GroupInput{Name: "Site", IncludeExtensions: true, IncludeCompany: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grp := map[string]any{"id": site.ID}
+	c.must(http.StatusBadRequest, "POST", "/api/v1/phones", map[string]any{
+		"mac": "805ec0aabb04", "vendor": "yealink", "model": "T54W", "extensionId": p.ext101["id"], "groupId": 999999})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/phones", map[string]any{
+		"mac": "805ec0aabb04", "vendor": "yealink", "model": "T54W", "extensionId": p.ext101["id"], "groupId": 0})
+	inGroup := c.must(http.StatusCreated, "POST", "/api/v1/phones", map[string]any{
+		"mac": "805ec0aabb04", "vendor": "yealink", "model": "T54W", "extensionId": p.ext101["id"], "groupId": grp["id"]}).json(t)
+	if g, _ := inGroup["groupId"].(float64); int64(g) != site.ID {
+		t.Fatalf("created in group = %v", inGroup["groupId"])
+	}
+	c.must(http.StatusNoContent, "DELETE", "/api/v1/phones/"+fmt.Sprint(inGroup["id"]), nil)
+
 	// Unbinding disables; an unbound phone cannot be enabled.
 	unbound := c.must(http.StatusOK, "PATCH", path, map[string]any{"deviceId": nil}).json(t)
 	if unbound["deviceId"] != nil || unbound["enabled"] != false {
@@ -827,8 +844,9 @@ func TestMaskSecrets(t *testing.T) {
 		Line:     prov.Line{Password: "sip-secret"},
 		Prov:     prov.ProvInfo{URL: testPublicURL + "/p/" + token + "/"},
 		Firmware: &prov.FirmwareInfo{URL: testPublicURL + "/p/" + token + "/fw/x.rom"},
+		Book:     prov.NewBookInfo(testPublicURL+"/p/"+token+"/", []string{"Extensions", "Company"}, prov.DefaultBookRefresh),
 	}
-	fw := d.Firmware
+	fw, book := d.Firmware, d.Book
 	maskSecrets(&d)
 	b, _ := json.Marshal(d)
 	for _, s := range []string{token, "admin-pw", "sip-secret"} {
@@ -841,6 +859,12 @@ func TestMaskSecrets(t *testing.T) {
 	}
 	if strings.Contains(fw.URL, mask) {
 		t.Fatal("masking changed the caller's firmware value in place")
+	}
+	if d.Book.URL != testPublicURL+"/p/"+mask+"/pb/0.xml" || d.Book.Sources[1].URL != testPublicURL+"/p/"+mask+"/pb/2.xml" {
+		t.Fatalf("masked book URLs = %s, %s", d.Book.URL, d.Book.Sources[1].URL)
+	}
+	if strings.Contains(book.URL, mask) || strings.Contains(book.Sources[0].URL, mask) {
+		t.Fatal("masking changed the caller's book value in place")
 	}
 }
 
