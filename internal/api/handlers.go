@@ -286,6 +286,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		ForwardNoAnswer  *string `json:"forwardNoAnswer"`
 		VoicemailEnabled *bool   `json:"voicemailEnabled"`
 		RecordDefault    *bool   `json:"recordDefault"`
+		AllowIntercom    *bool   `json:"allowIntercom"`
 		DirectoryHidden  *bool   `json:"directoryHidden"`
 	}
 	if !decode(w, r, &in) {
@@ -293,7 +294,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Number == nil && in.Name == nil && in.ExternalNumber == nil && in.DND == nil &&
 		in.ForwardAlways == nil && in.ForwardBusy == nil && in.ForwardNoAnswer == nil &&
-		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.DirectoryHidden == nil {
+		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.AllowIntercom == nil && in.DirectoryHidden == nil {
 		badRequest(w, "a field to change is required")
 		return
 	}
@@ -317,7 +318,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		Number: in.Number, Name: in.Name, ExternalNumber: in.ExternalNumber,
 		DND: in.DND, ForwardAlways: in.ForwardAlways, ForwardBusy: in.ForwardBusy,
 		ForwardNoAnswer: in.ForwardNoAnswer, VoicemailEnabled: in.VoicemailEnabled,
-		RecordDefault: in.RecordDefault, DirectoryHidden: in.DirectoryHidden,
+		RecordDefault: in.RecordDefault, AllowIntercom: in.AllowIntercom, DirectoryHidden: in.DirectoryHidden,
 	}, s.check())
 	if err != nil {
 		s.configError(w, "extension", err)

@@ -281,6 +281,13 @@ type SIP struct {
 	// MaxCallDuration ends a connected call that has run this long (both
 	// legs get BYE), so a call whose phones vanished without BYE is cleared.
 	MaxCallDuration time.Duration
+	// Server paging (phonebooks-ptt spec P-12): a page ends after
+	// PageMaxDuration (HELLO_PAGE_MAX_SECONDS, 120 s); a node runs at most
+	// PageConcurrent pages (HELLO_PAGE_CONCURRENT, 5) of at most PageFanout
+	// legs (HELLO_PAGE_FANOUT, 200).
+	PageMaxDuration time.Duration
+	PageConcurrent  int
+	PageFanout      int
 	// RTPPortMin and RTPPortMax (HELLO_RTP_PORT_MIN/MAX, default
 	// 20000-21000) are the UDP port range anchored media sessions draw
 	// their relay sockets from.
@@ -672,6 +679,9 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		StateTimeout:       r.duration("HELLO_SIP_STATE_TIMEOUT", 200*time.Millisecond),
 		MaxCallDuration:    r.duration("HELLO_SIP_MAX_CALL_DURATION", 4*time.Hour),
 	}
+	c.PageMaxDuration = time.Duration(r.positiveInt("HELLO_PAGE_MAX_SECONDS", 120)) * time.Second
+	c.PageConcurrent = r.positiveInt("HELLO_PAGE_CONCURRENT", 5)
+	c.PageFanout = r.positiveInt("HELLO_PAGE_FANOUT", 200)
 	c.RTPPortMin = r.port("HELLO_RTP_PORT_MIN", 20000)
 	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
 	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"

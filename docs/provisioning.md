@@ -507,6 +507,69 @@ template (the directory itself does not change). `HELLO_PROV_BOOK_REFRESH`
 (default `15m`, at least `1m`) sets the refresh interval where the phone
 has such a setting.
 
+## Paging and intercom
+
+Hello can page a group of phones, or call one phone, so that the phones
+answer by themselves on the speaker.
+
+- **Paging groups.** An admin defines a group (Paging groups in the
+  console, or `/api/v1/paging-groups`): a name, a page code such as `*60`,
+  its member extensions (up to 200), the extensions allowed to page (empty
+  means any internal extension) and a priority. Dial the code from any
+  phone registered on Hello. Hello forks the call to every registered phone
+  of every member with `Call-Info: <sip:host>;answer-after=0` and an
+  `Alert-Info` auto-answer value, and the phones answer on the speaker.
+  Audio is one way, from the caller to the members: whatever a member sends
+  back is dropped. When the caller hangs up, every leg ends. A page also
+  ends after `HELLO_PAGE_MAX_SECONDS` (120), and the caller hears busy when
+  no member answers within 10 seconds.
+- **Who is skipped.** Members on DND, members in a call (a page never
+  interrupts a call), members that are not registered, and the caller's own
+  extension. An `emergency` group ignores DND but still never interrupts a
+  call, and preempts a running `normal` page of the same group; otherwise a
+  second caller on a group that is being paged hears busy. At most
+  `HELLO_PAGE_FANOUT` (200) legs per page and `HELLO_PAGE_CONCURRENT` (5)
+  pages per node; beyond that the caller hears busy.
+- **Intercom.** The feature code `*80` followed by an extension number
+  (`*80200`) calls that extension's phones with the same headers and
+  two-way audio. It respects DND, never answers a phone that is in a call
+  (that phone rings normally), and does not follow forwarding. An extension
+  with `allowIntercom` off (`PATCH /api/v1/extensions/{id}`) rings normally.
+- **CDRs.** A page or intercom call has `kind` `page` or `intercom`; the
+  call trace lists each page member's result (`answered`, `busy`, `dnd`,
+  `no_answer`, `no_registration`).
+- **Security.** Auto-answer turns a phone into a listening device, so Hello
+  adds these headers only on the legs it creates for a page or an intercom
+  call. `Alert-Info`, `Call-Info` and `Answer-After` headers in anything a
+  phone or trunk sends are never forwarded, forwarded and transferred calls
+  never carry them, and a trunk dialling a page or intercom code gets `403`.
+  Provisioned phones accept auto-answer requests from any source: the
+  vendors offer no restriction to the server.
+- **Provisioning.** The built-in templates enable what each vendor
+  documents:
+
+  | Vendor       | Key written                                                                                           | Status                                                                                                                    |
+  | ------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+  | Grandstream  | `P298 = 1`, Allow Auto Answer by Call-Info/Alert-Info (the plain account Auto Answer, P90, stays off) | the setting is in the WP8xx Administration Guide, the P-value is from GXP/GRP templates and is to be confirmed on a WP822 |
+  | Yealink      | `features.intercom.allow = 1`, `features.intercom.tone = 1`, `features.intercom.mute = 0`             | Administrator Guide, "Intercom"; Alert-Info value to be confirmed                                                         |
+  | Poly         | `voIpProt.SIP.alertInfo.1.value = "Auto Answer"`, class `ringAutoAnswer`                              | to be confirmed on a VVX                                                                                                  |
+  | Snom, Fanvil | none: enable auto answer by Call-Info/Alert-Info on the phone                                         | no documented provisioning key found                                                                                      |
+
+  Grandstream publishes no WP8xx config template any more, and neither the
+  WP8xx guide nor its release notes give P-values for the speaker volume or
+  the warning beep (the beep before an auto answer is on by default). Set
+  them in a copied template if you need other values. The WP822 has a PTT
+  button instead of programmable keys: dial the page code on the handset.
+
+- **Troubleshooting.** A phone that ignores the headers rings as an
+  ordinary call and the CDR shows `no_answer` for it: check the key above on
+  that phone. Hello decides the `Alert-Info` value from the phone's
+  `User-Agent` at registration (`auto-answer` for Grandstream and unknown
+  phones).
+- **Multicast.** This is Hello's server paging, through Hello, so it works
+  across subnets. The phones' own multicast paging (LAN only, no server)
+  is separate and not yet provisioned.
+
 ## Security model and its limits
 
 What protects the phones' secrets:

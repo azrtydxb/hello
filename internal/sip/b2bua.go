@@ -119,6 +119,13 @@ type call struct {
 	// anchorHost is the advertised IPv4 for relay SDP answers.
 	anchorHost string
 
+	// kind is the CDR kind: call (default), page or intercom (Phase E).
+	// autoAnswer adds the auto-answer headers to this call's legs (an
+	// intercom call only, spec P-16). page is the state of a server page.
+	kind       string
+	autoAnswer bool
+	page       *pageState
+
 	groupName     string
 	groupStrategy string
 	groupFn       func()
@@ -216,6 +223,9 @@ type leg struct {
 	uri       *sip.Uri
 	abandoned bool // guarded by c.mu: failed over, may no longer win
 	stage     int  // the forwarding stage this fork belongs to; setup ignores older stages' events
+	// pl is set on a page member leg (Phase E): it carries the page's
+	// per-member state and offer.
+	pl *pageLeg
 }
 
 func (l *leg) session() *sipgo.DialogClientSession {
@@ -272,6 +282,12 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	c := s.newCall(req)
 	c.callerNum, c.callerName, c.callerDevice = dev.Extension, dev.ExtensionName, dev.Username
+	// A paging group's code (Phase E, spec P-12) pages its members; the
+	// store keeps page codes from colliding with feature codes.
+	if g, ok := snap.PagingGroup(c.dialled); ok {
+		c.handlePage(tx, snap, g)
+		return
+	}
 	// A feature code dialled as a call (*78, *72599, *97) is dispatched here
 	// and never reaches routing.
 	if fc, arg, ok := matchFeatureCode(snap, c.dialled); ok {
@@ -729,6 +745,10 @@ func (c *call) answer(w *leg) {
 // The dialogs stay routable until that BYE completes, so a caller ACK still
 // in flight confirms the A dialog the BYE needs.
 func (c *call) hangup(side string) {
+	if c.page != nil {
+		c.pageHangup(side)
+		return
+	}
 	c.mu.Lock()
 	if c.hungUp {
 		c.mu.Unlock()
@@ -860,6 +880,10 @@ func (c *call) expire() {
 // endBoth ends a connected call for a system reason (max duration, drain
 // timeout): BYE to both legs, CDR side system.
 func (c *call) endBoth(reason string) {
+	if c.page != nil {
+		c.pageEndBoth(reason)
+		return
+	}
 	c.mu.Lock()
 	if c.hungUp || c.ended {
 		c.mu.Unlock()
@@ -916,6 +940,7 @@ func (c *call) end(status int, side, reason, result string) {
 		}
 		c.mu.Unlock()
 		c.closeMedia()
+		c.pageStop()
 		if held {
 			c.s.m.HoldActive.Dec()
 		}
@@ -1002,7 +1027,7 @@ func (c *call) record(status int, side, reason, result string) {
 		DurationMs: end.Sub(c.start).Milliseconds(), SIPNode: c.s.cfg.NodeID, MediaMode: "direct",
 		FinalStatus: status, TerminationSide: side, FailureReason: reason,
 		Direction: c.direction, OriginalDestination: c.dialled, RewrittenDestination: c.rewritten,
-		Route: c.route, Trunk: c.trunkName, Trace: trace,
+		Route: c.route, Trunk: c.trunkName, Trace: trace, Kind: c.kind,
 	}
 	c.mu.Unlock()
 	if !answer.IsZero() {
@@ -1246,6 +1271,7 @@ func (l *leg) invite() (*sip.Request, error) {
 			}
 		}
 	}
+	l.addPagingHeaders(req)
 	req.SetTransport("UDP")
 	switch {
 	case l.trunk != nil:
@@ -1439,6 +1465,9 @@ func (s *Server) matchDialog(req *sip.Request) (dialogRef, bool) {
 		}
 		return ref, false
 	}
+	if c.page != nil {
+		return s.matchPageLeg(ref, req)
+	}
 	c.mu.Lock()
 	w := c.winner
 	c.mu.Unlock()
@@ -1514,6 +1543,10 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 		s.haByeRequest(c, hom, ref.leg != nil, req, tx)
 		return
 	}
+	if c.page != nil {
+		s.pageBye(c, ref, req, tx)
+		return
+	}
 	c.mu.Lock()
 	w, connected := c.winner, c.connected
 	c.mu.Unlock()
@@ -1549,6 +1582,11 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	c := ref.c
+	if c.page != nil {
+		// A page is one-way by construction: no hold, no renegotiation.
+		s.respond(tx, req, sip.StatusNotAcceptableHere, "Not Acceptable Here")
+		return
+	}
 	c.mu.Lock()
 	w, connected := c.winner, c.connected
 	c.mu.Unlock()

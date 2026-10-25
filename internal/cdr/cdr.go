@@ -26,6 +26,13 @@ const (
 	DirectionOutbound = "outbound"
 )
 
+// Call kinds (migration 00011).
+const (
+	KindCall     = "call"
+	KindPage     = "page"
+	KindIntercom = "intercom"
+)
+
 // Termination sides.
 const (
 	SideCaller = "caller"
@@ -63,6 +70,8 @@ type Record struct {
 	RTPPackets  *int64
 	RTPLost     *int64
 	RTPJitterMs *float64
+	// Kind is call (default), page or intercom.
+	Kind string
 }
 
 // Execer is the subset of a pgx pool or connection the writer needs.
@@ -121,9 +130,9 @@ const insert = `INSERT INTO cdrs (correlation_id, sip_call_id, source, destinati
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
-    rtp_packets, rtp_lost, rtp_jitter_ms)
+    rtp_packets, rtp_lost, rtp_jitter_ms, kind)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24)
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
 ON CONFLICT (correlation_id) DO NOTHING`
 
 // Run writes queued records until ctx is cancelled, retrying each with
@@ -193,6 +202,10 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	if direction == "" {
 		direction = DirectionInternal
 	}
+	kind := r.Kind
+	if kind == "" {
+		kind = KindCall
+	}
 	trace := r.Trace
 	if trace == nil {
 		trace = routing.Trace{}
@@ -205,7 +218,7 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
-		r.RTPPackets, r.RTPLost, r.RTPJitterMs)
+		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind)
 	return err
 }
 

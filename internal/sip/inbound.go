@@ -53,6 +53,13 @@ func (s *Server) inboundCall(req *sip.Request, tx sip.ServerTransaction, snap *s
 	c := s.newCall(req)
 	from := req.From()
 	c.direction, c.trunkName = cdr.DirectionInbound, t.Name
+	if isPageOrIntercomCode(snap, req.Recipient.User) {
+		// Auto-answer turns a phone into a listening device: only an
+		// authenticated internal caller may use it (spec P-16).
+		s.respond(tx, req, sip.StatusForbidden, "Forbidden")
+		c.record(sip.StatusForbidden, cdr.SideSystem, "page or intercom code dialled from a trunk", ResultFailed)
+		return
+	}
 	c.callerNum, c.callerName = from.Address.User, from.DisplayName
 	c.trace.Add(fmt.Sprintf("Source %s identifies trunk %s", s.clientIP(req), t.Name))
 	// An inbound call counts against its source trunk's max_calls too.

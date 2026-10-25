@@ -20,6 +20,15 @@
     <P{{add 324 (mul $i 3)}}>0</P{{add 324 (mul $i 3)}}>
     <P{{add 325 (mul $i 3)}}>{{xml $k.Number}}</P{{add 325 (mul $i 3)}}>
 {{- end}}
+    <!-- Paging and intercom (Kuvryn Hello phonebooks-ptt spec P-12, P-13): answer by itself, on
+         the speaker after a short beep, when Hello sends Call-Info answer-after=0. The WP8xx
+         Administration Guide names this setting "Account > Call Settings > Allow Auto Answer by
+         Call-Info/Alert-Info" (https://documentation.grandstream.com/knowledge-base/wp8xx-administration-guide/)
+         and the 1.0.11.75 release notes list a warning tone upon auto answer, but Grandstream no
+         longer publishes a WP8xx config template and neither document gives the P-value: P298 is
+         the GXP/GRP template's value for it and is still to be confirmed on a WP822 (verify). The
+         plain "Auto Answer" option (P90) is deliberately not set: it would answer every call. -->
+    <P298>1</P298>
     <P2>{{xml .Phone.AdminPassword}}</P2>
     <P212>2</P212>
 {{- with .Prov.CACertPEM}}
