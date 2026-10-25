@@ -194,7 +194,6 @@ type MessageFilter struct {
 }
 
 var (
-	extNumberRe      = regexp.MustCompile(`^[0-9]{2,10}$`)
 	externalNumberRe = regexp.MustCompile(`^\+?[0-9*#]{2,32}$`)
 	contentTypeRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(\s*;.*)?$`)
 )
@@ -748,6 +747,7 @@ func (s *Store) ListMessages(ctx context.Context, f MessageFilter, before int64,
 		}
 	}
 	args = append(args, limit)
+	//nolint:gosec // G202: only constants and numbered placeholders are joined into the SQL; values are bound.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, batch, sender, sender_kind, sender_name, actor, recipient, recipient_kind, scope, scope_ref, trunk, content_type,
 		       body_text, body_len, status, detail, attempts, created_at, expires_at, delivered_at, n, nd, np, nf
@@ -814,6 +814,7 @@ func (s *Store) ListMessageConversations(ctx context.Context, f MessageFilter, l
 	args := []any{}
 	where := messageWhere(f, &args)
 	args = append(args, limit)
+	//nolint:gosec // G202: only constants and numbered placeholders are joined into the SQL; values are bound.
 	rows, err := s.db.QueryContext(ctx, `
 		WITH keyed AS (
 			SELECT m.id, m.batch, m.scope, m.scope_ref, (`+convKey+`) AS k FROM messages m`+where+`)
