@@ -269,6 +269,10 @@ type SIP struct {
 	TrustedProxies []netip.Prefix
 	// DrainTimeout bounds how long a draining node waits for its calls.
 	DrainTimeout time.Duration
+	// RolloutWait bounds how long a node told to stop waits for the restart
+	// token and a READY peer before it drains (lifecycle.RolloutGate); 0
+	// turns the gate off (the default; kw sets it).
+	RolloutWait time.Duration
 	// MemberHeartbeat is how often the node refreshes its membership record.
 	MemberHeartbeat time.Duration
 	// MaxCallDuration ends a connected call that has run this long (both
@@ -683,6 +687,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	if c.DrainTimeout == 0 {
 		r.fail("HELLO_DRAIN_TIMEOUT", errors.New("must be positive"))
 	}
+	c.RolloutWait = r.duration("HELLO_ROLLOUT_WAIT", 0)
 	c.MemberHeartbeat = r.duration("HELLO_MEMBER_HEARTBEAT", time.Second)
 	c.HATakeoverEnabled = r.getenv("HELLO_HA_TAKEOVER_ENABLED") != "false"
 	c.HATakeoverPoll = r.duration("HELLO_HA_TAKEOVER_POLL", time.Second)

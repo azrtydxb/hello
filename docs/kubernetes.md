@@ -371,7 +371,7 @@ expressed:
 | Concern           | kw (raw manifests)                                                              | Chart                                                          |
 | ----------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | hello-sip nodes   | Deployments `hello-sip-1`, `hello-sip-2`, one headless Service each, `Recreate` | One StatefulSet, one headless Service, ordered `RollingUpdate` |
-| Staggered rollout | `preStop` on hello-sip-2 waits for hello-sip-1's `/readyz`                      | Inherent: the next pod is not replaced until the last is ready |
+| Staggered rollout | Rollout gate: a stopping node takes a Valkey token and waits for a READY peer   | Inherent: the next pod is not replaced until the last is ready |
 | Node identity     | Pod name of a Deployment; advertised Service name                               | Stable pod name; advertised pod DNS name                       |
 | Kamailio          | Pinned to master-11, ports 30508/9071                                           | `hostNetwork` option, `nodeSelector`, ports are values         |
 | Secrets           | Five Sync-managed SOPS Secrets                                                  | One existing Secret by reference                               |

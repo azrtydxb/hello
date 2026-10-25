@@ -93,6 +93,9 @@ func memberKey(id string) string { return "hello:member:" + id }
 func tombKey(id string) string   { return "hello:member:tomb:" + id }
 func drainKey(id string) string  { return "hello:drain:" + id }
 
+// rolloutKey is the one-per-kind restart token (AcquireRollout).
+func rolloutKey(kind Kind) string { return "hello:rollout:" + string(kind) }
+
 // Store reads and writes membership.
 type Store struct{ c valkey.Client }
 
@@ -160,6 +163,50 @@ func (s *Store) Members(ctx context.Context) ([]Member, error) {
 	})
 	return out, nil
 }
+
+// AcquireRollout takes (or, when id already holds it, renews) the restart
+// token of a node kind: one node at a time may start a planned shutdown,
+// so a rollout that stops every node of a kind at once (Kuvryn Sync applies
+// hello-sip-1 and hello-sip-2 together) cannot leave a draining node with
+// no READY survivor. The token expires after ttl, so a holder that died
+// does not block its peers for ever. It returns the node that holds the
+// token afterwards: id on success, the other node when it is taken.
+func (s *Store) AcquireRollout(ctx context.Context, kind Kind, id string, ttl time.Duration) (string, error) {
+	key := rolloutKey(kind)
+	if err := s.c.Do(ctx, s.c.B().Set().Key(key).Value(id).Nx().Px(ttl).Build()).Error(); err == nil {
+		return id, nil
+	} else if !valkey.IsValkeyNil(err) {
+		return "", fmt.Errorf("cluster: rollout %s: %w", kind, err)
+	}
+	// Taken: by this node (renew) or another. The renewal is a compare and
+	// extend, so a token that changed hands in between is not stolen back.
+	n, err := renewRollout.Exec(ctx, s.c, []string{key}, []string{id, strconv.FormatInt(ttl.Milliseconds(), 10)}).AsInt64()
+	if err != nil {
+		return "", fmt.Errorf("cluster: rollout %s: %w", kind, err)
+	}
+	if n == 1 {
+		return id, nil
+	}
+	holder, err := s.c.Do(ctx, s.c.B().Get().Key(key).Build()).ToString()
+	if valkey.IsValkeyNil(err) {
+		return s.AcquireRollout(ctx, kind, id, ttl) // released meanwhile
+	}
+	if err != nil {
+		return "", fmt.Errorf("cluster: rollout %s: %w", kind, err)
+	}
+	return holder, nil
+}
+
+// ReleaseRollout gives the restart token back, only if id holds it: the
+// restarted node calls it once it is READY, which lets the next node go.
+func (s *Store) ReleaseRollout(ctx context.Context, kind Kind, id string) error {
+	return releaseRollout.Exec(ctx, s.c, []string{rolloutKey(kind)}, []string{id}).Error()
+}
+
+var (
+	renewRollout   = valkey.NewLuaScript(`if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("PEXPIRE", KEYS[1], ARGV[2]) end return 0`)
+	releaseRollout = valkey.NewLuaScript(`if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) end return 0`)
+)
 
 // RequestDrain asks node id to drain; CancelDrain withdraws the request.
 // Requests have no TTL: a drain stands until cancelled or the node leaves.
