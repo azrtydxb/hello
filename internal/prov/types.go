@@ -110,6 +110,9 @@ type RenderData struct {
 	// Codecs is the HD voice codec plan: G.722 first, Opus where the model
 	// has it, then PCMU and PCMA (see CodecInfo).
 	Codecs CodecInfo
+	// Emergency is the comma-separated emergency numbers of Hello's
+	// emergency-flagged outbound routes (digits only), empty when none.
+	Emergency string
 }
 
 // Phone is the phone itself, as templates and resolution see it.
@@ -127,6 +130,9 @@ type Phone struct {
 	// reads P26063 the other way round (1 = off, 2 = on). Render fills it
 	// from Vendor and Model.
 	CWInverted bool
+	// Family is the Grandstream WP family of the model ("8x6", "856",
+	// "8xx"), empty for any other phone. Render fills it from Model.
+	Family string
 }
 
 // Line is the SIP account of the phone's bound device.
@@ -149,6 +155,9 @@ type Line struct {
 	// it, so the phone and Hello agree about a second call. False means the
 	// phone must not announce one.
 	CallWaiting bool
+	// ParkCode and ParkRetrieveCode are the call-park and park-retrieve
+	// feature codes, empty when none is configured.
+	ParkCode, ParkRetrieveCode string
 }
 
 // Server is the registrar the phone registers with.

@@ -196,6 +196,9 @@ func validatePhoneFields(f *fieldErrs, serial *string, vendor *prov.Vendor, mode
 			}
 		}
 	}
+	if blf != nil && len(*blf) > 0 && vendor != nil && model != nil && !prov.SupportsBLF(*vendor, *model) {
+		f.add("blf", "the %s %s has no BLF keys", *vendor, *model)
+	}
 	if templateID != nil && *templateID <= 0 {
 		f.add("templateId", "must be a template id")
 	}
@@ -319,6 +322,25 @@ func (s *server) updatePhone(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	validatePhoneFields(&f, in.Serial, in.Vendor, in.Model, in.Label, in.BLF, tpl)
+	if len(f) == 0 && in.BLF != nil && len(*in.BLF) > 0 && (in.Vendor == nil || in.Model == nil) {
+		// The change names the keys but not the model: check them against
+		// the phone's stored vendor and model.
+		cur, err := s.ProvStore.GetPhone(r.Context(), id)
+		if err != nil {
+			s.provError(w, "phone", err)
+			return
+		}
+		v, m := cur.Vendor, cur.Model
+		if in.Vendor != nil {
+			v = *in.Vendor
+		}
+		if in.Model != nil {
+			m = *in.Model
+		}
+		if !prov.SupportsBLF(v, m) {
+			f.add("blf", "the %s %s has no BLF keys", v, m)
+		}
+	}
 	if len(f) > 0 {
 		writeFields(w, f)
 		return
