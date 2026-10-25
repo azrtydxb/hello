@@ -17,6 +17,7 @@ import {
   fieldErrors,
   listExtensions,
   listInboundRoutes,
+  listIvrMenus,
   listOutboundRoutes,
   listTrunks,
   updateInboundRoute,
@@ -26,6 +27,7 @@ import {
   type Id,
   type InboundRoute,
   type InboundRouteFields,
+  type IvrMenu,
   type OutboundRoute,
   type OutboundRouteFields,
   type RouteDirection,
@@ -406,6 +408,7 @@ const DESTINATION_KIND: Record<
   internal: { label: "Internal", icon: "arrow-left-right" },
   external: { label: "External", icon: "phone-forwarded" },
   sip_uri: { label: "SIP URI", icon: "at-sign" },
+  ivr: { label: "IVR menu", icon: "list-tree" },
 };
 
 function Destination({
@@ -1199,6 +1202,7 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   internal: "Internal (the DID names the extension)",
   external: "External number",
   sip_uri: "SIP URI",
+  ivr: "IVR menu",
 };
 
 function InboundDrawer({
@@ -1215,6 +1219,14 @@ function InboundDrawer({
   const form = "in";
   const [d, setD] = useState(() => inboundDraft(route));
   const [busy, setBusy] = useState(false);
+  const [menus, setMenus] = useState<IvrMenu[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    listIvrMenus(controller.signal)
+      .then(setMenus)
+      .catch(() => undefined); // the picker stays empty; saving still works
+    return () => controller.abort();
+  }, []);
   const v = useServerErrors();
   const set = <K extends keyof InboundDraft>(k: K, value: InboundDraft[K]) =>
     setD((prev) => ({ ...prev, [k]: value }));
@@ -1333,6 +1345,7 @@ function InboundDrawer({
               { value: "extension", label: "Extension" },
               { value: "external", label: "External number" },
               { value: "sip_uri", label: "SIP URI" },
+              { value: "ivr", label: "IVR menu" },
             ]}
             onChange={(e) =>
               set(
@@ -1341,14 +1354,37 @@ function InboundDrawer({
               )
             }
           />
-          <Input
-            id={id("destination")}
-            label={DESTINATION_LABEL[d.destinationKind]}
-            mono
-            value={d.destination}
-            error={v.errors.destination}
-            onChange={(e) => set("destination", e.target.value)}
-          />
+          {d.destinationKind === "ivr" ? (
+            <Select
+              id={id("destination")}
+              label={DESTINATION_LABEL.ivr}
+              value={d.destination}
+              error={v.errors.destination}
+              options={[
+                { value: "", label: "Choose…" },
+                ...(d.destination !== "" &&
+                !menus.some((m) => m.name === d.destination)
+                  ? [
+                      {
+                        value: d.destination,
+                        label: `${d.destination} (not found)`,
+                      },
+                    ]
+                  : []),
+                ...menus.map((m) => ({ value: m.name, label: m.name })),
+              ]}
+              onChange={(e) => set("destination", e.target.value)}
+            />
+          ) : (
+            <Input
+              id={id("destination")}
+              label={DESTINATION_LABEL[d.destinationKind]}
+              mono
+              value={d.destination}
+              error={v.errors.destination}
+              onChange={(e) => set("destination", e.target.value)}
+            />
+          )}
         </div>
         <fieldset className="cf-form__section">
           <legend className="az-eyebrow">More conditions</legend>

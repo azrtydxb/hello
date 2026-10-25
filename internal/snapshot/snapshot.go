@@ -132,6 +132,8 @@ type Snapshot struct {
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
 	anns   map[string]string
+	// ivrByName and ivrByNumber are the IVR menus (migration 00018).
+	ivrByName, ivrByNumber map[string]IVRMenu
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
 }
@@ -385,9 +387,13 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	ivrs, err := loadIVRMenus(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	return New(rev, domain, devices).WithExtensions(bare...).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs), nil
 }
 
 // loadAnnouncements reads the announcement set (name -> MinIO object), so

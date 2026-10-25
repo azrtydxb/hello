@@ -241,7 +241,13 @@ destination — have one dialog, the caller's. The taker re-INVITEs the
 caller onto media of its own (a fresh voicemail anchor, or a relay) and
 restarts the application from its beginning: voicemail replays the greeting
 and beep and records afresh (what the caller had said on the dead node is
-lost), an announcement plays from the top and then hangs up as before.
+lost), an announcement plays from the top and then hangs up as before. A
+caller in an IVR menu is recovered the same way (the relay carries the
+caller): the menu restarts from its greeting on the taker. Once the menu has
+connected the caller to a phone the call is an ordinary two-leg call and is
+taken over as one. A taker cannot ring a new destination for a menu it
+restarted (it has no INVITE to build the legs from): a key that dials out
+there is answered as a destination that did not answer, and the menu repeats.
 
 Each claim is counted against the dead node in Valkey. Past the dialog TTL,
 exactly one survivor counts the dead node's calls that nobody claimed (its

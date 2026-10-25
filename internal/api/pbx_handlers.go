@@ -39,7 +39,7 @@ var (
 var (
 	strategies = []string{"ring-all", "sequential", "round-robin", "longest-idle", "weighted"}
 	fcActions  = []string{"forward_always", "forward_busy", "forward_no_answer", "dnd_on", "dnd_off",
-		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom"}
+		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr"}
 )
 
 // voicemailLimits bound greeting uploads.
@@ -493,8 +493,16 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		if !externalNumRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be 2-32 of 0-9 * # with an optional leading +")
 		}
+	case "announcement":
+		if !usernameRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be the name of an announcement")
+		}
+	case "ivr":
+		if !usernameRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be the name of an IVR menu")
+		}
 	default:
-		f.add("failureKind", `must be "none", "voicemail" or "external"`)
+		f.add("failureKind", `must be "none", "voicemail", "external", "announcement" or "ivr"`)
 	}
 	if len(in.Members) == 0 || len(in.Members) > 50 {
 		f.add("members", "must have 1-50 members")
@@ -542,7 +550,11 @@ func (s *server) createRingGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, _ := b.toInput(defaultsRingGroup())
-	if f := validateRingGroup(&in); len(f) > 0 {
+	f := validateRingGroup(&in)
+	if len(f) == 0 && in.FailureKind == "ivr" {
+		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
+	}
+	if len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
@@ -578,7 +590,11 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 		FailureKind: current.FailureKind, FailureTarget: current.FailureTarget, Members: current.Members,
 	}
 	in, _ := b.toInput(base)
-	if f := validateRingGroup(&in); len(f) > 0 {
+	f := validateRingGroup(&in)
+	if len(f) == 0 && in.FailureKind == "ivr" {
+		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
+	}
+	if len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
@@ -637,6 +653,9 @@ func (s *server) putFeatureCodes(w http.ResponseWriter, r *http.Request) {
 			f.add(p+".code", "must be a distinct code")
 		}
 		seen[c.Code] = true
+		if c.Action == "ivr" {
+			s.requireIVRMenu(r.Context(), &f, p+".argument", c.Argument)
+		}
 	}
 	if len(f) > 0 {
 		writeFields(w, f)

@@ -26,6 +26,8 @@ const (
 	// ActionIntercom is the 1-to-1 intercom prefix (phonebooks-ptt spec
 	// P-13): the code plus an extension number auto-answers that phone.
 	ActionIntercom = "intercom"
+	// ActionIVR runs an IVR menu: the argument names it.
+	ActionIVR = "ivr"
 )
 
 // ExtUpdate is one queued extension-feature change from a feature code.
@@ -82,6 +84,23 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		return true
 	case ActionIntercom:
 		c.handleIntercom(tx, arg)
+		return true
+	case ActionIVR:
+		name := fc.Argument
+		if name == "" {
+			name = arg
+		}
+		snap := s.deps.Snapshots.Current()
+		m, ok := snapshot.IVRMenu{}, false
+		if snap != nil {
+			m, ok = snap.IVRMenu(name)
+		}
+		if !ok {
+			s.respond(tx, c.inv, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "IVR menu "+name+" does not exist", ResultNotFound)
+			return true
+		}
+		c.startIVR(tx, snap, m)
 		return true
 	case ActionAnnouncement:
 		// The announcement feature code answers, plays its argument's
@@ -182,7 +201,9 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	if h := req.ContentType(); h != nil && strings.Contains(h.Value(), "dtmf-relay") {
 		if d, ok := dtmfDigit(req.Body()); ok {
-			s.dispatchDigit(ref.c, ref.leg == nil, d)
+			if ref.leg != nil || !ref.c.ivrDigit(legCaller, d) {
+				s.dispatchDigit(ref.c, ref.leg == nil, d)
+			}
 		}
 	}
 	s.respond(tx, req, sip.StatusOK, "OK")

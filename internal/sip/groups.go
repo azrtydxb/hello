@@ -291,6 +291,13 @@ func (c *call) groupFail(snap *snapshot.Snapshot, g snapshot.RingGroup) {
 		// (spec failure mode).
 		c.addTrace(fmt.Sprintf("Group %s: announcement %q", g.Name, g.FailureTarget))
 		c.announcementDestination(g.FailureTarget)
+	case "ivr":
+		if m, ok := snap.IVRMenu(g.FailureTarget); ok {
+			c.addTrace(fmt.Sprintf("Group %s: IVR menu %q", g.Name, g.FailureTarget))
+			c.startIVR(nil, snap, m)
+			return
+		}
+		c.hangupGroup(sip.StatusTemporarilyUnavailable, "failure IVR menu unavailable")
 	case "external":
 		if req := c.inv; req != nil {
 			c.forward(req, nil, snap, g.FailureTarget, nil)

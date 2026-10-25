@@ -5,6 +5,7 @@ import {
   errorMessage,
   fieldErrors,
   listExtensions,
+  listIvrMenus,
   listRingGroups,
   updateRingGroup,
   EXTENSION_NUMBER_PATTERN,
@@ -12,6 +13,7 @@ import {
   RING_STRATEGY_LABEL,
   type Extension,
   type FailureKind,
+  type IvrMenu,
   type FieldError,
   type Id,
   type RingGroup,
@@ -94,6 +96,10 @@ function failureText(g: RingGroup): string {
       return `Voicemail box ${g.failureTarget || UNKNOWN}`;
     case "external":
       return `External ${g.failureTarget || UNKNOWN}`;
+    case "announcement":
+      return `Announcement ${g.failureTarget || UNKNOWN}`;
+    case "ivr":
+      return `IVR menu ${g.failureTarget || UNKNOWN}`;
     default:
       return "Hang up";
   }
@@ -297,10 +303,7 @@ function GroupCard({
                   {i + 1}
                 </span>
                 <span className="cf-member__who">
-                  <Avatar
-                    name={ext?.name || ext?.number || "?"}
-                    size={26}
-                  />
+                  <Avatar name={ext?.name || ext?.number || "?"} size={26} />
                   <span>
                     <span className="cf-mono">
                       {memberLabel(m, extensions)}
@@ -457,6 +460,9 @@ function validateGroup(d: GroupDraft): Record<string, string> {
       e.failureTarget = "Use 2 to 20 digits, optionally starting with +.";
     }
   }
+  if (d.failureKind === "ivr" && d.failureTarget.trim() === "") {
+    e.failureTarget = "Choose the IVR menu.";
+  }
   if (d.failureKind === "voicemail") {
     if (d.failureTarget.trim() === "") {
       e.failureTarget = "Enter the extension whose box takes the call.";
@@ -488,6 +494,14 @@ function RingGroupDrawer({
   const [unmatched, setUnmatched] = useState<FieldError[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [pick, setPick] = useState("");
+  const [menus, setMenus] = useState<IvrMenu[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    listIvrMenus(controller.signal)
+      .then(setMenus)
+      .catch(() => undefined); // the picker stays empty; saving still works
+    return () => controller.abort();
+  }, []);
   const set = <K extends keyof GroupDraft>(k: K, v: GroupDraft[K]) =>
     setD((prev) => ({ ...prev, [k]: v }));
   const fid = (k: string) => `group-${k.replace(/[^A-Za-z0-9_-]+/g, "-")}`;
@@ -763,27 +777,50 @@ function RingGroupDrawer({
               { value: "none", label: "Hang up" },
               { value: "voicemail", label: "Voicemail" },
               { value: "external", label: "External number" },
+              { value: "ivr", label: "IVR menu" },
             ]}
             onChange={(e) => set("failureKind", e.target.value as FailureKind)}
           />
-          {d.failureKind !== "none" && (
-              <Input
-                id={fid("failureTarget")}
-                label={
-                  d.failureKind === "voicemail"
-                    ? "Box extension"
-                    : "External number"
-                }
-                mono
-                value={d.failureTarget}
-                error={errors.failureTarget}
-                hint={
-                  d.failureKind === "voicemail"
-                    ? "The extension whose box takes the call."
-                    : "2 to 20 digits, optionally starting with +."
-                }
-                onChange={(e) => set("failureTarget", e.target.value)}
-              />
+          {d.failureKind === "ivr" && (
+            <Select
+              id={fid("failureTarget")}
+              label="IVR menu"
+              value={d.failureTarget}
+              error={errors.failureTarget}
+              options={[
+                { value: "", label: "Choose…" },
+                ...(d.failureTarget !== "" &&
+                !menus.some((m) => m.name === d.failureTarget)
+                  ? [
+                      {
+                        value: d.failureTarget,
+                        label: `${d.failureTarget} (not found)`,
+                      },
+                    ]
+                  : []),
+                ...menus.map((m) => ({ value: m.name, label: m.name })),
+              ]}
+              onChange={(e) => set("failureTarget", e.target.value)}
+            />
+          )}
+          {d.failureKind !== "none" && d.failureKind !== "ivr" && (
+            <Input
+              id={fid("failureTarget")}
+              label={
+                d.failureKind === "voicemail"
+                  ? "Box extension"
+                  : "External number"
+              }
+              mono
+              value={d.failureTarget}
+              error={errors.failureTarget}
+              hint={
+                d.failureKind === "voicemail"
+                  ? "The extension whose box takes the call."
+                  : "2 to 20 digits, optionally starting with +."
+              }
+              onChange={(e) => set("failureTarget", e.target.value)}
+            />
           )}
         </fieldset>
         <FormAlert message={formError} unmatched={unmatched} />
