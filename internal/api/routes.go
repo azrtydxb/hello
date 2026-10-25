@@ -148,6 +148,10 @@ func (s *server) routes() []route {
 		{"PATCH", "/api/v1/routes/inbound/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.updateInbound},
 		{"DELETE", "/api/v1/routes/inbound/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteInbound},
 
+		{"GET", "/api/v1/flow/catalogue", auth.ScopeRead, auth.RoleViewer, false, s.getFlowCatalogue},
+		{"GET", "/api/v1/flow/graph", auth.ScopeRead, auth.RoleViewer, false, s.getFlowGraph},
+		{"GET", "/api/v1/flow/revision", auth.ScopeRead, auth.RoleViewer, false, s.getFlowRevision},
+
 		{"POST", "/api/v1/routing/test", auth.ScopeWrite, auth.RoleOperator, false, s.routingTest},
 
 		{"GET", "/api/v1/cluster", auth.ScopeRead, auth.RoleViewer, false, s.clusterOverview},

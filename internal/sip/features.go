@@ -28,6 +28,10 @@ const (
 	ActionIntercom = "intercom"
 	// ActionIVR runs an IVR menu: the argument names it.
 	ActionIVR = "ivr"
+	// ActionCallWaitingOn and ActionCallWaitingOff toggle the extension's
+	// call-waiting flag (migration 00026, spec S-18).
+	ActionCallWaitingOn  = "call_waiting_on"
+	ActionCallWaitingOff = "call_waiting_off"
 )
 
 // ExtUpdate is one queued extension-feature change from a feature code.
@@ -38,6 +42,7 @@ type ExtUpdate struct {
 	ForwardAlways   *string
 	ForwardBusy     *string
 	ForwardNoAnswer *string
+	CallWaiting     *bool
 }
 
 // SettingsSink takes extension-feature changes and applies them later: the
@@ -154,6 +159,12 @@ func featureUpdate(fc snapshot.FeatureCode, arg, ext string) (ExtUpdate, bool) {
 	case ActionDNDOff:
 		off := false
 		upd.DND = &off
+	case ActionCallWaitingOn:
+		on := true
+		upd.CallWaiting = &on
+	case ActionCallWaitingOff:
+		off := false
+		upd.CallWaiting = &off
 	case ActionForwardAlways:
 		if fc.Argument == "clear" {
 			empty := ""

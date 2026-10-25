@@ -279,3 +279,38 @@ func TestIVRNumberNotShadowed(t *testing.T) {
 		t.Fatalf("unrelated group change: %v", err)
 	}
 }
+
+// TestIVRFeatureCodeAlongsideCallWaiting: after every migration has run, an
+// "ivr" feature code saves next to the call-waiting codes. A later migration
+// that rewrote the action constraint without "ivr" (00026 once did) makes the
+// insert fail on the CHECK constraint.
+func TestIVRFeatureCodeAlongsideCallWaiting(t *testing.T) {
+	s := scratchStore(t)
+	ctx := context.Background()
+	greet, err := s.CreateAnnouncement(ctx, "t", "greet", "ann/greet.wav", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateIVRMenu(ctx, "t", ivrInput("main", greet.ID), nil); err != nil {
+		t.Fatal(err)
+	}
+	codes := []FeatureCode{
+		{Code: "*55", Action: "ivr", Argument: "main"},
+		{Code: "*70", Action: "call_waiting_off"},
+		{Code: "*71", Action: "call_waiting_on"},
+	}
+	if err := s.PutFeatureCodes(ctx, "t", codes, nil); err != nil {
+		t.Fatalf("saving an ivr feature code with the call-waiting codes: %v", err)
+	}
+	got, err := s.ListFeatureCodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range got {
+		found = found || (c.Code == "*55" && c.Action == "ivr" && c.Argument == "main")
+	}
+	if !found {
+		t.Fatalf("ivr feature code not stored: %+v", got)
+	}
+}

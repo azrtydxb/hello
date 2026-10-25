@@ -370,6 +370,7 @@ type FeatureUpdate struct {
 	ForwardAlways   *string
 	ForwardBusy     *string
 	ForwardNoAnswer *string
+	CallWaiting     *bool
 }
 
 // ApplyFeatureUpdate applies one feature-code change the same way every
@@ -385,9 +386,10 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 				forward_always = COALESCE($3, forward_always),
 				forward_busy = COALESCE($4, forward_busy),
 				forward_no_answer = COALESCE($5, forward_no_answer),
+				call_waiting = COALESCE($6, call_waiting),
 				updated_at = now()
 			WHERE number = $1`,
-			u.Number, u.DND, u.ForwardAlways, u.ForwardBusy, u.ForwardNoAnswer)
+			u.Number, u.DND, u.ForwardAlways, u.ForwardBusy, u.ForwardNoAnswer, u.CallWaiting)
 		if err != nil {
 			return "", err
 		}
@@ -729,6 +731,8 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*93", Action: "forward_no_answer", Argument: "clear"},
 		{Code: "*97", Action: "voicemail"},
 		{Code: "*80", Action: "intercom"},
+		{Code: "*70", Action: "call_waiting_off"},
+		{Code: "*71", Action: "call_waiting_on"},
 		{Code: "##", Action: "attended_transfer"},
 	}
 }

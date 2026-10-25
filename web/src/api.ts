@@ -60,6 +60,12 @@ export interface Extension {
   directoryHidden?: boolean;
   /** An intercom call (`*80` plus the number) auto-answers; true by default. */
   allowIntercom?: boolean;
+  /**
+   * Call waiting; true by default. Off: a call to the extension while it is in
+   * a call goes to forward-busy (else busy), and the phone's own call-waiting
+   * setting is switched off at the next resync.
+   */
+  callWaiting?: boolean;
   /** The extension's voicemail box, when it has one. */
   voicemailBoxId?: Id | null;
   createdAt: string;
@@ -656,6 +662,7 @@ export const updateExtension = (
     recordDefault?: boolean;
     directoryHidden?: boolean;
     allowIntercom?: boolean;
+    callWaiting?: boolean;
   },
 ) =>
   request<Extension>("PATCH", `/api/v1/extensions/${id(extensionId)}`, {
@@ -1268,7 +1275,7 @@ export const FEATURE_CODE_PATTERN = /^(\*[0-9#]{2,4}|##)$/;
 
 /**
  * The actions a feature code can perform (migration 00004's action column,
- * widened by 00005 with announcement and 00013 with intercom).
+ * widened by 00005 with announcement, 00013 with intercom and 00026 with call waiting).
  */
 export const FEATURE_CODE_ACTIONS = [
   "forward_always",
@@ -1282,6 +1289,8 @@ export const FEATURE_CODE_ACTIONS = [
   "announcement",
   "intercom",
   "ivr",
+  "call_waiting_on",
+  "call_waiting_off",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
@@ -1300,6 +1309,8 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   announcement: "Play announcement",
   intercom: "Intercom (auto-answer)",
   ivr: "IVR menu",
+  call_waiting_on: "Call waiting on",
+  call_waiting_off: "Call waiting off",
 };
 
 /** GET /api/v1/feature-codes. */
