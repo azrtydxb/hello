@@ -649,6 +649,20 @@ func (c *call) toggleRecording() {
 	c.startRecordingFlow("dtmf")
 }
 
+// setRecording is the phone's Record key (SIP INFO "Record: on" / "Record:
+// off"): it runs the *1 toggle only when the recording is not already in the
+// requested state, so a repeated "on" or an "off" with nothing recording
+// changes nothing.
+func (c *call) setRecording(on bool) {
+	c.mu.Lock()
+	rec := c.rec
+	c.mu.Unlock()
+	if active := rec != nil && rec.isActive(); active == on {
+		return
+	}
+	c.toggleRecording()
+}
+
 // playRecordingNotice plays the recording-notice announcement to both
 // parties when the announcement set has it (contract 5). A missing WAV is
 // skipped (spec failure mode).
@@ -792,8 +806,17 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	}
 	dir := media.SDPDirection(body)
 	c.setHADirs(fromCaller, dir)
+	// An inactive hold stays inactive toward the holder, but the held peer
+	// is offered sendonly so it can hear the music (S-33).
+	peerDir := dir
+	if dir == "inactive" {
+		peerDir = "sendonly"
+		c.setHAPeerDir(fromCaller, peerDir)
+	}
 	c.haRefresh() // the hold's directions are in the snapshot before the change replicates
-	c.setHeld(dir == "sendonly" || dir == "inactive")
+	held := dir == "sendonly" || dir == "inactive"
+	c.setHeld(held)
+	c.holdMOH(fromCaller, held)
 	// The answer to the offer's side: our SDP with the mirrored direction,
 	// on the codec the call is running.
 	off = c.midCallOffer(off)
@@ -805,7 +828,6 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	s.send(tx, res)
 	// The peer gets our SDP in the same direction (a held side hears
 	// silence because the held side stopped sending).
-	peerDir := dir
 	peer := off.Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir)
 	c.mu.Lock()
 	w := c.winner

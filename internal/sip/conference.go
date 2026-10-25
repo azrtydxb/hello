@@ -436,12 +436,29 @@ func (r *confRoom) announcement(name string) []int16 {
 	return samples
 }
 
-// holdSamples is what a waiting participant hears.
+// holdSamples is what a waiting participant hears: the ConferenceHold
+// source when one is wired, else music on hold (the global default class,
+// or the built-in tune when there is none), else the wait beep.
 func (r *confRoom) holdSamples() []int16 {
-	if h := r.s.deps.ConferenceHold; h != nil {
-		if s := h.HoldSamples(r.number); len(s) > 0 {
-			return s
+	s := r.s
+	if h := s.deps.ConferenceHold; h != nil {
+		if smp := h.HoldSamples(r.number); len(smp) > 0 {
+			return smp
 		}
+	}
+	var cl snapshot.MOHClass
+	if snap := s.deps.Snapshots.Current(); snap != nil {
+		cl, _ = snap.DefaultMOHClass()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*s.cfg.StateTimeout)
+	defer cancel()
+	pl := s.mohPlaylist(ctx, cl) // an empty class plays the built-in tune
+	var pcm []byte
+	for range max(len(pl.tracks), 1) {
+		pcm = append(pcm, pl.next()...)
+	}
+	if len(pcm) >= 2*media.MixFrame {
+		return media.PCMToSamples(pcm[:len(pcm)&^1])
 	}
 	return media.WaitLoop()
 }

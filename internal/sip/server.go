@@ -236,6 +236,10 @@ type Server struct {
 	// being handed to survivors.
 	handoff atomic.Bool
 
+	// mohCache holds decoded music on hold announcements (guarded by mohMu).
+	mohMu    sync.Mutex
+	mohCache map[string]mohAudioEntry
+
 	// Presence (S-10) and feature-code (S-11) state. subs holds the live
 	// dialog subscriptions by Call-ID, byExt the per-extension index used
 	// for NOTIFY fan-out; rrPos is the round-robin rotation per group; lastEnd

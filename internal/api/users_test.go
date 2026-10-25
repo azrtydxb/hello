@@ -90,7 +90,7 @@ func TestRoleEnforcement(t *testing.T) {
 		{auth.KindOAuth, auth.PrefixAccess + "x"},
 		{auth.KindService, auth.PrefixAccess + "svc"},
 	}
-	roles := []auth.Role{auth.RoleViewer, auth.RoleOperator, auth.RoleAdmin, ""}
+	roles := []auth.Role{auth.RoleUser, auth.RoleViewer, auth.RoleOperator, auth.RoleAdmin, ""}
 	l := roleLookup{actors: map[string]*auth.Actor{}}
 	as, err := oauth.New(oauth.Options{PublicURL: "https://hello.test"})
 	if err != nil {
@@ -208,6 +208,7 @@ func TestRoleEnforcement(t *testing.T) {
 // hold).
 func TestUserRoles(t *testing.T) {
 	for role, want := range map[auth.Role]auth.Scopes{
+		auth.RoleUser:     {auth.ScopeRead, auth.ScopeWrite},
 		auth.RoleViewer:   {auth.ScopeRead, auth.ScopeEvents},
 		auth.RoleOperator: {auth.ScopeRead, auth.ScopeWrite, auth.ScopeCalls, auth.ScopeEvents, auth.ScopeRecordings},
 		auth.RoleAdmin:    auth.AllScopes,

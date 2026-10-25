@@ -12,7 +12,7 @@ Rooms are audio only.
 | User PIN             | Optional, 4 to 10 digits. Callers key it and press `#`.                                                                  |
 | Leader PIN           | Optional, 4 to 10 digits, different from the user PIN. Makes the caller a leader.                                        |
 | Seats                | 2 to 50, default 10. A caller entering a PIN or waiting for a leader holds a seat. The next caller gets `486 Busy Here`. |
-| Wait for a leader    | Callers who are not leaders hear a soft beep every six seconds until a leader is in the room.                            |
+| Wait for a leader    | Callers who are not leaders hear music on hold until a leader is in the room.                                            |
 | Mute on entry        | Everyone but a leader joins muted.                                                                                       |
 | Join and leave sound | A tone, an uploaded announcement (an empty name falls back to the tone), or nothing.                                     |
 | Record               | The room's mix is saved to the recordings list while anyone is in the room.                                              |
@@ -70,9 +70,11 @@ Room state is kept per participant and its media sits behind that codec step,
 so a video track can be added beside the audio later without redesigning the
 room.
 
-Wait-for-leader audio is the `ConferenceHold` dependency of the SIP server:
-return the music-on-hold samples at the mixing rate from `HoldSamples(room)`
-and waiting callers hear them; nil (the default) plays the beep.
+Callers waiting for a leader hear music on hold: the global default MOH class
+(Media, Music on hold), or the built-in tune when no class is set or none of
+its tracks load; the soft beep is the last resort. A deployment can replace the
+source through the `ConferenceHold` dependency of the SIP server
+(`HoldSamples(room)` returns samples at the mixing rate).
 
 Recording is held in memory per ten-minute segment and stored as a WAV in the
 recordings bucket, one row per segment (initiated by `default`, correlation id

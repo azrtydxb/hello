@@ -62,6 +62,9 @@ type Extension struct {
 	// rung. The inverted sense keeps the zero value (and every extension
 	// built without the flag) on the default, call waiting on.
 	NoCallWaiting bool
+	// MOHClassID is the music on hold class callers hear while this
+	// extension holds them (migration 00021); 0 uses the global default.
+	MOHClassID int64
 }
 
 // RingGroup is a ring or hunt group (contract 2). Strategy is one of
@@ -79,6 +82,11 @@ type RingGroup struct {
 	// announcement (FailureTarget names an announcement, migration 00005;
 	// spec S-5).
 	FailureKind, FailureTarget string
+	// MOHClassID is the music on hold class of calls to the group (0: the
+	// global default); MOHRingback plays it instead of ringback while the
+	// group rings (migration 00021).
+	MOHClassID  int64
+	MOHRingback bool
 }
 
 // RingGroupMember is one member of a group, ordered by Position.
@@ -152,6 +160,10 @@ type Snapshot struct {
 	anns   map[string]string
 	// confs maps a dialled number to its conference room (spec S-34).
 	confs map[string]Conference
+	// mohs maps a music on hold class ID to its playlist; mohDefault is the
+	// global default class (0 when none is set).
+	mohs       map[int64]MOHClass
+	mohDefault int64
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
 }
@@ -167,7 +179,7 @@ type groupEntry struct {
 func New(revision int64, domain string, devices []Device) *Snapshot {
 	s := &Snapshot{Revision: revision, byUser: map[string]Device{}, byExt: map[string][]Device{},
 		exts: map[string]Extension{}, groups: map[string]groupEntry{}, codes: map[string]FeatureCode{}, pages: map[string]PagingGroup{}, confs: map[string]Conference{},
-		anns: map[string]string{}, known: map[string]bool{}}
+		anns: map[string]string{}, known: map[string]bool{}, mohs: map[int64]MOHClass{}}
 	for _, d := range devices {
 		if d.Realm != domain {
 			s.Skipped = append(s.Skipped, d.Username)
@@ -228,6 +240,57 @@ func (s *Snapshot) WithAnnouncements(anns map[string]string) *Snapshot {
 		s.anns[n] = o
 	}
 	return s
+}
+
+// MOHClass is one music on hold class: its playlist as announcement names
+// and their MinIO objects, in order. An empty playlist plays the built-in
+// tone.
+type MOHClass struct {
+	ID        int64
+	Name      string
+	Shuffle   bool
+	IsDefault bool
+	Names     []string
+	Objects   []string
+}
+
+// WithMOHClasses installs the music on hold classes (tests and Load).
+func (s *Snapshot) WithMOHClasses(classes []MOHClass) *Snapshot {
+	for _, c := range classes {
+		s.mohs[c.ID] = c
+		if c.IsDefault {
+			s.mohDefault = c.ID
+		}
+	}
+	return s
+}
+
+// MOHClass returns the class with that ID.
+func (s *Snapshot) MOHClass(id int64) (MOHClass, bool) {
+	c, ok := s.mohs[id]
+	return c, ok
+}
+
+// DefaultMOHClass returns the global default class; ok is false when none
+// is set (the built-in tone plays).
+func (s *Snapshot) DefaultMOHClass() (MOHClass, bool) {
+	c, ok := s.mohs[s.mohDefault]
+	return c, ok && s.mohDefault != 0
+}
+
+// ResolveMOH picks the class to play from a precedence list of class IDs
+// (0 = unset): the first that names an existing class, else the global
+// default. ok is false when neither exists (the built-in tone plays).
+func (s *Snapshot) ResolveMOH(ids ...int64) (MOHClass, bool) {
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		if c, ok := s.mohs[id]; ok {
+			return c, true
+		}
+	}
+	return s.DefaultMOHClass()
 }
 
 // Announcement returns the MinIO object of a named announcement; ok is
@@ -324,7 +387,7 @@ type Querier interface {
 const snapshotQuery = `SELECT (SELECT config_revision FROM schema_info),
        d.id, d.sip_username, d.realm, d.ha1_md5, d.ha1_sha256, e.number, e.name,
        e.dnd, e.forward_always, e.forward_busy, e.forward_no_answer, e.voicemail_enabled, v.id,
-       e.record_default, e.allow_intercom, e.call_waiting
+       e.record_default, e.allow_intercom, e.call_waiting, coalesce(e.moh_class_id, 0)
 FROM extensions e
 LEFT JOIN devices d ON d.extension_id = e.id AND d.enabled
 LEFT JOIN voicemail_boxes v ON v.extension_id = e.id
@@ -358,7 +421,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 		)
 		if err := rows.Scan(&rev, &id, &user, &realm, &ha1MD5, &ha1SHA256, &d.Extension, &d.ExtensionName,
 			&e.DND, &e.ForwardAlways, &e.ForwardBusy, &e.ForwardNoAnswer, &e.VoicemailEnabled, &boxID,
-			&e.RecordDefault, &e.AllowIntercom, &callWaiting); err != nil {
+			&e.RecordDefault, &e.AllowIntercom, &callWaiting, &e.MOHClassID); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan: %w", err)
 		}
@@ -407,9 +470,61 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	mohs, err := loadMOHClasses(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	return New(rev, domain, devices).WithExtensions(bare...).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithMOHClasses(mohs), nil
+}
+
+// loadMOHClasses reads the music on hold classes with their playlists
+// (announcement names and MinIO objects in order), so a hold stays off the
+// database path.
+func loadMOHClasses(ctx context.Context, db Querier) ([]MOHClass, error) {
+	rows, err := db.Query(ctx, `SELECT id, name, mode, is_default FROM moh_classes ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot: moh classes: %w", err)
+	}
+	var out []MOHClass
+	idx := map[int64]int{}
+	for rows.Next() {
+		var c MOHClass
+		var mode string
+		if err := rows.Scan(&c.ID, &c.Name, &mode, &c.IsDefault); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("snapshot: scan moh class: %w", err)
+		}
+		c.Shuffle = mode == "shuffle"
+		idx[c.ID] = len(out)
+		out = append(out, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("snapshot: moh classes: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	trows, err := db.Query(ctx, `SELECT t.class_id, a.name, a.minio_object
+FROM moh_class_tracks t JOIN announcements a ON a.id = t.announcement_id ORDER BY t.class_id, t.position`)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot: moh tracks: %w", err)
+	}
+	defer trows.Close()
+	for trows.Next() {
+		var cid int64
+		var name, obj string
+		if err := trows.Scan(&cid, &name, &obj); err != nil {
+			return nil, fmt.Errorf("snapshot: scan moh track: %w", err)
+		}
+		if i, ok := idx[cid]; ok {
+			out[i].Names = append(out[i].Names, name)
+			out[i].Objects = append(out[i].Objects, obj)
+		}
+	}
+	return out, trows.Err()
 }
 
 // loadAnnouncements reads the announcement set (name -> MinIO object), so
@@ -494,7 +609,8 @@ WHERE m.group_id = $1 ORDER BY e.number`, &groups[i].Callers},
 // loadRingGroups reads the groups and their members (in position order) as
 // parallel slices for WithRingGroups.
 func loadRingGroups(ctx context.Context, db Querier) ([]RingGroup, [][]RingGroupMember, error) {
-	rows, err := db.Query(ctx, `SELECT id, name, strategy, hunt, ring_timeout, member_delay, ignore_dnd, failure_kind, failure_target
+	rows, err := db.Query(ctx, `SELECT id, name, strategy, hunt, ring_timeout, member_delay, ignore_dnd, failure_kind, failure_target,
+coalesce(moh_class_id, 0), moh_ringback
 FROM ring_groups ORDER BY id`)
 	if err != nil {
 		return nil, nil, fmt.Errorf("snapshot: ring groups: %w", err)
@@ -509,7 +625,7 @@ FROM ring_groups ORDER BY id`)
 			timeout, delay int32
 			ext            *string
 		)
-		if err := rows.Scan(&g.ID, &g.Name, &g.Strategy, &g.Hunt, &timeout, &delay, &g.IgnoreDND, &g.FailureKind, &ext); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.Strategy, &g.Hunt, &timeout, &delay, &g.IgnoreDND, &g.FailureKind, &ext, &g.MOHClassID, &g.MOHRingback); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("snapshot: scan ring group: %w", err)
 		}

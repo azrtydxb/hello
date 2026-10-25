@@ -33,18 +33,25 @@ type Extension struct {
 	CallWaiting bool `json:"callWaiting"`
 	// DirectoryHidden keeps the extension out of the automatic extensions
 	// book (spec P-1).
-	DirectoryHidden bool      `json:"directoryHidden"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	DirectoryHidden bool `json:"directoryHidden"`
+	// MOHClassID is the music on hold class callers hear while this
+	// extension holds them (migration 00021); nil uses the global default.
+	MOHClassID *int64    `json:"mohClassId"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 const extensionCols = `id, number, name, external_number, dnd, forward_always, forward_busy, forward_no_answer,
-	voicemail_enabled, record_default, allow_intercom, call_waiting, directory_hidden, created_at, updated_at`
+	voicemail_enabled, record_default, allow_intercom, call_waiting, directory_hidden, moh_class_id, created_at, updated_at`
 
 func scanExtension(r interface{ Scan(...any) error }) (Extension, error) {
 	var e Extension
+	var moh sql.NullInt64
 	err := r.Scan(&e.ID, &e.Number, &e.Name, &e.ExternalNumber, &e.DND, &e.ForwardAlways, &e.ForwardBusy,
-		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CallWaiting, &e.DirectoryHidden, &e.CreatedAt, &e.UpdatedAt)
+		&e.ForwardNoAnswer, &e.VoicemailEnabled, &e.RecordDefault, &e.AllowIntercom, &e.CallWaiting, &e.DirectoryHidden, &moh, &e.CreatedAt, &e.UpdatedAt)
+	if moh.Valid {
+		e.MOHClassID = &moh.Int64
+	}
 	return e, err
 }
 
@@ -105,6 +112,10 @@ type ExtensionChange struct {
 	AllowIntercom                *bool
 	CallWaiting                  *bool
 	DirectoryHidden              *bool
+	// MOHClassID sets the extension's MOH class; ClearMOHClass clears it
+	// (a nil MOHClassID alone keeps the current value).
+	MOHClassID    *int64
+	ClearMOHClass bool
 }
 
 // UpdateExtension changes the fields that are not nil. Renumbering an
@@ -120,6 +131,9 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 		if c.Number != nil && *c.Number != number && len(routes) != 0 {
 			return id, inUse("extension "+number, routes)
 		}
+		if err := checkMOHClass(ctx, tx, "mohClassId", c.MOHClassID); err != nil {
+			return id, err
+		}
 		e, err = scanExtension(tx.QueryRowContext(ctx, `
 			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name),
 			       external_number = COALESCE($4, external_number), dnd = COALESCE($5, dnd),
@@ -127,9 +141,11 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 			       forward_no_answer = COALESCE($8, forward_no_answer), voicemail_enabled = COALESCE($9, voicemail_enabled),
 			       record_default = COALESCE($10, record_default), allow_intercom = COALESCE($11, allow_intercom),
 			       directory_hidden = COALESCE($12, directory_hidden), call_waiting = COALESCE($13, call_waiting),
+			       moh_class_id = CASE WHEN $15 THEN NULL ELSE COALESCE($14, moh_class_id) END,
 			       updated_at = now()
 			WHERE id = $1 RETURNING `+extensionCols, id, c.Number, c.Name, c.ExternalNumber,
-			c.DND, c.ForwardAlways, c.ForwardBusy, c.ForwardNoAnswer, c.VoicemailEnabled, c.RecordDefault, c.AllowIntercom, c.DirectoryHidden, c.CallWaiting))
+			c.DND, c.ForwardAlways, c.ForwardBusy, c.ForwardNoAnswer, c.VoicemailEnabled, c.RecordDefault, c.AllowIntercom, c.DirectoryHidden, c.CallWaiting,
+			c.MOHClassID, c.ClearMOHClass))
 		return id, err
 	})
 	return e, err

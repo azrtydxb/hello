@@ -26,7 +26,7 @@ const (
 	DirectionOutbound = "outbound"
 )
 
-// Call kinds (migration 00013; conference, 00029).
+// Call kinds (migration 00013; conference, 00031).
 const (
 	KindCall       = "call"
 	KindPage       = "page"

@@ -31,6 +31,7 @@ export const browser = {
 };
 
 const ROLE_NAME: Record<Role, string> = {
+  user: "User",
   viewer: "Viewer",
   operator: "Operator",
   admin: "Administrator",

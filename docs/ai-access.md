@@ -108,6 +108,7 @@ that place calls or follow them:
 
 | Role       | May grant                                                            |
 | ---------- | -------------------------------------------------------------------- |
+| `user`     | `read`, `write` (own extensions only)                                |
 | `viewer`   | `read`, `events`                                                     |
 | `operator` | `read`, `write`, `calls`, `events`, `recordings`                     |
 | `admin`    | `read`, `write`, `admin`, `secrets`, `calls`, `events`, `recordings` |
@@ -238,6 +239,11 @@ current.
 | `getFlowCatalogue`              | read  | `GET /api/v1/flow/catalogue`                       | Read the flow node and port catalogue                                                                                                    |
 | `getFlowGraph`                  | read  | `GET /api/v1/flow/graph`                           | Read the call flow as a graph                                                                                                            |
 | `getFlowRevision`               | read  | `GET /api/v1/flow/revision`                        | Read the configuration revision                                                                                                          |
+| `listMOHClasses`                | read  | `GET /api/v1/moh-classes`                          | List music on hold classes                                                                                                               |
+| `createMOHClass`                | write | `POST /api/v1/moh-classes`                         | Create a music on hold class                                                                                                             |
+| `getMOHClass`                   | read  | `GET /api/v1/moh-classes/{id}`                     | One music on hold class                                                                                                                  |
+| `putMOHClass`                   | write | `PUT /api/v1/moh-classes/{id}`                     | Replace a music on hold class                                                                                                            |
+| `deleteMOHClass`                | write | `DELETE /api/v1/moh-classes/{id}`                  | Delete a music on hold class                                                                                                             |
 | `bulkAdoptOnboardingCandidates` | write | `POST /api/v1/onboarding/adopt`                    | Adopt several queued phones, with consecutive extensions or one per row                                                                  |
 | `listOnboardingCandidates`      | write | `GET /api/v1/onboarding/candidates`                | Phones that asked for a configuration before being added                                                                                 |
 | `adoptOnboardingCandidate`      | write | `POST /api/v1/onboarding/candidates/{mac}/adopt`   | Adopt a queued phone: create the phone for an extension and remove it from the queue                                                     |

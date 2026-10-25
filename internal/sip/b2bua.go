@@ -102,6 +102,13 @@ type call struct {
 	vmSession media.Session
 	held      bool
 
+	// Music on hold (S-33), guarded by mu: moh plays to the held party,
+	// ringMOH to a caller in place of ringback; the route and group carry
+	// the class and ringback settings of the call's destination.
+	moh, ringMOH                       *mohPlayer
+	mohRouteClass, mohGroupClass       int64
+	mohRouteRingback, mohGroupRingback bool
+
 	// Phase 5 anchoring state: the reason the media anchors ("" direct),
 	// the session's relay, and the recording state. Guarded by mu.
 	anchored      bool
@@ -405,6 +412,7 @@ func (s *Server) decide(rs *snapshot.RoutingState, c routing.Call) routing.Decis
 func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot, dec routing.Decision) {
 	c.trace = append(c.trace, dec.Trace...)
 	c.route, c.rewritten = dec.Route, dec.Number
+	c.noteMOHRoute(dec)
 	switch {
 	case dec.Kind == routing.KindOutbound:
 		if c.direction == cdr.DirectionInternal {
@@ -680,7 +688,9 @@ func (c *call) ringing() {
 	ext := c.dialled
 	c.mu.Unlock()
 	if first {
-		c.respondA(sip.StatusRinging, "Ringing")
+		if id, on := c.ringbackMOH(); !on || !c.startRingMOH(id) {
+			c.respondA(sip.StatusRinging, "Ringing")
+		}
 		if snap := c.s.deps.Snapshots.Current(); snap != nil {
 			c.s.publishDeviceState(c.s.devicesOf(snap, ext), ext, StateRinging)
 		}
@@ -709,6 +719,7 @@ func (c *call) respondA(code int, reason string) {
 // answer connects the caller to the winning fork.
 func (c *call) answer(w *leg) {
 	c.cancelForks(w)
+	c.stopRingMOH() // the destination answered: the waiting music ends before the bridge
 	dcs := w.session()
 	bres := dcs.InviteResponse
 	if len(c.inv.Body()) > 0 {
@@ -1010,6 +1021,7 @@ func (c *call) end(status int, side, reason, result string) {
 			c.maxTimer.Stop()
 		}
 		c.mu.Unlock()
+		c.endMOH()
 		c.closeMedia()
 		c.pageStop()
 		if held {

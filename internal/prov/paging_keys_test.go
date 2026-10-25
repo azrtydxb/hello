@@ -22,6 +22,7 @@ func TestProvisionedPagingKeys(t *testing.T) {
 		{Grandstream, "WP856", "cfg805ec0aabbcc.xml", []string{"<P90>2</P90>"}, []string{"<P298>"}},
 		{Yealink, "T54W", "805ec0aabbcc.cfg", []string{"features.intercom.allow = 1", "features.intercom.tone = 1"}, nil},
 		{Poly, "VVX 450", "805ec0aabbcc-hello.cfg", []string{`voIpProt.SIP.alertInfo.1.class="ringAutoAnswer"`}, nil},
+		{Fanvil, "X5U", "805ec0aabbcc.cfg", []string{"P1 Enable Intercom :1", "P1 Intercom Tone   :1", "P1 Intercom Mute   :0"}, []string{"SIP1 Auto Answer"}},
 	}
 	for _, c := range cases {
 		d := renderSample(false)

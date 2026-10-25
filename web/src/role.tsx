@@ -1,12 +1,21 @@
 import type { ReactNode } from "react";
 import { useAuth } from "./auth";
 
-/** A user's role (spec S-23), least to most privileged. */
-export type Role = "viewer" | "operator" | "admin";
+/**
+ * A user's role (spec S-23), least to most privileged. "user" is the
+ * extension self-service role: it ranks below viewer and reaches only the
+ * "My phone" pages.
+ */
+export type Role = "user" | "viewer" | "operator" | "admin";
 
-export const ROLES: readonly Role[] = ["viewer", "operator", "admin"];
+export const ROLES: readonly Role[] = ["user", "viewer", "operator", "admin"];
 
-const RANK: Record<Role, number> = { viewer: 1, operator: 2, admin: 3 };
+const RANK: Record<Role, number> = {
+  user: 1,
+  viewer: 2,
+  operator: 3,
+  admin: 4,
+};
 
 /** Whether `role` is `min` or above; an unknown role is below every role. */
 export function atLeast(role: string | undefined, min: Role): boolean {

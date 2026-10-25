@@ -489,6 +489,8 @@ Spec: `.procoder/specs/clients-webrtc-mobile-video.md`, now approved. The user a
 
 Not done here (outside this change, left for the user to request): the Phase 0 amendments to `hello-pbx-spec.md` §3/§5 and the `phone-feature-parity.md` dependency limit.
 
+Applied 2026-10-25: the Phase 0 amendments to `hello-pbx-spec.md` (§3 non-goals and the "WSS/WebRTC later" principle, which is item 1 of §4) and the `phone-feature-parity.md` dependency limit.
+
 Decision: accepted by the user (2026-10-25).
 
 ## 2026-10-25: Messaging channels, answers to the open questions

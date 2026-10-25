@@ -3,6 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import { NAV_GROUPS, NAV_ITEMS } from "./nav";
 import { json, ME, mockApi, renderApp } from "./test/api";
 
+/** An administrator who also has an extension: the sidebar shows every group. */
+const ME_WITH_EXTENSION = {
+  "GET /api/v1/auth/me": () =>
+    json({
+      username: "admin",
+      role: "admin",
+      extensions: [{ id: 1, number: "101", name: "Desk" }],
+    }),
+};
+
 /** The AI group shows while AI is enabled. */
 const AI_ON = {
   "GET /api/v1/ai/status": () => json({ enabled: true, reason: null }),
@@ -10,7 +20,7 @@ const AI_ON = {
 
 describe("App navigation", () => {
   it("renders every primary nav item and marks the active one", async () => {
-    mockApi({ ...ME, ...AI_ON });
+    mockApi({ ...ME_WITH_EXTENSION, ...AI_ON });
     renderApp("/diagnostics");
 
     const nav = await screen.findByRole("navigation", { name: "Primary" });
@@ -105,7 +115,7 @@ describe("App navigation", () => {
 
   it("groups the nav as the design does and breadcrumbs the page", async () => {
     mockApi({
-      ...ME,
+      ...ME_WITH_EXTENSION,
       ...AI_ON,
       "GET /api/v1/trunks": () => json({ items: [] }),
     });
@@ -126,6 +136,7 @@ describe("App navigation", () => {
     }
     expect(NAV_GROUPS.map((g) => g.label)).toEqual([
       "",
+      "My phone",
       "Directory",
       "Call flow",
       "Media",
@@ -140,6 +151,17 @@ describe("App navigation", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("shows My phone to an administrator only when they have an extension", async () => {
+    mockApi({ ...ME, ...AI_ON });
+    renderApp("/trunks");
+    const nav = await screen.findByRole("navigation", { name: "Primary" });
+    await within(nav).findByRole("link", { name: "Findings", hidden: true });
+    expect(within(nav).queryByRole("group", { name: "My phone" })).toBeNull();
+    expect(
+      within(nav).queryByRole("link", { name: "Address book" }),
+    ).toBeNull();
   });
 
   it("marks Route tester, not Routes, active on /routes/test", async () => {

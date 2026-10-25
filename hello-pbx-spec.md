@@ -47,7 +47,9 @@ Hello is not intended to reproduce every historical feature of Asterisk or FreeS
 
 # 3. Non-Goals
 
-Initial releases do not need analog FXS/FXO, ISDN/PRI, telephony cards, proprietary phone protocols, Asterisk compatibility, every legacy PBX feature, full carrier-SBC functionality, WebRTC, video or very large conferencing (hundreds of participants, SFU-style forwarding), or mandatory transcoding.
+Initial releases do not need analog FXS/FXO, ISDN/PRI, telephony cards, proprietary phone protocols, Asterisk compatibility, every legacy PBX feature, full carrier-SBC functionality, very large conferencing (hundreds of participants, SFU-style forwarding), or mandatory transcoding.
+
+WebRTC and video calls are no longer non-goals (amended 2026-10-25): a browser softphone and video relayed without transcoding are in scope as specified in `.procoder/specs/clients-webrtc-mobile-video.md`.
 
 Hello is a **SIP PBX**, not a universal legacy telephony platform.
 
@@ -55,7 +57,7 @@ _Amended 2026-10-25:_ "no large conferencing" is reversed. Hello now provides au
 
 # 4. Design Principles
 
-1. **SIP first.** UDP/TCP/TLS initially; WSS/WebRTC later.
+1. **SIP first.** UDP/TCP/TLS first; WSS/WebRTC follows once TLS and SRTP are in place (amended 2026-10-25, see `.procoder/specs/clients-webrtc-mobile-video.md`).
 2. **Container native.** Fast startup, graceful shutdown, health endpoints, structured logs, and no required local persistent state.
 3. **Active/active.** No idle PBX standby architecture.
 4. **Stateless where possible.** PostgreSQL for durable configuration and appropriate distributed storage for ephemeral state.

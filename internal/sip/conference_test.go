@@ -818,3 +818,23 @@ func TestConferenceKeyLamp(t *testing.T) {
 		}
 	}
 }
+
+// TestConferenceWaitMusic fails if a participant waiting for a leader hears
+// silence when no hold source is wired: it must hear music on hold (the
+// built-in tune when no class is set).
+func TestConferenceWaitMusic(t *testing.T) {
+	f := newFakeConf()
+	room := pinRoom()
+	room.UserPIN, room.LeaderPIN, room.WaitForLeader = "", "9999", true
+	pbx := startPBX(t, confDevices(), withRooms(room), withConferences(f, nil))
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	w, _ := seatJoin(t, a, "800")
+	w.keys("#")
+	waitState(t, f, "800", "waiting", func(s livestate.ConfRoomState) bool {
+		return len(s.Participants) == 1 && s.Participants[0].Waiting
+	})
+	if got := w.hear(800 * time.Millisecond); got < 500 {
+		t.Fatalf("the waiting participant hears peak %d: no music on hold", got)
+	}
+}

@@ -257,7 +257,8 @@ func loadOutbound(ctx context.Context, db Querier, cfg *routing.Config) error {
 
 func loadInbound(ctx context.Context, db Querier, cfg *routing.Config) error {
 	rows, err := db.Query(ctx, `SELECT id, position, name, did_kind, did, coalesce(trunk_id, 0), sip_domain, header_name,
-		header_regex, schedule, callerid_transform, destination_kind, destination, enabled FROM inbound_routes ORDER BY position`)
+		header_regex, schedule, callerid_transform, destination_kind, destination, enabled,
+		coalesce(moh_class_id, 0), moh_ringback FROM inbound_routes ORDER BY position`)
 	if err != nil {
 		return fmt.Errorf("snapshot: inbound routes: %w", err)
 	}
@@ -268,7 +269,8 @@ func loadInbound(ctx context.Context, db Querier, cfg *routing.Config) error {
 			sched, callerT []byte
 		)
 		if err := rows.Scan(&r.ID, &pos, &r.Name, &r.DIDKind, &r.DID, &r.TrunkID, &r.SIPDomain, &r.HeaderName,
-			&r.HeaderRegex, &sched, &callerT, &r.DestinationKind, &r.Destination, &r.Enabled); err != nil {
+			&r.HeaderRegex, &sched, &callerT, &r.DestinationKind, &r.Destination, &r.Enabled,
+			&r.MOHClassID, &r.MOHRingback); err != nil {
 			rows.Close()
 			return fmt.Errorf("snapshot: scan inbound route: %w", err)
 		}

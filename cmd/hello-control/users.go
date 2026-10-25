@@ -17,18 +17,18 @@ type userCreator interface {
 	CreateUser(ctx context.Context, actor, username, passwordHash string, role auth.Role) (int64, error)
 }
 
-// userAdd runs "user add [--role viewer|operator|admin] <username>": it
+// userAdd runs "user add [--role user|viewer|operator|admin] <username>": it
 // reads the password from the first line of stdin and creates the user
 // with the role (default viewer; the first user is always admin).
 func userAdd(ctx context.Context, st userCreator, args []string, stdin io.Reader, out io.Writer) error {
 	fs := flag.NewFlagSet("user add", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	role := fs.String("role", string(auth.RoleViewer), "viewer, operator or admin")
+	role := fs.String("role", string(auth.RoleViewer), "user, viewer, operator or admin")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("user add: %w", err)
 	}
 	if fs.NArg() != 1 || strings.TrimSpace(fs.Arg(0)) == "" {
-		return errors.New("usage: hello-control user add [--role viewer|operator|admin] <username> < password")
+		return errors.New("usage: hello-control user add [--role user|viewer|operator|admin] <username> < password")
 	}
 	r, err := auth.ParseRole(*role)
 	if err != nil {
@@ -42,7 +42,7 @@ func userAdd(ctx context.Context, st userCreator, args []string, stdin io.Reader
 	if password == "" {
 		return errors.New("user add: the password is read from stdin and must not be empty")
 	}
-	hash, err := auth.HashPassword(password)
+	hash, err := auth.HashUserPassword(password)
 	if err != nil {
 		return err
 	}
