@@ -120,6 +120,25 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
+    label: "Integrations",
+    items: [
+      {
+        label: "Overview",
+        path: "/integrations",
+        phase: 5,
+        icon: "plug",
+        minRole: "admin",
+      },
+      {
+        label: "API access",
+        path: "/integrations/api-access",
+        phase: 5,
+        icon: "key-round",
+        minRole: "admin",
+      },
+    ],
+  },
+  {
     label: "Platform",
     items: [
       { label: "Cluster", path: "/cluster", phase: 3, icon: "server" },

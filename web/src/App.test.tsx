@@ -131,6 +131,7 @@ describe("App navigation", () => {
       "Media",
       "Activity",
       "AI",
+      "Integrations",
       "Platform",
     ]);
     const crumbs = screen.getByRole("navigation", { name: "Breadcrumb" });
