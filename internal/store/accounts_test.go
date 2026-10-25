@@ -56,7 +56,8 @@ func TestUserAccounts(t *testing.T) {
 	if alice.ExtensionID == nil || *alice.ExtensionID != e1.ID || len(alice.ExtensionIDs) != 2 || alice.ExtensionIDs[1] != e2.ID {
 		t.Fatalf("alice = %+v; want primary %d and extensions [%d %d]", alice, e1.ID, e1.ID, e2.ID)
 	}
-	if _, err := s.CreateAccount(ctx, "test", NewAccount{Username: "alice", Role: auth.RoleUser, PasswordHash: "x"}); !errors.Is(err, ErrConflict) {
+	if _, err := s.CreateAccount(ctx, "test", NewAccount{Username: "alice", Role: auth.RoleUser, PasswordHash: "x",
+		Voicemail: VoicemailEmailPrefs{Notify: true, Attach: true, After: "none"}}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate login = %v, want ErrConflict", err)
 	}
 	var inUse *InUseError
@@ -316,7 +317,9 @@ func TestUserAccountsMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.Role != auth.RoleAdmin || !u.Enabled || u.AuthMethod != "local" || u.MustChangePassword ||
+	// The user was created after migration 00008, so it has that column's
+	// default role; the migration must keep it, not promote or demote it.
+	if u.Role != auth.RoleViewer || !u.Enabled || u.AuthMethod != "local" || u.MustChangePassword ||
 		len(u.ExtensionIDs) != 1 || u.ExtensionIDs[0] != ext || u.ExtensionID == nil || !u.VoicemailEmail.Notify || !u.VoicemailEmail.Attach || u.VoicemailEmail.After != "none" {
 		t.Fatalf("migrated user = %+v", u)
 	}
