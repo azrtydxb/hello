@@ -17,6 +17,37 @@
 {{- /* Call waiting (phone-feature-parity S-18): call_waiting per line is on (waiting tone), visual (no tone) or off; Hello writes on or off from the extension's flag. Key and values as in Snom's own settings reference and the Tancredi snom template. Unverified on hardware (verify, lab item 26). */}}
     <call_waiting idx="1" perm="R">{{if .Line.CallWaiting}}on{{else}}off{{end}}</call_waiting>
     <admin_mode_password perm="R">{{xml .Phone.AdminPassword}}</admin_mode_password>
+{{- /* Web UI password. admin_mode_password is the keypad/admin-mode PIN only. The D3xx/D7xx web UI is protected by http_user with http_pass (Snom Service Hub, http_user and http_pass); the D86x/D89x replace them with webserver_admin_password (Hub, since 10.1.115.0). The same per-phone password every other vendor gets (Phone.AdminPassword). */}}
+    <http_user perm="R">admin</http_user>
+    <http_pass perm="R">{{xml .Phone.AdminPassword}}</http_pass>
+    <webserver_admin_password perm="R">{{xml .Phone.AdminPassword}}</webserver_admin_password>
+{{- /* Call recording: the phone's Record key sends SIP INFO "Record: on" / "Record: off" (Hub, recording_mechanism = SIP, the default) which the PBX turns into the *1 recording toggle. */}}
+    <recording_mechanism perm="R">SIP</recording_mechanism>
+{{- /* Star codes (Hub, dnd_on_code and dnd_off_code; fwd_all, fwd_busy and fwd_time on/off codes, per identity, since 8.7.4): with a code set the phone's DND and forward keys dial the PBX's code (a forward code followed by the target) instead of acting alone. */}}
+{{- with .Codes.DNDOn}}
+    <dnd_on_code perm="R">{{xml .}}</dnd_on_code>
+{{- end}}
+{{- with .Codes.DNDOff}}
+    <dnd_off_code perm="R">{{xml .}}</dnd_off_code>
+{{- end}}
+{{- with .Codes.ForwardOn}}
+    <fwd_all_on_code idx="1" perm="R">{{xml .}}</fwd_all_on_code>
+{{- end}}
+{{- with .Codes.ForwardOff}}
+    <fwd_all_off_code idx="1" perm="R">{{xml .}}</fwd_all_off_code>
+{{- end}}
+{{- with .Codes.ForwardBusyOn}}
+    <fwd_busy_on_code idx="1" perm="R">{{xml .}}</fwd_busy_on_code>
+{{- end}}
+{{- with .Codes.ForwardBusyOff}}
+    <fwd_busy_off_code idx="1" perm="R">{{xml .}}</fwd_busy_off_code>
+{{- end}}
+{{- with .Codes.ForwardNoAnswerOn}}
+    <fwd_time_on_code idx="1" perm="R">{{xml .}}</fwd_time_on_code>
+{{- end}}
+{{- with .Codes.ForwardNoAnswerOff}}
+    <fwd_time_off_code idx="1" perm="R">{{xml .}}</fwd_time_off_code>
+{{- end}}
     <setting_server perm="R">{{xml .Prov.URL}}{mac}</setting_server>
     <prov_polling_enabled perm="R">on</prov_polling_enabled>
     <prov_polling_mode perm="R">rel</prov_polling_mode>
@@ -35,9 +66,16 @@
     <firmware perm="R">{{xml .URL}}</firmware>
 {{- end}}
   </phone-settings>
+{{- /* Trusted CA (Hub, "<certificates> tag"): inside <settings>, outside <phone-settings>; type="base64" carries the certificate itself (firmware 8.7.5.52 / 8.9.3.41 and later), available as soon as the line is read. */}}
+{{- with .Prov.CACertBase64}}
+  <certificates>
+    <certificate type="base64">{{.}}</certificate>
+  </certificates>
+{{- end}}
   <functionKeys e="2">
+{{- /* BLF keys are placed by Render (internal/prov/keycaps.go): fkey 0 is the account's line key, so BLF starts at idx 1, runs to the model's last key and on into expansion module 1 (UXM, 18 keys; Hub, "Function Key Index Ranges"); keys past that are dropped. Snom's BLF pickup is by key press with the Replaces header or a BroadWorks code, so no pickup value is written. */}}
 {{- range $i, $k := .BLF}}
-    <fkey idx="{{$i}}" context="active" label="{{xml $k.Label}}" perm="R">blf {{xml $k.URI}}</fkey>
+    <fkey idx="{{$k.Slot}}" context="active" label="{{xml $k.Label}}" perm="R">blf {{xml $k.URI}}</fkey>
 {{- end}}
   </functionKeys>
 </settings>

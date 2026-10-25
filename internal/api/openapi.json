@@ -5999,9 +5999,6 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -6046,9 +6043,6 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -6079,9 +6073,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6128,9 +6119,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6201,9 +6189,6 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -6262,9 +6247,6 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -13127,6 +13109,8 @@
                 "type": "string",
                 "enum": [
                   "bad_request",
+                  "graph_too_large",
+                  "config_changing",
                   "unauthorized",
                   "not_found",
                   "conflict",
@@ -14879,7 +14863,8 @@
           "defaultCallerId",
           "enabled",
           "destinations",
-          "internalDialing"
+          "internalDialing",
+          "codecs"
         ],
         "properties": {
           "id": {
@@ -14960,6 +14945,16 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "codecs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "enum": ["PCMU", "PCMA", "G722", "opus"]
+            },
+            "description": "Audio codec allow-list offered to the carrier, in preference order. Names are case-insensitive and stored as PCMU, PCMA, G722 or opus; none may repeat. Default PCMU, PCMA."
           },
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing"
@@ -15049,6 +15044,15 @@
             "maxLength": 256,
             "description": "Sealed with AES-256-GCM under HELLO_SECRET_KEY and never returned. On PATCH: omitted keeps it, \"\" clears it, a value replaces it."
           },
+          "codecs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "string"
+            },
+            "description": "Audio codec allow-list offered to the carrier, in preference order. Names are case-insensitive and stored as PCMU, PCMA, G722 or opus; none may repeat. Default PCMU, PCMA."
+          },
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing",
             "description": "The trunk's internal-number dialing policy: what it may dial in the extension namespace. Default mode \"off\" dials no internal number, so a new trunk reaches nothing internal. Set whole: a body that carries internalDialing replaces the policy."
@@ -15137,6 +15141,15 @@
             "writeOnly": true,
             "maxLength": 256,
             "description": "Sealed with AES-256-GCM under HELLO_SECRET_KEY and never returned. On PATCH: omitted keeps it, \"\" clears it, a value replaces it."
+          },
+          "codecs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "string"
+            },
+            "description": "Audio codec allow-list offered to the carrier, in preference order. Names are case-insensitive and stored as PCMU, PCMA, G722 or opus; none may repeat. Default PCMU, PCMA."
           },
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing",

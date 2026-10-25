@@ -411,3 +411,34 @@ func TestAnchorPortNotShadowed(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionDTMFWireCodes sends RFC 2833 events with the real wire codes
+// 10 ('*'), 1, 11 ('#') and expects ASCII on the channel.
+func TestSessionDTMFWireCodes(t *testing.T) {
+	s, caller, answer, dtmfPT := answeredSession(t)
+	port := sdpAudioPort(t, answer)
+	seq, ts := uint16(0), uint32(0)
+	dtmf := make(chan byte, 8)
+	done := make(chan struct{})
+	go func() {
+		_, _ = s.Record(context.Background(), 10*time.Second, dtmf)
+		close(done)
+	}()
+	for _, code := range []byte{10, 1, 11} {
+		sendEventTo(t, caller, port, uint8(dtmfPT), &seq, &ts, code, true, false)
+		sendEventTo(t, caller, port, uint8(dtmfPT), &seq, &ts, code, false, true)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Record did not return on '#'")
+	}
+	close(dtmf)
+	var got []byte
+	for d := range dtmf {
+		got = append(got, d)
+	}
+	if string(got) != "*1#" {
+		t.Errorf("dtmf channel saw %q, want %q", got, "*1#")
+	}
+}

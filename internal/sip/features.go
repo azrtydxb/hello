@@ -5,9 +5,11 @@
 package sip
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/azrtydxb/hello/internal/cdr"
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo/sip"
 )
@@ -212,22 +214,62 @@ func featureUpdate(fc snapshot.FeatureCode, arg, ext string) (ExtUpdate, bool) {
 }
 
 // handleInfo relays nothing: an INFO with a DTMF digit (application/
-// dtmf-relay) feeds the call's feature-code collection; anything else is
-// answered 200 and ignored.
+// dtmf-relay) feeds the call's feature-code collection, an INFO that carries
+// "Record: on" or "Record: off" (the phone's Record key) starts or stops the
+// call's recording like the *1 code does; anything else is answered 200 and
+// ignored.
 func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 	ref, ok := s.matchDialog(req)
 	if !ok {
 		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 		return
 	}
-	if h := req.ContentType(); h != nil && strings.Contains(h.Value(), "dtmf-relay") {
+	if h := req.ContentType(); h != nil && isDTMFInfo(h.Value()) {
 		if d, ok := dtmfDigit(req.Body()); ok {
 			if ref.leg != nil || !ref.c.ivrDigit(legCaller, d) {
 				s.dispatchDigit(ref.c, ref.leg == nil, d)
 			}
 		}
+	} else if on, ok := recordInfo(req); ok {
+		ref.c.setRecording(on)
 	}
 	s.respond(tx, req, sip.StatusOK, "OK")
+}
+
+// recordInfo reads the recording request of a phone's Record key: Snom
+// sends SIP INFO "Record: on" / "Record: off" (recording_mechanism SIP, the
+// default) and Fanvil the bodies of SIP1 Record Start and Record Stop
+// ("Record:on", "Record:off"). The word is taken from a Record header or a
+// body line, in any content type, with or without a space after the colon.
+func recordInfo(req *sip.Request) (on, ok bool) {
+	if h := req.GetHeader("Record"); h != nil {
+		if on, ok = recordWord(h.Value()); ok {
+			return on, true
+		}
+	}
+	for _, line := range strings.Split(string(req.Body()), "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) < 7 || !strings.EqualFold(line[:6], "record") {
+			continue
+		}
+		if rest, found := strings.CutPrefix(strings.TrimSpace(line[6:]), ":"); found {
+			if on, ok = recordWord(rest); ok {
+				return on, true
+			}
+		}
+	}
+	return false, false
+}
+
+// recordWord reads "on" or "off".
+func recordWord(v string) (on, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "on":
+		return true, true
+	case "off":
+		return false, true
+	}
+	return false, false
 }
 
 // handleMessage answers an inbound MESSAGE 200; the MWI MESSAGEs are
@@ -236,17 +278,41 @@ func (s *Server) handleMessage(req *sip.Request, tx sip.ServerTransaction) {
 	s.respond(tx, req, sip.StatusOK, "OK")
 }
 
-// dtmfDigit reads a digit from a dtmf-relay body ("Signal=2", "Signal: #").
+// isDTMFInfo reports whether an INFO Content-Type carries a DTMF digit:
+// application/dtmf-relay or application/dtmf.
+func isDTMFInfo(contentType string) bool {
+	ct := strings.ToLower(contentType)
+	return strings.Contains(ct, "dtmf-relay") || strings.HasPrefix(strings.TrimSpace(ct), "application/dtmf")
+}
+
+// dtmfDigit reads an ASCII digit from an INFO DTMF body: dtmf-relay
+// ("Signal=2", "Signal: #", "Signal=10" for '*') or a bare application/dtmf
+// body ("*", "#", "5"). A numeric signal of 10-15 is an RFC 4733 event code
+// and is mapped like an RFC 2833 event, so every path yields the same
+// ASCII.
 func dtmfDigit(body []byte) (byte, bool) {
 	for _, line := range strings.Split(string(body), "\n") {
 		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-		if !strings.HasPrefix(strings.ToLower(line), "signal") {
+		if line == "" {
 			continue
 		}
-		rest := strings.TrimLeft(strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(line), "signal"), ":"), " =")
-		if rest != "" {
-			return rest[0], true
+		val := line
+		if strings.HasPrefix(strings.ToLower(line), "signal") {
+			val = strings.TrimLeft(strings.TrimPrefix(line[len("signal"):], ":"), " =")
+		} else if strings.ContainsAny(line, "=:") {
+			continue // another dtmf-relay field such as Duration
 		}
+		val = strings.TrimSpace(val)
+		if val == "" {
+			continue
+		}
+		if n, err := strconv.Atoi(val); err == nil && len(val) > 1 {
+			if n >= 10 && n <= 15 {
+				return media.DTMFDigit(byte(n))
+			}
+			return 0, false
+		}
+		return media.DTMFDigit(val[0])
 	}
 	return 0, false
 }
