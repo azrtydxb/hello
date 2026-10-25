@@ -269,19 +269,37 @@ func classifyFanvil(model, lower string) (FileKind, string, bool) {
 	return KindOther, "", false
 }
 
-// FanvilCommon is a Fanvil model's common file name: "F0V00", the model,
-// then zeros to twelve characters, as F0V00X600000.cfg is the X6's in
-// Fanvil's auto-provisioning guide. False for a model too long to fit.
+// FanvilCommon is a Fanvil model's common file name, as Fanvil's Auto
+// Provision Description (4.1, "General configuration file") lists them:
+// the high-end X and XU series (X5S, X6, X7, X7C, X210, X3U to X6U) use
+// "F0V" and the model right-aligned in four characters, zero-filled on the
+// left, then five zeros (F0V00X600000.cfg for the X6, F0V0X5S00000.cfg for
+// the X5S, F0VX21000000.cfg for the X210); the low-end X, H, i and PA models
+// use f0<model>hw1.100.cfg (f0X3Shw1.100.cfg). False for a model too long to
+// fit or one the guide's naming does not cover.
 func FanvilCommon(model string) (string, bool) {
 	m := strings.ToUpper(strings.ReplaceAll(model, " ", ""))
-	if m == "" || len(m) > 7 {
+	if m == "" || len(m) > 8 {
 		return "", false
 	}
-	return "F0V00" + m + strings.Repeat("0", 7-len(m)) + ".cfg", true
+	if name, ok := fanvilLowEnd[m]; ok {
+		return name, true
+	}
+	return "F0V" + leftPad(m, 4) + "00000.cfg", true
+}
+
+// fanvilLowEnd are the common files of the models the guide names
+// f0<model>hw1.100.cfg, as written there (i20S is f0i20SVhw1.100.cfg).
+var fanvilLowEnd = map[string]string{
+	"X1": "f0X1hw1.100.cfg", "X2": "f0X2hw1.100.cfg", "X3S": "f0X3Shw1.100.cfg", "X4": "f0X4hw1.100.cfg",
+	"H2S": "f0H2Shw1.100.cfg", "H3": "f0H3hw1.100.cfg", "H5": "f0H5hw1.100.cfg", "PA2": "f0PA2hw1.100.cfg",
+	"I12": "f0i12hw1.100.cfg", "I13W": "f0i13Whw1.100.cfg", "I16V": "f0i16Vhw1.100.cfg", "I18S": "f0i18Shw1.100.cfg",
+	"I20S": "f0i20SVhw1.100.cfg", "I23S": "f0i23Shw1.100.cfg", "I30": "f0i30hw1.100.cfg", "I31S": "f0i31Shw1.100.cfg",
+	"I32V": "f0i32Vhw1.100.cfg", "I33V": "f0i33Vhw1.100.cfg", "IW30": "f0iW30hw1.100.cfg", "EIM-01": "f0EIM-01hw1.100.cfg",
 }
 
 // fanvilCommonRE is any Fanvil common file, for the boot path.
-var fanvilCommonRE = regexp.MustCompile(`^f0v00[0-9a-z]{7}\.cfg$`)
+var fanvilCommonRE = regexp.MustCompile(`^(f0v[0-9a-z]{9,10}|f0[0-9a-z-]+hw1\.100)\.cfg$`)
 
 // genericMAC returns a MAC a generic phone's file name embeds: a run of
 // exactly 12 hex digits, not all zero, bounded by non-hex characters.

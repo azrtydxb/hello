@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"net/url"
 	"path"
 	"reflect"
 	"regexp"
@@ -55,8 +56,13 @@ var templateFuncs = template.FuncMap{
 		}
 		return v
 	},
-	"add": func(a, b int) int { return a + b },
-	"mul": func(a, b int) int { return a * b },
+	// urlhost and urlpath split a URL for a phone that takes the server and
+	// the path apart (Fanvil's Flash Server IP and Flash File Name):
+	// "https://h:8/p/x/" gives "h:8" and "p/x/" (no leading slash).
+	"urlhost": func(s string) string { return urlParts(s).Host },
+	"urlpath": func(s string) string { return strings.TrimPrefix(urlParts(s).Path, "/") },
+	"add":     func(a, b int) int { return a + b },
+	"mul":     func(a, b int) int { return a * b },
 	"div": func(a, b int) (int, error) {
 		if b == 0 {
 			return 0, errors.New("div by zero")
@@ -73,7 +79,16 @@ var allowedIdents = map[string]bool{
 	"and": true, "or": true, "not": true, "eq": true, "ne": true, "lt": true,
 	"le": true, "gt": true, "ge": true, "len": true, "index": true,
 	"xml": true, "upper": true, "lower": true, "default": true,
-	"add": true, "mul": true, "div": true,
+	"add": true, "mul": true, "div": true, "urlhost": true, "urlpath": true,
+}
+
+// urlParts parses a URL, or returns the zero URL for one that does not.
+func urlParts(s string) url.URL {
+	u, err := url.Parse(s)
+	if err != nil {
+		return url.URL{}
+	}
+	return *u
 }
 
 // Render renders the file of t that the requested name matches, within

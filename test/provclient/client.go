@@ -30,7 +30,7 @@ var Models = []Model{
 	{Vendor: "poly", Model: "VVX 450", Firmware: "6.4.6.2195", OUI: "0004f2", Common: "000000000000.cfg"},
 	{Vendor: "grandstream", Model: "GRP2614", Firmware: "1.0.9.69", OUI: "c074ad", Common: "cfggrp2614.xml"},
 	{Vendor: "snom", Model: "D785", Firmware: "10.1.159.12", OUI: "000413", Common: "snomD785.htm"},
-	{Vendor: "fanvil", Model: "X5U", Firmware: "2.12.1.4", OUI: "0c383e", Common: "F0V00X5U0000.cfg"},
+	{Vendor: "fanvil", Model: "X5U", Firmware: "2.12.1.4", OUI: "0c383e", Common: "F0V0X5U00000.cfg"},
 }
 
 // UserAgent is what the phone with MAC mac (12 lowercase hex digits)
