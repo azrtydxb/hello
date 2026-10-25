@@ -298,3 +298,53 @@ func TestGrantsAPI(t *testing.T) {
 		t.Fatalf("clients after prune = %v", left)
 	}
 }
+
+// TestServiceAccountIntegrationScopes fails if the integration scopes are
+// grantable beyond the roles that may hold them, a bad extension limit is
+// accepted, the limit is not stored and shown, an update that omits it
+// changes it, or null does not clear it (spec integrations I-31, I-33).
+func TestServiceAccountIntegrationScopes(t *testing.T) {
+	e := newAIEnv(t)
+	c := e.login()
+	create := func(code int, body map[string]any) map[string]any {
+		return c.must(code, "POST", "/api/v1/service-accounts", body).json(t)
+	}
+	// A viewer holds events but not calls or recordings.
+	create(http.StatusBadRequest, map[string]any{"name": "v1", "role": "viewer", "scopes": []string{"read", "calls"}})
+	create(http.StatusBadRequest, map[string]any{"name": "v2", "role": "viewer", "scopes": []string{"recordings"}})
+	create(http.StatusCreated, map[string]any{"name": "v3", "role": "viewer", "scopes": []string{"read", "events"}})
+	// A bad limit: not a number, too short, duplicated.
+	for _, bad := range [][]string{{"abc"}, {"1"}, {"101", "101"}, {"12345678901"}, {"10 1"}} {
+		create(http.StatusBadRequest, map[string]any{"name": "bad", "role": "operator", "scopes": []string{"calls"}, "extensionScope": bad})
+	}
+	sa := create(http.StatusCreated, map[string]any{"name": "crm", "role": "operator", "scopes": []string{"read", "calls", "events", "recordings"},
+		"extensionScope": []string{"101", "102"}})
+	id := sa["id"].(string)
+	if got := fmt.Sprint(sa["extensionScope"]); got != "[101 102]" {
+		t.Fatalf("created extensionScope = %s", got)
+	}
+	all := create(http.StatusCreated, map[string]any{"name": "all", "role": "operator", "scopes": []string{"events"}})
+	if all["extensionScope"] != nil {
+		t.Fatalf("an account created without a limit has %v", all["extensionScope"])
+	}
+
+	patch := func(code int, body any) map[string]any {
+		return c.must(code, "PATCH", "/api/v1/service-accounts/"+id, body).json(t)
+	}
+	if got := patch(http.StatusOK, map[string]any{"description": "x"}); fmt.Sprint(got["extensionScope"]) != "[101 102]" {
+		t.Fatalf("an update without extensionScope changed it: %v", got["extensionScope"])
+	}
+	if got := patch(http.StatusOK, map[string]any{"extensionScope": []string{"103"}}); fmt.Sprint(got["extensionScope"]) != "[103]" {
+		t.Fatalf("set = %v", got["extensionScope"])
+	}
+	if got := patch(http.StatusOK, map[string]any{"extensionScope": []string{}}); fmt.Sprint(got["extensionScope"]) != "[]" {
+		t.Fatalf("empty list = %v", got["extensionScope"])
+	}
+	patch(http.StatusBadRequest, map[string]any{"extensionScope": []string{"x"}})
+	patch(http.StatusBadRequest, map[string]any{"extensionScope": "101"})
+	if got := patch(http.StatusOK, map[string]any{"extensionScope": nil}); got["extensionScope"] != nil {
+		t.Fatalf("null did not clear the limit: %v", got["extensionScope"])
+	}
+	// Downgrading to a role that cannot hold calls is refused.
+	patch(http.StatusBadRequest, map[string]any{"role": "viewer"})
+}
