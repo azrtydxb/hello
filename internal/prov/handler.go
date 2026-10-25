@@ -43,6 +43,9 @@ type Options struct {
 	Audit   *Audit
 	Metrics *Metrics
 	Log     *slog.Logger
+	// BookCache keeps rendered directories between requests (spec P-11);
+	// nil renders every request.
+	BookCache BookCache
 }
 
 type handler struct {

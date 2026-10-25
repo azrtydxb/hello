@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/auth"
@@ -22,6 +23,13 @@ func TestRoutesTable(t *testing.T) {
 		"POST /api/v1/phones/{id}/admin-password/reveal": true,
 		"POST /api/v1/phones/{id}/admin-password/rotate": true,
 	}
+	// Self-service routes (spec P-19) write with the write scope but ask
+	// only the viewer role: any user with a linked extension edits their own
+	// contacts. A session holds every scope; a viewer's token can only hold
+	// read, so a viewer changes contacts from the console.
+	selfService := func(r RouteInfo) bool {
+		return r.Scope == auth.ScopeWrite && r.Role == auth.RoleViewer && strings.HasPrefix(r.Pattern, "/api/v1/me/contacts")
+	}
 	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true}
 	seen := map[string]bool{}
 	for _, r := range Routes() {
@@ -40,7 +48,7 @@ func TestRoutesTable(t *testing.T) {
 			continue
 		}
 		want, ok := roleOf[r.Scope]
-		if !ok || r.Role != want {
+		if !ok || (r.Role != want && !selfService(r)) {
 			t.Errorf("%s: scope %q role %q, want the scope's role %q", key, r.Scope, r.Role, want)
 		}
 		if (r.Scope == auth.ScopeSecrets) != secrets[key] {

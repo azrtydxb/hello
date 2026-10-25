@@ -190,6 +190,71 @@ export function importCsv(
 export const exportUrl = (bookId: Id) =>
   `/api/v1/phonebooks/${seg(bookId)}/export`;
 
+// --- one list of entries, shared or personal ------------------------------------------
+
+/**
+ * The operations of one list of entries: a shared book's (by id) or the
+ * signed-in user's own contacts (spec P-9), which the entries view and its
+ * dialogs work with alike.
+ */
+export interface EntriesApi {
+  list(cursor: string, signal?: AbortSignal): Promise<Page<Entry>>;
+  create(input: EntryInput): Promise<Entry>;
+  update(entryId: Id, input: EntryInput): Promise<Entry>;
+  remove(entryId: Id): Promise<void>;
+  importCsv(
+    csv: string,
+    opts: { dryRun: boolean; mode: "append" | "replace" },
+  ): Promise<ImportResult>;
+  /** The URL of the CSV export. */
+  exportUrl: string;
+}
+
+/** The entries of a shared book. */
+export const bookEntriesApi = (bookId: Id): EntriesApi => ({
+  list: (cursor, signal) => listEntries(bookId, cursor, signal),
+  create: (input) => createEntry(bookId, input),
+  update: (entryId, input) => updateEntry(bookId, entryId, input),
+  remove: (entryId) => deleteEntry(bookId, entryId),
+  importCsv: (csv, opts) => importCsv(bookId, csv, opts),
+  exportUrl: exportUrl(bookId),
+});
+
+// --- my contacts (spec P-9) -----------------------------------------------------------
+
+/** The signed-in user's own contacts: the owner is always the caller. */
+export const myContactsApi: EntriesApi = {
+  list: (cursor, signal) =>
+    page<Entry>(
+      `/api/v1/me/contacts?limit=200${
+        cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""
+      }`,
+      signal,
+    ),
+  create: (input) =>
+    request<Entry>("POST", "/api/v1/me/contacts", { body: input }),
+  update: (entryId, input) =>
+    request<Entry>("PUT", `/api/v1/me/contacts/${seg(entryId)}`, {
+      body: input,
+    }),
+  remove: (entryId) =>
+    request<void>("DELETE", `/api/v1/me/contacts/${seg(entryId)}`),
+  importCsv: (csv, opts) => {
+    const form = new FormData();
+    form.set("file", new Blob([csv], { type: "text/csv" }), "contacts.csv");
+    const q = new URLSearchParams({
+      dry_run: String(opts.dryRun),
+      mode: opts.mode,
+    });
+    return request<ImportResult>(
+      "POST",
+      `/api/v1/me/contacts/import?${q.toString()}`,
+      { rawBody: form },
+    );
+  },
+  exportUrl: "/api/v1/me/contacts/export",
+};
+
 // --- phone groups --------------------------------------------------------------------
 
 export const listGroups = (signal?: AbortSignal) =>
