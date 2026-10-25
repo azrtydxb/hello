@@ -161,15 +161,19 @@ func text(s string, max int, multiline bool) bool {
 
 // Group is a phone group: what it delivers to its phones (spec P-2).
 type Group struct {
-	ID                int64     `json:"id"`
-	Name              string    `json:"name"`
-	Description       string    `json:"description"`
-	IncludeExtensions bool      `json:"includeExtensions"`
-	IncludeCompany    bool      `json:"includeCompany"`
-	BookIDs           []int64   `json:"bookIds"`
-	PhoneCount        int       `json:"phoneCount"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID                int64   `json:"id"`
+	Name              string  `json:"name"`
+	Description       string  `json:"description"`
+	IncludeExtensions bool    `json:"includeExtensions"`
+	IncludeCompany    bool    `json:"includeCompany"`
+	BookIDs           []int64 `json:"bookIds"`
+	// Multicast is the group's multicast paging channels and PTT its
+	// push-to-talk settings (migration 00016).
+	Multicast  []MulticastChannel `json:"multicast"`
+	PTT        PTT                `json:"ptt"`
+	PhoneCount int                `json:"phoneCount"`
+	CreatedAt  time.Time          `json:"createdAt"`
+	UpdatedAt  time.Time          `json:"updatedAt"`
 }
 
 // ValidName reports whether s is a usable book or group name: 1 to max

@@ -39,15 +39,19 @@ type PagingExtension struct {
 // PagingGroup is a paging group with its members (in position order) and the
 // extensions allowed to page it (empty: any internal extension).
 type PagingGroup struct {
-	ID        int64             `json:"id"`
-	Name      string            `json:"name"`
-	Code      string            `json:"code"`
-	Priority  string            `json:"priority"`
-	Enabled   bool              `json:"enabled"`
-	Members   []PagingExtension `json:"members"`
-	Callers   []PagingExtension `json:"callers"`
-	CreatedAt time.Time         `json:"createdAt"`
-	UpdatedAt time.Time         `json:"updatedAt"`
+	ID       int64             `json:"id"`
+	Name     string            `json:"name"`
+	Code     string            `json:"code"`
+	Priority string            `json:"priority"`
+	Enabled  bool              `json:"enabled"`
+	Members  []PagingExtension `json:"members"`
+	Callers  []PagingExtension `json:"callers"`
+	// MulticastChannelID names a multicast channel of a phone group the page
+	// is also sent to (migration 00016); MulticastChannel describes it.
+	MulticastChannelID *int64           `json:"multicastChannelId"`
+	MulticastChannel   *PagingMulticast `json:"multicastChannel"`
+	CreatedAt          time.Time        `json:"createdAt"`
+	UpdatedAt          time.Time        `json:"updatedAt"`
 }
 
 // PagingGroupInput is the writable shape of a paging group; an update
@@ -59,11 +63,27 @@ type PagingGroupInput struct {
 	Enabled  bool
 	Members  []int64 // extension ids, in display order
 	Callers  []int64 // extension ids
+	// MulticastChannelID is the multicast channel to page too, or nil.
+	MulticastChannelID *int64
+}
+
+// PagingMulticast describes the multicast channel of a paging group
+// (read-only).
+type PagingMulticast struct {
+	ID        int64  `json:"id"`
+	GroupID   int64  `json:"groupId"`
+	GroupName string `json:"groupName"`
+	Label     string `json:"label"`
+	Address   string `json:"address"`
+	Port      int    `json:"port"`
+	Codec     string `json:"codec"`
 }
 
 func listPagingGroups(ctx context.Context, q querier, where string, args ...any) ([]PagingGroup, error) {
-	rows, err := q.QueryContext(ctx, `SELECT g.id, g.name, g.code, g.priority, g.enabled, g.created_at, g.updated_at
-		FROM paging_groups g `+where+` ORDER BY g.id`, args...)
+	rows, err := q.QueryContext(ctx, `SELECT g.id, g.name, g.code, g.priority, g.enabled, g.created_at, g.updated_at,
+			g.multicast_channel_id, c.id, c.group_id, pg.name, c.label, c.address, c.port, c.codec
+		FROM paging_groups g LEFT JOIN multicast_channels c ON c.id = g.multicast_channel_id
+		LEFT JOIN phone_groups pg ON pg.id = c.group_id `+where+` ORDER BY g.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -72,8 +92,16 @@ func listPagingGroups(ctx context.Context, q querier, where string, args ...any)
 	var ids []int64
 	for rows.Next() {
 		var g PagingGroup
-		if err := rows.Scan(&g.ID, &g.Name, &g.Code, &g.Priority, &g.Enabled, &g.CreatedAt, &g.UpdatedAt); err != nil {
+		var cid, cgroup sql.NullInt64
+		var cgname, clabel, caddr, ccodec sql.NullString
+		var cport sql.NullInt64
+		if err := rows.Scan(&g.ID, &g.Name, &g.Code, &g.Priority, &g.Enabled, &g.CreatedAt, &g.UpdatedAt,
+			&g.MulticastChannelID, &cid, &cgroup, &cgname, &clabel, &caddr, &cport, &ccodec); err != nil {
 			return nil, err
+		}
+		if cid.Valid {
+			g.MulticastChannel = &PagingMulticast{ID: cid.Int64, GroupID: cgroup.Int64, GroupName: cgname.String,
+				Label: clabel.String, Address: caddr.String, Port: int(cport.Int64), Codec: ccodec.String}
 		}
 		g.Members, g.Callers = []PagingExtension{}, []PagingExtension{}
 		out = append(out, g)
@@ -165,6 +193,28 @@ func checkPageCode(ctx context.Context, tx *sql.Tx, code string) error {
 	return rows.Err()
 }
 
+// checkPagingChannel refuses a multicast channel Hello cannot page: one that
+// does not exist, that the phones do not listen on, or whose codec is not
+// G.711 (Hello does not transcode to G.722).
+func checkPagingChannel(ctx context.Context, tx *sql.Tx, id *int64) error {
+	if id == nil {
+		return nil
+	}
+	var role, codec string
+	err := tx.QueryRowContext(ctx, `SELECT role, codec FROM multicast_channels WHERE id = $1`, *id).Scan(&role, &codec)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return fieldError("multicastChannelId", "no such multicast channel")
+	case err != nil:
+		return err
+	case role == "send":
+		return fieldError("multicastChannelId", "the phones do not listen on this channel (its role is send)")
+	case codec != "PCMU" && codec != "PCMA":
+		return fieldError("multicastChannelId", "Hello pages G.711 only; the channel's codec is "+codec)
+	}
+	return nil
+}
+
 func writePagingLists(ctx context.Context, tx *sql.Tx, id int64, in PagingGroupInput) error {
 	for _, q := range []string{
 		`DELETE FROM paging_group_members WHERE group_id = $1`,
@@ -212,9 +262,12 @@ func (s *Store) CreatePagingGroup(ctx context.Context, actor string, in PagingGr
 		if err := checkPageCode(ctx, tx, in.Code); err != nil {
 			return 0, err
 		}
+		if err := checkPagingChannel(ctx, tx, in.MulticastChannelID); err != nil {
+			return 0, err
+		}
 		var id int64
-		if err := tx.QueryRowContext(ctx, `INSERT INTO paging_groups (name, code, priority, enabled)
-			VALUES ($1, $2, $3, $4) RETURNING id`, in.Name, in.Code, in.Priority, in.Enabled).Scan(&id); err != nil {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO paging_groups (name, code, priority, enabled, multicast_channel_id)
+			VALUES ($1, $2, $3, $4, $5) RETURNING id`, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := writePagingLists(ctx, tx, id, in); err != nil {
@@ -236,8 +289,11 @@ func (s *Store) UpdatePagingGroup(ctx context.Context, actor string, id int64, i
 		if err := checkPageCode(ctx, tx, in.Code); err != nil {
 			return id, err
 		}
+		if err := checkPagingChannel(ctx, tx, in.MulticastChannelID); err != nil {
+			return id, err
+		}
 		res, err := tx.ExecContext(ctx, `UPDATE paging_groups SET name = $2, code = $3, priority = $4, enabled = $5,
-			updated_at = now() WHERE id = $1`, id, in.Name, in.Code, in.Priority, in.Enabled)
+			multicast_channel_id = $6, updated_at = now() WHERE id = $1`, id, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID)
 		if err != nil {
 			return id, err
 		}

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"html"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -505,8 +506,81 @@ func emuGrandstream(m *emu) {
 	c.opt("P234")
 	c.opt("P235")
 	c.opt("P238")
+	gsPagingButton(m, c)
 	m.firmware(fw)
 }
+
+// gsPagingButton models what the WP8xx PTT/paging button needs to do
+// anything (the phone says "not configured" otherwise): multicast paging on
+// (P22208) with at least one listening address "ip:port" in the multicast
+// range (P1569 onward, address and label pairs, ten slots) and a codec
+// number the phone knows (P1568); on a WP8x6 also the PTT/Paging switch
+// (P22556), the side key set to PTT/Paging (P82317 = 0) and, for PTT,
+// P22177 with the address (P22183), a default channel the phone takes
+// (P22184: 1, 2, 24 or 25) that exists, transmits and is available
+// (channel n is P82001 + 5 (n-1): available, transmit, subscribe, join,
+// name). Grandstream WP8x6 and WP810/822/825 config templates
+// (config-template_09302026) and the WP8x6 Administration Guide.
+func gsPagingButton(m *emu, c conf) {
+	listeners := 0
+	for i := range prov10 {
+		addr := c.take("P" + strconv.Itoa(1569+2*i))
+		c.take("P" + strconv.Itoa(1570+2*i))
+		if addr == "" {
+			continue
+		}
+		listeners++
+		host, port, ok := strings.Cut(addr, ":")
+		p, err := strconv.Atoi(port)
+		if ip := net.ParseIP(host); !ok || err != nil || ip == nil || !ip.IsMulticast() || p < 1024 || p > 65535 {
+			m.t.Errorf("Grandstream: listening address P%d = %q is not a multicast ip:port", 1569+2*i, addr)
+		}
+	}
+	if c.take("P22208") != "1" || listeners == 0 {
+		m.t.Errorf("Grandstream: multicast paging is not set up (P22208 = %q, %d listening addresses): the paging button says not configured", c.kv["P22208"], listeners)
+	}
+	if !slices.Contains([]string{"0", "2", "8", "9", "18", "98", "123"}, c.take("P1568")) {
+		m.t.Errorf("Grandstream: P1568 = %q is not a multicast paging codec number", c.kv["P1568"])
+	}
+	if !SupportsPTT(m.vendor, m.p.model) {
+		for _, k := range []string{"P22556", "P82317", "P22177", "P22183", "P82001"} {
+			if _, set := c.kv[k]; set {
+				m.t.Errorf("Grandstream: %s is a WP8x6-only key and the %s gets it", k, m.p.model)
+			}
+		}
+		return
+	}
+	if c.take("P22556") != "1" {
+		m.t.Errorf("Grandstream: PTT/Paging (P22556) is %q on a %s: the side key says not configured", c.kv["P22556"], m.p.model)
+	}
+	if c.take("P82317") != "0" {
+		m.t.Errorf("Grandstream: side key P82317 = %q, want 0 (PTT/Paging)", c.kv["P82317"])
+	}
+	if c.take("P22177") != "1" {
+		m.t.Errorf("Grandstream: PTT (P22177) is off on a %s whose group has PTT channels", m.p.model)
+	}
+	host, port, _ := strings.Cut(c.take("P22183"), ":")
+	if ip := net.ParseIP(host); ip == nil || !ip.IsMulticast() || port == "" {
+		m.t.Errorf("Grandstream: P22183 = %q is not a multicast ip:port", c.kv["P22183"])
+	}
+	def := c.take("P22184")
+	n, _ := strconv.Atoi(def)
+	if !slices.Contains([]int{1, 2, 24, 25}, n) {
+		m.t.Fatalf("Grandstream: default PTT channel P22184 = %q, the phone takes 1, 2, 24 or 25", def)
+	}
+	base := 82001 + 5*(n-1)
+	for off, what := range []string{"available", "transmit", "subscribe", "join"} {
+		if v := c.take("P" + strconv.Itoa(base+off)); v != "1" {
+			m.t.Errorf("Grandstream: default channel %d is not %s (P%d = %q)", n, what, base+off, v)
+		}
+	}
+	if c.take("P"+strconv.Itoa(base+4)) == "" {
+		m.t.Errorf("Grandstream: default channel %d has no name", n)
+	}
+	c.takeMatching(`^P(2217[89]|2218[0-6]|8[2-4][0-9]{3})$`)
+}
+
+var prov10 = make([]struct{}, MaxMulticastListen)
 
 // gsBase is scheme (from the via code) + server path. The server path is
 // host/path with no scheme (Grandstream firmware upgrade guide: "do not
@@ -702,6 +776,17 @@ func newEmu(t *testing.T, c emuCase, pinned bool) *emu {
 	e := newEnv(t, func(o *Options) { o.CACertFile = caFile })
 	p, _ := e.s.addPhone(c.vendor, c.model, macA)
 	p.books = twoBooks()
+	if c.vendor == Grandstream {
+		// The phone's group has a multicast paging channel and, for a phone
+		// that supports PTT, PTT channels: what the paging button needs.
+		p.multicast = NewMulticastInfo([]MulticastChannel{
+			{Label: "Warehouse", Address: "239.255.0.1", Port: 5004, Codec: "PCMU", Priority: 1},
+		}, []string{"both"})
+		p.multicast.PagingKey = SupportsPTT(c.vendor, c.model)
+		if SupportsPTT(c.vendor, c.model) {
+			p.ptt = NewPTTInfo("224.0.1.116:5001", "PCMU", 1, false, []PTTChannel{{Channel: 1, Label: "All", Transmit: 1, Subscribe: 1}})
+		}
+	}
 	m := &emu{t: t, e: e, p: p, vendor: c.vendor, host: e.s.public.Host, pinned: pinned, ca: caDER,
 		fw: []byte("image-" + c.fw), flagged: map[string]string{}, taken: map[string]bool{}}
 	if pinned {
@@ -815,6 +900,8 @@ func TestPhoneEmulatorCatchesKnownBugs(t *testing.T) {
 		{"grandstream IANA time zone", "GRP2614", "<P64>{{xml .}}</P64>", "<P64>Europe/Brussels</P64>", "IANA name"},
 		{"yealink IANA time zone", "T54W", "local_time.time_zone = {{.YealinkOffset}}", "local_time.time_zone = Europe/Brussels", "IANA name"},
 		{"poly boot server left to DHCP", "VVX 450", `device.dhcp.bootSrvUseOpt="Static"`, `device.dhcp.bootSrvUseOpt="2"`, "needs Static"},
+		{"grandstream WP822 multicast paging off", "WP822", "<P22208>1</P22208>", "<P22208>0</P22208>", "paging button says not configured"},
+		{"grandstream WP836 PTT/Paging switch off", "WP836", "<P22556>1</P22556>", "<P22556>0</P22556>", "side key says not configured"},
 		{"yealink unmodelled ringtone URL", "T54W", "static.firmware.url", "ringtone.url = https://x.example/ring.wav\nstatic.firmware.url", "does not model"},
 		{"snom firmware without update policy", "D785", `<update_policy perm="R">auto_update</update_policy>`, "", "must come together"},
 		{"fanvil server as a full URL", "X6", "Flash Server IP    :", "Flash Server IP    :https://x/", "must be a bare host"},
