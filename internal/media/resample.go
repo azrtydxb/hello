@@ -1,6 +1,7 @@
 package media
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -29,7 +30,8 @@ func Resample(pcm []byte, from, to int) ([]byte, error) {
 	n := len(pcm) / 2
 	in := make([]float64, n)
 	for i := range in {
-		in[i] = float64(int16(uint16(pcm[2*i]) | uint16(pcm[2*i+1])<<8))
+		//nolint:gosec // G115: reinterpreting the two bytes as a signed sample is the point.
+		in[i] = float64(int16(binary.LittleEndian.Uint16(pcm[2*i:])))
 	}
 	nOut := int(math.Round(float64(n) * float64(to) / float64(from)))
 	out := make([]byte, 2*nOut)
@@ -64,8 +66,8 @@ func Resample(pcm []byte, from, to int) ([]byte, error) {
 		} else if v < math.MinInt16 {
 			v = math.MinInt16
 		}
-		out[2*j] = byte(v)
-		out[2*j+1] = byte(v >> 8)
+		//nolint:gosec // G115: v is clamped to the int16 range above.
+		binary.LittleEndian.PutUint16(out[2*j:], uint16(int16(v)))
 	}
 	return out, nil
 }

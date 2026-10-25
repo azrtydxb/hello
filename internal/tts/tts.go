@@ -8,6 +8,7 @@ package tts
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -134,11 +135,11 @@ func MP3ToWAV(audio []byte) ([]byte, error) {
 	}
 	dec, err := mp3.NewDecoder(bytes.NewReader(audio))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBadAudio, err)
+		return nil, fmt.Errorf("%w: %w", ErrBadAudio, err)
 	}
 	raw, err := io.ReadAll(io.LimitReader(dec, maxAudioBytes))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBadAudio, err)
+		return nil, fmt.Errorf("%w: %w", ErrBadAudio, err)
 	}
 	// The decoder always yields 16-bit little-endian stereo frames.
 	frames := len(raw) / 4
@@ -147,13 +148,22 @@ func MP3ToWAV(audio []byte) ([]byte, error) {
 	}
 	mono := make([]byte, 2*frames)
 	for i := 0; i < frames; i++ {
-		l := int(int16(uint16(raw[4*i]) | uint16(raw[4*i+1])<<8))
-		r := int(int16(uint16(raw[4*i+2]) | uint16(raw[4*i+3])<<8))
-		v := (l + r) / 2
-		mono[2*i] = byte(v)
-		mono[2*i+1] = byte(v >> 8)
+		l := int(sampleAt(raw[4*i:]))
+		r := int(sampleAt(raw[4*i+2:]))
+		putSample(mono[2*i:], int16((l+r)/2)) //nolint:gosec // G115: the mean of two int16 fits int16.
 	}
 	return PCMToWAV(mono, dec.SampleRate())
+}
+
+// sampleAt reads one little-endian 16-bit sample.
+func sampleAt(b []byte) int16 {
+	//nolint:gosec // G115: reinterpreting the two bytes as a signed sample is the point.
+	return int16(binary.LittleEndian.Uint16(b))
+}
+
+func putSample(b []byte, v int16) {
+	//nolint:gosec // G115: reinterpreting the signed sample as two bytes is the point.
+	binary.LittleEndian.PutUint16(b, uint16(v))
 }
 
 // PCMToWAV validates 16-bit mono PCM (non-empty, even byte count), resamples
@@ -167,7 +177,7 @@ func PCMToWAV(pcm []byte, rate int) ([]byte, error) {
 	}
 	out, err := media.Resample(pcm, rate, 8000)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrBadAudio, err)
+		return nil, fmt.Errorf("%w: %w", ErrBadAudio, err)
 	}
 	if len(out) == 0 {
 		return nil, ErrEmptyAudio
@@ -180,10 +190,10 @@ func PCMToWAV(pcm []byte, rate int) ([]byte, error) {
 func mapError(err error) error {
 	var api *ai.APICallError
 	if errors.As(err, &api) {
-		switch {
-		case api.StatusCode == http.StatusUnauthorized || api.StatusCode == http.StatusForbidden:
+		switch api.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
 			return ErrUnauthorized
-		case api.StatusCode == http.StatusPaymentRequired || api.StatusCode == http.StatusTooManyRequests:
+		case http.StatusPaymentRequired, http.StatusTooManyRequests:
 			return ErrQuota
 		}
 		msg := api.Message
