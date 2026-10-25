@@ -19,7 +19,7 @@ that apply here too.
 ## Release a change
 
 1. Merge to `main`. `.github/workflows/ci.yaml` builds and pushes
-   `192.168.10.131:5000/azrtydxb/hello-control`, `hello-sip`, `hello-ui`
+   `ant.azrty.com/oci-hosted/azrtydxb/hello-control`, `hello-sip`, `hello-ui`
    and `kamailio` with the immutable tag `sha-<full sha>` (plus `main`; the
    registry keeps no short tags). `kamailio` also gets a content tag,
    `kc-<16 hex>`: the tree hash of `docker/kamailio`, the only input of that
@@ -94,9 +94,9 @@ Confirmed against the cluster during the first-sync bootstrap:
 - `KAMAILIO_PUBLIC_HOST` (kamailio): `192.168.10.101` (node master-11; the
   kamailio pod runs there with hostNetwork and binds 30508 udp+tcp itself, so
   phones reach it un-NATed — a NodePort SNATs them and breaks calls to them).
-- Images pull from `192.168.10.131:5000/...` with no imagePullSecret: the
-  nodes trust Nexus directly (containerd `certs.d`), verified with a
-  disposable pod in this namespace before the first sync.
+- Images pull from the kw Kuvryn Ant replica,
+  `ant.kw.watteel.lab/oci-hosted/azrtydxb/...`, with no imagePullSecret: the
+  nodes hold the Ant pull credential (k3s `registries.yaml`).
 
 ## Secrets
 

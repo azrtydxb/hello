@@ -164,7 +164,10 @@ func (c *call) soloAnswer(phase, detail, what string) bool {
 		c.ivrReject(nil, sip.StatusNotAcceptableHere, what+" needs a G.711 SDP offer", ResultFailed)
 		return false
 	}
-	body := c.anchoredAnswerA(off)
+	// The menu's voicemail recording taps G.711 packets (relaySession), so the
+	// application answers G.711 whatever else the caller offers.
+	g711, _ := off.Pick("g711")
+	body := c.anchoredAnswerA(off, g711)
 	c.mu.Lock()
 	cancelled := c.isCancelled
 	aborted := closed(c.aborted)
@@ -691,6 +694,10 @@ func (r *relaySession) Play(ctx context.Context, pcm []byte) error {
 }
 
 func (r *relaySession) Close() error { return nil }
+
+// SampleRate is 8000: the relay encodes the 8 kHz audio in the leg's codec,
+// and the application answers G.711 (see soloAnswer).
+func (r *relaySession) SampleRate() int { return 8000 }
 
 // setVMTap installs the caller's-RTP tap of a voicemail recording and returns
 // the call's IVR session.

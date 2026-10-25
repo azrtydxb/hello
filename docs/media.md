@@ -1,10 +1,9 @@
 # Media anchoring
 
-Hello relays RTP through itself only when a feature needs it — NAT handling,
-call recording, announcements, voicemail. Every other call is direct
-endpoint-to-endpoint audio (spec §4, §16). This page describes when a call
-anchors and what that means; the implementation detail lives in
-`internal/media`.
+Hello relays RTP through itself for every call (the always-anchor policy,
+spec S-7); the triggers below are kept as trace information on the call.
+This page describes what anchoring means and which codecs it carries; the
+implementation detail lives in `internal/media`.
 
 ## When a call anchors
 
@@ -19,12 +18,54 @@ anchors and what that means; the implementation detail lives in
 An anchored call keeps its anchor until it ends — a mid-call re-INVITE can
 add the anchor, but Hello does not remove it mid-call.
 
-## Codecs
+## Codecs (HD voice)
 
-PCMU, PCMA, G.722 and Opus pass through the anchor untouched — Hello never
-transcodes. Recordings store the pass-through payload as received (G.711
-payloads are recorded as WAV; other codecs are stored with the codec noted
-in the recording metadata).
+Two phones that both support G.722 talk wideband end to end, and Opus works
+where both ends have it. G.711 (PCMU, PCMA) is the fallback for everything
+else.
+
+**Negotiation.** Hello forwards a filtered copy of the caller's codec list
+to the callee: G.722, Opus, PCMU, PCMA and telephone-event, in the caller's
+order, each with its own rtpmap and fmtp lines and its dynamic payload
+type. Everything else the phone offered (G.729, iLBC, ...) is dropped. The
+caller's answer is whatever the callee chose, so the relay needs no
+transcoding: payload types pass through unchanged, dynamic ones included. A
+mid-call re-INVITE (hold, resume) keeps the codec the call runs on.
+
+**Trunks.** Most carriers accept G.711 only, so a trunk is offered PCMU and
+PCMA unless its codec list says otherwise (Trunks page, "Codecs", or
+`codecs` in the trunk API). If that filter would leave a wideband-only
+caller nothing to offer, the caller's list is sent as it is and the carrier
+decides.
+
+**G.722 and clock rates.** G.722 audio is sampled at 16 kHz but its RTP
+clock is 8000 (RFC 3551), so `a=rtpmap:9 G722/8000` and a timestamp step of
+160 per 20 ms frame. Opus is `opus/48000/2` with a step of 960. The
+telephone-event codec that goes with a codec is the one with the same clock
+rate; a phone that offers only `telephone-event/16000` with G.722 is
+answered with that.
+
+**Media Hello ends itself** (voicemail, announcements, the recording notice,
+paging, IVR) is a session with its own sample rate: 16 kHz when the caller
+offered G.722 (it is answered with G.722), 8 kHz G.711 otherwise; an
+Opus-only caller is answered with Opus. Prompts and recordings are WAV files
+at 8 or 16 kHz; the rate a file has is resampled to the session's, so
+existing 8 kHz assets keep working and voicemail left over a G.722 call is
+stored at 16 kHz.
+
+**Recording** decodes G.711, G.722 and Opus to PCM and mixes the two
+directions into one WAV at the higher of their sample rates; any other
+codec is stored as it came with the codec noted.
+
+**Paging** with a G.722 caller sends G.722 to members that answer with it,
+a G.711 rendition (decoded and downsampled) to members that only answered
+PCMU, and G.711 to a multicast group.
+
+**Opus** is implemented with `github.com/kazzmir/opus-go`, libopus
+transpiled to Go: no cgo, so the static `CGO_ENABLED=0` build and the Alpine
+image are unchanged. It is excluded from `-race` builds (its pointer
+arithmetic trips the race detector's checkptr), where Opus calls still relay
+but are not decodable by the recorder or answerable by voicemail.
 
 ## Metrics
 

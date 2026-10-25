@@ -3,8 +3,9 @@
 # dhole deployment pattern (azrtydxb/dhole deploy/kuvryn-sync/kw).
 #
 # Images are pinned by sha- tag; every merge to main publishes
-# 192.168.10.131:5000/azrtydxb/hello-<part>:sha-<short sha> (workflow:
-# .github/workflows/ci.yaml). Replace the tags below with the tag of the
+# ant.azrty.com/oci-hosted/azrtydxb/hello-<part>:sha-<full sha> (workflow:
+# .github/workflows/ci.yaml), which the kw Ant replicates and kw pulls as
+# ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-<part>. Replace the tags below with the tag of the
 # commit you intend to run and let Sync converge; immutable sha256 digest
 # pins come later.
 #
@@ -873,7 +874,7 @@ spec:
         # starts Kamailio regardless: a node that stays gone still fails
         # loudly there rather than silently running without it.
         - name: wait-dispatcher
-          image: 192.168.10.131:5000/azrtydxb/kamailio:kc-d2a16abc8231fee9
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/kamailio:kc-d2a16abc8231fee9
           imagePullPolicy: IfNotPresent
           securityContext:
             runAsUser: 102
@@ -917,7 +918,7 @@ spec:
           # kamailio/Dockerfile), pinned to the tag it published for
           # commit 1c3fe03 (the full sha tag; the registry keeps no short
           # tags). Later: an immutable repository@sha256:... digest.
-          image: 192.168.10.131:5000/azrtydxb/kamailio:kc-d2a16abc8231fee9
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/kamailio:kc-d2a16abc8231fee9
           imagePullPolicy: IfNotPresent
           securityContext:
             # uid/gid of the image's kamailio user (read from the image).
@@ -1076,7 +1077,7 @@ spec:
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-8ac01c25d6fed0f581fb1c07b36fa7dbc0fef707
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-8ac01c25d6fed0f581fb1c07b36fa7dbc0fef707
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1295,7 +1296,7 @@ spec:
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
-          image: 192.168.10.131:5000/azrtydxb/hello-sip:sha-8ac01c25d6fed0f581fb1c07b36fa7dbc0fef707
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-8ac01c25d6fed0f581fb1c07b36fa7dbc0fef707
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1826,7 +1827,7 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: 192.168.10.131:5000/azrtydxb/hello-ui:sha-8ac01c25d6fed0f581fb1c07b36fa7dbc0fef707
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-ui:sha-8ac01c25d6fed0f581fb1c07b36fa7dbc0fef707
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.

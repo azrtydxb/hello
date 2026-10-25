@@ -9,7 +9,7 @@
 global:
   # Images are <imageRegistry>/<name>:<tag>. Pin an immutable tag
   # (sha-<commit>) for anything but evaluation; "main" moves.
-  imageRegistry: 192.168.10.131:5000/azrtydxb
+  imageRegistry: ant.kw.watteel.lab/oci-hosted/azrtydxb
   imageTag: main
   imagePullPolicy: IfNotPresent
   imagePullSecrets: []

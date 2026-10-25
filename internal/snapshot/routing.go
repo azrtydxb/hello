@@ -64,7 +64,7 @@ func (s *Snapshot) WithRouting(r *RoutingState) *Snapshot {
 // silently, and never logged itself (only its ID and reason are).
 func loadTrunks(ctx context.Context, db Querier, box *secret.Box, log *slog.Logger, cfg *routing.Config, bad map[int64]string) error {
 	rows, err := db.Query(ctx, `SELECT id, name, mode, username, password_enc, realm, from_domain, register_expires,
-		options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing FROM trunks ORDER BY id`)
+		options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs FROM trunks ORDER BY id`)
 	if err != nil {
 		return fmt.Errorf("snapshot: trunks: %w", err)
 	}
@@ -74,11 +74,12 @@ func loadTrunks(ctx context.Context, db Querier, box *secret.Box, log *slog.Logg
 			t         routing.Trunk
 			sealed    []byte
 			dialing   []byte
+			codecs    []byte
 			reg, opts int32
 			maxCalls  int32
 		)
 		if err := rows.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &sealed, &t.Realm, &t.FromDomain, &reg,
-			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled, &dialing); err != nil {
+			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs); err != nil {
 			return fmt.Errorf("snapshot: scan trunk: %w", err)
 		}
 		t.RegisterExpires = time.Duration(reg) * time.Second
@@ -86,6 +87,10 @@ func loadTrunks(ctx context.Context, db Querier, box *secret.Box, log *slog.Logg
 		t.MaxCalls = int(maxCalls)
 		if err := json.Unmarshal(dialing, &t.InternalDialing); err != nil {
 			return fmt.Errorf("snapshot: decode trunk %d internal_dialing: %w", t.ID, err)
+		}
+		// A missing or unreadable list is the default: G.711 only.
+		if err := json.Unmarshal(codecs, &t.Codecs); err != nil || len(t.Codecs) == 0 {
+			t.Codecs = slices.Clone(routing.DefaultTrunkCodecs)
 		}
 		if why := checkDialing(&t); why != "" {
 			// Only reachable by writing the column directly: a stored
