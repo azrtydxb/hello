@@ -310,7 +310,7 @@ func (s *Server) routeToBinding(req *sip.Request, b livestate.Binding) error {
 // device's realm, from the stored HA1 (the password is never kept). A
 // challenge in another realm is refused.
 func answerChallenge(headers []sip.Header, method, uri, user, realm, ha1MD5, ha1SHA256 string) (*digest.Credentials, error) {
-	var lastErr error = errors.New("no digest challenge")
+	lastErr := errors.New("no digest challenge")
 	var best *digest.Challenge
 	for _, h := range headers {
 		c, err := digest.ParseChallenge(h.Value())
