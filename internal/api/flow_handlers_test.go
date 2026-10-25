@@ -99,3 +99,21 @@ func TestFlowCatalogueAndRevisionHandlers(t *testing.T) {
 		t.Fatalf("revision %q", rec.Body)
 	}
 }
+
+// TestFlowGraphStatuses sends the graph's refusals through the real API, so
+// the OpenAPI conformance check sees them: a bad scope or include (400), an
+// unknown closure node (404) and a whole-configuration graph over the node
+// cap (413). It needs the test database.
+func TestFlowGraphStatuses(t *testing.T) {
+	e := newEnv(t, noLive{})
+	c := e.login()
+	c.must(http.StatusOK, "GET", "/api/v1/flow/graph", nil)
+	c.must(http.StatusBadRequest, "GET", "/api/v1/flow/graph?scope=weird", nil)
+	c.must(http.StatusBadRequest, "GET", "/api/v1/flow/graph?include=all", nil)
+	c.must(http.StatusNotFound, "GET", "/api/v1/flow/graph?scope=closure:nope:1", nil)
+	if _, err := e.db.ExecContext(context.Background(),
+		`INSERT INTO extensions (number, name) SELECT g::text, 'bulk' FROM generate_series(100000, $1::int) g`, 100000+maxFlowNodes); err != nil {
+		t.Fatal(err)
+	}
+	c.must(http.StatusRequestEntityTooLarge, "GET", "/api/v1/flow/graph", nil)
+}

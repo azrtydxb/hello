@@ -676,3 +676,53 @@ func TestAdvertisedAnchorSDP(t *testing.T) {
 		t.Fatalf("CDR media = %q, want anchored", cd.MediaMode)
 	}
 }
+
+// TestRecordingToggleRFC2833 drives the *1 recording toggle with real
+// RFC 2833 wire codes (event 10 is '*', event 1 is '1'), as a hardware
+// phone sends them. The raw code used to reach relayDTMF unmapped, so the
+// toggle only worked with test feeds that sent ASCII bytes.
+func TestRecordingToggleRFC2833(t *testing.T) {
+	objs := &fakeObjects{}
+	putAnnouncements(objs)
+	recs := &fakeRecordings{}
+	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), withMedia(false),
+		withFeatures(func(s *snapshot.Snapshot) {
+			s.WithAnnouncements(map[string]string{"recording-notice": "ann/recording-notice.wav"})
+		}), withVoicemail(newVMStore(), objs))
+	pbx.srv.deps.Recordings = recs
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	b := newPhone(t, pbx, "b1", "pb1")
+	b.register(t)
+	b.setCallee(answerAfter(nil))
+	c := newPhone(t, pbx, "c1", "pc")
+	c.register(t)
+	c.setCallee(answerAfter(nil))
+
+	r := waitCall(t, dial(t.Context(), a, "300"))
+	if r.err != nil {
+		t.Fatalf("call: %v", r.err)
+	}
+	invC := waitReq(t, c.invites, "INVITE to c")
+	waitReq(t, c.acks, "ACK to c")
+	feedA := startRTPFeed(t, r.dcs.InviteResponse.Body())
+	feedC := startRTPFeed(t, invC.Body())
+	feedA.digit(10) // '*'
+	feedA.digit(1)
+	feedA.silence(1)
+	feedC.silence(1)
+	feedA.digit(10)
+	feedA.digit(1)
+	deadline := time.Now().Add(5 * time.Second)
+	for len(recs.snapshot()) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("RFC 2833 events 10,1 did not toggle the *1 recording")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if by := recs.snapshot()[0].by; by != "dtmf" {
+		t.Fatalf("recording by = %q, want dtmf", by)
+	}
+	hangup(t, r.dcs)
+	pbx.nextCDR(t)
+}

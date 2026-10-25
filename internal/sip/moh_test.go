@@ -21,13 +21,23 @@ func holdBody(dir string) string {
 // rtpCount reads RTP from conn for d and returns how many audio packets
 // arrived and the loudest decoded sample among them.
 func rtpCount(conn net.PacketConn, d time.Duration) (n int, peak int) {
+	return rtpCountFrom(conn, 0, d)
+}
+
+// rtpCountFrom is rtpCount counting only datagrams sent from UDP port src
+// (any sender when src is 0). Loopback ports are shared by every test in the
+// process, so a stray sender must not count as the stream under test.
+func rtpCountFrom(conn net.PacketConn, src int, d time.Duration) (n int, peak int) {
 	buf := make([]byte, 1500)
 	end := time.Now().Add(d)
 	for time.Now().Before(end) {
 		_ = conn.SetReadDeadline(end)
-		k, _, err := conn.ReadFrom(buf)
+		k, from, err := conn.ReadFrom(buf)
 		if err != nil {
 			break
+		}
+		if ua, ok := from.(*net.UDPAddr); ok && src != 0 && ua.Port != src {
+			continue
 		}
 		pkt, ok := media.ParseRTP(buf[:k])
 		if !ok || pkt.PayloadType != 0 {
