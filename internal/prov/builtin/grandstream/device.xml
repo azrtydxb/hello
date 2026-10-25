@@ -12,9 +12,9 @@
     <P3>{{xml .Line.DisplayName}}</P3>
     <P130>0</P130>
     <P32>{{div .Server.Expiry 60}}</P32>
-{{- with .Line.VoicemailCode}}
-    <P33>{{xml .}}</P33>
-{{- end}}
+{{- /* MWI (spec S-1): P99 = Subscribe for MWI [R8x6 TPL, R8x6 section 5; WP822 same key]; P33 = voicemail access number, defaulting to Hello's voicemail feature code. */}}
+    <P99>1</P99>
+    <P33>{{xml (or .Line.VoicemailCode "*97")}}</P33>
 {{- range $i, $k := .BLF}}
     <P{{add 323 (mul $i 3)}}>1</P{{add 323 (mul $i 3)}}>
     <P{{add 324 (mul $i 3)}}>0</P{{add 324 (mul $i 3)}}>

@@ -54,7 +54,9 @@ type Metrics struct {
 	Forwarded             *prometheus.CounterVec // kind
 	GroupCalls            *prometheus.CounterVec // group, strategy, result
 	PresenceSubscriptions prometheus.Gauge
-	HoldActive            prometheus.Gauge
+	// MWINotify counts message-summary NOTIFYs by kind and result (S-1).
+	MWINotify  *prometheus.CounterVec // kind, result
+	HoldActive prometheus.Gauge
 
 	// Phase 7 (in-call HA, spec S-13). DialogReplicated counts replication
 	// writes by result; DialogTakeovers the calls this node took over;
@@ -170,6 +172,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.PresenceSubscriptions = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_presence_subscriptions", Help: "Live dialog (BLF) subscriptions served by this node.",
 	})
+	m.MWINotify = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_mwi_notify_total", Help: "Message-summary NOTIFYs by kind (initial, refresh, change, terminate, unsolicited) and result.",
+	}, []string{"kind", "result"})
 	m.HoldActive = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_hold_active", Help: "Calls currently held on this node (either leg sendonly).",
 	})
@@ -185,7 +190,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Forwarded, m.GroupCalls,
-		m.PresenceSubscriptions, m.HoldActive,
+		m.PresenceSubscriptions, m.MWINotify, m.HoldActive,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	return m
 }
