@@ -23,6 +23,9 @@ const (
 	ActionBlindTransfer    = "blind_transfer"
 	ActionAttendedTransfer = "attended_transfer"
 	ActionAnnouncement     = "announcement"
+	// ActionIntercom is the 1-to-1 intercom prefix (phonebooks-ptt spec
+	// P-13): the code plus an extension number auto-answers that phone.
+	ActionIntercom = "intercom"
 )
 
 // ExtUpdate is one queued extension-feature change from a feature code.
@@ -76,6 +79,9 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 			return true
 		}
 		c.voicemailOwnBox(fc.Argument)
+		return true
+	case ActionIntercom:
+		c.handleIntercom(tx, arg)
 		return true
 	case ActionAnnouncement:
 		// The announcement feature code answers, plays its argument's

@@ -236,10 +236,10 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 24 {
-		t.Fatalf("insert takes %d arguments, want 24", len(db.args))
+	if len(db.args) != 25 {
+		t.Fatalf("insert takes %d arguments, want 25", len(db.args))
 	}
-	for i, a := range db.args[21:] {
+	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
 			t.Fatalf("argument %d = %#v, want a nil pointer", 22+i, a)
 		}
@@ -249,6 +249,9 @@ func TestCallQualityCDR(t *testing.T) {
 	base.RTPPackets, base.RTPLost, base.RTPJitterMs = &p, &l, &j
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
+	}
+	if db.args[24] != "call" {
+		t.Fatalf("kind = %v, want the default call", db.args[24])
 	}
 	gp, gl, gj := db.args[21].(*int64), db.args[22].(*int64), db.args[23].(*float64)
 	if *gp != 1000 || *gl != 12 || *gj != 37.5 {
