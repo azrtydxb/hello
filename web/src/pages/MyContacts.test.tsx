@@ -151,11 +151,31 @@ describe("MyContacts", () => {
     expect(screen.queryByRole("button", { name: "Add entry" })).toBeNull();
   });
 
-  it("is in the sidebar for every role", async () => {
-    api("viewer");
+  it("is the user's address book in the sidebar", async () => {
+    mockApi({
+      "GET /api/v1/auth/me": () =>
+        json({
+          username: "u",
+          role: "user",
+          extensions: [{ id: 1, number: "101", name: "Desk" }],
+        }),
+      "GET /api/v1/me/contacts?limit=200": () => json({ items: [], next: "" }),
+    });
     renderApp("/me/contacts");
     expect(
-      await screen.findByRole("link", { name: "My contacts" }),
+      await screen.findByRole("link", { name: "Address book" }),
     ).toHaveAttribute("href", "/me/contacts");
+  });
+
+  it("lets a user with the self-service role keep contacts", async () => {
+    api("user", {
+      "POST /api/v1/me/contacts": () =>
+        json(contact(11, "Cy", "Young", "1004"), 201),
+    });
+    renderApp("/me/contacts");
+    await screen.findByRole("table", { name: "Entries of My contacts" });
+    expect(
+      screen.getByRole("button", { name: "Add entry" }),
+    ).toBeInTheDocument();
   });
 });

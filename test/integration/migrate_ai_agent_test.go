@@ -116,8 +116,8 @@ func TestMigrateAIAgentRollback(t *testing.T) {
 	if n := present(); n != 0 {
 		t.Fatalf("after rollback: %d AI agent objects left", n)
 	}
-	if n, err := migrate.Up(ctx, db); err != nil || n != 14 { // 00009 to 00017, 00019 and 00026 to 00029
-		t.Fatalf("re-apply = %d, %v; want 14, nil", n, err)
+	if n, err := migrate.Up(ctx, db); err != nil || n != 15 { // 00009 to 00017, 00019 and 00026 to 00030
+		t.Fatalf("re-apply = %d, %v; want 15, nil", n, err)
 	}
 	if n := present(); n != want {
 		t.Fatalf("after re-apply: %d of %d AI agent objects present", n, want)

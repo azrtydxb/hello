@@ -85,6 +85,10 @@ type Role string
 
 // The roles, from least to most privileged.
 const (
+	// RoleUser is an extension self-service account: it reaches only the
+	// /me routes, and there only the data of its linked extensions. It ranks
+	// below viewer, so no route that asks viewer or more admits it.
+	RoleUser     Role = "user"
 	RoleViewer   Role = "viewer"
 	RoleOperator Role = "operator"
 	RoleAdmin    Role = "admin"
@@ -92,12 +96,14 @@ const (
 
 func (r Role) rank() int {
 	switch r {
-	case RoleViewer:
+	case RoleUser:
 		return 1
-	case RoleOperator:
+	case RoleViewer:
 		return 2
-	case RoleAdmin:
+	case RoleOperator:
 		return 3
+	case RoleAdmin:
+		return 4
 	}
 	return 0
 }
@@ -119,6 +125,8 @@ func ParseRole(v string) (Role, error) {
 // GrantableScopes is the most a user or service account of role r may hold.
 func GrantableScopes(r Role) Scopes {
 	switch r {
+	case RoleUser:
+		return Scopes{ScopeRead, ScopeWrite}
 	case RoleViewer:
 		return Scopes{ScopeRead, ScopeEvents}
 	case RoleOperator:
