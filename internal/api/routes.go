@@ -98,6 +98,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/paging-groups/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getPagingGroup},
 		{"PUT", "/api/v1/paging-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPagingGroup},
 		{"DELETE", "/api/v1/paging-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deletePagingGroup},
+		{"POST", "/api/v1/paging-groups/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testPagingGroup},
 		{"GET", "/api/v1/feature-codes", auth.ScopeRead, auth.RoleViewer, false, s.listFeatureCodes},
 		{"PUT", "/api/v1/feature-codes", auth.ScopeWrite, auth.RoleOperator, false, s.putFeatureCodes},
 
@@ -153,6 +154,7 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/phones/{id}/preview", auth.ScopeRead, auth.RoleViewer, false, s.previewPhone},
 
 		{"GET", "/api/v1/phonebooks", auth.ScopeRead, auth.RoleViewer, false, s.listPhonebooks},
+		{"GET", "/api/v1/phonebooks/lookup", auth.ScopeAdmin, auth.RoleAdmin, false, s.lookupPhonebook},
 		{"POST", "/api/v1/phonebooks", auth.ScopeAdmin, auth.RoleAdmin, false, s.createPhonebook},
 		{"GET", "/api/v1/phonebooks/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getPhonebook},
 		{"PUT", "/api/v1/phonebooks/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.updatePhonebook},
@@ -163,6 +165,13 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/phonebooks/{id}/entries/{entryId}", auth.ScopeWrite, auth.RoleOperator, false, s.deletePhonebookEntry},
 		{"POST", "/api/v1/phonebooks/{id}/import", auth.ScopeWrite, auth.RoleOperator, false, s.importPhonebook},
 		{"GET", "/api/v1/phonebooks/{id}/export", auth.ScopeWrite, auth.RoleOperator, false, s.exportPhonebook},
+
+		{"GET", "/api/v1/me/contacts", auth.ScopeRead, auth.RoleViewer, false, s.listContacts},
+		{"POST", "/api/v1/me/contacts", auth.ScopeWrite, auth.RoleViewer, false, s.createContact},
+		{"POST", "/api/v1/me/contacts/import", auth.ScopeWrite, auth.RoleViewer, false, s.importContacts},
+		{"GET", "/api/v1/me/contacts/export", auth.ScopeRead, auth.RoleViewer, false, s.exportContacts},
+		{"PUT", "/api/v1/me/contacts/{id}", auth.ScopeWrite, auth.RoleViewer, false, s.updateContact},
+		{"DELETE", "/api/v1/me/contacts/{id}", auth.ScopeWrite, auth.RoleViewer, false, s.deleteContact},
 
 		{"GET", "/api/v1/phone-groups", auth.ScopeRead, auth.RoleViewer, false, s.listPhoneGroups},
 		{"POST", "/api/v1/phone-groups", auth.ScopeAdmin, auth.RoleAdmin, false, s.createPhoneGroup},

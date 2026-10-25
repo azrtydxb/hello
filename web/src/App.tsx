@@ -47,6 +47,7 @@ import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
 import { PhoneDetail } from "./pages/PhoneDetail";
 import { PhoneGroups } from "./pages/PhoneGroups";
+import { MyContacts } from "./pages/MyContacts";
 import { Phonebooks } from "./pages/Phonebooks";
 import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
@@ -76,6 +77,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/devices": Devices,
   "/phones": Phones,
   "/phonebooks": Phonebooks,
+  "/me/contacts": MyContacts,
   "/registrations": Registrations,
   "/calls": Calls,
   "/history": History,

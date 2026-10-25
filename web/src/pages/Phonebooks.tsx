@@ -1,4 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   errorMessage,
   fieldErrors,
@@ -9,20 +15,16 @@ import {
 } from "../api";
 import {
   BOOK_KIND_LABEL,
+  bookEntriesApi,
   createBook,
-  createEntry,
   deleteBook,
-  deleteEntry,
   entryName,
-  exportUrl,
-  importCsv,
   listBooks,
-  listEntries,
   NUMBER_LABELS,
   renameBook,
-  updateEntry,
   type Book,
   type Entry,
+  type EntriesApi,
   type EntryInput,
   type ImportResult,
 } from "../api/phonebook";
@@ -387,14 +389,35 @@ function ExtensionsBook() {
   );
 }
 
-/** A named or company book's entries, with search, edit and CSV. */
-function EntriesView({
+/**
+ * Shows its children to an operator and above, or to everybody for a list
+ * its viewer owns (the user's own contacts, spec P-19).
+ */
+function Gate({ open, children }: { open: boolean; children: ReactNode }) {
+  return open ? <>{children}</> : <Can>{children}</Can>;
+}
+
+/**
+ * A list of entries, with search, edit and CSV: a named or company book's
+ * (the default) or, with `api` and `selfService`, the signed-in user's own
+ * contacts, which any role may change.
+ */
+export function EntriesView({
   book,
   onCount,
+  api: entriesApi,
+  selfService = false,
 }: {
   book: Book;
   onCount: (count: number) => void;
+  api?: EntriesApi;
+  selfService?: boolean;
 }) {
+  const bookId = book.id;
+  const api = useMemo(
+    () => entriesApi ?? bookEntriesApi(bookId),
+    [entriesApi, bookId],
+  );
   const [entries, setEntries] = useState<Load<Entry[]>>({ status: "loading" });
   const [next, setNext] = useState("");
   const [query, setQuery] = useState("");
@@ -408,7 +431,8 @@ function EntriesView({
 
   useEffect(() => {
     const controller = new AbortController();
-    listEntries(book.id, "", controller.signal)
+    api
+      .list("", controller.signal)
       .then((p) => {
         setEntries({ status: "ready", value: p.items });
         setNext(p.next);
@@ -419,13 +443,13 @@ function EntriesView({
         }
       });
     return () => controller.abort();
-  }, [book.id, reload]);
+  }, [api, reload]);
 
   async function onMore() {
     setLoadingMore(true);
     setMoreError(null);
     try {
-      const p = await listEntries(book.id, next);
+      const p = await api.list(next);
       setEntries((prev) =>
         prev.status === "ready"
           ? { status: "ready", value: [...prev.value, ...p.items] }
@@ -441,7 +465,7 @@ function EntriesView({
 
   async function onDelete(e: Entry) {
     try {
-      await deleteEntry(book.id, e.id);
+      await api.remove(e.id);
     } catch (err: unknown) {
       throw new Error(`Could not delete the entry: ${errorMessage(err)}`, {
         cause: err,
@@ -494,7 +518,7 @@ function EntriesView({
       label: "Actions",
       align: "right",
       render: (e) => (
-        <Can>
+        <Gate open={selfService}>
           <div className="inv-actions">
             <IconButton
               icon="pencil"
@@ -509,7 +533,7 @@ function EntriesView({
               onClick={() => setDeleting(e)}
             />
           </div>
-        </Can>
+        </Gate>
       ),
     },
   ];
@@ -525,7 +549,7 @@ function EntriesView({
           onChange={(e) => setQuery(e.target.value)}
         />
         <div className="prov-row pb-toolbar__buttons">
-          <Can>
+          <Gate open={selfService}>
             <Button
               variant="secondary"
               icon="upload"
@@ -535,7 +559,7 @@ function EntriesView({
             </Button>
             <a
               className="az-btn az-btn--secondary"
-              href={exportUrl(book.id)}
+              href={api.exportUrl}
               download
             >
               Export CSV
@@ -543,7 +567,7 @@ function EntriesView({
             <Button icon="plus" onClick={() => setEditing("new")}>
               Add entry
             </Button>
-          </Can>
+          </Gate>
         </div>
       </div>
       {entries.status === "loading" && <Spinner label="Loading entries…" />}
@@ -593,6 +617,7 @@ function EntriesView({
       {editing && (
         <EntryModal
           book={book}
+          api={api}
           entry={editing === "new" ? null : editing}
           onClose={() => setEditing(null)}
           onSaved={(saved, created) => {
@@ -626,6 +651,7 @@ function EntriesView({
       {importing && (
         <ImportModal
           book={book}
+          api={api}
           onClose={() => setImporting(false)}
           onImported={(imported) => {
             setImporting(false);
@@ -668,11 +694,13 @@ interface NumberDraft {
 
 function EntryModal({
   book,
+  api,
   entry,
   onClose,
   onSaved,
 }: {
   book: Book;
+  api: EntriesApi;
   entry: Entry | null;
   onClose: () => void;
   onSaved: (entry: Entry, created: boolean) => void;
@@ -717,8 +745,8 @@ function EntryModal({
     setBusy(true);
     try {
       const saved = entry
-        ? await updateEntry(book.id, entry.id, input)
-        : await createEntry(book.id, input);
+        ? await api.update(entry.id, input)
+        : await api.create(input);
       onSaved(saved, entry === null);
     } catch (err) {
       const { byKey, unmatched } = mapFieldErrors(fieldErrors(err), [
@@ -857,10 +885,12 @@ function EntryModal({
 
 function ImportModal({
   book,
+  api,
   onClose,
   onImported,
 }: {
   book: Book;
+  api: EntriesApi;
   onClose: () => void;
   onImported: (imported: number) => void;
 }) {
@@ -884,7 +914,7 @@ function ImportModal({
     setError(null);
     setBusy(true);
     try {
-      const result = await importCsv(book.id, csv, { dryRun: true, mode });
+      const result = await api.importCsv(csv, { dryRun: true, mode });
       setChecked({ csv, mode, result });
     } catch (err) {
       setChecked(null);
@@ -898,7 +928,7 @@ function ImportModal({
     setError(null);
     setBusy(true);
     try {
-      const result = await importCsv(book.id, csv, { dryRun: false, mode });
+      const result = await api.importCsv(csv, { dryRun: false, mode });
       onImported(result.imported);
     } catch (err) {
       setError(errorMessage(err));

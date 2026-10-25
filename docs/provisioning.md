@@ -452,8 +452,23 @@ endpoint, with the phone's own token. Manage it under **Phonebooks** and
   `POST /api/v1/phones` or `PATCH /api/v1/phones/{id}`.
 - **Link a user to an extension** with `extensionId` on
   `PATCH /api/v1/users/{id}` (admin; one user per extension). It is what
-  will tie a user's personal contacts to the phones of that extension;
-  personal books are not delivered yet.
+  ties a user's personal contacts to the phones of that extension (see
+  _Personal contacts_ below).
+- **Check a number.** `GET /api/v1/phonebooks/lookup?number=&callee=`
+  (admin) says which entry would name a caller: the number is reduced to
+  its lookup key (`+41 79 123 45 67`, `0041791234567`, `079 123 45 67` and
+  `sip:+41791234567@host` are one key) and looked up in the extensions
+  book, the named books of the groups of the callee's phones (`callee` is
+  an extension number; leave it out to skip them) and the company book, in
+  that order. An exact match on the key wins; failing that, the last nine
+  digits match when exactly one entry has them (`ambiguous` names nobody).
+  Anonymous, feature codes (`*72`), short codes and non-numbers are
+  `unresolvable`. Personal books are never read. How `+` and a leading `0`
+  are read depends on `HELLO_DIAL_INTL_PREFIX` (default `00`, the digits a
+  dialled international number starts with) and `HELLO_DIAL_COUNTRY_CODE`
+  (default unset; `41` or `+41` makes `079 123 45 67` the same number as
+  `+41 79 123 45 67`). A number is stored with its key when it is saved, so
+  after changing either, re-import or re-save the entries that matter.
 - **CSV.** On the Phonebooks page, **Import CSV** checks the file first
   (every failing row with its row, column and reason) and imports only a
   clean file; **Export CSV** downloads the book. Over the API,
@@ -490,6 +505,46 @@ the vendor's limit.
 A phone with no books is given no directory settings. A directory above
 2 MiB is not served (an empty `404`, with a log line), so the phone keeps
 what it has.
+
+**Caching.** Each rendered directory is kept in Valkey under
+`hello:pb:render:<vendor>:<hash>` for an hour (five minutes when it holds a
+personal book, and then under a key of that phone alone), so every replica
+answers a repeat fetch without reading the books. The hash covers the vendor,
+the slot and the _version_ of the phone's delivered set: each book carries a
+version that every entry, import or rename of it bumps in the same
+transaction, the set names its books in order (so a phone group change is a
+new set), and the extensions book is fingerprinted by how many extensions
+there are, how many are hidden and the latest change. A change anywhere
+therefore names a new key and the old render is simply never asked for
+again; nothing is invalidated by hand, and a Valkey flush or outage costs
+a render from PostgreSQL, never a stale directory.
+
+### Personal contacts
+
+Any signed-in user whose account is linked to an extension keeps their own
+contacts on **My contacts** (`/me/contacts`): add, edit, delete, CSV import
+and export, up to 1,000. The personal book is the last book of the
+directory of the phones bound to that user's extension, after the
+extensions, company and group books (a number an earlier book has is not
+repeated), and shows at the phone's next refresh. Over the API:
+`GET|POST /api/v1/me/contacts`, `PUT|DELETE /api/v1/me/contacts/{id}`,
+`POST /api/v1/me/contacts/import` and `GET /api/v1/me/contacts/export`,
+with the same body and CSV format as a shared book.
+
+- The owner is always the caller. No route takes a user id, and no route
+  reads another user's contacts, an administrator's included; the book does
+  not appear in the book list, the phonebook routes or the lookup check, and
+  the MCP tools do not cover it.
+- A service account has no contacts (`403`, code `no_user`). A user with no
+  linked extension gets `403` with code `no_extension`, and the page tells
+  them to ask an administrator.
+- Unlinking the user (or deleting them) stops the delivery at the phone's
+  next fetch; the contacts are kept for a later relink, and deleted with the
+  user.
+- The audit log records that a user created, changed, deleted or imported
+  contacts, with the user and the number of imported rows, never a contact.
+- A viewer's API token can only read, so a viewer changes contacts from the
+  console (a session); an operator's token can write.
 
 |                  | Yealink                                                                                                                                               | Poly                                                                      | Grandstream                                                              | Snom                             | Fanvil                                                                        |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------- | ----------------------------------------------------------------------------- |
@@ -542,7 +597,10 @@ answer by themselves on the speaker.
   of every member with `Call-Info: <sip:host>;answer-after=0` and an
   `Alert-Info` auto-answer value, and the phones answer on the speaker.
   Audio is one way, from the caller to the members: whatever a member sends
-  back is dropped. When the caller hangs up, every leg ends. A page also
+  back is dropped. Until the first member answers, the caller hears Hello's
+  page tone (two short beeps, repeated) as early media instead of ringback;
+  it stops when the page connects. When the caller hangs up, every leg
+  ends. A page also
   ends after `HELLO_PAGE_MAX_SECONDS` (120), and the caller hears busy when
   no member answers within 10 seconds.
 - **Who is skipped.** Members on DND, members in a call (a page never
@@ -556,10 +614,23 @@ answer by themselves on the speaker.
   (`*80200`) calls that extension's phones with the same headers and
   two-way audio. It respects DND, never answers a phone that is in a call
   (that phone rings normally), and does not follow forwarding. An extension
-  with `allowIntercom` off (`PATCH /api/v1/extensions/{id}`) rings normally.
-- **CDRs.** A page or intercom call has `kind` `page` or `intercom`; the
-  call trace lists each page member's result (`answered`, `busy`, `dnd`,
-  `no_answer`, `no_registration`).
+  with `allowIntercom` off rings normally; set it with the Allow intercom
+  switch on the extension's page or `PATCH /api/v1/extensions/{id}`.
+- **Testing a group.** The Test button on a paging group (or
+  `POST /api/v1/paging-groups/{id}/test`, admin only, body
+  `{"extension": "200"}`, default the first member) pages that one member
+  as a real page would, plays the tone for three seconds and hangs up. The
+  result lists each registered contact, what it did and the auto-answer
+  headers sent, which is how to check a phone's setting without a second
+  person. A member on DND (in a normal group) or in a call is reported, not
+  rung. A test needs Valkey and a running `hello-sip` node, and answers
+  `504` when none takes it within 20 seconds. It writes no CDR.
+- **CDRs.** A page or intercom call has `kind` `page` or `intercom`. A page
+  also has one row per member (table `cdr_page_legs`) with the member's
+  extension, the contact's device and its result (`answered`, `busy`, `dnd`,
+  `no_answer`, `no_registration`), returned as `pageLegs` by
+  `GET /api/v1/cdrs/{id}` and listed on the call's detail page; the call
+  trace repeats them.
 - **Security.** Auto-answer turns a phone into a listening device, so Hello
   adds these headers only on the legs it creates for a page or an intercom
   call. `Alert-Info`, `Call-Info` and `Answer-After` headers in anything a

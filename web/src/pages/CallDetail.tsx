@@ -26,6 +26,14 @@ type State =
   | { status: "error"; message: string }
   | { status: "ready"; cdr: CallRecord };
 
+const PAGE_RESULT: Record<string, string> = {
+  answered: "Answered",
+  busy: "In a call",
+  dnd: "Do not disturb",
+  no_answer: "No answer",
+  no_registration: "Not registered",
+};
+
 /** One call's record: timeline, the CDR fields, its routing trace and, if it failed, why. */
 export function CallDetail() {
   const { id = "" } = useParams();
@@ -251,6 +259,21 @@ function Detail({ cdr }: { cdr: CallRecord }) {
             <h2 className="calls-card__title">Record</h2>
             <PropertyList items={facts} />
           </div>
+          {cdr.pageLegs && cdr.pageLegs.length > 0 && (
+            <div className="az-card calls-card">
+              <h2 className="calls-card__title">Page members</h2>
+              <PropertyList
+                items={cdr.pageLegs.map((l) => ({
+                  label: `Extension ${l.extension}${l.device ? ` (${l.device})` : ""}`,
+                  value: (
+                    <Badge tone={l.result === "answered" ? "good" : "neutral"}>
+                      {PAGE_RESULT[l.result] ?? l.result}
+                    </Badge>
+                  ),
+                }))}
+              />
+            </div>
+          )}
         </div>
         <div className="az-card calls-card">
           <h2 className="calls-card__title" id="trace-title">
