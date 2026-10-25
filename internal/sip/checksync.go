@@ -283,28 +283,6 @@ func (s *Server) checkSyncRequest(user string, b livestate.Binding, event string
 	return req, nil
 }
 
-// routeToBinding addresses req to a registered contact: via the Path of a
-// registration that came through an edge proxy (or another node), else
-// straight to the address the REGISTER came from.
-func (s *Server) routeToBinding(req *sip.Request, b livestate.Binding) error {
-	viaPath := len(b.Path) > 0 &&
-		(!strings.Contains(b.Path[0], "hflow=") || b.ReceivedNode != s.cfg.NodeID)
-	switch {
-	case viaPath:
-		var first sip.Uri
-		if err := sip.ParseUri(strings.Trim(b.Path[0], "<> "), &first); err != nil {
-			return err
-		}
-		for _, p := range b.Path {
-			req.AppendHeader(sip.NewHeader("Route", p))
-		}
-		req.SetDestination(hostPort(first))
-	case b.Source != "":
-		req.SetDestination(b.Source)
-	}
-	return nil
-}
-
 // answerChallenge builds the Authorization value for the first challenge
 // the phone offers that Hello can answer: SHA-256 before MD5, in the
 // device's realm, from the stored HA1 (the password is never kept). A
