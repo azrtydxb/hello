@@ -1,0 +1,47 @@
+<?xml version="1.0" standalone="yes"?>
+<directory>
+  <item_list>
+    <item>
+      <ln>Acme &lt;Corp&gt;</ln>
+      <fn></fn>
+      <ct>02 555 00 00</ct>
+      <lb>other</lb>
+    </item>
+    <item>
+      <ln>Adams</ln>
+      <fn>Bob</fn>
+      <ct>1003</ct>
+      <lb>work</lb>
+    </item>
+    <item>
+      <ln>Müller</ln>
+      <fn>Zoë</fn>
+      <ct>+32 2 555 01 02</ct>
+      <lb>work</lb>
+    </item>
+    <item>
+      <ln>Smith &amp; Sons</ln>
+      <fn>Tom</fn>
+      <ct>1001</ct>
+      <lb>work</lb>
+    </item>
+    <item>
+      <ln>Smith &amp; Sons</ln>
+      <fn>Tom</fn>
+      <ct>+32470123456</ct>
+      <lb>mobile</lb>
+    </item>
+    <item>
+      <ln>Smith &amp; Sons</ln>
+      <fn>Tom</fn>
+      <ct>0471 22 33 44</ct>
+      <lb>home</lb>
+    </item>
+    <item>
+      <ln>ÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜÜ</ln>
+      <fn>Ann</fn>
+      <ct>1002</ct>
+      <lb>work</lb>
+    </item>
+  </item_list>
+</directory>

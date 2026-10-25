@@ -73,7 +73,7 @@ type conf struct {
 var urlKey = map[Vendor]*regexp.Regexp{
 	Yealink:     regexp.MustCompile(`(?i)url|server|path|ntp|firmware|voice_mail`),
 	Poly:        regexp.MustCompile(`(?i)servername|servertype|bootsrv|url|path|\.address$|sntp|callback|_files$|_directory$|customcacert`),
-	Grandstream: regexp.MustCompile(`^P(47|30|33|145|192|193|194|212|232|233|234|235|237|238|6767|8433)$`),
+	Grandstream: regexp.MustCompile(`^P(47|30|33|145|192|193|194|212|232|233|234|235|237|238|330|331|6767|8433)$`),
 	Snom:        regexp.MustCompile(`(?i)server|url|firmware|ntp|host|mailbox|custom|status|directory|update_policy|prov_polling`),
 	Fanvil:      regexp.MustCompile(`(?i)server|url|file name|protocol|image|sntp|register addr|mwi|upgrade|flash`),
 }
@@ -234,6 +234,15 @@ func (m *emu) caFetch(raw string) {
 	}
 }
 
+// book requests an address-book URL the phone built and checks it is the
+// vendor's directory format.
+func (m *emu) book(what, raw, marker string) {
+	m.t.Helper()
+	if body := m.must(what, raw); !strings.Contains(body, marker) {
+		m.t.Errorf("%s: %s (%s) is not a %s directory:\n%s", m.vendor, what, raw, marker, body)
+	}
+}
+
 // hostOnly fails a host/port setting that holds a scheme or a path.
 func (m *emu) hostOnly(what, v string) {
 	m.t.Helper()
@@ -304,6 +313,19 @@ func emuYealink(m *emu) {
 	}
 	m.caFetch(c.take("static.trusted_certificates.url"))
 	m.firmware(c.opt("static.firmware.url"))
+	// remote_phonebook.data.N.url is a full URL of one directory file.
+	slots := 0
+	for i := 1; i <= 5; i++ {
+		name, u := c.opt(fmt.Sprintf("remote_phonebook.data.%d.name", i)), c.opt(fmt.Sprintf("remote_phonebook.data.%d.url", i))
+		if u != "" {
+			slots++
+			m.book("remote phonebook "+name, u, "<YealinkIPPhoneDirectory>")
+		}
+	}
+	if slots != 2 {
+		m.t.Errorf("Yealink: %d remote phonebook slots filled, want the phone's 2 books", slots)
+	}
+	c.takeMatching(`^features\.remote_phonebook\.`)
 	m.hostOnly("local_time.ntp_server1", c.take("local_time.ntp_server1"))
 	m.hostOnly("account.1.sip_server.1.address", c.take("account.1.sip_server.1.address"))
 	c.takeMatching(`^account\.1\.sip_server\.`)
@@ -352,6 +374,8 @@ func emuPoly(m *emu) {
 		d.takeMatching(`^msg\.mwi\.`)
 		d.takeMatching(`^(reg\.1\.|attendant\.|device\.sec\.)`)
 	}
+	// The phone's directory: <mac>-directory.xml next to the master.
+	m.book("directory", slashAlways(base, m.p.mac+"-directory.xml"), "<directory>")
 	if app := master.opt("APP_FILE_PATH"); app != "" {
 		if !strings.Contains(app, "://") {
 			app = slashAlways(base, app)
@@ -438,6 +462,27 @@ func emuGrandstream(m *emu) {
 		}
 		fw = slashAlways(dir, name)
 	}
+	// Phonebook XML download: P330 the protocol (1 HTTP, 3 HTTPS; 2 is TFTP),
+	// P331 "host[:port]/dir" with the file name when it is not phonebook.xml,
+	// P332 minutes (0 or 5 to 720). Grandstream XML Phonebook Guide.
+	if _, set := c.kv["P331"]; set {
+		scheme, ok := map[string]string{"1": "http", "3": "https"}[c.take("P330")]
+		if !ok {
+			m.t.Errorf("Grandstream: P330 = %q is not a modelled phonebook protocol code (1 HTTP, 3 HTTPS)", c.kv["P330"])
+		}
+		path := c.take("P331")
+		if s, rest := stripScheme(path); s != "" {
+			path = rest
+		}
+		if !strings.HasSuffix(path, ".xml") {
+			path += "/phonebook.xml" // the phone looks for phonebook.xml when given a directory
+		}
+		m.book("phonebook", scheme+"://"+path, "<AddressBook>")
+		if n, err := strconv.Atoi(c.take("P332")); err != nil || (n != 0 && (n < 5 || n > 720)) {
+			m.t.Errorf("Grandstream: P332 = %q, documented: 0 or 5 to 720 minutes", c.kv["P332"])
+		}
+		c.opt("P333")
+	}
 	c.opt("P234")
 	c.opt("P235")
 	c.opt("P238")
@@ -503,6 +548,14 @@ func emuSnom(m *emu) {
 	if v := c.take("prov_polling_enabled"); !slices.Contains([]string{"on", "off"}, v) {
 		m.t.Errorf("Snom: prov_polling_enabled = %q, documented: on, off", v)
 	}
+	// dkey_directory "url <URL>" opens the directory at a full URL.
+	if v := c.opt("dkey_directory"); v != "" {
+		u, ok := strings.CutPrefix(v, "url ")
+		if !ok {
+			m.t.Errorf("Snom: dkey_directory = %q is not a modelled action (url <URL>)", v)
+		}
+		m.book("directory", u, "<SnomIPPhoneDirectory>")
+	}
 	fw := c.opt("firmware")
 	if pol := c.opt("update_policy"); pol != "" && !slices.Contains([]string{"auto_update", "ask_for_update", "settings_only", "never_update"}, pol) {
 		m.t.Errorf("Snom: update_policy = %q, documented: auto_update, ask_for_update, settings_only, never_update", pol)
@@ -559,6 +612,13 @@ func emuFanvil(m *emu) {
 	m.hostOnly("SIP1 Register Addr", c.take("SIP1 Register Addr"))
 	c.takeMatching(`^SIP1 (Register|MWI)`)
 	m.firmware(c.opt("Auto Image Url"))
+	// Remote Phonebook1 URL is a full URL of the directory file.
+	if u := c.opt("Remote Phonebook1 URL"); u != "" {
+		m.book("remote phonebook", u, "<IPPhoneDirectory>")
+		c.takeMatching(`^Remote Phonebook`)
+	} else {
+		m.t.Errorf("Fanvil: no remote phonebook URL although the phone has books")
+	}
 }
 
 // fanvilURL is the URL the Flash settings give.
@@ -619,6 +679,7 @@ func newEmu(t *testing.T, c emuCase, pinned bool) *emu {
 	caFile, caDER := testCA(t)
 	e := newEnv(t, func(o *Options) { o.CACertFile = caFile })
 	p, _ := e.s.addPhone(c.vendor, c.model, macA)
+	p.books = twoBooks()
 	m := &emu{t: t, e: e, p: p, vendor: c.vendor, host: e.s.public.Host, pinned: pinned, ca: caDER,
 		fw: []byte("image-" + c.fw), flagged: map[string]string{}, taken: map[string]bool{}}
 	if pinned {
@@ -727,7 +788,7 @@ func TestPhoneEmulatorCatchesKnownBugs(t *testing.T) {
 		{"grandstream P192 as a file URL", "WP822", "<P192>{{xml .Dir}}</P192>", "<P192>{{xml .URL}}</P192>", "wp810fw.bin/wp810fw.bin"},
 		{"grandstream HTTP code for an HTTPS server", "WP822", "<P212>2</P212>", "<P212>1</P212>", "contradicts"},
 		{"grandstream unknown via code", "WP822", "<P212>2</P212>", "<P212>7</P212>", "not a modelled upgrade-via code"},
-		{"yealink unmodelled phonebook URL", "T54W", "static.firmware.url", "features.remote_phonebook.data.1.url = https://x.example/pb.xml\nstatic.firmware.url", "does not model"},
+		{"yealink unmodelled ringtone URL", "T54W", "static.firmware.url", "ringtone.url = https://x.example/ring.wav\nstatic.firmware.url", "does not model"},
 		{"snom firmware without update policy", "D785", `<update_policy perm="R">auto_update</update_policy>`, "", "must come together"},
 		{"fanvil server as a full URL", "X6", "Flash Server IP    :", "Flash Server IP    :https://x/", "must be a bare host"},
 	} {

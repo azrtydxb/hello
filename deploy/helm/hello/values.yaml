@@ -100,6 +100,12 @@ sip:
   # must stay below terminationGracePeriodSeconds.
   drainTimeoutSeconds: 90
   terminationGracePeriodSeconds: 150
+  # How long a node told to stop waits for the hello-sip restart token and a
+  # READY peer before it drains (HELLO_ROLLOUT_WAIT). 0 is off: the
+  # StatefulSet's ordered RollingUpdate already replaces one pod at a time.
+  # Turn it on (drainTimeoutSeconds plus this must stay below the grace
+  # period) when something else restarts several nodes at once.
+  rolloutWaitSeconds: 0
   # A replaced node must be ready this long before the next one is replaced.
   # Kamailio learns a replaced pod's new address from cluster DNS: answers are
   # cached for the record's TTL (CoreDNS's default is 30 s; kw's cluster uses

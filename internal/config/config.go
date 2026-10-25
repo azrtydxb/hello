@@ -194,6 +194,9 @@ type Prov struct {
 	// Resync (HELLO_PROV_RESYNC, default 24h, at least 1m) is the phones'
 	// re-check interval.
 	Resync time.Duration
+	// BookRefresh (HELLO_PROV_BOOK_REFRESH, default 15m, at least 1m) is how
+	// often phones that have a refresh setting re-fetch their address book.
+	BookRefresh time.Duration
 	// Timezone (HELLO_PROV_TIMEZONE, default UTC) and NTP
 	// (HELLO_PROV_NTP, default pool.ntp.org) set the phones' clocks.
 	Timezone string
@@ -269,6 +272,10 @@ type SIP struct {
 	TrustedProxies []netip.Prefix
 	// DrainTimeout bounds how long a draining node waits for its calls.
 	DrainTimeout time.Duration
+	// RolloutWait bounds how long a node told to stop waits for the restart
+	// token and a READY peer before it drains (lifecycle.RolloutGate); 0
+	// turns the gate off (the default; kw sets it).
+	RolloutWait time.Duration
 	// MemberHeartbeat is how often the node refreshes its membership record.
 	MemberHeartbeat time.Duration
 	// MaxCallDuration ends a connected call that has run this long (both
@@ -500,6 +507,7 @@ func (r *reader) prov() Prov {
 		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
 		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
 		Resync:             r.days("HELLO_PROV_RESYNC", 24*time.Hour),
+		BookRefresh:        r.days("HELLO_PROV_BOOK_REFRESH", 15*time.Minute),
 		Timezone:           r.optional("HELLO_PROV_TIMEZONE", "UTC"),
 		NTP:                r.optional("HELLO_PROV_NTP", "pool.ntp.org"),
 		AuditRetention:     r.days("HELLO_PROV_AUDIT_RETENTION", 90*24*time.Hour),
@@ -538,6 +546,9 @@ func (r *reader) prov() Prov {
 	}
 	if p.Resync < time.Minute {
 		r.fail("HELLO_PROV_RESYNC", errors.New("must be at least 1m"))
+	}
+	if p.BookRefresh < time.Minute {
+		r.fail("HELLO_PROV_BOOK_REFRESH", errors.New("must be at least 1m"))
 	}
 	if !tzRe.MatchString(p.Timezone) || strings.Contains(p.Timezone, "..") {
 		r.fail("HELLO_PROV_TIMEZONE", errors.New("must be a time zone name such as Europe/Brussels"))
@@ -683,6 +694,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	if c.DrainTimeout == 0 {
 		r.fail("HELLO_DRAIN_TIMEOUT", errors.New("must be positive"))
 	}
+	c.RolloutWait = r.duration("HELLO_ROLLOUT_WAIT", 0)
 	c.MemberHeartbeat = r.duration("HELLO_MEMBER_HEARTBEAT", time.Second)
 	c.HATakeoverEnabled = r.getenv("HELLO_HA_TAKEOVER_ENABLED") != "false"
 	c.HATakeoverPoll = r.duration("HELLO_HA_TAKEOVER_POLL", time.Second)

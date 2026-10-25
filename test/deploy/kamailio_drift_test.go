@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -231,16 +232,19 @@ func TestKamailioHelloSocketVetsSource(t *testing.T) {
 	}
 }
 
-// TestKwSIPRolloutStaggered guards the rollout order of the two hostNetwork
-// hello-sip Deployments: both are Recreate and Sync applies them together, so
-// hello-sip-2 must wait in a preStop for hello-sip-1 to be ready again, and
-// its grace period must cover that wait plus its own drain.
-func TestKwSIPRolloutStaggered(t *testing.T) {
+// TestKwSIPRolloutGated guards the rollout of the two hostNetwork hello-sip
+// Deployments: both are Recreate and Sync applies them together, so each
+// node must hold at the rollout gate (HELLO_ROLLOUT_WAIT: the one-at-a-time
+// restart token and a READY peer) before it drains, and its termination
+// grace must cover that wait plus its own drain. A preStop that only
+// polled the peer's /readyz was not enough: both nodes could pass it
+// together, and the check raced the peer's own SIGTERM.
+func TestKwSIPRolloutGated(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kuvryn-sync", "kw", "resources.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var found bool
+	seen := map[string]bool{}
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	for {
 		var d struct {
@@ -256,13 +260,11 @@ func TestKwSIPRolloutStaggered(t *testing.T) {
 					Spec struct {
 						Grace      int `yaml:"terminationGracePeriodSeconds"`
 						Containers []struct {
-							Lifecycle struct {
-								PreStop struct {
-									Exec struct {
-										Command []string `yaml:"command"`
-									} `yaml:"exec"`
-								} `yaml:"preStop"`
-							} `yaml:"lifecycle"`
+							Name string `yaml:"name"`
+							Env  []struct {
+								Name  string `yaml:"name"`
+								Value string `yaml:"value"`
+							} `yaml:"env"`
 						} `yaml:"containers"`
 					} `yaml:"spec"`
 				} `yaml:"template"`
@@ -274,22 +276,41 @@ func TestKwSIPRolloutStaggered(t *testing.T) {
 			}
 			t.Fatal(err)
 		}
-		if d.Kind != "Deployment" || d.Metadata.Name != "hello-sip-2" {
+		if d.Kind != "Deployment" || (d.Metadata.Name != "hello-sip-1" && d.Metadata.Name != "hello-sip-2") {
 			continue
 		}
-		found = true
+		name := d.Metadata.Name
+		seen[name] = true
 		if d.Spec.Strategy.Type != "Recreate" {
-			t.Errorf("hello-sip-2 strategy = %q, want Recreate (hostNetwork ports)", d.Spec.Strategy.Type)
+			t.Errorf("%s strategy = %q, want Recreate (hostNetwork ports)", name, d.Spec.Strategy.Type)
 		}
-		cmd := strings.Join(d.Spec.Template.Spec.Containers[0].Lifecycle.PreStop.Exec.Command, " ")
-		if !strings.Contains(cmd, "http://hello-sip-1:8082/readyz") {
-			t.Errorf("hello-sip-2 preStop must wait for hello-sip-1 /readyz, got %q", cmd)
+		env := map[string]time.Duration{}
+		for _, c := range d.Spec.Template.Spec.Containers {
+			if c.Name != "hello-sip" {
+				continue
+			}
+			for _, e := range c.Env {
+				if e.Name == "HELLO_ROLLOUT_WAIT" || e.Name == "HELLO_DRAIN_TIMEOUT" {
+					v, err := time.ParseDuration(e.Value)
+					if err != nil {
+						t.Fatalf("%s %s = %q: %v", name, e.Name, e.Value, err)
+					}
+					env[e.Name] = v
+				}
+			}
 		}
-		if d.Spec.Template.Spec.Grace < 270 {
-			t.Errorf("hello-sip-2 terminationGracePeriodSeconds = %d, must cover the preStop wait (~140s) plus the 90s drain", d.Spec.Template.Spec.Grace)
+		wait, drain := env["HELLO_ROLLOUT_WAIT"], env["HELLO_DRAIN_TIMEOUT"]
+		if wait <= 0 {
+			t.Errorf("%s: HELLO_ROLLOUT_WAIT must be set, or Sync's simultaneous rollout drains both nodes at once", name)
+		}
+		grace := time.Duration(d.Spec.Template.Spec.Grace) * time.Second
+		if grace <= wait+drain {
+			t.Errorf("%s terminationGracePeriodSeconds = %s, must exceed the gate wait %s plus the drain %s", name, grace, wait, drain)
 		}
 	}
-	if !found {
-		t.Fatal("no hello-sip-2 Deployment")
+	for _, n := range []string{"hello-sip-1", "hello-sip-2"} {
+		if !seen[n] {
+			t.Errorf("no %s Deployment", n)
+		}
 	}
 }

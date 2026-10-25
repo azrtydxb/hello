@@ -180,6 +180,11 @@ func run(args []string) error {
 	}
 	watcher.OnReload = srv.SnapshotChanged
 
+	rollout := &lifecycle.RolloutGate{
+		Store: members, Kind: cluster.KindSIP, ID: cfg.NodeID, Wait: cfg.RolloutWait,
+		// Covers the node's restart (pull, start, READY) after it exits.
+		TTL: 2 * time.Minute, Log: log.With("component", "rollout"),
+	}
 	machine := lifecycle.New(lifecycle.Options{
 		Member: cluster.Member{ID: cfg.NodeID, Kind: cluster.KindSIP, SIPAddr: cfg.SIPAdvertisedAddr, HTTPAddr: cfg.HTTPAddr,
 			Transports: []string{"udp"}, Version: version.Version, Incarnation: incarnation},
@@ -213,6 +218,8 @@ func run(args []string) error {
 		Log:       log.With("component", "lifecycle"),
 		OnChange: func(from, to cluster.State, _ string) {
 			switch {
+			case to == cluster.Ready:
+				go rollout.Release() // this restart is over: the peer may go next
 			case to == cluster.Draining:
 				srv.Drain() // trunk leases go at once (contract 6)
 			case from == cluster.Draining:
@@ -224,8 +231,13 @@ func run(args []string) error {
 	lcCtx, stopLifecycle := context.WithCancel(context.Background())
 	lcDone := make(chan struct{})
 	go func() { machine.Run(lcCtx); close(lcDone) }()
+	// One node of the kind stops at a time, and only while a READY peer can
+	// take its calls: SIGTERM first waits at the rollout gate (the node stays
+	// READY meanwhile), then drains. The restarted node returns the token
+	// once it is READY (OnChange above).
 	go func() {
 		<-sigCtx.Done()
+		rollout.Enter(ctx)
 		machine.Drain("SIGTERM")
 	}()
 	drainDone := make(chan struct{})

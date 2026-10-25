@@ -9,6 +9,7 @@ import {
   type Extension,
   type Id,
 } from "../api";
+import { listGroups, type Group } from "../api/phonebook";
 import {
   createPhone,
   deletePhone,
@@ -70,6 +71,7 @@ type ListState =
       extensions: Extension[];
       devices: Device[];
       templates: Template[];
+      groups: Group[];
       /** When the list was loaded: "stale" is measured from here. */
       loadedAt: number;
     };
@@ -210,14 +212,17 @@ export function Phones() {
       listDevices(controller.signal),
       // The template override is optional; the inventory works without it.
       listTemplates(controller.signal).catch(() => [] as Template[]),
+      // Phone groups are optional too: a phone without one still works.
+      listGroups(controller.signal).catch(() => [] as Group[]),
     ])
-      .then(([phones, extensions, devices, templates]) =>
+      .then(([phones, extensions, devices, templates, groups]) =>
         setList({
           status: "ready",
           phones,
           extensions,
           devices,
           templates,
+          groups,
           loadedAt: Date.now(),
         }),
       )
@@ -432,6 +437,7 @@ export function Phones() {
           extensions={ready.extensions}
           devices={ready.devices}
           templates={ready.templates}
+          groups={ready.groups}
           onClose={() => setEditing(null)}
           onCreated={(created) => {
             updatePhones((phones) => [...phones, withoutUrl(created)]);
@@ -648,6 +654,7 @@ const FORM_FIELDS = [
   "deviceId",
   "blf",
   "templateId",
+  "groupId",
   "enabled",
 ] as const;
 
@@ -658,6 +665,7 @@ function PhoneForm({
   extensions,
   devices,
   templates,
+  groups,
   onClose,
   onCreated,
   onUpdated,
@@ -666,6 +674,7 @@ function PhoneForm({
   extensions: Extension[];
   devices: Device[];
   templates: Template[];
+  groups: Group[];
   onClose: () => void;
   onCreated: (phone: IssuedPhone) => void;
   onUpdated: (phone: Phone) => void;
@@ -688,6 +697,9 @@ function PhoneForm({
   const [templateId, setTemplateId] = useState(
     phone?.templateId == null ? "" : String(phone.templateId),
   );
+  const [groupId, setGroupId] = useState(
+    phone?.groupId == null ? "" : String(phone.groupId),
+  );
   const [enabled, setEnabled] = useState(phone?.enabled ?? true);
   const [errors, setErrors] = useState<ErrorMap>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -701,7 +713,7 @@ function PhoneForm({
   const blfChoices = extensions.filter((x) => !blf.includes(x.number));
 
   const idOf = (value: string): Id | undefined =>
-    [...extensions, ...devices, ...templates]
+    [...extensions, ...devices, ...templates, ...groups]
       .map((x) => x.id)
       .find((v) => String(v) === value);
 
@@ -733,6 +745,9 @@ function PhoneForm({
     if (JSON.stringify(blf) !== JSON.stringify(p.blf)) patch.blf = blf;
     if (templateId !== String(p.templateId ?? "")) {
       patch.templateId = templateId === "" ? null : (idOf(templateId) ?? null);
+    }
+    if (groupId !== String(p.groupId ?? "")) {
+      patch.groupId = groupId === "" ? null : (idOf(groupId) ?? null);
     }
     if (enabled !== p.enabled) patch.enabled = enabled;
     return patch;
@@ -770,6 +785,8 @@ function PhoneForm({
         if (serial.trim() !== "") input.serial = serial.trim();
         const dev = deviceId === NEW_DEVICE ? undefined : idOf(deviceId);
         if (dev !== undefined) input.deviceId = dev;
+        const group = groupId === "" ? undefined : idOf(groupId);
+        if (group !== undefined) input.groupId = group;
         onCreated(await createPhone(input));
       }
     } catch (err) {
@@ -1015,6 +1032,18 @@ function PhoneForm({
             ]}
           />
         )}
+        <Select
+          id="phone-group"
+          label="Phone group"
+          hint="The group decides which address books the phone shows."
+          value={groupId}
+          error={errors.groupId}
+          onChange={(e) => setGroupId(e.target.value)}
+          options={[
+            { value: "", label: "No group" },
+            ...groups.map((g) => ({ value: String(g.id), label: g.name })),
+          ]}
+        />
         <Switch
           label="Enabled"
           hint="A disabled phone gets no configuration"

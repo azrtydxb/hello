@@ -153,6 +153,35 @@ call active throughout: the call moves to the upgraded node and is never
 dropped. Upgrade hello-control replicas one at a time the same way; they
 carry no calls.
 
+### When a deployer restarts every node at once
+
+A deployer that applies all SIP nodes together (kw: Kuvryn Sync applies the
+hello-sip-1 and hello-sip-2 Deployments in the same second, each `Recreate`)
+would stop both: the draining node would have no READY survivor and new calls
+no node. Set `HELLO_ROLLOUT_WAIT` (kw: 150s) and SIGTERM takes a rollout gate
+before the drain starts:
+
+- The node takes the one-per-kind restart token in Valkey
+  (`hello:rollout:sip`, expiring after 2 minutes without renewal; held by the
+  node's slot, its ID without a Deployment pod's generated suffix, so a
+  replacement pod with a new name releases what its predecessor took) and waits,
+  still READY and serving, until another SIP node is READY. Two nodes told to
+  stop together get the token one after the other.
+- It keeps the token while it drains and after it exits. Its replacement
+  releases the token once it is READY, and only then may the peer stop. A
+  replacement that never becomes READY holds the peer back for at most the
+  token's 2 minutes.
+- A node with no SIP peer stops at once. A node that waited the full
+  `HELLO_ROLLOUT_WAIT`, or finds Valkey unreachable, drains anyway: a
+  shutdown never hangs. The pod's termination grace period must exceed the
+  wait plus `HELLO_DRAIN_TIMEOUT` (`test/deploy` checks kw).
+
+Once draining, a node whose calls have no READY survivor yet keeps them and
+only waits: the survivors scan DRAINING nodes' handoff-marked calls on every
+takeover pass, so the calls move as soon as a peer is READY, and only the
+drain timeout ends them. The default is off (`0`), which keeps the lab and
+the chart's ordered StatefulSet rollout as they were.
+
 ## In-call HA (Level 4)
 
 Every call anchors through the owning node's media relay, and the node

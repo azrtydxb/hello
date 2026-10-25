@@ -131,6 +131,10 @@ func classifyYealink(model, lower string) (FileKind, string, bool) {
 	if m, ok := macStem(lower, ".boot"); ok {
 		return KindOther, m, true
 	}
+	// <mac>-contact.xml is the phone's local contact backup, not its remote
+	// phonebook, and Hello's template never enables that backup; it stays an
+	// empty 404 unless the lab shows a phone needs it (spec P-4, P-6). The
+	// remote phonebook is fetched from /p/<token>/pb/<n>.xml.
 	for _, suffix := range []string{"-local.cfg", "-contact.xml"} {
 		if m, ok := macStem(lower, suffix); ok {
 			return KindOther, m, true // answered with an empty 404
@@ -178,7 +182,7 @@ func YealinkModelID(model string) (int, bool) {
 
 // polyUploads are the per-MAC files Poly phones PUT back (and some GET
 // first); Hello discards them.
-var polyUploads = []string{"-phone.cfg", "-web.cfg", "-app.log", "-boot.log", "-directory.xml"}
+var polyUploads = []string{"-phone.cfg", "-web.cfg", "-app.log", "-boot.log"}
 
 func classifyPoly(lower string) (FileKind, string, bool) {
 	if lower == zeroMAC+".cfg" {
@@ -186,6 +190,11 @@ func classifyPoly(lower string) (FileKind, string, bool) {
 	}
 	if m, ok := macStem(lower, "-hello.cfg"); ok {
 		return KindDevice, m, true
+	}
+	// Poly GETs and PUTs <mac>-directory.xml: the GET is the phone's
+	// directory (spec P-4), the PUT stays discarded.
+	if m, ok := macStem(lower, "-directory.xml"); ok {
+		return KindPhonebook, m, true
 	}
 	for _, suffix := range polyUploads {
 		if m, ok := macStem(lower, suffix); ok {
