@@ -41,18 +41,19 @@ type FileKind string
 
 // The file kinds.
 const (
-	KindCommon   FileKind = "common"   // a vendor's model or site common file
-	KindDevice   FileKind = "device"   // the per-MAC file carrying the account
-	KindMaster   FileKind = "master"   // Poly's per-MAC master (000000000000.cfg form)
-	KindFirmware FileKind = "firmware" // /p/<token>/fw/<file>
-	KindCA       FileKind = "ca"       // /p/ca.crt, /p/ca.der
-	KindBoot     FileKind = "boot"     // /p/boot/<file>
-	KindUpload   FileKind = "upload"   // a discarded PUT
-	KindOther    FileKind = "other"    // anything not recognised
+	KindCommon    FileKind = "common"    // a vendor's model or site common file
+	KindDevice    FileKind = "device"    // the per-MAC file carrying the account
+	KindMaster    FileKind = "master"    // Poly's per-MAC master (000000000000.cfg form)
+	KindFirmware  FileKind = "firmware"  // /p/<token>/fw/<file>
+	KindCA        FileKind = "ca"        // /p/ca.crt, /p/ca.der
+	KindBoot      FileKind = "boot"      // /p/boot/<file>
+	KindUpload    FileKind = "upload"    // a discarded PUT
+	KindPhonebook FileKind = "phonebook" // /p/<token>/pb/<n>.xml and Poly's <mac>-directory.xml
+	KindOther     FileKind = "other"     // anything not recognised
 )
 
 // FileKinds lists every file kind.
-var FileKinds = []FileKind{KindCommon, KindDevice, KindMaster, KindFirmware, KindCA, KindBoot, KindUpload, KindOther}
+var FileKinds = []FileKind{KindCommon, KindDevice, KindMaster, KindFirmware, KindCA, KindBoot, KindUpload, KindPhonebook, KindOther}
 
 // Result is the outcome recorded on a fetch (spec S-14).
 type Result string
@@ -97,6 +98,7 @@ type RenderData struct {
 	BLF      []BLFKey
 	Prov     ProvInfo
 	Firmware *FirmwareInfo // nil when no firmware is pinned for the model
+	Book     *BookInfo     // nil when the phone has no address book to fetch
 	Time     TimeInfo
 }
 
@@ -147,6 +149,30 @@ type ProvInfo struct {
 	// CA setting takes the certificate, not a URL (Poly, Grandstream).
 	CACertPEM     string
 	ResyncSeconds int // re-check interval, jitter from the MAC included
+}
+
+// BookInfo is where a phone fetches its address book (spec P-4). The URLs
+// carry the phone's token, so previews mask them like Prov.URL.
+type BookInfo struct {
+	// URL is the merged directory of every book the phone has.
+	URL string
+	// HostPath is URL without its https:// scheme, for settings that take
+	// a server path (Grandstream P331).
+	HostPath string
+	// Sources are the separate directories for vendors that take several
+	// (Yealink): always five, one per book of the phone's set in order
+	// (the fifth also holds any further books), unused ones with an empty
+	// Name and URL so a template can clear them.
+	Sources []BookSource
+	// RefreshSeconds and RefreshMinutes are HELLO_PROV_BOOK_REFRESH.
+	RefreshSeconds int
+	RefreshMinutes int
+}
+
+// BookSource is one separate directory of a phone.
+type BookSource struct {
+	Name string
+	URL  string
 }
 
 // FirmwareInfo is the firmware pinned for the phone's model.

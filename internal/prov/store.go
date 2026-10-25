@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/netip"
 	"time"
+
+	"github.com/azrtydxb/hello/internal/prov/phonebook"
 )
 
 // Errors a Store returns for the handler to tell apart. Any other error is
@@ -119,6 +121,12 @@ type Store interface {
 	// specific glob, then the lower firmware ID. ErrNoTemplate, ErrSealed
 	// or ErrNotFound as above.
 	RenderInputs(ctx context.Context, phoneID int64) (RenderData, Template, error)
+
+	// DeliveredBooks returns the address books the phone is delivered, in
+	// delivery order (spec P-2): the extensions book, the company book and
+	// the phone group's named books, each with its entries. Empty when the
+	// phone has none. ErrNotFound when the phone is gone.
+	DeliveredBooks(ctx context.Context, phoneID int64) ([]phonebook.Book, error)
 
 	// FirmwareByName finds a vendor's uploaded firmware by file name.
 	// ErrNotFound when there is none.

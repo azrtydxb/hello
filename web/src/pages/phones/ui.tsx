@@ -8,6 +8,7 @@ import "./phones.css";
 
 const SECTIONS = [
   { label: "Inventory", path: "/phones", end: true },
+  { label: "Groups", path: "/phones/groups", end: false },
   { label: "Templates", path: "/phones/templates", end: false },
   { label: "Firmware", path: "/phones/firmware", end: false },
   { label: "Provisioning settings", path: "/phones/settings", end: false },

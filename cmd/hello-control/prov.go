@@ -38,7 +38,7 @@ const (
 func provSettings(cfg config.Control, deployment map[prov.Vendor]redirect.Credentials) store.ProvSettings {
 	p := store.ProvSettings{
 		SIPServer: cfg.Prov.SIPServer, Domain: cfg.SIPDomain, Expiry: cfg.Prov.RegisterExpiry,
-		Resync: cfg.Prov.Resync, Timezone: cfg.Prov.Timezone, NTP: cfg.Prov.NTP, TokenGrace: cfg.Prov.TokenGrace,
+		Resync: cfg.Prov.Resync, BookRefresh: cfg.Prov.BookRefresh, Timezone: cfg.Prov.Timezone, NTP: cfg.Prov.NTP, TokenGrace: cfg.Prov.TokenGrace,
 		CACertFile: cfg.Prov.CACert,
 		Deployment: map[prov.Vendor]bool{},
 	}

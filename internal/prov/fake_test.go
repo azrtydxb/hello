@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/azrtydxb/hello/internal/prov/phonebook"
 )
 
 // fakeStore is an in-memory Store with the contract's semantics: token
@@ -59,6 +61,7 @@ type fakePhone struct {
 	handoffAt                  time.Time
 	handoffIP                  netip.Addr
 	admin, secret, user, label string
+	books                      []phonebook.Book // the phone's delivered set
 }
 
 func newFakeStore() *fakeStore {
@@ -236,6 +239,11 @@ func (s *fakeStore) RenderInputs(_ context.Context, id int64) (RenderData, Templ
 		Prov:   ProvInfo{URL: DeviceURL(s.public, p.plain), CAURL: CAURL(s.public), ResyncSeconds: ResyncSeconds(p.mac, 24*time.Hour)},
 		Time:   TimeInfo{Zone: "Europe/Brussels", NTP: "pool.ntp.org"},
 	}
+	names := make([]string, len(p.books))
+	for i, b := range p.books {
+		names[i] = b.Name
+	}
+	d.Book = NewBookInfo(DeviceURL(s.public, p.plain), names, DefaultBookRefresh)
 	if p.pinned != nil {
 		d.Firmware = &FirmwareInfo{URL: FirmwareURL(s.public, p.plain, p.pinned.Filename), Dir: strings.TrimSuffix(DeviceURL(s.public, p.plain), "/") + "/fw", Via: UpgradeVia(s.public.Scheme + "://"), Version: p.pinned.Version}
 	}
@@ -244,6 +252,19 @@ func (s *fakeStore) RenderInputs(_ context.Context, id int64) (RenderData, Templ
 		return RenderData{}, Template{}, ErrNoTemplate
 	}
 	return d, t, nil
+}
+
+func (s *fakeStore) DeliveredBooks(_ context.Context, id int64) ([]phonebook.Book, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.outage != nil {
+		return nil, s.outage
+	}
+	p, ok := s.phones[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return p.books, nil
 }
 
 func (s *fakeStore) FirmwareByName(_ context.Context, v Vendor, name string) (Firmware, error) {

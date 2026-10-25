@@ -225,6 +225,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	d.Server = prov.Server{Host: host, Port: port, Transport: "udp", Expiry: int(s.prov.Expiry / time.Second)}
 	d.Prov = s.prov.info(token, d.Phone.MAC)
 	d.Time = prov.TimeInfo{Zone: s.prov.Timezone, NTP: s.prov.NTP}
+	if d.Book, err = s.bookInfo(ctx, phoneID, token); err != nil {
+		return d, prov.Template{}, err
+	}
 	if d.BLF, err = s.blfKeys(ctx, blfJSON); err != nil {
 		return d, prov.Template{}, err
 	}
