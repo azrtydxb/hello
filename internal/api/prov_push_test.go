@@ -139,4 +139,11 @@ func TestPhoneResyncAPI(t *testing.T) {
 	if len(latest) != 2 {
 		t.Errorf("latest pushes = %d phones, want 2 (the phone without a device never had one)", len(latest))
 	}
+
+	// The remaining refusals and queues, after the counts above.
+	operator.must(http.StatusAccepted, "POST", "/api/v1/phone-groups/"+gid+"/resync", nil)
+	operator.must(http.StatusAccepted, "POST", "/api/v1/phones/reboot", nil)
+	operator.must(http.StatusNotFound, "POST", "/api/v1/phone-groups/99999/reboot", nil)
+	operator.must(http.StatusNotFound, "POST", "/api/v1/phones/99999/reboot", nil)
+	operator.must(http.StatusConflict, "POST", "/api/v1/phones/"+did+"/reboot", nil)
 }

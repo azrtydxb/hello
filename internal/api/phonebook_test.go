@@ -917,6 +917,8 @@ func TestPhoneGroupMulticastAndPTT(t *testing.T) {
 		}
 	}
 
+	c.must(http.StatusNotFound, "PUT", "/api/v1/phone-groups/999999/ptt", good)
+
 	// A paging group may page a listening G.711 channel, with no members.
 	grp := func(channel any, want int) response {
 		body := map[string]any{"name": "dock", "code": "*61", "members": []int{}, "multicastChannelId": channel}

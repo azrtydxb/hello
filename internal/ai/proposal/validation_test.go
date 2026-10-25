@@ -190,10 +190,19 @@ func TestProposalDeleteValidation(t *testing.T) {
 	if err != nil || len(ch) == 0 {
 		t.Fatalf("the delete diff shows nothing: %v %v", ch, err)
 	}
+	// A field that was null (mohClassId with no class) disappears as a
+	// removal whose Before is also nil, so only After is checked per change.
+	removed := 0
 	for _, c := range ch {
-		if c.After != nil || c.Before == nil {
+		if c.After != nil {
 			t.Errorf("delete diff change %+v is not a removal", c)
 		}
+		if c.Before != nil {
+			removed++
+		}
+	}
+	if removed == 0 {
+		t.Errorf("the delete diff removes no value: %+v", ch)
 	}
 
 	d, err = e.validate(act("deleteOutboundRoute", map[string]string{"id": s.route}, nil))
