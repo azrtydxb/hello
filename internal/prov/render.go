@@ -137,6 +137,14 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 	}
 	d.Line.AccountLabel = AccountLabel(d.Line.Label, d.Line.DisplayName)
 	d.Phone.CWInverted = d.Phone.Vendor == Grandstream && strings.HasPrefix(strings.ToUpper(strings.ReplaceAll(d.Phone.Model, " ", "")), "WP856")
+	if d.Phone.Vendor == Grandstream {
+		d.Phone.Family = GrandstreamFamily(d.Phone.Model)
+		if d.Book != nil {
+			b := *d.Book
+			b.RefreshMinutes = BookRefreshFor(d.Phone.Family, b.RefreshMinutes)
+			d.Book = &b
+		}
+	}
 	w := &cappedWriter{ctx: ctx}
 	if err := tmpl.Execute(w, toData(reflect.ValueOf(d))); err != nil {
 		if w.err != nil {

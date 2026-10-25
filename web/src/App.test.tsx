@@ -1,5 +1,5 @@
 import { fireEvent, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { NAV_GROUPS, NAV_ITEMS } from "./nav";
 import { json, ME, mockApi, renderApp } from "./test/api";
 
@@ -14,8 +14,8 @@ describe("App navigation", () => {
     renderApp("/diagnostics");
 
     const nav = await screen.findByRole("navigation", { name: "Primary" });
-    await within(nav).findByRole("link", { name: "Findings" });
-    const links = within(nav).getAllByRole("link");
+    await within(nav).findByRole("link", { name: "Findings", hidden: true });
+    const links = within(nav).getAllByRole("link", { hidden: true });
     expect(links.map((l) => l.textContent)).toEqual(
       NAV_ITEMS.map((i) => i.label),
     );
@@ -23,7 +23,7 @@ describe("App navigation", () => {
       within(nav).getByRole("link", { name: "Diagnostics" }),
     ).toHaveAttribute("aria-current", "page");
     expect(
-      within(nav).getByRole("link", { name: "Ring groups" }),
+      within(nav).getByRole("link", { name: "Ring groups", hidden: true }),
     ).not.toHaveAttribute("aria-current");
     expect(
       screen.getByRole("heading", { level: 1, name: "Diagnostics" }),
@@ -61,12 +61,23 @@ describe("App navigation", () => {
     renderApp("/");
     const nav = await screen.findByRole("navigation", { name: "Primary" });
     expect(
-      await within(nav).findByRole("link", { name: /^Cluster\s*, 2 issues$/ }),
+      await within(nav).findByRole("link", {
+        name: /^Cluster\s*, 2 issues$/,
+        hidden: true,
+      }),
     ).toHaveAttribute("href", "/cluster");
     expect(
-      within(nav).getByRole("link", { name: /^Trunks\s*, 1 issue$/ }),
+      within(nav).getByRole("link", {
+        name: /^Trunks\s*, 1 issue$/,
+        hidden: true,
+      }),
     ).toHaveAttribute("href", "/trunks");
-    expect(within(nav).getByRole("link", { name: "Routes" })).toBeVisible();
+    // Trunks sits in the collapsed Call flow group, which flags the badge.
+    const callFlow = within(nav).getByRole("button", { name: /^Call flow/ });
+    expect(callFlow).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(callFlow).getByRole("img", { name: "needs attention" }),
+    ).toBeInTheDocument();
   });
 
   it("lists Registrations and gives every Phase 1 page real content", async () => {
@@ -81,10 +92,10 @@ describe("App navigation", () => {
       within(nav).getByRole("link", { name: "Registrations" }),
     ).toHaveAttribute("href", "/registrations");
     expect(
-      within(nav).getByRole("link", { name: "Active calls" }),
+      within(nav).getByRole("link", { name: "Active calls", hidden: true }),
     ).toHaveAttribute("href", "/calls");
     expect(
-      within(nav).getByRole("link", { name: "Call history" }),
+      within(nav).getByRole("link", { name: "Call history", hidden: true }),
     ).toHaveAttribute("href", "/history");
     expect(
       await screen.findByText("No devices are registered"),
@@ -101,12 +112,15 @@ describe("App navigation", () => {
     renderApp("/trunks");
 
     const nav = await screen.findByRole("navigation", { name: "Primary" });
-    await within(nav).findByRole("link", { name: "Findings" });
+    await within(nav).findByRole("link", { name: "Findings", hidden: true });
     for (const group of NAV_GROUPS.filter((g) => g.label)) {
-      const section = within(nav).getByRole("group", { name: group.label });
+      const toggle = within(nav).getByRole("button", { name: group.label });
+      const section = document.getElementById(
+        toggle.getAttribute("aria-controls")!,
+      )!;
       expect(
         within(section)
-          .getAllByRole("link")
+          .getAllByRole("link", { hidden: true })
           .map((l) => l.textContent),
       ).toEqual(group.items.map((i) => i.label));
     }
@@ -194,5 +208,93 @@ describe("App navigation", () => {
     expect(document.documentElement).toHaveAttribute("data-theme", "light");
     fireEvent.click(within(theme).getByRole("radio", { name: "Dark" }));
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+  });
+});
+
+describe("Collapsible nav groups", () => {
+  const key = "hello.nav.expanded.admin";
+
+  async function navFor(path: string) {
+    mockApi({ ...ME, ...AI_ON });
+    renderApp(path);
+    return screen.findByRole("navigation", { name: "Primary" });
+  }
+
+  it("expands only the active group by default", async () => {
+    const nav = await navFor("/diagnostics");
+    const platform = await within(nav).findByRole("button", {
+      name: "Platform",
+    });
+    expect(platform).toHaveAttribute("aria-expanded", "true");
+    expect(
+      within(nav).getByRole("button", { name: "Directory" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(nav).queryByRole("link", { name: "Extensions" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(nav).getByRole("link", { name: "Diagnostics" }),
+    ).toBeInTheDocument();
+  });
+
+  it("toggles a group and wires aria-controls", async () => {
+    const nav = await navFor("/diagnostics");
+    const dir = await within(nav).findByRole("button", { name: "Directory" });
+    const panel = document.getElementById(dir.getAttribute("aria-controls")!);
+    expect(panel).toHaveAttribute("hidden");
+    fireEvent.click(dir);
+    expect(dir).toHaveAttribute("aria-expanded", "true");
+    expect(panel).not.toHaveAttribute("hidden");
+    expect(
+      within(nav).getByRole("link", { name: "Extensions" }),
+    ).toBeInTheDocument();
+    fireEvent.click(dir);
+    expect(dir).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("auto-expands the group of the route navigated to", async () => {
+    const nav = await navFor("/diagnostics");
+    const media = await within(nav).findByRole("button", { name: "Media" });
+    expect(media).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(within(nav).getByRole("link", { name: "Diagnostics" }));
+    // Navigate via a link in another group: open Activity, follow its link.
+    fireEvent.click(within(nav).getByRole("button", { name: "Activity" }));
+    fireEvent.click(within(nav).getByRole("link", { name: "Call history" }));
+    expect(
+      within(nav).getByRole("button", { name: "Activity" }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("remembers the state per user", async () => {
+    const nav = await navFor("/diagnostics");
+    fireEvent.click(await within(nav).findByRole("button", { name: "Media" }));
+    expect(JSON.parse(window.localStorage.getItem(key)!)).toEqual(
+      expect.arrayContaining(["Platform", "Media"]),
+    );
+  });
+
+  it("restores the remembered groups on load", async () => {
+    window.localStorage.setItem(key, JSON.stringify(["Media"]));
+    const nav = await navFor("/diagnostics");
+    expect(
+      await within(nav).findByRole("button", { name: "Media" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      within(nav).getByRole("button", { name: "Platform" }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("degrades when storage is broken", async () => {
+    window.localStorage.setItem(key, "{not json");
+    const spy = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("quota");
+      });
+    const nav = await navFor("/diagnostics");
+    const dir = await within(nav).findByRole("button", { name: "Directory" });
+    fireEvent.click(dir);
+    expect(dir).toHaveAttribute("aria-expanded", "true");
+    spy.mockRestore();
   });
 });
