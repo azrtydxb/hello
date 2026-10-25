@@ -8,7 +8,7 @@
     <user_pass idx="1" perm="R">{{xml .Line.Password}}</user_pass>
     <user_host idx="1" perm="R">{{xml .Server.Host}}:{{.Server.Port}}</user_host>
     <user_realname idx="1" perm="R">{{xml .Line.DisplayName}}</user_realname>
-    <user_idle_text idx="1" perm="R">{{xml .Line.Label}}</user_idle_text>
+    <user_idle_text idx="1" perm="R">{{xml .Line.AccountLabel}}</user_idle_text>
     <user_expiry idx="1" perm="R">{{.Server.Expiry}}</user_expiry>
 {{- /* MWI (spec S-1): user_mailbox names the mailbox the phone ties MWI to and dials for voicemail (Snom Service Hub, user_mailbox, D-series); Snom documents no separate subscribe flag. Unverified on hardware (lab item 1). */}}
     <user_mailbox idx="1" perm="R">{{xml (or .Line.VoicemailCode "*97")}}</user_mailbox>
