@@ -734,7 +734,10 @@ func (c2 *call) handOverAnchored(from *call, l *leg) bool {
 	c2.anchorHost = host
 	c2.mu.Unlock()
 	c2.adoptRelay(from, relay)
-	cOffer := media.BuildAudioSDP(host, relay.LegPort(legCallee), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
+	// The target is offered the caller's codecs (filtered for a trunk) and
+	// the caller is refreshed with whatever the target picks, so the pair
+	// agrees on one codec.
+	cOffer := filteredOffer(off, legCodecs(l)).Build(host, relay.LegPort(legCallee), "sendrecv")
 	cAns, ok := reinvite(l.session(), cOffer)
 	if !ok {
 		c2.addTrace("Transferred leg re-INVITE onto the anchor failed; its media follows the original offer")
@@ -742,7 +745,10 @@ func (c2 *call) handOverAnchored(from *call, l *leg) bool {
 	}
 	ackLate(l.session(), nil)
 	haAim(relay, legCallee, cAns)
-	aOffer := media.BuildAudioSDP(host, relay.LegPort(legCaller), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
+	targetAns, _ := media.ParseAudioSDP(cAns)
+	neg := media.AnswerFor(off, targetAns)
+	c2.applyNegotiated(neg)
+	aOffer := neg.Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(from.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
 	}
@@ -766,14 +772,17 @@ func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
 	if err != nil {
 		return nil, false
 	}
-	cOffer := media.BuildAudioSDP(host, relay.LegPort(legCallee), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
+	cOffer := filteredOffer(off, legCodecs(wB)).Build(host, relay.LegPort(legCallee), "sendrecv")
 	cAns, ok := reinvite(wB.session(), cOffer)
 	if !ok {
 		return relay, false
 	}
 	ackLate(wB.session(), nil)
 	haAim(relay, legCallee, cAns)
-	aOffer := media.BuildAudioSDP(host, relay.LegPort(legCaller), off.PayloadType, off.DTMFPayloadType, off.DTMFRate)
+	targetAns, _ := media.ParseAudioSDP(cAns)
+	neg := media.AnswerFor(off, targetAns)
+	other.applyNegotiated(neg)
+	aOffer := neg.Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(other.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
 	}

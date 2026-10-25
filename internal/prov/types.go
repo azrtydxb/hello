@@ -107,6 +107,9 @@ type RenderData struct {
 	Multicast *MulticastInfo
 	PTT       *PTTInfo
 	Time      TimeInfo
+	// Codecs is the HD voice codec plan: G.722 first, Opus where the model
+	// has it, then PCMU and PCMA (see CodecInfo).
+	Codecs CodecInfo
 }
 
 // Phone is the phone itself, as templates and resolution see it.
