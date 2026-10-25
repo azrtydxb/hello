@@ -206,6 +206,7 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		return d, prov.Template{}, prov.ErrSealed
 	}
 	d.Phone.MACUpper = strings.ToUpper(d.Phone.MAC)
+	d.Phone.PTTCapable = prov.SupportsPTT(d.Phone.Vendor, d.Phone.Model)
 	token, err := s.openToken(phoneID, tokenEnc)
 	if err != nil {
 		return d, prov.Template{}, err
@@ -226,6 +227,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	d.Prov = s.prov.info(token, d.Phone.MAC)
 	d.Time = prov.NewTimeInfo(s.prov.Timezone, s.prov.NTP, time.Now())
 	if d.Book, err = s.bookInfo(ctx, phoneID, token); err != nil {
+		return d, prov.Template{}, err
+	}
+	if d.Multicast, d.PTT, err = s.multicastInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
 		return d, prov.Template{}, err
 	}
 	if d.BLF, err = s.blfKeys(ctx, blfJSON); err != nil {

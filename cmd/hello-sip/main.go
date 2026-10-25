@@ -156,6 +156,7 @@ func run(args []string) error {
 		RingTimeout: cfg.RingTimeout, AuthFailLimit: cfg.AuthFailLimit, StateTimeout: cfg.StateTimeout,
 		MaxCallDuration: cfg.MaxCallDuration, TrustedProxies: cfg.TrustedProxies,
 		PageMaxDuration: cfg.PageMaxDuration, PageConcurrent: cfg.PageConcurrent, PageFanout: cfg.PageFanout,
+		PageMulticastIface: cfg.PageMulticastIface, PageMulticastTTL: cfg.PageMulticastTTL,
 		RTPPortMin: cfg.RTPPortMin, RTPPortMax: cfg.RTPPortMax,
 		MediaForceAnchor: cfg.MediaForceAnchor, MediaRecordingNotice: cfg.MediaRecordingNotice,
 		HADialogHeartbeat: cfg.MemberHeartbeat, HATakeoverEnabled: cfg.HATakeoverEnabled,

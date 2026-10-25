@@ -36,6 +36,7 @@ import {
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { FormAlert } from "./callflow/ui";
 import { Can } from "../role";
+import { listGroups, type Group } from "../api/phonebook";
 
 const FORM_ID = "paging-form";
 const CODE_PATTERN = /^\*[0-9]{2,4}$/;
@@ -51,6 +52,7 @@ export function Paging() {
   const [extensions, setExtensions] = useState<Extension[]>([]);
   const [extReady, setExtReady] = useState(false);
   const [extError, setExtError] = useState<string | null>(null);
+  const [phoneGroups, setPhoneGroups] = useState<Group[]>([]);
   const [deleting, setDeleting] = useState<PagingGroup | null>(null);
   const [editing, setEditing] = useState<
     { kind: "new" } | { kind: "edit"; group: PagingGroup } | null
@@ -79,6 +81,16 @@ export function Paging() {
       .catch((err: unknown) => {
         if (!controller.signal.aborted) setExtError(errorMessage(err));
       });
+    return () => controller.abort();
+  }, []);
+
+  // The multicast channels a paging group may also page. A failure leaves
+  // the picker empty: a group without a channel still works.
+  useEffect(() => {
+    const controller = new AbortController();
+    listGroups(controller.signal)
+      .then(setPhoneGroups)
+      .catch(() => undefined);
     return () => controller.abort();
   }, []);
 
@@ -168,6 +180,7 @@ export function Paging() {
           group={editing.kind === "edit" ? editing.group : null}
           extensions={extensions}
           extReady={extReady}
+          phoneGroups={phoneGroups}
           onClose={() => setEditing(null)}
           onSaved={(saved, created) => {
             replaceItems((items) =>
@@ -230,6 +243,16 @@ function GroupCard({
           </Badge>
         </span>
       </div>
+      {g.multicastChannel && (
+        <div className="cf-card__sub">
+          Also multicast to {g.multicastChannel.groupName} ·{" "}
+          {g.multicastChannel.label} (
+          <span className="cf-mono">
+            {g.multicastChannel.address}:{g.multicastChannel.port}
+          </span>
+          , {g.multicastChannel.codec})
+        </div>
+      )}
       <ul className="cf-members" aria-label={`Members of ${g.name}`}>
         {g.members.map((m) => (
           <li className="cf-member" key={String(m.extensionId)}>
@@ -373,6 +396,7 @@ interface Draft {
   enabled: boolean;
   members: Id[];
   callers: Id[];
+  multicastChannelId: Id | null;
 }
 
 const draftOf = (g: PagingGroup | null): Draft =>
@@ -384,6 +408,7 @@ const draftOf = (g: PagingGroup | null): Draft =>
         enabled: g.enabled,
         members: g.members.map((m) => m.extensionId),
         callers: g.callers.map((m) => m.extensionId),
+        multicastChannelId: g.multicastChannelId ?? null,
       }
     : {
         name: "",
@@ -392,9 +417,18 @@ const draftOf = (g: PagingGroup | null): Draft =>
         enabled: true,
         members: [],
         callers: [],
+        multicastChannelId: null,
       };
 
-const KEYS = ["name", "code", "priority", "enabled", "members", "callers"];
+const KEYS = [
+  "name",
+  "code",
+  "priority",
+  "enabled",
+  "members",
+  "callers",
+  "multicastChannelId",
+];
 
 function validate(d: Draft): Record<string, string> {
   const out: Record<string, string> = {};
@@ -404,7 +438,9 @@ function validate(d: Draft): Record<string, string> {
   if (!CODE_PATTERN.test(d.code)) {
     out.code = "Use * followed by 2 to 4 digits, for example *60.";
   }
-  if (d.members.length === 0) out.members = "Choose at least one member.";
+  if (d.members.length === 0 && d.multicastChannelId === null) {
+    out.members = "Choose at least one member, or a multicast channel.";
+  }
   return out;
 }
 
@@ -412,12 +448,14 @@ function PagingDrawer({
   group,
   extensions,
   extReady,
+  phoneGroups,
   onClose,
   onSaved,
 }: {
   group: PagingGroup | null;
   extensions: Extension[];
   extReady: boolean;
+  phoneGroups: Group[];
   onClose: () => void;
   onSaved: (g: PagingGroup, created: boolean) => void;
 }) {
@@ -455,7 +493,11 @@ function PagingDrawer({
     }
     setBusy(true);
     try {
-      const body: PagingGroupFields = { ...d };
+      const { multicastChannelId, ...rest } = d;
+      const body: PagingGroupFields = {
+        ...rest,
+        ...(multicastChannelId === null ? {} : { multicastChannelId }),
+      };
       onSaved(
         group
           ? await putPagingGroup(group.id, body)
@@ -595,6 +637,32 @@ function PagingDrawer({
             { value: "emergency", label: "Emergency (ignores DND)" },
           ]}
           onChange={(e) => set("priority", e.target.value as PagingPriority)}
+        />
+        <Select
+          id="paging-multicast"
+          label="Also page a multicast channel"
+          hint="The page's audio is also sent to the channel's address, which the phone group listens on. LAN only. G.711 channels that listen."
+          value={
+            d.multicastChannelId === null ? "" : String(d.multicastChannelId)
+          }
+          error={errors.multicastChannelId}
+          options={[
+            { value: "", label: "None" },
+            ...phoneGroups.flatMap((pg) =>
+              (pg.multicast ?? [])
+                .filter((c) => c.role !== "send" && c.codec !== "G722")
+                .map((c) => ({
+                  value: String(c.id),
+                  label: `${pg.name} · ${c.label} (${c.address}:${String(c.port)}, ${c.codec})`,
+                })),
+            ),
+          ]}
+          onChange={(e) =>
+            set(
+              "multicastChannelId",
+              e.target.value === "" ? null : Number(e.target.value),
+            )
+          }
         />
         <Switch
           label="Enabled"

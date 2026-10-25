@@ -130,6 +130,112 @@ describe("Paging", () => {
     ).toBeVisible();
   });
 
+  it("creates a multicast-only group from a phone group's listening channel", async () => {
+    const channel = (
+      id: number,
+      role: string,
+      codec: string,
+      label: string,
+    ) => ({
+      id,
+      label,
+      address: `239.255.0.${id}`,
+      port: 5004,
+      codec,
+      role,
+      priority: 1,
+    });
+    const calls = setup({
+      "GET /api/v1/phone-groups?limit=200": () =>
+        json({
+          items: [
+            {
+              id: 9,
+              name: "Warehouse",
+              description: "",
+              includeExtensions: true,
+              includeCompany: true,
+              bookIds: [],
+              multicast: [
+                channel(1, "both", "PCMU", "Dock"),
+                channel(2, "send", "PCMU", "Talk-only"),
+                channel(3, "listen", "G722", "Wideband"),
+              ],
+              phoneCount: 0,
+              createdAt: CREATED,
+              updatedAt: CREATED,
+            },
+          ],
+          next: "",
+        }),
+      "POST /api/v1/paging-groups": () =>
+        json(
+          {
+            ...GROUP,
+            members: [],
+            multicastChannelId: 1,
+            multicastChannel: {
+              id: 1,
+              groupId: 9,
+              groupName: "Warehouse",
+              label: "Dock",
+              address: "239.255.0.1",
+              port: 5004,
+              codec: "PCMU",
+            },
+          },
+          201,
+        ),
+    });
+    renderApp("/paging");
+    const [create] = await screen.findAllByRole("button", {
+      name: "New paging group",
+    });
+    await waitFor(() => expect(create).toBeEnabled());
+    fireEvent.click(create!);
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "kitchen" },
+    });
+    fireEvent.change(screen.getByLabelText("Page code"), {
+      target: { value: "*60" },
+    });
+    // No member and no channel: refused before anything is sent.
+    fireEvent.click(screen.getByRole("button", { name: "Create group" }));
+    expect(
+      await screen.findByText(/Choose at least one member, or a multicast/),
+    ).toBeVisible();
+
+    const pick = screen.getByLabelText(/Also page a multicast channel/);
+    const labels = Array.from(pick.querySelectorAll("option")).map(
+      (o) => o.textContent,
+    );
+    expect(labels).toEqual([
+      "None",
+      "Warehouse · Dock (239.255.0.1:5004, PCMU)",
+    ]);
+    fireEvent.change(pick, { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create group" }));
+    expect(
+      await screen.findByText("Paging group kitchen created."),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/Also multicast to Warehouse · Dock/),
+    ).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "POST",
+      url: "/api/v1/paging-groups",
+      body: {
+        name: "kitchen",
+        code: "*60",
+        priority: "normal",
+        enabled: true,
+        members: [],
+        callers: [],
+        multicastChannelId: 1,
+      },
+    });
+  });
+
   it("shows a server validation error at its field", async () => {
     setup({
       "POST /api/v1/paging-groups": () =>

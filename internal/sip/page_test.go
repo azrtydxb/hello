@@ -343,6 +343,44 @@ func TestPagingGroupTest(t *testing.T) {
 	}
 }
 
+// TestPagingGroupMulticast fails if a paging group with a multicast channel
+// and no members does not connect the caller at once (multicast has nothing
+// to wait for), rings anyone, plays the ringback tone, or loses the trace
+// line naming the channel; or if a member group's page ends when its
+// members hang up while the multicast page is still running. (That the
+// packets reach listeners is the media package's TestMulticastFanout.)
+func TestPagingGroupMulticast(t *testing.T) {
+	g := pageGroup("normal")
+	g.Members = nil
+	g.Multicast = &snapshot.MulticastTarget{Address: "239.255.0.1", Port: 5004, PT: 0}
+	pbx := startPBX(t, pageDevices(), withPaging(g, pageExts()...))
+	ph := registerAll(t, pbx, "a1", "b1")
+	a, b := ph["a1"], ph["b1"]
+	aRTP := rtpSocket(t, a)
+
+	res := dial(t.Context(), a, "*60")
+	r := waitCall(t, res)
+	if r.err != nil {
+		t.Fatalf("multicast page: %v", r.err)
+	}
+	noReq(t, b.invites, 100*time.Millisecond, "INVITE to a phone on a multicast-only page")
+	callerSDP, err := media.ParseAudioSDP(r.dcs.InviteResponse.Body())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The caller's audio is accepted (and fanned out to the multicast group).
+	to := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: callerSDP.Port}
+	_, _ = aRTP.WriteToUDP(media.BuildRTP(0, 1, 160, 99, false, []byte("speak")), to)
+	hangup(t, r.dcs)
+	cd := pbx.nextCDR(t)
+	if cd.Kind != cdr.KindPage || cd.FinalStatus != 200 {
+		t.Fatalf("CDR = kind %q status %d, want page 200", cd.Kind, cd.FinalStatus)
+	}
+	if tr := traceText(cd.Trace); !strings.Contains(tr, "Page also sent to multicast 239.255.0.1:5004") || strings.Contains(tr, "Page tone") {
+		t.Errorf("trace:\n%s", tr)
+	}
+}
+
 // TestPagingGroupRules fails if a disabled group or a caller outside the
 // allowed list pages, if a second caller gets through on a busy normal
 // page, if an emergency page does not preempt it, if a page outlives its
@@ -612,7 +650,7 @@ func TestAutoAnswerHeaders(t *testing.T) {
 		"":                            "auto-answer",
 		"Yealink SIP-T54W 96.86":      "Ring Answer",
 		"PolycomVVX-VVX_450-UA/6.4":   "Auto Answer",
-		"snom D785-10.1.150":          "info=alert-autoanswer",
+		"snom D785-10.1.150":          "<http://www.notused.com>;info=alert-autoanswer;delay=0",
 		"Fanvil X6U 2.4":              "info=Auto Answer",
 	} {
 		hs := autoAnswerHeaders("pbx.example", ua)

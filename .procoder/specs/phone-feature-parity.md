@@ -517,7 +517,7 @@ These items are checked on hardware (two WP836 on 1.0.1.44 and 1.0.1.80, upgrade
   - an unflagged trunk gets them;
   - a callback within 30 min does not bypass DND.
 - [ ] [S-29] `TestAlarmCall` in `internal/sip` passes. It fails if `*55` does not reach the group's alarm destination ignoring DND with ring tag alarm and CDR kind alarm, if `*55` without a destination is not 404, or if P22270 is rendered without a destination.
-- [ ] [S-30] `TestGrandstreamPTTChannels` in `internal/prov` passes. It fails if a WP8x6 group's PTT channels do not render P22177 to P22194, if a WP822 gets a DSS-key PTT entry, or if validation from phonebooks-ptt P-15 is bypassed.
+- [x] [S-30] `TestGrandstreamPTTChannels` in `internal/prov` passes. It fails if a WP8x6 group's PTT channels do not render P22177 to P22194, if a WP822 gets a DSS-key PTT entry, or if validation from phonebooks-ptt P-15 is bypassed.
 - [ ] [S-31] `TestGrandstreamPhonebookCap` in `internal/prov/phonebook` passes. It fails if a WP822 directory exceeds 500 entries or a WP8x6 directory exceeds 1000, if truncation breaks the delivered-set order, if P331 carries a scheme, or if the vCard slot is malformed.
 - [ ] [S-32] The phonebooks-ptt `TestAutoAnswerHardening` passes with WP822 and WP836 provclient profiles. It fails if a WP template lacks "Accept Incoming SIP from Proxy Only".
 - [ ] [S-33] `TestMusicOnHold` in `internal/sip` passes. It fails if a held or parked party hears silence when MOH is configured, or MOH continues after resume.

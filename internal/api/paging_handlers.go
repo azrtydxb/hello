@@ -28,6 +28,8 @@ type pagingBody struct {
 	Enabled  *bool    `json:"enabled"`
 	Members  *[]int64 `json:"members"`
 	Callers  *[]int64 `json:"callers"`
+	// MulticastChannelID is a phone group's multicast channel to page too.
+	MulticastChannelID *int64 `json:"multicastChannelId"`
 }
 
 // toInput applies the body over defaults: priority normal, enabled, no
@@ -52,6 +54,7 @@ func (b pagingBody) toInput() store.PagingGroupInput {
 	if b.Callers != nil {
 		in.Callers = *b.Callers
 	}
+	in.MulticastChannelID = b.MulticastChannelID
 	return in
 }
 
@@ -67,8 +70,14 @@ func validatePagingGroup(in *store.PagingGroupInput) fieldErrs {
 	if in.Priority != store.PagingNormal && in.Priority != store.PagingEmergency {
 		f.add("priority", `must be "normal" or "emergency"`)
 	}
-	if len(in.Members) == 0 || len(in.Members) > store.MaxPagingMembers {
-		f.add("members", "must have 1-%d members", store.MaxPagingMembers)
+	switch {
+	case len(in.Members) > store.MaxPagingMembers:
+		f.add("members", "must have at most %d members", store.MaxPagingMembers)
+	case len(in.Members) == 0 && in.MulticastChannelID == nil:
+		f.add("members", "must have 1-%d members, or a multicast channel to page", store.MaxPagingMembers)
+	}
+	if in.MulticastChannelID != nil && *in.MulticastChannelID <= 0 {
+		f.add("multicastChannelId", "must be a multicast channel id")
 	}
 	checkIDs := func(path string, ids []int64) {
 		seen := map[int64]bool{}

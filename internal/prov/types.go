@@ -99,7 +99,13 @@ type RenderData struct {
 	Prov     ProvInfo
 	Firmware *FirmwareInfo // nil when no firmware is pinned for the model
 	Book     *BookInfo     // nil when the phone has no address book to fetch
-	Time     TimeInfo
+	// Multicast is the multicast paging of the phone's group, nil when the
+	// phone has no group or the group no channel. PTT is the group's
+	// push-to-talk, nil unless it is on and the phone supports it
+	// (SupportsPTT).
+	Multicast *MulticastInfo
+	PTT       *PTTInfo
+	Time      TimeInfo
 }
 
 // Phone is the phone itself, as templates and resolution see it.
@@ -110,6 +116,9 @@ type Phone struct {
 	Model         string
 	Label         string
 	AdminPassword string // the phone's web UI password (spec S-20); masked in previews
+	// PTTCapable is set for a phone with the PTT and group paging feature
+	// set (SupportsPTT): the Grandstream WP816, WP826 and WP836.
+	PTTCapable bool
 }
 
 // Line is the SIP account of the phone's bound device.

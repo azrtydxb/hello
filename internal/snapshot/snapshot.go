@@ -97,6 +97,19 @@ type PagingGroup struct {
 	Enabled  bool
 	Members  []string
 	Callers  []string
+	// Multicast is the multicast channel the page is also sent to (migration
+	// 00016), nil when the group pages its members only. With no Members the
+	// page is multicast only.
+	Multicast *MulticastTarget
+}
+
+// MulticastTarget is a paging group's multicast channel: the address and
+// port the phones listen on and the G.711 payload type of its codec (0
+// PCMU, 8 PCMA).
+type MulticastTarget struct {
+	Address string
+	Port    int
+	PT      uint8
 }
 
 // Paging priorities.
@@ -418,16 +431,25 @@ func loadAnnouncements(ctx context.Context, db Querier) (map[string]string, erro
 // loadPagingGroups reads the paging groups with their member and allowed
 // caller extension numbers, so a page never touches the database.
 func loadPagingGroups(ctx context.Context, db Querier) ([]PagingGroup, error) {
-	rows, err := db.Query(ctx, `SELECT id, name, code, priority, enabled FROM paging_groups ORDER BY id`)
+	rows, err := db.Query(ctx, `SELECT g.id, g.name, g.code, g.priority, g.enabled, c.address, c.port, c.codec
+FROM paging_groups g LEFT JOIN multicast_channels c ON c.id = g.multicast_channel_id ORDER BY g.id`)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot: paging groups: %w", err)
 	}
 	var groups []PagingGroup
 	for rows.Next() {
 		var g PagingGroup
-		if err := rows.Scan(&g.ID, &g.Name, &g.Code, &g.Priority, &g.Enabled); err != nil {
+		var addr, codec *string
+		var port *int
+		if err := rows.Scan(&g.ID, &g.Name, &g.Code, &g.Priority, &g.Enabled, &addr, &port, &codec); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan paging group: %w", err)
+		}
+		if addr != nil && port != nil && codec != nil && (*codec == "PCMU" || *codec == "PCMA") {
+			g.Multicast = &MulticastTarget{Address: *addr, Port: *port, PT: 0}
+			if *codec == "PCMA" {
+				g.Multicast.PT = 8
+			}
 		}
 		groups = append(groups, g)
 	}

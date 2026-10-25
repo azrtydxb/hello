@@ -1101,6 +1101,8 @@ export interface PagingGroupFields {
   members: Id[];
   /** Extension ids allowed to page; empty means any internal extension. */
   callers: Id[];
+  /** A phone group's multicast channel to page as well; omit for none. */
+  multicastChannelId?: Id | null;
 }
 
 /** A paging group as returned. */
@@ -1112,6 +1114,17 @@ export interface PagingGroup {
   enabled: boolean;
   members: PagingExtension[];
   callers: PagingExtension[];
+  multicastChannelId?: Id | null;
+  /** The multicast channel the page also goes to. */
+  multicastChannel?: {
+    id: Id;
+    groupId: Id;
+    groupName: string;
+    label: string;
+    address: string;
+    port: number;
+    codec: string;
+  } | null;
   createdAt: string;
   updatedAt: string;
 }

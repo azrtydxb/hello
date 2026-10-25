@@ -163,6 +163,133 @@ describe("Phone groups", () => {
     );
   });
 
+  it("saves multicast channels and push-to-talk, and shows a refused field", async () => {
+    const channel = {
+      id: 1,
+      label: "Dock",
+      address: "239.255.0.1",
+      port: 5004,
+      codec: "PCMU",
+      role: "both",
+      priority: 1,
+    };
+    const calls = api("admin", {
+      "PUT /api/v1/phone-groups/9": () => json(group()),
+      "PUT /api/v1/phone-groups/9/multicast": () =>
+        json(group({ multicast: [channel] })),
+      "PUT /api/v1/phone-groups/9/ptt": () =>
+        json(
+          group({
+            multicast: [channel],
+            ptt: {
+              enabled: true,
+              address: "224.0.1.116:5001",
+              codec: "PCMU",
+              defaultChannel: 1,
+              acceptWhileBusy: false,
+              channels: [
+                { channel: 1, label: "All", transmit: true, subscribe: true },
+              ],
+            },
+          }),
+        ),
+    });
+    renderApp("/phones/groups");
+    await groupsTable();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Site A" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Site A" });
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Add channel" }),
+    );
+    fireEvent.change(within(dialog).getByLabelText("Label 1"), {
+      target: { value: "Dock" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("switch", { name: /^Push-to-talk/ }),
+    );
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Add PTT channel" }),
+    );
+    fireEvent.change(within(dialog).getByLabelText("Channel name 1"), {
+      target: { value: "All" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls).toContainEqual({
+      method: "PUT",
+      url: "/api/v1/phone-groups/9/multicast",
+      body: {
+        channels: [
+          {
+            label: "Dock",
+            address: "239.255.0.1",
+            port: 5004,
+            codec: "PCMU",
+            role: "both",
+            priority: 1,
+          },
+        ],
+      },
+    });
+    expect(calls).toContainEqual({
+      method: "PUT",
+      url: "/api/v1/phone-groups/9/ptt",
+      body: {
+        enabled: true,
+        address: "224.0.1.116:5001",
+        codec: "PCMU",
+        defaultChannel: 1,
+        acceptWhileBusy: false,
+        channels: [
+          { channel: 1, label: "All", transmit: true, subscribe: true },
+        ],
+      },
+    });
+  });
+
+  it("shows a multicast validation error at its field", async () => {
+    api("admin", {
+      "PUT /api/v1/phone-groups/9": () => json(group()),
+      "PUT /api/v1/phone-groups/9/multicast": () =>
+        json(
+          {
+            error: {
+              code: "bad_request",
+              message: "invalid",
+              fields: [
+                {
+                  path: "channels[0].address",
+                  message:
+                    "224.0.0.0/24 is reserved for network control traffic",
+                },
+              ],
+            },
+          },
+          400,
+        ),
+    });
+    renderApp("/phones/groups");
+    await groupsTable();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Site A" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Site A" });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Add channel" }),
+    );
+    fireEvent.change(within(dialog).getByLabelText("Label 1"), {
+      target: { value: "Bad" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Address 1"), {
+      target: { value: "224.0.0.9" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(
+      await within(dialog).findByText(/224\.0\.0\.0\/24 is reserved/),
+    ).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Edit Site A" })).toBeVisible();
+  });
+
   it("creates a group with the extensions book switched off", async () => {
     const calls = api("admin", {
       "POST /api/v1/phone-groups": () =>

@@ -117,6 +117,8 @@ naming the key, if one is missing or malformed.
 | `HELLO_PAGE_MAX_SECONDS`                          | sip     | `120`; a server page ends after this many seconds                                                                             |
 | `HELLO_PAGE_CONCURRENT`                           | sip     | `5`; pages one node runs at once, beyond that the caller hears busy                                                           |
 | `HELLO_PAGE_FANOUT`                               | sip     | `200`; legs of one page, beyond that the caller hears busy                                                                    |
+| `HELLO_PAGE_MULTICAST_IFACE`                      | sip     | empty (the system route); the interface a paging group's multicast packets leave on, which must be on the phones' LAN         |
+| `HELLO_PAGE_MULTICAST_TTL`                        | sip     | `1`; routers a page's multicast packets may cross                                                                             |
 | `HELLO_SIP_AUTH_FAIL_LIMIT` / `_WINDOW`           | sip     | `10` failures per `5m` per source IP; set the limit on control too (Diagnostics shows which sources it blocks)                |
 | `HELLO_SIP_STATE_TIMEOUT`                         | sip     | `200ms`; Valkey calls while handling SIP                                                                                      |
 | `HELLO_SIP_TRUSTED_PROXIES`                       | sip     | unset (trust none); CIDRs of the SIP balancers (Kamailio) whose `Path` and client address are believed                        |

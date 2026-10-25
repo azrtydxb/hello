@@ -59,6 +59,11 @@ type Config struct {
 	PageAnswerTimeout time.Duration
 	PageFanout        int
 	PageConcurrent    int
+	// PageMulticastIface and PageMulticastTTL are the interface and TTL of
+	// the multicast a paging group with a channel sends (iface "" is the
+	// system's choice; TTL 1 when unset).
+	PageMulticastIface string
+	PageMulticastTTL   int
 	// PeerRefresh is how often this node announces itself and reloads the
 	// peer set (10s); NodeTTL is how long its announcement lives (30s).
 	PeerRefresh time.Duration
