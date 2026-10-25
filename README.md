@@ -126,6 +126,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_PROV_TLS_CERT` / `_TLS_KEY`                | control | unset; TLS on the listener itself, when no proxy terminates it                                                                |
 | `HELLO_PROV_BOOT_CIDRS`                           | control | unset (any); sources allowed the DHCP trust-on-first-use hand-off                                                             |
 | `HELLO_PROV_TOKEN_GRACE` / `_RESYNC`              | control | `7d` / `24h`; old-token grace after a rotation; the phones' re-check interval                                                 |
+| `HELLO_PROV_BOOK_REFRESH`                         | control | `15m`; how often phones with a refresh setting re-fetch their address book (at least `1m`)                                    |
 | `HELLO_PROV_TIMEZONE` / `_NTP`                    | control | `UTC` / `pool.ntp.org`                                                                                                        |
 | `HELLO_PROV_AUDIT_RETENTION`                      | control | `90d`; how long the fetch audit is kept                                                                                       |
 | `HELLO_PROV_RATE_*`                               | control | `IP_PER_MIN` `60`, `DENIED_PER_10MIN` `10`, `PHONE_PER_HOUR` `30`                                                             |

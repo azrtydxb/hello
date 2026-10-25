@@ -41,7 +41,7 @@ func TestVendorFileSets(t *testing.T) {
 		{Poly, "VVX 450", mac + "-web.cfg", KindUpload},
 		{Poly, "VVX 450", mac + "-app.log", KindUpload},
 		{Poly, "VVX 450", mac + "-boot.log", KindUpload},
-		{Poly, "VVX 450", mac + "-directory.xml", KindUpload},
+		{Poly, "VVX 450", mac + "-directory.xml", KindPhonebook},
 		{Poly, "VVX 450", other + "-hello.cfg", ""},
 		// Grandstream: cfg<mac>, .bin, .xml, cfg<model>.xml, cfg.xml.
 		{Grandstream, "GRP2614", "cfg" + mac, KindOther},

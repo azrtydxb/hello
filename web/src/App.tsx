@@ -46,6 +46,8 @@ import { History } from "./pages/History";
 import { Login } from "./pages/Login";
 import { NotFound } from "./pages/NotFound";
 import { PhoneDetail } from "./pages/PhoneDetail";
+import { PhoneGroups } from "./pages/PhoneGroups";
+import { Phonebooks } from "./pages/Phonebooks";
 import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
 import { ProvSettings } from "./pages/ProvSettings";
@@ -72,6 +74,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/extensions": Extensions,
   "/devices": Devices,
   "/phones": Phones,
+  "/phonebooks": Phonebooks,
   "/registrations": Registrations,
   "/calls": Calls,
   "/history": History,
@@ -236,6 +239,7 @@ export function App() {
             <Route path="/ai/assistant/:id" element={<AIAssistant />} />
             <Route path="/ai/proposals/:id" element={<AIProposalDetail />} />
             {/* Phones sections; static paths outrank /phones/:id. */}
+            <Route path="/phones/groups" element={<PhoneGroups />} />
             <Route path="/phones/templates" element={<ProvTemplates />} />
             <Route path="/phones/firmware" element={<ProvFirmware />} />
             <Route path="/phones/settings" element={<ProvSettings />} />

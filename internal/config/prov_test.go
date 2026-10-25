@@ -110,6 +110,22 @@ func TestLoadProvDurations(t *testing.T) {
 	wantProvErr(t, env(map[string]string{"HELLO_PROV_RESYNC": "30s"}), "HELLO_PROV_RESYNC", "under a minute")
 }
 
+// TestLoadProvBookRefresh fails if the address-book refresh does not default
+// to 15 minutes, take a duration, or refuse zero, malformed and sub-minute
+// values.
+func TestLoadProvBookRefresh(t *testing.T) {
+	c, err := LoadControl(env(nil))
+	if err != nil || c.Prov.BookRefresh != 15*time.Minute {
+		t.Fatalf("default = %v, %v", c.Prov.BookRefresh, err)
+	}
+	if c, err = LoadControl(env(map[string]string{"HELLO_PROV_BOOK_REFRESH": "1h"})); err != nil || c.Prov.BookRefresh != time.Hour {
+		t.Fatalf("1h = %v, %v", c.Prov.BookRefresh, err)
+	}
+	for _, bad := range []string{"0", "30s", "-1h", "soon"} {
+		wantProvErr(t, env(map[string]string{"HELLO_PROV_BOOK_REFRESH": bad}), "HELLO_PROV_BOOK_REFRESH", bad)
+	}
+}
+
 // TestLoadProvRegisterExpiry fails if the rendered expiry is not
 // HELLO_SIP_REGISTER_MAX_EXPIRES or an inverted or sub-second window is
 // accepted.

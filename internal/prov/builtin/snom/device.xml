@@ -19,6 +19,9 @@
     <prov_polling_mode perm="R">rel</prov_polling_mode>
     <prov_polling_period perm="R">{{.Prov.ResyncSeconds}}</prov_polling_period>
     <ntp_server perm="R">{{xml .Time.NTP}}</ntp_server>
+{{- with .Book}}
+    <dkey_directory perm="R">url {{xml .URL}}</dkey_directory>
+{{- end}}
 {{- with .Firmware}}
     <update_policy perm="R">auto_update</update_policy>
     <firmware perm="R">{{xml .URL}}</firmware>

@@ -29,6 +29,12 @@
     <P145>0</P145>
     <P194>1</P194>
     <P193>{{div .Prov.ResyncSeconds 60}}</P193>
+{{- with .Book}}
+    <P330>3</P330>
+    <P331>{{xml .HostPath}}</P331>
+    <P332>{{.RefreshMinutes}}</P332>
+    <P333>1</P333>
+{{- end}}
     <P30>{{xml .Time.NTP}}</P30>
     <P246>{{xml .Time.Zone}}</P246>
 {{- with .Firmware}}
