@@ -276,3 +276,87 @@ func TestBlocklistEntries(t *testing.T) {
 		t.Fatalf("unconfigured = %d, want 503", rec.Code)
 	}
 }
+
+// TestBlocklistAPI runs the blocklist routes against a real database: every
+// documented answer, the scope of an entry, the reason hidden from an
+// operator, the import, and the 10,000-entry limit.
+func TestBlocklistAPI(t *testing.T) {
+	e := newEnv(t, noLive{})
+	c := e.login()
+	ctx := context.Background()
+	tr, err := e.st.CreateTrunk(ctx, "t", store.TrunkInput{Name: "carrier-a", Mode: "ip", RegisterExpires: 3600, OptionsInterval: 30,
+		Enabled: true, SourceCIDRs: []string{"203.0.113.0/24"}, InternalDialing: store.Dialing{Mode: "off"},
+		Destinations: []routing.Destination{{Host: "203.0.113.10", Port: 5060, Priority: 1, Weight: 1}}}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created := c.must(http.StatusCreated, "POST", "/api/v1/blocklist",
+		map[string]any{"pattern": "+41 22 555 00 00", "reason": "spam", "trunkId": tr.ID}).json(t)
+	if created["pattern"] != "+41225550000" || created["trunkName"] != "carrier-a" || created["reason"] != "spam" {
+		t.Fatalf("created = %v", created)
+	}
+	id := rowID(created)
+	c.must(http.StatusBadRequest, "POST", "/api/v1/blocklist", map[string]any{"pattern": "12"})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/blocklist", map[string]any{"pattern": "+4122", "trunkId": 99999})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/blocklist", map[string]any{"pattern": "+41225550000", "trunkId": tr.ID})
+	c.must(http.StatusCreated, "POST", "/api/v1/blocklist", map[string]any{"pattern": "+44", "match": "prefix"})
+
+	if items := listItems(t, c.must(http.StatusOK, "GET", "/api/v1/blocklist", nil)); len(items) != 2 {
+		t.Fatalf("list = %v", items)
+	}
+	if items := listItems(t, c.must(http.StatusOK, "GET", "/api/v1/blocklist?scope=global", nil)); len(items) != 1 {
+		t.Fatalf("global list = %v", items)
+	}
+	c.must(http.StatusBadRequest, "GET", "/api/v1/blocklist?action=bogus", nil)
+
+	op, _ := e.asRole("ops", auth.RoleOperator)
+	for _, it := range listItems(t, op.must(http.StatusOK, "GET", "/api/v1/blocklist", nil)) {
+		if it.(map[string]any)["reason"] != "" {
+			t.Fatalf("an operator saw a reason: %v", it)
+		}
+	}
+	// An operator's replace keeps the note it cannot see.
+	op.must(http.StatusOK, "PUT", "/api/v1/blocklist/"+id, map[string]any{"pattern": "+41225550000", "action": "allow", "trunkId": tr.ID})
+	var reason string
+	if err := e.db.QueryRowContext(ctx, `SELECT reason FROM call_blocklist WHERE id = $1`, id).Scan(&reason); err != nil || reason != "spam" {
+		t.Fatalf("reason after an operator's replace = %q, %v", reason, err)
+	}
+	c.must(http.StatusBadRequest, "PUT", "/api/v1/blocklist/"+id, map[string]any{"pattern": "abc"})
+	c.must(http.StatusNotFound, "PUT", "/api/v1/blocklist/99999", map[string]any{"pattern": "+4122555"})
+
+	// The import: a dry run writes nothing, a bad row writes nothing, a good
+	// file adds and updates.
+	dry := c.upload("/api/v1/blocklist/import?dry_run=true", "number,action,scope\n+33 1 23 45 67 89,block,carrier-a\n").json(t)
+	if dry["ok"] != true {
+		t.Fatalf("dry run = %v", dry)
+	}
+	var n int
+	if err := e.db.QueryRowContext(ctx, `SELECT count(*) FROM call_blocklist`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("rows after a dry run = %d, %v", n, err)
+	}
+	if r := c.upload("/api/v1/blocklist/import", "number,action\nabc,block\n"); r.code != http.StatusBadRequest {
+		t.Fatalf("import of a bad row = %d %s", r.code, r.body)
+	}
+	got := c.upload("/api/v1/blocklist/import", "number,action,scope,reason\n+33 1 23 45 67 89,block,carrier-a,x\n+4122 555 00 00,allow,carrier-a,again\n").json(t)
+	if got["created"] != float64(1) || got["updated"] != float64(1) {
+		t.Fatalf("import = %v", got)
+	}
+
+	// The limit: fill the table, then one more is refused everywhere.
+	if _, err := e.db.ExecContext(ctx, `INSERT INTO call_blocklist (pattern, match, action)
+		SELECT '+9' || lpad(g::text, 12, '0'), 'exact', 'block' FROM generate_series(1, $1 - (SELECT count(*) FROM call_blocklist)) g`,
+		routing.MaxBlocklistEntries); err != nil {
+		t.Fatal(err)
+	}
+	c.must(http.StatusConflict, "POST", "/api/v1/blocklist", map[string]any{"pattern": "+4177 777 77 77"})
+	if r := c.upload("/api/v1/blocklist/import", "number\n+41 77 777 77 78\n"); r.code != http.StatusConflict {
+		t.Fatalf("import past the limit = %d %s", r.code, r.body)
+	}
+	if _, err := e.db.ExecContext(ctx, `DELETE FROM call_blocklist WHERE pattern LIKE '+9%'`); err != nil {
+		t.Fatal(err)
+	}
+
+	c.must(http.StatusNoContent, "DELETE", "/api/v1/blocklist/"+id, nil)
+	c.must(http.StatusNotFound, "DELETE", "/api/v1/blocklist/"+id, nil)
+}
