@@ -21,6 +21,11 @@ EXPOSE 5060/udp 8090
 ENTRYPOINT ["fakecarrier"]
 
 FROM runtime AS hello-control
+# pg_dump and pg_restore for backups (docs/backup.md). Their major version
+# must be at least the server's.
+USER root
+RUN apk add --no-cache postgresql-client
+USER 65532:65532
 COPY --from=build /out/hello-control /usr/local/bin/hello-control
 EXPOSE 8081
 ENTRYPOINT ["hello-control"]

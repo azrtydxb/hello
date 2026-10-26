@@ -38,6 +38,16 @@ type Common struct {
 	DrainDelay time.Duration
 }
 
+// Backup holds the backup tool settings.
+type Backup struct {
+	// PGDump and PGRestore are the pg_dump and pg_restore binaries
+	// (HELLO_BACKUP_PG_DUMP, HELLO_BACKUP_PG_RESTORE).
+	PGDump, PGRestore string
+	// Tmp is the staging directory for the dump and the archive
+	// (HELLO_BACKUP_TMP); empty means the system temporary directory.
+	Tmp string
+}
+
 // Control is hello-control's configuration.
 type Control struct {
 	Common
@@ -76,6 +86,9 @@ type Control struct {
 	// SecretKey (HELLO_SECRET_KEY) seals trunk passwords; identical on every
 	// hello-control and hello-sip.
 	SecretKey string
+	// Backup is where the PostgreSQL client programs and the staging
+	// directory of backups are (HELLO_BACKUP_*, spec pbx-gaps S-2).
+	Backup Backup
 	// Prov is the phone provisioning listener (HELLO_PROV_*).
 	Prov Prov
 	// Dial is the numbering context of the address books (HELLO_DIAL_*,
@@ -405,6 +418,8 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	if c.SessionTTL == 0 {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
+	c.Backup = Backup{PGDump: r.optional("HELLO_BACKUP_PG_DUMP", "pg_dump"),
+		PGRestore: r.optional("HELLO_BACKUP_PG_RESTORE", "pg_restore"), Tmp: r.getenv("HELLO_BACKUP_TMP")}
 	c.Prov = r.prov()
 	c.Dial = r.dialing()
 	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")

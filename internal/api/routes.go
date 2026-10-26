@@ -286,6 +286,13 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/settings/smtp", auth.ScopeAdmin, auth.RoleAdmin, false, s.putSMTP},
 		{"POST", "/api/v1/settings/smtp/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testSMTP},
 
+		{"GET", "/api/v1/backups/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.getBackupSettings},
+		{"PUT", "/api/v1/backups/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putBackupSettings},
+		{"GET", "/api/v1/backups", auth.ScopeAdmin, auth.RoleAdmin, false, s.listBackups},
+		{"POST", "/api/v1/backups", auth.ScopeAdmin, auth.RoleAdmin, false, s.createBackup},
+		{"DELETE", "/api/v1/backups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteBackup},
+		{"POST", "/api/v1/backups/{id}/restore", auth.ScopeAdmin, auth.RoleAdmin, false, s.restoreBackup},
+
 		{"GET", "/api/v1/messages", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessages},
 		{"POST", "/api/v1/messages", auth.ScopeWrite, auth.RoleOperator, false, s.sendMessage},
 		{"GET", "/api/v1/messages/conversations", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessageConversations},

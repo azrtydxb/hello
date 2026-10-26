@@ -116,7 +116,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 | Item                                          | Status                         |
 | --------------------------------------------- | ------------------------------ |
-| Backup and restore                            | wip (spec #199)                |
+| Backup and restore                            | wip (gaps-backup)              |
 | Follow-me                                     | wip (spec #199)                |
 | Blocklist, anonymous reject, country limits   | wip (spec #199)                |
 | Queue callback                                | wip (spec #199)                |

@@ -42,7 +42,7 @@ const (
 	pruneEvery = time.Hour
 )
 
-const usage = "usage: hello-control serve | migrate up | migrate status | user add [--role viewer|operator|admin] <username> < password"
+const usage = "usage: hello-control serve | migrate up | migrate status | user add [--role viewer|operator|admin] <username> < password | backup restore --from <object-key>"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -85,6 +85,8 @@ func run(args []string) error {
 			fmt.Printf("%05d %-8s %s\n", s.Source.Version, s.State, s.Source.Path)
 		}
 		return nil
+	case len(args) >= 2 && args[0] == "backup" && args[1] == "restore":
+		return backupRestore(ctx, cfg, db, log, args[2:], os.Getenv, os.Stdin, os.Stdout)
 	case len(args) >= 2 && args[0] == "user" && args[1] == "add":
 		return userAdd(ctx, store.New(db), args[2:], os.Stdin, os.Stdout)
 	}
@@ -135,6 +137,16 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	}
 	go runMailer(ctx, envSMTP(cfg), st, objs, log)
 
+	// Scheduled and manual backups, and restore (spec pbx-gaps S-2 to S-4).
+	// Every replica runs the scheduler; the run itself is taken under an
+	// advisory lock, so one replica does it.
+	backups, err := newBackupService(cfg, st, db, vk, metrics.Registry, log)
+	if err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("backup: %w", err)
+	}
+	go backups.Serve(ctx)
+
 	// External AI access (spec ai-external-access): the OAuth
 	// authorization server and /mcp, only with HELLO_PUBLIC_URL.
 	as, err := newAuthServer(cfg.AI, st, vk, metrics.Registry, log)
@@ -177,6 +189,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		PageTests:       vk,
 		Parked:          vk,
 		Objects:         objs,
+		Backups:         backups,
+		Maintenance:     backups.Maintenance,
 		Diagnostics:     vk,
 		AuthFailLimit:   cfg.AuthFailLimit,
 		EmailDelivery:   cfg.SmtpHost != "",

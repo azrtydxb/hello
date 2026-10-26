@@ -100,6 +100,8 @@ spec:
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_BASE_URL" "key" "base-url" "optional" true) | nindent 12 }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_MODEL" "key" "model" "optional" true) | nindent 12 }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_API_KEY" "key" "api-key" "optional" true) | nindent 12 }}
+            - name: HELLO_BACKUP_TMP
+              value: /var/lib/hello-backup
             - name: HELLO_VOICEMAIL_LANGUAGE
               value: {{ .Values.global.voicemailLanguage | default "en" | quote }}
             {{- with .Values.global.publicUrl }}
@@ -132,12 +134,14 @@ spec:
             {{- with .Values.control.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if and $provOn $prov.caSecret }}
           volumeMounts:
+            - name: backup-staging
+              mountPath: /var/lib/hello-backup
+            {{- if and $provOn $prov.caSecret }}
             - name: prov-ca
               mountPath: /etc/hello/prov
               readOnly: true
-          {{- end }}
+            {{- end }}
           ports:
             - name: http
               containerPort: 8081
@@ -161,15 +165,18 @@ spec:
             {{- include "hello.containerSecurity" . | nindent 12 }}
           resources:
             {{- toYaml .Values.control.resources | nindent 12 }}
-      {{- if and $provOn $prov.caSecret }}
       volumes:
+        - name: backup-staging
+          emptyDir:
+            sizeLimit: {{ .Values.control.backup.stagingSize | quote }}
+        {{- if and $provOn $prov.caSecret }}
         - name: prov-ca
           secret:
             secretName: {{ $prov.caSecret }}
             items:
               - key: ca.crt
                 path: ca.crt
-      {{- end }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service
