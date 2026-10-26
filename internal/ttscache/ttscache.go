@@ -1,4 +1,4 @@
-// Package ttscache turns prompt text into 8 kHz WAV audio for the call
+// Package ttscache turns prompt text into WAV audio for the call
 // plane and remembers it. Audio is stored in the object store under a key
 // derived from a hash of (model, voice, text), so a prompt is synthesized
 // once per voice for the whole cluster: every node, and the control plane's
@@ -28,8 +28,11 @@ import (
 )
 
 // KeyPrefix is the object-store prefix of cached audio, in the voicemail
-// bucket: tts/<sha256 hex>.wav.
-const KeyPrefix = "tts/"
+// bucket: tts/hd/<sha256 hex>.wav. The audio is stored at the voice's own
+// sample rate (up to 48 kHz) and resampled per call. The "hd" segment keeps
+// the 8 kHz entries an earlier release stored under tts/ from being served as
+// if they were wideband.
+const KeyPrefix = "tts/hd/"
 
 // ErrNotConfigured means no key or model is set: speech is off.
 var ErrNotConfigured = errors.New("text to speech is not configured")
@@ -77,7 +80,7 @@ func (s Settings) GoString() string { return s.String() }
 type SettingsFunc func(ctx context.Context) (Settings, error)
 
 // Key is the object-store key of the audio for text in a voice of a model:
-// tts/<hex sha256 of model, voice and text>.wav. A different voice or model
+// tts/hd/<hex sha256 of model, voice and text>.wav. A different voice or model
 // is a different key, so changing the voice never plays stale audio.
 func Key(model, voice, text string) string {
 	h := sha256.New()

@@ -780,7 +780,17 @@ func TestFirmwareHosting(t *testing.T) {
 		_ = mw.Close()
 		p.c.header.Set("Content-Type", mw.FormDataContentType())
 		defer p.c.header.Del("Content-Type")
-		return p.c.do("POST", "/api/v1/prov/firmware", buf.String())
+		// The streamed upload cannot be retried inside the handler, so a
+		// store that stays throttled past minio-go's retries surfaces as a
+		// 5xx; the test (not the code under test) tries again for a while.
+		deadline := time.Now().Add(90 * time.Second)
+		for {
+			resp := p.c.do("POST", "/api/v1/prov/firmware", buf.String())
+			if resp.code < 500 || time.Now().After(deadline) {
+				return resp
+			}
+			time.Sleep(time.Second)
+		}
 	}
 	r := upload("T54W-96.86.0.70.rom")
 	if r.code != http.StatusCreated {

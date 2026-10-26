@@ -900,7 +900,7 @@ function GreetingSource({
           error={error}
           hint={
             object
-              ? `${current} Uploading replaces it; other sample rates are converted to 8 kHz.`
+              ? `${current} Uploading replaces it; stereo is mixed to mono and the sample rate is kept (up to 48 kHz).`
               : current
           }
           onFile={onFile}

@@ -731,6 +731,7 @@ func (c *call) answer(w *leg) {
 		if len(bres.Body()) > 0 {
 			if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
 				c.relay.SetTarget(legCallee, udpAddr(ans.Address, ans.Port))
+				allowSignalSource(c.relay, legCallee, bres.Source())
 				calleeAns = ans
 			}
 		}
@@ -765,6 +766,12 @@ func (c *call) answer(w *leg) {
 		}
 		return
 	}
+	if c.dss.LoadState() == sip.DialogStateEnded {
+		// The caller's BYE overtook its ACK: handleBye has accepted it and
+		// ends the call (and the callee's leg) as the caller's hangup.
+		c.addTrace("Caller hung up before acknowledging the answer")
+		return
+	}
 	c.mu.Lock()
 	cancelled = c.isCancelled
 	c.connected = false
@@ -777,6 +784,13 @@ func (c *call) answer(w *leg) {
 	c.s.log.Info("caller did not acknowledge answer", "correlation_id", c.id, "error", err)
 	c.byeA()
 	c.end(sip.StatusOK, cdr.SideSystem, "no ACK from caller", ResultFailed)
+}
+
+// callerByeHeld runs the test-only callerByeHook, if one is set.
+func (s *Server) callerByeHeld() {
+	if h := s.callerByeHook.Load(); h != nil {
+		(*h)()
+	}
 }
 
 // hangup ends a connected call from one side and sends BYE to the other.
@@ -1591,6 +1605,7 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 				return
 			}
 		}
+		s.callerByeHeld()
 		s.m.response(sip.StatusOK)
 		c.hangup(cdr.SideCaller)
 	default: // matchDialog only matches the caller's leg or the winner's

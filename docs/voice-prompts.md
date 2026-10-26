@@ -10,13 +10,13 @@ The exception is the voicemail voice ([voicemail.md](voicemail.md)): the
 default greetings and the spoken `*97` menus use the model and voice saved
 here, and are generated the first time a call needs them (the static ones when
 you save the settings) and cached in the voicemail bucket as
-`tts/<sha256 of model, voice and text>.wav`. If the voice cannot be reached the
+`tts/hd/<sha256 of model, voice and text>.wav`. If the voice cannot be reached the
 call carries on with tones and recordings.
 
 Audio is generated through [OpenRouter](https://openrouter.ai), which offers
 ElevenLabs models (for example `elevenlabs/eleven-multilingual-v2`), using
 `github.com/azrtydxb/go-ai-sdk`. Hello asks for MP3, decodes it, converts it to
-8 kHz 16-bit mono and stores it as a WAV, the one format the call plane plays.
+16-bit mono at the speech model's own sample rate (up to 48 kHz) and stores it as a WAV; playback resamples to each call.
 
 ## Set the key (once)
 
@@ -70,9 +70,10 @@ also be recorded from the phone. See [voicemail.md](voicemail.md).
 
 ## Audio format
 
-Playback assumes 8 kHz 16-bit mono PCM. Uploaded WAVs at another sample rate
-are converted to 8 kHz when they are uploaded; WAVs that are not 16-bit mono
-PCM are refused with the reason.
+Uploads are stored as 16-bit mono PCM at their own sample rate (up to 48 kHz);
+stereo is mixed to mono and 8, 24, 32-bit and float WAVs are converted.
+Playback resamples to each call's rate. Compressed WAVs are refused with the
+reason.
 
 ## Errors
 

@@ -12,7 +12,7 @@ import (
 
 // newSpeech builds the voicemail voice: prompts are spoken with the model,
 // voice and key saved under Settings, Voice (TTS), synthesized through
-// OpenRouter once and cached in the voicemail bucket (tts/<hash>.wav) for
+// OpenRouter once and cached in the voicemail bucket (tts/hd/<hash>.wav) for
 // every node. The store must hold the secret box that opens the key. The key
 // is read per refresh and never logged.
 func newSpeech(st *store.Store, objs sip.ObjectStore, log *slog.Logger) *ttscache.Cache {

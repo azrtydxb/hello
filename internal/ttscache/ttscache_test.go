@@ -73,7 +73,7 @@ func newCache(syn *fakeSynth, st *memStore, log *slog.Logger) *Cache {
 
 func TestKeyIsHashOfModelVoiceText(t *testing.T) {
 	a := Key("m", "v", "hello")
-	if !strings.HasPrefix(a, "tts/") || !strings.HasSuffix(a, ".wav") || len(a) != len("tts/")+64+len(".wav") {
+	if !strings.HasPrefix(a, "tts/hd/") || !strings.HasSuffix(a, ".wav") || len(a) != len("tts/hd/")+64+len(".wav") {
 		t.Fatalf("Key = %q", a)
 	}
 	if a != Key("m", "v", "hello") {

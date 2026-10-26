@@ -187,6 +187,7 @@ func TestOnboardingDismissAndIgnore(t *testing.T) {
 	p.queue("000b82000001", "grandstream", "WP822")
 	p.queue("000b82000002", "yealink", "T54W")
 	base := "/api/v1/onboarding/candidates/"
+	c.must(http.StatusBadRequest, "POST", base+"000b82000001/dismiss", map[string]any{"ignore": "yes"})
 	c.must(http.StatusNoContent, "POST", base+"00:0b:82:00:00:01/dismiss", nil)
 	c.must(http.StatusNotFound, "POST", base+"000b82000001/dismiss", nil)
 	c.must(http.StatusNoContent, "POST", base+"000b82000002/dismiss", map[string]any{"ignore": true})

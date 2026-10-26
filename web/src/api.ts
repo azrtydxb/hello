@@ -1160,7 +1160,7 @@ export interface PagingGroupFields {
   members: Id[];
   /** Extension ids allowed to page; empty means any internal extension. */
   callers: Id[];
-  /** A phone group's multicast channel to page as well; omit for none. */
+  /** A catalog paging channel to page as well; omit for none. */
   multicastChannelId?: Id | null;
 }
 
@@ -1177,12 +1177,11 @@ export interface PagingGroup {
   /** The multicast channel the page also goes to. */
   multicastChannel?: {
     id: Id;
-    groupId: Id;
-    groupName: string;
     label: string;
     address: string;
     port: number;
     codec: string;
+    enabled: boolean;
   } | null;
   createdAt: string;
   updatedAt: string;
@@ -1379,7 +1378,7 @@ export const listAnnouncements = (signal?: AbortSignal) =>
   list<Announcement>("/api/v1/announcements", signal);
 
 /** The largest announcement WAV the server accepts (spec S-5). */
-export const MAX_ANNOUNCEMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_ANNOUNCEMENT_BYTES = 64 * 1024 * 1024;
 
 /**
  * POST /api/v1/announcements: multipart with `name` and `file` (WAV) parts.

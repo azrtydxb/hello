@@ -5,7 +5,7 @@ package api
 // prompts when the text-to-speech settings are saved. The calls themselves
 // are spoken by hello-sip (internal/sip, cmd/hello-sip); both sides use
 // internal/ttscache, so they share one cache: audio is stored in the
-// voicemail bucket as tts/<sha256 of model, voice and text>.wav, and a
+// voicemail bucket as tts/hd/<sha256 of model, voice and text>.wav, and a
 // preview here is already warm when a caller needs it.
 
 import (

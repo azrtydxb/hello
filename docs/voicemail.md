@@ -127,7 +127,7 @@ MinIO), so the whole cluster shares it:
 
 | Object key                                | Holds                                                         |
 | ----------------------------------------- | ------------------------------------------------------------- |
-| `tts/<sha256>.wav`                        | one spoken sentence, 8 kHz 16-bit mono WAV                    |
+| `tts/hd/<sha256>.wav`                     | one spoken sentence, 16-bit mono WAV at the voice's own rate (up to 48 kHz), resampled per call, so G.722 and Opus callers hear it in HD |
 | `box/<box id>/<slot>-<unix ns>.wav`       | a box's own greeting, busy greeting, unreachable greeting or name (`<slot>` is `greeting`, `busy`, `unreachable` or `name`) |
 | `box/<box id>/<unix>-<call id>.wav`       | a message                                                     |
 

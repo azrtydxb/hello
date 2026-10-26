@@ -476,17 +476,25 @@ type GroupInput struct {
 const phoneGroupCols = `g.id, g.name, g.description, g.include_extensions, g.include_company,
 	COALESCE((SELECT jsonb_agg(gb.book_id ORDER BY gb.position) FROM phone_group_books gb WHERE gb.group_id = g.id), '[]'::jsonb),
 	(SELECT count(*) FROM phones p WHERE p.group_id = g.id), g.created_at, g.updated_at,
-	g.ptt_enabled, g.ptt_address, g.ptt_codec, g.ptt_default_channel, g.ptt_accept_busy`
+	g.ptt_enabled, g.ptt_address, g.ptt_codec, g.ptt_default_channel, g.ptt_accept_busy, g.ptt_channel_id,
+	g.ptt_priority_channel, g.ptt_emergency_channel, g.group_paging_enabled, g.group_paging_default,
+	g.group_paging_priority, g.group_paging_emergency, g.paging_allow_in_dnd, g.paging_barge,
+	g.paging_priority_active, g.paging_timeout, g.intercom_barge`
 
 func scanPhoneGroup(r interface{ Scan(...any) error }) (phonebook.Group, error) {
 	var (
 		g   phonebook.Group
 		ids []byte
+		ptt sql.NullInt64
 	)
 	if err := r.Scan(&g.ID, &g.Name, &g.Description, &g.IncludeExtensions, &g.IncludeCompany, &ids, &g.PhoneCount, &g.CreatedAt, &g.UpdatedAt,
-		&g.PTT.Enabled, &g.PTT.Address, &g.PTT.Codec, &g.PTT.DefaultChannel, &g.PTT.AcceptBusy); err != nil {
+		&g.PTT.Enabled, &g.PTT.Address, &g.PTT.Codec, &g.PTT.DefaultChannel, &g.PTT.AcceptBusy, &ptt,
+		&g.PTT.PriorityChannel, &g.PTT.EmergencyChannel, &g.PTT.GroupPaging, &g.PTT.DefaultGroup,
+		&g.PTT.PriorityGroup, &g.PTT.EmergencyGroup, &g.PagingOptions.AllowInDND, &g.PagingOptions.Barge,
+		&g.PagingOptions.PriorityActive, &g.PagingOptions.Timeout, &g.PagingOptions.IntercomBarge); err != nil {
 		return g, err
 	}
+	g.PTT.ChannelID = nullInt(ptt)
 	g.Multicast, g.PTT.Channels = []phonebook.MulticastChannel{}, []phonebook.PTTChannel{}
 	if err := json.Unmarshal(ids, &g.BookIDs); err != nil {
 		return g, fmt.Errorf("phone group %d books: %w", g.ID, err)
@@ -537,7 +545,10 @@ func getPhoneGroup(ctx context.Context, q querier, id int64) (phonebook.Group, e
 	return gs[0], nil
 }
 
-// loadGroupChannels fills the multicast channels and PTT channels of gs.
+// loadGroupChannels fills the multicast channels and PTT channels of gs,
+// and their effective PTT address and codec: the group's catalog PTT
+// channel, else the catalog's first enabled one, else the group's own
+// (pre-catalog) address.
 func loadGroupChannels(ctx context.Context, q querier, gs []phonebook.Group) error {
 	if len(gs) == 0 {
 		return nil
@@ -548,15 +559,25 @@ func loadGroupChannels(ctx context.Context, q querier, gs []phonebook.Group) err
 		ids[i] = gs[i].ID
 		byID[gs[i].ID] = &gs[i]
 	}
-	rows, err := q.QueryContext(ctx, `SELECT group_id, id, label, address, port, codec, role, priority
-		FROM multicast_channels WHERE group_id = ANY($1) ORDER BY group_id, position`, ids)
+	ptts, err := catalogChannels(ctx, q, phonebook.KindPTT, true)
+	if err != nil {
+		return err
+	}
+	for i := range gs {
+		if c, ok := resolvePTT(ptts, gs[i].PTT.ChannelID); ok {
+			gs[i].PTT.Address, gs[i].PTT.Codec = c.HostPort(), c.Codec
+		}
+	}
+	rows, err := q.QueryContext(ctx, `SELECT l.group_id, c.id, c.label, c.address, c.port, c.codec, l.role, c.priority, c.enabled
+		FROM phone_group_multicast l JOIN multicast_channels c ON c.id = l.channel_id
+		WHERE l.group_id = ANY($1) ORDER BY l.group_id, l.position`, ids)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var gid int64
 		var c phonebook.MulticastChannel
-		if err := rows.Scan(&gid, &c.ID, &c.Label, &c.Address, &c.Port, &c.Codec, &c.Role, &c.Priority); err != nil {
+		if err := rows.Scan(&gid, &c.ID, &c.Label, &c.Address, &c.Port, &c.Codec, &c.Role, &c.Priority, &c.Enabled); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -583,82 +604,86 @@ func loadGroupChannels(ctx context.Context, q querier, gs []phonebook.Group) err
 	return prows.Err()
 }
 
-// SetPhoneGroupMulticast replaces a group's multicast paging channels. It is
-// a configuration change (the snapshot carries the channel a paging group
-// sends to), so hello-sip is notified. Channels keep their ids when the
-// same label is rewritten at the same position, so a paging group's link
-// survives an edit; a channel that disappears unlinks its paging groups.
-func (s *Store) SetPhoneGroupMulticast(ctx context.Context, actor string, id int64, in []phonebook.MulticastInput) (phonebook.Group, error) {
+// SetPhoneGroupMulticast replaces the catalog paging channels a group
+// uses, each with its role; none means every enabled paging channel. opts,
+// when not nil, replaces how the group's phones take a page. It is a
+// configuration change like the catalog's.
+func (s *Store) SetPhoneGroupMulticast(ctx context.Context, actor string, id int64, in []phonebook.MulticastInput, opts *phonebook.PagingOptions) (phonebook.Group, error) {
 	var out phonebook.Group
 	err := s.configChange(ctx, actor, "set-multicast", "phone_group", nil, func(tx *sql.Tx) (int64, error) {
 		var one int
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM phone_groups WHERE id = $1 FOR UPDATE`, id).Scan(&one); err != nil {
 			return id, err
 		}
-		type old struct {
-			id    int64
-			label string
-		}
-		olds := map[int]old{}
-		rows, err := tx.QueryContext(ctx, `SELECT position, id, label FROM multicast_channels WHERE group_id = $1`, id)
-		if err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM phone_group_multicast WHERE group_id = $1`, id); err != nil {
 			return id, err
 		}
-		for rows.Next() {
-			var pos int
-			var o old
-			if err := rows.Scan(&pos, &o.id, &o.label); err != nil {
-				_ = rows.Close()
+		for i, c := range in {
+			if err := checkCatalogChannel(ctx, tx, "channels["+strconv.Itoa(i)+"].channelId", c.ChannelID, phonebook.KindPaging); err != nil {
 				return id, err
 			}
-			olds[pos] = o
-		}
-		_ = rows.Close()
-		if err := rows.Err(); err != nil {
-			return id, err
-		}
-		keep := map[int64]bool{}
-		for i, c := range in {
-			if o, ok := olds[i]; ok && o.label == c.Label {
-				keep[o.id] = true
-			}
-		}
-		for _, o := range olds {
-			if !keep[o.id] {
-				if _, err := tx.ExecContext(ctx, `DELETE FROM multicast_channels WHERE id = $1`, o.id); err != nil {
-					return id, err
-				}
-			}
-		}
-		for i, c := range in {
-			if o, ok := olds[i]; ok && keep[o.id] && o.label == c.Label {
-				if _, err := tx.ExecContext(ctx, `UPDATE multicast_channels SET address = $2, port = $3, codec = $4, role = $5, priority = $6
-					WHERE id = $1`, o.id, c.Address, c.Port, c.Codec, c.Role, c.Priority); err != nil {
-					return id, err
-				}
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO multicast_channels (group_id, position, label, address, port, codec, role, priority)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, id, i, c.Label, c.Address, c.Port, c.Codec, c.Role, c.Priority); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO phone_group_multicast (group_id, channel_id, position, role)
+				VALUES ($1, $2, $3, $4)`, id, c.ChannelID, i, c.Role); err != nil {
 				return id, err
 			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE phone_groups SET updated_at = now() WHERE id = $1`, id); err != nil {
 			return id, err
 		}
+		if opts != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE phone_groups SET paging_allow_in_dnd = $2, paging_barge = $3,
+				paging_priority_active = $4, paging_timeout = $5, intercom_barge = $6 WHERE id = $1`,
+				id, opts.AllowInDND, opts.Barge, opts.PriorityActive, opts.Timeout, opts.IntercomBarge); err != nil {
+				return id, err
+			}
+		}
+		var err error
 		out, err = getPhoneGroup(ctx, tx, id)
 		return id, err
 	})
 	return out, err
 }
 
-// SetPhoneGroupPTT replaces a group's push-to-talk settings and channels.
+// SetPhoneGroupPTT replaces a group's push-to-talk and group paging
+// settings and channels. PTT on with no PTT channels defines the default
+// channel, so the phones' PTT button always has a channel to talk on, and
+// group paging on with no group channels defines the default group.
 func (s *Store) SetPhoneGroupPTT(ctx context.Context, actor string, id int64, in phonebook.PTT) (phonebook.Group, error) {
 	var out phonebook.Group
+	// What is off is not checked: keep it in range for the table.
+	def := phonebook.DefaultPTT()
+	if in.DefaultChannel < 1 || in.DefaultChannel > phonebook.MaxPTTChannels {
+		in.DefaultChannel = def.DefaultChannel
+	}
+	if in.PriorityChannel < 1 || in.PriorityChannel > phonebook.MaxPTTChannels {
+		in.PriorityChannel = def.PriorityChannel
+	}
+	if in.EmergencyChannel < 1 || in.EmergencyChannel > phonebook.MaxPTTChannels {
+		in.EmergencyChannel = def.EmergencyChannel
+	}
+	switch in.DefaultGroup {
+	case 26, 27, 49, 50:
+	default:
+		in.DefaultGroup = def.DefaultGroup
+	}
+	if in.PriorityGroup < phonebook.MinGroupChannel || in.PriorityGroup > phonebook.MaxGroupChannel {
+		in.PriorityGroup = def.PriorityGroup
+	}
+	if in.EmergencyGroup < phonebook.MinGroupChannel || in.EmergencyGroup > phonebook.MaxGroupChannel {
+		in.EmergencyGroup = def.EmergencyGroup
+	}
 	err := s.tx(ctx, func(tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET ptt_enabled = $2, ptt_address = $3, ptt_codec = $4,
-			ptt_default_channel = $5, ptt_accept_busy = $6, updated_at = now() WHERE id = $1`,
-			id, in.Enabled, in.Address, in.Codec, in.DefaultChannel, in.AcceptBusy)
+		if in.ChannelID != nil {
+			if err := checkPTTChannel(ctx, tx, "channelId", *in.ChannelID); err != nil {
+				return err
+			}
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE phone_groups SET ptt_enabled = $2, ptt_channel_id = $3,
+			ptt_default_channel = $4, ptt_accept_busy = $5, ptt_priority_channel = $6, ptt_emergency_channel = $7,
+			group_paging_enabled = $8, group_paging_default = $9, group_paging_priority = $10,
+			group_paging_emergency = $11, updated_at = now() WHERE id = $1`,
+			id, in.Enabled, in.ChannelID, in.DefaultChannel, in.AcceptBusy, in.PriorityChannel, in.EmergencyChannel,
+			in.GroupPaging, in.DefaultGroup, in.PriorityGroup, in.EmergencyGroup)
 		if err != nil {
 			return err
 		}
@@ -668,7 +693,22 @@ func (s *Store) SetPhoneGroupPTT(ctx context.Context, actor string, id int64, in
 		if _, err := tx.ExecContext(ctx, `DELETE FROM ptt_channels WHERE group_id = $1`, id); err != nil {
 			return err
 		}
-		for _, c := range in.Channels {
+		chans := in.Channels
+		hasPTT, hasGroup := false, false
+		for _, c := range chans {
+			if c.Channel <= phonebook.MaxPTTChannels {
+				hasPTT = true
+			} else {
+				hasGroup = true
+			}
+		}
+		if in.Enabled && !hasPTT {
+			chans = append(chans, phonebook.PTTChannel{Channel: in.DefaultChannel, Label: "Channel " + strconv.Itoa(in.DefaultChannel), Transmit: true, Subscribe: true})
+		}
+		if in.GroupPaging && !hasGroup {
+			chans = append(chans, phonebook.PTTChannel{Channel: in.DefaultGroup, Label: "Group " + strconv.Itoa(in.DefaultGroup), Transmit: true, Subscribe: true})
+		}
+		for _, c := range chans {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO ptt_channels (group_id, channel, label, transmit, subscribe)
 				VALUES ($1, $2, $3, $4, $5)`, id, c.Channel, c.Label, c.Transmit, c.Subscribe); err != nil {
 				return err
@@ -689,7 +729,8 @@ func phoneGroupNameError(err error, name string) error {
 	return err
 }
 
-// CreatePhoneGroup creates a group with no named books.
+// CreatePhoneGroup creates a group with no named books, with PTT on and
+// channel 1 defined (the Grandstream default channel).
 func (s *Store) CreatePhoneGroup(ctx context.Context, actor string, in GroupInput) (phonebook.Group, error) {
 	var out phonebook.Group
 	err := s.tx(ctx, func(tx *sql.Tx) error {
@@ -699,6 +740,13 @@ func (s *Store) CreatePhoneGroup(ctx context.Context, actor string, in GroupInpu
 			VALUES ($1, $2, $3, $4) RETURNING id`,
 			in.Name, in.Description, in.IncludeExtensions, in.IncludeCompany).Scan(&id); err != nil {
 			return phoneGroupNameError(err, in.Name)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE phone_groups SET ptt_enabled = TRUE, ptt_default_channel = 1 WHERE id = $1`, id); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO ptt_channels (group_id, channel, label, transmit, subscribe)
+			VALUES ($1, 1, 'Channel 1', TRUE, TRUE)`, id); err != nil {
+			return err
 		}
 		var err error
 		if out, err = getPhoneGroup(ctx, tx, id); err != nil {

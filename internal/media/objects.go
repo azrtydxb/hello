@@ -12,6 +12,8 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+
+	"github.com/azrtydxb/hello/internal/s3retry"
 )
 
 // The buckets, one per media kind (Phase 5 contract 4): voicemail audio,
@@ -82,9 +84,14 @@ func NewMinioObjects(endpoint, accessKey, secretKey string, secure bool, log *sl
 	if log == nil {
 		log = slog.Default()
 	}
+	tr, err := s3retry.ClientTransport(secure)
+	if err != nil {
+		return nil, fmt.Errorf("media: build MinIO transport for %s: %w", endpoint, err)
+	}
 	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure: secure,
+		Creds:     credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure:    secure,
+		Transport: tr,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("media: build MinIO client for %s: %w", endpoint, err)
@@ -173,9 +180,14 @@ func (o *minioObjects) GetAnnouncement(ctx context.Context, key string) ([]byte,
 		return nil, fmt.Errorf("media: open announcement %s: %w", key, err)
 	}
 	defer func() { _ = obj.Close() }()
-	data, err := io.ReadAll(obj)
-	if err != nil {
+	// A song is tens of megabytes: size the buffer from the object's length
+	// so ReadAll does not grow it through a chain of copies.
+	var buf bytes.Buffer
+	if st, err := obj.Stat(); err == nil && st.Size > 0 && st.Size < 1<<30 {
+		buf.Grow(int(st.Size) + 512)
+	}
+	if _, err := buf.ReadFrom(obj); err != nil {
 		return nil, fmt.Errorf("media: read announcement %s: %w", key, err)
 	}
-	return data, nil
+	return buf.Bytes(), nil
 }

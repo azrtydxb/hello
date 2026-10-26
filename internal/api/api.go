@@ -90,6 +90,12 @@ type Store interface {
 	UpdatePagingGroup(ctx context.Context, actor string, id int64, in store.PagingGroupInput, check store.Check) (store.PagingGroup, error)
 	DeletePagingGroup(ctx context.Context, actor string, id int64, check store.Check) error
 
+	ListMulticastChannels(ctx context.Context) ([]phonebook.Channel, error)
+	GetMulticastChannel(ctx context.Context, id int64) (phonebook.Channel, error)
+	CreateMulticastChannel(ctx context.Context, actor string, in phonebook.ChannelInput) (phonebook.Channel, error)
+	UpdateMulticastChannel(ctx context.Context, actor string, id int64, in phonebook.ChannelInput) (phonebook.Channel, error)
+	DeleteMulticastChannel(ctx context.Context, actor string, id int64) error
+
 	ListFeatureCodes(ctx context.Context) ([]store.FeatureCode, error)
 	PutFeatureCodes(ctx context.Context, actor string, codes []store.FeatureCode, check store.Check) error
 

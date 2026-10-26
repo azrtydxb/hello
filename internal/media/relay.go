@@ -49,6 +49,9 @@ type DirectionStats struct {
 	// Dropped counts packets discarded because the destination leg's
 	// bounded queue was full (drop-oldest, spec S-3).
 	Dropped uint64
+	// Rejected counts packets refused because their source address did
+	// not match the leg's peer (see relayLeg.sourceOK).
+	Rejected uint64
 	// JitterMs is the RFC 3550 interarrival jitter estimate in ms.
 	JitterMs float64
 }
@@ -96,6 +99,16 @@ type relayLeg struct {
 
 	remoteMu sync.Mutex
 	remote   *net.UDPAddr // latched peer address
+
+	// Source policy (guarded by remoteMu). sdpIP is the address the remote
+	// SDP names, extraIPs are further addresses the signalling vouches for
+	// (the INVITE or response source, which is where a NATed phone's media
+	// comes from), and pinnedIP is the address of the first accepted
+	// packet. See Relay.accept.
+	sdpIP    net.IP
+	extraIPs []net.IP
+	pinnedIP net.IP
+	rejected atomic.Uint64
 
 	out rewriteState // rewrite applied to packets sent INTO this leg
 
@@ -229,7 +242,34 @@ func (r *Relay) SetTarget(name string, addr *net.UDPAddr) {
 	}
 	l.remoteMu.Lock()
 	l.remote = addr
+	// A new target is a new negotiation (first INVITE, answer, re-INVITE,
+	// takeover): the source policy starts over from what this SDP names.
+	l.pinnedIP = nil
+	l.sdpIP = nil
+	if addr != nil {
+		l.sdpIP = append(net.IP(nil), addr.IP...)
+	}
 	l.remoteMu.Unlock()
+}
+
+// AllowSource vouches for ip as a source of the leg's media: the address
+// the signalling for this leg came from (or went to). A phone behind NAT
+// names a private address in its SDP, but its media arrives from the same
+// public address as its signalling. Calling it again adds another address;
+// SetTarget keeps them.
+func (r *Relay) AllowSource(name string, ip net.IP) {
+	l := r.findLeg(name)
+	if l == nil || len(ip) == 0 || ip.IsUnspecified() {
+		return
+	}
+	l.remoteMu.Lock()
+	defer l.remoteMu.Unlock()
+	for _, have := range l.extraIPs {
+		if have.Equal(ip) {
+			return
+		}
+	}
+	l.extraIPs = append(l.extraIPs, append(net.IP(nil), ip...))
 }
 
 // findLeg returns the named leg.
@@ -441,6 +481,10 @@ func (r *Relay) recv(l *relayLeg) {
 		if err != nil {
 			return // socket closed by Close
 		}
+		if !l.sourceOK(from) {
+			l.rejected.Add(1)
+			continue // not the leg's peer: never counted, tapped or relayed
+		}
 		r.latch(l, from)
 		pkt, ok := ParseRTP(buf[:n])
 		if !ok {
@@ -476,6 +520,66 @@ func (r *Relay) recv(l *relayLeg) {
 		}
 		r.forward(l, buf[:n])
 	}
+}
+
+// sourceOK is the leg's source policy, the guard against RTP injection and
+// hijack: anyone who can reach a relay port could otherwise send audio into
+// the call or, by sending first, redirect the other side's audio to
+// themselves. A packet is accepted from:
+//
+//   - the address the leg's remote SDP names, or one the signalling vouches
+//     for (AllowSource), until the leg is pinned;
+//   - any address, for the first packet, when the SDP names none usable
+//     and nothing vouches for the leg: no address (hold, 0.0.0.0) or a
+//     private one (a phone behind NAT, whose public address Hello was not
+//     told). That packet pins the leg;
+//   - after the pin, the pinned address (any port, so a changed NAT
+//     mapping still works) or a vouched one.
+//
+// Everything else is refused. A moved media address is negotiated: the
+// re-INVITE's SetTarget starts the policy over.
+func (l *relayLeg) sourceOK(from *net.UDPAddr) bool {
+	l.remoteMu.Lock()
+	defer l.remoteMu.Unlock()
+	ip := from.IP
+	vouched := false
+	for _, v := range l.extraIPs {
+		if v.Equal(ip) {
+			vouched = true
+			break
+		}
+	}
+	if l.pinnedIP != nil {
+		if ip.Equal(l.pinnedIP) {
+			return true
+		}
+		if vouched {
+			l.pinnedIP = append(net.IP(nil), ip...)
+			return true
+		}
+		return false
+	}
+	switch {
+	case vouched, len(l.sdpIP) > 0 && ip.Equal(l.sdpIP):
+	case len(l.extraIPs) == 0 && !publicAddr(l.sdpIP):
+	default:
+		return false
+	}
+	l.pinnedIP = append(net.IP(nil), ip...)
+	return true
+}
+
+// publicAddr reports whether ip is a globally routable unicast address; nil,
+// unspecified, loopback, private, link-local and CGNAT (100.64/10) are not.
+func publicAddr(ip net.IP) bool {
+	if len(ip) == 0 || ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() || ip.IsMulticast() {
+		return false
+	}
+	if v4 := ip.To4(); v4 != nil && v4[0] == 100 && v4[1]&0xc0 == 64 {
+		return false
+	}
+	return true
 }
 
 // latch implements symmetric RTP latching with refresh: the first inbound
@@ -692,6 +796,7 @@ func (r *Relay) Metrics() RelayStats {
 			Lost:     l.stats.lost,
 			JitterMs: l.stats.jitter * 1000,
 			Dropped:  l.dropped.Load(),
+			Rejected: l.rejected.Load(),
 		}
 		l.stats.mu.Unlock()
 		// Audio arriving into leg l is l's party speaking: the direction
@@ -751,14 +856,16 @@ func (r *Relay) LegPort(name string) int {
 // own announcement stream: a fresh SSRC with its own sequence and
 // timestamp space, so the bridged stream's rewrite state is untouched.
 // The stream is encoded in the leg's negotiated codec (G.722 and Opus legs
-// get the 8 kHz audio resampled up). It returns ctx.Err() when ctx is
+// get the 8 kHz audio resampled up; use PlayPCMTo for audio that is already
+// wideband). It returns ctx.Err() when ctx is
 // cancelled mid-way.
 func (r *Relay) PlayTo(ctx context.Context, legName string, pcm []byte) error {
 	return r.PlayPCMTo(ctx, legName, pcm, sampleRateHz)
 }
 
-// PlayPCMTo is PlayTo for PCM at an explicit sample rate (WAV assets are 8
-// or 16 kHz).
+// PlayPCMTo is PlayTo for PCM at an explicit sample rate (WAV assets are
+// stored at 8 kHz up to 48 kHz); it is resampled to the leg's codec rate,
+// 8 kHz for G.711, 16 kHz for G.722, 48 kHz for Opus.
 func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate int) error {
 	l := r.findLeg(legName)
 	if l == nil {
@@ -768,14 +875,14 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 		pcm = pcm[:len(pcm)-1]
 	}
 	codec := l.speaks()
-	if want := codec.SampleRate(); want != rate {
+	if want := codec.PlaybackRate(); want != rate {
 		out, err := Resample(pcm, rate, want)
 		if err != nil {
 			return fmt.Errorf("media: announcement resample: %w", err)
 		}
 		pcm = out
 	}
-	enc, err := NewEncoder(codec)
+	enc, err := NewPlaybackEncoder(codec)
 	if err != nil {
 		return err
 	}
@@ -787,7 +894,7 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 	seq := binary.BigEndian.Uint16(b[0:2])
 	ts := binary.BigEndian.Uint32(b[2:6])
 	ssrc := binary.BigEndian.Uint32(b[6:10])
-	frame := 2 * codec.FrameSamples()
+	frame := 2 * codec.PlaybackFrameSamples()
 	ticker := time.NewTicker(frameDur)
 	defer ticker.Stop()
 	for off := 0; off < len(pcm); off += frame {

@@ -64,6 +64,37 @@ const PHONE = {
   updatedAt: STAMP,
 };
 
+const catalogChannel = (
+  id: number,
+  kind: string,
+  label: string,
+  address: string,
+  port: number,
+) => ({
+  id,
+  label,
+  address,
+  port,
+  codec: "PCMU",
+  kind,
+  priority: id,
+  enabled: true,
+});
+
+const CATALOG = [
+  catalogChannel(1, "paging", "Dock", "239.255.0.1", 5004),
+  catalogChannel(2, "ptt", "PTT", "224.0.1.116", 5001),
+  catalogChannel(3, "ptt", "Floor", "224.0.1.117", 5001),
+];
+
+const OPTIONS = {
+  allowInDnd: false,
+  barge: 0,
+  priorityActive: true,
+  timeout: 0,
+  intercomBarge: false,
+};
+
 function api(role = "admin", more: Routes = {}) {
   return mockApi({
     "GET /api/v1/auth/me": () => json({ username: "u", role }),
@@ -71,6 +102,7 @@ function api(role = "admin", more: Routes = {}) {
       json({ items: [group()], next: "" }),
     "GET /api/v1/phonebooks?limit=200": () => json({ items: BOOKS, next: "" }),
     "GET /api/v1/phones": () => json({ items: [PHONE] }),
+    "GET /api/v1/multicast-channels": () => json({ items: [] }),
     ...more,
   });
 }
@@ -163,56 +195,125 @@ describe("Phone groups", () => {
     );
   });
 
-  it("saves multicast channels and push-to-talk, and shows a refused field", async () => {
-    const channel = {
-      id: 1,
-      label: "Dock",
-      address: "239.255.0.1",
-      port: 5004,
+  it("saves catalog multicast channels and a PTT channel", async () => {
+    const PTT = {
+      enabled: true,
+      channelId: 2,
+      address: "224.0.1.117:5001",
       codec: "PCMU",
-      role: "both",
-      priority: 1,
+      defaultChannel: 1,
+      acceptWhileBusy: false,
+      channels: [
+        { channel: 1, label: "Channel 1", transmit: true, subscribe: true },
+      ],
     };
     const calls = api("admin", {
+      "GET /api/v1/multicast-channels": () => json({ items: CATALOG }),
       "PUT /api/v1/phone-groups/9": () => json(group()),
       "PUT /api/v1/phone-groups/9/multicast": () =>
-        json(group({ multicast: [channel] })),
+        json(group({ multicast: [{ ...CATALOG[0], role: "both" }] })),
       "PUT /api/v1/phone-groups/9/ptt": () =>
-        json(
-          group({
-            multicast: [channel],
-            ptt: {
-              enabled: true,
-              address: "224.0.1.116:5001",
-              codec: "PCMU",
-              defaultChannel: 1,
-              acceptWhileBusy: false,
-              channels: [
-                { channel: 1, label: "All", transmit: true, subscribe: true },
-              ],
-            },
-          }),
-        ),
+        json(group({ multicast: [{ ...CATALOG[0], role: "both" }], ptt: PTT })),
     });
     renderApp("/phones/groups");
     await groupsTable();
     fireEvent.click(screen.getByRole("button", { name: "Edit Site A" }));
     const dialog = screen.getByRole("dialog", { name: "Edit Site A" });
 
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Add channel" }),
+    const add = await within(dialog).findByRole("button", {
+      name: "Add channel",
+    });
+    fireEvent.click(add);
+    const pick = within(dialog).getByRole("combobox", { name: "Channel 1" });
+    expect(
+      Array.from(pick.querySelectorAll("option")).map((o) => o.textContent),
+    ).toEqual(["Dock (239.255.0.1:5004, PCMU)"]);
+    // PTT is on by default; pick the catalog's second PTT channel.
+    expect(
+      within(dialog).getByRole("switch", { name: /^Push-to-talk/ }),
+    ).toBeChecked();
+    expect(within(dialog).getByTestId("ptt-effective")).toHaveTextContent(
+      "224.0.1.116:5001",
     );
-    fireEvent.change(within(dialog).getByLabelText("Label 1"), {
-      target: { value: "Dock" },
+    fireEvent.change(within(dialog).getByLabelText("PTT channel"), {
+      target: { value: "3" },
+    });
+    expect(within(dialog).getByTestId("ptt-effective")).toHaveTextContent(
+      "224.0.1.117:5001",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(calls).toContainEqual({
+      method: "PUT",
+      url: "/api/v1/phone-groups/9/multicast",
+      body: { channels: [{ channelId: 1, role: "both" }], options: OPTIONS },
+    });
+    expect(calls).toContainEqual({
+      method: "PUT",
+      url: "/api/v1/phone-groups/9/ptt",
+      body: {
+        enabled: true,
+        channelId: 3,
+        defaultChannel: 1,
+        priorityChannel: 24,
+        emergencyChannel: 25,
+        acceptWhileBusy: false,
+        groupPaging: false,
+        defaultGroup: 26,
+        priorityGroup: 49,
+        emergencyGroup: 50,
+        channels: [
+          { channel: 1, label: "Channel 1", transmit: true, subscribe: true },
+        ],
+      },
+    });
+  });
+
+  it("saves group paging channels and the paging options", async () => {
+    const calls = api("admin", {
+      "GET /api/v1/multicast-channels": () => json({ items: CATALOG }),
+      "PUT /api/v1/phone-groups/9": () => json(group()),
+      "PUT /api/v1/phone-groups/9/multicast": () => json(group()),
+      "PUT /api/v1/phone-groups/9/ptt": () => json(group()),
+    });
+    renderApp("/phones/groups");
+    await groupsTable();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Site A" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Site A" });
+
+    // Intercom barging is off by default.
+    const barging = await within(dialog).findByRole("switch", {
+      name: /^Intercom barging/,
+    });
+    expect(barging).not.toBeChecked();
+    fireEvent.click(barging);
+    fireEvent.click(
+      within(dialog).getByRole("switch", {
+        name: /^Play pages in Do Not Disturb/,
+      }),
+    );
+    fireEvent.change(within(dialog).getByLabelText("Paging barge"), {
+      target: { value: "3" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/^Paging timeout/), {
+      target: { value: "60" },
+    });
+    expect(within(dialog).queryByLabelText(/^Default group/)).toBeNull();
+    fireEvent.click(
+      within(dialog).getByRole("switch", { name: /^Group paging/ }),
+    );
+    fireEvent.change(within(dialog).getByLabelText(/^Priority channel/), {
+      target: { value: "20" },
     });
     fireEvent.click(
-      within(dialog).getByRole("switch", { name: /^Push-to-talk/ }),
+      within(dialog).getByRole("button", { name: "Add group channel" }),
     );
-    fireEvent.click(
-      within(dialog).getByRole("button", { name: "Add PTT channel" }),
-    );
-    fireEvent.change(within(dialog).getByLabelText("Channel name 1"), {
-      target: { value: "All" },
+    expect(
+      within(dialog).getByRole("group", { name: "Group channel 26" }),
+    ).toBeVisible();
+    fireEvent.change(within(dialog).getByLabelText("Channel name 2"), {
+      target: { value: "Floor" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
@@ -221,16 +322,14 @@ describe("Phone groups", () => {
       method: "PUT",
       url: "/api/v1/phone-groups/9/multicast",
       body: {
-        channels: [
-          {
-            label: "Dock",
-            address: "239.255.0.1",
-            port: 5004,
-            codec: "PCMU",
-            role: "both",
-            priority: 1,
-          },
-        ],
+        channels: [],
+        options: {
+          allowInDnd: true,
+          barge: 3,
+          priorityActive: true,
+          timeout: 60,
+          intercomBarge: true,
+        },
       },
     });
     expect(calls).toContainEqual({
@@ -238,12 +337,18 @@ describe("Phone groups", () => {
       url: "/api/v1/phone-groups/9/ptt",
       body: {
         enabled: true,
-        address: "224.0.1.116:5001",
-        codec: "PCMU",
+        channelId: null,
         defaultChannel: 1,
+        priorityChannel: 20,
+        emergencyChannel: 25,
         acceptWhileBusy: false,
+        groupPaging: true,
+        defaultGroup: 26,
+        priorityGroup: 49,
+        emergencyGroup: 50,
         channels: [
-          { channel: 1, label: "All", transmit: true, subscribe: true },
+          { channel: 1, label: "Channel 1", transmit: true, subscribe: true },
+          { channel: 26, label: "Floor", transmit: true, subscribe: true },
         ],
       },
     });
@@ -251,6 +356,7 @@ describe("Phone groups", () => {
 
   it("shows a multicast validation error at its field", async () => {
     api("admin", {
+      "GET /api/v1/multicast-channels": () => json({ items: CATALOG }),
       "PUT /api/v1/phone-groups/9": () => json(group()),
       "PUT /api/v1/phone-groups/9/multicast": () =>
         json(
@@ -260,9 +366,8 @@ describe("Phone groups", () => {
               message: "invalid",
               fields: [
                 {
-                  path: "channels[0].address",
-                  message:
-                    "224.0.0.0/24 is reserved for network control traffic",
+                  path: "channels[0].channelId",
+                  message: "is a push-to-talk channel",
                 },
               ],
             },
@@ -275,17 +380,11 @@ describe("Phone groups", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit Site A" }));
     const dialog = screen.getByRole("dialog", { name: "Edit Site A" });
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Add channel" }),
+      await within(dialog).findByRole("button", { name: "Add channel" }),
     );
-    fireEvent.change(within(dialog).getByLabelText("Label 1"), {
-      target: { value: "Bad" },
-    });
-    fireEvent.change(within(dialog).getByLabelText("Address 1"), {
-      target: { value: "224.0.0.9" },
-    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     expect(
-      await within(dialog).findByText(/224\.0\.0\.0\/24 is reserved/),
+      await within(dialog).findByText("is a push-to-talk channel"),
     ).toBeVisible();
     expect(screen.getByRole("dialog", { name: "Edit Site A" })).toBeVisible();
   });

@@ -47,7 +47,9 @@ control:
     tag: ""
   resources:
     requests: { cpu: 50m, memory: 64Mi }
-    limits: { memory: 256Mi }
+    # An announcement upload (up to 64 MiB) is held in memory while it is
+    # converted, about 1.5x its size.
+    limits: { memory: 512Mi }
   # Phone provisioning listener (:8083). Enabled when provisioning.publicUrl is set.
   provisioning:
     publicUrl: ""

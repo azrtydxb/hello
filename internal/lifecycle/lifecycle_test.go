@@ -542,3 +542,23 @@ func waitState(t *testing.T, m *Machine, s cluster.State) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// TestNoPublishAfterLeave fails if a drain (SIGTERM's goroutine) or a
+// heartbeat publishes after the node has left the cluster, which would
+// re-create the record Leave removed and list the exited node as live.
+func TestNoPublishAfterLeave(t *testing.T) {
+	pub := &fakePub{}
+	m := New(Options{Checks: map[string]Check{}, Publisher: pub})
+	m.Heartbeat(context.Background())
+	m.leave()
+	pub.mu.Lock()
+	before := len(pub.published)
+	pub.mu.Unlock()
+	m.Drain("SIGTERM")
+	m.Heartbeat(context.Background())
+	pub.mu.Lock()
+	defer pub.mu.Unlock()
+	if !pub.left || len(pub.published) != before {
+		t.Fatalf("left=%v, published %d records after leave (had %d)", pub.left, len(pub.published)-before, before)
+	}
+}
