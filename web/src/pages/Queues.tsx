@@ -748,26 +748,28 @@ function QueueDrawer({
               role="group"
               aria-label={`Agent ${m.number ?? ""}`}
             >
-              <span className="cf-mono">
-                {m.number} {m.name}
-              </span>
-              <Switch
-                label="Logs in"
-                labelPosition="end"
-                checked={m.dynamic}
-                onChange={(e) => setMember(i, { dynamic: e.target.checked })}
-              />
-              <Input
-                id={`queue-member-${String(i)}-penalty`}
-                label="Penalty"
-                size="sm"
-                mono
-                value={String(m.penalty)}
-                error={errors[`members[${String(i)}].penalty`]}
-                onChange={(e) =>
-                  setMember(i, { penalty: Number(e.target.value) || 0 })
-                }
-              />
+              <div className="cf-row__fields">
+                <span className="cf-mono">
+                  {m.number} {m.name}
+                </span>
+                <Switch
+                  label="Logs in"
+                  labelPosition="end"
+                  checked={m.dynamic}
+                  onChange={(e) => setMember(i, { dynamic: e.target.checked })}
+                />
+                <Input
+                  id={`queue-member-${String(i)}-penalty`}
+                  label="Penalty"
+                  size="sm"
+                  mono
+                  value={String(m.penalty)}
+                  error={errors[`members[${String(i)}].penalty`]}
+                  onChange={(e) =>
+                    setMember(i, { penalty: Number(e.target.value) || 0 })
+                  }
+                />
+              </div>
               <IconButton
                 icon="trash-2"
                 label={`Remove agent ${m.number ?? ""}`}
