@@ -317,7 +317,11 @@ func TestFlowCanvasAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	put := func(want int, version int, nodes ...map[string]any) response {
-		return c.must(want, "PUT", base+"/layout", map[string]any{"layoutVersion": version, "nodes": nodes})
+		body := map[string]any{"layoutVersion": version}
+		if len(nodes) > 0 {
+			body["nodes"] = nodes
+		}
+		return c.must(want, "PUT", base+"/layout", body)
 	}
 	node := func(id string, x, y float64) map[string]any { return map[string]any{"node": id, "x": x, "y": y} }
 	put(http.StatusBadRequest, 0, node("bogus:1", 0, 0))
