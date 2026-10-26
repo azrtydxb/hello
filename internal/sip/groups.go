@@ -7,6 +7,7 @@ package sip
 import (
 	"fmt"
 	"hash/fnv"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -132,6 +133,13 @@ func splitmix64(state *uint64) uint64 {
 // groups ring one member at a time; ring groups fork (staggered by delay).
 func (c *call) ringGroup(req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot, g snapshot.RingGroup, members []snapshot.RingGroupMember) {
 	s := c.s
+	// A nil tx means the call has begun already (a failover from another
+	// group opens a new stage on it), as in the IVR, queue and time
+	// condition entries.
+	begin := func() bool { return tx == nil || c.begin(req, tx) }
+	c.mu.Lock()
+	c.gfChain = append(c.gfChain, g.Name)
+	c.mu.Unlock()
 	var ms []groupMember
 	var busy map[string]bool // fetched once, and only when a member has call waiting off
 	for _, m := range members {
@@ -152,7 +160,7 @@ func (c *call) ringGroup(req *sip.Request, tx sip.ServerTransaction, snap *snaps
 	c.addTrace(fmt.Sprintf("Group %s (%s): members %v", g.Name, g.Strategy, extsOf(ordered)))
 	if len(ordered) == 0 {
 		s.m.Forwarded.WithLabelValues("group_dnd").Inc()
-		if !c.begin(req, tx) {
+		if !begin() {
 			return
 		}
 		c.groupFail(snap, g)
@@ -175,7 +183,7 @@ func (c *call) ringGroup(req *sip.Request, tx sip.ServerTransaction, snap *snaps
 		order = append(order, m)
 	}
 	if len(bindings) == 0 {
-		if !c.begin(req, tx) {
+		if !begin() {
 			return
 		}
 		c.groupFail(snap, g)
@@ -183,7 +191,7 @@ func (c *call) ringGroup(req *sip.Request, tx sip.ServerTransaction, snap *snaps
 	}
 	// The anchoring decision (contract 2) from the first member binding.
 	c.considerAnchor(snap, bindingEndpoint(bindings[0], ordered[0].ext))
-	if !c.begin(req, tx) {
+	if !begin() {
 		return
 	}
 	if g.Hunt {
@@ -320,6 +328,8 @@ func (c *call) groupFail(snap *snapshot.Snapshot, g snapshot.RingGroup) {
 	case "time_condition":
 		c.addTrace(fmt.Sprintf("Group %s: time condition %q", g.Name, g.FailureTarget))
 		c.routeTimeCondition(nil, snap, g.FailureTarget)
+	case "extension", "ring_group":
+		c.groupFailover(snap, g)
 	case "external":
 		if req := c.inv; req != nil {
 			c.forward(req, nil, snap, g.FailureTarget, nil)
@@ -329,6 +339,153 @@ func (c *call) groupFail(snap *snapshot.Snapshot, g snapshot.RingGroup) {
 	default:
 		c.hangupGroup(sip.StatusRequestTimeout, "group timeout")
 	}
+}
+
+// groupFailMaxDepth bounds a chain of ring group failovers at run time, like
+// the queue failover chain; the visited names catch a loop sooner.
+const groupFailMaxDepth = queueMaxDepth
+
+// groupFailover is the failure destination "extension" or "ring_group": the
+// group's ring stage has ended, so the call gets a new one (stage) that rings
+// the extension, or the other group with its own strategy and failure
+// destination. It returns once the new stage's setup has finished. A chain
+// that comes back to a group or extension it already rang, or that is longer
+// than groupFailMaxDepth, is cut with 408 "forward loop" (spec S-4).
+func (c *call) groupFailover(snap *snapshot.Snapshot, g snapshot.RingGroup) {
+	kind, target := g.FailureKind, g.FailureTarget
+	c.mu.Lock()
+	c.gfDepth++
+	depth := c.gfDepth
+	chain := append([]string(nil), c.gfChain...)
+	var visited []string
+	if c.stages != nil {
+		visited = append(visited, c.stages.visited...)
+	}
+	c.mu.Unlock()
+	loop := depth > groupFailMaxDepth
+	switch kind {
+	case "ring_group":
+		loop = loop || slices.Contains(chain, target)
+	case "extension":
+		loop = loop || slices.Contains(visited, target)
+	}
+	if loop {
+		c.groupLoop(g, append(chain, target))
+		return
+	}
+	switch kind {
+	case "ring_group":
+		g2, members, ok := snap.RingGroup(target)
+		if !ok {
+			c.hangupGroup(sip.StatusTemporarilyUnavailable, "failure ring group unavailable")
+			return
+		}
+		c.addTrace(fmt.Sprintf("Group %s: fails over to group %s", g.Name, target))
+		c.s.m.Forwarded.WithLabelValues(ForwardGroupFailover).Inc()
+		if !c.openFailoverStage(nil) {
+			return
+		}
+		c.ringGroup(c.inv, nil, snap, g2, members)
+	default:
+		if !snap.HasExtension(target) {
+			c.hangupGroup(sip.StatusTemporarilyUnavailable, "failure extension unavailable")
+			return
+		}
+		e, ok := snap.Extension(target)
+		if !ok {
+			e = snapshot.Extension{Number: target} // no row: no features
+		}
+		c.failoverExtension(snap, g, e, visited)
+	}
+}
+
+// failoverExtension rings the extension a group failed over to. Its own
+// features apply from there: do not disturb and no registered device send
+// the call to its voicemail box when it has one, and a ring that is not
+// answered follows its no-answer forward or voicemail like a forward does.
+func (c *call) failoverExtension(snap *snapshot.Snapshot, g snapshot.RingGroup, e snapshot.Extension, visited []string) {
+	s := c.s
+	ext := e.Number
+	c.addTrace(fmt.Sprintf("Group %s: fails over to extension %s", g.Name, ext))
+	s.m.Forwarded.WithLabelValues(ForwardGroupFailover).Inc()
+	toVoicemail := func(reason string) bool {
+		if !c.voicemailConfigured(e) {
+			return false
+		}
+		c.mu.Lock()
+		c.vmExt = ext
+		c.mu.Unlock()
+		c.addTrace(fmt.Sprintf("Extension %s: to voicemail (%s)", ext, reason))
+		c.startVoicemail(vmLeave, reason)
+		return true
+	}
+	if e.DND {
+		if !toVoicemail(ForwardDND) {
+			c.hangupGroup(sip.StatusGlobalDecline, "failure extension is do not disturb")
+		}
+		return
+	}
+	targets, err := c.bindingsFor(snap, ext)
+	if err != nil {
+		c.respondA(sip.StatusServiceUnavailable, "Service Unavailable")
+		c.end(sip.StatusServiceUnavailable, cdr.SideSystem, "live state unavailable", ResultFailed)
+		return
+	}
+	if len(targets) == 0 {
+		if !toVoicemail("unreachable") {
+			c.hangupGroup(sip.StatusTemporarilyUnavailable, "failure extension has no registered device")
+		}
+		return
+	}
+	if !c.openFailoverStage(&callStages{
+		visited: append(visited, ext), ext: ext, feats: e, source: ForwardGroupFailover,
+	}) {
+		return
+	}
+	c.considerAnchor(snap, bindingEndpoint(targets[0], ext))
+	c.forkBindings(targets)
+	c.setup(len(targets))
+}
+
+// openFailoverStage ends the ring stage that gave up and opens the next:
+// its legs are abandoned and cancelled, late answers from them are refused,
+// and the call's setup gets a fresh event channel (as an IVR menu does).
+// stages is the new stage's extension state, nil for a group. It reports
+// false when a leg answered in the meantime or the caller is gone.
+func (c *call) openFailoverStage(stages *callStages) bool {
+	c.mu.Lock()
+	if c.winner != nil || c.ended {
+		c.mu.Unlock()
+		return false
+	}
+	if c.isCancelled {
+		// The setup loop that would have ended the call is the one that
+		// handed over here, so the call ends here (the transaction layer
+		// has answered 487).
+		c.mu.Unlock()
+		c.cancelForks(nil)
+		c.end(sip.StatusRequestTerminated, cdr.SideCaller, "cancelled by caller", ResultCancelled)
+		return false
+	}
+	for _, l := range c.legs {
+		l.abandoned = true
+	}
+	c.stageSeq++
+	c.stages = stages
+	c.groupFn = nil // the new stage sets its own
+	c.setupClosed = false
+	c.setupDone = make(chan struct{})
+	c.mu.Unlock()
+	c.cancelForks(nil)
+	return true
+}
+
+// groupLoop cuts a failover chain that came back on itself.
+func (c *call) groupLoop(g snapshot.RingGroup, chain []string) {
+	c.respondA(sip.StatusRequestTimeout, "Forward Loop")
+	c.addTrace(fmt.Sprintf("Group %s: failover loop detected: %v", g.Name, chain))
+	c.s.m.Forwarded.WithLabelValues(ForwardLoop).Inc()
+	c.end(sip.StatusRequestTimeout, cdr.SideSystem, "forward loop", ResultFailed)
 }
 
 // hangupGroup answers the caller with the final failure and records it.
