@@ -9,7 +9,11 @@ per-setting path stays in [phones.md](phones.md).
 
 Values below are kw's: provisioning is published at
 `https://prov.hello.kw.watteel.lab` (`HELLO_PROV_PUBLIC_URL`), and phones
-register with Kamailio at `192.168.10.101:30508`. The console's
+register with Kamailio at its virtual IP, `192.168.10.109:30508`
+(`HELLO_PROV_SIP_SERVER`); phones provisioned before the VIP still use the
+node address `192.168.10.101:30508` until they re-fetch, see
+[Moving phones to a new Kamailio address](#moving-phones-to-a-new-kamailio-address).
+The console's
 **Phones → Settings** shows the same values for any deployment, computed by
 `GET /api/v1/prov/settings`.
 
@@ -386,13 +390,13 @@ that both do G.722 talk wideband and anything else falls back to G.711 (see
 account Hello provisions); another account of a multi-account model takes
 the same keys with its own number:
 
-| Vendor      | Keys                                                                                                                                                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0`                |
-| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...) |
-| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                              |
-| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                    |
-| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                    |
+| Vendor      | Keys                                                                                                                                                                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0` |
+| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...)                     |
+| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                                                  |
+| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                                        |
+| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                                        |
 
 Opus is listed only for models known to support it (`internal/prov/codecs.go`);
 an unknown model gets G.722, PCMU and PCMA. The keys are from the vendors'
@@ -650,6 +654,35 @@ that is the same at two scans in a row queues a resync for that phone, so a
 burst of edits pushes once; pushes still go out at `HELLO_PROV_PUSH_RATE`. A
 phone seen for the first time is only recorded. Automatic pushes show as
 "(automatic)" and are audited as `auto_resync` by `system`.
+
+## Moving phones to a new Kamailio address
+
+The proxy address a phone registers with (`HELLO_PROV_SIP_SERVER`) is part of
+the configuration Hello renders, so moving phones to another one (kw moved
+from the node address `192.168.10.101:30508` to the virtual IP
+`192.168.10.109:30508`, [docs/ha.md](ha.md)) is a re-provision
+and needs no visit to a phone:
+
+1. Change `HELLO_PROV_SIP_SERVER` and deploy. The old address must still be
+   served by Kamailio (kw: `KAMAILIO_LEGACY_IP`), so phones that have not
+   fetched yet keep working. Nothing is pushed by the deploy itself.
+2. Push a resync: **Phones → Resync all**, or `POST /api/v1/phones/resync`
+   (see above; the push rate means a large site takes a while). Each phone
+   re-fetches, registers at the new address, and its registration there
+   replaces the old one (same contact). A phone that is off or unregistered
+   moves at its next periodic re-check (`HELLO_PROV_RESYNC`, default 24 h) or
+   when it next boots.
+3. Watch the old address drain. Kamailio counts the requests each socket
+   carries (`kamailio_edge_requests_total{socket=...}`): the node-address
+   sockets are `phones_legacy`, `phones_legacy_tcp` and `hello_legacy`. When
+   `increase(kamailio_edge_requests_total{socket=~".*legacy.*"}[24h])` is
+   zero, no phone uses the old address (phones send keep-alives, so a phone
+   that still does shows up within a minute).
+4. Retire the old address: remove `KAMAILIO_LEGACY_IP` from Kamailio's
+   environment. The pair restarts one instance at a time and the legacy
+   sockets are gone. Phones that were off for the whole drain and still
+   point at the old address are unreachable until they are re-provisioned by
+   hand or reboot into the new configuration, so check the counter first.
 
 ## Redirect services
 
