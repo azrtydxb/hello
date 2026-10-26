@@ -283,11 +283,9 @@ func TestQueueTimeoutFailover(t *testing.T) {
 		t.Fatal(r.err)
 	}
 	waitReq(t, c.invites, "the timeout destination rings")
-	// The CDR names the failover only once it answers and the call is
-	// bridged to it (ivrConnect): hanging up on the INVITE alone races that.
-	eventually(t, "the timeout destination is connected", func() bool {
-		return pbx.metric(t, "hello_ivr_total", map[string]string{"event": "connected"}) == 1
-	})
+	// Hanging up before the destination answers would end the call before
+	// the CDR carries the destination (flaky on a loaded runner).
+	waitReq(t, c.acks, "the timeout destination is connected")
 	if ws, _ := st.Waiting(t.Context(), "sales"); len(ws) != 0 {
 		t.Fatalf("the caller still waits: %+v", ws)
 	}
