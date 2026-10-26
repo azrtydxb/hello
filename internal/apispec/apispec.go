@@ -203,6 +203,7 @@ var ExcludeCategories = map[string]string{
 	"paid-credits":      "spends paid text-to-speech credits",
 	"binary-download":   "a download (audio, CSV, zip) for a person, not data for an agent",
 	"payload-too-large": "its payload cannot fit in an MCP request (1 MiB) even encoded as JSON",
+	"stream":            "a long-lived stream (server-sent events) does not fit a tool call",
 	"session":           "starts or ends a browser session",
 	"spec-document":     "the API document itself",
 }

@@ -81,6 +81,17 @@ configuration (never the password). See [trunk states](references/trunks.md).
 - `listPresence` shows each device as idle, ringing, on-call or dnd.
 - `listSkills` lists the skills this server ships, so a client can offer them.
 
+## What happened on a call: events
+
+`listEvents` pages through the stored call events (kept for a few days,
+7 by default), oldest first by default (`order` `desc` for newest first,
+`nextCursor` to continue). Filter with `types` (comma-separated, a trailing
+`.*` matches a prefix such as `call.*`) and `extension`. It needs the `events`
+scope, which is separate from `read`; a user or an extension-scoped service
+account only sees events about its own extensions. Use it after `getCDR` to
+see the order of things (ringing, answered, transferred, hung up) for one
+extension; the live stream is for the console and is not an MCP tool.
+
 ## Cluster depth: maintenance and draining
 
 `getCluster` and `listClusterNodes` give the state. Before maintenance on a
