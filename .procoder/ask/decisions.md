@@ -793,7 +793,7 @@ Phones are re-pointed to the VIP via check-sync and .101 is retired after.
 
 ## Negotiated codec per leg in the CDR (2026-10-26)
 
-`cdrs` gets `caller_codec` and `callee_codec` (migration 00042, nullable text,
+`cdrs` gets `caller_codec` and `callee_codec` (migration 00043, nullable text,
 `name/clock rate` such as `PCMU/8000`, `G722/8000`, `opus/48000`), fed by the
 same `logCodec` bookkeeping as the `call codec` log line, so the two never
 disagree. Choices: the value is the last codec the leg settled on (a re-INVITE
