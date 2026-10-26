@@ -530,8 +530,12 @@ func TestInboxAPI(t *testing.T) {
 			}
 			r.other.must(http.StatusNotFound, req[0], idPath("/api/v1/me/inbox/conversations", conv, req[1]), body)
 		}
-		if got := listItems(t, r.other.must(http.StatusOK, "GET", "/api/v1/me/inbox/conversations?status=any", nil)); len(got) != 0 {
-			t.Fatalf("another agent lists %d conversations", len(got))
+		// The other agent was handed some conversations by the scenarios above
+		// but never this one.
+		for _, c := range listItems(t, r.other.must(http.StatusOK, "GET", "/api/v1/me/inbox/conversations?status=any", nil)) {
+			if c.(map[string]any)["id"] == float64(conv) {
+				t.Fatalf("another agent lists the first agent's conversation: %v", c)
+			}
 		}
 		if got := listItems(t, r.agent.must(http.StatusOK, "GET", "/api/v1/me/inbox/agents", nil)); len(got) < 4 {
 			t.Fatalf("agents = %v", got)
