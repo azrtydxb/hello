@@ -10,8 +10,11 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/auth"
@@ -254,7 +257,11 @@ type Config struct {
 	PageTestWait time.Duration
 	// Conferences is the conference room persistence and ConferenceLive the
 	// rooms' live state and control queue (spec S-34); nil answers 503.
-	Conferences    ConferenceStore
+	Conferences ConferenceStore
+	// TwoFactor is the TOTP persistence and TwoFALogins its login counter;
+	// nil TwoFactor answers 503 and refuses the login of a 2FA user.
+	TwoFactor      TwoFactorStore
+	TwoFALogins    *prometheus.CounterVec
 	ConferenceLive ConferenceLive
 	// Events is the call-event pipeline (stream, history, tickets); nil
 	// answers 503 on the event routes.
@@ -376,15 +383,22 @@ func Handler(c Config) http.Handler {
 }
 
 // passwordGate refuses every route but the few a user needs to choose their
-// new password while an admin-set one is still in force.
+// new password while an admin-set one is still in force, and, while 2FA is
+// required of them and not enrolled, to enrol it (spec pbx-gaps S-12).
 func passwordGate(pattern string, next http.Handler) http.Handler {
 	switch pattern {
 	case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
 		return next
 	}
+	enrol := strings.HasPrefix(pattern, "/api/v1/me/2fa")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if actor(r).MustChangePassword {
+		a := actor(r)
+		if a.MustChangePassword {
 			writeError(w, http.StatusForbidden, "password_change_required", "choose a new password first")
+			return
+		}
+		if a.MustEnrollMFA && !enrol {
+			writeError(w, http.StatusForbidden, "two_factor_enrolment_required", "set up two-factor authentication first")
 			return
 		}
 		next.ServeHTTP(w, r)

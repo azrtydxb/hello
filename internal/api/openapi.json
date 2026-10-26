@@ -67,7 +67,7 @@
       "post": {
         "operationId": "login",
         "summary": "Start a session; sets the hello_session cookie",
-        "description": "Starts a browser session for a username and password and sets the hello_session cookie. Used by the console; API clients use bearer tokens instead.",
+        "description": "Starts a browser session for a username and password and sets the hello_session cookie. Used by the console; API clients use bearer tokens instead. For a user with two-factor authentication the password alone starts no session: the answer is 202 with an mfaToken, and login/2fa completes the login.",
         "tags": ["auth"],
         "requestBody": {
           "required": true,
@@ -80,6 +80,26 @@
           }
         },
         "responses": {
+          "202": {
+            "description": "The password is right and a second factor is needed; no session exists yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginMFARequired"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The user has 2FA and it is not available; the login is refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "204": {
             "description": "Logged in",
             "headers": {
@@ -107,6 +127,527 @@
         "security": [],
         "x-hello-mcp": {
           "exclude": "starts a browser session"
+        }
+      }
+    },
+    "/api/v1/auth/login/2fa": {
+      "post": {
+        "operationId": "login2fa",
+        "summary": "Finish a login with a second factor",
+        "description": "Second step of a login for a user with two-factor authentication. Takes the mfaToken the login answered 202 with (valid 5 minutes, single use) and a 6-digit authenticator code or a recovery code, and then sets the hello_session cookie as the login does. An unknown or expired challenge, a wrong or replayed code and an exhausted limit (5 wrong codes per challenge, 10 per user per 10 minutes) all answer the same 401.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Login2FARequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Logged in",
+            "headers": {
+              "Set-Cookie": {
+                "description": "hello_session=<value>; Path=/; HttpOnly; SameSite=Strict; Secure when the request is HTTPS",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Two-factor authentication is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-hello-mcp": {
+          "exclude": "starts a browser session"
+        }
+      }
+    },
+    "/api/v1/me/2fa": {
+      "get": {
+        "operationId": "getMyTwoFactor",
+        "summary": "My two-factor state",
+        "description": "Whether two-factor authentication is active, pending confirmation or required of the caller, and how many recovery codes are left. Browser session only.",
+        "tags": ["me"],
+        "responses": {
+          "200": {
+            "description": "State",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorState"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/me/2fa/setup": {
+      "post": {
+        "operationId": "setupMyTwoFactor",
+        "summary": "Start two-factor enrolment",
+        "description": "Creates a new inactive TOTP secret (replacing an unconfirmed one) and returns it with the otpauth:// URI, once. The console draws the QR code from the URI in the browser. 2FA stays off until enable is called with a valid code. 409 already_enrolled while it is active.",
+        "tags": ["me"],
+        "responses": {
+          "200": {
+            "description": "The secret and URI",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorSetup"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "2FA is already active (already_enrolled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/me/2fa/enable": {
+      "post": {
+        "operationId": "enableMyTwoFactor",
+        "summary": "Confirm two-factor enrolment",
+        "description": "Activates the secret from setup when the code is valid, and returns ten single-use recovery codes, once.",
+        "tags": ["me"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwoFactorCode"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recovery codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodes"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "description": "No setup in progress (no_setup) or already active (already_enrolled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The code is wrong (invalid_code) or the session is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/me/2fa/disable": {
+      "post": {
+        "operationId": "disableMyTwoFactor",
+        "summary": "Turn off my two-factor authentication",
+        "description": "Needs the current password and a valid code or recovery code. Refused with 409 two_factor_required while the account or its role requires 2FA.",
+        "tags": ["me"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwoFactorDisable"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Turned off"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "description": "2FA is required of this account (two_factor_required) or is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Wrong password or code (invalid_code) or the session is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/me/2fa/recovery-codes": {
+      "post": {
+        "operationId": "regenerateMyRecoveryCodes",
+        "summary": "Replace my recovery codes",
+        "description": "Needs a valid code or recovery code. The old recovery codes stop working; the ten new ones are returned once.",
+        "tags": ["me"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwoFactorCode"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recovery codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodes"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "The code is wrong (invalid_code) or the session is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/auth/2fa-policy": {
+      "get": {
+        "operationId": "getTwoFactorPolicy",
+        "summary": "Read the two-factor policy",
+        "description": "The roles whose users must use two-factor authentication. Empty by default.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorPolicy"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      },
+      "put": {
+        "operationId": "putTwoFactorPolicy",
+        "summary": "Set the two-factor policy",
+        "description": "Replaces the roles that must use two-factor authentication. Admin only, audited. A user of such a role who has not enrolled can use nothing but the enrolment after signing in. Naming admin answers 409 two_factor_required unless the caller has active 2FA.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwoFactorPolicy"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "description": "The caller has no active 2FA (two_factor_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/users/{id}/2fa": {
+      "delete": {
+        "operationId": "resetUserTwoFactor",
+        "summary": "Reset a user's two-factor authentication",
+        "description": "Admin only, audited. Clears the secret and recovery codes and ends the user's sessions. The only admin with 2FA cannot be reset here (409 last_enrolled_admin); the break-glass form is the hello-control user 2fa-reset command.",
+        "tags": ["users"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Reset"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The only enrolled admin (last_enrolled_admin)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "user and role management stays in the console"
         }
       }
     },
@@ -17921,6 +18462,12 @@
                   "self_disable",
                   "self_delete",
                   "password_change_required",
+                  "two_factor_enrolment_required",
+                  "two_factor_required",
+                  "last_enrolled_admin",
+                  "invalid_code",
+                  "no_setup",
+                  "already_enrolled",
                   "session_required",
                   "not_configured",
                   "smtp_failed",
@@ -17973,6 +18520,132 @@
           }
         }
       },
+      "Login2FARequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mfaToken", "code"],
+        "properties": {
+          "mfaToken": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The challenge token the login answered 202 with."
+          },
+          "code": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "A 6-digit authenticator code or a recovery code."
+          }
+        }
+      },
+      "LoginMFARequired": {
+        "type": "object",
+        "required": ["mfa", "mfaToken"],
+        "properties": {
+          "mfa": {
+            "type": "string",
+            "enum": ["required"]
+          },
+          "mfaToken": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "Single-use challenge, valid 5 minutes; give it to login/2fa."
+          }
+        }
+      },
+      "TwoFactorState": {
+        "type": "object",
+        "required": ["enabled", "pending", "required", "recoveryCodesLeft"],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "pending": {
+            "type": "boolean",
+            "description": "A secret was issued and not yet confirmed."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "The account or its role requires 2FA."
+          },
+          "recoveryCodesLeft": {
+            "type": "integer",
+            "description": "Fewer than 3 left is a reason to replace them."
+          }
+        }
+      },
+      "TwoFactorSetup": {
+        "type": "object",
+        "required": ["secret", "otpauthUri"],
+        "properties": {
+          "secret": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "Base32 secret, shown once."
+          },
+          "otpauthUri": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "otpauth://totp URI for an authenticator app or a QR code."
+          }
+        }
+      },
+      "TwoFactorCode": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "A 6-digit authenticator code (a recovery code where the operation allows it)."
+          }
+        }
+      },
+      "TwoFactorDisable": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["password", "code"],
+        "properties": {
+          "password": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The caller's current password."
+          },
+          "code": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "A 6-digit authenticator code or a recovery code."
+          }
+        }
+      },
+      "RecoveryCodes": {
+        "type": "object",
+        "required": ["recoveryCodes"],
+        "properties": {
+          "recoveryCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "x-hello-secret": true
+            },
+            "description": "Ten single-use codes, shown once."
+          }
+        }
+      },
+      "TwoFactorPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["require2faRoles"],
+        "properties": {
+          "require2faRoles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            },
+            "description": "Roles whose users must use 2FA."
+          }
+        }
+      },
       "Me": {
         "type": "object",
         "required": [
@@ -17984,7 +18657,8 @@
           "mustChangePassword",
           "extensions",
           "voicemailEmail",
-          "emailDelivery"
+          "emailDelivery",
+          "mustEnrollMfa"
         ],
         "properties": {
           "username": {
@@ -18023,6 +18697,13 @@
           "emailDelivery": {
             "type": "boolean",
             "description": "Whether the system can send email at all."
+          },
+          "mustEnrollMfa": {
+            "type": "boolean",
+            "description": "True while 2FA is required of the user and not enrolled; every operation but the 2FA enrolment, this one and logout answers 403 two_factor_enrolment_required."
+          },
+          "twoFactor": {
+            "$ref": "#/components/schemas/TwoFactorState"
           }
         }
       },
@@ -18080,6 +18761,8 @@
           "extensionId",
           "extensionIds",
           "voicemailEmail",
+          "totpEnabled",
+          "totpRequired",
           "createdAt"
         ],
         "properties": {
@@ -18126,6 +18809,14 @@
           },
           "voicemailEmail": {
             "$ref": "#/components/schemas/VoicemailEmailPrefs"
+          },
+          "totpEnabled": {
+            "type": "boolean",
+            "description": "The user has active two-factor authentication."
+          },
+          "totpRequired": {
+            "type": "boolean",
+            "description": "An administrator requires 2FA of this user."
           },
           "createdAt": {
             "type": "string",
@@ -18286,6 +18977,10 @@
           },
           "voicemailEmail": {
             "$ref": "#/components/schemas/VoicemailEmailPrefsUpdate"
+          },
+          "totpRequired": {
+            "type": "boolean",
+            "description": "Require two-factor authentication of this user. Setting it on an admin answers 409 two_factor_required unless the caller has active 2FA."
           }
         },
         "description": "At least one field."
