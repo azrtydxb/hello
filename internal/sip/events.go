@@ -204,6 +204,9 @@ func missedReason(result, reason string) (string, bool) {
 // once per call, and returns the call.completed events the CDR writer
 // publishes once the record is stored (with the CDR id).
 func (c *call) endEvents(result, reason string, end, answered time.Time, durMs, billMs int64) []events.Event {
+	if !c.eventsOn() {
+		return nil // a node without an event sink does no event work at all
+	}
 	c.mu.Lock()
 	subjects := c.subjectsLocked()
 	c.evSubjects = slices.Clone(subjects)
@@ -216,9 +219,6 @@ func (c *call) endEvents(result, reason string, end, answered time.Time, durMs, 
 		datas[s] = c.eventDataLocked(s)
 	}
 	c.mu.Unlock()
-	if !c.eventsOn() {
-		return nil
-	}
 	disp := dispositionOf(result)
 	var completed []events.Event
 	for _, s := range subjects {
