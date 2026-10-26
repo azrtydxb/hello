@@ -20,6 +20,7 @@ import (
 	"github.com/azrtydxb/hello/internal/apispec"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
+	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/prov"
@@ -158,7 +159,16 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	} else {
 		log.Info("ai agent off", "reason", reason)
 	}
+	// Call events (spec integrations I-35): consume the stream hello-sip
+	// appends to, store it, and fan it out to the SSE clients of this pod.
+	evSvc := &events.Service{
+		DB: db, Valkey: vk.Client, Locker: st, Consumer: cfg.NodeID,
+		RetentionDays: cfg.EventRetentionDays, Log: log.With("component", "events"),
+		Metrics: events.NewServiceMetrics(metrics.Registry),
+	}
+	go evSvc.Run(ctx)
 	apiCfg := api.Config{
+		Events:          evSvc,
 		AIAgent:         agent,
 		Store:           st,
 		Live:            vk,
