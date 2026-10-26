@@ -1152,6 +1152,7 @@ func (c *call) ivrFollow(ctx context.Context, snap *snapshot.Snapshot, from, tar
 // destination.
 func (c *call) ivrRingGroup(ctx context.Context, snap *snapshot.Snapshot, g snapshot.RingGroup, members []snapshot.RingGroupMember, visited []string) ivrResult {
 	s := c.s
+	visited = append(visited[:len(visited):len(visited)], g.Name) // group names and extension numbers never collide
 	var ms []groupMember
 	for _, m := range members {
 		e, _ := snap.Extension(m.Extension)
@@ -1205,6 +1206,25 @@ func (c *call) ivrRingGroup(ctx context.Context, snap *snapshot.Snapshot, g snap
 		return c.ivrExternal(ctx, snap, g.FailureTarget, g.Name)
 	case "ivr":
 		return ivrResult{kind: ivrToMenu, menu: g.FailureTarget}
+	case "extension", "ring_group":
+		// A new ring for the menu's caller, as groupFailover does for a
+		// call that has not been answered; the chain of groups and
+		// extensions rung bounds it.
+		t := g.FailureTarget
+		if slices.Contains(visited, t) || len(visited) > groupFailMaxDepth {
+			c.addTrace(fmt.Sprintf("IVR: group %s: failover loop detected: %v", g.Name, append(visited, t)))
+			c.s.m.Forwarded.WithLabelValues(ForwardLoop).Inc()
+			return ivrResult{kind: ivrFailed, why: "failover loop at " + t}
+		}
+		c.s.m.Forwarded.WithLabelValues(ForwardGroupFailover).Inc()
+		if g.FailureKind == "ring_group" {
+			if g2, m2, ok := snap.RingGroup(t); ok {
+				return c.ivrRingGroup(ctx, snap, g2, m2, visited)
+			}
+		} else if snap.HasExtension(t) {
+			return c.ivrRingExtension(ctx, snap, t, visited)
+		}
+		return ivrResult{kind: ivrFailed, why: "failure destination " + t + " is unavailable"}
 	}
 	return ivrResult{kind: ivrFailed, why: "group " + g.Name + " did not answer"}
 }
