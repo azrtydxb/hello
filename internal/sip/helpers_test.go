@@ -493,6 +493,10 @@ type phone struct {
 
 	mu     sync.Mutex
 	callee calleeFn
+	// done is set when the test's cleanup starts. sipgo serves requests on
+	// its own goroutines, which can outlive the test: a handler must not
+	// report a failure on a test that has already completed.
+	done atomic.Bool
 	// reinviteHold, when set, delays the 200 to re-INVITE/UPDATE until
 	// closed; reinviteAnswered is stamped just before that 200 goes out, so
 	// a BYE arriving at any phone is never before it.
@@ -610,6 +614,7 @@ func startPhone(t *testing.T, pbx *testPBX, user, pass string, conn net.PacketCo
 	srv.OnNotify(p.onNotify)
 	go func() { _ = srv.ServeUDP(conn) }()
 	t.Cleanup(func() {
+		p.done.Store(true)
 		_ = conn.Close()
 		_ = ua.Close()
 	})
@@ -641,7 +646,17 @@ func (p *phone) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	dss, err := p.dua.ReadInvite(req, tx)
 	if err != nil {
-		p.t.Errorf("%s: read invite: %v", p.user, err)
+		switch {
+		case p.done.Load():
+			// The test is over and the phone's transport is closing; the
+			// transaction ended with it.
+		case errors.Is(err, sip.ErrTransactionCanceled):
+			// The PBX CANCELed this fork before the handler ran, which a
+			// phone sees as an ordinary cancelled call.
+			push(p.cancels, req)
+		default:
+			p.t.Errorf("%s: read invite: %v", p.user, err)
+		}
 		return
 	}
 	p.mu.Lock()

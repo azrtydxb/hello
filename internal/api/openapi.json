@@ -18981,13 +18981,19 @@
             "enum": ["PCMU", "PCMA", "G722"],
             "description": "Codec of the channel; a PTT channel takes PCMU or G722, and a paging group sends only to PCMU or PCMA"
           },
-          "priority": { "type": "integer", "description": "Priority or channel number, 1 (highest) to 25; default 1" },
+          "priority": {
+            "type": "integer",
+            "description": "Priority or channel number, 1 (highest) to 25; default 1"
+          },
           "kind": {
             "type": "string",
             "enum": ["paging", "ptt"],
             "description": "paging: phones listen and paging groups send; ptt: the Grandstream WP8x6 PTT and group paging address. Default paging"
           },
-          "enabled": { "type": "boolean", "description": "Whether phones and paging groups use the channel; default true" }
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether phones and paging groups use the channel; default true"
+          }
         }
       },
       "MulticastChannel": {
@@ -19014,7 +19020,11 @@
         "type": "object",
         "required": ["channelId", "role"],
         "properties": {
-          "channelId": { "type": "integer", "format": "int64", "description": "A paging channel of the catalog" },
+          "channelId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "A paging channel of the catalog"
+          },
           "role": {
             "type": "string",
             "enum": ["listen", "send", "both"],
@@ -19113,10 +19123,7 @@
       },
       "PhoneGroupPTT": {
         "type": "object",
-        "required": [
-          "enabled",
-          "defaultChannel"
-        ],
+        "required": ["enabled", "defaultChannel"],
         "properties": {
           "enabled": {
             "type": "boolean",

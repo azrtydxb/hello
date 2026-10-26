@@ -14,6 +14,8 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+
+	"github.com/azrtydxb/hello/internal/s3retry"
 )
 
 // The buckets, one per media kind (spec contract 4).
@@ -69,9 +71,14 @@ type MinioObjects struct {
 // NewMinioObjects builds the MinIO client once, at startup. minio.New does
 // not dial, so an unreachable endpoint surfaces on first use, not here.
 func NewMinioObjects(endpoint, accessKey, secretKey string, secure bool) (*MinioObjects, error) {
+	tr, err := s3retry.ClientTransport(secure)
+	if err != nil {
+		return nil, fmt.Errorf("api: minio transport: %w", err)
+	}
 	cli, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure: secure,
+		Creds:     credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure:    secure,
+		Transport: tr,
 	})
 	return &MinioObjects{cli: cli}, err
 }
