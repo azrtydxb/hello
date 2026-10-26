@@ -279,3 +279,53 @@ func TestGroupFailoverLoop(t *testing.T) {
 		}
 	})
 }
+
+// TestIVRGroupFailover fails if a ring group a menu key dials does not fall
+// back to its extension or other group for the menu's caller, or if a
+// failover loop through the menu's path is not cut.
+func TestIVRGroupFailover(t *testing.T) {
+	group := func(name, kind, target string) snapshot.RingGroup {
+		return snapshot.RingGroup{Name: name, Strategy: "ring-all", RingTimeout: 1, MemberDelay: 1, FailureKind: kind, FailureTarget: target}
+	}
+	run := func(t *testing.T, groups []snapshot.RingGroup, members [][]snapshot.RingGroupMember) (*testPBX, *phone, *phone, *phone, callResult) {
+		pbx, _ := ivrPBX(t, 1, ivrMenu("main", "800", map[string]snapshot.IVRDest{
+			"1": {Kind: snapshot.IVRRingGroup, Target: "700"},
+		}))
+		pbx.snaps.p.Load().WithRingGroups(groups, members)
+		a, b, c := registerABC(t, pbx)
+		b.setCallee(ringForever())
+		r := waitCall(t, dial(t.Context(), a, "800"))
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		seq := r.dcs.InviteRequest.CSeq().SeqNo + 10
+		sendDigits(t, a, r.dcs, "1", &seq)
+		return pbx, a, b, c, r
+	}
+	m200 := []snapshot.RingGroupMember{{ExtensionID: 2, Extension: "200", Position: 1}}
+	m300 := []snapshot.RingGroupMember{{ExtensionID: 3, Extension: "300", Position: 1}}
+	t.Run("extension", func(t *testing.T) {
+		_, _, _, c, r := run(t,
+			[]snapshot.RingGroup{group("700", "extension", "300")},
+			[][]snapshot.RingGroupMember{m200})
+		waitReq(t, c.invites, "INVITE to the failover extension")
+		_ = r.dcs.Bye(t.Context())
+	})
+	t.Run("group", func(t *testing.T) {
+		_, _, _, c, r := run(t,
+			[]snapshot.RingGroup{group("700", "ring_group", "710"), group("710", "none", "")},
+			[][]snapshot.RingGroupMember{m200, m300})
+		waitReq(t, c.invites, "INVITE to the failover group's member")
+		_ = r.dcs.Bye(t.Context())
+	})
+	t.Run("loop", func(t *testing.T) {
+		pbx, _, b, _, r := run(t,
+			[]snapshot.RingGroup{group("700", "ring_group", "710"), group("710", "ring_group", "700")},
+			[][]snapshot.RingGroupMember{m200, m200})
+		waitReq(t, b.invites, "INVITE to the member")
+		eventually(t, "the loop is cut", func() bool {
+			return pbx.metric(t, "hello_forwarded_calls_total", map[string]string{"kind": "loop"}) == 1
+		})
+		_ = r.dcs.Bye(t.Context())
+	})
+}
