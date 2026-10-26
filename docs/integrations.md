@@ -177,7 +177,7 @@ responses is the usual cause.
 
 - `hello-sip` appends to the Valkey stream `hello:events` (capped at about
   10,000 entries). `hello-control` consumes it with the consumer group `ingest`,
-  stores each event once in `integration_events` (migration `00043`) and
+  stores each event once in `integration_events` (migration `00044`) and
   acknowledges it. An entry read by a replica that then crashed is taken over by
   another after 60 seconds, so nothing is lost; one stored twice is stored once.
 - One blocking read per `hello-control` pod fans the live stream out in memory
