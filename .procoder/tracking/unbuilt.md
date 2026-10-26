@@ -118,7 +118,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | --------------------------------------------- | ------------------------------ |
 | Backup and restore                            | wip (spec #199)                |
 | Follow-me                                     | wip (spec #199)                |
-| Blocklist, anonymous reject, country limits   | wip (spec #199)                |
+| Blocklist, anonymous reject, country limits   | wip (#210)                     |
 | Queue callback                                | wip (spec #199)                |
 | 2FA                                           | wip (spec #199)                |
 | Dial-by-name                                  | wip (spec #199)                |
