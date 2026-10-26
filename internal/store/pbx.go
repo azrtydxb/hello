@@ -827,6 +827,10 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*40", Action: "pickup_group"},
 		{Code: "*41", Action: "pickup_directed"},
 		{Code: "##", Action: "attended_transfer"},
+		{Code: "*45", Action: ActionQueueLogin},
+		{Code: "*46", Action: ActionQueueLogout},
+		{Code: "*47", Action: ActionQueuePause, Argument: "break"},
+		{Code: "*48", Action: ActionQueueUnpause},
 	}
 }
 

@@ -57,6 +57,7 @@ const (
 	KindPaging        = "paging"
 	KindIVR           = "ivr"
 	KindExternal      = "external"
+	KindQueue         = "queue"
 	KindTimeCondition = "time_condition"
 )
 

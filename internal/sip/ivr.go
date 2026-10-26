@@ -150,10 +150,18 @@ func (c *call) ivrReject(tx sip.ServerTransaction, code int, why, result string)
 // ivrAnswer sends the 200 with the relay's caller-leg SDP and starts the
 // call's replication as a one-legged call.
 func (c *call) ivrAnswer(m snapshot.IVRMenu) bool {
+	return c.soloAnswer(haPhaseIVR, haIVRDetailPrefix+m.Name, "IVR")
+}
+
+// soloAnswer is ivrAnswer for every application that answers the call
+// itself and keeps the caller on the relay (IVR menus, call queues): phase
+// and detail are what a taker restarts, what names the application in
+// refusals.
+func (c *call) soloAnswer(phase, detail, what string) bool {
 	s := c.s
 	off, err := media.ParseAudioSDP(c.inv.Body())
 	if err != nil {
-		c.ivrReject(nil, sip.StatusNotAcceptableHere, "IVR needs an audio SDP offer", ResultFailed)
+		c.ivrReject(nil, sip.StatusNotAcceptableHere, what+" needs an audio SDP offer", ResultFailed)
 		return false
 	}
 	// No callee: the anchor answers with the best codec it shares with the
@@ -222,7 +230,7 @@ func (c *call) ivrAnswer(m snapshot.IVRMenu) bool {
 		// onto its own relay and restarts the menu from its greeting.
 		c.haSoloRefresh(string(body))
 		c.mu.Lock()
-		c.haPhase, c.haDetail = haPhaseIVR, haIVRDetailPrefix+m.Name
+		c.haPhase, c.haDetail = phase, detail
 		c.mu.Unlock()
 		go c.haLoop()
 	}
@@ -349,6 +357,14 @@ func (c *call) ivrLeave(ctx context.Context, snap *snapshot.Snapshot, m snapshot
 		return res.menu, res.kind == ivrConnected || res.kind == ivrFinished
 	case snapshot.IVRPaging:
 		return "", c.ivrPage(ctx, snap, d.Target)
+	case snapshot.IVRQueue:
+		q, ok := snap.Queue(d.Target)
+		if !ok || !q.Enabled {
+			c.addTrace(fmt.Sprintf("IVR: queue %s is unavailable", d.Target))
+			return "", false
+		}
+		c.queueSession(ctx, snap, q, 0)
+		return "", true
 	}
 	c.ivrHangup() // hangup, or a kind this node does not know
 	return "", true

@@ -43,7 +43,8 @@ var (
 	fcActions  = []string{"forward_always", "forward_busy", "forward_no_answer", "dnd_on", "dnd_off",
 		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr",
 		"call_waiting_on", "call_waiting_off",
-		"park", "park_retrieve", "pickup_group", "pickup_directed", "time_condition", "tc_override"}
+		"park", "park_retrieve", "pickup_group", "pickup_directed", "time_condition", "tc_override",
+		"queue_login", "queue_logout", "queue_pause", "queue_unpause"}
 )
 
 // voicemailLimits bound greeting uploads.
@@ -592,12 +593,16 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		if !usernameRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be the name of an IVR menu")
 		}
+	case "queue":
+		if !usernameRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be the name of a queue")
+		}
 	case "time_condition":
 		if !usernameRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be the name of a time condition")
 		}
 	default:
-		f.add("failureKind", `must be "none", "voicemail", "external", "announcement", "ivr" or "time_condition"`)
+		f.add("failureKind", `must be "none", "voicemail", "external", "announcement", "ivr", "queue" or "time_condition"`)
 	}
 	if len(in.Members) == 0 || len(in.Members) > 50 {
 		f.add("members", "must have 1-50 members")
@@ -648,7 +653,11 @@ func (s *server) createRingGroup(w http.ResponseWriter, r *http.Request) {
 	// The store checks that an IVR or time condition failure destination
 	// exists, inside the change's transaction (one deleted meanwhile cannot
 	// slip through).
-	if f := validateRingGroup(&in); len(f) > 0 {
+	f := validateRingGroup(&in)
+	if len(f) == 0 && in.FailureKind == "queue" {
+		s.requireQueue(r.Context(), &f, "failureTarget", in.FailureTarget)
+	}
+	if len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
@@ -688,7 +697,11 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 	// The store checks that an IVR or time condition failure destination
 	// exists, inside the change's transaction (one deleted meanwhile cannot
 	// slip through).
-	if f := validateRingGroup(&in); len(f) > 0 {
+	f := validateRingGroup(&in)
+	if len(f) == 0 && in.FailureKind == "queue" {
+		s.requireQueue(r.Context(), &f, "failureTarget", in.FailureTarget)
+	}
+	if len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
@@ -749,6 +762,9 @@ func (s *server) putFeatureCodes(w http.ResponseWriter, r *http.Request) {
 		seen[c.Code] = true
 		// An "ivr" or "time_condition" argument must name a menu or a time
 		// condition: the store checks it inside the change's transaction.
+		if c.Action == "queue_pause" && len(c.Argument) > 32 {
+			f.add(p+".argument", "the pause reason is at most 32 characters")
+		}
 		if c.Action == "tc_override" && !slices.Contains([]string{"toggle", "open", "closed", "auto"}, c.Argument) {
 			f.add(p+".argument", `must be "toggle", "open", "closed" or "auto"`)
 		}

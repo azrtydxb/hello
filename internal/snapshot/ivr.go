@@ -20,7 +20,8 @@ const (
 	IVRPaging       = "paging"
 	IVRMenuKind     = "ivr"
 	IVRExternal     = "external"
-	// IVRTimeCondition names a time condition (migration 00020).
+	IVRQueue        = "queue"
+	// IVRTimeCondition names a time condition (migration 00034).
 	IVRTimeCondition = "time_condition"
 )
 

@@ -26,7 +26,9 @@ export function useLoadedList<T>(
   }, []);
   const replace = (fn: (items: T[]) => T[]) =>
     setState((prev) =>
-      prev.status === "ready" ? { status: "ready", items: fn(prev.items) } : prev,
+      prev.status === "ready"
+        ? { status: "ready", items: fn(prev.items) }
+        : prev,
     );
   return [state, replace];
 }

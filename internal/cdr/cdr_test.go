@@ -236,8 +236,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 26 {
-		t.Fatalf("insert takes %d arguments, want 26", len(db.args))
+	if len(db.args) != 27 {
+		t.Fatalf("insert takes %d arguments, want 27", len(db.args))
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {

@@ -66,15 +66,15 @@ added. A calendar holds up to 1000 entries.
 ## Time conditions
 
 A destination is one of the IVR destination kinds: extension, ring group,
-voicemail box, announcement, IVR menu, paging group, external number, hang up
-and another time condition. An announcement can name a voicemail box to take the
-call after it plays ("after hours: announcement, then voicemail").
+voicemail box, announcement, IVR menu, paging group, external number, call
+queue, hang up and another time condition. An announcement can name a voicemail
+box to take the call after it plays ("after hours: announcement, then voicemail").
 
 Where a time condition can be used:
 
 - an **inbound route** (destination kind `time_condition`);
 - an **IVR** option, or its timeout / invalid-choice exit;
-- the **failover** of a ring group;
+- the **failover** of a ring group, or of a call queue (timeout, full, no agents);
 - a **feature code** with the action `time_condition` (the argument names it).
 
 The example: inbound route -> time condition -> open: ring group `sales`;

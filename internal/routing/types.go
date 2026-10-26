@@ -116,8 +116,8 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "time_condition"
-	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr", the room number for "conference"
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition"
+	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr", the room number for "conference", the queue name for "queue"
 	Enabled         bool
 	// MOHClassID is the music on hold class of calls the route delivers
 	// (0 = the global default); MOHRingback plays it to the caller instead
@@ -137,6 +137,9 @@ type Config struct {
 	// IVRMenus is the set of IVR menu names an inbound route may name as
 	// its "ivr" destination.
 	IVRMenus map[string]bool
+	// Queues is the set of call queue names an inbound route may name as its
+	// "queue" destination.
+	Queues map[string]bool
 	// TimeConditions is the set of time condition names an inbound route may
 	// name as its "time_condition" destination.
 	TimeConditions map[string]bool
@@ -198,6 +201,8 @@ type Decision struct {
 	SIPURI    string
 	// IVR is the IVR menu an inbound route sends the call to.
 	IVR string
+	// Queue is the call queue an inbound route sends the call to.
+	Queue string
 	// TimeCondition is the time condition an inbound route sends the call to.
 	TimeCondition string
 	// Conference is the room number of an inbound call routed to a

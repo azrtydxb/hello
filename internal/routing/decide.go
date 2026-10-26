@@ -441,6 +441,9 @@ func (t *Table) fromTrunk(d *Decision, c Call, usable TrunkUsability) {
 	case "ivr":
 		d.Trace.Add("Destination: IVR menu " + show(r.r.Destination))
 		d.Kind, d.IVR = KindInbound, r.r.Destination
+	case "queue":
+		d.Trace.Add("Destination: queue " + show(r.r.Destination))
+		d.Kind, d.Queue = KindInbound, r.r.Destination
 	case "conference":
 		d.Trace.Add("Destination: conference room " + show(r.r.Destination))
 		d.Kind, d.Conference = KindInbound, r.r.Destination

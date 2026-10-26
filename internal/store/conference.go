@@ -113,13 +113,14 @@ func (s *Store) ConferenceByNumber(ctx context.Context, number string) (Conferen
 	return c, mapErr(err)
 }
 
-// checkConferenceNumber refuses a room number an extension, a ring group or
-// an IVR menu already answers to, or a park lot's slots use.
+// checkConferenceNumber refuses a room number an extension, a ring group, an
+// IVR menu or a call queue already answers to, or a park lot's slots use.
 func checkConferenceNumber(ctx context.Context, tx *sql.Tx, number string) error {
 	var taken string
 	switch err := tx.QueryRowContext(ctx, `SELECT 'an extension' FROM extensions WHERE number = $1
 		UNION ALL SELECT 'a ring group' FROM ring_groups WHERE name = $1
-		UNION ALL SELECT 'an IVR menu' FROM ivr_menus WHERE number = $1 LIMIT 1`, number).Scan(&taken); {
+		UNION ALL SELECT 'an IVR menu' FROM ivr_menus WHERE number = $1
+		UNION ALL SELECT 'a queue' FROM queues WHERE number = $1 LIMIT 1`, number).Scan(&taken); {
 	case errors.Is(err, sql.ErrNoRows):
 		return checkNotSlot(ctx, tx, "number", number)
 	case err != nil:

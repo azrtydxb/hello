@@ -1038,6 +1038,10 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		go c.voicemailFlow(mode, reason, sess)
 		return
 	}
+	if st.State == haPhaseQueue {
+		c.queueResume(st.StateDetail)
+		return
+	}
 	if st.State == haPhaseIVR {
 		c.ivrResume(strings.TrimPrefix(st.StateDetail, haIVRDetailPrefix))
 		return

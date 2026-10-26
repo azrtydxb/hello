@@ -259,20 +259,24 @@ function validate(name: string, entries: EntryDraft[]): Record<string, string> {
   }
   entries.forEach((e, i) => {
     const p = `entries[${i}]`;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.start)) out[`${p}.start`] = "Pick a date.";
-    if (e.end && !/^\d{4}-\d{2}-\d{2}$/.test(e.end)) out[`${p}.end`] = "Pick a date.";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(e.start))
+      out[`${p}.start`] = "Pick a date.";
+    if (e.end && !/^\d{4}-\d{2}-\d{2}$/.test(e.end))
+      out[`${p}.end`] = "Pick a date.";
     if (!e.yearly && e.end && e.start && e.end < e.start) {
       out[`${p}.end`] = "Must not be before the start.";
     }
     if (e.mode === "closed" && !e.allDay) {
       if (!HHMM.test(e.startTime)) out[`${p}.startTime`] = "Use HH:MM.";
-      if (!HHMM_END.test(e.endTime)) out[`${p}.endTime`] = "Use HH:MM or 24:00.";
+      if (!HHMM_END.test(e.endTime))
+        out[`${p}.endTime`] = "Use HH:MM or 24:00.";
     }
     if (e.mode === "open") {
       if (e.hours.length === 0) out[`${p}.hours`] = "Add the open hours.";
       e.hours.forEach((h, j) => {
         if (!HHMM.test(h.start)) out[`${p}.hours[${j}].start`] = "Use HH:MM.";
-        if (!HHMM_END.test(h.end)) out[`${p}.hours[${j}].end`] = "Use HH:MM or 24:00.";
+        if (!HHMM_END.test(h.end))
+          out[`${p}.hours[${j}].end`] = "Use HH:MM or 24:00.";
       });
     }
   });
@@ -306,7 +310,9 @@ function CalendarDrawer({
   const [importing, setImporting] = useState(false);
 
   const setEntry = (key: number, next: Partial<EntryDraft>) =>
-    setEntries((prev) => prev.map((e) => (e.key === key ? { ...e, ...next } : e)));
+    setEntries((prev) =>
+      prev.map((e) => (e.key === key ? { ...e, ...next } : e)),
+    );
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -439,7 +445,9 @@ function CalendarDrawer({
                     id={`cal-entry-${e.key}-label`}
                     label={`Label ${n}`}
                     value={e.label}
-                    onChange={(ev) => setEntry(e.key, { label: ev.target.value })}
+                    onChange={(ev) =>
+                      setEntry(e.key, { label: ev.target.value })
+                    }
                   />
                   <Input
                     id={`cal-entry-${e.key}-start`}
@@ -447,7 +455,9 @@ function CalendarDrawer({
                     type="date"
                     value={e.start}
                     error={errors[`${p}.start`]}
-                    onChange={(ev) => setEntry(e.key, { start: ev.target.value })}
+                    onChange={(ev) =>
+                      setEntry(e.key, { start: ev.target.value })
+                    }
                   />
                   <Input
                     id={`cal-entry-${e.key}-end`}
@@ -504,7 +514,9 @@ function CalendarDrawer({
                     <Checkbox
                       label="All day"
                       checked={e.allDay}
-                      onChange={(ev) => setEntry(e.key, { allDay: ev.target.checked })}
+                      onChange={(ev) =>
+                        setEntry(e.key, { allDay: ev.target.checked })
+                      }
                     />
                   )}
                 </div>
@@ -516,7 +528,9 @@ function CalendarDrawer({
                       mono
                       value={e.startTime}
                       error={errors[`${p}.startTime`]}
-                      onChange={(ev) => setEntry(e.key, { startTime: ev.target.value })}
+                      onChange={(ev) =>
+                        setEntry(e.key, { startTime: ev.target.value })
+                      }
                     />
                     <Input
                       id={`cal-entry-${e.key}-to`}
@@ -524,7 +538,9 @@ function CalendarDrawer({
                       mono
                       value={e.endTime}
                       error={errors[`${p}.endTime`]}
-                      onChange={(ev) => setEntry(e.key, { endTime: ev.target.value })}
+                      onChange={(ev) =>
+                        setEntry(e.key, { endTime: ev.target.value })
+                      }
                     />
                   </div>
                 )}

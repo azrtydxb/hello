@@ -208,7 +208,7 @@ func (c *call) haSoloRefresh(sdp string) {
 // restart: the voicemail application, or an announcement destination's
 // playback. Anything else is a solo call about to end on its own.
 func haSoloPhase(phase string) bool {
-	return phase == haPhaseVoicemail || phase == haPhaseAnnouncement || phase == haPhaseIVR || phase == haPhaseConference
+	return phase == haPhaseVoicemail || phase == haPhaseAnnouncement || phase == haPhaseIVR || phase == haPhaseQueue || phase == haPhaseConference
 }
 
 // noteSentCSeq records a CSeq this node sent on a dialog outside sipgo's
@@ -282,7 +282,7 @@ func (c *call) haState() (livestate.DialogState, bool) {
 		// A one-legged call answered by Hello: recoverable while its
 		// application runs (the taker restarts it from the beginning).
 		if !haSoloPhase(phase) || (phase == haPhaseVoicemail && vm == nil) ||
-			((phase == haPhaseAnnouncement || phase == haPhaseIVR) && relay == nil) ||
+			((phase == haPhaseAnnouncement || phase == haPhaseIVR || phase == haPhaseQueue) && relay == nil) ||
 			(phase == haPhaseConference && !confLocal && viaRoom == "") {
 			return livestate.DialogState{}, false
 		}

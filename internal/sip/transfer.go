@@ -167,6 +167,13 @@ func (c *call) transferBlindVia(transfereeExt, target, kind string, viaLeg *leg)
 		c.noteHAState("", "")
 		return
 	}
+	if q, ok := snap.QueueByNumber(target); ok {
+		c.transferIntoQueue(snap, q, w, kind, notify)
+		return
+	} else if q, ok := snap.Queue(target); ok && !snap.HasExtension(target) {
+		c.transferIntoQueue(snap, q, w, kind, notify)
+		return
+	}
 	c2, legs, ok := c.originateFor(target, snap)
 	if !ok {
 		c.addTrace(fmt.Sprintf("Transfer to %s failed: nothing to ring", target))
@@ -484,6 +491,18 @@ func (c *call) attendedReplaces(w *leg, target, replaces string, viaCaller bool)
 	other.mu.Lock()
 	oWinner, oConnected := other.winner, other.connected
 	other.mu.Unlock()
+	if qn := other.queuedIn(); qn != "" {
+		// The consultation call is waiting in a queue: the transferee joins
+		// that queue and the consultation call ends.
+		c.addTrace("Attended transfer: the second call waits in queue " + qn + "; the transferee joins it")
+		if viaCaller {
+			c.transferBlindVia(c.callerNum, qn, TransferAttended, nil)
+		} else {
+			c.transferBlind(c.dialled, qn, TransferAttended)
+		}
+		go other.ivrHangup()
+		return
+	}
 	if !oConnected || oWinner == nil {
 		// The second call was never answered: treated as a blind transfer
 		// (spec edge case).

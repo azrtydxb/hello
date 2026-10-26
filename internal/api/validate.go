@@ -387,6 +387,10 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 		if !usernameRe.MatchString(in.Destination) {
 			f.add("destination", "must be the name of an IVR menu")
 		}
+	case "queue":
+		if !usernameRe.MatchString(in.Destination) {
+			f.add("destination", "must be the name of a queue")
+		}
 	case "time_condition":
 		if !usernameRe.MatchString(in.Destination) {
 			f.add("destination", "must be the name of a time condition")
@@ -413,7 +417,7 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 			f.add("destination", "must be a sip: URI of at most 255 characters")
 		}
 	default:
-		f.add("destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "sip_uri" or "time_condition"`)
+		f.add("destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri" or "time_condition"`)
 	}
 	return f
 }

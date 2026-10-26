@@ -226,6 +226,18 @@ type call struct {
 	vmTap       func(leg string, pkt *media.RTPPacket)
 	bridgedExt  string
 
+	// Call queue state (queue.go), guarded by mu. qName is the queue the call
+	// waited in, qAgent the agent that answered (whose wrap-up starts when
+	// the call ends), qLegs the CDR's queue legs and qDepth the failover
+	// chain's length.
+	qName  string
+	qAgent string
+	qWrap  time.Duration
+	qLegs  []cdr.QueueLeg
+	qDepth int
+	// qWaiting is true while the caller waits in a queue, since qEnteredAt.
+	qWaiting   bool
+	qEnteredAt time.Time
 	// Time conditions (timecond.go): tcVisited lists the conditions the call
 	// passed, so a loop through ring group failover or an IVR menu is caught;
 	// vmPre is an announcement played before the voicemail greeting. Guarded
@@ -378,6 +390,11 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		c.startIVR(tx, snap, m)
 		return
 	}
+	// A queue's number answers and queues the caller.
+	if q, ok := snap.QueueByNumber(c.dialled); ok {
+		c.startQueue(tx, snap, q)
+		return
+	}
 	// A park slot dialled as a number retrieves the call parked there, and
 	// an INVITE with Replaces naming an early dialog picks that call up.
 	if _, ok := snap.ParkLotOf(c.dialled); ok {
@@ -489,6 +506,14 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 			return
 		}
 		c.startIVR(tx, snap, m)
+	case dec.Kind == routing.KindInbound && dec.Queue != "":
+		q, ok := snap.Queue(dec.Queue)
+		if !ok {
+			s.respond(tx, req, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "queue "+dec.Queue+" does not exist", ResultNotFound)
+			return
+		}
+		c.startQueue(tx, snap, q)
 	case dec.Kind == routing.KindInbound && dec.TimeCondition != "":
 		c.routeTimeCondition(tx, snap, dec.TimeCondition)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
@@ -1150,6 +1175,8 @@ func (c *call) end(status int, side, reason, result string) {
 			c.releaseSlots()
 			return
 		}
+		c.queueAbandoned()
+		go c.queueEnded()
 		c.unpublish()
 		c.record(status, side, reason, result)
 	})
@@ -1220,6 +1247,9 @@ func (c *call) record(status int, side, reason, result string) {
 	if ps := c.page; ps != nil {
 		r.PageLegs = ps.results()
 	}
+	c.mu.Lock()
+	r.QueueLegs = append([]cdr.QueueLeg(nil), c.qLegs...)
+	c.mu.Unlock()
 	c.s.m.Calls.WithLabelValues(result).Inc()
 	if c.groupName != "" {
 		c.s.m.GroupCalls.WithLabelValues(c.groupName, c.groupStrategy, result).Inc()

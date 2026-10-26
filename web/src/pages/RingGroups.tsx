@@ -1,5 +1,6 @@
 import { listTimeConditions, type TimeCondition } from "../api/timecond";
 import { useEffect, useState, type FormEvent } from "react";
+import { QueueSelect } from "../components/QueueSelect";
 import {
   createRingGroup,
   deleteRingGroup,
@@ -102,6 +103,8 @@ function failureText(g: RingGroup): string {
       return `Announcement ${g.failureTarget || UNKNOWN}`;
     case "ivr":
       return `IVR menu ${g.failureTarget || UNKNOWN}`;
+    case "queue":
+      return `Queue ${g.failureTarget || UNKNOWN}`;
     case "time_condition":
       return `Time condition ${g.failureTarget || UNKNOWN}`;
     default:
@@ -475,6 +478,9 @@ function validateGroup(d: GroupDraft): Record<string, string> {
   if (d.failureKind === "ivr" && d.failureTarget.trim() === "") {
     e.failureTarget = "Choose the IVR menu.";
   }
+  if (d.failureKind === "queue" && d.failureTarget.trim() === "") {
+    e.failureTarget = "Choose the call queue.";
+  }
   if (d.failureKind === "time_condition" && d.failureTarget.trim() === "") {
     e.failureTarget = "Choose the time condition.";
   }
@@ -812,6 +818,7 @@ function RingGroupDrawer({
               { value: "voicemail", label: "Voicemail" },
               { value: "external", label: "External number" },
               { value: "ivr", label: "IVR menu" },
+              { value: "queue", label: "Call queue" },
               { value: "time_condition", label: "Time condition" },
             ]}
             onChange={(e) => set("failureKind", e.target.value as FailureKind)}
@@ -838,6 +845,15 @@ function RingGroupDrawer({
               onChange={(e) => set("failureTarget", e.target.value)}
             />
           )}
+          {d.failureKind === "queue" && (
+            <QueueSelect
+              id={fid("failureTarget")}
+              label="Call queue"
+              value={d.failureTarget}
+              error={errors.failureTarget}
+              onChange={(target) => set("failureTarget", target)}
+            />
+          )}
           {d.failureKind === "time_condition" && (
             <Select
               id={fid("failureTarget")}
@@ -862,6 +878,7 @@ function RingGroupDrawer({
           )}
           {d.failureKind !== "none" &&
             d.failureKind !== "ivr" &&
+            d.failureKind !== "queue" &&
             d.failureKind !== "time_condition" && (
               <Input
                 id={fid("failureTarget")}

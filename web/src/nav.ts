@@ -132,6 +132,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "users",
       },
       { label: "IVR", path: "/ivr", phase: 5, icon: "list-tree" },
+      { label: "Queues", path: "/queues", phase: 5, icon: "headset" },
       {
         label: "Time conditions",
         path: "/time-conditions",
@@ -164,6 +165,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "Activity",
     items: [
       { label: "Active calls", path: "/calls", phase: 1, icon: "phone-call" },
+      {
+        label: "Queue wallboard",
+        path: "/wallboard",
+        phase: 5,
+        icon: "gauge",
+      },
       { label: "Call history", path: "/history", phase: 1, icon: "history" },
       {
         label: "Messages",

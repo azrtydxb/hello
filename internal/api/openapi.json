@@ -6349,7 +6349,7 @@
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
-        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed, time_condition (the argument is the time condition's name), tc_override (the argument is toggle, open, closed or auto). Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, ivr, queue_login, queue_logout, queue_pause, queue_unpause (the argument of queue_pause is the pause reason), call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed, time_condition (the argument is the time condition's name), tc_override (the argument is toggle, open, closed or auto). Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -13466,6 +13466,345 @@
         "x-hello-role": "viewer",
         "x-hello-mcp": true
       }
+    },
+    "/api/v1/queues": {
+      "get": {
+        "operationId": "listQueues",
+        "summary": "List call queues",
+        "description": "Lists every ACD call queue with its agents.",
+        "tags": ["queues"],
+        "responses": {
+          "200": {
+            "description": "Call queues",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createQueue",
+        "summary": "Create a call queue",
+        "description": "Creates a call queue: callers wait on music and announcements and are offered to the next free agent. Validation failures list each failing field in error.fields; referenced extensions, announcements and destinations must exist and the failover destinations must not lead back to the queue.",
+        "tags": ["queues"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/queues/status": {
+      "get": {
+        "operationId": "listQueueStatus",
+        "summary": "Live queue status (wallboard)",
+        "description": "Every queue with its waiting callers (position, wait), the longest wait and each agent with its live state (available, on_call, ringing, dnd, wrapping, paused, logged_out). The console wallboard polls it.",
+        "tags": ["queues"],
+        "responses": {
+          "200": {
+            "description": "Live status of every queue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueStatusList"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/queues/{id}": {
+      "get": {
+        "operationId": "getQueue",
+        "summary": "One call queue",
+        "description": "Returns one call queue by id.",
+        "tags": ["queues"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The queue",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putQueue",
+        "summary": "Replace a call queue",
+        "description": "Replaces a call queue as a whole, members included. A queue that a route, ring group, IVR menu or another queue names cannot be renamed. Callers already waiting finish with the settings they started with.",
+        "tags": ["queues"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteQueue",
+        "summary": "Delete a call queue",
+        "description": "Deletes a call queue and its members. A queue that an inbound route, ring group, IVR menu or another queue names cannot be deleted (409).",
+        "tags": ["queues"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/queue-agents": {
+      "get": {
+        "operationId": "listQueueAgents",
+        "summary": "Queue agents and their login state",
+        "description": "Lists every extension that is an agent of some queue with its login, queue limit and pause state.",
+        "tags": ["queues"],
+        "responses": {
+          "200": {
+            "description": "Agents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueAgentList"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/queue-agents/{extension}": {
+      "put": {
+        "operationId": "setQueueAgent",
+        "summary": "Log an agent in or out, pause or unpause",
+        "description": "Changes an agent's state; absent fields keep their value. Logging out also clears a pause. Pausing takes a reason (default \"pause\"). The same changes are made by the agent feature codes.",
+        "tags": ["queues"],
+        "parameters": [
+          {
+            "name": "extension",
+            "in": "path",
+            "required": true,
+            "description": "The agent's extension number.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueAgentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The agent's new state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueAgent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
     }
   },
   "components": {
@@ -15039,7 +15378,8 @@
               "external",
               "announcement",
               "ivr",
-              "time_condition"
+              "time_condition",
+              "queue"
             ]
           },
           "mohClassId": {
@@ -15126,7 +15466,8 @@
               "external",
               "announcement",
               "ivr",
-              "time_condition"
+              "time_condition",
+              "queue"
             ],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
@@ -15235,7 +15576,8 @@
               "external",
               "announcement",
               "ivr",
-              "time_condition"
+              "time_condition",
+              "queue"
             ],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
@@ -16451,7 +16793,11 @@
               "pickup_group",
               "pickup_directed",
               "time_condition",
-              "tc_override"
+              "tc_override",
+              "queue_login",
+              "queue_logout",
+              "queue_pause",
+              "queue_unpause"
             ]
           },
           "argument": {
@@ -16511,7 +16857,11 @@
                     "pickup_group",
                     "pickup_directed",
                     "time_condition",
-                    "tc_override"
+                    "tc_override",
+                    "queue_login",
+                    "queue_logout",
+                    "queue_pause",
+                    "queue_unpause"
                   ]
                 },
                 "argument": {
@@ -19077,7 +19427,8 @@
               "internal",
               "ivr",
               "conference",
-              "time_condition"
+              "time_condition",
+              "queue"
             ]
           },
           "mohClassId": {
@@ -19176,7 +19527,8 @@
               "internal",
               "ivr",
               "conference",
-              "time_condition"
+              "time_condition",
+              "queue"
             ],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
@@ -19277,7 +19629,8 @@
               "internal",
               "ivr",
               "conference",
-              "time_condition"
+              "time_condition",
+              "queue"
             ],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
@@ -19573,6 +19926,54 @@
                         "no_answer",
                         "no_registration"
                       ]
+                    }
+                  }
+                }
+              },
+              "queueLegs": {
+                "type": "array",
+                "description": "For a call that waited in a call queue, what it did there, in order: enter, agent (a ring), wait, answered, abandon, exit",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "event",
+                    "queue",
+                    "extension",
+                    "waitMs",
+                    "result",
+                    "at"
+                  ],
+                  "properties": {
+                    "event": {
+                      "type": "string",
+                      "enum": [
+                        "enter",
+                        "agent",
+                        "answered",
+                        "wait",
+                        "abandon",
+                        "exit"
+                      ]
+                    },
+                    "queue": {
+                      "type": "string"
+                    },
+                    "extension": {
+                      "type": "string",
+                      "description": "The agent, for agent and answered events"
+                    },
+                    "waitMs": {
+                      "type": "integer",
+                      "format": "int64",
+                      "description": "Time waited, for wait, answered, abandon and exit events"
+                    },
+                    "result": {
+                      "type": "string",
+                      "description": "agent: answered, no_answer or busy; wait and exit: the outcome (answered, abandoned, timeout, full, no_agents, breakout)"
+                    },
+                    "at": {
+                      "type": "string",
+                      "format": "date-time"
                     }
                   }
                 }
@@ -22115,13 +22516,14 @@
               "paging",
               "ivr",
               "external",
-              "time_condition"
+              "time_condition",
+              "queue"
             ],
-            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; or an external number routed through the outbound routes."
+            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; a call queue; a time condition; or an external number routed through the outbound routes."
           },
           "target": {
             "type": "string",
-            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr); a page code such as *60 (paging); a number (external)."
+            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition); a page code such as *60 (paging); a number (external)."
           }
         }
       },
@@ -22658,13 +23060,14 @@
               "paging",
               "ivr",
               "external",
+              "queue",
               "time_condition"
             ],
             "description": "The IVR destination kinds, plus another time condition."
           },
           "target": {
             "type": "string",
-            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr, time_condition); a page code (paging); a number (external)."
+            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition); a page code (paging); a number (external)."
           },
           "thenVoicemail": {
             "type": "string",
@@ -22926,6 +23329,671 @@
           "error": {
             "type": "string",
             "description": "Set when the chain of time conditions cannot be followed; the call would be rejected."
+          }
+        }
+      },
+      "QueueMemberInput": {
+        "type": "object",
+        "required": ["extensionId"],
+        "additionalProperties": false,
+        "properties": {
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "dynamic": {
+            "type": "boolean",
+            "description": "A dynamic agent must log in; a static one is always available."
+          },
+          "penalty": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 99,
+            "description": "Lower penalties are tried first; a higher one only when every lower-penalty agent is unavailable."
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Order for the linear strategy; defaults to the list order."
+          }
+        }
+      },
+      "QueueMember": {
+        "type": "object",
+        "required": [
+          "extensionId",
+          "number",
+          "name",
+          "dynamic",
+          "penalty",
+          "position"
+        ],
+        "properties": {
+          "extensionId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "dynamic": {
+            "type": "boolean"
+          },
+          "penalty": {
+            "type": "integer"
+          },
+          "position": {
+            "type": "integer"
+          }
+        }
+      },
+      "QueueInput": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique queue name."
+          },
+          "number": {
+            "type": "string",
+            "pattern": "^([0-9]{2,16})?$",
+            "description": "Optional number that dials the queue (and that a transfer targets); must not be an extension number, ring group name or IVR number."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to true; a disabled queue answers 404."
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "ring_all",
+              "longest_idle",
+              "round_robin",
+              "fewest_calls",
+              "random",
+              "linear"
+            ],
+            "description": "Defaults to ring_all."
+          },
+          "agentTimeout": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 120,
+            "description": "Seconds an agent rings before the next is tried. Defaults to 20."
+          },
+          "retryDelay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 120,
+            "description": "Seconds before a call nobody answered is offered again. Defaults to 5."
+          },
+          "wrapUp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 600,
+            "description": "Seconds an agent is left alone after a call. Defaults to 0."
+          },
+          "maxCallers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000,
+            "description": "Callers that may wait; 0 for no limit."
+          },
+          "maxWait": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400,
+            "description": "Seconds a caller may wait before the timeout destination applies; 0 for no limit. Defaults to 600."
+          },
+          "joinEmpty": {
+            "type": "boolean",
+            "description": "Whether a call may join while no agent is logged in. Defaults to true; otherwise the no-agents destination applies."
+          },
+          "leaveEmpty": {
+            "type": "boolean",
+            "description": "Whether waiting callers leave when the last agent logs out. Defaults to false."
+          },
+          "timeout": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where a caller goes after the maximum wait. Defaults to hangup."
+          },
+          "full": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where a caller goes when the queue is full. Defaults to hangup."
+          },
+          "noAgents": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where a caller goes when no agent is logged in. Defaults to hangup."
+          },
+          "mohClassId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Music on hold class the waiting caller hears; null uses the global default."
+          },
+          "announceFrequency": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 600,
+            "description": "Seconds between the periodic announcements; 0 for none."
+          },
+          "announcePosition": {
+            "type": "boolean",
+            "description": "Announce the caller's position (needs positionPromptId and digitsPrefix)."
+          },
+          "announceWait": {
+            "type": "boolean",
+            "description": "Announce the estimated wait (needs waitPromptId, minutesPromptId and digitsPrefix)."
+          },
+          "periodicPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement played first at each interval."
+          },
+          "positionPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement for \"you are caller number\"; the number follows digit by digit."
+          },
+          "waitPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement for \"the estimated wait is\"; the minutes follow."
+          },
+          "minutesPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement for \"minutes\"."
+          },
+          "digitsPrefix": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{0,32}$",
+            "description": "Numbers are spoken from the announcements <prefix>0 to <prefix>9."
+          },
+          "breakoutKey": {
+            "type": "string",
+            "pattern": "^[0-9*#]?$",
+            "description": "Key that leaves a voicemail; empty for none."
+          },
+          "breakoutPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement offering the breakout (\"press 1 to leave a voicemail\")."
+          },
+          "breakoutVoicemail": {
+            "type": "string",
+            "pattern": "^([0-9]{2,10})?$",
+            "description": "Extension whose voicemail box takes the message."
+          },
+          "members": {
+            "type": "array",
+            "maxItems": 200,
+            "description": "The queue's agents; an update replaces the list.",
+            "items": {
+              "$ref": "#/components/schemas/QueueMemberInput"
+            }
+          }
+        }
+      },
+      "Queue": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "number",
+          "enabled",
+          "strategy",
+          "agentTimeout",
+          "retryDelay",
+          "wrapUp",
+          "maxCallers",
+          "maxWait",
+          "joinEmpty",
+          "leaveEmpty",
+          "timeout",
+          "full",
+          "noAgents",
+          "mohClassId",
+          "announceFrequency",
+          "announcePosition",
+          "announceWait",
+          "periodicPromptId",
+          "positionPromptId",
+          "waitPromptId",
+          "minutesPromptId",
+          "digitsPrefix",
+          "breakoutKey",
+          "breakoutPromptId",
+          "breakoutVoicemail",
+          "periodicPromptName",
+          "positionPromptName",
+          "waitPromptName",
+          "minutesPromptName",
+          "breakoutPromptName",
+          "members",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "description": "Optional number that dials the queue (and that a transfer targets); must not be an extension number, ring group name or IVR number."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to true; a disabled queue answers 404."
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "ring_all",
+              "longest_idle",
+              "round_robin",
+              "fewest_calls",
+              "random",
+              "linear"
+            ],
+            "description": "Defaults to ring_all."
+          },
+          "agentTimeout": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 120,
+            "description": "Seconds an agent rings before the next is tried. Defaults to 20."
+          },
+          "retryDelay": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 120,
+            "description": "Seconds before a call nobody answered is offered again. Defaults to 5."
+          },
+          "wrapUp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 600,
+            "description": "Seconds an agent is left alone after a call. Defaults to 0."
+          },
+          "maxCallers": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000,
+            "description": "Callers that may wait; 0 for no limit."
+          },
+          "maxWait": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400,
+            "description": "Seconds a caller may wait before the timeout destination applies; 0 for no limit. Defaults to 600."
+          },
+          "joinEmpty": {
+            "type": "boolean",
+            "description": "Whether a call may join while no agent is logged in. Defaults to true; otherwise the no-agents destination applies."
+          },
+          "leaveEmpty": {
+            "type": "boolean",
+            "description": "Whether waiting callers leave when the last agent logs out. Defaults to false."
+          },
+          "timeout": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where a caller goes after the maximum wait. Defaults to hangup."
+          },
+          "full": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where a caller goes when the queue is full. Defaults to hangup."
+          },
+          "noAgents": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where a caller goes when no agent is logged in. Defaults to hangup."
+          },
+          "mohClassId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Music on hold class the waiting caller hears; null uses the global default."
+          },
+          "announceFrequency": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 600,
+            "description": "Seconds between the periodic announcements; 0 for none."
+          },
+          "announcePosition": {
+            "type": "boolean",
+            "description": "Announce the caller's position (needs positionPromptId and digitsPrefix)."
+          },
+          "announceWait": {
+            "type": "boolean",
+            "description": "Announce the estimated wait (needs waitPromptId, minutesPromptId and digitsPrefix)."
+          },
+          "periodicPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement played first at each interval."
+          },
+          "positionPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement for \"you are caller number\"; the number follows digit by digit."
+          },
+          "waitPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement for \"the estimated wait is\"; the minutes follow."
+          },
+          "minutesPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement for \"minutes\"."
+          },
+          "digitsPrefix": {
+            "type": "string",
+            "description": "Numbers are spoken from the announcements <prefix>0 to <prefix>9."
+          },
+          "breakoutKey": {
+            "type": "string",
+            "description": "Key that leaves a voicemail; empty for none."
+          },
+          "breakoutPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement offering the breakout (\"press 1 to leave a voicemail\")."
+          },
+          "breakoutVoicemail": {
+            "type": "string",
+            "description": "Extension whose voicemail box takes the message."
+          },
+          "periodicPromptName": {
+            "type": "string"
+          },
+          "positionPromptName": {
+            "type": "string"
+          },
+          "waitPromptName": {
+            "type": "string"
+          },
+          "minutesPromptName": {
+            "type": "string"
+          },
+          "breakoutPromptName": {
+            "type": "string"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueMember"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "QueueList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Queue"
+            }
+          }
+        }
+      },
+      "QueueCaller": {
+        "type": "object",
+        "required": [
+          "callId",
+          "caller",
+          "callerName",
+          "position",
+          "waitSeconds",
+          "offering",
+          "node"
+        ],
+        "properties": {
+          "callId": {
+            "type": "string"
+          },
+          "caller": {
+            "type": "string"
+          },
+          "callerName": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "waitSeconds": {
+            "type": "integer"
+          },
+          "offering": {
+            "type": "string",
+            "description": "The agents ringing for this caller right now, comma separated."
+          },
+          "node": {
+            "type": "string",
+            "description": "The SIP node holding the caller."
+          }
+        }
+      },
+      "QueueStatusAgent": {
+        "type": "object",
+        "required": [
+          "extension",
+          "name",
+          "dynamic",
+          "penalty",
+          "loggedIn",
+          "paused",
+          "pauseReason",
+          "state",
+          "callsAnswered",
+          "wrapSeconds"
+        ],
+        "properties": {
+          "extension": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "dynamic": {
+            "type": "boolean"
+          },
+          "penalty": {
+            "type": "integer"
+          },
+          "loggedIn": {
+            "type": "boolean"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "pauseReason": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "available",
+              "on_call",
+              "ringing",
+              "dnd",
+              "wrapping",
+              "paused",
+              "logged_out"
+            ]
+          },
+          "callsAnswered": {
+            "type": "integer"
+          },
+          "wrapSeconds": {
+            "type": "integer",
+            "description": "Seconds of wrap-up time left."
+          }
+        }
+      },
+      "QueueStatus": {
+        "type": "object",
+        "required": [
+          "name",
+          "number",
+          "enabled",
+          "strategy",
+          "waiting",
+          "longestWaitSeconds",
+          "avgHandleSeconds",
+          "staffed",
+          "available",
+          "agents"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "strategy": {
+            "type": "string"
+          },
+          "waiting": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueCaller"
+            }
+          },
+          "longestWaitSeconds": {
+            "type": "integer"
+          },
+          "avgHandleSeconds": {
+            "type": "integer",
+            "description": "Average call length, 0 until measured."
+          },
+          "staffed": {
+            "type": "integer",
+            "description": "Agents logged in, not paused and not in DND."
+          },
+          "available": {
+            "type": "integer",
+            "description": "Staffed agents free to take a call now."
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueStatusAgent"
+            }
+          }
+        }
+      },
+      "QueueStatusList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueStatus"
+            }
+          }
+        }
+      },
+      "QueueAgent": {
+        "type": "object",
+        "required": [
+          "extension",
+          "name",
+          "loggedIn",
+          "queues",
+          "paused",
+          "reason",
+          "since"
+        ],
+        "properties": {
+          "extension": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "loggedIn": {
+            "type": "boolean"
+          },
+          "queues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The queues the login is limited to; empty for every queue the agent belongs to."
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string",
+            "description": "When the state last changed; empty if never."
+          }
+        }
+      },
+      "QueueAgentList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueAgent"
+            }
+          }
+        }
+      },
+      "QueueAgentInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "loggedIn": {
+            "type": "boolean",
+            "description": "Log the agent in (true) or out (false, which also clears a pause)."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Pause (true, with a reason) or unpause (false) the agent."
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9 ._-]{0,32}$",
+            "description": "Why the agent pauses."
+          },
+          "queues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Limit the login to these queues."
           }
         }
       }

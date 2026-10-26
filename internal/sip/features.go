@@ -31,6 +31,13 @@ const (
 	ActionIntercom = "intercom"
 	// ActionIVR runs an IVR menu: the argument names it.
 	ActionIVR = "ivr"
+	// The agent codes of the call queues: log in (the argument of a dialled
+	// code is an optional queue number), log out, pause (the code row's
+	// argument is the reason) and unpause.
+	ActionQueueLogin   = "queue_login"
+	ActionQueueLogout  = "queue_logout"
+	ActionQueuePause   = "queue_pause"
+	ActionQueueUnpause = "queue_unpause"
 	// ActionCallWaitingOn and ActionCallWaitingOff toggle the extension's
 	// call-waiting flag (migration 00026, spec S-18).
 	ActionCallWaitingOn  = "call_waiting_on"
@@ -127,6 +134,9 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		return true
 	case ActionIntercom:
 		c.handleIntercom(tx, arg)
+		return true
+	case ActionQueueLogin, ActionQueueLogout, ActionQueuePause, ActionQueueUnpause:
+		c.handleQueueCode(tx, fc, arg)
 		return true
 	case ActionTimeCondition:
 		name := fc.Argument

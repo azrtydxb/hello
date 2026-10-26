@@ -1,3 +1,4 @@
+import { QueueSelect } from "../components/QueueSelect";
 import { listTimeConditions, type TimeCondition } from "../api/timecond";
 import {
   useEffect,
@@ -411,6 +412,7 @@ const DESTINATION_KIND: Record<
   external: { label: "External", icon: "phone-forwarded" },
   sip_uri: { label: "SIP URI", icon: "at-sign" },
   ivr: { label: "IVR menu", icon: "list-tree" },
+  queue: { label: "Call queue", icon: "headset" },
   time_condition: { label: "Time condition", icon: "clock" },
 };
 
@@ -1214,6 +1216,7 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   external: "External number",
   sip_uri: "SIP URI",
   ivr: "IVR menu",
+  queue: "Call queue",
   time_condition: "Time condition",
 };
 
@@ -1362,6 +1365,7 @@ function InboundDrawer({
               { value: "external", label: "External number" },
               { value: "sip_uri", label: "SIP URI" },
               { value: "ivr", label: "IVR menu" },
+              { value: "queue", label: "Call queue" },
               { value: "time_condition", label: "Time condition" },
             ]}
             onChange={(e) =>
@@ -1371,7 +1375,15 @@ function InboundDrawer({
               )
             }
           />
-          {d.destinationKind === "time_condition" ? (
+          {d.destinationKind === "queue" ? (
+            <QueueSelect
+              id={id("destination")}
+              label={DESTINATION_LABEL.queue}
+              value={d.destination}
+              error={v.errors.destination}
+              onChange={(target) => set("destination", target)}
+            />
+          ) : d.destinationKind === "time_condition" ? (
             <Select
               id={id("destination")}
               label={DESTINATION_LABEL.time_condition}

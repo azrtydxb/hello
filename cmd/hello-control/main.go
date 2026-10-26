@@ -160,6 +160,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		AIAgent:         agent,
 		Store:           st,
 		Live:            vk,
+		Queues:          vk,
 		Trunks:          vk,
 		Cluster:         vk,
 		Valkey:          vk,

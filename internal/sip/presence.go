@@ -125,9 +125,13 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 	case eventDialog:
 		ext = req.Recipient.User
 		_, isSlot := snap.ParkLotOf(ext)
-		if _, room := snap.Conference(ext); !snap.HasExtension(ext) && !isSlot && !room {
-			// A key on a day/night toggle code (*28<n>) is a BLF too.
-			if _, ok := tcToggleCode(snap, ext); !ok {
+		_, room := snap.Conference(ext)
+		if !snap.HasExtension(ext) && !isSlot && !room {
+			// An agent's login or pause lamp (*45101) or a key on a day/night
+			// toggle code (*28<n>) is a BLF too.
+			_, _, isAgent := queueBLFTarget(snap, ext)
+			_, isToggle := tcToggleCode(snap, ext)
+			if !isAgent && !isToggle {
 				s.respond(tx, req, sip.StatusNotFound, "Not Found")
 				return
 			}
@@ -208,6 +212,15 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 			init = slotState(s.slotOccupied(ext))
 		} else if t, ok := tcToggleCode(snap, ext); ok {
 			init = tcLampState(t)
+		} else if !snap.HasExtension(ext) {
+			if st := s.queueStore(); st != nil {
+				cctx, cancel := s.stateCtx()
+				states, err := st.Agents(cctx)
+				cancel()
+				if err == nil {
+					init, _ = s.queueLamp(snap, ext, states)
+				}
+			}
 		}
 		go s.sendStateNotify(sub, init, int(exp/time.Second), "")
 	}

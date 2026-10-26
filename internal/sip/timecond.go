@@ -192,6 +192,14 @@ func (c *call) applyTCDest(tx sip.ServerTransaction, snap *snapshot.Snapshot, d 
 		c.startIVR(tx, snap, m)
 	case timecond.KindExternal:
 		c.forward(c.inv, tx, snap, d.Target, nil)
+	case timecond.KindQueue:
+		q, ok := snap.Queue(d.Target)
+		if !ok {
+			c.addTrace("Time condition: queue " + d.Target + " does not exist")
+			c.tcReject(tx, sip.StatusNotFound, "queue "+d.Target+" does not exist")
+			return
+		}
+		c.startQueue(tx, snap, q)
 	default: // hangup, or a kind this node does not know
 		c.addTrace("Time condition: hang up")
 		if tx != nil {

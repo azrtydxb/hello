@@ -42,6 +42,20 @@ type CDR struct {
 	// PageLegs is a page's outcome per member (migration 00014); set by
 	// GetCDR for a page only.
 	PageLegs []PageLeg `json:"pageLegs,omitempty"`
+	// QueueLegs is what the call did in a call queue (migration 00040); set
+	// by GetCDR.
+	QueueLegs []QueueLeg `json:"queueLegs,omitempty"`
+}
+
+// QueueLeg is one event of a call in a queue: enter, agent, answered, wait,
+// abandon or exit.
+type QueueLeg struct {
+	Event     string    `json:"event"`
+	Queue     string    `json:"queue"`
+	Extension string    `json:"extension"`
+	WaitMs    int64     `json:"waitMs"`
+	Result    string    `json:"result"`
+	At        time.Time `json:"at"`
 }
 
 // PageLeg is one paged member's outcome: answered, busy, dnd, no_answer or
@@ -176,5 +190,18 @@ func (s *Store) GetCDR(ctx context.Context, id int64) (CDR, routing.Trace, error
 	if err := json.Unmarshal(raw, &trace); err != nil {
 		return c, nil, fmt.Errorf("store: decode trace of cdr %d: %w", id, err)
 	}
-	return c, trace, nil
+	rows, err := s.db.QueryContext(ctx, `SELECT event, queue, extension, wait_ms, result, at
+		FROM cdr_queue_legs WHERE cdr_id = $1 ORDER BY position`, id)
+	if err != nil {
+		return c, trace, fmt.Errorf("store: queue legs of cdr %d: %w", id, err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var l QueueLeg
+		if err := rows.Scan(&l.Event, &l.Queue, &l.Extension, &l.WaitMs, &l.Result, &l.At); err != nil {
+			return c, trace, err
+		}
+		c.QueueLegs = append(c.QueueLegs, l)
+	}
+	return c, trace, rows.Err()
 }

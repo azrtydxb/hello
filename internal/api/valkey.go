@@ -11,6 +11,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/valkey-io/valkey-go"
 )
 
@@ -350,4 +351,67 @@ func (l *LazyValkey) GetPageTestResult(ctx context.Context, id string) (livestat
 		return livestate.PageTestResult{}, false, err
 	}
 	return c.live.GetPageTestResult(ctx, id)
+}
+
+// qstore is the queue store on the connected client.
+func (l *LazyValkey) qstore() (*queue.ValkeyStore, error) {
+	c := l.Client()
+	if c == nil {
+		return nil, ErrValkeyConnecting
+	}
+	return queue.NewValkey(c), nil
+}
+
+// Waiting implements QueueLive.
+func (l *LazyValkey) Waiting(ctx context.Context, name string) ([]queue.Entry, error) {
+	q, err := l.qstore()
+	if err != nil {
+		return nil, err
+	}
+	return q.Waiting(ctx, name)
+}
+
+// Agent implements QueueLive.
+func (l *LazyValkey) Agent(ctx context.Context, ext string) (queue.AgentState, bool, error) {
+	q, err := l.qstore()
+	if err != nil {
+		return queue.AgentState{}, false, err
+	}
+	return q.Agent(ctx, ext)
+}
+
+// Agents implements QueueLive.
+func (l *LazyValkey) Agents(ctx context.Context) (map[string]queue.AgentState, error) {
+	q, err := l.qstore()
+	if err != nil {
+		return nil, err
+	}
+	return q.Agents(ctx)
+}
+
+// SetAgent implements QueueLive.
+func (l *LazyValkey) SetAgent(ctx context.Context, st queue.AgentState) error {
+	q, err := l.qstore()
+	if err != nil {
+		return err
+	}
+	return q.SetAgent(ctx, st)
+}
+
+// Stats implements QueueLive.
+func (l *LazyValkey) Stats(ctx context.Context, name string) (map[string]queue.AgentStats, error) {
+	q, err := l.qstore()
+	if err != nil {
+		return nil, err
+	}
+	return q.Stats(ctx, name)
+}
+
+// AvgHandle implements QueueLive.
+func (l *LazyValkey) AvgHandle(ctx context.Context, name string) (time.Duration, error) {
+	q, err := l.qstore()
+	if err != nil {
+		return 0, err
+	}
+	return q.AvgHandle(ctx, name)
 }

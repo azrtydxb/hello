@@ -366,6 +366,7 @@ export interface InboundRouteFields {
     | "external"
     | "sip_uri"
     | "ivr"
+    | "queue"
     | "time_condition";
   destination: string;
   enabled: boolean;
@@ -1081,7 +1082,13 @@ export const RING_STRATEGY_LABEL: Record<RingStrategy, string> = {
 
 /** Where a call goes when every member missed it. */
 export type FailureKind =
-  "none" | "voicemail" | "external" | "announcement" | "ivr" | "time_condition";
+  | "none"
+  | "voicemail"
+  | "external"
+  | "announcement"
+  | "ivr"
+  | "queue"
+  | "time_condition";
 
 export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   none: "Hang up",
@@ -1089,6 +1096,7 @@ export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   external: "An external number",
   announcement: "An announcement",
   ivr: "An IVR menu",
+  queue: "A call queue",
   time_condition: "A time condition",
 };
 
@@ -1354,6 +1362,7 @@ export const IVR_DESTINATION_KINDS = [
   "paging",
   "ivr",
   "external",
+  "queue",
   "time_condition",
 ] as const;
 
@@ -1368,6 +1377,7 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   paging: "Paging group",
   ivr: "Another IVR menu",
   external: "External number",
+  queue: "Call queue",
   time_condition: "Time condition",
 };
 
@@ -1513,6 +1523,161 @@ export const putPickupGroup = (groupId: Id, input: PickupGroupFields) =>
 export const deletePickupGroup = (groupId: Id) =>
   request<void>("DELETE", `/api/v1/pickup-groups/${id(groupId)}`);
 
+// --- call queues -----------------------------------------------------------------
+
+/** How a queue picks the agent to ring. */
+export const QUEUE_STRATEGIES = [
+  "ring_all",
+  "longest_idle",
+  "round_robin",
+  "fewest_calls",
+  "random",
+  "linear",
+] as const;
+
+export type QueueStrategy = (typeof QUEUE_STRATEGIES)[number];
+
+export const QUEUE_STRATEGY_LABEL: Record<QueueStrategy, string> = {
+  ring_all: "Ring all agents",
+  longest_idle: "Longest idle first",
+  round_robin: "Round robin",
+  fewest_calls: "Fewest calls first",
+  random: "Random",
+  linear: "In list order",
+};
+
+/** One agent of a queue. */
+export interface QueueMember {
+  extensionId: Id;
+  number?: string;
+  name?: string;
+  /** A dynamic agent must log in; a static one is always available. */
+  dynamic: boolean;
+  /** Lower penalties are tried first. */
+  penalty: number;
+  position?: number;
+}
+
+/** The writable fields of a queue (PUT replaces the whole queue). */
+export interface QueueFields {
+  name: string;
+  number: string;
+  enabled: boolean;
+  strategy: QueueStrategy;
+  agentTimeout: number;
+  retryDelay: number;
+  wrapUp: number;
+  maxCallers: number;
+  maxWait: number;
+  joinEmpty: boolean;
+  leaveEmpty: boolean;
+  timeout: IvrDestination;
+  full: IvrDestination;
+  noAgents: IvrDestination;
+  mohClassId: Id | null;
+  announceFrequency: number;
+  announcePosition: boolean;
+  announceWait: boolean;
+  periodicPromptId: Id | null;
+  positionPromptId: Id | null;
+  waitPromptId: Id | null;
+  minutesPromptId: Id | null;
+  digitsPrefix: string;
+  breakoutKey: string;
+  breakoutPromptId: Id | null;
+  breakoutVoicemail: string;
+  members: QueueMember[];
+}
+
+/** A queue as returned; the prompt names are read-only. */
+export interface Queue extends QueueFields {
+  id: Id;
+  periodicPromptName: string;
+  positionPromptName: string;
+  waitPromptName: string;
+  minutesPromptName: string;
+  breakoutPromptName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listQueues = (signal?: AbortSignal) =>
+  list<Queue>("/api/v1/queues", signal);
+
+export const createQueue = (input: QueueFields) =>
+  request<Queue>("POST", "/api/v1/queues", { body: input });
+
+export const putQueue = (queueId: Id, input: QueueFields) =>
+  request<Queue>("PUT", `/api/v1/queues/${id(queueId)}`, { body: input });
+
+export const deleteQueue = (queueId: Id) =>
+  request<void>("DELETE", `/api/v1/queues/${id(queueId)}`);
+
+/** An agent's state on the wallboard. */
+export type QueueAgentState =
+  | "available"
+  | "on_call"
+  | "ringing"
+  | "dnd"
+  | "wrapping"
+  | "paused"
+  | "logged_out";
+
+export interface QueueCaller {
+  callId: string;
+  caller: string;
+  callerName: string;
+  position: number;
+  waitSeconds: number;
+  offering: string;
+  node: string;
+}
+
+export interface QueueStatusAgent {
+  extension: string;
+  name: string;
+  dynamic: boolean;
+  penalty: number;
+  loggedIn: boolean;
+  paused: boolean;
+  pauseReason: string;
+  state: QueueAgentState;
+  callsAnswered: number;
+  wrapSeconds: number;
+}
+
+/** One queue on the wallboard: GET /api/v1/queues/status. */
+export interface QueueStatus {
+  name: string;
+  number: string;
+  enabled: boolean;
+  strategy: string;
+  waiting: QueueCaller[];
+  longestWaitSeconds: number;
+  avgHandleSeconds: number;
+  staffed: number;
+  available: number;
+  agents: QueueStatusAgent[];
+}
+
+export const listQueueStatus = (signal?: AbortSignal) =>
+  list<QueueStatus>("/api/v1/queues/status", signal);
+
+export interface QueueAgentChange {
+  loggedIn?: boolean;
+  paused?: boolean;
+  reason?: string;
+  queues?: string[];
+}
+
+/** PUT /api/v1/queue-agents/{extension}: log in or out, pause or unpause. */
+export const setQueueAgent = (extension: string, change: QueueAgentChange) =>
+  request<unknown>(
+    "PUT",
+    `/api/v1/queue-agents/${encodeURIComponent(extension)}`,
+    { body: change },
+  );
+
 // --- feature codes and presence -------------------------------------------------
 
 /** A DTMF feature code (GET/PUT /api/v1/feature-codes). */
@@ -1542,6 +1707,10 @@ export const FEATURE_CODE_ACTIONS = [
   "announcement",
   "intercom",
   "ivr",
+  "queue_login",
+  "queue_logout",
+  "queue_pause",
+  "queue_unpause",
   "call_waiting_on",
   "call_waiting_off",
   "park",
@@ -1568,6 +1737,10 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   announcement: "Play announcement",
   intercom: "Intercom (auto-answer)",
   ivr: "IVR menu",
+  queue_login: "Queue agent login",
+  queue_logout: "Queue agent logout",
+  queue_pause: "Queue agent pause (argument: reason)",
+  queue_unpause: "Queue agent unpause",
   call_waiting_on: "Call waiting on",
   call_waiting_off: "Call waiting off",
   park: "Park the call",

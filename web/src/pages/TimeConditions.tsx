@@ -94,7 +94,11 @@ export function TimeConditions() {
           { id: "calendars", label: "Calendars" },
         ]}
       />
-      <div role="tabpanel" id={`tc-panel-${tab}`} aria-labelledby={`tc-tab-${tab}`}>
+      <div
+        role="tabpanel"
+        id={`tc-panel-${tab}`}
+        aria-labelledby={`tc-tab-${tab}`}
+      >
         {tab === "conditions" && <Conditions />}
         {tab === "schedules" && <Schedules />}
         {tab === "calendars" && <Calendars />}
@@ -186,7 +190,9 @@ function Conditions() {
           {overrideError}
         </Alert>
       )}
-      {list.status === "loading" && <Spinner label="Loading time conditions…" />}
+      {list.status === "loading" && (
+        <Spinner label="Loading time conditions…" />
+      )}
       {list.status === "error" && (
         <Alert tone="bad" title="Could not load the time conditions">
           {list.message}
@@ -219,7 +225,8 @@ function Conditions() {
                     {t.toggleNumber && (
                       <>
                         {" "}
-                        · toggle <span className="cf-mono">*28{t.toggleNumber}</span>
+                        · toggle{" "}
+                        <span className="cf-mono">*28{t.toggleNumber}</span>
                       </>
                     )}
                   </div>
@@ -228,7 +235,10 @@ function Conditions() {
                   <Badge tone="warn">Forced {t.override}</Badge>
                 )}
               </div>
-              <ul className="cf-members" aria-label={`Destinations of ${t.name}`}>
+              <ul
+                className="cf-members"
+                aria-label={`Destinations of ${t.name}`}
+              >
                 <li className="cf-member">
                   <span className="cf-member__who">
                     <strong>Open</strong> {destText(t.open)}
@@ -695,7 +705,9 @@ function ConditionDrawer({
       <form
         id={FORM_ID}
         className="cf-form"
-        aria-label={item ? `Edit time condition ${item.name}` : "New time condition"}
+        aria-label={
+          item ? `Edit time condition ${item.name}` : "New time condition"
+        }
         onSubmit={(e) => void onSubmit(e)}
         noValidate
       >

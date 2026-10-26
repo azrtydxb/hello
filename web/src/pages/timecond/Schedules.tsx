@@ -213,7 +213,8 @@ function validate(d: Draft): Record<string, string> {
   d.ranges.forEach((r, i) => {
     if (!HHMM.test(r.start)) out[`ranges[${i}].start`] = "Use HH:MM.";
     if (!HHMM_END.test(r.end)) out[`ranges[${i}].end`] = "Use HH:MM or 24:00.";
-    if (r.start === r.end) out[`ranges[${i}].end`] = "Must differ from the start.";
+    if (r.start === r.end)
+      out[`ranges[${i}].end`] = "Must differ from the start.";
   });
   return out;
 }
@@ -247,7 +248,9 @@ function ScheduleDrawer({
     const controller = new AbortController();
     getDefaultTimeZone(controller.signal)
       .then((tz) =>
-        setD((prev) => (prev.timeZone === "" ? { ...prev, timeZone: tz } : prev)),
+        setD((prev) =>
+          prev.timeZone === "" ? { ...prev, timeZone: tz } : prev,
+        ),
       )
       .catch(() => undefined);
     return () => controller.abort();
@@ -395,7 +398,9 @@ function ScheduleDrawer({
                       mono
                       value={r.start}
                       error={errors[`ranges[${index}].start`]}
-                      onChange={(e) => setRange(index, { start: e.target.value })}
+                      onChange={(e) =>
+                        setRange(index, { start: e.target.value })
+                      }
                     />
                     <Input
                       id={`schedule-range-${index}-end`}

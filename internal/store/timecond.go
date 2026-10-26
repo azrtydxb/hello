@@ -793,6 +793,8 @@ func tcReferences(ctx context.Context, tx *sql.Tx, id int64, name string) ([]str
 		{`SELECT name FROM time_conditions WHERE id <> $2 AND (
 			(open_kind = 'time_condition' AND open_target = $1) OR (closed_kind = 'time_condition' AND closed_target = $1)
 			OR (holiday_kind = 'time_condition' AND holiday_target = $1))`, "time condition", []any{name, id}},
+		{`SELECT name FROM queues WHERE (timeout_kind = 'time_condition' AND timeout_target = $1)
+			OR (full_kind = 'time_condition' AND full_target = $1) OR (no_agents_kind = 'time_condition' AND no_agents_target = $1)`, "queue", []any{name}},
 	} {
 		names, err := stringsOf(ctx, tx, q.query, q.args...)
 		if err != nil {
