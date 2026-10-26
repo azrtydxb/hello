@@ -758,8 +758,6 @@ jobs:
     env:
       KIND_VERSION: v0.30.0
       KUBECTL_VERSION: v1.34.0
-      # What kube-system/kube-vip-ds runs on kw.
-      KUBE_VIP_IMAGE: ghcr.io/kube-vip/kube-vip:v1.2.3
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -825,9 +823,6 @@ jobs:
           tags: hello.local/kamailio:ha
           cache-from: ${{ steps.ant-cache-ha.outputs.cache-from }}
           cache-to: ${{ steps.ant-cache-ha.outputs.cache-to }}
-      - name: Pull kube-vip
-        if: steps.changed.outputs.run == 'true'
-        run: docker pull "$KUBE_VIP_IMAGE"
       - name: Create the kind cluster
         if: steps.changed.outputs.run == 'true'
         run: |
@@ -847,7 +842,9 @@ jobs:
             tail -n 60 ./kind-logs/*/journal.log 2>/dev/null || true
             exit 1
           }
-          kind load docker-image --name kamailio-ha hello.local/kamailio:ha "$KUBE_VIP_IMAGE"
+          # kube-vip is a multi-arch index that `kind load` cannot import from
+          # the runner's single-platform copy; the nodes pull it from ghcr.io.
+          kind load docker-image --name kamailio-ha hello.local/kamailio:ha
           kubectl get nodes -o wide
       - name: Failover test
         if: steps.changed.outputs.run == 'true'
