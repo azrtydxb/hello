@@ -569,3 +569,29 @@ before feature key sync (#158) merged, so its additive
 `extensions.no_answer_rings` migration moves to the next free number; the
 migrate rollback tests' re-apply counts and the "migration 000NN" comments
 follow it.
+
+## Voicemail voice after IVR and park (2026-10-26)
+
+Main took 00032 (park/pickup) and 00033 (IVR) first, so the additive
+voicemail-voice migration moves to the next free number. IVR added
+`call.vmExt`, the box an IVR menu hands a caller to; this branch had already
+folded the "which box" logic into `mailboxExt`, so `vmExt` now lives there
+(leave mode only) instead of in `boxDetails` and `sendMWI`, which take the
+extension explicitly. The IVR voicemail exit passes its extension to
+`boxDetails`.
+
+## Voicemail voice migration at 00036 (2026-10-26)
+
+Conference rooms (00034) and feature key sync (00035) merged first, so the
+voicemail-voice migration is 00036; the migrate rollback counts and the
+"migration 00036" comments follow it.
+
+## Stopped servers halt their conference mixers (2026-10-26)
+
+`TestConferenceTwoNodes` failed about one run in four: a stopped test PBX
+left its conference mixers running, and the leaked room kept sending RTP to
+loopback ports a later relay in the same process bound, so the relay's
+latch retargeted to the foreign stream. Serve now closes the mixers of the
+rooms this node holds once it stops (`confHalt`). Leases and shared state
+stay as a crashed node leaves them, because their lapse is what re-homes a
+room. `TestConferenceHaltOnStop` fails without the call.

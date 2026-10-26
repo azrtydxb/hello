@@ -433,3 +433,28 @@ func TestLoadAIRejects(t *testing.T) {
 		}
 	}
 }
+
+// TestLoadVoicemailVoice fails if the voicemail language and zone do not
+// default to English and UTC, fall back to the provisioning zone, or accept a
+// zone that does not exist.
+func TestLoadVoicemailVoice(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil || c.VoicePromptLanguage != "en" || c.Timezone != "UTC" {
+		t.Fatalf("defaults = %q %q %v", c.VoicePromptLanguage, c.Timezone, err)
+	}
+	c, err = LoadSIP(env(map[string]string{"HELLO_VOICEMAIL_LANGUAGE": "nl", "HELLO_PROV_TIMEZONE": "Europe/Brussels"}))
+	if err != nil || c.VoicePromptLanguage != "nl" || c.Timezone != "Europe/Brussels" {
+		t.Fatalf("provisioning zone fallback = %q %q %v", c.VoicePromptLanguage, c.Timezone, err)
+	}
+	c, err = LoadSIP(env(map[string]string{"HELLO_TIMEZONE": "Asia/Dubai", "HELLO_PROV_TIMEZONE": "Europe/Brussels"}))
+	if err != nil || c.Timezone != "Asia/Dubai" {
+		t.Fatalf("own zone = %q %v", c.Timezone, err)
+	}
+	if _, err := LoadSIP(env(map[string]string{"HELLO_TIMEZONE": "Mars/Olympus"})); err == nil || !strings.Contains(err.Error(), "HELLO_TIMEZONE") {
+		t.Fatalf("unknown zone accepted: %v", err)
+	}
+	ctl, err := LoadControl(env(map[string]string{"HELLO_VOICEMAIL_LANGUAGE": "nl"}))
+	if err != nil || ctl.VoicePromptLanguage != "nl" {
+		t.Fatalf("control language = %q %v", ctl.VoicePromptLanguage, err)
+	}
+}

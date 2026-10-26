@@ -1,6 +1,6 @@
 package store
 
-// Time conditions (migration 00036): schedules (weekly open hours in a time
+// Time conditions (migration 00037): schedules (weekly open hours in a time
 // zone), calendars (holidays and exceptions) and the time conditions that
 // route a call by them. Every mutation runs through configChange, so it is
 // audited, bumps the configuration revision and notifies hello-sip. The

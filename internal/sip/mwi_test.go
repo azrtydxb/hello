@@ -24,7 +24,7 @@ func TestMessageSummarySubscribe(t *testing.T) {
 
 	vm := newVMStore()
 	vm.boxes["200"] = VoicemailBox{ID: 5, Extension: "200"}
-	if _, err := vm.InsertMessage(context.Background(), 5, "obj1", "100", 2000); err != nil {
+	if _, err := vm.InsertMessage(context.Background(), 5, "obj1", "100", "", 2000); err != nil {
 		t.Fatal(err)
 	}
 	feats := func(s *snapshot.Snapshot) {
@@ -97,7 +97,7 @@ func TestMessageSummarySubscribe(t *testing.T) {
 	waitNotifyBody(b.notifies, "Messages-Waiting: no", "NOTIFY after heard")
 
 	// New message in-process: one NOTIFY to the subscription, none unsolicited.
-	if _, err := vm.InsertMessage(context.Background(), 5, "obj2", "100", 2000); err != nil {
+	if _, err := vm.InsertMessage(context.Background(), 5, "obj2", "100", "", 2000); err != nil {
 		t.Fatal(err)
 	}
 	pbx.srv.notifyMWI("200")
@@ -156,7 +156,7 @@ func (f *fakeMailboxEvents) Watch(ctx context.Context, changed func(int64)) {
 func TestMailboxEventNotifies(t *testing.T) {
 	vm := newVMStore()
 	vm.boxes["200"] = VoicemailBox{ID: 5, Extension: "200"}
-	if _, err := vm.InsertMessage(context.Background(), 5, "obj1", "100", 2000); err != nil {
+	if _, err := vm.InsertMessage(context.Background(), 5, "obj1", "100", "", 2000); err != nil {
 		t.Fatal(err)
 	}
 	feats := func(s *snapshot.Snapshot) {

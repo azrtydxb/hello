@@ -202,7 +202,7 @@ type Snapshot struct {
 	confs map[string]Conference
 	// ivrByName and ivrByNumber are the IVR menus (migration 00033).
 	ivrByName, ivrByNumber map[string]IVRMenu
-	// tcByName and tcByToggle are the time conditions (migration 00036).
+	// tcByName and tcByToggle are the time conditions (migration 00037).
 	tcByName, tcByToggle map[string]TimeCondition
 	// parkLots are the enabled park lots in slot order; pickups the pickup
 	// groups (migration 00032).

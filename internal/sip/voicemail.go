@@ -15,6 +15,7 @@ import (
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/voiceprompt"
 	"github.com/emiago/sipgo/sip"
 )
 
@@ -25,6 +26,11 @@ type VoicemailBox struct {
 	Email             string
 	GreetingObject    string
 	UnreachableObject string
+	// BusyObject is the custom greeting for a busy extension and NameObject
+	// the owner's recorded name (migration 00036). An empty one means the
+	// default spoken prompt.
+	BusyObject string
+	NameObject string
 }
 
 // VoicemailStore is the voicemail metadata store (PostgreSQL, implemented by
@@ -35,14 +41,33 @@ type VoicemailStore interface {
 	Box(ctx context.Context, extension string) (VoicemailBox, bool, error)
 	// PasswordOK compares a retrieval password (hashing lives here).
 	PasswordOK(ctx context.Context, boxID int64, password string) (bool, error)
-	// InsertMessage stores one message and returns its id.
-	InsertMessage(ctx context.Context, boxID int64, object, caller string, durationMs int64) (int64, error)
+	// InsertMessage stores one message and returns its id. callerName is the
+	// caller-ID display name the call carried ("" for none).
+	InsertMessage(ctx context.Context, boxID int64, object, caller, callerName string, durationMs int64) (int64, error)
 	// MessageCounts returns the unread and total message counts.
 	MessageCounts(ctx context.Context, boxID int64) (unread, total int, err error)
 	// ListMessages returns the box's messages, newest first.
 	ListMessages(ctx context.Context, boxID int64) ([]VoicemailMessage, error)
 	// MarkHeard marks a message heard.
 	MarkHeard(ctx context.Context, id int64) error
+
+	// The guided session's writes (*97 menus). Each acts on the caller's own
+	// box only.
+
+	// DeleteMessage removes a message of the box and returns its object key.
+	DeleteMessage(ctx context.Context, boxID, id int64) (object string, err error)
+	// SetPIN changes the box's retrieval PIN.
+	SetPIN(ctx context.Context, boxID int64, pin string) error
+	// SetGreeting points a greeting slot ("greeting", "busy", "unreachable"
+	// or "name") at object and returns the object it replaced. An empty
+	// object reverts the slot to the spoken default.
+	SetGreeting(ctx context.Context, boxID int64, slot, object string) (replaced string, err error)
+	// ResetGreetings reverts the greeting, busy and unreachable slots and
+	// returns the objects dropped.
+	ResetGreetings(ctx context.Context, boxID int64) ([]string, error)
+	// ContactName names number from the address books ("" when unknown).
+	// callee is the mailbox owner's extension (its phones' books apply).
+	ContactName(ctx context.Context, number, callee string) (string, error)
 }
 
 // VoicemailMessage is one stored message.
@@ -51,9 +76,11 @@ type VoicemailMessage struct {
 	BoxID       int64
 	MinioObject string
 	Caller      string
-	DurationMs  int64
-	Heard       bool
-	CreatedAt   time.Time
+	// CallerName is the caller-ID display name the call carried.
+	CallerName string
+	DurationMs int64
+	Heard      bool
+	CreatedAt  time.Time
 }
 
 // ObjectStore is the call-plane audio store (MinIO, buckets hello-voicemail,
@@ -72,8 +99,12 @@ const (
 	vmRetrieve
 )
 
-// voicemailOwnBox is the *97 path: the caller's own box, password-gated.
+// voicemailOwnBox is the *97 path: the caller's own box, password-gated. (*97
+// with an extension after it leaves a message instead, see voicemailTarget.)
 func (c *call) voicemailOwnBox(string) {
+	c.mu.Lock()
+	c.vmTarget = c.callerNum
+	c.mu.Unlock()
 	c.startVoicemail(vmRetrieve, "")
 }
 
@@ -94,6 +125,24 @@ func (c *call) voicemailTarget(ext string) bool {
 	c.dialled = ext
 	c.mu.Unlock()
 	return true
+}
+
+// mailboxExt is the extension whose box the application works on: the
+// dialled extension for a message being left, the caller's own for retrieval.
+// (The dialled string of a *97 call is the feature code, not a mailbox.)
+func (c *call) mailboxExt(mode int) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if mode == vmRetrieve {
+		if c.vmTarget != "" {
+			return c.vmTarget
+		}
+		return c.callerNum
+	}
+	if c.vmExt != "" {
+		return c.vmExt // an IVR menu handed the call to this box
+	}
+	return c.dialled
 }
 
 // startVoicemail answers the caller through the media anchor and runs the
@@ -125,11 +174,25 @@ func (c *call) startVoicemail(mode int, reason string) {
 		// application from the greeting.
 		c.haSoloRefresh(string(answer))
 		c.mu.Lock()
-		c.haPhase, c.haDetail = haPhaseVoicemail, voicemailDetail(mode, reason, c.dialled)
+		c.haPhase, c.haDetail = haPhaseVoicemail, voicemailDetail(mode, reason, c.mailboxExtLocked(mode))
 		c.mu.Unlock()
 		go c.haLoop()
 	}
 	go c.voicemailFlow(mode, reason, sess)
+}
+
+// mailboxExtLocked is mailboxExt for a caller that holds c.mu.
+func (c *call) mailboxExtLocked(mode int) string {
+	if mode == vmRetrieve {
+		if c.vmTarget != "" {
+			return c.vmTarget
+		}
+		return c.callerNum
+	}
+	if c.vmExt != "" {
+		return c.vmExt // an IVR menu handed the call to this box
+	}
+	return c.dialled
 }
 
 // answerAnchored binds the media anchor for this call and builds the answer
@@ -238,10 +301,11 @@ func (c *call) voicemailFlow(mode int, reason string, sess media.Session) {
 	}
 	ctx, cancel := c.vmCtx()
 	defer cancel()
-	box := c.boxDetails()
+	ext := c.mailboxExt(mode)
+	box := c.boxDetails(ext)
 	switch mode {
 	case vmRetrieve:
-		c.vmRetrieve(ctx, sess, box)
+		c.vmRetrieve(ctx, sess, box, ext)
 	default:
 		c.vmLeave(ctx, sess, box, reason)
 	}
@@ -260,20 +324,14 @@ func (c *call) voicemailFlow(mode int, reason string, sess media.Session) {
 
 // boxDetails loads the box's settings from the store (greeting objects,
 // email); failures leave a zero box, which records without a greeting.
-func (c *call) boxDetails() VoicemailBox {
+func (c *call) boxDetails(ext string) VoicemailBox {
 	s := c.s
 	if s.deps.Voicemails == nil {
 		return VoicemailBox{}
 	}
-	c.mu.Lock()
-	dialled := c.dialled
-	if c.vmExt != "" {
-		dialled = c.vmExt
-	}
-	c.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout)
 	defer cancel()
-	box, ok, err := s.deps.Voicemails.Box(ctx, dialled)
+	box, ok, err := s.deps.Voicemails.Box(ctx, ext)
 	if err != nil {
 		s.log.Warn("voicemail box lookup failed", "error", err)
 	}
@@ -291,6 +349,10 @@ func (c *call) boxDetails() VoicemailBox {
 func (c *call) vmLeave(ctx context.Context, sess media.Session, box VoicemailBox, reason string) {
 	c.playPreRoll(ctx, sess)
 	c.playGreeting(ctx, sess, box, reason)
+	if sess != nil {
+		// The tone that says "now".
+		_ = sess.Play(ctx, media.BeepPCMRate(sess.SampleRate()))
+	}
 	c.mu.Lock()
 	vm := c.s.deps.Voicemails
 	objs := c.s.deps.Objects
@@ -323,7 +385,7 @@ func (c *call) vmLeave(ctx context.Context, sess media.Session, box VoicemailBox
 	}
 	idctx, icancel := context.WithTimeout(context.Background(), c.s.cfg.StateTimeout)
 	defer icancel()
-	if _, err := vm.InsertMessage(idctx, box.ID, key, c.callerNum, dur.Milliseconds()); err != nil {
+	if _, err := vm.InsertMessage(idctx, box.ID, key, c.callerNum, c.callerName, dur.Milliseconds()); err != nil {
 		c.s.log.Warn("voicemail message row failed", "error", err)
 		c.s.m.VoicemailMessages.WithLabelValues(VMFailed).Inc()
 		c.addTrace("Voicemail metadata store failed")
@@ -335,38 +397,118 @@ func (c *call) vmLeave(ctx context.Context, sess media.Session, box VoicemailBox
 	c.s.m.VoicemailStorage.Set(float64(n))
 	c.s.m.VoicemailMessages.WithLabelValues(VMStored).Inc()
 	c.addTrace(fmt.Sprintf("Voicemail message %d stored (%d ms)", box.ID, dur.Milliseconds()))
-	c.sendMWI()
+	c.sendMWI(c.mailboxExt(vmLeave))
 }
 
-// playGreeting plays the box's greeting (the unreachable one for an
-// unreachable call), or nothing when neither is set. A failed object fetch
-// is logged and skipped: the beep still marks the recording start.
+// customGreeting is the object of the box's own greeting for reason: the
+// busy greeting for a busy call and the unreachable one for an unreachable
+// call, each falling back to the general greeting, which every other reason
+// plays. "" means the box has none and the spoken default applies.
+func customGreeting(box VoicemailBox, reason string) string {
+	var specific string
+	switch reason {
+	case "busy":
+		specific = box.BusyObject
+	case "unreachable":
+		specific = box.UnreachableObject
+	}
+	if specific != "" {
+		return specific
+	}
+	return box.GreetingObject
+}
+
+// greetingVariant is the default spoken greeting a call reason gets.
+func greetingVariant(reason string) voiceprompt.Variant {
+	switch reason {
+	case "busy":
+		return voiceprompt.Busy
+	case "unreachable":
+		return voiceprompt.Unreachable
+	}
+	return voiceprompt.Unavailable
+}
+
+// playGreeting plays the box's greeting: its own recording or upload when it
+// has one for this reason, else the default spoken in the configured voice
+// (naming the owner), else nothing. A failed fetch or synthesis is logged and
+// skipped: the tone still marks the recording start.
 func (c *call) playGreeting(ctx context.Context, sess media.Session, box VoicemailBox, reason string) {
-	if sess == nil || c.s.deps.Objects == nil {
+	if sess == nil {
 		return
 	}
-	key := box.GreetingObject
-	if reason == "unreachable" && box.UnreachableObject != "" {
-		key = box.UnreachableObject
+	if key := customGreeting(box, reason); key != "" && c.s.deps.Objects != nil {
+		if c.playObject(ctx, sess, key) {
+			return
+		}
 	}
-	if key == "" {
-		return
-	}
-	octx, cancel := context.WithTimeout(ctx, c.s.cfg.StateTimeout)
+	c.playDefaultGreeting(ctx, sess, box, greetingVariant(reason))
+}
+
+// playObject plays a stored WAV and reports whether it could.
+func (c *call) playObject(ctx context.Context, sess media.Session, key string) bool {
+	octx, cancel := context.WithTimeout(ctx, vmOpTimeout)
 	defer cancel()
 	raw, err := c.s.deps.Objects.Get(octx, key)
 	if err != nil {
 		c.s.log.Warn("voicemail greeting unavailable", "error", err)
-		return
+		return false
 	}
 	pcm, err := media.WAVToRate(raw, sess.SampleRate())
 	if err != nil {
 		c.s.log.Warn("voicemail greeting is not a WAV", "error", err)
-		return
+		return false
 	}
 	if err := sess.Play(ctx, pcm); err != nil {
 		c.s.log.Debug("greeting playback failed", "error", err)
 	}
+	return true
+}
+
+// speakOnce synthesizes text (or fetches it from the cache) and plays it;
+// false when speech is unavailable.
+func (c *call) speakOnce(ctx context.Context, sess media.Session, text string) bool {
+	sp := c.s.deps.Speech
+	if sp == nil || text == "" {
+		return false
+	}
+	sctx, cancel := context.WithTimeout(ctx, vmSpeakWait)
+	defer cancel()
+	wav, err := sp.Speak(sctx, text)
+	if err != nil {
+		c.s.log.Debug("voicemail default greeting unavailable", "error", err)
+		return false
+	}
+	pcm, err := media.WAVToRate(wav, sess.SampleRate())
+	if err != nil {
+		return false
+	}
+	if err := sess.Play(ctx, pcm); err != nil {
+		c.s.log.Debug("greeting playback failed", "error", err)
+	}
+	return true
+}
+
+// playDefaultGreeting speaks "<name> is not available, please leave a
+// message after the tone" (or the busy / unreachable wording). With a
+// recorded name it plays the recording and speaks only the rest.
+func (c *call) playDefaultGreeting(ctx context.Context, sess media.Session, box VoicemailBox, v voiceprompt.Variant) {
+	if c.s.deps.Speech == nil {
+		return
+	}
+	lang := c.s.promptLang()
+	ext := c.mailboxExt(vmLeave)
+	if box.NameObject != "" && c.s.deps.Objects != nil && c.playObject(ctx, sess, box.NameObject) {
+		c.speakOnce(ctx, sess, voiceprompt.GreetingTail(lang, v))
+		return
+	}
+	name := ""
+	if snap := c.s.deps.Snapshots.Current(); snap != nil {
+		if e, ok := snap.Extension(ext); ok {
+			name = e.Name
+		}
+	}
+	c.speakOnce(ctx, sess, voiceprompt.GreetingText(lang, v, voiceprompt.Owner(lang, name, ext)))
 }
 
 // recordMessage runs the record loop: DTMF '#' finishes, '*' retries (at
@@ -440,17 +582,55 @@ func (c *call) putAudio(ctx context.Context, key string, wav []byte) bool {
 	return false
 }
 
-// vmRetrieve is the *97 application: prompt (beep), collect the password
-// with DTMF, then play the unheard messages one by one, marking each heard.
-// Three wrong passwords end the call.
-func (c *call) vmRetrieve(ctx context.Context, sess media.Session, box VoicemailBox) {
+// vmRetrieve is the *97 application. With speech available it is the guided
+// session (vmsession.go): PIN by voice, counts, each message introduced,
+// menus. Without it - no key configured, or the provider down - it is the
+// plain flow it always was: a tone, the PIN, then the unheard messages one
+// after the other. Either way three wrong PINs end the call.
+func (c *call) vmRetrieve(ctx context.Context, sess media.Session, box VoicemailBox, ext string) {
 	s := c.s
 	if sess == nil || s.deps.Voicemails == nil || s.deps.Objects == nil {
 		return
 	}
 	if box.ID == 0 {
-		return // no box: nothing to retrieve (the 200 already went out)
+		// No box: nothing to retrieve (the 200 already went out).
+		if s.deps.Speech != nil {
+			ui := newCallUI(ctx, c, sess, s.deps.Speech)
+			lang := s.promptLang()
+			_, _ = ui.Say(ctx, utt{Key: voiceprompt.NoMailbox, Text: voiceprompt.Text(lang, voiceprompt.NoMailbox, nil)}, false)
+			ui.close()
+		}
+		return
 	}
+	lang := s.promptLang()
+	if s.deps.Speech != nil {
+		// The first prompt decides: if it cannot be spoken, fall back before
+		// the caller has heard anything.
+		pinText := voiceprompt.Text(lang, voiceprompt.PINEnter, nil)
+		wctx, cancel := context.WithTimeout(ctx, vmSpeakWait)
+		_, err := s.deps.Speech.Speak(wctx, pinText)
+		cancel()
+		if err == nil {
+			ui := newCallUI(ctx, c, sess, s.deps.Speech)
+			defer ui.close()
+			data := &callData{c: c, box: box, mailbox: ext}
+			m := newVMMachine(lang, s.timeLocation(), ui, data)
+			if err := m.run(ctx); err != nil && ctx.Err() == nil {
+				s.log.Debug("voicemail session ended", "error", err)
+			}
+			c.sendMWI(ext)
+			return
+		}
+		s.log.Warn("voicemail: spoken prompts unavailable; using the plain retrieval flow", "error", err)
+	}
+	c.vmRetrievePlain(ctx, sess, box, ext)
+}
+
+// vmRetrievePlain is the retrieval without speech: prompt (beep), collect the
+// password with DTMF, then play the unheard messages one by one, marking each
+// heard. Three wrong passwords end the call.
+func (c *call) vmRetrievePlain(ctx context.Context, sess media.Session, box VoicemailBox, ext string) {
+	s := c.s
 	var ok bool
 	var err error
 	for attempt := 0; attempt < 3 && !ok; attempt++ {
@@ -502,7 +682,7 @@ func (c *call) vmRetrieve(ctx context.Context, sess media.Session, box Voicemail
 			s.log.Warn("voicemail mark-heard failed", "error", err)
 		}
 	}
-	c.sendMWI()
+	c.sendMWI(ext)
 }
 
 // collectDigits reads DTMF until '#'. The session's own '#' handling ends
@@ -527,15 +707,51 @@ func collectDigits(ctx context.Context, sess media.Session, dtmf chan byte) []by
 	}
 }
 
-// sendMWI tells the call's mailbox owner the counts changed (S-1).
-func (c *call) sendMWI() {
-	c.mu.Lock()
-	ext := c.dialled
-	if c.vmExt != "" {
-		ext = c.vmExt
-	}
-	c.mu.Unlock()
+// sendMWI tells the mailbox owner ext the counts changed (S-1).
+func (c *call) sendMWI(ext string) {
 	c.s.notifyMWI(ext)
+}
+
+// greetingKey is the object key of a greeting recorded from the phone.
+func greetingKey(boxID int64, slot string, at time.Time) (string, error) {
+	switch slot {
+	case "greeting", "busy", "unreachable", "name":
+	default:
+		return "", fmt.Errorf("sip: unknown greeting slot %q", slot)
+	}
+	return fmt.Sprintf("box/%d/%s-%d.wav", boxID, slot, at.UnixNano()), nil
+}
+
+// objectRemover is the optional delete of an object store; without it a
+// replaced greeting or deleted message is left behind in storage, harmless.
+type objectRemover interface {
+	Remove(ctx context.Context, key string) error
+}
+
+// removeObject deletes key from the object store, best effort.
+func (c *call) removeObject(ctx context.Context, key string) {
+	if key == "" {
+		return
+	}
+	if r, ok := c.s.deps.Objects.(objectRemover); ok {
+		if err := r.Remove(ctx, key); err != nil {
+			c.s.log.Warn("voicemail: remove object", "error", err)
+		}
+	}
+}
+
+// promptLang is the language of the spoken prompts.
+func (s *Server) promptLang() voiceprompt.Lang { return voiceprompt.Parse(s.cfg.PromptLanguage) }
+
+// timeLocation is the zone message times are spoken in (UTC when unset or
+// unknown).
+func (s *Server) timeLocation() *time.Location {
+	if s.cfg.Timezone != "" {
+		if loc, err := time.LoadLocation(s.cfg.Timezone); err == nil {
+			return loc
+		}
+	}
+	return time.UTC
 }
 
 // boxIDFor is the snapshot's box id for an extension (0 without one).

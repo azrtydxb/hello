@@ -2,8 +2,16 @@
 
 Announcements and voicemail greetings can be written as text and turned into
 audio once. The audio is stored like any uploaded WAV and plays from storage
-on every call. **Nothing calls a text-to-speech service while a call is
-running**, and nothing generates audio except an explicit click.
+on every call. **Announcements and the greetings you generate never call a
+text-to-speech service while a call is running**, and nothing generates them
+except an explicit click.
+
+The exception is the voicemail voice ([voicemail.md](voicemail.md)): the
+default greetings and the spoken `*97` menus use the model and voice saved
+here, and are generated the first time a call needs them (the static ones when
+you save the settings) and cached in the voicemail bucket as
+`tts/hd/<sha256 of model, voice and text>.wav`. If the voice cannot be reached the
+call carries on with tones and recordings.
 
 Audio is generated through [OpenRouter](https://openrouter.ai), which offers
 ElevenLabs models (for example `elevenlabs/eleven-multilingual-v2`), using
@@ -54,6 +62,12 @@ greeting has a source:
 - **Generate from text**, with its own **Generate greeting** button. The same
   text, voice and model never generate twice.
 
+A box with none of these uses the **default spoken greeting** (shown as
+"Default (AI voice)"); **Preview default greeting** plays it and **Revert to
+default** drops a custom one. There are slots for the general greeting, the
+busy greeting, the unreachable greeting and a recorded name; all of them can
+also be recorded from the phone. See [voicemail.md](voicemail.md).
+
 ## Audio format
 
 Uploads are stored as 16-bit mono PCM at their own sample rate (up to 48 kHz);
@@ -70,16 +84,18 @@ leave the stored audio untouched. Every successful generation is audited
 
 ## API
 
-| Route                                            | Role     | Purpose                               |
-| ------------------------------------------------ | -------- | ------------------------------------- |
-| `GET/PUT /api/v1/tts/settings`                   | admin    | settings; `apiKey` is write-only      |
-| `DELETE /api/v1/tts/settings/key`                | admin    | remove the key                        |
-| `POST /api/v1/tts/settings/test`                 | admin    | check the key                         |
-| `GET /api/v1/tts/voices`                         | operator | ElevenLabs models and voices          |
-| `POST /api/v1/announcements/generate`            | operator | new announcement from text            |
-| `POST /api/v1/park-lots/announcement/generate`   | operator | spoken park slot clips                |
-| `PATCH /api/v1/announcements/{id}`               | operator | save text without generating          |
-| `POST /api/v1/announcements/{id}/generate`       | operator | generate or regenerate                |
-| `PUT /api/v1/extensions/{id}/voicemail/greeting` | operator | greeting from an announcement or text |
+| Route                                                      | Role     | Purpose                               |
+| ---------------------------------------------------------- | -------- | ------------------------------------- |
+| `GET/PUT /api/v1/tts/settings`                             | admin    | settings; `apiKey` is write-only      |
+| `DELETE /api/v1/tts/settings/key`                          | admin    | remove the key                        |
+| `POST /api/v1/tts/settings/test`                           | admin    | check the key                         |
+| `GET /api/v1/tts/voices`                                   | operator | ElevenLabs models and voices          |
+| `POST /api/v1/announcements/generate`                      | operator | new announcement from text            |
+| `POST /api/v1/park-lots/announcement/generate`             | operator | spoken park slot clips                |
+| `PATCH /api/v1/announcements/{id}`                         | operator | save text without generating          |
+| `POST /api/v1/announcements/{id}/generate`                 | operator | generate or regenerate                |
+| `PUT /api/v1/extensions/{id}/voicemail/greeting`           | operator | greeting from an announcement or text |
+| `POST /api/v1/extensions/{id}/voicemail/greeting/preview`  | operator | the default spoken greeting, as WAV   |
+| `DELETE /api/v1/extensions/{id}/voicemail/greeting/{slot}` | operator | revert a slot to the default          |
 
 The routes that hold the key or spend credits are left out of the MCP tools.
