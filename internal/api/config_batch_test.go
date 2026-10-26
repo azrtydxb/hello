@@ -628,17 +628,21 @@ func TestBatchableHandlersNoExternalEffects(t *testing.T) {
 func TestFlowWarningEnum(t *testing.T) {
 	var doc struct {
 		Components struct {
-			Schemas map[string]struct {
-				Properties map[string]struct {
-					Enum []string `json:"enum"`
-				} `json:"properties"`
+			Schemas struct {
+				FlowWarning struct {
+					Properties struct {
+						Code struct {
+							Enum []string `json:"enum"`
+						} `json:"code"`
+					} `json:"properties"`
+				} `json:"FlowWarning"`
 			} `json:"schemas"`
 		} `json:"components"`
 	}
 	if err := json.Unmarshal(openAPI, &doc); err != nil {
 		t.Fatal(err)
 	}
-	got := slices.Clone(doc.Components.Schemas["FlowWarning"].Properties["code"].Enum)
+	got := slices.Clone(doc.Components.Schemas.FlowWarning.Properties.Code.Enum)
 	want := []string{flow.WarnDangling, flow.WarnEmptyGroup, flow.WarnVoicemailDisable, flow.WarnUnreachable, flow.WarnLoop,
 		flow.WarnShadowedRoute, flow.WarnNoGreeting}
 	slices.Sort(got)
