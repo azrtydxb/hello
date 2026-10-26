@@ -138,12 +138,52 @@ kamailio:
   image:
     name: kamailio
     tag: ""
+  # One instance, or two (docs/ha.md, "Kamailio pair"): with two, give
+  # nodeSelector (or affinity) the nodes they may run on, and set vip below.
+  # Two instances roll one at a time (maxSurge 0, maxUnavailable 1), sit on
+  # different nodes (required hostname anti-affinity) and get a
+  # PodDisruptionBudget. One instance is Recreate, as before.
+  replicas: 1
+  # A replacement must be ready this long before its peer is touched.
+  minReadySeconds: 10
   # hostNetwork binds the phones' port on the node address, so phones reach
   # Kamailio with no NAT and Kamailio sees their real source address. Pin the
   # pod to the node whose address is publicHost with nodeSelector.
   hostNetwork: true
-  # Where phones reach Kamailio (REQUIRED): a node address, VIP or DNS name.
+  # Where phones reach Kamailio (REQUIRED, unless vip.enabled, which makes it
+  # the VIP): a node address, VIP or DNS name.
   publicHost: ""
+  # A virtual IP that follows a healthy instance (kube-vip, ARP mode), so
+  # phones keep one address through the loss of either node. Needs
+  # hostNetwork, at least two replicas on nodes of one layer-2 network (the
+  # VIP is added to vip.interface there), and a free address on it.
+  vip:
+    enabled: false
+    # The VIP (REQUIRED with enabled). The phones' sockets and the
+    # Hello-facing socket bind it, and publicHost becomes it, so every address
+    # a dialog names (Via, Path, Record-Route) survives an instance.
+    address: ""
+    # The network interface that carries the VIP on those nodes (REQUIRED
+    # with enabled): eth0, bond0, ...
+    interface: ""
+    # Also serve each node's own address (an instance's pod IP) on separate
+    # sockets, for phones provisioned with it before the VIP. They move at
+    # their next fetch (docs/provisioning.md); drop this when none remain.
+    legacy: false
+    # kube-vip talks to the API server through the name "kubernetes". Set
+    # this to the address that name resolves to on the edge nodes when it
+    # must not be the cluster's service address, e.g. 127.0.0.1 on
+    # control-plane nodes (as kube-vip's own DaemonSet does).
+    apiServerAddress: ""
+    image: ghcr.io/kube-vip/kube-vip:v1.2.3
+    # The election Lease, in the release's namespace.
+    leaseName: kamailio-vip
+    leaseDurationSeconds: 5
+    renewDeadlineSeconds: 3
+    retryPeriodSeconds: 1
+    resources:
+      requests: { cpu: 10m, memory: 24Mi }
+      limits: { memory: 96Mi }
   # The port phones use, as advertised in Via and Record-Route.
   publicPort: 5060
   # The port Kamailio binds (UDP and TCP) on its pod address. With

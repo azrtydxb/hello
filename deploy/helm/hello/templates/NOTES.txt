@@ -1,7 +1,10 @@
 Hello {{ .Chart.AppVersion }} is installed as release "{{ .Release.Name }}".
 
-SIP: phones register to {{ .Values.kamailio.publicHost }}:{{ .Values.kamailio.publicPort }} (domain {{ .Values.global.sipDomain }}).
-{{- if .Values.kamailio.hostNetwork }}
+SIP: phones register to {{ include "hello.kamailioPublicHost" . }}:{{ .Values.kamailio.publicPort }} (domain {{ .Values.global.sipDomain }}).
+{{- if .Values.kamailio.vip.enabled }}
+{{ .Values.kamailio.replicas }} Kamailio run on the host network on different nodes; kube-vip holds the virtual IP {{ .Values.kamailio.vip.address }}
+on {{ .Values.kamailio.vip.interface }} of the node whose Kamailio is healthy. UDP/TCP {{ .Values.kamailio.phonesPort }} must be reachable on it.
+{{- else if .Values.kamailio.hostNetwork }}
 Kamailio runs on the host network: it binds the node whose address is {{ .Values.kamailio.publicHost }}
 (pin it with kamailio.nodeSelector) and UDP/TCP {{ .Values.kamailio.phonesPort }} must be reachable on it.
 {{- else }}

@@ -317,15 +317,6 @@ var kwOnlyEnv = map[string]string{
 	"HELLO_AI_TIMEOUT":                   "kw tuning; set through control.extraEnv",
 }
 
-// kwKamailioChartLag lists Kamailio env vars the kw manifests set and the
-// chart does not render yet, each with the kamailio-ha phase that closes the
-// gap. The list must be empty once the chart option for two
-// instances and the VIP lands (phase 4).
-var kwKamailioChartLag = map[string]string{
-	"KAMAILIO_EDGE_VIP":  "phase 2: kw binds the phones and hello sockets to the VIP; the chart option follows in phase 4",
-	"KAMAILIO_LEGACY_IP": "phase 2: kw serves phones still on the node address; the chart option follows in phase 4",
-}
-
 // TestChartEnvParityWithKw fails if a hello-sip, hello-control or Kamailio
 // environment variable in the kw manifests is missing from the chart's
 // render (other than the documented kw-only tuning), or a variable the kw
@@ -340,6 +331,9 @@ func TestChartEnvParityWithKw(t *testing.T) {
 		"--set", "control.provisioning.trustedProxies=10.0.0.0/8",
 		"--set", "control.provisioning.caSecret=hello-prov-tls",
 		"--set", "secrets.provRedirectSecret=hello-prov-redirect",
+		// kw serves the node address beside the VIP while phones move.
+		"--set", "kamailio.vip.legacy=true",
+		"--set", "kamailio.vip.apiServerAddress=127.0.0.1",
 	)
 	pairs := []struct {
 		name        string
@@ -363,9 +357,6 @@ func TestChartEnvParityWithKw(t *testing.T) {
 		kwEnv, chartEnv := envOf(kwC), envOf(chartC)
 		for name, e := range kwEnv {
 			if _, skip := kwOnlyEnv[name]; skip && p.name == "hello-control" {
-				continue
-			}
-			if _, lag := kwKamailioChartLag[name]; lag && p.name == "kamailio" {
 				continue
 			}
 			ce, ok := chartEnv[name]
@@ -568,9 +559,23 @@ func TestChartAntiAffinityAndPDBs(t *testing.T) {
 	if n := intOf(t, dig(sipPDB, "spec", "maxUnavailable")); n != 1 {
 		t.Errorf("hello-sip PDB maxUnavailable = %d, want 1: the other node is the survivor", n)
 	}
-	// Kamailio is a single replica: a budget there would block every drain
-	// of its node, so it has none by design (docs/kubernetes.md).
-	if hasObj(objs, "PodDisruptionBudget", "hello-kamailio") {
+	// The Kamailio pair (values-ha.yaml) allows one disruption at a time; a
+	// single Kamailio would block every drain of its node with a budget, so
+	// it has none (docs/kubernetes.md).
+	kam := findObj(t, objs, "Deployment", "hello-kamailio")
+	kamLabels := dig(kam, "spec", "template", "metadata", "labels")
+	kamTerms := list(dig(podSpec(kam), "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution"))
+	if len(kamTerms) != 1 || str(dig(kamTerms[0], "topologyKey")) != "kubernetes.io/hostname" || !matchesLabels(dig(kamTerms[0], "labelSelector", "matchLabels"), kamLabels) {
+		t.Errorf("the Kamailio pair needs one required hostname anti-affinity term on its own labels, has %v", kamTerms)
+	}
+	kamPDB := findObj(t, objs, "PodDisruptionBudget", "hello-kamailio")
+	if !matchesLabels(dig(kamPDB, "spec", "selector", "matchLabels"), kamLabels) {
+		t.Error("PDB hello-kamailio does not select the Kamailio pods")
+	}
+	if n := intOf(t, dig(kamPDB, "spec", "maxUnavailable")); n != 1 {
+		t.Errorf("kamailio PDB maxUnavailable = %d, want 1: the other instance carries the phones", n)
+	}
+	if hasObj(evalRender(t), "PodDisruptionBudget", "hello-kamailio") {
 		t.Error("a PodDisruptionBudget on the single-replica Kamailio blocks node drains")
 	}
 	single := evalRender(t, "--set", "sip.nodes=1")
@@ -653,8 +658,19 @@ func TestChartUpgradeOrdering(t *testing.T) {
 	}
 
 	kam := findObj(t, objs, "Deployment", "hello-kamailio")
-	if got := str(dig(kam, "spec", "strategy", "type")); got != "Recreate" {
-		t.Errorf("kamailio strategy = %q, want Recreate (hostNetwork ports)", got)
+	// The pair rolls one instance at a time; a single Kamailio is Recreate
+	// (hostNetwork ports).
+	if got := str(dig(kam, "spec", "strategy", "type")); got != "RollingUpdate" {
+		t.Errorf("kamailio pair strategy = %q, want RollingUpdate", got)
+	}
+	if got := str(dig(kam, "spec", "strategy", "rollingUpdate", "maxSurge")); got != "0" {
+		t.Errorf("kamailio maxSurge = %q, want 0 (a surge pod cannot bind the node's ports)", got)
+	}
+	if got := str(dig(kam, "spec", "strategy", "rollingUpdate", "maxUnavailable")); got != "1" {
+		t.Errorf("kamailio maxUnavailable = %q, want 1", got)
+	}
+	if got := str(dig(findObj(t, evalRender(t), "Deployment", "hello-kamailio"), "spec", "strategy", "type")); got != "Recreate" {
+		t.Errorf("single kamailio strategy = %q, want Recreate (hostNetwork ports)", got)
 	}
 	containerNamed(t, kam, true, "wait-dispatcher")
 	cfg, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kamailio", "kamailio.cfg"))

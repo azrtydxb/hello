@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -312,6 +313,142 @@ func TestKamailioHARBAC(t *testing.T) {
 			if !have[rule{res[0], res[1], v}] {
 				t.Errorf("kw manifests carry %s but no Role grants the deployer %s on %s/%s", kind, v, res[0], res[1])
 			}
+		}
+	}
+}
+
+// TestChartKamailioPair fails if the chart's pair differs from kw's: the
+// same kube-vip container (image, election, probes, capabilities), the same
+// Lease-only Role, the VIP as the address phones and provisioning use, and a
+// refusal of every configuration that would leave the VIP without an
+// interface, a second instance or the host network it needs.
+func TestChartKamailioPair(t *testing.T) {
+	objs := haRender(t,
+		"--set", "control.provisioning.publicUrl=https://prov.hello.example.com",
+		"--set", "control.provisioning.trustedProxies=10.0.0.0/8",
+	)
+	dep := findObj(t, objs, "Deployment", "hello-kamailio")
+	kwDep := kwObject(t, "Deployment", "kamailio")
+
+	vip := containerNamed(t, dep, false, "vip")
+	kwVIP := containerNamed(t, kwDep, false, "vip")
+	// What differs between sites: the address, the NIC and the namespace of
+	// the election Lease (the release's). Everything else is kw's.
+	siteSpecific := map[string]bool{"address": true, "vip_interface": true, "cp_namespace": true, "vip_namespace": true}
+	env, kwEnv := envOf(vip), envOf(kwVIP)
+	for name, e := range kwEnv {
+		ce, ok := env[name]
+		if !ok {
+			t.Errorf("kw sets vip env %s, the chart does not render it", name)
+			continue
+		}
+		if siteSpecific[name] {
+			continue
+		}
+		if str(ce["value"]) != str(e["value"]) || str(dig(ce, "valueFrom", "fieldRef", "fieldPath")) != str(dig(e, "valueFrom", "fieldRef", "fieldPath")) {
+			t.Errorf("vip env %s = %v, kw %v", name, ce, e)
+		}
+	}
+	if str(vip["image"]) != str(kwVIP["image"]) {
+		t.Errorf("vip image = %q, kw %q", vip["image"], kwVIP["image"])
+	}
+	for _, probe := range []string{"startupProbe", "livenessProbe"} {
+		for _, f := range []string{"periodSeconds", "failureThreshold"} {
+			if str(dig(vip, probe, f)) != str(dig(kwVIP, probe, f)) {
+				t.Errorf("vip %s.%s = %v, kw %v", probe, f, dig(vip, probe, f), dig(kwVIP, probe, f))
+			}
+		}
+		if str(dig(vip, probe, "httpGet", "path")) != "/healthz" {
+			t.Errorf("vip %s must ask Kamailio's /healthz", probe)
+		}
+	}
+	if str(dig(vip, "livenessProbe", "httpGet", "port")) != str(envOf(containerNamed(t, dep, false, "kamailio"))["KAMAILIO_METRICS_PORT"]["value"]) {
+		t.Error("the vip liveness probe must ask Kamailio's metrics port")
+	}
+	caps := strOf(list(dig(vip, "securityContext", "capabilities", "add")))
+	sort.Strings(caps)
+	if strings.Join(caps, ",") != "NET_ADMIN,NET_RAW" {
+		t.Errorf("vip capabilities = %v", caps)
+	}
+
+	// The same addresses in every place that names one.
+	kam := envOf(containerNamed(t, dep, false, "kamailio"))
+	if got := str(kam["KAMAILIO_PUBLIC_HOST"]["value"]); got != "192.168.10.109" {
+		t.Errorf("KAMAILIO_PUBLIC_HOST = %q, want the VIP", got)
+	}
+	if got := str(kam["KAMAILIO_EDGE_VIP"]["value"]); got != "192.168.10.109" {
+		t.Errorf("KAMAILIO_EDGE_VIP = %q, want the VIP", got)
+	}
+	if kam["KAMAILIO_LEGACY_IP"] != nil {
+		t.Error("KAMAILIO_LEGACY_IP is rendered without kamailio.vip.legacy")
+	}
+	if got := str(envOf(vip)["address"]["value"]); got != "192.168.10.109" {
+		t.Errorf("kube-vip address = %q, want the VIP", got)
+	}
+	ctl := envOf(containerNamed(t, findObj(t, objs, "Deployment", "hello-control"), false, "hello-control"))
+	if got := str(ctl["HELLO_PROV_SIP_SERVER"]["value"]); got != "192.168.10.109:5060" {
+		t.Errorf("HELLO_PROV_SIP_SERVER = %q, want the VIP and port", got)
+	}
+
+	// Identity: a Lease-only Role like kw's, the token for the vip container alone.
+	spec := podSpec(dep)
+	if got := str(dig(spec, "serviceAccountName")); got != "hello-kamailio-vip" {
+		t.Errorf("serviceAccountName = %q", got)
+	}
+	if str(dig(spec, "automountServiceAccountToken")) != "false" {
+		t.Error("automountServiceAccountToken must be false: only the vip container gets the token")
+	}
+	role := findObj(t, objs, "Role", "hello-kamailio-vip")
+	kwRole := kwObject(t, "Role", "kamailio-vip")
+	if fmt.Sprint(dig(role, "rules")) != fmt.Sprint(dig(kwRole, "rules")) {
+		t.Errorf("Role rules = %v, kw %v", dig(role, "rules"), dig(kwRole, "rules"))
+	}
+	findObj(t, objs, "RoleBinding", "hello-kamailio-vip")
+	findObj(t, objs, "ServiceAccount", "hello-kamailio-vip")
+
+	// The legacy sockets and the API server name are opt-in.
+	withLegacy := haRender(t, "--set", "kamailio.vip.legacy=true", "--set", "kamailio.vip.apiServerAddress=127.0.0.1")
+	d2 := findObj(t, withLegacy, "Deployment", "hello-kamailio")
+	if got := str(dig(envOf(containerNamed(t, d2, false, "kamailio"))["KAMAILIO_LEGACY_IP"], "valueFrom", "fieldRef", "fieldPath")); got != "status.podIP" {
+		t.Errorf("KAMAILIO_LEGACY_IP = %q, want the pod IP", got)
+	}
+	if got := str(dig(podSpec(d2), "hostAliases", 0, "ip")); got != "127.0.0.1" {
+		t.Errorf("hostAliases ip = %q, want 127.0.0.1", got)
+	}
+	if dig(spec, "hostAliases") != nil {
+		t.Error("hostAliases rendered without kamailio.vip.apiServerAddress")
+	}
+
+	// A pair without a VIP: rolled one at a time and protected, nothing else.
+	plain := evalRender(t, "--set", "kamailio.publicHost=10.0.0.9", "--set", "kamailio.replicas=2")
+	if got := str(dig(findObj(t, plain, "Deployment", "hello-kamailio"), "spec", "strategy", "type")); got != "RollingUpdate" {
+		t.Errorf("a Kamailio pair without a VIP has strategy %q, want RollingUpdate", got)
+	}
+	findObj(t, plain, "PodDisruptionBudget", "hello-kamailio")
+	if hasObj(plain, "Role", "hello-kamailio-vip") {
+		t.Error("a Kamailio pair without a VIP renders kube-vip's Role")
+	}
+	for _, c := range list(dig(podSpec(findObj(t, plain, "Deployment", "hello-kamailio")), "containers")) {
+		if str(dig(c, "name")) == "vip" {
+			t.Error("a Kamailio pair without a VIP renders the vip container")
+		}
+	}
+
+	// Refused configurations.
+	base := []string{"-f", valuesFile(t, "values-ha.yaml")}
+	for _, tc := range []struct {
+		name, want string
+		args       []string
+	}{
+		{"no interface", "kamailio.vip.interface is required", []string{"--set", "kamailio.vip.interface="}},
+		{"no address", "kamailio.vip.address is required", []string{"--set", "kamailio.vip.address="}},
+		{"one instance", "kamailio.replicas of at least 2", []string{"--set", "kamailio.replicas=1"}},
+		{"no host network", "needs kamailio.hostNetwork", []string{"--set", "kamailio.hostNetwork=false"}},
+		{"another public host", "differs from kamailio.vip.address", []string{"--set", "kamailio.publicHost=192.168.10.50"}},
+	} {
+		_, err := helmTemplate(t, append(append([]string{}, base...), tc.args...)...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: want a render failure containing %q, got %v", tc.name, tc.want, err)
 		}
 	}
 }
