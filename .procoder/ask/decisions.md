@@ -631,6 +631,7 @@ numeric ring group keeps working). Down converts `ring_group` routes back to
 earlier destination migrations do.
 
 Why only these kinds. Decision 3 asks for every kind on every output, but:
+
 - a call that has already started (a ring group fallback, an IVR key, a queue
   exit, a time condition branch) cannot be handed to a paging group or a
   conference room: the runtime pages and joins only from the INVITE
@@ -646,7 +647,7 @@ Why only these kinds. Decision 3 asks for every kind on every output, but:
   transfer to a slot);
 - extension forwards stay extension / numeric ring group / external number,
   because that is what `sip.forward` resolves.
-The catalogue lists exactly what is stored.
+  The catalogue lists exactly what is stored.
 
 Runtime. Inbound routes of the new kinds are carried out by the destination
 dispatcher time conditions already use (`applyTCDest`), so there is one place
@@ -677,6 +678,14 @@ so the integration job is required green before merge.
 The form pages (Routes) do not offer the new inbound kinds yet; they render
 them through the existing fallback. The API and MCP do.
 
+## Ring group voicemail failure box (2026-10-26)
+
+A ring group whose failure kind is `voicemail` now sets `vmExt` to the failure
+target before starting the voicemail application, the same way the IVR and time
+condition paths do. Before, `mailboxExt` fell back to the dialled string (the
+group number), so the message went to the wrong box or to none. Covered by
+`TestRingGroupVoicemailFailureBox`, which fails without the fix.
+
 ## Routes form: new inbound destination kinds (2026-10-26)
 
 The inbound route drawer offers `ring_group`, `voicemail`, `announcement` and
@@ -689,6 +698,51 @@ is not a target of another. An empty target is refused with a kind-specific
 message. `conference` is also in the API enum and still has no chooser; not part
 of this change.
 
+## Prefer Opus over G.722 (2026-10-26) — decided: Opus first everywhere
+
+Opus is almost never used: provisioned phones list G.722 before Opus, and
+Hello-terminated media (MOH, IVR, voicemail) picks Opus only as a last resort.
+
+- Opus first everywhere: provisioning (Opus models) and Hello's own audio; paging stays G.722
+- Opus first for Hello's own audio only; provisioning order unchanged
+- Keep G.722 first (no change)
+
+## Build every unbuilt item from the 2026-10-26 audit (2026-10-26) — decided: build and track all
+
+An audit found specced work never built. The user: "you need to build, and
+track all items and partials you discovered". The tracker is
+`.procoder/tracking/unbuilt.md`; every row ends in a merged PR or an explicit
+hardware/external-account wait.
+
+Competitor gaps, all chosen (multi-select, every option picked):
+
+- Backup and restore, follow-me, blocklist, queue callback
+- 2FA, dial-by-name, voicemail groups, fax
+- Boss/secretary, multi-language prompts, codec in call history, phone LDAP
+  directory (this reverses the earlier "No LDAP" decision for phones)
+
+Voicemail language — decided: keep English default, add Dutch as a per-box option.
+
+- Dutch default
+- Keep English default (chosen)
+- English only
+
+Kamailio HA: option A vs B to be discussed before choosing; the user agreed
+phones may be re-pointed to the new address via check-sync and `.101`
+retired afterwards. VIP address chosen after the A/B discussion.
+
+## Kamailio HA option and VIP (2026-10-26) — decided: Option A, VIP 192.168.10.109
+
+After discussing A against B the user chose A ("A, choose any that is free"):
+two hostNetwork Kamailio (master-11, master-12) behind a VRRP VIP
+(keepalived or kube-vip, ARP mode). The VIP is 192.168.10.109: outside
+Cilium LB-IPAM's .120-.159, not a node (.101-.108, .245-.246), no ARP reply
+on 2026-10-26. 192.168.10.100 answers with master-12's MAC, so a VIP
+mechanism may already run for the API server; check it before adding one.
+Phones are re-pointed to the VIP via check-sync and .101 is retired after.
+
+- A: VRRP VIP, two hostNetwork Kamailio (chosen)
+- B: Cilium LB-IPAM LoadBalancer with L2 announcement
 ## SIP over TLS terminates at the edge (2026-10-26)
 
 Phone-feature-parity S-14 (delivery PR 23) says "hello-sip listens on TLS 5061".
