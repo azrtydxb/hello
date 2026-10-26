@@ -16735,7 +16735,16 @@
       },
       "VoicemailGroup": {
         "type": "object",
-        "required": ["id", "number", "name", "enabled", "maxSeconds", "members", "createdAt", "updatedAt"],
+        "required": [
+          "id",
+          "number",
+          "name",
+          "enabled",
+          "maxSeconds",
+          "members",
+          "createdAt",
+          "updatedAt"
+        ],
         "properties": {
           "id": {
             "type": "integer",
