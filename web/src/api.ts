@@ -1138,6 +1138,8 @@ export interface RingGroupFields {
   mohClassId?: Id | null;
   /** Play the class to the caller instead of ringback while the group rings. */
   mohRingback?: boolean;
+  /** Ring tag that replaces ringgroup for calls through the group; "" keeps it. */
+  ringTag?: string;
 }
 
 /** A ring group as returned. */

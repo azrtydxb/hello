@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/ringtag"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/jackc/pgx/v5"
@@ -91,6 +92,9 @@ type RingGroup struct {
 	// group rings (migration 00021).
 	MOHClassID  int64
 	MOHRingback bool
+	// RingTag overrides the ringgroup ring tag for calls through the group
+	// ("" keeps ringgroup; migration 00042).
+	RingTag string
 }
 
 // RingGroupMember is one member of a group, ordered by Position.
@@ -214,6 +218,9 @@ type Snapshot struct {
 	// global default class (0 when none is set).
 	mohs       map[int64]MOHClass
 	mohDefault int64
+	// ringTags are the ring tags and rules (migration 00042); nil means the
+	// built-in tags and no rules.
+	ringTags *ringtag.Table
 	// routing is the trunk and route state; nil for a snapshot from New.
 	routing *RoutingState
 }
@@ -620,9 +627,13 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	rtags, err := loadRingTags(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	return New(rev, domain, devices).WithExtensions(bare...).WithQueues(queues).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithRingTags(rtags), nil
 }
 
 // loadMOHClasses reads the music on hold classes with their playlists
@@ -802,7 +813,7 @@ WHERE m.group_id = $1 ORDER BY e.number`, &groups[i].Callers},
 // parallel slices for WithRingGroups.
 func loadRingGroups(ctx context.Context, db Querier) ([]RingGroup, [][]RingGroupMember, error) {
 	rows, err := db.Query(ctx, `SELECT id, name, strategy, hunt, ring_timeout, member_delay, ignore_dnd, failure_kind, failure_target,
-coalesce(moh_class_id, 0), moh_ringback
+coalesce(moh_class_id, 0), moh_ringback, coalesce(ring_tag, '')
 FROM ring_groups ORDER BY id`)
 	if err != nil {
 		return nil, nil, fmt.Errorf("snapshot: ring groups: %w", err)
@@ -817,7 +828,7 @@ FROM ring_groups ORDER BY id`)
 			timeout, delay int32
 			ext            *string
 		)
-		if err := rows.Scan(&g.ID, &g.Name, &g.Strategy, &g.Hunt, &timeout, &delay, &g.IgnoreDND, &g.FailureKind, &ext, &g.MOHClassID, &g.MOHRingback); err != nil {
+		if err := rows.Scan(&g.ID, &g.Name, &g.Strategy, &g.Hunt, &timeout, &delay, &g.IgnoreDND, &g.FailureKind, &ext, &g.MOHClassID, &g.MOHRingback, &g.RingTag); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("snapshot: scan ring group: %w", err)
 		}

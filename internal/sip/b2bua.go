@@ -169,6 +169,10 @@ type call struct {
 	pickedUp bool
 	pickupCh chan *pickupReq
 
+	// ringTag and ringWhy are the ring tag the call's device legs carry and
+	// what chose it (S-40); guarded by mu, written to the trace and the CDR.
+	ringTag, ringWhy string
+
 	groupName     string
 	groupStrategy string
 	groupFn       func()
@@ -1249,6 +1253,7 @@ func (c *call) record(status int, side, reason, result string) {
 		FinalStatus: status, TerminationSide: side, FailureReason: reason,
 		Direction: c.direction, OriginalDestination: c.dialled, RewrittenDestination: c.rewritten,
 		Route: c.route, Trunk: c.trunkName, Trace: trace, Kind: c.kind,
+		RingTag: c.ringTag, RingRule: c.ringWhy,
 	}
 	c.mu.Unlock()
 	if !answer.IsZero() {
@@ -1519,6 +1524,7 @@ func (l *leg) invite() (*sip.Request, error) {
 		}
 	}
 	l.addPagingHeaders(req)
+	l.addRingTag(req)
 	for _, h := range c.confForwardHeaders(l.callID) {
 		req.AppendHeader(h)
 	}

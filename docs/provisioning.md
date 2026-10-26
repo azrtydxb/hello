@@ -1259,6 +1259,18 @@ and a resume as `sendrecv`, as on any bridged call.
 `Reason: SIP;cause=200;text="Call completed elsewhere"` on the CANCEL, so they
 do not log the call as missed.
 
+## Distinctive ringing (ring tags)
+
+Hello tags every call to an internal phone (internal, external, ring group,
+page, door, alarm and your own tags) and sends the tag in an `Alert-Info` header
+of the form `<http://127.0.0.1/Bellcore-drN>;info=hello-<tag>`. Which tag a call
+gets, the rules and the header are in [ring-tags.md](ring-tags.md). The
+provisioned templates do not yet map a tag to a tone: until the ring map ships,
+set the phone's distinctive-ring rule by hand (match `hello-<tag>` in the
+Alert-Info text, or `Bellcore-drN` where the phone maps only the five Bellcore
+rings). Page and intercom calls keep the auto-answer `Alert-Info` described
+under paging and intercom above.
+
 ## Security model and its limits
 
 What protects the phones' secrets:

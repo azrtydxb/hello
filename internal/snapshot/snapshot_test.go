@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/migrate"
+	"github.com/azrtydxb/hello/internal/ringtag"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/prometheus/client_golang/prometheus"
@@ -360,5 +361,53 @@ func TestExtensionByBox(t *testing.T) {
 		if n, ok := s.ExtensionByBox(id); ok {
 			t.Errorf("ExtensionByBox(%d) = %q, want none", id, n)
 		}
+	}
+}
+
+// TestRingTagLoad fails if the ring tags, their Bellcore slots, the ordered
+// rules and a ring group's own tag (migration 00042) do not reach the
+// snapshot, or if the seven built-in tags are not seeded.
+func TestRingTagLoad(t *testing.T) {
+	cfg := scratch(t)
+	ctx := context.Background()
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	for _, q := range []string{
+		`INSERT INTO ring_tags (name, bellcore_slot) VALUES ('vip', 4)`,
+		`INSERT INTO ring_rules (position, name, match, tag) VALUES
+			(2, 'b', '{"trunk":"main"}', 'external'), (1, 'a', '{"callerPattern":"1XX"}', 'vip')`,
+		`INSERT INTO ring_groups (name, strategy, hunt, failure_kind, failure_target, ring_tag) VALUES ('700', 'ring-all', false, 'none', '', 'vip')`,
+		`INSERT INTO ring_groups (name, strategy, hunt, failure_kind, failure_target) VALUES ('710', 'ring-all', false, 'none', '')`,
+	} {
+		if _, err := conn.Exec(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	w := &Watcher{Domain: domain}
+	s, err := w.loadAll(ctx, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g, _, ok := s.RingGroup("700"); !ok || g.RingTag != "vip" {
+		t.Fatalf("group 700 = %+v ok=%v, want ring tag vip", g, ok)
+	}
+	if g, _, ok := s.RingGroup("710"); !ok || g.RingTag != "" {
+		t.Fatalf("group 710 = %+v ok=%v, want no ring tag", g, ok)
+	}
+	tb := s.RingTags()
+	if n := len(tb.Tags()); n != 8 {
+		t.Fatalf("%d tags, want 7 built-in and vip", n)
+	}
+	if tb.Slot("vip") != 4 || tb.Slot("external") != 2 || tb.Slot("doorbell") != 4 {
+		t.Fatalf("slots: vip %d external %d doorbell %d", tb.Slot("vip"), tb.Slot("external"), tb.Slot("doorbell"))
+	}
+	if got := tb.Choose(ringtag.Input{CallerNumber: "150"}); got.Tag != "vip" || got.Why != "rule:1 a" {
+		t.Fatalf("choice = %+v, want rule 1 (rules load in position order)", got)
+	}
+	if got := tb.Choose(ringtag.Input{CallerNumber: "250", Trunk: "main", FromTrunk: true}); got.Tag != "external" || got.Why != "rule:2 b" {
+		t.Fatalf("choice = %+v, want rule 2", got)
 	}
 }

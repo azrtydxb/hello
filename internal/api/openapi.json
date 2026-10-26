@@ -13064,6 +13064,414 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/ring-tags": {
+      "get": {
+        "operationId": "listRingTags",
+        "summary": "List ring tags",
+        "description": "Returns the seven built-in ring tags (internal, external, ringgroup, page, doorbell, alarm, emergency-callback) and the custom tags, each with its Bellcore slot and the number of rules and ring groups that use it.",
+        "tags": ["ring-tags"],
+        "responses": {
+          "200": {
+            "description": "The tags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingTagList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createRingTag",
+        "summary": "Create a custom ring tag",
+        "description": "Adds a custom tag (at most 32). The name is 1 to 32 characters of a-z 0-9 and -. The Bellcore slot (1 to 5, default 1) is the Bellcore-drN the canonical Alert-Info carries.",
+        "tags": ["ring-tags"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RingTagCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingTag"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ring-tags/{name}": {
+      "get": {
+        "operationId": "getRingTag",
+        "summary": "One ring tag",
+        "description": "Returns one ring tag by name.",
+        "tags": ["ring-tags"],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The ring tag name.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,32}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tag",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingTag"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putRingTag",
+        "summary": "Change a ring tag",
+        "description": "Changes the Bellcore slot and description of a tag; absent fields keep their value. The name cannot change. Built-in tags can be changed this way too.",
+        "tags": ["ring-tags"],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The ring tag name.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,32}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RingTagUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingTag"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteRingTag",
+        "summary": "Delete a custom ring tag",
+        "description": "Deletes a custom tag. A built-in tag, or a tag that a rule or a ring group uses, cannot be deleted (409).",
+        "tags": ["ring-tags"],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The ring tag name.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9-]{1,32}$"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ring-rules": {
+      "get": {
+        "operationId": "listRingRules",
+        "summary": "List ring tag rules",
+        "description": "Returns the ordered rules that choose a ring tag. The first rule that matches a call wins; the position is the order.",
+        "tags": ["ring-tags"],
+        "responses": {
+          "200": {
+            "description": "The rules in order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingRuleList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putRingRules",
+        "summary": "Replace the ring tag rules",
+        "description": "Replaces the whole ordered rule list (at most 100). The position of a rule is its place in the list. A rule matches on any of caller number pattern, inbound trunk, dialled number pattern, caller kind and a time window; every field present must match. Rules rank below the call's own kind (page, intercom, alarm, door call, emergency callback) and above the ring group's tag.",
+        "tags": ["ring-tags"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RingRulesInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingRuleList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ring-rules/evaluate": {
+      "get": {
+        "operationId": "evaluateRingRules",
+        "summary": "Which ring tag would a call get",
+        "description": "Answers which ring tag a described call would ring an internal device with, and why, using the saved tags and rules. Nothing is changed.",
+        "tags": ["ring-tags"],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "The call's kind when it fixes the tag.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "page",
+                "intercom",
+                "alarm",
+                "door",
+                "emergency-callback"
+              ]
+            }
+          },
+          {
+            "name": "callerNumber",
+            "in": "query",
+            "description": "The caller's number.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "did",
+            "in": "query",
+            "description": "The dialled number.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "trunk",
+            "in": "query",
+            "description": "The inbound trunk's name.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "callerKind",
+            "in": "query",
+            "description": "Who is calling.",
+            "schema": {
+              "type": "string",
+              "enum": ["extension", "door", "trunk"]
+            }
+          },
+          {
+            "name": "fromTrunk",
+            "in": "query",
+            "description": "true when the call entered on a trunk.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "groupTag",
+            "in": "query",
+            "description": "The tag of the ring group the call comes through (ringgroup for a group without its own tag).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at",
+            "in": "query",
+            "description": "The instant for time windows: an RFC 3339 time. Defaults to now.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The choice",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingChoice"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/time-conditions": {
       "get": {
         "operationId": "listTimeConditions",
@@ -15398,6 +15806,10 @@
             "type": "boolean",
             "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
           },
+          "ringTag": {
+            "type": "string",
+            "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
+          },
           "failureTarget": {
             "type": "string"
           },
@@ -15486,6 +15898,10 @@
           "mohRingback": {
             "type": "boolean",
             "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
+          },
+          "ringTag": {
+            "type": "string",
+            "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
           },
           "failureTarget": {
             "type": "string",
@@ -15596,6 +16012,10 @@
           "mohRingback": {
             "type": "boolean",
             "description": "Play the music on hold class to the caller instead of ringback while the destination rings. Default false."
+          },
+          "ringTag": {
+            "type": "string",
+            "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
           },
           "failureTarget": {
             "type": "string",
@@ -18554,6 +18974,14 @@
             "type": "string",
             "enum": ["call", "page", "intercom", "conference"],
             "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room."
+          },
+          "ringTag": {
+            "type": "string",
+            "description": "The ring tag the call's internal device legs carried; empty when no internal device rang."
+          },
+          "ringRule": {
+            "type": "string",
+            "description": "What chose the tag: kind:<kind>, rule:<position> [name], group, trunk or default."
           }
         },
         "description": "Null times are omitted."
@@ -22884,6 +23312,237 @@
               "format": "int64"
             },
             "description": "The calendars (holidays, exceptions) the schedule consults."
+          }
+        }
+      },
+      "RingTag": {
+        "type": "object",
+        "required": [
+          "name",
+          "builtin",
+          "bellcoreSlot",
+          "description",
+          "usedBy"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,32}$",
+            "description": "1 to 32 of a-z 0-9 -."
+          },
+          "builtin": {
+            "type": "boolean"
+          },
+          "bellcoreSlot": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "The Bellcore-drN the canonical Alert-Info carries."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "usedBy": {
+            "type": "integer",
+            "description": "How many rules and ring groups name the tag."
+          }
+        }
+      },
+      "RingTagList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingTag"
+            }
+          }
+        }
+      },
+      "RingTagCreate": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,32}$",
+            "description": "1 to 32 of a-z 0-9 -."
+          },
+          "bellcoreSlot": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "The Bellcore-drN the canonical Alert-Info carries."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "What the tag is for, at most 200 characters."
+          }
+        }
+      },
+      "RingTagUpdate": {
+        "type": "object",
+        "minProperties": 1,
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,32}$",
+            "description": "1 to 32 of a-z 0-9 -."
+          },
+          "bellcoreSlot": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "The Bellcore-drN the canonical Alert-Info carries."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "What the tag is for, at most 200 characters."
+          }
+        }
+      },
+      "RingRuleWindow": {
+        "type": "object",
+        "required": ["timeZone", "ranges"],
+        "additionalProperties": false,
+        "properties": {
+          "timeZone": {
+            "type": "string",
+            "description": "An IANA time zone name such as Asia/Dubai."
+          },
+          "ranges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DayRange"
+            }
+          }
+        }
+      },
+      "RingRuleMatch": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Every field present must match; at least one must be set.",
+        "properties": {
+          "callerPattern": {
+            "type": "string",
+            "description": "A dial-plan pattern (exact number, X pattern or regex) for the caller's number."
+          },
+          "trunk": {
+            "type": "string",
+            "description": "The inbound trunk's name."
+          },
+          "did": {
+            "type": "string",
+            "description": "A dial-plan pattern for the dialled number."
+          },
+          "callerKind": {
+            "type": "string",
+            "enum": ["extension", "door", "trunk"]
+          },
+          "window": {
+            "$ref": "#/components/schemas/RingRuleWindow"
+          }
+        }
+      },
+      "RingRule": {
+        "type": "object",
+        "required": ["id", "position", "name", "match", "tag"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "match": {
+            "$ref": "#/components/schemas/RingRuleMatch"
+          },
+          "tag": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,32}$",
+            "description": "1 to 32 of a-z 0-9 -."
+          }
+        }
+      },
+      "RingRuleList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingRule"
+            }
+          }
+        }
+      },
+      "RingRuleInput": {
+        "type": "object",
+        "required": ["match", "tag"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "match": {
+            "$ref": "#/components/schemas/RingRuleMatch"
+          },
+          "tag": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,32}$",
+            "description": "1 to 32 of a-z 0-9 -."
+          }
+        }
+      },
+      "RingRulesInput": {
+        "type": "object",
+        "required": ["rules"],
+        "additionalProperties": false,
+        "properties": {
+          "rules": {
+            "description": "The whole ordered list; the first rule that matches a call wins.",
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/RingRuleInput"
+            }
+          }
+        }
+      },
+      "RingChoice": {
+        "type": "object",
+        "required": ["tag", "why", "bellcoreSlot", "alertInfo"],
+        "properties": {
+          "tag": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,32}$",
+            "description": "1 to 32 of a-z 0-9 -."
+          },
+          "why": {
+            "type": "string",
+            "description": "kind:<kind>, rule:<position> [name], group, trunk or default."
+          },
+          "bellcoreSlot": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "The Bellcore-drN the canonical Alert-Info carries."
+          },
+          "alertInfo": {
+            "type": "string",
+            "description": "The canonical Alert-Info value."
           }
         }
       },

@@ -39,6 +39,10 @@ type CDR struct {
 	RTPJitterMs          *float64   `json:"rtpJitterMs"`
 	// Kind is call, page or intercom (migration 00013).
 	Kind string `json:"kind"`
+	// RingTag is the ring tag the call rang with and RingRule what chose it
+	// (migration 00042); empty when no internal device rang.
+	RingTag  string `json:"ringTag"`
+	RingRule string `json:"ringRule"`
 	// PageLegs is a page's outcome per member (migration 00014); set by
 	// GetCDR for a page only.
 	PageLegs []PageLeg `json:"pageLegs,omitempty"`
@@ -69,14 +73,14 @@ type PageLeg struct {
 const cdrCols = `id, correlation_id, sip_call_id, source, destination, start_time, ring_time, answer_time,
 	end_time, duration_ms, billable_ms, sip_node, media_mode, final_status, termination_side, failure_reason,
 	direction, original_destination, rewritten_destination, route_name, trunk_name,
-	rtp_packets, rtp_lost, rtp_jitter_ms, kind`
+	rtp_packets, rtp_lost, rtp_jitter_ms, kind, ring_tag, ring_rule`
 
 func scanCDR(r interface{ Scan(...any) error }, extra ...any) (CDR, error) {
 	var c CDR
 	var ring, answer sql.NullTime
 	dest := append([]any{&c.ID, &c.CorrelationID, &c.SIPCallID, &c.Source, &c.Destination, &c.StartTime, &ring, &answer,
 		&c.EndTime, &c.DurationMs, &c.BillableMs, &c.SIPNode, &c.MediaMode, &c.FinalStatus, &c.TerminationSide, &c.FailureReason,
-		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs, &c.Kind,
+		&c.Direction, &c.OriginalDestination, &c.RewrittenDestination, &c.Route, &c.Trunk, &c.RTPPackets, &c.RTPLost, &c.RTPJitterMs, &c.Kind, &c.RingTag, &c.RingRule,
 	}, extra...)
 	if err := r.Scan(dest...); err != nil {
 		return c, err
