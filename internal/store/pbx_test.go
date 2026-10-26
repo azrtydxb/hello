@@ -247,6 +247,25 @@ func TestApplyFeatureUpdate(t *testing.T) {
 		t.Fatalf("after the API update: %+v, %v", got, err)
 	}
 
+	// The no-answer ring count (a phone's feature key) is stored with the
+	// other columns, untouched when nil, and the database refuses a count
+	// outside 0 to 20.
+	rings := 4
+	if err := s.ApplyFeatureUpdate(ctx, "hello-sip", FeatureUpdate{Number: e.Number, NoAnswerRings: &rings}); err != nil {
+		t.Fatalf("apply ring count: %v", err)
+	}
+	got, err = s.GetExtension(ctx, e.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.NoAnswerRings != 4 || !got.DND || got.ForwardBusy != other {
+		t.Fatalf("extension after ring count = %+v", got)
+	}
+	tooMany := 21
+	if err := s.ApplyFeatureUpdate(ctx, "hello-sip", FeatureUpdate{Number: e.Number, NoAnswerRings: &tooMany}); err == nil {
+		t.Fatal("ring count 21 accepted")
+	}
+
 	// An unknown extension number is a not-found, like every other store path.
 	if err := s.ApplyFeatureUpdate(ctx, "hello-sip", FeatureUpdate{Number: "999"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown number: err=%v, want ErrNotFound", err)

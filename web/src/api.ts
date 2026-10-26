@@ -93,6 +93,8 @@ export interface Extension {
    * setting is switched off at the next resync.
    */
   callWaiting?: boolean;
+  /** Rings before the no-answer forward (the phone's ring count); 0 = the system default. */
+  noAnswerRings?: number;
   /** The extension's voicemail box, when it has one. */
   voicemailBoxId?: Id | null;
   /** Music on hold class callers hear while this extension holds them; null = the default. */
@@ -704,6 +706,7 @@ export const updateExtension = (
     callWaiting?: boolean;
     /** null clears the pick (the global default plays). */
     mohClassId?: Id | null;
+    noAnswerRings?: number;
   },
 ) =>
   request<Extension>("PATCH", `/api/v1/extensions/${id(extensionId)}`, {

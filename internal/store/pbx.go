@@ -26,7 +26,7 @@ type VoicemailBox struct {
 	GreetingObject    string `json:"greetingObject"`
 	UnreachableObject string `json:"unreachableObject"`
 	// BusyObject is the custom greeting for a busy extension and NameObject
-	// the owner's recorded name (migration 00035); "" means the default
+	// the owner's recorded name (migration 00036); "" means the default
 	// spoken prompt is used.
 	BusyObject string `json:"busyObject"`
 	NameObject string `json:"nameObject"`
@@ -418,6 +418,8 @@ type FeatureUpdate struct {
 	ForwardBusy     *string
 	ForwardNoAnswer *string
 	CallWaiting     *bool
+	// NoAnswerRings is the no-answer ring count (0 = system default).
+	NoAnswerRings *int
 }
 
 // ApplyFeatureUpdate applies one feature-code change the same way every
@@ -434,9 +436,10 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 				forward_busy = COALESCE($4, forward_busy),
 				forward_no_answer = COALESCE($5, forward_no_answer),
 				call_waiting = COALESCE($6, call_waiting),
+				no_answer_rings = COALESCE($7, no_answer_rings),
 				updated_at = now()
 			WHERE number = $1`,
-			u.Number, u.DND, u.ForwardAlways, u.ForwardBusy, u.ForwardNoAnswer, u.CallWaiting)
+			u.Number, u.DND, u.ForwardAlways, u.ForwardBusy, u.ForwardNoAnswer, u.CallWaiting, u.NoAnswerRings)
 		if err != nil {
 			return "", err
 		}

@@ -65,6 +65,9 @@ type ExtUpdate struct {
 	ForwardBusy     *string
 	ForwardNoAnswer *string
 	CallWaiting     *bool
+	// NoAnswerRings is the no-answer ring count a phone's feature key set
+	// (as-feature-event ringCount); 0 means the system default.
+	NoAnswerRings *int
 }
 
 // SettingsSink takes extension-feature changes and applies them later: the

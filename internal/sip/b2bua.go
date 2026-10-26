@@ -586,7 +586,7 @@ func (c *call) addTrace(text string) {
 // to cancel, or the ring timeout.
 func (c *call) setup(pending int) {
 	defer close(c.setupDone)
-	timer := time.NewTimer(c.s.cfg.RingTimeout)
+	timer := time.NewTimer(c.ringTimeout())
 	defer timer.Stop()
 	total, busy := pending, 0
 	for {
@@ -613,7 +613,7 @@ func (c *call) setup(pending int) {
 					switch c.exhausted(busy == total) {
 					case exhRetry: // forwarding opened a new stage
 						pending, total, busy = c.pendingLegs(), c.pendingLegs(), 0
-						timer.Reset(c.s.cfg.RingTimeout)
+						timer.Reset(c.ringTimeout())
 						continue
 					case exhDone:
 						return
@@ -657,7 +657,7 @@ func (c *call) setup(pending int) {
 			switch c.exhausted(false) {
 			case exhRetry:
 				pending, total, busy = c.pendingLegs(), c.pendingLegs(), 0
-				timer.Reset(c.s.cfg.RingTimeout)
+				timer.Reset(c.ringTimeout())
 				continue
 			case exhDone:
 				return

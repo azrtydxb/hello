@@ -532,6 +532,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.serving.Store(false)
 	stop()
 	close(s.done)
+	s.confHalt()
 	_ = ua.Close()
 	s.bgMu.Lock()
 	s.bgClosed = true
@@ -812,6 +813,7 @@ func (s *Server) SnapshotChanged(old, cur *snapshot.Snapshot) {
 	if old == nil || cur == nil {
 		return
 	}
+	s.notifyFeatureChanges(cur)
 	var gone []string
 	for _, u := range old.Usernames() {
 		if _, ok := cur.DeviceByUsername(u); !ok {
