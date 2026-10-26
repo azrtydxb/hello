@@ -36,7 +36,7 @@ from it. See [cluster states](references/cluster.md).
    `countCDRs` tells you whether failures are unusual right now.
 2. `getCDR` for the record: the final status, which side ended it, the
    failure reason in plain words, the route and trunk used, the codec each
-   leg ended on (`callerCodec`, `calleeCodec`; null when none was negotiated)
+   leg ended on (the callerCodec and calleeCodec fields; null when none was negotiated)
    and the routing trace.
 3. If the routing looks wrong, re-run the decision with `testRouting` (same
    caller and number) to see whether the saved configuration still decides
