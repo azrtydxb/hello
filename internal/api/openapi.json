@@ -1355,7 +1355,7 @@
       "patch": {
         "operationId": "updateExtension",
         "summary": "Change an extension's number or name",
-        "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields.",
+        "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields. Renumbering an extension an IVR menu names is refused (409).",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -1409,7 +1409,7 @@
       "delete": {
         "operationId": "deleteExtension",
         "summary": "Delete an extension and its devices",
-        "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes.",
+        "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes. An extension an IVR menu names (as a destination or voicemail box) cannot be deleted (409).",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -4294,7 +4294,7 @@
       "delete": {
         "operationId": "deleteAnnouncement",
         "summary": "Delete an announcement",
-        "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time.",
+        "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time. An announcement that an IVR menu plays or names as a destination cannot be deleted (409).",
         "tags": ["media"],
         "parameters": [
           {
@@ -4307,6 +4307,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -4585,7 +4588,7 @@
       "patch": {
         "operationId": "updateRingGroup",
         "summary": "Change a ring/hunt group",
-        "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored.",
+        "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored. A group that an IVR menu names cannot be renamed (409).",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -4619,6 +4622,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -4636,7 +4642,7 @@
       "delete": {
         "operationId": "deleteRingGroup",
         "summary": "Delete a ring/hunt group",
-        "description": "Deletes a ring or hunt group. The members go with it.",
+        "description": "Deletes a ring or hunt group. The members go with it. A group that an IVR menu names cannot be deleted (409).",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -4649,6 +4655,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5753,7 +5762,7 @@
       "put": {
         "operationId": "putPagingGroup",
         "summary": "Replace a paging group",
-        "description": "Replaces a paging group as a whole, member and caller lists included. A page already running keeps the member set it started with.",
+        "description": "Replaces a paging group as a whole, member and caller lists included. A page already running keeps the member set it started with. Changing the code of a group an IVR menu names is refused (409).",
         "tags": ["paging-groups"],
         "parameters": [
           {
@@ -5807,7 +5816,7 @@
       "delete": {
         "operationId": "deletePagingGroup",
         "summary": "Delete a paging group",
-        "description": "Deletes a paging group. Its member and caller lists go with it.",
+        "description": "Deletes a paging group. Its member and caller lists go with it. A paging group that an IVR menu names cannot be deleted (409).",
         "tags": ["paging-groups"],
         "parameters": [
           {
@@ -5820,6 +5829,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5900,7 +5912,9 @@
             "description": "No hello-sip node reported the test page in time",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Error" }
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           }
@@ -11442,6 +11456,212 @@
         "x-hello-role": "admin",
         "x-hello-mcp": true
       }
+    },
+    "/api/v1/ivr-menus": {
+      "get": {
+        "operationId": "listIVRMenus",
+        "summary": "List IVR menus",
+        "description": "Lists every IVR / auto-attendant menu with its options.",
+        "tags": ["ivr-menus"],
+        "responses": {
+          "200": {
+            "description": "IVR menus",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenuList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createIVRMenu",
+        "summary": "Create an IVR menu",
+        "description": "Creates an IVR menu: it answers, plays its greeting (an announcement), collects digits and routes the call to the option's destination. Validation failures list each failing field in error.fields; digits must be unique, referenced announcements and destinations must exist and automatic exits (timeout, invalid) must not loop back to the menu. A menu with a paging destination (an option, the timeout or the invalid exit) needs the admin role and scope, like paging groups; otherwise 403.",
+        "tags": ["ivr-menus"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IVRMenuInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenu"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ivr-menus/{id}": {
+      "get": {
+        "operationId": "getIVRMenu",
+        "summary": "One IVR menu",
+        "description": "Returns one IVR menu by id.",
+        "tags": ["ivr-menus"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The IVR menu",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenu"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putIVRMenu",
+        "summary": "Replace an IVR menu",
+        "description": "Replaces an IVR menu as a whole, options included. A menu that a route, ring group, feature code or another menu names cannot be renamed. Calls already in the menu finish with the settings they started with. A menu with a paging destination (an option, the timeout or the invalid exit) needs the admin role and scope, like paging groups; otherwise 403.",
+        "tags": ["ivr-menus"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IVRMenuInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenu"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteIVRMenu",
+        "summary": "Delete an IVR menu",
+        "description": "Deletes an IVR menu and its options. A menu that an inbound route, ring group, feature code or another menu names cannot be deleted (409).",
+        "tags": ["ivr-menus"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
     }
   },
   "components": {
@@ -12668,7 +12888,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external"]
+            "enum": ["none", "voicemail", "external", "announcement", "ivr"]
           },
           "mohClassId": {
             "oneOf": [
@@ -12748,7 +12968,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external"],
+            "enum": ["none", "voicemail", "external", "announcement", "ivr"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
           "mohClassId": {
@@ -12850,7 +13070,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external"],
+            "enum": ["none", "voicemail", "external", "announcement", "ivr"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
           "mohClassId": {
@@ -12943,7 +13163,9 @@
         "required": ["id", "extension", "result", "contacts", "node"],
         "description": "The outcome of a paging-group test page.",
         "properties": {
-          "id": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
           "extension": {
             "type": "string",
             "description": "The member that was paged"
@@ -12974,15 +13196,21 @@
               "type": "object",
               "required": ["device", "userAgent", "result", "headers"],
               "properties": {
-                "device": { "type": "string" },
-                "userAgent": { "type": "string" },
+                "device": {
+                  "type": "string"
+                },
+                "userAgent": {
+                  "type": "string"
+                },
                 "result": {
                   "type": "string",
                   "enum": ["answered", "busy", "no_answer", "failed"]
                 },
                 "headers": {
                   "type": "array",
-                  "items": { "type": "string" },
+                  "items": {
+                    "type": "string"
+                  },
                   "description": "The auto-answer headers the INVITE carried, as Name: value"
                 }
               }
@@ -13759,6 +13987,7 @@
               "attended_transfer",
               "announcement",
               "intercom",
+              "ivr",
               "call_waiting_on",
               "call_waiting_off",
               "park",
@@ -13816,6 +14045,7 @@
                     "attended_transfer",
                     "announcement",
                     "intercom",
+                    "ivr",
                     "call_waiting_on",
                     "call_waiting_off",
                     "park",
@@ -14416,18 +14646,6 @@
             "type": "string",
             "pattern": "^[0-9]{4,10}$",
             "description": "The new PIN, 4 to 10 digits."
-          }
-        }
-      },
-      "VoicemailMessageList": {
-        "type": "object",
-        "required": ["items"],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VoicemailMessage"
-            }
           }
         }
       },
@@ -15851,7 +16069,9 @@
             "type": "array",
             "minItems": 1,
             "maxItems": 4,
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Audio codec allow-list offered to the carrier, in preference order. Names are case-insensitive and stored as PCMU, PCMA, G722 or opus; none may repeat. Default PCMU, PCMA."
           },
           "internalDialing": {
@@ -15947,7 +16167,9 @@
             "type": "array",
             "minItems": 1,
             "maxItems": 4,
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Audio codec allow-list offered to the carrier, in preference order. Names are case-insensitive and stored as PCMU, PCMA, G722 or opus; none may repeat. Default PCMU, PCMA."
           },
           "internalDialing": {
@@ -16358,7 +16580,7 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri", "internal"]
+            "enum": ["extension", "external", "sip_uri", "internal", "ivr"]
           },
           "mohClassId": {
             "oneOf": [
@@ -16379,7 +16601,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "An extension number, an external number, an IVR menu name, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean"
@@ -16449,7 +16671,7 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri", "internal"],
+            "enum": ["extension", "external", "sip_uri", "internal", "ivr"],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
           "mohClassId": {
@@ -16542,7 +16764,7 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri", "internal"],
+            "enum": ["extension", "external", "sip_uri", "internal", "ivr"],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
           "mohClassId": {
@@ -16817,7 +17039,9 @@
                   "type": "object",
                   "required": ["extension", "device", "result"],
                   "properties": {
-                    "extension": { "type": "string" },
+                    "extension": {
+                      "type": "string"
+                    },
                     "device": {
                       "type": "string",
                       "description": "The member contact's device; empty when the member was never rung"
@@ -18998,7 +19222,9 @@
       },
       "MulticastChannel": {
         "allOf": [
-          { "$ref": "#/components/schemas/MulticastChannelInput" },
+          {
+            "$ref": "#/components/schemas/MulticastChannelInput"
+          },
           {
             "type": "object",
             "required": ["id", "kind", "priority", "enabled"],
@@ -19317,6 +19543,241 @@
               "format": "int64"
             },
             "description": "Named books in delivery order; an empty list removes them all."
+          }
+        }
+      },
+      "IVRDestination": {
+        "type": "object",
+        "required": ["kind", "target"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "hangup",
+              "extension",
+              "ring_group",
+              "voicemail",
+              "announcement",
+              "paging",
+              "ivr",
+              "external"
+            ],
+            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; or an external number routed through the outbound routes."
+          },
+          "target": {
+            "type": "string",
+            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr); a page code such as *60 (paging); a number (external)."
+          }
+        }
+      },
+      "IVROption": {
+        "type": "object",
+        "required": ["digit", "kind", "target"],
+        "additionalProperties": false,
+        "properties": {
+          "digit": {
+            "type": "string",
+            "pattern": "^[0-9*#]$",
+            "description": "The key; each digit may appear once per menu."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IVRDestination/properties/kind"
+          },
+          "target": {
+            "$ref": "#/components/schemas/IVRDestination/properties/target"
+          }
+        }
+      },
+      "IVRMenu": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "number",
+          "enabled",
+          "greetingId",
+          "greetingName",
+          "invalidPromptId",
+          "invalidPromptName",
+          "timeoutPromptId",
+          "timeoutPromptName",
+          "digitTimeout",
+          "interDigitTimeout",
+          "maxRetries",
+          "allowDirectDial",
+          "timeout",
+          "invalid",
+          "options",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "description": "The number that dials the menu directly; empty when it is only a destination."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "greetingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The announcement played first."
+          },
+          "greetingName": {
+            "type": "string"
+          },
+          "invalidPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement played after an invalid choice; null replays the greeting."
+          },
+          "invalidPromptName": {
+            "type": "string"
+          },
+          "timeoutPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement played after a timeout; null replays the greeting."
+          },
+          "timeoutPromptName": {
+            "type": "string"
+          },
+          "digitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Seconds to wait for the first digit after the prompt."
+          },
+          "interDigitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "description": "Seconds to wait between the digits of a directly dialled extension."
+          },
+          "maxRetries": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "How often the menu repeats after a timeout or an invalid choice before the matching exit destination applies."
+          },
+          "allowDirectDial": {
+            "type": "boolean",
+            "description": "Whether the caller may dial an extension number from the menu."
+          },
+          "timeout": {
+            "$ref": "#/components/schemas/IVRDestination"
+          },
+          "invalid": {
+            "$ref": "#/components/schemas/IVRDestination"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IVROption"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "IVRMenuInput": {
+        "type": "object",
+        "required": ["name", "greetingId"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique menu name (letters, digits, . _ -)."
+          },
+          "number": {
+            "type": "string",
+            "pattern": "^([0-9]{2,16})?$",
+            "description": "Optional number that dials the menu; must not be an extension number or ring group name."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to true; a disabled menu answers 404."
+          },
+          "greetingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Id of the greeting announcement."
+          },
+          "invalidPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Id of the announcement played after an invalid choice; null replays the greeting."
+          },
+          "timeoutPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Id of the announcement played after a timeout; null replays the greeting."
+          },
+          "digitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Defaults to 5."
+          },
+          "interDigitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "description": "Defaults to 3."
+          },
+          "maxRetries": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Defaults to 3."
+          },
+          "allowDirectDial": {
+            "type": "boolean",
+            "description": "Defaults to false."
+          },
+          "timeout": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where the call goes once the retries are used up after silence. Defaults to hangup."
+          },
+          "invalid": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where the call goes once the retries are used up after invalid choices. Defaults to hangup."
+          },
+          "options": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {
+              "$ref": "#/components/schemas/IVROption"
+            },
+            "description": "The menu's keys and where each sends the call; each digit once."
+          }
+        }
+      },
+      "IVRMenuList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IVRMenu"
+            }
           }
         }
       }

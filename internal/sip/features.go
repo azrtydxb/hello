@@ -29,6 +29,8 @@ const (
 	// ActionIntercom is the 1-to-1 intercom prefix (phonebooks-ptt spec
 	// P-13): the code plus an extension number auto-answers that phone.
 	ActionIntercom = "intercom"
+	// ActionIVR runs an IVR menu: the argument names it.
+	ActionIVR = "ivr"
 	// ActionCallWaitingOn and ActionCallWaitingOff toggle the extension's
 	// call-waiting flag (migration 00026, spec S-18).
 	ActionCallWaitingOn  = "call_waiting_on"
@@ -122,6 +124,23 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		return true
 	case ActionIntercom:
 		c.handleIntercom(tx, arg)
+		return true
+	case ActionIVR:
+		name := fc.Argument
+		if name == "" {
+			name = arg
+		}
+		snap := s.deps.Snapshots.Current()
+		m, ok := snapshot.IVRMenu{}, false
+		if snap != nil {
+			m, ok = snap.IVRMenu(name)
+		}
+		if !ok {
+			s.respond(tx, c.inv, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "IVR menu "+name+" does not exist", ResultNotFound)
+			return true
+		}
+		c.startIVR(tx, snap, m)
 		return true
 	case ActionAnnouncement:
 		// The announcement feature code answers, plays its argument's
@@ -230,7 +249,9 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	if h := req.ContentType(); h != nil && isDTMFInfo(h.Value()) {
 		if d, ok := dtmfDigit(req.Body()); ok {
-			s.dispatchDigit(ref.c, ref.leg == nil, d)
+			if ref.leg != nil || !ref.c.ivrDigit(legCaller, d) {
+				s.dispatchDigit(ref.c, ref.leg == nil, d)
+			}
 		}
 	} else if on, ok := recordInfo(req); ok {
 		ref.c.setRecording(on)

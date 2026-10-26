@@ -41,7 +41,7 @@ var (
 var (
 	strategies = []string{"ring-all", "sequential", "round-robin", "longest-idle", "weighted"}
 	fcActions  = []string{"forward_always", "forward_busy", "forward_no_answer", "dnd_on", "dnd_off",
-		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom",
+		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr",
 		"call_waiting_on", "call_waiting_off",
 		"park", "park_retrieve", "pickup_group", "pickup_directed"}
 )
@@ -561,8 +561,16 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		if !externalNumRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be 2-32 of 0-9 * # with an optional leading +")
 		}
+	case "announcement":
+		if !usernameRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be the name of an announcement")
+		}
+	case "ivr":
+		if !usernameRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be the name of an IVR menu")
+		}
 	default:
-		f.add("failureKind", `must be "none", "voicemail" or "external"`)
+		f.add("failureKind", `must be "none", "voicemail", "external", "announcement" or "ivr"`)
 	}
 	if len(in.Members) == 0 || len(in.Members) > 50 {
 		f.add("members", "must have 1-50 members")
@@ -610,6 +618,8 @@ func (s *server) createRingGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, _ := b.toInput(defaultsRingGroup())
+	// The store checks that an IVR failure destination exists, inside the
+	// change's transaction (a menu deleted meanwhile cannot slip through).
 	if f := validateRingGroup(&in); len(f) > 0 {
 		writeFields(w, f)
 		return
@@ -647,6 +657,8 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 		MOHClassID: current.MOHClassID, MOHRingback: current.MOHRingback,
 	}
 	in, _ := b.toInput(base)
+	// The store checks that an IVR failure destination exists, inside the
+	// change's transaction (a menu deleted meanwhile cannot slip through).
 	if f := validateRingGroup(&in); len(f) > 0 {
 		writeFields(w, f)
 		return
@@ -706,6 +718,8 @@ func (s *server) putFeatureCodes(w http.ResponseWriter, r *http.Request) {
 			f.add(p+".code", "must be a distinct code")
 		}
 		seen[c.Code] = true
+		// An "ivr" argument must name a menu: the store checks it inside
+		// the change's transaction.
 	}
 	if len(f) > 0 {
 		writeFields(w, f)

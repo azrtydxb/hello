@@ -9,6 +9,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -499,6 +500,9 @@ func (s *Store) GetRingGroup(ctx context.Context, id int64) (RingGroup, error) {
 func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupInput, check Check) (RingGroup, error) {
 	var g RingGroup
 	err := s.configChange(ctx, actor, "create", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		if err := checkRingGroupIVR(ctx, tx, "", in); err != nil {
+			return 0, err
+		}
 		if err := checkNotSlot(ctx, tx, "name", in.Name); err != nil {
 			return 0, err
 		}
@@ -528,6 +532,18 @@ func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupI
 func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in RingGroupInput, check Check) (RingGroup, error) {
 	var g RingGroup
 	err := s.configChange(ctx, actor, "update", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		var cur string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = $1`, id).Scan(&cur); err != nil {
+			return id, err
+		}
+		if cur != in.Name {
+			if err := refuseIfIVRPoints(ctx, tx, "ring group "+cur+", which cannot be renamed while it is named by", cur, IVRRingGroup); err != nil {
+				return id, err
+			}
+		}
+		if err := checkRingGroupIVR(ctx, tx, cur, in); err != nil {
+			return id, err
+		}
 		if err := checkNotSlot(ctx, tx, "name", in.Name); err != nil {
 			return id, err
 		}
@@ -556,9 +572,32 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 	return g, err
 }
 
+// checkRingGroupIVR checks a ring group's IVR interplay inside the change's
+// transaction: a new name must not be an IVR menu's number, and an IVR
+// failure destination must name an existing menu. cur is the stored name ("" on
+// create).
+func checkRingGroupIVR(ctx context.Context, tx *sql.Tx, cur string, in RingGroupInput) error {
+	if in.Name != cur {
+		if err := refuseIVRNumber(ctx, tx, "name", in.Name); err != nil {
+			return err
+		}
+	}
+	if in.FailureKind == "ivr" {
+		return requireIVRMenuTx(ctx, tx, "failureTarget", in.FailureTarget)
+	}
+	return nil
+}
+
 // DeleteRingGroup removes a group and, by cascade, its members.
 func (s *Store) DeleteRingGroup(ctx context.Context, actor string, id int64, check Check) error {
 	return s.configChange(ctx, actor, "delete", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		var name string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM ring_groups WHERE id = $1`, id).Scan(&name); err != nil {
+			return id, err
+		}
+		if err := refuseIfIVRPoints(ctx, tx, "ring group "+name, name, IVRRingGroup); err != nil {
+			return id, err
+		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM ring_groups WHERE id = $1`, id)
 		if err != nil {
 			return id, err
@@ -629,6 +668,13 @@ func (s *Store) PutFeatureCodes(ctx context.Context, actor string, codes []Featu
 	return s.configChangeID(ctx, actor, "update", "feature_code", check, func(tx *sql.Tx) (string, error) {
 		if err := checkFeatureCodesAgainstPaging(ctx, tx, codes); err != nil {
 			return "", err
+		}
+		for i, c := range codes {
+			if c.Action == "ivr" {
+				if err := requireIVRMenuTx(ctx, tx, fmt.Sprintf("items[%d].argument", i), c.Argument); err != nil {
+					return "", err
+				}
+			}
 		}
 		err := dialGuard(ctx, tx, "items", func() error {
 			for _, c := range codes {

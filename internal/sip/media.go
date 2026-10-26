@@ -304,8 +304,11 @@ func udpAddr(host string, port int) *net.UDPAddr {
 // what lands in the recording (no transcoding).
 func (c *call) recTap(leg string, pkt *media.RTPPacket) {
 	c.mu.Lock()
-	rec := c.rec
+	rec, tap := c.rec, c.vmTap
 	c.mu.Unlock()
+	if tap != nil {
+		tap(leg, pkt)
+	}
 	if rec == nil {
 		return
 	}
@@ -778,6 +781,9 @@ func (c *call) storeRecording(rec *media.Recorder, by string) {
 // (spec S-4). Digits also flow into the call's feature-code buffer, so an
 // INFO dtmf-relay *1 and an in-band *1 behave the same.
 func (c *call) relayDTMF(leg string, digit byte) {
+	if c.ivrDigit(leg, digit) {
+		return // the IVR menu is collecting the caller's digits
+	}
 	// RFC 2833 digits feed the same feature-code collection as INFO ones
 	// (the *1 recording toggle included), so a code dialled mid-call acts
 	// on an anchored call too.

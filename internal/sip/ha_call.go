@@ -45,6 +45,8 @@ const (
 	haPhaseTransferring  = "transferring"
 	haPhaseAnnouncement  = "announcement"
 	haPhaseVoicemail     = "voicemail"
+	haPhaseIVR           = "ivr"
+	haIVRDetailPrefix    = "ivr:"
 	haRecordDetailPrefix = "announcement:"
 	// haReferDetailPrefix names the dialog a REFER arrived on while a
 	// transfer is in progress ("refer:caller" or "refer:callee"), so a
@@ -205,7 +207,7 @@ func (c *call) haSoloRefresh(sdp string) {
 // restart: the voicemail application, or an announcement destination's
 // playback. Anything else is a solo call about to end on its own.
 func haSoloPhase(phase string) bool {
-	return phase == haPhaseVoicemail || phase == haPhaseAnnouncement
+	return phase == haPhaseVoicemail || phase == haPhaseAnnouncement || phase == haPhaseIVR
 }
 
 // noteSentCSeq records a CSeq this node sent on a dialog outside sipgo's
@@ -264,7 +266,7 @@ func (c *call) haState() (livestate.DialogState, bool) {
 		// A one-legged call answered by Hello: recoverable while its
 		// application runs (the taker restarts it from the beginning).
 		if !haSoloPhase(phase) || (phase == haPhaseVoicemail && vm == nil) ||
-			(phase == haPhaseAnnouncement && relay == nil) {
+			((phase == haPhaseAnnouncement || phase == haPhaseIVR) && relay == nil) {
 			return livestate.DialogState{}, false
 		}
 	} else if !anchored || relay == nil || legs[1].callID == "" {

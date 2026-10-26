@@ -217,7 +217,12 @@ func (c *call) extensionBindings(snap *snapshot.Snapshot, ext string) ([]livesta
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, bs...)
+		for _, b := range bs {
+			if c.isCallerContact(b) {
+				continue
+			}
+			out = append(out, b)
+		}
 	}
 	return out, nil
 }

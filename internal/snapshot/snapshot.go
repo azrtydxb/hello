@@ -195,6 +195,8 @@ type Snapshot struct {
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
 	anns   map[string]string
+	// ivrByName and ivrByNumber are the IVR menus (migration 00033).
+	ivrByName, ivrByNumber map[string]IVRMenu
 	// parkLots are the enabled park lots in slot order; pickups the pickup
 	// groups (migration 00032).
 	parkLots []ParkLot
@@ -585,6 +587,10 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	ivrs, err := loadIVRMenus(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	lots, err := loadParkLots(ctx, db)
 	if err != nil {
 		return nil, err
@@ -599,7 +605,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	}
 	return New(rev, domain, devices).WithExtensions(bare...).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs), nil
 }
 
 // loadMOHClasses reads the music on hold classes with their playlists

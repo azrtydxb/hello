@@ -1015,6 +1015,10 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		go c.voicemailFlow(mode, reason, sess)
 		return
 	}
+	if st.State == haPhaseIVR {
+		c.ivrResume(strings.TrimPrefix(st.StateDetail, haIVRDetailPrefix))
+		return
+	}
 	obj := strings.TrimPrefix(st.StateDetail, haRecordDetailPrefix)
 	c.addTrace("Announcement restarts from its beginning after the takeover")
 	go func() {

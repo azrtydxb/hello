@@ -84,6 +84,9 @@ func (s *Store) GetExtension(ctx context.Context, id int64) (Extension, error) {
 func (s *Store) CreateExtension(ctx context.Context, actor, number, name, externalNumber string, check Check) (Extension, error) {
 	var e Extension
 	err := s.configChange(ctx, actor, "create", "extension", check, func(tx *sql.Tx) (int64, error) {
+		if err := refuseIVRNumber(ctx, tx, "number", number); err != nil {
+			return 0, err
+		}
 		if err := checkExtensionNotSlot(ctx, tx, number); err != nil {
 			return 0, err
 		}
@@ -131,6 +134,15 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 		if c.Number != nil && *c.Number != number && len(routes) != 0 {
 			return id, inUse("extension "+number, routes)
 		}
+		if c.Number != nil && *c.Number != number {
+			if err := refuseIfIVRPoints(ctx, tx, "extension "+number+", which cannot be renumbered while it is named by", number,
+				IVRExtension, IVRVoicemail); err != nil {
+				return id, err
+			}
+			if err := refuseIVRNumber(ctx, tx, "number", *c.Number); err != nil {
+				return id, err
+			}
+		}
 		if err := checkMOHClass(ctx, tx, "mohClassId", c.MOHClassID); err != nil {
 			return id, err
 		}
@@ -167,6 +179,9 @@ func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, che
 		}
 		if len(routes) > 0 {
 			return id, inUse("extension "+number, routes)
+		}
+		if err := refuseIfIVRPoints(ctx, tx, "extension "+number, number, IVRExtension, IVRVoicemail); err != nil {
+			return id, err
 		}
 		if err := boundPhone(ctx, tx, `d.extension_id = $1`, id); err != nil {
 			return id, err

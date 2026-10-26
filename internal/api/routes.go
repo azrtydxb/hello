@@ -104,6 +104,11 @@ func (s *server) routes() []route {
 		{"PATCH", "/api/v1/ring-groups/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.updateRingGroup},
 		{"DELETE", "/api/v1/ring-groups/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteRingGroup},
 
+		{"GET", "/api/v1/ivr-menus", auth.ScopeRead, auth.RoleViewer, false, s.listIVRMenus},
+		{"POST", "/api/v1/ivr-menus", auth.ScopeWrite, auth.RoleOperator, false, s.createIVRMenu},
+		{"GET", "/api/v1/ivr-menus/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getIVRMenu},
+		{"PUT", "/api/v1/ivr-menus/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.putIVRMenu},
+		{"DELETE", "/api/v1/ivr-menus/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteIVRMenu},
 		{"GET", "/api/v1/moh-classes", auth.ScopeRead, auth.RoleViewer, false, s.listMOHClasses},
 		{"POST", "/api/v1/moh-classes", auth.ScopeWrite, auth.RoleOperator, false, s.createMOHClass},
 		{"GET", "/api/v1/moh-classes/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getMOHClass},
