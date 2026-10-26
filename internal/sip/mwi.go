@@ -176,7 +176,7 @@ func (s *Server) sendMWINotify(sub *subscription, expires int, reason, kind stri
 	req.SetBody([]byte(body))
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	res, err := s.client.Do(ctx, req)
+	res, err := s.do(ctx, req)
 	if err != nil {
 		s.log.Debug("MWI NOTIFY failed", "device", sub.device, "error", err)
 		s.m.MWINotify.WithLabelValues(kind, "failed").Inc()
@@ -212,7 +212,7 @@ func (s *Server) sendUnsolicitedMWI(ctx context.Context, ext string, b livestate
 	if b.Source != "" {
 		req.SetDestination(b.Source)
 	}
-	res, err := s.client.Do(ctx, req)
+	res, err := s.do(ctx, req)
 	if err != nil {
 		return err
 	}

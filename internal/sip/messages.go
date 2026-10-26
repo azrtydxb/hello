@@ -735,7 +735,7 @@ func (s *Server) messageToContact(ctx context.Context, snap *snapshot.Snapshot, 
 	if len(req.String()) > udpMessageLimit {
 		return sip.StatusRequestEntityTooLarge
 	}
-	res, err := s.client.Do(ctx, req)
+	res, err := s.do(ctx, req)
 	if err != nil {
 		return 0
 	}
@@ -753,7 +753,7 @@ func (s *Server) messageToContact(ctx context.Context, snap *snapshot.Snapshot, 
 		req.AppendHeader(sip.NewHeader(authHdr, cred.String()))
 		req.CSeq().SeqNo++
 		req.RemoveHeader("Via")
-		if res, err = s.client.Do(ctx, req); err != nil {
+		if res, err = s.do(ctx, req); err != nil {
 			return 0
 		}
 		s.m.response(res.StatusCode)
@@ -893,13 +893,13 @@ func (s *Server) messageViaTrunk(ctx context.Context, t routing.Trunk, d routing
 	req.SetBody(j.Body)
 	req.SetTransport("UDP")
 	req.SetDestination(s.trunks.destAddr(d))
-	res, err := s.client.Do(ctx, req)
+	res, err := s.do(ctx, req)
 	if err != nil {
 		return 0
 	}
 	s.m.response(res.StatusCode)
 	if (res.StatusCode == sip.StatusUnauthorized || res.StatusCode == sip.StatusProxyAuthRequired) && t.Password != "" {
-		res, err = s.client.DoDigestAuth(ctx, req, res, sipgo.DigestAuth{Username: t.Username, Password: t.Password})
+		res, err = s.doDigest(ctx, req, res, sipgo.DigestAuth{Username: t.Username, Password: t.Password})
 		if err != nil {
 			return 0
 		}

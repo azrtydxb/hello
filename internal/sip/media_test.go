@@ -132,8 +132,8 @@ func TestRecording(t *testing.T) {
 		s.WithAnnouncements(map[string]string{"recording-notice": "ann/recording-notice.wav"})
 	}
 	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), withMedia(false),
-		withFeatures(feats), withVoicemail(newVMStore(), objs))
-	pbx.srv.deps.Recordings = recs
+		withFeatures(feats), withVoicemail(newVMStore(), objs),
+		func(_ *Config, d *Deps) { d.Recordings = recs })
 	a := newPhone(t, pbx, "a1", "pa")
 	a.register(t)
 	b := newPhone(t, pbx, "b1", "pb1")
@@ -285,8 +285,8 @@ func TestRecordingPauseOnHold(t *testing.T) {
 		s.WithExtensionData([]snapshot.Extension{{Number: "200", RecordDefault: true}})
 	}
 	pbx := startPBX(t, callerDevices(), shortRing(2*time.Second), withMedia(false),
-		withFeatures(feats), withVoicemail(newVMStore(), objs))
-	pbx.srv.deps.Recordings = recs
+		withFeatures(feats), withVoicemail(newVMStore(), objs),
+		func(_ *Config, d *Deps) { d.Recordings = recs })
 	a := newPhone(t, pbx, "a1", "pa")
 	a.register(t)
 	b := newPhone(t, pbx, "b1", "pb1")
@@ -350,8 +350,8 @@ func TestAnnouncements(t *testing.T) {
 		s.WithAnnouncements(map[string]string{"welcome": "ann/welcome.wav"})
 	}
 	pbx := startPBX(t, threeDevices(), shortRing(300*time.Millisecond), withMedia(false),
-		withFeatures(feats), withVoicemail(newVMStore(), objs))
-	pbx.srv.deps.Recordings = &fakeRecordings{}
+		withFeatures(feats), withVoicemail(newVMStore(), objs),
+		func(_ *Config, d *Deps) { d.Recordings = &fakeRecordings{} })
 	a := newPhone(t, pbx, "a1", "pa")
 	a.register(t)
 	b := newPhone(t, pbx, "b1", "pb1")
@@ -688,8 +688,8 @@ func TestRecordingToggleRFC2833(t *testing.T) {
 	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), withMedia(false),
 		withFeatures(func(s *snapshot.Snapshot) {
 			s.WithAnnouncements(map[string]string{"recording-notice": "ann/recording-notice.wav"})
-		}), withVoicemail(newVMStore(), objs))
-	pbx.srv.deps.Recordings = recs
+		}), withVoicemail(newVMStore(), objs),
+		func(_ *Config, d *Deps) { d.Recordings = recs })
 	a := newPhone(t, pbx, "a1", "pa")
 	a.register(t)
 	b := newPhone(t, pbx, "b1", "pb1")

@@ -565,8 +565,8 @@ func TestConferenceWaitForLeader(t *testing.T) {
 	room := pinRoom()
 	room.UserPIN, room.LeaderPIN, room.WaitForLeader = "", "9999", true
 	hold := hold500{}
-	pbx := startPBX(t, confDevices(), withRooms(room), withConferences(f, nil))
-	pbx.srv.deps.ConferenceHold = hold
+	pbx := startPBX(t, confDevices(), withRooms(room), withConferences(f, nil),
+		func(_ *Config, d *Deps) { d.ConferenceHold = hold })
 	a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
 	a.register(t)
 	b.register(t)

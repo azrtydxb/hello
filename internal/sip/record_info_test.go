@@ -92,8 +92,8 @@ func TestRecordInfoTogglesRecording(t *testing.T) {
 		s.WithAnnouncements(map[string]string{"recording-notice": "ann/recording-notice.wav"})
 	}
 	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), withMedia(false),
-		withFeatures(feats), withVoicemail(newVMStore(), objs))
-	pbx.srv.deps.Recordings = recs
+		withFeatures(feats), withVoicemail(newVMStore(), objs),
+		func(_ *Config, d *Deps) { d.Recordings = recs })
 	a := newPhone(t, pbx, "a1", "pa")
 	a.register(t)
 	c := newPhone(t, pbx, "c1", "pc")
