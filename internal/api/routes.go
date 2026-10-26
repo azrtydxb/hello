@@ -256,6 +256,12 @@ func (s *server) routes() []route {
 		{"POST", "/api/v1/phonebooks/{id}/import", auth.ScopeWrite, auth.RoleOperator, false, s.importPhonebook},
 		{"GET", "/api/v1/phonebooks/{id}/export", auth.ScopeWrite, auth.RoleOperator, false, s.exportPhonebook},
 
+		{"GET", "/api/v1/blocklist", auth.ScopeRead, auth.RoleViewer, false, s.listBlocklist},
+		{"POST", "/api/v1/blocklist", auth.ScopeWrite, auth.RoleOperator, false, s.createBlocklistEntry},
+		{"POST", "/api/v1/blocklist/import", auth.ScopeWrite, auth.RoleOperator, false, s.importBlocklist},
+		{"PUT", "/api/v1/blocklist/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.putBlocklistEntry},
+		{"DELETE", "/api/v1/blocklist/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteBlocklistEntry},
+
 		{"GET", "/api/v1/me/contacts", auth.ScopeRead, auth.RoleUser, false, s.listContacts},
 		{"POST", "/api/v1/me/contacts", auth.ScopeWrite, auth.RoleUser, false, s.createContact},
 		{"POST", "/api/v1/me/contacts/import", auth.ScopeWrite, auth.RoleUser, false, s.importContacts},

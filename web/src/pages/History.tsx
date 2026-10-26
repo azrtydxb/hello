@@ -27,11 +27,18 @@ import { clock, day, directionOf, statusTone } from "./calls/common";
 export const PAGE_SIZE = 50;
 
 /** The tabs of Call history, also its ?tab= values. */
-export type HistoryTab = "all" | "failed" | "inbound" | "outbound" | "internal";
+export type HistoryTab =
+  | "all"
+  | "failed"
+  | "blocked"
+  | "inbound"
+  | "outbound"
+  | "internal";
 
 const TAB_IDS: readonly HistoryTab[] = [
   "all",
   "failed",
+  "blocked",
   "inbound",
   "outbound",
   "internal",
@@ -40,6 +47,7 @@ const TAB_IDS: readonly HistoryTab[] = [
 const FILTERS: Record<HistoryTab, CdrFilter> = {
   all: {},
   failed: { failed: true },
+  blocked: { disposition: "blocked" },
   inbound: { direction: "inbound" },
   outbound: { direction: "outbound" },
   internal: { direction: "internal" },
@@ -107,6 +115,7 @@ export function History() {
   const tabs: TabItem<HistoryTab>[] = [
     { id: "all", label: "All", count: counts?.all },
     { id: "failed", label: "Failed", count: counts?.failed },
+    { id: "blocked", label: "Blocked" },
     { id: "inbound", label: "Inbound" },
     { id: "outbound", label: "Outbound" },
     { id: "internal", label: "Internal" },
@@ -239,7 +248,9 @@ export function History() {
                 ? "No older calls"
                 : tab === "failed"
                   ? "No failed calls"
-                  : "No calls recorded"
+                  : tab === "blocked"
+                    ? "No blocked calls"
+                    : "No calls recorded"
             }
             description="A call record is written when a call ends."
           />

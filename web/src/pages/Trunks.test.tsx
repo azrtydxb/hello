@@ -22,6 +22,10 @@ const TRUNK = {
   internalDialing: { mode: "off", patterns: [] },
   messaging: false,
   codecs: ["PCMU", "PCMA"],
+  rejectAnonymous: false,
+  allowedCountryCodes: [],
+  unknownCallerAction: "block",
+  rejectCode: 603,
   createdAt: "2026-10-01T10:00:00Z",
   updatedAt: "2026-10-01T10:00:00Z",
 };
@@ -175,6 +179,64 @@ describe("Trunks", () => {
     expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
       codecs: ["PCMU", "PCMA", "G722"],
     });
+  });
+
+  it("sets the caller screening of a trunk: anonymous reject, countries, reject code", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+      "PATCH /api/v1/trunks/4": () =>
+        json({
+          ...TRUNK,
+          rejectAnonymous: true,
+          allowedCountryCodes: ["41", "49"],
+          rejectCode: 486,
+        }),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    expect(within(primary).getByText("Caller screening")).toBeVisible();
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    expect(
+      screen.getByRole("switch", { name: /Reject anonymous/ }),
+    ).not.toBeChecked();
+    fireEvent.click(screen.getByRole("switch", { name: /Reject anonymous/ }));
+    field("Allowed country codes", "41, +49");
+    field("Answer a screened call with", "486");
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(
+      await screen.findByText("Trunk carrier-primary saved."),
+    ).toBeVisible();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toMatchObject({
+      rejectAnonymous: true,
+      allowedCountryCodes: ["41", "49"],
+      unknownCallerAction: "block",
+      rejectCode: 486,
+    });
+  });
+
+  it("refuses a country code that is not a calling code", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: [TRUNK] }),
+      "GET /api/v1/trunks/status": () => json({ items: [STATUS] }),
+    });
+    renderApp("/trunks");
+    const primary = await card(/carrier-primary/);
+    fireEvent.click(
+      within(primary).getByRole("button", {
+        name: "Edit trunk carrier-primary",
+      }),
+    );
+    field("Allowed country codes", "041");
+    fireEvent.click(screen.getByRole("button", { name: "Save trunk" }));
+    expect(await screen.findByText(/without a leading 0/)).toBeVisible();
+    expect(calls.some((c) => c.method === "PATCH")).toBe(false);
   });
 
   it("refuses a trunk with no codec ticked", async () => {

@@ -280,6 +280,9 @@ type Config struct {
 	// lookup keys of stored numbers are built in.
 	Phonebooks PhonebookStore
 	Dialing    phonebook.Dialing
+	// Blocklist is the call blocklist persistence; nil answers 503 on the
+	// blocklist routes.
+	Blocklist BlocklistStore
 	// Messages is the SIP MESSAGE persistence; nil answers 503 on the
 	// message routes.
 	Messages MessageStore

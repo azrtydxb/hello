@@ -41,6 +41,9 @@ type RoutingState struct {
 	// Errors are this revision's compile errors; when set, Router and
 	// Config are the last good revision's.
 	Errors []routing.FieldError
+	// Blocklist is the compiled blocklist (pbx-gaps S-7); nil matches
+	// nothing.
+	Blocklist *routing.Blocklist
 }
 
 // Routing returns the snapshot's routing state. A snapshot built with New
@@ -64,27 +67,32 @@ func (s *Snapshot) WithRouting(r *RoutingState) *Snapshot {
 // silently, and never logged itself (only its ID and reason are).
 func loadTrunks(ctx context.Context, db Querier, box *secret.Box, log *slog.Logger, cfg *routing.Config, bad map[int64]string) error {
 	rows, err := db.Query(ctx, `SELECT id, name, mode, username, password_enc, realm, from_domain, register_expires,
-		options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging FROM trunks ORDER BY id`)
+		options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging,
+		reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code FROM trunks ORDER BY id`)
 	if err != nil {
 		return fmt.Errorf("snapshot: trunks: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var (
-			t         routing.Trunk
-			sealed    []byte
-			dialing   []byte
-			codecs    []byte
-			reg, opts int32
-			maxCalls  int32
+			t          routing.Trunk
+			sealed     []byte
+			dialing    []byte
+			codecs     []byte
+			reg, opts  int32
+			maxCalls   int32
+			rejectCode int32
 		)
 		if err := rows.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &sealed, &t.Realm, &t.FromDomain, &reg,
-			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging); err != nil {
+			&opts, &t.SourceCIDRs, &maxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging,
+			&t.CallerPolicy.RejectAnonymous, &t.CallerPolicy.AllowedCountryCodes, &t.CallerPolicy.UnknownCallerAction,
+			&rejectCode); err != nil {
 			return fmt.Errorf("snapshot: scan trunk: %w", err)
 		}
 		t.RegisterExpires = time.Duration(reg) * time.Second
 		t.OptionsInterval = time.Duration(opts) * time.Second
 		t.MaxCalls = int(maxCalls)
+		t.CallerPolicy.RejectCode = int(rejectCode)
 		if err := json.Unmarshal(dialing, &t.InternalDialing); err != nil {
 			return fmt.Errorf("snapshot: decode trunk %d internal_dialing: %w", t.ID, err)
 		}
@@ -161,6 +169,9 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 		return cfg, nil, fmt.Errorf("snapshot: destinations: %w", err)
 	}
 
+	if err := loadBlocklist(ctx, db, &cfg); err != nil {
+		return cfg, nil, err
+	}
 	if err := loadOutbound(ctx, db, &cfg); err != nil {
 		return cfg, nil, err
 	}
@@ -274,6 +285,26 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 	return cfg, bad, nil
 }
 
+// loadBlocklist reads the enabled blocklist entries (pbx-gaps S-7), with the
+// name of the announcement each one plays.
+func loadBlocklist(ctx context.Context, db Querier, cfg *routing.Config) error {
+	rows, err := db.Query(ctx, `SELECT b.id, b.pattern, b.match, b.action, coalesce(b.trunk_id, 0), coalesce(a.name, '')
+		FROM call_blocklist b LEFT JOIN announcements a ON a.id = b.announcement_id
+		WHERE b.enabled ORDER BY b.id`)
+	if err != nil {
+		return fmt.Errorf("snapshot: blocklist: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var e routing.BlockEntry
+		if err := rows.Scan(&e.ID, &e.Pattern, &e.Match, &e.Action, &e.TrunkID, &e.Announcement); err != nil {
+			return fmt.Errorf("snapshot: scan blocklist entry: %w", err)
+		}
+		cfg.Blocklist = append(cfg.Blocklist, e)
+	}
+	return rows.Err()
+}
+
 func loadOutbound(ctx context.Context, db Querier, cfg *routing.Config) error {
 	rows, err := db.Query(ctx, `SELECT id, position, name, match_kind, match, source_extensions, schedule,
 		number_transform, callerid_transform, failover_codes, emergency, enabled FROM outbound_routes ORDER BY position`)
@@ -382,6 +413,7 @@ func decodeJSON(sched []byte, s **routing.Schedule, num []byte, n *routing.Trans
 func buildRouting(cfg routing.Config, bad map[int64]string, resolved map[string][]string) *RoutingState {
 	cfg.ResolvedIPs = resolvedIPs(cfg.Trunks, resolved)
 	rs := &RoutingState{Config: cfg, Misconfigured: bad, Resolved: resolved}
+	rs.Blocklist = routing.CompileBlocklist(cfg.Blocklist)
 	rs.Router, rs.Errors = compile(cfg)
 	if rs.Router == nil {
 		// Never nil: the watcher swaps in the last good table on install.

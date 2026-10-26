@@ -84,6 +84,10 @@ type Trunk struct {
 	// caller's order (names: PCMU, PCMA, G722, opus). Empty means the
 	// default, PCMU and PCMA: most carriers accept G.711 only.
 	Codecs []string
+	// CallerPolicy screens inbound calls from this trunk: anonymous reject
+	// and a country restriction (pbx-gaps S-8). The zero value screens
+	// nothing.
+	CallerPolicy CallerPolicy
 }
 
 // OutboundRoute matches calls from extensions to external numbers.
@@ -155,6 +159,9 @@ type Config struct {
 	// resolved to, for source validation. hello-sip fills it off the call
 	// path (DNS); hello-control's route tester may leave it empty.
 	ResolvedIPs map[int64][]netip.Addr
+	// Blocklist is the enabled blocklist entries (pbx-gaps S-7). It is not
+	// validated by Compile: hello-sip compiles it with CompileBlocklist.
+	Blocklist []BlockEntry
 }
 
 // FieldError is a validation failure on one field, for API 400 responses.

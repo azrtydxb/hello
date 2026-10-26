@@ -25,9 +25,12 @@ const byeTimeout = 35 * time.Second
 // per binding of the dialled extension (B legs, UAC dialogs). It stays on
 // the node that set it up.
 type call struct {
-	s      *Server
-	id     string // correlation ID
-	callID string // caller's Call-ID
+	s *Server
+	// blocked is why a trunk's screening turned this call away (blocklist,
+	// anonymous or country); empty for every other call. Guarded by mu.
+	blocked string
+	id      string // correlation ID
+	callID  string // caller's Call-ID
 	// The caller as presented: an extension (with its device) or a trunk's
 	// caller ID; callerDevice is never rung for this call.
 	callerNum    string
@@ -1242,6 +1245,9 @@ func (c *call) record(status int, side, reason, result string) {
 		}
 	}
 	trace := append(routing.Trace(nil), c.trace...)
+	if c.blocked != "" {
+		reason = "blocked: " + c.blocked
+	}
 	r := cdr.Record{
 		CorrelationID: c.id, SIPCallID: c.callID, Source: c.callerNum, Destination: c.dialled,
 		StartTime: c.start, RingTime: ring, AnswerTime: answer, EndTime: end,

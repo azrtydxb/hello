@@ -1824,6 +1824,15 @@
             }
           },
           {
+            "name": "disposition",
+            "in": "query",
+            "description": "blocked keeps only the calls a trunk's screening turned away (blocklist, anonymous reject or country restriction); their failure reason starts with \"blocked: \".",
+            "schema": {
+              "type": "string",
+              "enum": ["blocked"]
+            }
+          },
+          {
             "name": "failed",
             "in": "query",
             "description": "true keeps only failed calls (final status outside 2xx)",
@@ -1955,6 +1964,15 @@
             "schema": {
               "type": "string",
               "enum": ["internal", "inbound", "outbound"]
+            }
+          },
+          {
+            "name": "disposition",
+            "in": "query",
+            "description": "blocked keeps only the calls a trunk's screening turned away (blocklist, anonymous reject or country restriction); their failure reason starts with \"blocked: \".",
+            "schema": {
+              "type": "string",
+              "enum": ["blocked"]
             }
           },
           {
@@ -10404,6 +10422,314 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/blocklist": {
+      "get": {
+        "operationId": "listBlocklist",
+        "summary": "List blocklist entries",
+        "description": "Lists the call blocklist in id order, 200 entries a page. The reason note is returned to admins only.",
+        "tags": [
+          "blocklist"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "description": "Keep entries whose stored pattern contains this text."
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "block",
+                "allow"
+              ]
+            },
+            "description": "Keep only entries with this action."
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "global, or a trunk id."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 200
+            },
+            "description": "Page size, 1-1000."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "The previous page's next."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": {
+              "$ref": "#/components/schemas/BlocklistPage"
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createBlocklistEntry",
+        "summary": "Add a blocklist entry",
+        "description": "Blocks (or allows) a number or a number prefix, on every trunk or one. An allow entry always beats a block entry; among entries of the same action an exact match beats a prefix and a longer prefix beats a shorter one. A blocked inbound call is turned away with the trunk's reject code (603 or 486) and never rings; its CDR has failure reason \"blocked: blocklist\". At most 10000 entries (409 beyond). A number already listed for the scope is a 400 on pattern.",
+        "tags": [
+          "blocklist"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlocklistEntryInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": {
+              "$ref": "#/components/schemas/BlocklistEntry"
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/blocklist/import": {
+      "post": {
+        "operationId": "importBlocklist",
+        "summary": "Import blocklist entries from CSV",
+        "description": "Reads a CSV file (multipart part \"file\", at most 2 MiB and 10000 rows) with the header number,action,match,scope,reason (number is required; the others are optional, any order, comma or semicolon). action is block (default) or allow, match is exact (default; a number ending in * is a prefix) or prefix, scope is global (default) or a trunk name. A number already listed for its scope is updated. dry_run=true checks every row and writes nothing. An import is all or nothing: with failing rows it answers 400 with the result and writes nothing; one that would pass 10000 entries is a 409.",
+        "tags": [
+          "blocklist"
+        ],
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "true only checks the rows."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The CSV file."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": {
+              "$ref": "#/components/schemas/BlocklistImportResult"
+            }
+          },
+          "400": {
+            "description": "A malformed request (an error), or an import with failing rows (the result, ok false, nothing written)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    {
+                      "$ref": "#/components/schemas/BlocklistImportResult"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "multipart CSV upload"
+        }
+      }
+    },
+    "/api/v1/blocklist/{id}": {
+      "put": {
+        "operationId": "putBlocklistEntry",
+        "summary": "Replace a blocklist entry",
+        "description": "Replaces every field of the entry; absent fields take their defaults, except reason, which keeps its current value.",
+        "tags": [
+          "blocklist"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlocklistEntryInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": {
+              "$ref": "#/components/schemas/BlocklistEntry"
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteBlocklistEntry",
+        "summary": "Delete a blocklist entry",
+        "description": "Removes the entry; calls from the number are no longer screened by it.",
+        "tags": [
+          "blocklist"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phonebooks": {
       "get": {
         "operationId": "listPhonebooks",
@@ -18714,7 +19040,7 @@
           "internalDialing",
           "codecs",
           "messaging"
-        ],
+        , "rejectAnonymous", "allowedCountryCodes", "unknownCallerAction", "rejectCode"],
         "properties": {
           "id": {
             "type": "integer",
@@ -18811,6 +19137,38 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Off by default."
+          },
+          "rejectAnonymous": {
+            "type": "boolean",
+            "description": "Turn away inbound calls from a withheld caller (From user anonymous, Privacy: id, or no caller number) with rejectCode before routing. Off by default. Internal calls and calls from extensions are never checked."
+          },
+          "allowedCountryCodes": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,2}$",
+              "example": "41"
+            },
+            "description": "Country calling codes (digits, a leading + is dropped) inbound callers must come from. Empty means no restriction. The caller number is normalised with HELLO_DIAL_INTL_PREFIX and HELLO_DIAL_COUNTRY_CODE; a number that cannot be normalised follows unknownCallerAction."
+          },
+          "unknownCallerAction": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "block"
+            ],
+            "default": "block",
+            "description": "What a trunk with allowedCountryCodes does with a caller number that cannot be normalised (including a withheld one). Only used while allowedCountryCodes is not empty."
+          },
+          "rejectCode": {
+            "type": "integer",
+            "enum": [
+              603,
+              486
+            ],
+            "default": 603,
+            "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
           }
         }
       },
@@ -18913,6 +19271,38 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
+          },
+          "rejectAnonymous": {
+            "type": "boolean",
+            "description": "Turn away inbound calls from a withheld caller (From user anonymous, Privacy: id, or no caller number) with rejectCode before routing. Off by default. Internal calls and calls from extensions are never checked."
+          },
+          "allowedCountryCodes": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,2}$",
+              "example": "41"
+            },
+            "description": "Country calling codes (digits, a leading + is dropped) inbound callers must come from. Empty means no restriction. The caller number is normalised with HELLO_DIAL_INTL_PREFIX and HELLO_DIAL_COUNTRY_CODE; a number that cannot be normalised follows unknownCallerAction."
+          },
+          "unknownCallerAction": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "block"
+            ],
+            "default": "block",
+            "description": "What a trunk with allowedCountryCodes does with a caller number that cannot be normalised (including a withheld one). Only used while allowedCountryCodes is not empty."
+          },
+          "rejectCode": {
+            "type": "integer",
+            "enum": [
+              603,
+              486
+            ],
+            "default": 603,
+            "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
           }
         }
       },
@@ -19015,6 +19405,38 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
+          },
+          "rejectAnonymous": {
+            "type": "boolean",
+            "description": "Turn away inbound calls from a withheld caller (From user anonymous, Privacy: id, or no caller number) with rejectCode before routing. Off by default. Internal calls and calls from extensions are never checked."
+          },
+          "allowedCountryCodes": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,2}$",
+              "example": "41"
+            },
+            "description": "Country calling codes (digits, a leading + is dropped) inbound callers must come from. Empty means no restriction. The caller number is normalised with HELLO_DIAL_INTL_PREFIX and HELLO_DIAL_COUNTRY_CODE; a number that cannot be normalised follows unknownCallerAction."
+          },
+          "unknownCallerAction": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "block"
+            ],
+            "default": "block",
+            "description": "What a trunk with allowedCountryCodes does with a caller number that cannot be normalised (including a withheld one). Only used while allowedCountryCodes is not empty."
+          },
+          "rejectCode": {
+            "type": "integer",
+            "enum": [
+              603,
+              486
+            ],
+            "default": 603,
+            "description": "The final response of a call this trunk screens out: 603 Decline or 486 Busy Here. Also used for blocklist matches on this trunk."
           }
         }
       },
@@ -19818,6 +20240,238 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TraceStep"
+            }
+          }
+        }
+      },
+      "BlocklistEntry": {
+        "type": "object",
+        "required": [
+          "id",
+          "pattern",
+          "match",
+          "action",
+          "trunkId",
+          "trunkName",
+          "reason",
+          "announcementId",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "The number as stored: a normalised phonebook key (E.164 with a leading +, or the digits when the country is unknown), with a trailing * on a prefix entry.",
+            "example": "+4122123456"
+          },
+          "match": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "prefix"
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "block",
+              "allow"
+            ],
+            "description": "An allow entry always beats a block entry."
+          },
+          "trunkId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The trunk the entry applies to; null is every trunk."
+          },
+          "trunkName": {
+            "type": "string",
+            "description": "The trunk's name; empty for a global entry."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "The administrators' note. Returned to admins only; empty for other roles."
+          },
+          "announcementId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "An announcement played to a blocked caller before the call ends; null plays none."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BlocklistEntryInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "A number to match, in any usual spelling (+41 22 123 45 67, 0041221234567, 022 123 45 67 with HELLO_DIAL_COUNTRY_CODE set). For a prefix, a leading part such as +44 (a trailing * is allowed). Required.",
+            "example": "+44"
+          },
+          "match": {
+            "type": "string",
+            "enum": [
+              "exact",
+              "prefix"
+            ],
+            "default": "exact",
+            "description": "exact matches the whole number; prefix matches every number that starts with the pattern."
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "block",
+              "allow"
+            ],
+            "default": "block",
+            "description": "block turns the call away; allow lets it through and beats every block entry."
+          },
+          "trunkId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Limit the entry to one trunk; null or absent is every trunk."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "A note shown to admins only. On a replace, absent keeps the current note."
+          },
+          "announcementId": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Block entries only: an announcement to play before the call ends."
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "A disabled entry is kept but not applied."
+          }
+        }
+      },
+      "BlocklistPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "next",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlocklistEntry"
+            }
+          },
+          "next": {
+            "type": "string",
+            "description": "Pass as after for the next page; empty at the end."
+          },
+          "total": {
+            "type": "integer",
+            "description": "Entries matching the filter, over all pages."
+          }
+        }
+      },
+      "BlocklistImportResult": {
+        "type": "object",
+        "required": [
+          "ok",
+          "dryRun",
+          "rows",
+          "created",
+          "updated",
+          "errors",
+          "warnings"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether every row is valid (and, unless dry_run, was imported)."
+          },
+          "dryRun": {
+            "type": "boolean"
+          },
+          "rows": {
+            "type": "integer",
+            "description": "Data rows read."
+          },
+          "created": {
+            "type": "integer",
+            "description": "Entries added; 0 for a dry run or a refused import."
+          },
+          "updated": {
+            "type": "integer",
+            "description": "Existing entries (same number and scope) changed."
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "row",
+                "column",
+                "reason"
+              ],
+              "properties": {
+                "row": {
+                  "type": "integer",
+                  "description": "1 is the header row, the first entry is row 2."
+                },
+                "column": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "row",
+                "reason"
+              ],
+              "properties": {
+                "row": {
+                  "type": "integer"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
             }
           }
         }
