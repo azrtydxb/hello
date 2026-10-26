@@ -31,6 +31,7 @@ type pickupReq struct {
 	node      string // the picker's node and Call-ID when it is not here
 	callID    string
 	retriever string
+	source    string // the picker's signalling source, vouched for its media
 	res       chan pickupRes
 }
 
@@ -122,7 +123,7 @@ func (c *call) answerPickup(req *pickupReq) {
 	}
 	// The picker's media: the relay's callee leg, in the codec the caller
 	// and the picker share.
-	relay.SetTarget(legCallee, udpAddr(req.offer.Address, req.offer.Port))
+	handOverLeg(relay, legCallee, udpAddr(req.offer.Address, req.offer.Port), req.source)
 	ans := media.AnswerFor(off, req.offer)
 	c.applyNegotiated(ans)
 	takerAns := ans.Build(c.anchorHost, relay.LegPort(legCallee), "sendrecv")
@@ -251,13 +252,14 @@ func (c *call) pickupFrom(tx sip.ServerTransaction, snap *snapshot.Snapshot, can
 	for _, cand := range cands {
 		var res pickupRes
 		if cand.local != nil {
-			res = cand.local.pickupBy(&pickupReq{offer: offer, taker: c, retriever: c.callerNum, res: make(chan pickupRes, 1)})
+			res = cand.local.pickupBy(&pickupReq{offer: offer, taker: c, retriever: c.callerNum, source: c.inv.Source(), res: make(chan pickupRes, 1)})
 			if res.ok {
 				lk.peer = cand.local
 			}
 		} else {
 			rep, ok := s.parkCommand(cand.live.Node, livestate.ParkCommand{Op: livestate.ParkOpPickup,
-				Correlation: cand.live.ID, Offer: string(c.inv.Body()), PeerCallID: c.callID, Retriever: c.callerNum})
+				Correlation: cand.live.ID, Offer: string(c.inv.Body()), PeerCallID: c.callID, Retriever: c.callerNum,
+				Source: c.inv.Source()})
 			res = pickupRes{ok: ok, answer: []byte(rep.Answer), code: rep.Code, why: rep.Reason, callID: rep.CallID}
 			if ok {
 				lk.node, lk.callID = cand.live.Node, rep.CallID
@@ -391,7 +393,7 @@ func (s *Server) runParkCommand(cmd livestate.ParkCommand) {
 		case !ok:
 			rep.Code, rep.Reason = sip.StatusGone, "the parked call is gone"
 		default:
-			ans, code, why, ok := ref.c.parkRetrieved(offer, cmd.Retriever, cmd.From, cmd.PeerCallID, nil)
+			ans, code, why, ok := ref.c.parkRetrieved(offer, cmd.Retriever, cmd.Source, cmd.From, cmd.PeerCallID, nil)
 			rep.OK, rep.Answer, rep.Code, rep.Reason, rep.CallID = ok, string(ans), code, why, ref.c.callID
 		}
 	case livestate.ParkOpPickup:
@@ -410,7 +412,7 @@ func (s *Server) runParkCommand(cmd livestate.ParkCommand) {
 		case target == nil:
 			rep.Code, rep.Reason = sip.StatusNotFound, "the call is no longer ringing"
 		default:
-			r := target.pickupBy(&pickupReq{offer: offer, node: cmd.From, callID: cmd.PeerCallID, retriever: cmd.Retriever,
+			r := target.pickupBy(&pickupReq{offer: offer, node: cmd.From, callID: cmd.PeerCallID, retriever: cmd.Retriever, source: cmd.Source,
 				res: make(chan pickupRes, 1)})
 			rep.OK, rep.Answer, rep.Code, rep.Reason, rep.CallID = r.ok, string(r.answer), r.code, r.why, r.callID
 		}

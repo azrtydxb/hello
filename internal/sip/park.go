@@ -210,7 +210,7 @@ func (s *Server) notifyPeer(from *call, lk *callLink) {
 // attachParty points relay leg at a phone's SDP offer and returns the answer
 // to give that phone: the relay port for the leg with the held party's
 // codec. Callers hold no lock.
-func (c *call) attachParty(leg string, offer media.AudioSDP) ([]byte, bool) {
+func (c *call) attachParty(leg string, offer media.AudioSDP, source string) ([]byte, bool) {
 	c.mu.Lock()
 	relay, host := c.relay, c.anchorHost
 	var base media.AudioSDP
@@ -221,7 +221,7 @@ func (c *call) attachParty(leg string, offer media.AudioSDP) ([]byte, bool) {
 	if relay == nil || len(base.Codecs) == 0 {
 		return nil, false
 	}
-	relay.SetTarget(leg, udpAddr(offer.Address, offer.Port))
+	handOverLeg(relay, leg, udpAddr(offer.Address, offer.Port), source)
 	return base.Build(host, relay.LegPort(leg), "sendrecv"), true
 }
 
@@ -502,7 +502,7 @@ func (c *call) parkRelease(pk *parkState) {
 // parkRetrieved connects a retriever to this held call: the retriever's
 // offer is attached to the party's counterpart relay leg and the answer for
 // the retriever is returned. The slot is already claimed.
-func (c *call) parkRetrieved(offer media.AudioSDP, retriever string, takerNode, takerCallID string, taker *call) ([]byte, int, string, bool) {
+func (c *call) parkRetrieved(offer media.AudioSDP, retriever, source string, takerNode, takerCallID string, taker *call) ([]byte, int, string, bool) {
 	c.mu.Lock()
 	pk, lk := c.park, c.link
 	if pk == nil || lk == nil || pk.phase != phaseParked || c.ended || c.hungUp {
@@ -517,7 +517,7 @@ func (c *call) parkRetrieved(offer media.AudioSDP, retriever string, takerNode, 
 	if lk.relayLeg == legCallee {
 		leg = legCaller
 	}
-	answer, ok := c.attachParty(leg, offer)
+	answer, ok := c.attachParty(leg, offer, source)
 	if !ok {
 		return nil, sip.StatusServiceUnavailable, "the parked call lost its media", false
 	}
@@ -580,11 +580,11 @@ func (c *call) handleRetrieve(tx sip.ServerTransaction, snap *snapshot.Snapshot,
 		}
 		lk.peer = ref.c
 		peerID = ref.c.callID
-		answer, code, why, ok = ref.c.parkRetrieved(offer, c.callerNum, s.cfg.NodeID, c.callID, c)
+		answer, code, why, ok = ref.c.parkRetrieved(offer, c.callerNum, c.inv.Source(), s.cfg.NodeID, c.callID, c)
 	} else {
 		var rep livestate.ParkReply
 		rep, ok = s.parkCommand(p.Node, livestate.ParkCommand{Op: livestate.ParkOpRetrieve, Slot: slot, CallID: p.CallID,
-			Offer: string(c.inv.Body()), PeerCallID: c.callID, Retriever: c.callerNum})
+			Offer: string(c.inv.Body()), PeerCallID: c.callID, Retriever: c.callerNum, Source: c.inv.Source()})
 		answer, peerID, code, why = []byte(rep.Answer), rep.CallID, rep.Code, rep.Reason
 		lk.node, lk.callID = p.Node, rep.CallID
 	}
@@ -730,12 +730,14 @@ func (c *call) parkReturnLegs(snap *snapshot.Snapshot, pk *parkState, relay *med
 // stopping it can wait for the player.
 func (c *call) parkReturnAnswered(rc *call, l *leg, pk *parkState, partyLeg, parkerLeg string) {
 	s := c.s
-	if ans, err := media.ParseAudioSDP(l.session().InviteResponse.Body()); err == nil {
-		c.mu.Lock()
-		relay := c.relay
-		c.mu.Unlock()
-		if relay != nil {
-			relay.SetTarget(parkerLeg, udpAddr(ans.Address, ans.Port))
+	if res := l.session().InviteResponse; res != nil {
+		if ans, err := media.ParseAudioSDP(res.Body()); err == nil {
+			c.mu.Lock()
+			relay := c.relay
+			c.mu.Unlock()
+			if relay != nil {
+				handOverLeg(relay, parkerLeg, udpAddr(ans.Address, ans.Port), res.Source())
+			}
 		}
 	}
 	rc.mu.Lock()

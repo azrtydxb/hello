@@ -272,6 +272,27 @@ func (r *Relay) AllowSource(name string, ip net.IP) {
 	l.extraIPs = append(l.extraIPs, append(net.IP(nil), ip...))
 }
 
+// ResetSources replaces the addresses vouched for the leg with vouch, for
+// when another phone takes the leg over (a retrieved parked call, a returned
+// park, a pickup): the previous phone's signalling address no longer speaks
+// for it. The pin is dropped too; SetTarget then names the new SDP address.
+func (r *Relay) ResetSources(name string, vouch ...net.IP) {
+	l := r.findLeg(name)
+	if l == nil {
+		return
+	}
+	var keep []net.IP
+	for _, ip := range vouch {
+		if len(ip) > 0 && !ip.IsUnspecified() {
+			keep = append(keep, append(net.IP(nil), ip...))
+		}
+	}
+	l.remoteMu.Lock()
+	l.extraIPs = keep
+	l.pinnedIP = nil
+	l.remoteMu.Unlock()
+}
+
 // findLeg returns the named leg.
 func (r *Relay) findLeg(name string) *relayLeg {
 	r.mu.Lock()

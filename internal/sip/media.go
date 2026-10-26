@@ -1057,3 +1057,18 @@ func allowSignalSource(relay *media.Relay, leg, source string) {
 		relay.AllowSource(leg, ip)
 	}
 }
+
+// handOverLeg points a relay leg at a phone that takes it over from another
+// one. The earlier phone's vouched address is replaced by the new phone's
+// signalling source before the target moves, so neither the old phone nor a
+// stranger can claim the leg, and a phone behind NAT (whose SDP names a
+// private address) still has its media accepted.
+func handOverLeg(relay *media.Relay, leg string, target *net.UDPAddr, source string) {
+	host, _ := splitHostPort(source)
+	if ip := net.ParseIP(host); ip != nil {
+		relay.ResetSources(leg, ip)
+	} else {
+		relay.ResetSources(leg)
+	}
+	relay.SetTarget(leg, target)
+}

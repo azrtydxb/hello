@@ -91,6 +91,9 @@ type ParkCommand struct {
 	// Retriever is the extension taking the call (for scope checks and the
 	// trace).
 	Retriever string `json:"retriever,omitempty"`
+	// Source is the address the retriever's signalling came from, which the
+	// relay vouches for as the source of its media (a phone behind NAT).
+	Source string `json:"source,omitempty"`
 	// Dir is the media direction of a hold command, as the holding party
 	// offered it.
 	Dir string `json:"dir,omitempty"`
