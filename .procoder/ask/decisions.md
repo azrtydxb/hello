@@ -676,3 +676,15 @@ so the integration job is required green before merge.
 
 The form pages (Routes) do not offer the new inbound kinds yet; they render
 them through the existing fallback. The API and MCP do.
+
+## Routes form: new inbound destination kinds (2026-10-26)
+
+The inbound route drawer offers `ring_group`, `voicemail`, `announcement` and
+`paging` (migration 00041, API and MCP already had them). Each target is chosen
+from a list, reusing `targetOptions` from the IVR destination picker: ring group
+and announcement by name, voicemail by extension number (labelled "Voicemail box
+of"), paging by code. A stored value the list no longer has stays selectable as
+"(not found)". Choosing a kind clears the target, since a name valid for one kind
+is not a target of another. An empty target is refused with a kind-specific
+message. `conference` is also in the API enum and still has no chooser; not part
+of this change.

@@ -1,4 +1,5 @@
 import { QueueSelect } from "../components/QueueSelect";
+import { targetOptions } from "../components/IvrDestination";
 import { listTimeConditions, type TimeCondition } from "../api/timecond";
 import {
   useEffect,
@@ -17,13 +18,17 @@ import {
   deleteOutboundRoute,
   errorMessage,
   fieldErrors,
+  listAnnouncements,
   listExtensions,
   listInboundRoutes,
   listIvrMenus,
   listOutboundRoutes,
+  listPagingGroups,
+  listRingGroups,
   listTrunks,
   updateInboundRoute,
   updateOutboundRoute,
+  type Announcement,
   type Extension,
   type FieldError,
   type Id,
@@ -32,6 +37,8 @@ import {
   type IvrMenu,
   type OutboundRoute,
   type OutboundRouteFields,
+  type PagingGroup,
+  type RingGroup,
   type RouteDirection,
   type Schedule,
   type Trunk,
@@ -414,6 +421,10 @@ const DESTINATION_KIND: Record<
   ivr: { label: "IVR menu", icon: "list-tree" },
   queue: { label: "Call queue", icon: "headset" },
   time_condition: { label: "Time condition", icon: "clock" },
+  ring_group: { label: "Ring group", icon: "users-round" },
+  voicemail: { label: "Voicemail", icon: "voicemail" },
+  announcement: { label: "Announcement", icon: "megaphone" },
+  paging: { label: "Paging group", icon: "megaphone" },
 };
 
 function Destination({
@@ -1187,7 +1198,11 @@ function validateInbound(d: InboundDraft): Record<string, string> {
   if (d.headerRegex !== "" && d.headerName === "") {
     e.headerName = "Name the header the regex applies to.";
   }
-  if (d.destination.trim() === "") e.destination = "Enter where calls go.";
+  if (d.destination.trim() === "") {
+    e.destination = isListed(d.destinationKind)
+      ? `Choose a ${LISTED_NOUN[d.destinationKind]}.`
+      : "Enter where calls go.";
+  }
   return e;
 }
 
@@ -1218,7 +1233,26 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   ivr: "IVR menu",
   queue: "Call queue",
   time_condition: "Time condition",
+  ring_group: "Ring group",
+  voicemail: "Voicemail box of",
+  announcement: "Announcement",
+  paging: "Paging group",
 };
+
+type ListedKind = "ring_group" | "voicemail" | "announcement" | "paging";
+
+/** What the empty-target error calls each listed kind's target. */
+const LISTED_NOUN: Record<ListedKind, string> = {
+  ring_group: "ring group",
+  voicemail: "voicemail box",
+  announcement: "announcement",
+  paging: "paging group",
+};
+
+/** Destination kinds whose target is chosen from a list of stored objects. */
+function isListed(k: InboundDraft["destinationKind"]): k is ListedKind {
+  return k in LISTED_NOUN;
+}
 
 function InboundDrawer({
   route,
@@ -1236,8 +1270,25 @@ function InboundDrawer({
   const [busy, setBusy] = useState(false);
   const [menus, setMenus] = useState<IvrMenu[]>([]);
   const [timeConds, setTimeConds] = useState<TimeCondition[]>([]);
+  const [exts, setExts] = useState<Extension[]>([]);
+  const [ringGroups, setRingGroups] = useState<RingGroup[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [pagingGroups, setPagingGroups] = useState<PagingGroup[]>([]);
   useEffect(() => {
     const controller = new AbortController();
+    // The pickers stay empty when a list fails; saving still works.
+    listExtensions(controller.signal)
+      .then(setExts)
+      .catch(() => undefined);
+    listRingGroups(controller.signal)
+      .then(setRingGroups)
+      .catch(() => undefined);
+    listAnnouncements(controller.signal)
+      .then(setAnnouncements)
+      .catch(() => undefined);
+    listPagingGroups(controller.signal)
+      .then(setPagingGroups)
+      .catch(() => undefined);
     listTimeConditions(controller.signal)
       .then(setTimeConds)
       .catch(() => undefined); // the picker stays empty; saving still works
@@ -1367,12 +1418,20 @@ function InboundDrawer({
               { value: "ivr", label: "IVR menu" },
               { value: "queue", label: "Call queue" },
               { value: "time_condition", label: "Time condition" },
+              { value: "ring_group", label: "Ring group" },
+              { value: "voicemail", label: "Voicemail" },
+              { value: "announcement", label: "Announcement" },
+              { value: "paging", label: "Paging group" },
             ]}
             onChange={(e) =>
-              set(
-                "destinationKind",
-                e.target.value as InboundDraft["destinationKind"],
-              )
+              // The target belongs to the kind: a name chosen for one kind
+              // is not a valid target of another.
+              setD((prev) => ({
+                ...prev,
+                destinationKind: e.target
+                  .value as InboundDraft["destinationKind"],
+                destination: "",
+              }))
             }
           />
           {d.destinationKind === "queue" ? (
@@ -1423,6 +1482,27 @@ function InboundDrawer({
                   : []),
                 ...menus.map((m) => ({ value: m.name, label: m.name })),
               ]}
+              onChange={(e) => set("destination", e.target.value)}
+            />
+          ) : isListed(d.destinationKind) ? (
+            <Select
+              id={id("destination")}
+              label={DESTINATION_LABEL[d.destinationKind]}
+              value={d.destination}
+              error={v.errors.destination}
+              options={
+                targetOptions(
+                  d.destinationKind,
+                  {
+                    extensions: exts,
+                    ringGroups,
+                    announcements,
+                    pagingGroups,
+                    menus,
+                  },
+                  d.destination,
+                ) ?? []
+              }
               onChange={(e) => set("destination", e.target.value)}
             />
           ) : (
