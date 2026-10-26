@@ -565,9 +565,25 @@ func (l *lab) failover(t *testing.T, crash bool) {
 		re <- result{r, time.Now(), err}
 	}()
 
-	moved := waitVIPAnswers(t, l.vipAddr, vipFailoverBound)
-	if got := l.waitVIP(t, 10*time.Second, victim); got != survivor {
+	// The VIP has moved when the survivor holds it and it answers, steadily
+	// (the old holder may answer for a moment while it goes).
+	if got := l.waitVIP(t, vipFailoverBound, victim); got != survivor {
 		t.Fatalf("VIP is on %s, want the survivor %s", got, survivor)
+	}
+	var moved time.Time
+	for streak := 0; streak < 3; {
+		if probe(l.vipAddr, 300*time.Millisecond) {
+			streak++
+			if streak == 1 {
+				moved = time.Now()
+			}
+		} else {
+			streak = 0
+		}
+		if time.Since(t0) > vipFailoverBound+10*time.Second {
+			t.Fatalf("the VIP does not answer steadily from %s %s after the loss", survivor, time.Since(t0))
+		}
+		time.Sleep(150 * time.Millisecond)
 	}
 	t.Logf("the VIP answers from %s %s after the loss", survivor, moved.Sub(t0).Round(100*time.Millisecond))
 
@@ -692,6 +708,10 @@ func (l *lab) rolling(t *testing.T) {
 				mu.Lock()
 				minReady = min(minReady, n)
 				mu.Unlock()
+				if n < 2 {
+					out, _ := l.tryKubectl("-n", l.namespace, "get", "pods", "-l", "app.kubernetes.io/component=edge", "-o", "wide")
+					t.Logf("%s: %d Ready:\n%s", time.Now().Format("15:04:05"), n, out)
+				}
 			}
 		}
 	}()

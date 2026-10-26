@@ -383,9 +383,24 @@ func (l *labEnv) retry(t *testing.T, args ...string) {
 	t.Fatalf("kubectl %s: %v\n%s", strings.Join(args, " "), err, out)
 }
 
+// noMasqueradeForVIP exempts the VIP from kind's masquerading. kind's
+// kind-masq-agent source-NATs every new flow that leaves a node for a non-pod
+// address, host-network traffic included, so a Kamailio that has just taken
+// the VIP would send its first packet to a Hello node from the node's address
+// and an ephemeral port instead of from the VIP: not what a LAN does (Cilium
+// masquerades pod traffic, never the host's) and not what Hello's symmetric
+// answers and the Via it records expect.
+func (l *labEnv) noMasqueradeForVIP(t *testing.T) {
+	t.Helper()
+	for _, n := range l.nodes {
+		run(t, "docker", "exec", n, "iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", l.vip+"/32", "-j", "RETURN")
+	}
+}
+
 func (l *labEnv) apply(t *testing.T) {
 	t.Helper()
 	l.waitAPI(t)
+	l.noMasqueradeForVIP(t)
 	if _, err := l.tryKubectl("get", "namespace", l.namespace); err != nil {
 		l.retry(t, "create", "namespace", l.namespace)
 	}
