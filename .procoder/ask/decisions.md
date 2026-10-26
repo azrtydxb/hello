@@ -621,6 +621,53 @@ Feature and paging codes start with `*` and cannot equal a plain number;
 they keep the `dialGuard` prefix rules. Time conditions have no number of
 their own.
 
+## Flow canvas P2: the read-only canvas (2026-10-26)
+
+Built per `.procoder/specs/flow-canvas.md` (P2). Choices the spec left open:
+
+- Migration `00042_flow_canvas.sql` adds `flow_canvases` and `flow_canvas_nodes`
+  only (`config_batches` belongs to P3). The `node_id` CHECK is a shape check
+  (`<kind>:<id>`), not the kind list: the API validates the kind against the
+  catalogue, so a new node type (P1, P7) needs no migration.
+- Canvases and layout are not configuration: no `configChange`, no revision
+  bump, no notify. Each write is audited in its own transaction (`flow_canvas`
+  `create|update|delete|layout`). `layout_version` moves on every layout save;
+  a save made against an older one is `409 layout_stale` and saves nothing.
+- Layout of an object that no longer exists is dropped on `GET .../{id}` and
+  pruned on every layout save, by checking each node id against the graph
+  built from the live tables (devices and phones included).
+- `PATCH` takes `viewport` but not `null`: the viewport is replaced, never
+  cleared. The UI offers "Save view" (an explicit button) rather than saving on
+  every pan, which would fill the audit trail.
+- The UI filters the full graph (`scope=all`) by the canvas's positions instead
+  of the spec's `scope=canvas:<id>`: the "not on this canvas" list needs the
+  whole graph anyway, and one read keeps a single source of truth. "Import
+  flow" does use the server's `scope=closure:<id>`. No change to
+  `getFlowGraph`, so P1's work on it does not conflict.
+- Edges to an off-canvas node are drawn as one stub per edge end, up to 150;
+  past that the page says how many are left out. Clicking a stub adds the node
+  (operators) or opens its panel (viewers).
+- One generic node component draws every kind from the catalogue. A port an
+  edge uses that the catalogue does not list (an IVR key) is added, typed like
+  the node's first port of that direction. Handle ids are `in:<port>` and
+  `out:<port>` because an input and an output may share a name.
+- Port colours are `--flow-port-<type>`, mapped to Azrty tokens where one
+  exists (call, voicemail, member, prompt, device) and to the spec's hex
+  elsewhere (carrier, schedule, hold music), lifted on the dark theme.
+- Dagre runs in a Web Worker from 150 nodes and cancels through an
+  `AbortSignal`; below that, and where `Worker` does not exist (tests), it runs
+  on the calling thread. New nodes are placed to the right of what is on the
+  canvas.
+- Keyboard: nodes are focusable; arrow keys move focus to the nearest node in
+  that direction (stubs included); Enter or Space opens the panel (or adds a
+  stub); Alt+arrow nudges a node by 20 px (operators); Escape closes the panel
+  and returns focus to the node. React Flow's own arrow-key moving is off.
+- The panel is view-only in P2: the object's summary fields, its connections
+  (followable), its warnings and a link to the page that edits it. The nav item
+  is "Call flows" at the top of the Call flow group; the canvas route is
+  lazy-loaded.
+- Exact dependency pins: `@xyflow/react` 12.12.0, `@dagrejs/dagre` 3.1.3.
+
 ## Flow canvas P1: unified destinations and guards (2026-10-26)
 
 Migration 00041 widens `inbound_routes.destination_kind` with `ring_group`,
