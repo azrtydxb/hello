@@ -108,5 +108,13 @@ func kwKamailioEnvs(t *testing.T) map[string]map[string]string {
 			t.Fatalf("kamailio env %s: neither a literal nor status.podIP; teach kwKamailioEnvs", name)
 		}
 	}
-	return map[string]map[string]string{"kw environment": env}
+	// The same without the node-address sockets: the end state, once the last
+	// phone has moved to the VIP.
+	vipOnly := map[string]string{}
+	for k, v := range env {
+		if k != "KAMAILIO_LEGACY_IP" {
+			vipOnly[k] = v
+		}
+	}
+	return map[string]map[string]string{"kw environment": env, "kw environment without the legacy sockets": vipOnly}
 }

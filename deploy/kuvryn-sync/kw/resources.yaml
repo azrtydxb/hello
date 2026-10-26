@@ -74,6 +74,18 @@ data:
     #     there, both of which name the hello socket).
     #   - Phones: requests received on the "phones" sockets (PHONES_PORT). Their
     #     requests only ever go to Hello nodes.
+    #
+    # High availability (EDGE_VIP, kamailio-ha): two identical instances on two
+    # nodes, one virtual IP that follows a healthy one. The phones and hello
+    # sockets bind the VIP, so every address a dialog names (Via, Path,
+    # Record-Route, the phone's registered proxy) is the VIP and survives the
+    # instance: after a failover the survivor receives the same requests on the
+    # same address. Kamailio keeps no state Hello needs (bindings live in Valkey,
+    # the dispatcher view is rebuilt by probes), so either instance serves any
+    # phone and any in-dialog request that carries a Route. Phones still using an
+    # instance's own node address (the address they were provisioned with before
+    # the VIP) are served by LEGACY_IP sockets until they are re-provisioned; the
+    # two families never mix, see route[EDGE_SIDE].
     # The source address cannot decide this: on kw the hello-sip pods run with
     # hostNetwork, so their datagrams reach Kamailio SNAT'd from a node address
     # that matches no dispatcher entry (those are Service names/ClusterIPs).
@@ -103,6 +115,23 @@ data:
     #!ifndef LISTEN_IP
     #!define LISTEN_IP 10.89.53.10
     #!endif
+
+    # EDGE_VIP (optional): the virtual IP shared by the edge instances. When set,
+    # the "phones" sockets and the "hello" socket bind it instead of LISTEN_IP, and
+    # PUBLIC_HOST must be the same address (phones are told to use it). The VIP is
+    # held by one node at a time (kube-vip, ARP), so each instance binds it before
+    # it holds it (ip_free_bind) and receives traffic only while it does. The
+    # dispatcher's probes then leave from a socket on LISTEN_IP (the "probe"
+    # socket): a probe sent from the VIP would be answered to whichever node holds
+    # it, and the other instance would see every Hello node down.
+    #!trydefenv EDGE_VIP=KAMAILIO_EDGE_VIP
+
+    # LEGACY_IP (optional, only with EDGE_VIP): this instance's own node address.
+    # Phones provisioned before the VIP point at it (192.168.10.101 on kw); the
+    # "phones_legacy" and "hello_legacy" sockets keep serving them exactly as
+    # before, with the node address in Via, Path and Record-Route, until the last
+    # phone has moved to the VIP and the variable is dropped.
+    #!trydefenv LEGACY_IP=KAMAILIO_LEGACY_IP
 
     # The port the "phones" sockets (UDP and TCP) bind on LISTEN_IP, and the
     # metrics socket's TCP port. The lab keeps the defaults; on kw Kamailio runs
@@ -180,16 +209,33 @@ data:
     # coming from a Hello node (request_route sets FLT_FROM_HELLO on it) and may
     # be relayed to any phone. So 5070 must stay internal: never published to
     # the host in compose, never exposed through a NodePort/LoadBalancer
-    # Service on Kubernetes (on kw the hostNetwork pod binds it on the node
-    # address, which only the Hello nodes are told about). Phones only ever
+    # Service on Kubernetes (on kw the hostNetwork pod binds it on the VIP, or
+    # on the node address for LEGACY_IP phones, which only the Hello nodes are
+    # told about). Phones only ever
     # learn the advertised phones socket. Because that socket can still be
     # reached from the LAN, request_route also refuses anything received on it
     # whose source address is not a dispatcher (set 1) destination.
     # A request crossing from one socket to the other gets two Record-Route
     # headers (rr enable_double_rr), each naming the socket its side uses.
+    #!ifdef EDGE_VIP
+    # Bind the VIP before this node holds it (the VIP follows the healthy node).
+    ip_free_bind=1
+    listen=udp:EDGE_VIP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones"
+    listen=tcp:EDGE_VIP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones_tcp"
+    listen=udp:EDGE_VIP:5070 name "hello"
+    # Dispatcher probes (ds_default_sockname): on this node's own address, so a
+    # Hello node answers the instance that asked.
+    listen=udp:LISTEN_IP:5071 name "probe"
+    #!else
     listen=udp:LISTEN_IP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones"
     listen=tcp:LISTEN_IP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones_tcp"
     listen=udp:LISTEN_IP:5070 name "hello"
+    #!endif
+    #!ifdef LEGACY_IP
+    listen=udp:LEGACY_IP:PHONES_PORT name "phones_legacy"
+    listen=tcp:LEGACY_IP:PHONES_PORT name "phones_legacy_tcp"
+    listen=udp:LEGACY_IP:5070 name "hello_legacy"
+    #!endif
     # Prometheus metrics (xhttp_prom), internal only: not published to the host.
     # HTTP is served only here (event_route[xhttp:request] refuses it on the
     # phones TCP socket); SIP sent to it is dropped in request_route.
@@ -275,7 +321,11 @@ data:
     modparam("dispatcher", "xavp_dst", "_dsdst_")
     modparam("dispatcher", "xavp_ctx", "_dsctx_")
     modparam("dispatcher", "ds_load_mode", 1)           # a bad entry is fatal
+    #!ifdef EDGE_VIP
+    modparam("dispatcher", "ds_default_sockname", "probe") # probes from LISTEN_IP:5071
+    #!else
     modparam("dispatcher", "ds_default_sockname", "hello") # probes from 5070
+    #!endif
     # Re-resolve destination names in place (kw: hello-sip-N.hello.svc names
     # of headless Services; a hostNetwork pod that returns on another node has a
     # new IP). ds_dns_mode 1|4: resolve at load and again every ds_dns_interval
@@ -333,12 +383,16 @@ data:
     ####### Routing #######
 
     request_route {
-    	# The metrics socket is HTTP only: no SIP over it.
-    	if ($Rp == METRICS_PORT) {
+    	# The metrics socket is HTTP only: no SIP over it. The probe socket only
+    	# carries the answers to the dispatcher's own OPTIONS (replies never reach
+    	# request_route): a request there is nobody's.
+    	if ($Rp == METRICS_PORT || $Rn == "probe") {
     		drop;
     	}
 
-    	if ($Rn == "hello") {
+    	route(EDGE_SIDE);
+
+    	if ($Rn == "hello" || $Rn == "hello_legacy") {
     		# Received on the Hello-facing socket (5070). On kw that socket is on
     		# the node address (hostNetwork), reachable from the whole LAN, so it
     		# is trusted only from an address the dispatcher holds (set 1, the
@@ -357,7 +411,7 @@ data:
 
     	route(REQINIT);
 
-    	if ($Rn == "hello") {
+    	if ($Rn == "hello" || $Rn == "hello_legacy") {
     		# A hello-sip node (vetted above).
     		setflag(FLT_FROM_HELLO);
     	}
@@ -397,6 +451,29 @@ data:
     	if (!sanity_check("17895", "7")) {
     		xlog("L_WARN", "malformed request from $si:$sp\n");
     		exit;
+    	}
+    }
+
+    # Which family of sockets this request belongs to: $var(legacy) is 1 when it
+    # arrived on a LEGACY_IP socket (a phone still using the node address, or a
+    # Hello node answering one through the Path or Record-Route naming it), 0 for
+    # the primary sockets (the VIP with EDGE_VIP, the node address without). Every
+    # socket a request or its replies leave from is picked in the same family, so
+    # a phone that registered through its node address is never answered from the
+    # VIP, nor a VIP phone from a node address. Without LEGACY_IP it is always 0.
+    route[EDGE_SIDE] {
+    	$var(legacy) = 0;
+    	if ($Rn == "phones_legacy" || $Rn == "phones_legacy_tcp" || $Rn == "hello_legacy") {
+    		$var(legacy) = 1;
+    	}
+    }
+
+    # The Hello-facing socket of this request's family.
+    route[HELLO_SOCKET] {
+    	if ($var(legacy) == 1) {
+    		$fsn = "hello_legacy";
+    	} else {
+    		$fsn = "hello";
     	}
     }
 
@@ -447,7 +524,7 @@ data:
     		# Dialog-forming: in-dialog requests from both sides cross Kamailio
     		# (two Record-Route headers: the hello socket, then the advertised
     		# phones socket).
-    		$fsn = "hello";
+    		route(HELLO_SOCKET);
     		record_route();
     		# Hello reaches the phone's NAT binding through ;alias=ip~port~udp on
     		# its Contact (handle_ruri_alias in route[FROM_HELLO]).
@@ -562,7 +639,7 @@ data:
 
     # Forward to the Hello node in $du with the client's address.
     route[TO_HELLO] {
-    	$fsn = "hello";
+    	route(HELLO_SOCKET);
     	# Hello answers at the source port of what we send it (rport), not at a
     	# Via port that a replaced pod or a NAT no longer owns (kw: stale
     	# conntrack on 5070 after a Kamailio pod replacement).
@@ -627,9 +704,17 @@ data:
     # UDP otherwise.
     route[PHONES_SOCKET] {
     	if ($dP == "tcp") {
-    		$fsn = "phones_tcp";
+    		if ($var(legacy) == 1) {
+    			$fsn = "phones_legacy_tcp";
+    		} else {
+    			$fsn = "phones_tcp";
+    		}
     	} else {
-    		$fsn = "phones";
+    		if ($var(legacy) == 1) {
+    			$fsn = "phones_legacy";
+    		} else {
+    			$fsn = "phones";
+    		}
     	}
     }
 
@@ -874,7 +959,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: c2181bb13ef995400c3f323fb0de08b660b9174452d0addbee1c8afbd24d9559
+        hello.watteel.com/kamailio-config-sha256: d2394b5e326b5cd279823cb20ed387b9388821edcaee0612389e506fdc776b7d
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's
@@ -883,6 +968,15 @@ spec:
       hostNetwork: true
       # Keep cluster DNS (the dispatcher's hello-sip-N Service names).
       dnsPolicy: ClusterFirstWithHostNet
+      serviceAccountName: kamailio-vip
+      automountServiceAccountToken: false
+      hostAliases:
+        # kube-vip reaches the API server as "kubernetes", the local one on
+        # these control-plane nodes, as on kube-system/kube-vip-ds: it must
+        # not depend on a VIP to take a VIP.
+        - ip: 127.0.0.1
+          hostnames:
+            - kubernetes
       affinity:
         # Only the two nodes phones may reach Kamailio on: master-11
         # (192.168.10.101, the address every phone is provisioned with) and
@@ -979,17 +1073,24 @@ spec:
           env:
             - name: KAMAILIO_LISTEN_IP
               # The pod IP, i.e. its node's address (hostNetwork): the
-              # "hello" socket (5070) carries it to hello nodes, and the
-              # phones sockets bind it at KAMAILIO_PHONES_PORT.
+              # dispatcher's probe socket and the metrics socket bind it.
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
             - name: KAMAILIO_PUBLIC_HOST
-              # Where phones reach this Kamailio: its own node's address,
-              # which the pod binds directly (master-11 is 192.168.10.101, the
-              # address the phones are provisioned with; master-12 is
-              # 192.168.10.102, reached by a test phone only). The VIP
-              # phases replace this with one shared address.
+              # Where phones reach Kamailio: the VIP (kube-vip below holds it
+              # on the node whose Kamailio is healthy). Advertised in Via,
+              # Path and Record-Route, so it survives either instance.
+              value: 192.168.10.109
+            - name: KAMAILIO_EDGE_VIP
+              # The same address: the phones and hello sockets bind it
+              # (ip_free_bind, so a node that does not hold it yet can bind).
+              value: 192.168.10.109
+            - name: KAMAILIO_LEGACY_IP
+              # This node's own address: the phones provisioned before the
+              # VIP use it (192.168.10.101 is on master-11). Served by the
+              # phones_legacy and hello_legacy sockets exactly as before,
+              # until the last phone has moved; then this variable goes.
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
@@ -1043,6 +1144,92 @@ spec:
               memory: 32Mi
             limits:
               memory: 128Mi
+        # kube-vip, the mechanism that already holds the API server's VIP on
+        # this cluster (kube-system/kube-vip-ds, same image), here for the
+        # phones' VIP in ARP mode. Both pods run it and elect one holder with
+        # a Lease; the holder adds 192.168.10.109 to bond0 and announces it,
+        # and a loser, a crash, a node loss or a rollout moves it. It is a
+        # sidecar, not a DaemonSet, so the VIP follows this pod's health:
+        # the liveness probe below asks the Kamailio next to it, and when
+        # that stops answering kubelet restarts this container, which
+        # releases the VIP (SIGTERM drops the Lease and the address) for the
+        # other instance.
+        - name: vip
+          image: ghcr.io/kube-vip/kube-vip:v1.2.3
+          imagePullPolicy: IfNotPresent
+          args:
+            - manager
+          env:
+            - name: vip_arp
+              value: "true"
+            - name: address
+              value: 192.168.10.109
+            - name: vip_interface
+              value: bond0
+            - name: vip_subnet
+              value: "32"
+            - name: vip_cidr
+              value: "32"
+            # kube-vip's own election, in its control-plane mode as on the
+            # API server's DaemonSet, but on its own Lease (in this
+            # namespace) and with no load balancer and no Service handling.
+            - name: cp_enable
+              value: "true"
+            - name: cp_namespace
+              value: hello
+            - name: vip_namespace
+              value: hello
+            - name: svc_enable
+              value: "false"
+            - name: svc_election
+              value: "false"
+            - name: vip_leaderelection
+              value: "true"
+            - name: vip_leasename
+              value: kamailio-vip
+            # A crashed holder's Lease expires after 5s; a healthy one renews
+            # every second.
+            - name: vip_leaseduration
+              value: "5"
+            - name: vip_renewdeadline
+              value: "3"
+            - name: vip_retryperiod
+              value: "1"
+            - name: vip_nodename
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+                - NET_RAW
+          startupProbe:
+            # Kamailio's metrics port (KAMAILIO_METRICS_PORT), on the pod IP.
+            httpGet:
+              path: /healthz
+              port: 9071
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            # Hand the VIP over within about 6s of Kamailio going quiet, long
+            # before Kamailio's own (20s x 3) liveness would restart it.
+            httpGet:
+              path: /healthz
+              port: 9071
+            periodSeconds: 2
+            timeoutSeconds: 1
+            failureThreshold: 3
+          volumeMounts:
+            - name: vip-api
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 24Mi
+            limits:
+              memory: 96Mi
       volumes:
         - name: config
           configMap:
@@ -1050,6 +1237,25 @@ spec:
             defaultMode: 420
         - name: run
           emptyDir: {}
+        # The API credentials of kamailio-vip, for the vip container only
+        # (automountServiceAccountToken is off, so kamailio gets none).
+        - name: vip-api
+          projected:
+            defaultMode: 420
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
 ---
 apiVersion: v1
 kind: Service
@@ -1062,9 +1268,9 @@ metadata:
     app.kubernetes.io/component: edge
     app.kubernetes.io/managed-by: kuvryn-sync
 spec:
-  # In-cluster only (metrics). Phones reach a hostNetwork pod directly at its
-  # node address (192.168.10.101:30508 for every provisioned phone); a
-  # NodePort would SNAT them (and hold the port).
+  # In-cluster only (metrics). Phones reach a hostNetwork pod directly, at
+  # the VIP 192.168.10.109:30508 (or 192.168.10.101:30508 for a phone not yet
+  # re-provisioned); a NodePort would SNAT them (and hold the port).
   type: ClusterIP
   selector:
     app.kubernetes.io/name: hello
@@ -1098,6 +1304,55 @@ spec:
       app.kubernetes.io/name: hello
       app.kubernetes.io/instance: hello
       app.kubernetes.io/component: edge
+---
+# kube-vip's identity: it elects the VIP holder with one Lease in this
+# namespace and needs nothing else. Needs the deployer Role extended once
+# (deploy/kuvryn-sync/rbac-kamailio-ha.yaml).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kamailio-vip
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kamailio-vip
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kamailio-vip
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+subjects:
+  - kind: ServiceAccount
+    name: kamailio-vip
+    namespace: hello
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kamailio-vip
 ---
 apiVersion: apps/v1
 kind: Deployment
