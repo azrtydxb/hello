@@ -2,6 +2,7 @@ package sip
 
 import (
 	"context"
+	"encoding/binary"
 	"math"
 	"net"
 	"slices"
@@ -202,24 +203,44 @@ func TestMOHResolution(t *testing.T) {
 }
 
 // TestMOHPlaylist fails if a loop does not cycle its tracks in order, if a
-// shuffle repeats a track back to back or skips one in a pass, or if a
+// shuffle repeats a track back to back or skips one in a pass, if a track
+// that cannot be loaded stalls the stream instead of being skipped, or if a
 // class whose announcements cannot be loaded does not fall back to the
 // built-in track (silence is never an option).
 func TestMOHPlaylist(t *testing.T) {
-	pl := &mohPlaylist{tracks: [][]byte{{1}, {2}, {3}}, last: -1}
+	tracks := map[string]media.Track{}
+	load := func(skip string) func(string) media.Track {
+		return func(obj string) media.Track {
+			if obj == skip {
+				return nil
+			}
+			if tracks[obj] == nil {
+				tracks[obj] = media.NewPCMTrack([]byte{obj[0], 0}, 8000)
+			}
+			return tracks[obj]
+		}
+	}
+	id := func(tr media.Track) byte {
+		pcm, err := tr.PCMAt(8000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pcm[0]
+	}
+	pl := &mohPlaylist{objs: []string{"1", "2", "3"}, load: load(""), last: -1}
 	var got []byte
 	for range 7 {
-		got = append(got, pl.next()[0])
+		got = append(got, id(pl.next())-'0')
 	}
 	if string(got) != string([]byte{1, 2, 3, 1, 2, 3, 1}) {
 		t.Fatalf("loop order = %v", got)
 	}
-	sh := &mohPlaylist{tracks: [][]byte{{1}, {2}, {3}, {4}}, shuffle: true, last: -1}
+	sh := &mohPlaylist{objs: []string{"1", "2", "3", "4"}, load: load(""), shuffle: true, last: -1}
 	var prev byte
 	for pass := range 30 {
 		seen := map[byte]bool{}
 		for range 4 {
-			v := sh.next()[0]
+			v := id(sh.next())
 			if v == prev {
 				t.Fatalf("pass %d: track %d repeated back to back", pass, v)
 			}
@@ -230,10 +251,108 @@ func TestMOHPlaylist(t *testing.T) {
 			t.Fatalf("pass %d played %v: a shuffle pass must play every track once", pass, seen)
 		}
 	}
+	skipping := &mohPlaylist{objs: []string{"1", "2", "3"}, load: load("2"), last: -1}
+	got = got[:0]
+	for range 4 {
+		got = append(got, id(skipping.next())-'0')
+	}
+	if string(got) != string([]byte{1, 3, 1, 3}) {
+		t.Fatalf("with track 2 unloadable the order = %v, want 1 3 1 3", got)
+	}
 	srv := &Server{deps: Deps{Objects: &fakeObjects{}}, cfg: Config{StateTimeout: time.Second}, log: discard}
-	fb := srv.mohPlaylist(t.Context(), snapshot.MOHClass{Objects: []string{"ann/missing.wav"}})
-	if len(fb.tracks) != 1 || len(fb.tracks[0]) < 16000 {
-		t.Fatalf("fallback tracks = %d, want the built-in track", len(fb.tracks))
+	fb := srv.mohPlaylist(t.Context(), snapshot.MOHClass{Objects: []string{"ann/missing.wav"}}).next()
+	if pcm, err := fb.PCMAt(8000); err != nil || len(pcm) < 16000 {
+		t.Fatalf("fallback track = %d bytes, %v; want the built-in track", len(pcm), err)
+	}
+}
+
+// stereoSong is two seconds of a 48 kHz stereo WAV with a 1 kHz tone, the
+// shape of a typical uploaded song.
+func stereoSong() []byte {
+	const rate = 48000
+	raw := make([]byte, 4*2*rate)
+	for i := range 2 * rate {
+		v := int16(8000 * math.Sin(2*math.Pi*1000*float64(i)/rate))
+		binary.LittleEndian.PutUint16(raw[4*i:], uint16(v))
+		binary.LittleEndian.PutUint16(raw[4*i+2:], uint16(v))
+	}
+	h := make([]byte, 44)
+	copy(h, "RIFF")
+	binary.LittleEndian.PutUint32(h[4:], uint32(36+len(raw)))
+	copy(h[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(h[16:], 16)
+	binary.LittleEndian.PutUint16(h[20:], 1)
+	binary.LittleEndian.PutUint16(h[22:], 2)
+	binary.LittleEndian.PutUint32(h[24:], rate)
+	binary.LittleEndian.PutUint32(h[28:], rate*4)
+	binary.LittleEndian.PutUint16(h[32:], 4)
+	binary.LittleEndian.PutUint16(h[34:], 16)
+	copy(h[36:], "data")
+	binary.LittleEndian.PutUint32(h[40:], uint32(len(raw)))
+	return append(h, raw...)
+}
+
+// TestMOHAudioPerCodecRate fails if hold music made from a 48 kHz stereo
+// song reaches a leg at the wrong rate (8 kHz G.711, 16 kHz G.722, 48 kHz
+// Opus), if the 8 kHz copy is not what a song stored at 48 kHz gives
+// (rather than a track already squashed at upload), or if two held calls
+// each decode and resample their own copy instead of sharing one.
+func TestMOHAudioPerCodecRate(t *testing.T) {
+	objs := &fakeObjects{}
+	_ = objs.Put(context.Background(), "ann/song.wav", stereoSong())
+	srv := &Server{deps: Deps{Objects: objs}, cfg: Config{StateTimeout: time.Second}, log: discard}
+	tr, ok := srv.mohAudio(t.Context(), "ann/song.wav")
+	if !ok {
+		t.Fatal("the song did not load")
+	}
+	for _, rate := range []int{8000, 16000, 48000} {
+		pcm, err := tr.PCMAt(rate)
+		if err != nil || len(pcm) != 2*2*rate {
+			t.Fatalf("%d Hz: %d bytes, %v; want two seconds", rate, len(pcm), err)
+		}
+	}
+	// The song keeps what 8 kHz cannot hold: 1 kHz is in band at every rate.
+	hi, _ := tr.PCMAt(48000)
+	lo, _ := tr.PCMAt(8000)
+	if rmsOf(hi) < 4000 || rmsOf(lo) < 4000 {
+		t.Fatalf("rms %.0f at 48k / %.0f at 8k, the tone was lost", rmsOf(hi), rmsOf(lo))
+	}
+	again, ok := srv.mohAudio(t.Context(), "ann/song.wav")
+	if !ok || again != tr {
+		t.Fatal("a second hold decoded the song again instead of sharing the cached track")
+	}
+	a, _ := tr.PCMAt(16000)
+	b, _ := again.PCMAt(16000)
+	if &a[0] != &b[0] {
+		t.Fatal("the 16 kHz copy was resampled twice")
+	}
+}
+
+func rmsOf(pcm []byte) float64 {
+	var sum float64
+	for i := 0; i+1 < len(pcm); i += 2 {
+		v := float64(int16(binary.LittleEndian.Uint16(pcm[i:])))
+		sum += v * v
+	}
+	return math.Sqrt(sum / float64(len(pcm)/2))
+}
+
+// TestMOHCacheBudget fails if the decoded-announcement cache grows without
+// bound: entries past their lifetime and, beyond the byte budget, the oldest
+// entries must go, while the entry just added stays.
+func TestMOHCacheBudget(t *testing.T) {
+	srv := &Server{mohCache: map[string]mohAudioEntry{"old": {size: 1, at: time.Now().Add(-time.Hour)}}}
+	now := time.Now()
+	srv.mohMu.Lock()
+	for i, name := range []string{"a", "b", "c"} {
+		srv.cacheMOH(name, mohAudioEntry{size: mohCacheBudget / 2, at: now.Add(time.Duration(i) * time.Second)})
+	}
+	got := len(srv.mohCache)
+	_, hasC := srv.mohCache["c"]
+	_, hasA := srv.mohCache["a"]
+	srv.mohMu.Unlock()
+	if hasA || !hasC || got != 2 {
+		t.Fatalf("cache holds %d entries (a=%v c=%v), want b and c only", got, hasA, hasC)
 	}
 }
 

@@ -1,5 +1,6 @@
-// Package tts turns prompt text into the 8 kHz 16-bit mono WAV the call
-// plane plays. It reaches ElevenLabs through OpenRouter's OpenAI-compatible
+// Package tts turns prompt text into the 16-bit mono WAV the call plane
+// plays (at the speech model's own sample rate, up to 48 kHz; playback
+// resamples to each call's rate). It reaches ElevenLabs through OpenRouter's OpenAI-compatible
 // /audio/speech endpoint, using go-ai-sdk's openaicompatible provider. The
 // audio is generated once, on an operator's explicit request, and stored; a
 // call never reaches this package.
@@ -100,8 +101,9 @@ func ValidateText(text string) error {
 
 // Synthesize generates speech for text with the given OpenRouter model (for
 // example elevenlabs/eleven-multilingual-v2) and voice and returns it as an
-// 8 kHz 16-bit mono PCM WAV. It asks for MP3, which carries its own sample
-// rate, and resamples to the call plane's 8 kHz. The key is sent to
+// 16-bit mono PCM WAV. It asks for MP3, which carries its own sample rate,
+// and keeps it (a wideband voice is not squashed to 8 kHz; playback
+// resamples per call). The key is sent to
 // OpenRouter and nowhere else; it is never part of a returned error.
 func (c *Client) Synthesize(ctx context.Context, key, model, voice, text string) ([]byte, error) {
 	if key == "" {
@@ -128,7 +130,7 @@ func (c *Client) Synthesize(ctx context.Context, key, model, voice, text string)
 	return MP3ToWAV(resp.Audio)
 }
 
-// MP3ToWAV decodes MP3 audio to 8 kHz 16-bit mono PCM in a WAV.
+// MP3ToWAV decodes MP3 audio to 16-bit mono PCM in a WAV at the MP3's rate.
 func MP3ToWAV(audio []byte) ([]byte, error) {
 	if len(audio) == 0 {
 		return nil, ErrEmptyAudio
@@ -166,8 +168,8 @@ func putSample(b []byte, v int16) {
 	binary.LittleEndian.PutUint16(b, uint16(v))
 }
 
-// PCMToWAV validates 16-bit mono PCM (non-empty, even byte count), resamples
-// it to 8 kHz and wraps it in a WAV.
+// PCMToWAV validates 16-bit mono PCM (non-empty, even byte count) and wraps
+// it in a WAV at its own rate, reduced to media.MaxStoredRate when above it.
 func PCMToWAV(pcm []byte, rate int) ([]byte, error) {
 	if len(pcm) == 0 {
 		return nil, ErrEmptyAudio
@@ -175,14 +177,18 @@ func PCMToWAV(pcm []byte, rate int) ([]byte, error) {
 	if len(pcm)%2 != 0 {
 		return nil, fmt.Errorf("%w: odd PCM byte count", ErrBadAudio)
 	}
-	out, err := media.Resample(pcm, rate, 8000)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrBadAudio, err)
+	out := pcm
+	if rate > media.MaxStoredRate {
+		var err error
+		if out, err = media.Resample(pcm, rate, media.MaxStoredRate); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrBadAudio, err)
+		}
+		rate = media.MaxStoredRate
 	}
 	if len(out) == 0 {
 		return nil, ErrEmptyAudio
 	}
-	return media.EncodeWAV(out, 8000), nil
+	return media.EncodeWAV(out, rate), nil
 }
 
 // mapError turns an SDK or transport failure into an operator message. The

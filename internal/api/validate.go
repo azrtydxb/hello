@@ -383,6 +383,10 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 		if !numberRe.MatchString(in.Destination) {
 			f.add("destination", "must be an extension number (2-10 digits)")
 		}
+	case "ivr":
+		if !usernameRe.MatchString(in.Destination) {
+			f.add("destination", "must be the name of an IVR menu")
+		}
 	case "internal":
 		// The DID the route matched names the target; the route carries
 		// none of its own, as the engine's compile also requires.
@@ -405,7 +409,7 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 			f.add("destination", "must be a sip: URI of at most 255 characters")
 		}
 	default:
-		f.add("destinationKind", `must be "extension", "external", "internal", "conference" or "sip_uri"`)
+		f.add("destinationKind", `must be "extension", "external", "internal", "ivr", "conference" or "sip_uri"`)
 	}
 	return f
 }

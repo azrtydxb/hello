@@ -220,14 +220,14 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		return d, prov.Template{}, prov.ErrSealed
 	}
 	d.Line.AuthName, d.Line.Domain = d.Line.Username, s.prov.Domain
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(min(code), '') FROM feature_codes WHERE action = 'voicemail' AND argument = ''`).
-		Scan(&d.Line.VoicemailCode); err != nil {
-		return d, prov.Template{}, err
-	}
-	// Park and park-retrieve codes: empty until those feature actions exist
-	// (the phone then keeps its own empty setting).
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(min(code) FILTER (WHERE action = 'park'), ''), COALESCE(min(code) FILTER (WHERE action = 'park_retrieve'), '') FROM feature_codes`).
-		Scan(&d.Line.ParkCode, &d.Line.ParkRetrieveCode); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT
+		COALESCE(min(code) FILTER (WHERE action = 'voicemail' AND argument = ''), ''),
+		COALESCE(min(code) FILTER (WHERE action = 'park'), ''),
+		COALESCE(min(code) FILTER (WHERE action = 'park_retrieve'), ''),
+		COALESCE(min(code) FILTER (WHERE action = 'pickup_group'), ''),
+		COALESCE(min(code) FILTER (WHERE action = 'pickup_directed'), '')
+		FROM feature_codes`).
+		Scan(&d.Line.VoicemailCode, &d.Line.ParkCode, &d.Line.ParkRetrieveCode, &d.Line.PickupGroupCode, &d.Line.PickupDirectedCode); err != nil {
 		return d, prov.Template{}, err
 	}
 	if d.Emergency, err = s.emergencyNumbers(ctx); err != nil {

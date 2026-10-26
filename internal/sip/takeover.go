@@ -600,6 +600,10 @@ func legName(caller bool) string {
 // record) and the call replicates from here on.
 func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	defer contain(s.log, "takeover")
+	if st.State == haPhasePark {
+		s.takeOverPark(st, from)
+		return
+	}
 	if st.Legs[1].CallID == "" {
 		s.takeOverSolo(st, from)
 		return
@@ -1029,6 +1033,10 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		}
 		c.addTrace("Voicemail restarts from its greeting after the takeover")
 		go c.voicemailFlow(mode, reason, sess)
+		return
+	}
+	if st.State == haPhaseIVR {
+		c.ivrResume(strings.TrimPrefix(st.StateDetail, haIVRDetailPrefix))
 		return
 	}
 	obj := strings.TrimPrefix(st.StateDetail, haRecordDetailPrefix)

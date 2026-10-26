@@ -108,14 +108,14 @@ describe("Announcements", () => {
       target: { value: "toobig" },
     });
     chooseFile(
-      new File(["x".repeat(10 * 1024 * 1024 + 1)], "big.wav", {
+      new File(["x".repeat(64 * 1024 * 1024 + 1)], "big.wav", {
         type: "audio/wav",
       }),
     );
     fireEvent.click(
       screen.getByRole("button", { name: "Upload announcement" }),
     );
-    expect(await screen.findByText(/larger than 10 MB/)).toBeVisible();
+    expect(await screen.findByText(/larger than 64 MB/)).toBeVisible();
     expect(calls.some((c) => c.method === "POST")).toBe(false);
   });
 

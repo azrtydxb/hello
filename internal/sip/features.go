@@ -7,6 +7,7 @@ package sip
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/media"
@@ -28,11 +29,32 @@ const (
 	// ActionIntercom is the 1-to-1 intercom prefix (phonebooks-ptt spec
 	// P-13): the code plus an extension number auto-answers that phone.
 	ActionIntercom = "intercom"
+	// ActionIVR runs an IVR menu: the argument names it.
+	ActionIVR = "ivr"
 	// ActionCallWaitingOn and ActionCallWaitingOff toggle the extension's
 	// call-waiting flag (migration 00026, spec S-18).
 	ActionCallWaitingOn  = "call_waiting_on"
 	ActionCallWaitingOff = "call_waiting_off"
 )
+
+// handleParkFeatureInvite serves the park, retrieve and pickup codes dialled
+// as a call; ok=false means fc is none of them.
+func (c *call) handleParkFeatureInvite(tx sip.ServerTransaction, fc snapshot.FeatureCode, arg string) bool {
+	snap := c.s.deps.Snapshots.Current()
+	switch fc.Action {
+	case ActionPark:
+		// Park works inside a call (the code dialled, or a REFER to it).
+		c.s.respond(tx, c.inv, sip.StatusForbidden, "Forbidden")
+		c.record(sip.StatusForbidden, cdr.SideSystem, "park code dialled as a call", ResultFailed)
+	case ActionParkRetrieve:
+		c.handleRetrieve(tx, snap, arg)
+	case ActionPickupGroup, ActionPickupDirected:
+		c.handlePickup(tx, snap, fc, arg)
+	default:
+		return false
+	}
+	return true
+}
 
 // ExtUpdate is one queued extension-feature change from a feature code.
 // Pointer fields are optional: nil leaves the column alone.
@@ -75,6 +97,9 @@ func matchFeatureCode(snap *snapshot.Snapshot, dialled string) (snapshot.Feature
 // number is not a feature code.
 func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.FeatureCode, arg string) bool {
 	s := c.s
+	if c.handleParkFeatureInvite(tx, fc, arg) {
+		return true
+	}
 	switch fc.Action {
 	case ActionBlindTransfer, ActionAttendedTransfer:
 		// *2 and ## work only inside a call (in-dialog DTMF, handleInfo).
@@ -99,6 +124,23 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		return true
 	case ActionIntercom:
 		c.handleIntercom(tx, arg)
+		return true
+	case ActionIVR:
+		name := fc.Argument
+		if name == "" {
+			name = arg
+		}
+		snap := s.deps.Snapshots.Current()
+		m, ok := snapshot.IVRMenu{}, false
+		if snap != nil {
+			m, ok = snap.IVRMenu(name)
+		}
+		if !ok {
+			s.respond(tx, c.inv, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "IVR menu "+name+" does not exist", ResultNotFound)
+			return true
+		}
+		c.startIVR(tx, snap, m)
 		return true
 	case ActionAnnouncement:
 		// The announcement feature code answers, plays its argument's
@@ -212,6 +254,8 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 				// A conference participant's key press is a room control.
 			case ref.leg == nil && ref.c.confFwdActive():
 				ref.c.confForwardDigit(d) // the owner's participant reads it
+			case ref.leg == nil && ref.c.ivrDigit(legCaller, d):
+				// A digit for the IVR menu the caller is in.
 			default:
 				s.dispatchDigit(ref.c, ref.leg == nil, d)
 			}
@@ -347,6 +391,27 @@ func (s *Server) dispatchDigit(c *call, fromCaller bool, d byte) {
 		return // the target digits follow, ended by '#'
 	case ActionBlindTransfer, ActionAttendedTransfer:
 		return // the target digits follow, ended by '#'
+	case ActionPark:
+		// *74 parks to a slot of the system's choosing, *74<slot> to that
+		// slot: a full slot fires at once, '#' ends it, and a pause after
+		// the bare code means "any slot".
+		if _, full := snap.ParkLotOf(arg); full {
+			buf.take()
+			break
+		}
+		if arg == "" {
+			time.AfterFunc(parkDigitWait, func() {
+				defer contain(s.log, "park digit wait")
+				pending := buf.take()
+				if len(pending) == 0 {
+					return
+				}
+				if fc2, arg2, ok := matchFeatureCode(snap, string(pending)); ok && fc2.Action == ActionPark {
+					s.applyInDialogCode(c, fromCaller, fc2, arg2)
+				}
+			})
+		}
+		return
 	default:
 		buf.take()
 	}
@@ -418,6 +483,17 @@ func (s *Server) applyInDialogCode(c *call, fromCaller bool, fc snapshot.Feature
 		return
 	case ActionVoicemail:
 		return // dialling *97 mid-call does nothing
+	case ActionPark:
+		// The phone that dialled the code is the parker.
+		if slot, err := c.parkCall(fromCaller, arg); err != nil {
+			c.addTrace("Park refused: " + err.Error())
+			s.parkMetric("park", "refused")
+		} else {
+			c.addTrace("Park by feature code: slot " + slot)
+		}
+		return
+	case ActionParkRetrieve, ActionPickupGroup, ActionPickupDirected:
+		return // these are dialled as calls, not inside one
 	}
 	upd, ok := featureUpdate(fc, arg, ext)
 	if !ok || s.deps.Settings == nil || !s.deps.Settings.Apply(upd) {

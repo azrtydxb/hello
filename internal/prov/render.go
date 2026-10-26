@@ -504,6 +504,8 @@ func SampleData(full bool) RenderData {
 		d.Codecs = CodecInfo{Opus: true}
 		d.Phone.Label = "Reception"
 		d.Line.VoicemailCode = "*97"
+		d.Line.ParkCode, d.Line.ParkRetrieveCode = "*74", "*75"
+		d.Line.PickupGroupCode, d.Line.PickupDirectedCode = "*40", "*41"
 		d.Firmware = &FirmwareInfo{URL: "https://prov.hello.example/p/sample/fw/firmware.rom", Dir: "https://prov.hello.example/p/sample/fw", Via: 2, Version: "1.2.3"}
 		d.Book = NewBookInfo("https://prov.hello.example/p/sample/", []string{"Extensions", "Company", "Warehouse"}, DefaultBookRefresh)
 		d.Multicast = NewMulticastInfo([]MulticastChannel{

@@ -82,3 +82,68 @@ func TestConferenceStore(t *testing.T) {
 		t.Fatalf("deleted room = %v, want ErrNotFound", err)
 	}
 }
+
+// TestConferenceNumberDialSpace: a room number is dialled like an
+// extension, so it shares the plain-number dial space with extensions, ring
+// group names, IVR menu numbers and park slots. It fails if a room can take a
+// park slot or an IVR menu's number, or if an extension (created or
+// renumbered), a ring group (created or renamed), an IVR menu or a park lot
+// can take a room's number.
+func TestConferenceNumberDialSpace(t *testing.T) {
+	st := scratchStore(t)
+	ctx := context.Background()
+	var ve *ValidationError
+	refused := func(what string, err error, path string) {
+		t.Helper()
+		if !errors.As(err, &ve) || ve.Fields[0].Path != path {
+			t.Errorf("%s: %v, want a %s validation error", what, err, path)
+		}
+	}
+	room := func(name, number string) (Conference, error) {
+		return st.CreateConference(ctx, "t", ConferenceInput{Name: name, Number: number, MaxParticipants: 10,
+			EntryExit: ConferenceSoundTone, Enabled: true}, PINChange{}, PINChange{}, nil)
+	}
+	// The default park lot holds 701-720.
+	_, err := room("slot", "705")
+	refused("room on a park slot", err, "number")
+	greet, err := st.CreateAnnouncement(ctx, "t", "greet", "ann/greet.wav", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	menu := ivrInput("main", greet.ID)
+	menu.Number = "850"
+	if _, err := st.CreateIVRMenu(ctx, "t", menu, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err = room("menu", "850")
+	refused("room on an IVR number", err, "number")
+
+	if _, err := room("weekly", "800"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.CreateExtension(ctx, "t", "800", "Clash", "", nil)
+	refused("create extension", err, "number")
+	e, err := st.CreateExtension(ctx, "t", "801", "Fine", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := "800"
+	_, err = st.UpdateExtension(ctx, "t", e.ID, ExtensionChange{Number: &n}, nil)
+	refused("renumber extension", err, "number")
+	_, err = st.CreateRingGroup(ctx, "t", RingGroupInput{Name: "800", Strategy: "ring-all", RingTimeout: 30, FailureKind: "none"}, nil)
+	refused("create ring group", err, "name")
+	g, err := st.CreateRingGroup(ctx, "t", RingGroupInput{Name: "sales", Strategy: "ring-all", RingTimeout: 30, FailureKind: "none"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.UpdateRingGroup(ctx, "t", g.ID, RingGroupInput{Name: "800", Strategy: "ring-all", RingTimeout: 30, FailureKind: "none"}, nil)
+	refused("rename ring group", err, "name")
+	menu2 := ivrInput("second", greet.ID)
+	menu2.Number = "800"
+	_, err = st.CreateIVRMenu(ctx, "t", menu2, nil)
+	refused("IVR menu on a room", err, "number")
+	_, err = st.CreateParkLot(ctx, "t", ParkLotInput{Name: "upstairs", SlotStart: 795, SlotEnd: 805, ReturnSecs: 120, VoicemailSecs: 60, Enabled: true}, nil)
+	if !errors.As(err, &ve) {
+		t.Errorf("park lot over room 800: %v, want a validation error", err)
+	}
+}

@@ -529,3 +529,35 @@ Decision (the user's brief, 2026-10-25): an unknown MAC's config request keeps i
 - **Roles:** operator and admin (the write scope, which is the operator-level scope), for the reads too; viewers see neither the page nor the queue. Dismiss can add the MAC to an ignore list, which is listed and reversible.
 
 The user can change any of them; none is hard to undo.
+
+## Drain-test flake: one fix, not two (2026-10-26)
+
+- #179 and #180 both fixed the same OFFLINE-mid-test drain flake in `internal/api/cluster_test.go`. #180 (`pinMembers`: PEXPIRE the fake member records) merged first, so #179 keeps main's file and drops its `keepReady` re-publisher. Re-publishing READY every 500 ms could also overwrite the state a drain test is asserting on.
+
+## IVR menu numbers join the park-slot dial space (2026-10-26)
+
+IVR (#142) merged after park/pickup (#161), whose migration took 00032, so
+the IVR migration is renumbered to 00033. An IVR menu number and a park slot
+are both dialled as a plain number, so they must not collide: the dial-space
+guard (`loadDialItems`) now counts IVR menu numbers among the names a park
+slot may not equal, and creating or renumbering a menu runs `checkNotSlot`.
+Both directions are covered by `TestIVRNumberNotParkSlot`. The IVR test
+helper `countRTP` became `countPhoneRTP`, because park's tests brought their
+own `countRTP` with a different signature.
+
+## Conference room numbers join the dial space (2026-10-26)
+
+Conference rooms (#172) merged after park/pickup (00032) and IVR (00033), so
+its migration is renumbered to 00034 and its CHECK changes
+(`inbound_routes.destination_kind`, `cdrs.kind`) now go through
+`pg_temp.hello_check_values`, adding/removing only `conference` so the other
+features' values survive in both directions. A room number is dialled like an
+extension, so it joins the shared dial space: a room may not take a park slot
+or an IVR menu number, and an IVR menu, a park lot, an extension (created or
+renumbered) or a ring group (created or renamed) may not take a room number.
+`TestConferenceNumberDialSpace` covers each direction. Main's music-on-hold
+now hands out `media.Track`s, so the conference hold loop reads
+`PCMAt(media.MixRate)` per track. In the B2BUA INVITE path the room-number
+check runs before IVR, park-slot and Replaces handling (the guards keep these
+disjoint, so the order only matters for speed); for in-dialog INFO DTMF the
+conference consumers run before the IVR one for the same reason.

@@ -282,8 +282,12 @@ func (s *Store) MarkAnnouncementGenerated(ctx context.Context, actor string, id 
 func (s *Store) DeleteAnnouncement(ctx context.Context, actor string, id int64, check Check) (string, error) {
 	var object string
 	err := s.configChange(ctx, actor, "delete", "announcement", check, func(tx *sql.Tx) (int64, error) {
+		var name string
 		if err := tx.QueryRowContext(ctx,
-			`SELECT minio_object FROM announcements WHERE id = $1`, id).Scan(&object); err != nil {
+			`SELECT minio_object, name FROM announcements WHERE id = $1`, id).Scan(&object, &name); err != nil {
+			return id, err
+		}
+		if err := refuseIfIVRPoints(ctx, tx, "announcement "+name, name, IVRAnnouncement); err != nil {
 			return id, err
 		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM announcements WHERE id = $1`, id)

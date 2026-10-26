@@ -75,6 +75,23 @@ func (c Codec) SampleRate() int {
 	return 8000
 }
 
+// PlaybackRate is the PCM sample rate Hello uses to play stored audio (hold
+// music, announcements, notices) to a leg that speaks the codec. It equals
+// SampleRate except for Opus: a live Opus call is carried at 16 kHz (the
+// rate the bridge, the recorder and the G.711 transcoder work at), but
+// one-way playback goes straight to the leg's encoder, so it can use Opus's
+// native 48 kHz and keep a song's full bandwidth.
+func (c Codec) PlaybackRate() int {
+	if c.Kind() == nameOpus {
+		return 48000
+	}
+	return c.SampleRate()
+}
+
+// PlaybackFrameSamples is the PCM sample count of a 20 ms frame at
+// PlaybackRate.
+func (c Codec) PlaybackFrameSamples() int { return c.PlaybackRate() / 50 }
+
 // FrameSamples is the PCM sample count of a 20 ms frame at SampleRate.
 func (c Codec) FrameSamples() int { return c.SampleRate() / 50 }
 
@@ -147,6 +164,20 @@ func NewEncoder(c Codec) (*Encoder, error) {
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedCodec, c.Name)
 	}
 	return e, nil
+}
+
+// NewPlaybackEncoder returns an encoder for c fed PCM at c.PlaybackRate()
+// (see Codec.PlaybackRate). For everything but Opus that is NewEncoder; Opus
+// is encoded at 48 kHz tuned for music.
+func NewPlaybackEncoder(c Codec) (*Encoder, error) {
+	if c.Kind() != nameOpus {
+		return NewEncoder(c)
+	}
+	o, err := newOpusMusicEncoder(c.PlaybackRate())
+	if err != nil {
+		return nil, err
+	}
+	return &Encoder{codec: c, opus: o}, nil
 }
 
 // Codec is the codec the encoder produces.

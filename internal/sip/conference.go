@@ -454,8 +454,10 @@ func (r *confRoom) holdSamples() []int16 {
 	defer cancel()
 	pl := s.mohPlaylist(ctx, cl) // an empty class plays the built-in tune
 	var pcm []byte
-	for range max(len(pl.tracks), 1) {
-		pcm = append(pcm, pl.next()...)
+	for range max(len(pl.objs), 1) {
+		if b, err := pl.next().PCMAt(media.MixRate); err == nil {
+			pcm = append(pcm, b...)
+		}
 	}
 	if len(pcm) >= 2*media.MixFrame {
 		return media.PCMToSamples(pcm[:len(pcm)&^1])
