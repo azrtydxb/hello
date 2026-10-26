@@ -505,6 +505,10 @@ type phone struct {
 	// reinviteOwnSDP answers re-INVITEs with the phone's own SDP (its media
 	// address) instead of echoing the offer, as a real phone does.
 	reinviteOwnSDP bool
+	// reinviteStatus, when set, answers re-INVITE/UPDATE with that status
+	// instead of a 200; negative sends no answer at all (a handset that left
+	// the Wi-Fi).
+	reinviteStatus int
 	// notifyPass, when set, makes the phone challenge an out-of-dialog
 	// NOTIFY with digest and accept only that password (check-sync with
 	// P4428 on); notifyStatus answers every NOTIFY with that status
@@ -669,6 +673,15 @@ func (p *phone) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 
 func (p *phone) onReinvite(req *sip.Request, tx sip.ServerTransaction) {
 	push(p.reinvites, req)
+	p.mu.Lock()
+	status := p.reinviteStatus
+	p.mu.Unlock()
+	if status != 0 {
+		if status > 0 {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, status, "Refused", nil))
+		}
+		return
+	}
 	p.mu.Lock()
 	hold := p.reinviteHold
 	p.mu.Unlock()
