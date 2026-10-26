@@ -15879,7 +15879,9 @@
               "announcement",
               "ivr",
               "time_condition",
-              "queue"
+              "queue",
+              "extension",
+              "ring_group"
             ]
           },
           "mohClassId": {
@@ -15967,7 +15969,9 @@
               "announcement",
               "ivr",
               "time_condition",
-              "queue"
+              "queue",
+              "extension",
+              "ring_group"
             ],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
@@ -15989,7 +15993,7 @@
           },
           "failureTarget": {
             "type": "string",
-            "description": "The voicemail extension or external number, or the name of the announcement, IVR menu, queue or time condition, that failureKind names."
+            "description": "The voicemail extension, extension or external number, or the name of the announcement, IVR menu, queue, time condition or ring group, that failureKind names. An extension or ring group starts a new ring: the extension's own forwarding and voicemail apply, and a ring group uses its own strategy and failure destination. A group cannot name itself, and a chain that returns to a group or extension already rung is cut at run time."
           },
           "members": {
             "type": "array",
@@ -16077,7 +16081,9 @@
               "announcement",
               "ivr",
               "time_condition",
-              "queue"
+              "queue",
+              "extension",
+              "ring_group"
             ],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
@@ -16099,7 +16105,7 @@
           },
           "failureTarget": {
             "type": "string",
-            "description": "The voicemail extension or external number, or the name of the announcement, IVR menu, queue or time condition, that failureKind names."
+            "description": "The voicemail extension, extension or external number, or the name of the announcement, IVR menu, queue, time condition or ring group, that failureKind names. An extension or ring group starts a new ring: the extension's own forwarding and voicemail apply, and a ring group uses its own strategy and failure destination. A group cannot name itself, and a chain that returns to a group or extension already rung is cut at run time."
           },
           "members": {
             "type": "array",
