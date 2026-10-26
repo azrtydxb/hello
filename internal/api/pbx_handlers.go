@@ -19,6 +19,7 @@ import (
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/hello/internal/voiceprompt"
 )
 
 // Phase 4 field validation, in the same shape as the Phase 2 route
@@ -127,7 +128,8 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 		}
 	case self:
 		var in struct {
-			PIN *string `json:"pin"`
+			PIN            *string `json:"pin"`
+			PromptLanguage *string `json:"promptLanguage"`
 		}
 		if !decode(w, r, &in) {
 			return
@@ -135,14 +137,17 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 		if in.PIN != nil && *in.PIN != "" {
 			change.Password = in.PIN
 		}
+		change.PromptLanguage = in.PromptLanguage
 	default:
 		var in struct {
-			Password *string `json:"password"`
-			Email    *string `json:"email"`
+			Password       *string `json:"password"`
+			Email          *string `json:"email"`
+			PromptLanguage *string `json:"promptLanguage"`
 		}
 		if !decode(w, r, &in) {
 			return
 		}
+		change.PromptLanguage = in.PromptLanguage
 		if in.Password != nil && *in.Password != "" {
 			change.Password = in.Password
 		}
@@ -158,6 +163,10 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 	}
 	if change.Email != nil && *change.Email != "" && !emailRe.MatchString(*change.Email) {
 		f.add("email", "must be an email address or empty")
+	}
+	if change.PromptLanguage != nil {
+		*change.PromptLanguage = strings.ToLower(strings.TrimSpace(*change.PromptLanguage))
+		checkPromptLanguage(&f, "promptLanguage", *change.PromptLanguage)
 	}
 	if len(f) > 0 {
 		writeFields(w, f)
@@ -190,8 +199,8 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 			change.Name = &object
 		}
 	}
-	if change.Email == nil && change.Password == nil && len(uploads) == 0 {
-		badRequest(w, "password, email, greeting, busy, unreachable or name is required")
+	if change.Email == nil && change.Password == nil && change.PromptLanguage == nil && len(uploads) == 0 {
+		badRequest(w, "password, email, promptLanguage, greeting, busy, unreachable or name is required")
 		return
 	}
 	// The previous greetings, so they can go once the row names the new ones.
@@ -208,6 +217,9 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 		s.configError(w, "voicemail box", err)
 		return
 	}
+	if change.PromptLanguage != nil && *change.PromptLanguage != "" {
+		s.prewarmLanguages()
+	}
 	// Best effort: a stale object left behind is harmless.
 	if s.Objects != nil {
 		for _, object := range replaced {
@@ -223,6 +235,96 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 		return
 	}
 	writeJSON(w, http.StatusOK, s.boxView(r.Context(), b))
+}
+
+// checkPromptLanguage refuses a language with no complete prompt table. ""
+// is allowed: it clears the box language so the box inherits (S-20).
+func checkPromptLanguage(f *fieldErrs, path, v string) {
+	if v != "" && !voiceprompt.Valid(v) {
+		langs := voiceprompt.Languages()
+		names := make([]string, len(langs))
+		for i, l := range langs {
+			names[i] = string(l)
+		}
+		f.add(path, "must be empty (inherit) or one of %s", strings.Join(names, ", "))
+	}
+}
+
+// boxLanguageView is a box's language setting as the API sends it.
+type boxLanguageView struct {
+	// PromptLanguage is the box's own setting; "" inherits.
+	PromptLanguage string `json:"promptLanguage"`
+	// Effective is the language callers hear for this box today.
+	Effective string `json:"effective"`
+	// Languages are the languages a box can be set to.
+	Languages []string `json:"languages"`
+}
+
+func (s *server) boxLanguage(b store.VoicemailBox) boxLanguageView {
+	v := boxLanguageView{
+		PromptLanguage: b.PromptLanguage,
+		Effective:      string(voiceprompt.Resolve(b.PromptLanguage, s.PromptLanguage)),
+		Languages:      []string{},
+	}
+	for _, l := range voiceprompt.Languages() {
+		v.Languages = append(v.Languages, string(l))
+	}
+	return v
+}
+
+// getBoxLanguage is GET /api/v1/voicemail/boxes/{id}/language, {id} being a
+// voicemail box id.
+func (s *server) getBoxLanguage(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	b, err := s.Store.GetVoicemailBoxByID(r.Context(), id)
+	if err != nil {
+		s.configError(w, "voicemail box", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.boxLanguage(b))
+}
+
+// putBoxLanguage is PUT /api/v1/voicemail/boxes/{id}/language.
+func (s *server) putBoxLanguage(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		PromptLanguage *string `json:"promptLanguage"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	var f fieldErrs
+	if in.PromptLanguage == nil {
+		f.add("promptLanguage", "is required (empty inherits the deployment language)")
+	} else {
+		*in.PromptLanguage = strings.ToLower(strings.TrimSpace(*in.PromptLanguage))
+		checkPromptLanguage(&f, "promptLanguage", *in.PromptLanguage)
+	}
+	if len(f) > 0 {
+		writeFields(w, f)
+		return
+	}
+	cur, err := s.Store.GetVoicemailBoxByID(r.Context(), id)
+	if err != nil {
+		s.configError(w, "voicemail box", err)
+		return
+	}
+	b, err := s.Store.UpdateVoicemailBox(r.Context(), actor(r).String(), cur.ExtensionID,
+		store.VoicemailBoxChange{PromptLanguage: in.PromptLanguage}, s.check())
+	if err != nil {
+		s.configError(w, "voicemail box", err)
+		return
+	}
+	if b.PromptLanguage != "" {
+		s.prewarmLanguages()
+	}
+	writeJSON(w, http.StatusOK, s.boxLanguage(b))
 }
 
 // greetingSlots are the audio slots of a box: the general greeting (also the

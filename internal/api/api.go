@@ -73,6 +73,8 @@ type Store interface {
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
 
 	GetVoicemailBox(ctx context.Context, extensionID int64) (store.VoicemailBox, error)
+	GetVoicemailBoxByID(ctx context.Context, boxID int64) (store.VoicemailBox, error)
+	VoicemailPromptLanguages(ctx context.Context) ([]string, error)
 	ListVoicemailBoxes(ctx context.Context) ([]store.VoicemailBoxSummary, error)
 	UpdateVoicemailBox(ctx context.Context, actor string, extensionID int64, c store.VoicemailBoxChange, check store.Check) (store.VoicemailBox, error)
 	ListVoicemailMessages(ctx context.Context, boxID int64, unheardOnly bool) ([]store.VoicemailMessage, error)

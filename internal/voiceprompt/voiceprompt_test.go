@@ -227,3 +227,34 @@ func TestGreetings(t *testing.T) {
 		t.Errorf("tail = %q", got)
 	}
 }
+
+// TestPromptLanguage covers the resolution order of S-20: a box's own
+// language wins, an empty one inherits the deployment language, an unknown
+// box language is English, and English is the default everywhere.
+func TestPromptLanguage(t *testing.T) {
+	for _, tc := range []struct {
+		name, box, global string
+		want              Lang
+	}{
+		{"nothing set", "", "", English},
+		{"global dutch inherited", "", "nl", Dutch},
+		{"global regional code", "", "nl-BE", Dutch},
+		{"box dutch over english global", "nl", "en", Dutch},
+		{"box english over dutch global", "en", "nl", English},
+		{"box upper case", "NL", "", Dutch},
+		{"unknown box language is english", "xx", "nl", English},
+		{"unknown global is english", "", "xx", English},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Resolve(tc.box, tc.global); got != tc.want {
+				t.Errorf("Resolve(%q, %q) = %q, want %q", tc.box, tc.global, got, tc.want)
+			}
+		})
+	}
+	if !Valid("nl") || !Valid(" EN ") || Valid("") || Valid("fr") {
+		t.Error("Valid: want nl and en valid, empty and fr not")
+	}
+	if Text(Dutch, PINEnter, nil) == Text(English, PINEnter, nil) {
+		t.Error("Dutch and English PIN prompts are the same text")
+	}
+}

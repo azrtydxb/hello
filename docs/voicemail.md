@@ -112,12 +112,49 @@ text-to-speech key is configured; callers then hear no greeting before the tone.
 
 The prompts live in one catalogue (`internal/voiceprompt`): a key and a
 template per prompt, one table per language. English (`en`) and Dutch (`nl`)
-ship. Pick the language with `HELLO_VOICEMAIL_LANGUAGE` (Helm
-`global.voicemailLanguage`) on both hello-control and hello-sip, and the zone
-message times are worded in with `HELLO_TIMEZONE` on hello-sip (Helm
-`global.timezone`; it defaults to `HELLO_PROV_TIMEZONE`, then UTC). To add a
-language, add a table in `internal/voiceprompt` and list it in `tables`;
-`TestCatalogueComplete` fails until it has every key and placeholder.
+ship, and English is the default everywhere.
+
+**Per box.** Each voicemail box can speak its own language: its default
+spoken greeting, the prompts a caller hears when leaving a message and the
+`*97` menus the owner uses. A box with no language of its own (the default)
+inherits the deployment language, `HELLO_VOICEMAIL_LANGUAGE` (Helm
+`global.voicemailLanguage`) on both hello-control and hello-sip, which is
+English when unset. The order is: the box's language, then the deployment
+language, then English. A language a later release drops from the tables is
+spoken in English.
+
+Set it in any of these places:
+
+- the console: **Voicemail, Box settings, Prompt language** (operators);
+- the owner's own page: **My phone, Voicemail, Voicemail language**;
+- the API: `GET|PUT /api/v1/voicemail/boxes/{id}/language` with
+  `{"promptLanguage": "nl"}` (`{id}` is the box id from the box list; an
+  empty value clears it), or `promptLanguage` in the body of
+  `PUT /api/v1/extensions/{id}/voicemail` (operator) and
+  `PUT /api/v1/me/extensions/{id}/voicemail` (the box's own user).
+
+There is no language menu for callers in this release, and only the voicemail
+prompts are per box. The text of an IVR or queue announcement is whatever the
+operator wrote.
+
+**Generation.** The static prompts of every language in use (the deployment
+language and each box's own) are generated in the background when the TTS
+settings are saved and when a box is set to a language, so the first Dutch
+caller does not wait for the provider. They are stored per language like any
+other sentence (the key is a hash of the model, the voice and the text, see
+below). If a clip in the box's language cannot be spoken, the caller hears the
+English one rather than silence, and if no voice works the call falls back to
+tones and recordings as before. A recording a box has of its own (a greeting
+or recorded name) is played as is in any language.
+
+The zone message times are worded in is `HELLO_TIMEZONE` on hello-sip (Helm
+`global.timezone`; it defaults to `HELLO_PROV_TIMEZONE`, then UTC).
+
+**Adding a prompt or a language.** Every key goes into `english.go` and
+`dutch.go` in the same change. To add a language, add a table in
+`internal/voiceprompt` and list it in `tables`; `TestCatalogueComplete` fails
+until it has every key and placeholder. Dutch wording of new keys is reviewed
+by a native speaker before merge.
 
 ## How it speaks
 

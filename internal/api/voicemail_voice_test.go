@@ -224,3 +224,98 @@ func TestSettingsSavePregeneratesStaticPrompts(t *testing.T) {
 		t.Fatalf("a repeat save generated again: %d", fake.count())
 	}
 }
+
+// TestBoxLanguage fails if a box's prompt language cannot be read, set to Dutch
+// and cleared again, if an unknown language is accepted, if the effective
+// language does not follow the deployment language when the box has none, or
+// if the preview of the default greeting is not spoken in the box language
+// (pbx-gaps S-20).
+func TestBoxLanguage(t *testing.T) {
+	objs := newMemObjects()
+	fake := &fakeTTS{}
+	e := newEnvConfig(t, Config{Objects: objs, TTS: fake, PromptLanguage: "en"}, testBox(t))
+	c := e.login()
+	key := trunkPassword("tts")
+	extID := newExtension(t, c, "101", "Sales")
+	c.must(http.StatusOK, "PUT", fmt.Sprintf("/api/v1/extensions/%v/voicemail", extID), map[string]string{"email": ""})
+	box := c.must(http.StatusOK, "GET", fmt.Sprintf("/api/v1/extensions/%v/voicemail", extID), nil).json(t)
+	if box["promptLanguage"] != "" {
+		t.Fatalf("a fresh box has language %v, want none (inherit)", box["promptLanguage"])
+	}
+	path := fmt.Sprintf("/api/v1/voicemail/boxes/%v/language", box["id"])
+
+	got := c.must(http.StatusOK, "GET", path, nil).json(t)
+	if got["promptLanguage"] != "" || got["effective"] != "en" {
+		t.Fatalf("fresh language = %v, want inherit and English", got)
+	}
+	if langs, _ := got["languages"].([]any); len(langs) != 2 || langs[0] != "en" || langs[1] != "nl" {
+		t.Fatalf("languages = %v, want en and nl", got["languages"])
+	}
+
+	got = c.must(http.StatusOK, "PUT", path, map[string]string{"promptLanguage": "NL"}).json(t)
+	if got["promptLanguage"] != "nl" || got["effective"] != "nl" {
+		t.Fatalf("after PUT nl = %v", got)
+	}
+	if b := c.must(http.StatusOK, "GET", fmt.Sprintf("/api/v1/extensions/%v/voicemail", extID), nil).json(t); b["promptLanguage"] != "nl" {
+		t.Fatalf("the box view says %v", b["promptLanguage"])
+	}
+	// The box list carries it for the console.
+	list := c.must(http.StatusOK, "GET", "/api/v1/voicemail/boxes", nil).json(t)
+	if rows, _ := list["items"].([]any); len(rows) != 1 || rows[0].(map[string]any)["promptLanguage"] != "nl" {
+		t.Fatalf("box list = %v", list)
+	}
+
+	// The preview is spoken in Dutch.
+	c.must(http.StatusOK, "PUT", "/api/v1/tts/settings", map[string]string{"apiKey": key, "model": "elevenlabs/eleven-v3", "voice": "sarah"})
+	c.must(http.StatusOK, "POST", fmt.Sprintf("/api/v1/extensions/%v/voicemail/greeting/preview", extID), nil)
+	// (The prompts are also pre-generated in the background, so the fake's
+	// last text is not reliable; the greeting names its owner, which no
+	// pre-generation does, so its stored clip proves the preview's language.)
+	if want := voiceprompt.GreetingText(voiceprompt.Dutch, voiceprompt.Unavailable, "Sales"); !objs.has(ttscache.Key("elevenlabs/eleven-v3", "sarah", want)) {
+		t.Fatalf("the preview did not speak %q", want)
+	}
+
+	// Refused: an unknown language, and no value at all.
+	c.must(http.StatusBadRequest, "PUT", path, map[string]string{"promptLanguage": "klingon"})
+	c.must(http.StatusBadRequest, "PUT", path, map[string]string{})
+	c.must(http.StatusNotFound, "GET", "/api/v1/voicemail/boxes/999999/language", nil)
+	c.must(http.StatusNotFound, "PUT", "/api/v1/voicemail/boxes/999999/language", map[string]string{"promptLanguage": "nl"})
+
+	// The operator PUT on the box takes it too, and an empty value clears it.
+	c.must(http.StatusOK, "PUT", fmt.Sprintf("/api/v1/extensions/%v/voicemail", extID), map[string]string{"promptLanguage": ""})
+	if got = c.must(http.StatusOK, "GET", path, nil).json(t); got["promptLanguage"] != "" || got["effective"] != "en" {
+		t.Fatalf("after clearing = %v", got)
+	}
+}
+
+// TestBoxLanguagePregeneratesItsPrompts fails if choosing Dutch for a box does
+// not generate the Dutch static prompts in the background while the deployment
+// language stays English, so the first Dutch caller does not wait for the
+// provider (S-21).
+func TestBoxLanguagePregeneratesItsPrompts(t *testing.T) {
+	objs := newMemObjects()
+	fake := &fakeTTS{}
+	e := newEnvConfig(t, Config{Objects: objs, TTS: fake, PromptLanguage: "en"}, testBox(t))
+	c := e.login()
+	key := trunkPassword("tts")
+	extID := newExtension(t, c, "101", "Sales")
+	c.must(http.StatusOK, "PUT", "/api/v1/tts/settings", map[string]string{"apiKey": key, "model": "elevenlabs/eleven-v3", "voice": "sarah"})
+	c.must(http.StatusOK, "PUT", fmt.Sprintf("/api/v1/extensions/%v/voicemail", extID), map[string]string{"promptLanguage": "nl"})
+
+	missing := func(l voiceprompt.Lang) []string {
+		var out []string
+		for _, p := range voiceprompt.Static(l) {
+			if !objs.has(ttscache.Key("elevenlabs/eleven-v3", "sarah", p.Text)) {
+				out = append(out, p.Text)
+			}
+		}
+		return out
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for len(missing(voiceprompt.Dutch)) > 0 || len(missing(voiceprompt.English)) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("prompts not generated: %d Dutch and %d English missing", len(missing(voiceprompt.Dutch)), len(missing(voiceprompt.English)))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
