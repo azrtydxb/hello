@@ -728,6 +728,7 @@ func (c *call) answer(w *leg) {
 		if len(bres.Body()) > 0 {
 			if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
 				c.relay.SetTarget(legCallee, udpAddr(ans.Address, ans.Port))
+				allowSignalSource(c.relay, legCallee, bres.Source())
 				calleeAns = ans
 			}
 		}
