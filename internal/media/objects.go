@@ -12,6 +12,8 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+
+	"github.com/azrtydxb/hello/internal/s3retry"
 )
 
 // The buckets, one per media kind (Phase 5 contract 4): voicemail audio,
@@ -82,9 +84,14 @@ func NewMinioObjects(endpoint, accessKey, secretKey string, secure bool, log *sl
 	if log == nil {
 		log = slog.Default()
 	}
+	tr, err := s3retry.ClientTransport(secure)
+	if err != nil {
+		return nil, fmt.Errorf("media: build MinIO transport for %s: %w", endpoint, err)
+	}
 	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure: secure,
+		Creds:     credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure:    secure,
+		Transport: tr,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("media: build MinIO client for %s: %w", endpoint, err)
