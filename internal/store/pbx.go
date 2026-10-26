@@ -35,7 +35,7 @@ type VoicemailBox struct {
 	GreetingTTS    *TTSMeta `json:"greetingTts"`
 	UnreachableTTS *TTSMeta `json:"unreachableTts"`
 	BusyTTS        *TTSMeta `json:"busyTts"`
-	// PromptLanguage is the language the box speaks (migration 00044): "en",
+	// PromptLanguage is the language the box speaks (migration 00045): "en",
 	// "nl", or "" to inherit the deployment language.
 	PromptLanguage string    `json:"promptLanguage"`
 	CreatedAt      time.Time `json:"createdAt"`
