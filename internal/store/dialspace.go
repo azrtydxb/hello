@@ -21,6 +21,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -178,4 +179,42 @@ func dialGuard(ctx context.Context, tx *sql.Tx, field string, change func() erro
 	}
 	sort.Strings(fresh)
 	return fieldError(field, strings.Join(fresh, "; "))
+}
+
+// Kinds of object that answer to a plain dialled number; the own argument of
+// checkDialNumber.
+const (
+	numExtension  = "extension"
+	numRingGroup  = "ring group"
+	numIVRMenu    = "IVR menu"
+	numConference = "conference room"
+	numQueue      = "queue"
+)
+
+// checkDialNumber refuses number (field names it in the error) when another
+// object already answers to it: an extension number, ring group name, IVR menu
+// number, conference room number or queue number, or a slot of a park lot.
+// own is the kind of the object being written (one of the num* constants), so
+// its own table is skipped; a duplicate within a kind is the table's unique
+// index to refuse. Every create and every renumber of those objects runs this
+// one check, so the refusal is symmetric between all of them.
+func checkDialNumber(ctx context.Context, tx *sql.Tx, field, number, own string) error {
+	if number == "" {
+		return nil
+	}
+	var what string
+	err := tx.QueryRowContext(ctx, `SELECT what FROM (
+			SELECT 'extension' AS kind, 'an extension number' AS what, number AS n FROM extensions
+			UNION ALL SELECT 'ring group', 'a ring group name', name FROM ring_groups
+			UNION ALL SELECT 'IVR menu', 'the number of IVR menu ' || name, number FROM ivr_menus
+			UNION ALL SELECT 'conference room', 'the number of conference room ' || name, number FROM conference_rooms
+			UNION ALL SELECT 'queue', 'the number of queue ' || name, number FROM queues
+		) t WHERE n = $1 AND kind <> $2 LIMIT 1`, number, own).Scan(&what)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return checkNotSlot(ctx, tx, field, number)
+	case err != nil:
+		return err
+	}
+	return fieldError(field, "is already "+what)
 }

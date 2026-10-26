@@ -600,9 +600,6 @@ func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupI
 		if err := checkRingGroupIVR(ctx, tx, "", in); err != nil {
 			return 0, err
 		}
-		if err := checkNotSlot(ctx, tx, "name", in.Name); err != nil {
-			return 0, err
-		}
 		var id int64
 		if err := checkMOHClass(ctx, tx, "mohClassId", in.MOHClassID); err != nil {
 			return 0, err
@@ -641,9 +638,6 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 		if err := checkRingGroupIVR(ctx, tx, cur, in); err != nil {
 			return id, err
 		}
-		if err := checkNotSlot(ctx, tx, "name", in.Name); err != nil {
-			return id, err
-		}
 		if err := checkMOHClass(ctx, tx, "mohClassId", in.MOHClassID); err != nil {
 			return id, err
 		}
@@ -675,10 +669,7 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 // existing one. cur is the stored name ("" on create).
 func checkRingGroupIVR(ctx context.Context, tx *sql.Tx, cur string, in RingGroupInput) error {
 	if in.Name != cur {
-		if err := refuseIVRNumber(ctx, tx, "name", in.Name); err != nil {
-			return err
-		}
-		if err := conferenceNumberTaken(ctx, tx, "name", in.Name); err != nil {
+		if err := checkDialNumber(ctx, tx, "name", in.Name, numRingGroup); err != nil {
 			return err
 		}
 	}

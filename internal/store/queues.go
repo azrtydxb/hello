@@ -219,20 +219,8 @@ func (in QueueInput) destinations() []ivrDest {
 
 // checkQueue verifies the references of a queue before it is written.
 func checkQueue(ctx context.Context, tx *sql.Tx, id int64, in QueueInput) error {
-	if in.Number != "" {
-		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM extensions WHERE number = $1)
-			+ (SELECT count(*) FROM ring_groups WHERE name = $1)
-			+ (SELECT count(*) FROM ivr_menus WHERE number = $1)
-			+ (SELECT count(*) FROM conference_rooms WHERE number = $1)`, in.Number).Scan(&n); err != nil {
-			return err
-		}
-		if n > 0 {
-			return fieldError("number", "is already an extension number, a ring group name, an IVR menu number or a conference room number")
-		}
-		if err := checkNotSlot(ctx, tx, "number", in.Number); err != nil {
-			return err
-		}
+	if err := checkDialNumber(ctx, tx, "number", in.Number, numQueue); err != nil {
+		return err
 	}
 	if in.BreakoutKey != "" {
 		if in.BreakoutVoicemail == "" {

@@ -603,3 +603,20 @@ Conference rooms (00034), feature key sync (00035) and voicemail voice
 rollback counts follow it. The Yealink template keeps both the text-message
 key and the feature-key-sync keys, and hello-sip's deps carry both the
 message queue and the voicemail dial/speech wiring.
+
+## One dial-number check for every plain-number object (2026-10-26)
+
+Extensions, ring groups, IVR menus, conference rooms and queues are all
+dialled as a plain number, but each create/update carried its own pairwise
+list: an extension or ring group never checked a queue, and an extension
+and a ring group never checked each other. They now all call
+`checkDialNumber` (store/dialspace.go), which looks the value up in all five
+tables and then in the park slots, skipping the writer's own kind (a
+duplicate within a kind stays the unique index's refusal). Renumbering and
+renaming run it only when the value changes, so an old overlap does not block
+unrelated edits. No migration: like the existing checks it is a store-level
+validation, returned as the same field `ValidationError` the API already
+documents (422 on those endpoints), so the OpenAPI spec is unchanged.
+Feature and paging codes start with `*` and cannot equal a plain number;
+they keep the `dialGuard` prefix rules. Time conditions have no number of
+their own.

@@ -133,12 +133,6 @@ func (s *Store) DeleteParkLot(ctx context.Context, actor string, id int64, check
 	})
 }
 
-// checkExtensionNotSlot refuses an extension number that a park lot's slots
-// already use (a slot is dialled like an extension).
-func checkExtensionNotSlot(ctx context.Context, tx *sql.Tx, number string) error {
-	return checkNotSlot(ctx, tx, "number", number)
-}
-
 // checkNotSlot refuses a dialled value (field names it in the error) that a
 // park lot's slots already use.
 func checkNotSlot(ctx context.Context, tx *sql.Tx, field, number string) error {

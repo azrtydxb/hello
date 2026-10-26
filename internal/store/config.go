@@ -87,13 +87,7 @@ func (s *Store) GetExtension(ctx context.Context, id int64) (Extension, error) {
 func (s *Store) CreateExtension(ctx context.Context, actor, number, name, externalNumber string, check Check) (Extension, error) {
 	var e Extension
 	err := s.configChange(ctx, actor, "create", "extension", check, func(tx *sql.Tx) (int64, error) {
-		if err := conferenceNumberTaken(ctx, tx, "number", number); err != nil {
-			return 0, err
-		}
-		if err := refuseIVRNumber(ctx, tx, "number", number); err != nil {
-			return 0, err
-		}
-		if err := checkExtensionNotSlot(ctx, tx, number); err != nil {
+		if err := checkDialNumber(ctx, tx, "number", number, numExtension); err != nil {
 			return 0, err
 		}
 		var err error
@@ -146,20 +140,12 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 				IVRExtension, IVRVoicemail); err != nil {
 				return id, err
 			}
-			if err := refuseIVRNumber(ctx, tx, "number", *c.Number); err != nil {
-				return id, err
-			}
-			if err := conferenceNumberTaken(ctx, tx, "number", *c.Number); err != nil {
+			if err := checkDialNumber(ctx, tx, "number", *c.Number, numExtension); err != nil {
 				return id, err
 			}
 		}
 		if err := checkMOHClass(ctx, tx, "mohClassId", c.MOHClassID); err != nil {
 			return id, err
-		}
-		if c.Number != nil && *c.Number != number {
-			if err := checkExtensionNotSlot(ctx, tx, *c.Number); err != nil {
-				return id, err
-			}
 		}
 		e, err = scanExtension(tx.QueryRowContext(ctx, `
 			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name),
