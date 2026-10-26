@@ -4665,6 +4665,224 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/multicast-channels": {
+      "get": {
+        "operationId": "listMulticastChannels",
+        "summary": "List multicast channels",
+        "description": "Lists the multicast channel catalog: paging channels that phone groups listen on and paging groups send to, and push-to-talk channels that Grandstream WP8x6 phones use for PTT, by kind, priority and id.",
+        "tags": ["paging-groups"],
+        "responses": {
+          "200": {
+            "description": "The channels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastChannelList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createMulticastChannel",
+        "summary": "Add a multicast channel",
+        "description": "Adds a channel to the catalog. The address must be IPv4 multicast outside 224.0.0.0/24, the port 1024 to 65535 and the address and port unique in the catalog; kind defaults to paging, priority to 1 and enabled to true. Admin only.",
+        "tags": ["paging-groups"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MulticastChannelInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastChannel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/multicast-channels/{id}": {
+      "get": {
+        "operationId": "getMulticastChannel",
+        "summary": "One multicast channel",
+        "description": "Returns one channel of the catalog.",
+        "tags": ["paging-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastChannel"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putMulticastChannel",
+        "summary": "Change a multicast channel",
+        "description": "Replaces a channel of the catalog. Its kind cannot change while a phone group, paging group or phone uses it. Phones pick up the change at their next configuration fetch. Admin only.",
+        "tags": ["paging-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MulticastChannelInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastChannel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteMulticastChannel",
+        "summary": "Delete a multicast channel",
+        "description": "Deletes a channel from the catalog and unlinks it from phone groups; a group or phone that used it for PTT falls back to the catalog's first PTT channel. A channel a paging group sends to cannot be deleted. Admin only.",
+        "tags": ["paging-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/moh-classes": {
       "get": {
         "operationId": "listMOHClasses",
@@ -10850,7 +11068,7 @@
       "put": {
         "operationId": "setPhoneGroupMulticast",
         "summary": "Set a phone group's multicast paging channels",
-        "description": "Replaces the group's multicast paging channels (at most 10). Every phone of the group is provisioned to listen on the channels that listen and to send on those that send; Hello is not in the media path, which works on a LAN where multicast is delivered. Addresses must be IPv4 multicast outside 224.0.0.0/24, ports 1024 to 65535, codecs PCMU, PCMA or G722, and no listen address twice. A paging group can name one of these channels to send its page there too. Admin only.",
+        "description": "Replaces the catalog paging channels the group uses (at most 10), each with a role. Every phone of the group is provisioned to listen on the channels that listen and to send on those that send; Hello is not in the media path, which works on a LAN where multicast is delivered. A group with no channels listens on every enabled paging channel of the catalog. The optional options set how the phones take a page and an intercom call: paging in DND, barge, priority, timeout and intercom barging (off by default). Channels are added in Paging > Multicast channels (POST /multicast-channels). Admin only.",
         "tags": ["phone-groups"],
         "parameters": [
           {
@@ -10906,7 +11124,7 @@
       "put": {
         "operationId": "setPhoneGroupPTT",
         "summary": "Set a phone group's push-to-talk settings",
-        "description": "Replaces the group's push-to-talk settings: whether PTT is on, the PTT and group paging multicast address, codec, default channel and the channels (1 to 25) with label and whether the phone may transmit and subscribe. Only Grandstream WP8x6 phones are given them. Admin only.",
+        "description": "Replaces the group's push-to-talk and group paging settings: whether PTT is on, the catalog PTT channel (null: the catalog's first enabled PTT channel, by default 224.0.1.116:5001 PCMU), the default, priority and emergency channels, whether group paging is on with its default, priority and emergency group channels, and the channels (1 to 25 PTT, 26 to 50 group paging) with label and whether the phone may transmit and subscribe. A new group has PTT on with channel 1, priority 24 and emergency 25, and group paging off. Grandstream WP phones are given them (WP8x6, WP856, WP820; the WP810/822/825 keys are unverified); a phone may override the PTT channel with PATCH /phones/{id} pttChannelId. Admin only.",
         "tags": ["phone-groups"],
         "parameters": [
           {
@@ -11220,6 +11438,10 @@
           "groupId": {
             "type": ["integer", "null"],
             "description": "Id of the phone group the phone belongs to; null for none."
+          },
+          "pttChannelId": {
+            "type": ["integer", "null"],
+            "description": "The phone's own PTT channel (a catalog PTT channel); null uses its group's."
           }
         }
       },
@@ -11612,6 +11834,10 @@
           "groupId": {
             "type": ["integer", "null"],
             "description": "Id of a phone group, which decides the address books the phone is delivered; null for none."
+          },
+          "pttChannelId": {
+            "type": ["integer", "null"],
+            "description": "A catalog PTT channel the phone's PTT button uses instead of its group's (Grandstream WP8x6 only); null for the group's."
           }
         }
       },
@@ -12646,19 +12872,18 @@
           "multicastChannelId": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "A multicast channel of a phone group the page is also sent to, or null."
+            "description": "A catalog paging channel the page is also sent to, or null."
           },
           "multicastChannel": {
             "type": ["object", "null"],
             "description": "The multicast channel the page is also sent to (read-only).",
             "properties": {
               "id": { "type": "integer", "format": "int64" },
-              "groupId": { "type": "integer", "format": "int64" },
-              "groupName": { "type": "string" },
               "label": { "type": "string" },
               "address": { "type": "string" },
               "port": { "type": "integer" },
-              "codec": { "type": "string" }
+              "codec": { "type": "string" },
+              "enabled": { "type": "boolean" }
             }
           },
           "createdAt": {
@@ -12716,7 +12941,7 @@
           "multicastChannelId": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "A multicast channel of a phone group to page as well: the page's audio is also sent to its address, which the group's phones listen on. The channel must listen (role listen or both) and use PCMU or PCMA. With a channel, members may be empty."
+            "description": "A multicast channel of the catalog to page as well: the page's audio is also sent to its address, which the phones listening on it play. The channel must be an enabled paging channel using PCMU or PCMA. With a channel, members may be empty."
           }
         }
       },
@@ -18527,7 +18752,7 @@
       },
       "MulticastChannelInput": {
         "type": "object",
-        "required": ["label", "address", "port", "codec", "role", "priority"],
+        "required": ["label", "address", "port", "codec"],
         "properties": {
           "label": {
             "type": "string",
@@ -18544,14 +18769,21 @@
           "codec": {
             "type": "string",
             "enum": ["PCMU", "PCMA", "G722"],
-            "description": "Codec of the channel"
+            "description": "Codec of the channel; a PTT channel takes PCMU or G722, and a paging group sends only to PCMU or PCMA"
           },
-          "role": {
+          "priority": {
+            "type": "integer",
+            "description": "Priority or channel number, 1 (highest) to 25; default 1"
+          },
+          "kind": {
             "type": "string",
-            "enum": ["listen", "send", "both"],
-            "description": "Whether the phones listen on it, send to it or both"
+            "enum": ["paging", "ptt"],
+            "description": "paging: phones listen and paging groups send; ptt: the Grandstream WP8x6 PTT and group paging address. Default paging"
           },
-          "priority": { "type": "integer", "description": "1 (highest) to 25" }
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether phones and paging groups use the channel; default true"
+          }
         }
       },
       "MulticastChannel": {
@@ -18559,10 +18791,50 @@
           { "$ref": "#/components/schemas/MulticastChannelInput" },
           {
             "type": "object",
-            "required": ["id"],
+            "required": ["id", "kind", "priority", "enabled"],
             "properties": { "id": { "type": "integer", "format": "int64" } }
           }
         ]
+      },
+      "MulticastChannelList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MulticastChannel" }
+          }
+        }
+      },
+      "PhoneGroupMulticastLink": {
+        "type": "object",
+        "required": ["channelId", "role"],
+        "properties": {
+          "channelId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "A paging channel of the catalog"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["listen", "send", "both"],
+            "description": "Whether the group's phones listen on it, send to it or both"
+          }
+        }
+      },
+      "PhoneGroupChannel": {
+        "type": "object",
+        "description": "A catalog channel as a phone group uses it.",
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "label": { "type": "string" },
+          "address": { "type": "string" },
+          "port": { "type": "integer" },
+          "codec": { "type": "string" },
+          "role": { "type": "string", "enum": ["listen", "send", "both"] },
+          "priority": { "type": "integer" },
+          "enabled": { "type": "boolean" }
+        }
       },
       "PhoneGroupMulticast": {
         "type": "object",
@@ -18571,8 +18843,47 @@
         "properties": {
           "channels": {
             "type": "array",
-            "description": "The group's channels in priority order; replaces the whole list",
-            "items": { "$ref": "#/components/schemas/MulticastChannelInput" }
+            "description": "The group's catalog channels in order; replaces the whole list",
+            "items": { "$ref": "#/components/schemas/PhoneGroupMulticastLink" }
+          },
+          "options": {
+            "$ref": "#/components/schemas/PagingOptions",
+            "description": "How the group's phones take a page and an intercom call; left out, the stored options stay"
+          }
+        }
+      },
+      "PagingOptions": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "allowInDnd": {
+            "type": "boolean",
+            "default": false,
+            "description": "Multicast pages play while the phone is in Do Not Disturb (Grandstream P8381; WP8x6 and WP810/822/825)"
+          },
+          "barge": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "default": 0,
+            "description": "Paging barge (Grandstream P1566): 0 off; otherwise a page on a channel of this priority or higher (1 is highest) interrupts a call"
+          },
+          "priorityActive": {
+            "type": "boolean",
+            "default": true,
+            "description": "Paging priority active (Grandstream P1567): a higher-priority page interrupts a lower one"
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3600,
+            "default": 0,
+            "description": "Multicast paging timeout in seconds, 0 for none (Grandstream P22532, WP8x6 only)"
+          },
+          "intercomBarge": {
+            "type": "boolean",
+            "default": false,
+            "description": "An intercom call is answered even during a call (Grandstream P26019, Yealink features.intercom.barge); off by default"
           }
         }
       },
@@ -18582,7 +18893,9 @@
         "properties": {
           "channel": {
             "type": "integer",
-            "description": "Channel number, 1 to 25"
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Channel number: 1 to 25 push-to-talk, 26 to 50 group paging"
           },
           "label": {
             "type": "string",
@@ -18600,38 +18913,78 @@
       },
       "PhoneGroupPTT": {
         "type": "object",
-        "required": [
-          "enabled",
-          "address",
-          "codec",
-          "defaultChannel",
-          "channels"
-        ],
+        "required": ["enabled", "defaultChannel"],
         "properties": {
           "enabled": {
             "type": "boolean",
-            "description": "Push-to-talk is on for the group's WP8x6 phones"
+            "description": "Push-to-talk is on for the group's Grandstream WP phones (WP8x6, WP856, WP820; the WP810/822/825 keys are unverified)"
+          },
+          "channelId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The catalog PTT channel (kind ptt); null for the catalog's first enabled PTT channel"
           },
           "address": {
             "type": "string",
-            "description": "IPv4 multicast address and port of PTT and group paging, default 224.0.1.116:5001"
+            "readOnly": true,
+            "description": "The effective PTT and group paging address and port (read-only), default 224.0.1.116:5001"
           },
           "codec": {
             "type": "string",
             "enum": ["PCMU", "G722"],
-            "description": "PTT codec"
+            "readOnly": true,
+            "description": "The effective PTT codec (read-only)"
           },
           "defaultChannel": {
             "type": "integer",
-            "description": "The channel the PTT button talks on; one of the channels, and it must transmit"
+            "description": "The channel the PTT button talks on (1, 2, 24 or 25); one of the channels, and it must transmit"
+          },
+          "priorityChannel": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 24,
+            "description": "The PTT priority channel (Grandstream P22185)"
+          },
+          "emergencyChannel": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 25,
+            "description": "The PTT emergency channel (Grandstream P22186)"
           },
           "acceptWhileBusy": {
             "type": "boolean",
-            "description": "Accept PTT while in a call"
+            "description": "Accept PTT and group pages while in a call"
+          },
+          "groupPaging": {
+            "type": "boolean",
+            "default": false,
+            "description": "Group paging (channels 26 to 50, on the PTT address and codec) is on for the group's WP phones (Grandstream P22194)"
+          },
+          "defaultGroup": {
+            "type": "integer",
+            "enum": [26, 27, 49, 50],
+            "default": 26,
+            "description": "The group channel the phone pages on (Grandstream P22199); one of the group channels when there are any, and it must transmit"
+          },
+          "priorityGroup": {
+            "type": "integer",
+            "minimum": 26,
+            "maximum": 50,
+            "default": 49,
+            "description": "The group paging priority channel (Grandstream P22200)"
+          },
+          "emergencyGroup": {
+            "type": "integer",
+            "minimum": 26,
+            "maximum": 50,
+            "default": 50,
+            "description": "The group paging emergency channel (Grandstream P22201)"
           },
           "channels": {
             "type": "array",
-            "description": "The channels, 1 to 25",
+            "description": "The channels: 1 to 25 push-to-talk, 26 to 50 group paging; with none, the default channel (and with group paging on the default group channel) is defined with transmit and subscribe",
             "items": { "$ref": "#/components/schemas/PTTChannel" }
           }
         }
@@ -18678,10 +19031,11 @@
           },
           "multicast": {
             "type": "array",
-            "description": "The group's multicast paging channels",
-            "items": { "$ref": "#/components/schemas/MulticastChannel" }
+            "description": "The catalog paging channels the group uses; empty means every enabled paging channel",
+            "items": { "$ref": "#/components/schemas/PhoneGroupChannel" }
           },
           "ptt": { "$ref": "#/components/schemas/PhoneGroupPTT" },
+          "pagingOptions": { "$ref": "#/components/schemas/PagingOptions" },
           "phoneCount": {
             "type": "integer"
           },

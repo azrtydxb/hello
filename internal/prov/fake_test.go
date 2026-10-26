@@ -250,7 +250,8 @@ func (s *fakeStore) RenderInputs(_ context.Context, id int64) (RenderData, Templ
 		names[i] = b.Name
 	}
 	d.Book = NewBookInfo(DeviceURL(s.public, p.plain), names, DefaultBookRefresh)
-	d.Multicast, d.PTT = p.multicast, p.ptt
+	d.Multicast, d.PTT, d.Paging = p.multicast, p.ptt, DefaultPagingOptions()
+	d.Phone.PTTCapable, d.Phone.WP = SupportsPTT(p.vendor, p.model), WPFamily(p.vendor, p.model)
 	if p.pinned != nil {
 		d.Firmware = &FirmwareInfo{URL: FirmwareURL(s.public, p.plain, p.pinned.Filename), Dir: strings.TrimSuffix(DeviceURL(s.public, p.plain), "/") + "/fw", Via: UpgradeVia(s.public.Scheme + "://"), Version: p.pinned.Version}
 	}

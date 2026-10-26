@@ -40,7 +40,7 @@ type PhonebookStore interface {
 	UpdatePhoneGroup(ctx context.Context, actor string, id int64, in store.GroupInput) (phonebook.Group, error)
 	DeletePhoneGroup(ctx context.Context, actor string, id int64) error
 	SetPhoneGroupBooks(ctx context.Context, actor string, id int64, bookIDs []int64) (phonebook.Group, error)
-	SetPhoneGroupMulticast(ctx context.Context, actor string, id int64, in []phonebook.MulticastInput) (phonebook.Group, error)
+	SetPhoneGroupMulticast(ctx context.Context, actor string, id int64, in []phonebook.MulticastInput, opts *phonebook.PagingOptions) (phonebook.Group, error)
 	SetPhoneGroupPTT(ctx context.Context, actor string, id int64, in phonebook.PTT) (phonebook.Group, error)
 }
 
@@ -576,9 +576,12 @@ func (s *server) putPhoneGroupBooks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, g)
 }
 
-// putPhoneGroupMulticast replaces a group's multicast paging channels
+// putPhoneGroupMulticast replaces the catalog paging channels a group uses
 // (spec P-15): every phone of the group is provisioned to listen on the
-// channels that listen and to send on those that send.
+// channels that listen and to send on those that send. An empty list means
+// every enabled paging channel of the catalog. options, when given,
+// replaces how the group's Grandstream WP phones take a page and an
+// intercom call; omitted, they stay.
 func (s *server) putPhoneGroupMulticast(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok || s.booksDisabled(w) {
@@ -586,19 +589,24 @@ func (s *server) putPhoneGroupMulticast(w http.ResponseWriter, r *http.Request) 
 	}
 	var in struct {
 		Channels *[]phonebook.MulticastInput `json:"channels"`
+		Options  *phonebook.PagingOptions    `json:"options"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	if in.Channels == nil {
-		badRequest(w, "channels is required (an empty list removes every channel)")
+		badRequest(w, "channels is required (an empty list uses every enabled paging channel)")
 		return
 	}
-	if f := phonebook.ValidateMulticast(*in.Channels); len(f) > 0 {
+	f := phonebook.ValidateMulticast(*in.Channels)
+	if in.Options != nil {
+		f = append(f, phonebook.ValidatePagingOptions(*in.Options)...)
+	}
+	if len(f) > 0 {
 		writePhonebookFields(w, f)
 		return
 	}
-	g, err := s.Phonebooks.SetPhoneGroupMulticast(r.Context(), actor(r).String(), id, *in.Channels)
+	g, err := s.Phonebooks.SetPhoneGroupMulticast(r.Context(), actor(r).String(), id, *in.Channels, in.Options)
 	if err != nil {
 		s.bookError(w, "phone group", err)
 		return
@@ -607,19 +615,26 @@ func (s *server) putPhoneGroupMulticast(w http.ResponseWriter, r *http.Request) 
 }
 
 // putPhoneGroupPTT replaces a group's push-to-talk settings and channels
-// (phone-feature-parity S-30). Only phones that support PTT (Grandstream
-// WP8x6) are given them.
+// (phone-feature-parity S-30): the catalog PTT channel (channelId, null for
+// the catalog's first), the default channel and the channels. Only phones
+// that support PTT (Grandstream WP8x6) are given them. address and codec
+// in the body are ignored: they come from the PTT channel.
 func (s *server) putPhoneGroupPTT(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok || s.booksDisabled(w) {
 		return
 	}
-	in := phonebook.PTT{Address: phonebook.DefaultPTTAddress, Codec: phonebook.CodecPCMU, DefaultChannel: 1}
+	in := phonebook.DefaultPTT()
+	in.Enabled = false
 	if !decode(w, r, &in) {
 		return
 	}
 	if in.Channels == nil {
 		in.Channels = []phonebook.PTTChannel{}
+	}
+	if in.ChannelID != nil && *in.ChannelID <= 0 {
+		writePhonebookFields(w, []phonebook.FieldError{{Path: "channelId", Message: "must be a multicast channel id or null"}})
+		return
 	}
 	if f := phonebook.ValidatePTT(in); len(f) > 0 {
 		writePhonebookFields(w, f)
