@@ -148,6 +148,10 @@ func renderBody(ctx context.Context, body string, d RenderData, budget time.Dura
 	}
 	d.Prov.CACertBase64 = pemBase64(d.Prov.CACertPEM)
 	d.BLF = PlaceBLF(d.Phone.Vendor, d.Phone.Model, d.BLF, d.Codes.PickupDirected)
+	d.VMKey = nil
+	if !d.Line.NoVoicemail {
+		d.VMKey = PlaceVMKey(d.Phone.Vendor, d.Phone.Model, len(d.BLF), d.Line.VoicemailCode, d.Line.Label, d.Line.Domain)
+	}
 	w := &cappedWriter{ctx: ctx}
 	if err := tmpl.Execute(w, toData(reflect.ValueOf(d))); err != nil {
 		if w.err != nil {

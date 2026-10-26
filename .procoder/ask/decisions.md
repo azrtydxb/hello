@@ -697,3 +697,25 @@ of"), paging by code. A stored value the list no longer has stays selectable as
 is not a target of another. An empty target is refused with a kind-specific
 message. `conference` is also in the API enum and still has no chooser; not part
 of this change.
+
+## Transfer-to-voicemail phone key (2026-10-26)
+
+Yealink, Snom, Fanvil and Poly templates provision a key that transfers the
+active call to `*97<own extension>` (`internal/prov/keycaps.go`, `PlaceVMKey`).
+Choices:
+
+- The target is the phone's own extension. A key cannot ask for a number, and
+  "send this caller to my voicemail" is the common use; a colleague's box is
+  still reachable by dialling `*97<ext>` after a transfer.
+- The key goes on the first key left after the BLF keys, never ahead of one.
+  A phone whose keys the BLF keys fill gets none (no BLF is dropped for it).
+- Written only when the PBX defines the voicemail feature code and the
+  extension has voicemail enabled (`Line.NoVoicemail`, from
+  `extensions.voicemail_enabled`).
+- Gated like BLF: Yealink, Snom and Fanvil only on a model in the capability
+  table; Poly on every model (a softkey); no Grandstream, since a WP has no key
+  block in its template and the P323 block of the other models is unverified
+  and overlaps the phonebook keys.
+- Every key type is unverified on a phone and marked "(verify)" in the templates
+  (Yealink type 3, Snom `transfer`, Fanvil memory key `/f`, Poly efk macro).
+  The provclient Fanvil parser now counts only `/b` memory keys as BLF.
