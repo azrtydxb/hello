@@ -40,7 +40,7 @@ type CDR struct {
 	// Kind is call, page or intercom (migration 00013).
 	Kind string `json:"kind"`
 	// RingTag is the ring tag the call rang with and RingRule what chose it
-	// (migration 00043); empty when no internal device rang.
+	// (migration 00044); empty when no internal device rang.
 	RingTag  string `json:"ringTag"`
 	RingRule string `json:"ringRule"`
 	// PageLegs is a page's outcome per member (migration 00014); set by

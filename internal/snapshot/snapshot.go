@@ -94,7 +94,7 @@ type RingGroup struct {
 	MOHClassID  int64
 	MOHRingback bool
 	// RingTag overrides the ringgroup ring tag for calls through the group
-	// ("" keeps ringgroup; migration 00043).
+	// ("" keeps ringgroup; migration 00044).
 	RingTag string
 }
 
@@ -219,7 +219,7 @@ type Snapshot struct {
 	// global default class (0 when none is set).
 	mohs       map[int64]MOHClass
 	mohDefault int64
-	// ringTags are the ring tags and rules (migration 00043); nil means the
+	// ringTags are the ring tags and rules (migration 00044); nil means the
 	// built-in tags and no rules.
 	ringTags *ringtag.Table
 	// routing is the trunk and route state; nil for a snapshot from New.

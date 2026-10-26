@@ -1,6 +1,6 @@
 package store
 
-// Ring tags (migration 00043, spec phone-feature-parity S-39 and S-40): the
+// Ring tags (migration 00044, spec phone-feature-parity S-39 and S-40): the
 // built-in and custom tags with their Bellcore slots, and the ordered rules
 // that choose a tag. Every mutation runs through configChange, so it is
 // audited, bumps the configuration revision and reaches hello-sip as a new
