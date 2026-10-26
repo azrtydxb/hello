@@ -165,6 +165,17 @@ jobs:
         env:
           MINIO_ROOT_USER: hello
           MINIO_ROOT_PASSWORD: hello-voicemail-secret
+          # Headroom, not a feature: by default MinIO derives its
+          # concurrent-request ceiling from the pod's memory and answers 503
+          # SlowDown ("reduce your request rate") once requests queue past a
+          # 10 s deadline, which a busy shared runner node reaches during the
+          # firmware and recording tests. A generous ceiling and deadline
+          # make it queue instead, and the scanner and console stay quiet.
+          MINIO_API_REQUESTS_MAX: "1024"
+          MINIO_API_REQUESTS_DEADLINE: 120s
+          MINIO_SCANNER_SPEED: slowest
+          MINIO_BROWSER: "off"
+          MINIO_PROMETHEUS_AUTH_TYPE: public
         options: >-
           --health-cmd "curl -f http://localhost:9000/minio/health/live"
           --health-interval 5s --health-timeout 5s --health-retries 12
@@ -221,6 +232,16 @@ jobs:
       - run: go test -timeout 30m ./...
       - name: go test -race
         run: go test -race -timeout 30m ./...
+      # A MinIO SlowDown cannot be diagnosed from the test output alone: keep
+      # the drive and request metrics of the failed run in the log.
+      - name: MinIO diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          curl -fsS "http://$HELLO_TEST_MINIO_ENDPOINT/minio/v2/metrics/node" \
+            | grep -E '^minio_node_(drive|io|process_(resident|cpu))' | head -60 || true
+          curl -fsS "http://$HELLO_TEST_MINIO_ENDPOINT/minio/v2/metrics/cluster" \
+            | grep -E '^minio_(s3_requests_(rejected|errors|waiting)|node_drive_(offline|free))' | head -40 || true
       # The in-call HA races (a WaitGroup grown during shutdown, a transfer
       # writing the caller dialog under the original call) surfaced only
       # intermittently in one pass: soak the takeover matrix a few times.
