@@ -215,6 +215,32 @@ func waitBucket(t *testing.T, o *MinioObjects) {
 	}
 }
 
+// isSlowDown reports whether err is the store throttling or briefly refusing
+// writes (S3 SlowDown: "please reduce your request rate").
+func isSlowDown(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "reduce your request rate")
+}
+
+// retrySlowDown runs a test fixture write against the shared CI MinIO. The
+// client already retries SlowDown for about ten seconds; the service
+// container's drive can stay unwritable for longer than that under load, so
+// the fixture keeps trying for up to 90 s. The code under test is not
+// wrapped: only setup writes go through here.
+func retrySlowDown(t *testing.T, op func() error) {
+	t.Helper()
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		err := op()
+		if err == nil {
+			return
+		}
+		if !isSlowDown(err) || time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 var (
 	sharedBucketsMu sync.Mutex
 	sharedBucketsOK bool
@@ -400,13 +426,13 @@ func TestVoicemailMessagesFlow(t *testing.T) {
 
 	// A message hello-sip would have left: row + WAV in the bucket.
 	object := fmt.Sprintf("box/%s/1760000000-call-abc.wav", boxID)
-	if err := objs.Put(ctx, object, strings.NewReader(string(wav)+string(wav)), int64(2*len(wav))); err != nil {
-		t.Fatal(err)
-	}
+	retrySlowDown(t, func() error {
+		return objs.Put(ctx, object, strings.NewReader(string(wav)+string(wav)), int64(2*len(wav)))
+	})
 	second := fmt.Sprintf("box/%s/1760000100-call-def.wav", boxID)
-	if err := objs.Put(ctx, second, strings.NewReader(string(wav)), int64(len(wav))); err != nil {
-		t.Fatal(err)
-	}
+	retrySlowDown(t, func() error {
+		return objs.Put(ctx, second, strings.NewReader(string(wav)), int64(len(wav)))
+	})
 	if _, err := e.db.ExecContext(ctx,
 		`INSERT INTO voicemail_messages (box_id, minio_object, caller, duration_ms) VALUES ($1, $2, '102', 34000)`,
 		boxResp["id"], object); err != nil {
