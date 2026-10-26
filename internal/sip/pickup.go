@@ -135,6 +135,7 @@ func (c *call) answerPickup(req *pickupReq) {
 	c.mu.Unlock()
 	c.addTrace("Call picked up by " + req.retriever)
 	c.publish()
+	c.noteAnswered(req.retriever)
 	req.res <- pickupRes{ok: true, answer: takerAns, callID: c.callID}
 	body := ans.Build(c.anchorHost, relay.LegPort(legCaller), "sendrecv")
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
