@@ -164,6 +164,24 @@ func TestExtensionCallWaiting(t *testing.T) {
 	}})
 }
 
+// TestExtensionNoAnswerRings: the ring count before the no-answer forward
+// starts at 0 (system default), changes through PATCH, and a count outside 0
+// to 20 is a field error. It fails if any of those differ.
+func TestExtensionNoAnswerRings(t *testing.T) {
+	e := newPBXEnv(t, newMemObjects())
+	c := e.login()
+	path := fmt.Sprintf("/api/v1/extensions/%v", e.ext101["id"])
+	if e.ext101["noAnswerRings"] != float64(0) {
+		t.Fatalf("new extension noAnswerRings = %v, want 0", e.ext101["noAnswerRings"])
+	}
+	got := c.must(http.StatusOK, "PATCH", path, map[string]any{"noAnswerRings": 5}).json(t)
+	if got["noAnswerRings"] != float64(5) {
+		t.Fatalf("after PATCH noAnswerRings = %v", got["noAnswerRings"])
+	}
+	c.must(http.StatusBadRequest, "PATCH", path, map[string]any{"noAnswerRings": 21})
+	c.must(http.StatusBadRequest, "PATCH", path, map[string]any{"noAnswerRings": -1})
+}
+
 // fakePageTester answers a test page at once with a canned result.
 type fakePageTester struct {
 	mu   sync.Mutex

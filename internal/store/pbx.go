@@ -25,15 +25,21 @@ type VoicemailBox struct {
 	Email             string `json:"email"`
 	GreetingObject    string `json:"greetingObject"`
 	UnreachableObject string `json:"unreachableObject"`
-	// GreetingTTS and UnreachableTTS describe how a greeting was generated
-	// from text; nil for uploaded or picked audio.
+	// BusyObject is the custom greeting for a busy extension and NameObject
+	// the owner's recorded name (migration 00036); "" means the default
+	// spoken prompt is used.
+	BusyObject string `json:"busyObject"`
+	NameObject string `json:"nameObject"`
+	// GreetingTTS, UnreachableTTS and BusyTTS describe how a greeting was
+	// generated from text; nil for uploaded, recorded or picked audio.
 	GreetingTTS    *TTSMeta  `json:"greetingTts"`
 	UnreachableTTS *TTSMeta  `json:"unreachableTts"`
+	BusyTTS        *TTSMeta  `json:"busyTts"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
-const boxCols = `id, extension_id, password_hash <> '', email, greeting_object, unreachable_object, greeting_tts, unreachable_tts, created_at, updated_at`
+const boxCols = `id, extension_id, password_hash <> '', email, greeting_object, unreachable_object, busy_object, name_object, greeting_tts, unreachable_tts, busy_tts, created_at, updated_at`
 
 // GetVoicemailBox returns the box of extensionID.
 func (s *Store) GetVoicemailBox(ctx context.Context, extensionID int64) (VoicemailBox, error) {
@@ -44,10 +50,10 @@ func (s *Store) GetVoicemailBox(ctx context.Context, extensionID int64) (Voicema
 
 func scanBox(r interface{ Scan(...any) error }) (VoicemailBox, error) {
 	var b VoicemailBox
-	var gt, ut []byte
+	var gt, ut, bt []byte
 	err := r.Scan(&b.ID, &b.ExtensionID, &b.HasPassword, &b.Email, &b.GreetingObject, &b.UnreachableObject,
-		&gt, &ut, &b.CreatedAt, &b.UpdatedAt)
-	b.GreetingTTS, b.UnreachableTTS = parseTTSMeta(gt), parseTTSMeta(ut)
+		&b.BusyObject, &b.NameObject, &gt, &ut, &bt, &b.CreatedAt, &b.UpdatedAt)
+	b.GreetingTTS, b.UnreachableTTS, b.BusyTTS = parseTTSMeta(gt), parseTTSMeta(ut), parseTTSMeta(bt)
 	return b, err
 }
 
@@ -59,11 +65,15 @@ type VoicemailBoxChange struct {
 	Password    *string
 	Greeting    *string
 	Unreachable *string
-	// GreetingTTS and UnreachableTTS accompany a new Greeting or Unreachable
-	// object: the prompt it was generated from, or nil for uploaded audio
-	// (which clears an earlier record).
+	// Busy and Name are the busy greeting and the recorded name objects.
+	Busy *string
+	Name *string
+	// GreetingTTS, UnreachableTTS and BusyTTS accompany a new Greeting,
+	// Unreachable or Busy object: the prompt it was generated from, or nil
+	// for uploaded audio (which clears an earlier record).
 	GreetingTTS    *TTSMeta
 	UnreachableTTS *TTSMeta
+	BusyTTS        *TTSMeta
 }
 
 // UpdateVoicemailBox changes the box of extensionID, creating the box if the
@@ -92,10 +102,13 @@ func (s *Store) UpdateVoicemailBox(ctx context.Context, actor string, extensionI
 				unreachable_object = COALESCE($5, unreachable_object),
 				greeting_tts = CASE WHEN $4::text IS NOT NULL THEN $6::jsonb ELSE greeting_tts END,
 				unreachable_tts = CASE WHEN $5::text IS NOT NULL THEN $7::jsonb ELSE unreachable_tts END,
+				busy_object = COALESCE($8, busy_object),
+				name_object = COALESCE($9, name_object),
+				busy_tts = CASE WHEN $8::text IS NOT NULL THEN $10::jsonb ELSE busy_tts END,
 				updated_at = now()
 			WHERE extension_id = $1`,
 			extensionID, c.Email, hash, c.Greeting, c.Unreachable,
-			metaJSON(c.GreetingTTS), metaJSON(c.UnreachableTTS)); err != nil {
+			metaJSON(c.GreetingTTS), metaJSON(c.UnreachableTTS), c.Busy, c.Name, metaJSON(c.BusyTTS)); err != nil {
 			return "", err
 		}
 		var err error
@@ -109,9 +122,12 @@ func (s *Store) UpdateVoicemailBox(ctx context.Context, actor string, extensionI
 // VoicemailMessage is one recorded message. Object is its MinIO key and is
 // internal: clients play audio through the audio route.
 type VoicemailMessage struct {
-	ID          int64     `json:"id"`
-	BoxID       int64     `json:"boxId"`
-	Caller      string    `json:"caller"`
+	ID     int64  `json:"id"`
+	BoxID  int64  `json:"boxId"`
+	Caller string `json:"caller"`
+	// CallerName is the caller-ID display name the call carried ("" when it
+	// carried none).
+	CallerName  string    `json:"callerName"`
 	DurationMs  int64     `json:"durationMs"`
 	Heard       bool      `json:"heard"`
 	EmailStatus string    `json:"emailStatus"`
@@ -121,11 +137,11 @@ type VoicemailMessage struct {
 	Object string `json:"-"`
 }
 
-const messageCols = `id, box_id, caller, duration_ms, heard, email_status, created_at, minio_object`
+const messageCols = `id, box_id, caller, caller_name, duration_ms, heard, email_status, created_at, minio_object`
 
 func scanMessage(r interface{ Scan(...any) error }) (VoicemailMessage, error) {
 	var m VoicemailMessage
-	err := r.Scan(&m.ID, &m.BoxID, &m.Caller, &m.DurationMs, &m.Heard, &m.EmailStatus, &m.CreatedAt, &m.Object)
+	err := r.Scan(&m.ID, &m.BoxID, &m.Caller, &m.CallerName, &m.DurationMs, &m.Heard, &m.EmailStatus, &m.CreatedAt, &m.Object)
 	return m, err
 }
 
@@ -259,10 +275,10 @@ func (s *Store) ListVoicemailBoxes(ctx context.Context) ([]VoicemailBoxSummary, 
 func (s *Store) VoicemailBoxByNumber(ctx context.Context, number string) (VoicemailBox, bool, error) {
 	var b VoicemailBox
 	err := s.db.QueryRowContext(ctx, `
-		SELECT b.id, b.email, b.greeting_object, b.unreachable_object
+		SELECT b.id, b.email, b.greeting_object, b.unreachable_object, b.busy_object, b.name_object
 		FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
 		WHERE e.number = $1`, number).
-		Scan(&b.ID, &b.Email, &b.GreetingObject, &b.UnreachableObject)
+		Scan(&b.ID, &b.Email, &b.GreetingObject, &b.UnreachableObject, &b.BusyObject, &b.NameObject)
 	if errors.Is(err, sql.ErrNoRows) {
 		return VoicemailBox{}, false, nil
 	}
@@ -292,13 +308,91 @@ func (s *Store) VerifyVoicemailPassword(ctx context.Context, boxID int64, passwo
 }
 
 // InsertVoicemailMessage stores one recorded message and returns its id.
-func (s *Store) InsertVoicemailMessage(ctx context.Context, boxID int64, object, caller string, durationMs int64) (int64, error) {
+// callerName is the caller-ID display name, "" when the call carried none.
+func (s *Store) InsertVoicemailMessage(ctx context.Context, boxID int64, object, caller, callerName string, durationMs int64) (int64, error) {
 	var id int64
 	err := s.db.QueryRowContext(ctx, `
-		INSERT INTO voicemail_messages (box_id, minio_object, caller, duration_ms)
-		VALUES ($1, $2, $3, $4) RETURNING id`,
-		boxID, object, caller, durationMs).Scan(&id)
+		INSERT INTO voicemail_messages (box_id, minio_object, caller, caller_name, duration_ms)
+		VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		boxID, object, caller, callerName, durationMs).Scan(&id)
 	return id, err
+}
+
+// greetingColumns maps a greeting slot of the guided session to its columns
+// (object, and the generated-text record that goes with it, or "").
+var greetingColumns = map[string][2]string{
+	"greeting":    {"greeting_object", "greeting_tts"},
+	"busy":        {"busy_object", "busy_tts"},
+	"unreachable": {"unreachable_object", "unreachable_tts"},
+	"name":        {"name_object", ""},
+}
+
+// SetVoicemailGreeting is the call plane's way to record a greeting from the
+// phone (the 0 menu of *97): it points slot (greeting, busy, unreachable or
+// name) at object and returns the object it replaced, which the caller
+// removes. An empty object reverts the slot to the default spoken prompt.
+// Like the other call-plane paths it is not audited and does not bump the
+// revision hello-sip reloads on (the snapshot carries no greeting).
+func (s *Store) SetVoicemailGreeting(ctx context.Context, boxID int64, slot, object string) (string, error) {
+	cols, ok := greetingColumns[slot]
+	if !ok {
+		return "", errors.New("store: unknown greeting slot " + slot)
+	}
+	var prev string
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT `+cols[0]+` FROM voicemail_boxes WHERE id = $1`, boxID).Scan(&prev); err != nil {
+		return "", mapErr(err)
+	}
+	set := cols[0] + ` = $2`
+	if cols[1] != "" {
+		set += `, ` + cols[1] + ` = NULL`
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE voicemail_boxes SET `+set+`, updated_at = now() WHERE id = $1`, boxID, object); err != nil {
+		return "", err
+	}
+	return prev, nil
+}
+
+// ResetVoicemailGreetings reverts the greeting, busy and unreachable slots of
+// boxID to the default spoken prompts (the recorded name stays) and returns
+// the objects it dropped.
+func (s *Store) ResetVoicemailGreetings(ctx context.Context, boxID int64) ([]string, error) {
+	var dropped []string
+	for _, slot := range []string{"greeting", "busy", "unreachable"} {
+		prev, err := s.SetVoicemailGreeting(ctx, boxID, slot, "")
+		if err != nil {
+			return dropped, err
+		}
+		if prev != "" {
+			dropped = append(dropped, prev)
+		}
+	}
+	return dropped, nil
+}
+
+// SetVoicemailPIN changes boxID's retrieval password (bcrypt-hashed).
+func (s *Store) SetVoicemailPIN(ctx context.Context, boxID int64, pin string) error {
+	h, err := auth.HashPassword(pin)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE voicemail_boxes SET password_hash = $2, updated_at = now() WHERE id = $1`, boxID, h)
+	if err != nil {
+		return err
+	}
+	return requireRow(res)
+}
+
+// RemoveVoicemailMessage deletes message id of boxID from the phone and
+// returns its object key for the caller to remove. A message of another box
+// is not found. Not audited, like the other call-plane paths.
+func (s *Store) RemoveVoicemailMessage(ctx context.Context, boxID, id int64) (string, error) {
+	var object string
+	err := s.db.QueryRowContext(ctx,
+		`DELETE FROM voicemail_messages WHERE id = $1 AND box_id = $2 RETURNING minio_object`, id, boxID).Scan(&object)
+	return object, mapErr(err)
 }
 
 // SetVoicemailMessageHeard sets a message's heard flag after the phone
@@ -324,6 +418,8 @@ type FeatureUpdate struct {
 	ForwardBusy     *string
 	ForwardNoAnswer *string
 	CallWaiting     *bool
+	// NoAnswerRings is the no-answer ring count (0 = system default).
+	NoAnswerRings *int
 }
 
 // ApplyFeatureUpdate applies one feature-code change the same way every
@@ -340,9 +436,10 @@ func (s *Store) ApplyFeatureUpdate(ctx context.Context, actor string, u FeatureU
 				forward_busy = COALESCE($4, forward_busy),
 				forward_no_answer = COALESCE($5, forward_no_answer),
 				call_waiting = COALESCE($6, call_waiting),
+				no_answer_rings = COALESCE($7, no_answer_rings),
 				updated_at = now()
 			WHERE number = $1`,
-			u.Number, u.DND, u.ForwardAlways, u.ForwardBusy, u.ForwardNoAnswer, u.CallWaiting)
+			u.Number, u.DND, u.ForwardAlways, u.ForwardBusy, u.ForwardNoAnswer, u.CallWaiting, u.NoAnswerRings)
 		if err != nil {
 			return "", err
 		}

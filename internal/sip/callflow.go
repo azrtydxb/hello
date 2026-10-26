@@ -431,3 +431,20 @@ func (c *call) pendingLegs() int {
 	}
 	return n
 }
+
+// secondsPerRing converts a phone's ring count to time: one ring cadence
+// (2 s ring, 4 s pause) is 6 s.
+const secondsPerRing = 6
+
+// ringTimeout is how long the current stage rings before the no-answer
+// path: the extension's own ring count (set from the phone's feature key or
+// the UI) when it has one, else the system ring timeout.
+func (c *call) ringTimeout() time.Duration {
+	c.mu.Lock()
+	st := c.stages
+	c.mu.Unlock()
+	if st != nil && st.feats.NoAnswerRings > 0 {
+		return time.Duration(st.feats.NoAnswerRings*secondsPerRing) * time.Second
+	}
+	return c.s.cfg.RingTimeout
+}

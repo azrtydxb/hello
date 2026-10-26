@@ -394,12 +394,13 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		DirectoryHidden  *bool   `json:"directoryHidden"`
 		CallWaiting      *bool   `json:"callWaiting"`
 		// MOHClassID is null to clear (use the global default).
-		MOHClassID nullable[int64] `json:"mohClassId"`
+		MOHClassID    nullable[int64] `json:"mohClassId"`
+		NoAnswerRings *int            `json:"noAnswerRings"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.Number == nil && in.Name == nil && in.ExternalNumber == nil && in.DND == nil &&
+	if in.Number == nil && in.Name == nil && in.ExternalNumber == nil && in.DND == nil && in.NoAnswerRings == nil &&
 		in.ForwardAlways == nil && in.ForwardBusy == nil && in.ForwardNoAnswer == nil &&
 		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.AllowIntercom == nil && in.DirectoryHidden == nil && in.CallWaiting == nil &&
 		!in.MOHClassID.Set {
@@ -411,6 +412,9 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var f fieldErrs
+	if in.NoAnswerRings != nil && (*in.NoAnswerRings < 0 || *in.NoAnswerRings > 20) {
+		f.add("noAnswerRings", "must be 0 (system default) to 20")
+	}
 	for path, v := range map[string]*string{
 		"forwardAlways": in.ForwardAlways, "forwardBusy": in.ForwardBusy, "forwardNoAnswer": in.ForwardNoAnswer,
 	} {
@@ -428,6 +432,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		ForwardNoAnswer: in.ForwardNoAnswer, VoicemailEnabled: in.VoicemailEnabled,
 		RecordDefault: in.RecordDefault, AllowIntercom: in.AllowIntercom, DirectoryHidden: in.DirectoryHidden, CallWaiting: in.CallWaiting,
 		MOHClassID: in.MOHClassID.Value, ClearMOHClass: in.MOHClassID.Set && in.MOHClassID.Value == nil,
+		NoAnswerRings: in.NoAnswerRings,
 	}, s.check())
 	if err != nil {
 		s.configError(w, "extension", err)

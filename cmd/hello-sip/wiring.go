@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/sip"
 	"github.com/azrtydxb/hello/internal/store"
 )
@@ -19,7 +20,8 @@ import (
 // method runs on voicemail media or MWI goroutines, never on the SIP
 // transaction path, and is bounded by the caller's context.
 type voicemails struct {
-	st *store.Store
+	st   *store.Store
+	dial phonebook.Dialing
 }
 
 var _ sip.VoicemailStore = voicemails{}
@@ -39,6 +41,8 @@ func (v voicemails) Box(ctx context.Context, extension string) (sip.VoicemailBox
 		Email:             b.Email,
 		GreetingObject:    b.GreetingObject,
 		UnreachableObject: b.UnreachableObject,
+		BusyObject:        b.BusyObject,
+		NameObject:        b.NameObject,
 	}, true, nil
 }
 
@@ -48,8 +52,8 @@ func (v voicemails) PasswordOK(ctx context.Context, boxID int64, password string
 }
 
 // InsertMessage stores one message row after its audio reached MinIO.
-func (v voicemails) InsertMessage(ctx context.Context, boxID int64, object, caller string, durationMs int64) (int64, error) {
-	return v.st.InsertVoicemailMessage(ctx, boxID, object, caller, durationMs)
+func (v voicemails) InsertMessage(ctx context.Context, boxID int64, object, caller, callerName string, durationMs int64) (int64, error) {
+	return v.st.InsertVoicemailMessage(ctx, boxID, object, caller, callerName, durationMs)
 }
 
 // MessageCounts is the box's MWI summary (unheard, total).
@@ -71,6 +75,7 @@ func (v voicemails) ListMessages(ctx context.Context, boxID int64) ([]sip.Voicem
 			BoxID:       m.BoxID,
 			MinioObject: m.Object,
 			Caller:      m.Caller,
+			CallerName:  m.CallerName,
 			DurationMs:  m.DurationMs,
 			Heard:       m.Heard,
 			CreatedAt:   m.CreatedAt,
@@ -82,6 +87,39 @@ func (v voicemails) ListMessages(ctx context.Context, boxID int64) ([]sip.Voicem
 // MarkHeard marks a message heard after the phone played it.
 func (v voicemails) MarkHeard(ctx context.Context, id int64) error {
 	return v.st.SetVoicemailMessageHeard(ctx, id, true)
+}
+
+// DeleteMessage removes a message of the box and returns its object key.
+func (v voicemails) DeleteMessage(ctx context.Context, boxID, id int64) (string, error) {
+	return v.st.RemoveVoicemailMessage(ctx, boxID, id)
+}
+
+// SetPIN changes the box's retrieval PIN.
+func (v voicemails) SetPIN(ctx context.Context, boxID int64, pin string) error {
+	return v.st.SetVoicemailPIN(ctx, boxID, pin)
+}
+
+// SetGreeting points a greeting slot at a recorded object.
+func (v voicemails) SetGreeting(ctx context.Context, boxID int64, slot, object string) (string, error) {
+	return v.st.SetVoicemailGreeting(ctx, boxID, slot, object)
+}
+
+// ResetGreetings reverts the box's greetings to the spoken defaults.
+func (v voicemails) ResetGreetings(ctx context.Context, boxID int64) ([]string, error) {
+	return v.st.ResetVoicemailGreetings(ctx, boxID)
+}
+
+// ContactName names a caller's number from the extensions, named and company
+// address books (the same lookup the console's diagnostic runs).
+func (v voicemails) ContactName(ctx context.Context, number, callee string) (string, error) {
+	res, err := v.st.LookupPhonebook(ctx, v.dial, number, callee)
+	if err != nil {
+		return "", err
+	}
+	if res.Result != phonebook.LookupMatch {
+		return "", nil
+	}
+	return res.Name, nil
 }
 
 // settings applies feature-code updates through the control-plane store:
@@ -144,6 +182,7 @@ func (q *settings) apply(u sip.ExtUpdate) {
 		ForwardBusy:     u.ForwardBusy,
 		ForwardNoAnswer: u.ForwardNoAnswer,
 		CallWaiting:     u.CallWaiting,
+		NoAnswerRings:   u.NoAnswerRings,
 	})
 	if err != nil {
 		q.log.Warn("feature-code update failed", "extension", u.Extension, "error", err)
@@ -195,6 +234,20 @@ func (l *lazyObjects) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 	return o.Get(ctx, key)
+}
+
+// Remove deletes a voicemail object (a replaced greeting, a deleted message).
+func (l *lazyObjects) Remove(ctx context.Context, key string) error {
+	o, err := l.store()
+	if err != nil {
+		return err
+	}
+	if r, ok := o.(interface {
+		Remove(ctx context.Context, key string) error
+	}); ok {
+		return r.Remove(ctx, key)
+	}
+	return nil
 }
 
 func (l *lazyObjects) PutRecording(ctx context.Context, key string, data []byte) error {

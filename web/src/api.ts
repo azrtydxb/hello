@@ -93,6 +93,8 @@ export interface Extension {
    * setting is switched off at the next resync.
    */
   callWaiting?: boolean;
+  /** Rings before the no-answer forward (the phone's ring count); 0 = the system default. */
+  noAnswerRings?: number;
   /** The extension's voicemail box, when it has one. */
   voicemailBoxId?: Id | null;
   /** Music on hold class callers hear while this extension holds them; null = the default. */
@@ -706,6 +708,7 @@ export const updateExtension = (
     callWaiting?: boolean;
     /** null clears the pick (the global default plays). */
     mohClassId?: Id | null;
+    noAnswerRings?: number;
   },
 ) =>
   request<Extension>("PATCH", `/api/v1/extensions/${id(extensionId)}`, {
@@ -943,9 +946,15 @@ export interface VoicemailBoxInput {
   /** Sent only when changing it; never echoed back. */
   password?: string;
   email?: string;
-  /** Uploaded as multipart `greeting` / `unreachable` file parts. */
+  /**
+   * Uploaded as multipart `greeting` / `busy` / `unreachable` / `name` file
+   * parts: the general greeting, the busy greeting, the unreachable greeting
+   * and the owner's recorded name.
+   */
   greeting?: File;
+  busy?: File;
   unreachable?: File;
+  name?: File;
 }
 
 /** One stored voicemail message (GET /api/v1/voicemail/messages). */
@@ -954,6 +963,8 @@ export interface VoicemailMessage {
   boxId: Id;
   /** Who left it: a number, or a SIP identity. */
   caller: string;
+  /** The caller-ID display name the call carried; "" or absent when none. */
+  callerName?: string;
   durationMs: number;
   heard: boolean;
   /** pending | queued | sent | failed | skipped, when the server reports it. */
@@ -1018,7 +1029,7 @@ export function updateVoicemailBox(
   input: VoicemailBoxInput,
 ): Promise<VoicemailBox> {
   const path = `/api/v1/extensions/${id(extensionId)}/voicemail`;
-  if (!input.greeting && !input.unreachable) {
+  if (!input.greeting && !input.unreachable && !input.busy && !input.name) {
     return request<VoicemailBox>("PUT", path, {
       body: {
         ...(input.password !== undefined ? { password: input.password } : {}),
@@ -1030,9 +1041,11 @@ export function updateVoicemailBox(
   if (input.password !== undefined) form.set("password", input.password);
   if (input.email !== undefined) form.set("email", input.email);
   if (input.greeting) form.set("greeting", input.greeting, input.greeting.name);
+  if (input.busy) form.set("busy", input.busy, input.busy.name);
   if (input.unreachable) {
     form.set("unreachable", input.unreachable, input.unreachable.name);
   }
+  if (input.name) form.set("name", input.name, input.name.name);
   return request<VoicemailBox>("PUT", path, { rawBody: form });
 }
 
