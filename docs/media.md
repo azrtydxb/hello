@@ -68,6 +68,34 @@ image are unchanged. It is excluded from `-race` builds (its pointer
 arithmetic trips the race detector's checkptr), where Opus calls still relay
 but are not decodable by the recorder or answerable by voicemail.
 
+## Who may send media into a call
+
+The relay's UDP ports are reachable by anyone who can reach the host, so a
+leg does not take audio from just anyone. Each leg accepts RTP from:
+
+- the address its remote SDP names, or an address the signalling vouches
+  for: the source of the caller's INVITE, the source of the callee's
+  answer. A phone behind NAT names a private address in its SDP, while its
+  media arrives from the same public address as its signalling;
+- any address, for the first packet only, when the SDP names none usable
+  (no address, `0.0.0.0` for a hold, or a private/CGNAT one) and the
+  signalling gave no address to vouch for. That packet pins the leg.
+
+Once a leg has its first packet it is pinned to that source **address**. The
+port may change (a new NAT mapping), but a packet from any other address is
+refused: it is not counted, not recorded, not relayed, and cannot move
+where the other side's audio goes. Refusals show as `Rejected` in the
+relay's per-direction stats. A mid-call re-INVITE or takeover that moves
+media is a new negotiation: the next target restarts the policy, and the
+signalling addresses stay vouched.
+
+Limits: the policy is by address, not by RTP stream, so a host that can
+spoof the pinned address (same network segment) is not stopped, and the
+SSRC is not pinned because phones change it legitimately at hold and
+resume. A carrier whose media comes from an address that is neither in its
+SDP nor its signalling source is refused; the symptom is one-way or no
+audio on that trunk and a rising `Rejected` count.
+
 ## Music on hold and waiting music
 
 An anchored call plays music to a party the other side puts on hold: a
