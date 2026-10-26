@@ -832,74 +832,157 @@ func TestPhonebookRBAC(t *testing.T) {
 	alice.must(http.StatusOK, "GET", books+"/"+book+"/export", nil)
 }
 
-// TestPhoneGroupMulticastAndPTT fails if a group's multicast channels or PTT
-// settings are not stored and returned in order, an address outside the
-// multicast range or inside 224.0.0.0/24, a port below 1024, a duplicate
-// listen address, an eleventh channel, a PTT default channel the phone does
-// not take or a PTT channel twice is accepted, if a paging group can name a
-// channel that sends only, uses G.722 or does not exist, or if a paging
-// group with a channel needs members; or if removing a channel leaves a
-// paging group pointing at it.
+// TestPhoneGroupMulticastAndPTT fails if the multicast channel catalog
+// accepts an address outside the multicast range or inside 224.0.0.0/24, a
+// port below 1024, an unknown codec or kind, a priority outside 1-25, a
+// missing label or a duplicate address; if a group's links to catalog
+// channels are not stored and returned in order, or accept a PTT channel,
+// an unknown channel, a channel twice or an eleventh channel; if a new group
+// does not have PTT on with channel 1 on Grandstream's default address; if
+// a group's or a phone's PTT channel can be a paging channel; if a paging
+// group can name a G.722, PTT or unknown channel; or if a channel a paging
+// group sends to can be deleted or change kind.
 func TestPhoneGroupMulticastAndPTT(t *testing.T) {
 	p := newProvEnv(t, ProvConfig{})
 	c := p.c
+	const cat = "/api/v1/multicast-channels"
+	ch := func(label, addr string, port int, codec, kind string, prio int) map[string]any {
+		return map[string]any{"label": label, "address": addr, "port": port, "codec": codec, "kind": kind, "priority": prio, "enabled": true}
+	}
+	items := listItems(t, c.must(http.StatusOK, "GET", cat, nil))
+	if len(items) != 1 {
+		t.Fatalf("migrated catalog = %v", items)
+	}
+	first := items[0].(map[string]any)
+	if first["kind"] != "ptt" || first["address"] != "224.0.1.116" || first["port"] != float64(5001) {
+		t.Fatalf("migrated catalog = %v", items)
+	}
+	gsPTT := rowID(first)
+	dock := rowID(c.must(http.StatusCreated, "POST", cat, ch("Dock", "239.255.0.1", 5004, "PCMU", "paging", 1)).json(t))
+	out := rowID(c.must(http.StatusCreated, "POST", cat, ch("Out", "239.255.0.2", 5006, "G722", "paging", 2)).json(t))
+	site := rowID(c.must(http.StatusCreated, "POST", cat, ch("Site", "239.1.1.1", 5001, "G722", "ptt", 3)).json(t))
+	for name, bad := range map[string]map[string]any{
+		"unicast":   ch("a", "10.0.0.1", 5004, "PCMU", "paging", 1),
+		"reserved":  ch("a", "224.0.0.251", 5004, "PCMU", "paging", 1),
+		"ipv6":      ch("a", "ff02::1", 5004, "PCMU", "paging", 1),
+		"low port":  ch("a", "239.1.1.9", 80, "PCMU", "paging", 1),
+		"codec":     ch("a", "239.1.1.9", 5004, "OPUS", "paging", 1),
+		"kind":      ch("a", "239.1.1.9", 5004, "PCMU", "intercom", 1),
+		"priority":  ch("a", "239.1.1.9", 5004, "PCMU", "paging", 26),
+		"no label":  ch("", "239.1.1.9", 5004, "PCMU", "paging", 1),
+		"duplicate": ch("a", "239.255.0.1", 5004, "PCMU", "paging", 1),
+	} {
+		if r := c.do("POST", cat, bad); r.code != http.StatusBadRequest || len(r.body) == 0 {
+			t.Errorf("channel %s: status %d, want 400 with a body", name, r.code)
+		}
+	}
+	c.must(http.StatusNotFound, "GET", cat+"/999999", nil)
+	c.must(http.StatusNotFound, "PUT", cat+"/999999", ch("Gone", "239.255.9.9", 5004, "PCMU", "paging", 1))
+	c.must(http.StatusNotFound, "DELETE", cat+"/999999", nil)
+	upd := c.must(http.StatusOK, "PUT", cat+"/"+out, ch("Outside", "239.255.0.2", 5006, "G722", "paging", 2)).json(t)
+	if upd["label"] != "Outside" {
+		t.Fatalf("updated channel = %v", upd)
+	}
+
 	g := c.must(http.StatusCreated, "POST", "/api/v1/phone-groups", map[string]any{"name": "Warehouse"}).json(t)
 	path := "/api/v1/phone-groups/" + rowID(g)
 	if mc := g["multicast"].([]any); len(mc) != 0 {
 		t.Fatalf("new group multicast = %v", mc)
 	}
-	ch := func(label, addr string, port int, codec, role string, prio int) map[string]any {
-		return map[string]any{"label": label, "address": addr, "port": port, "codec": codec, "role": role, "priority": prio}
+	ptt := g["ptt"].(map[string]any)
+	if ptt["enabled"] != true || ptt["defaultChannel"] != float64(1) || ptt["address"] != "224.0.1.116:5001" || len(ptt["channels"].([]any)) != 1 {
+		t.Fatalf("new group PTT = %v", ptt)
 	}
-	put := func(want int, channels ...map[string]any) response {
-		return c.must(want, "PUT", path+"/multicast", map[string]any{"channels": channels})
+	if ptt["priorityChannel"] != float64(24) || ptt["emergencyChannel"] != float64(25) || ptt["groupPaging"] != false ||
+		ptt["defaultGroup"] != float64(26) || ptt["priorityGroup"] != float64(49) || ptt["emergencyGroup"] != float64(50) {
+		t.Fatalf("new group PTT priority, emergency or group paging = %v", ptt)
 	}
-
-	got := put(http.StatusOK, ch("Dock", "239.255.0.1", 5004, "PCMU", "both", 1), ch("Out", "239.255.0.2", 5006, "G722", "listen", 2)).json(t)
-	mc := got["multicast"].([]any)
-	if len(mc) != 2 || mc[0].(map[string]any)["label"] != "Dock" || mc[1].(map[string]any)["codec"] != "G722" {
+	if o := g["pagingOptions"].(map[string]any); o["priorityActive"] != true || o["allowInDnd"] != false || o["barge"] != float64(0) ||
+		o["timeout"] != float64(0) || o["intercomBarge"] != false {
+		t.Fatalf("new group paging options = %v", o)
+	}
+	link := func(id, role string) map[string]any {
+		n, _ := strconv.ParseInt(id, 10, 64)
+		return map[string]any{"channelId": n, "role": role}
+	}
+	put := func(want int, links ...map[string]any) response {
+		return c.must(want, "PUT", path+"/multicast", map[string]any{"channels": links})
+	}
+	mc := put(http.StatusOK, link(dock, "both"), link(out, "listen")).json(t)["multicast"].([]any)
+	if len(mc) != 2 || mc[0].(map[string]any)["label"] != "Dock" || mc[1].(map[string]any)["codec"] != "G722" || mc[1].(map[string]any)["role"] != "listen" {
 		t.Fatalf("multicast = %v", mc)
 	}
-	dock := rowID(mc[0].(map[string]any))
-	for name, bad := range map[string]map[string]any{
-		"unicast":  ch("a", "10.0.0.1", 5004, "PCMU", "both", 1),
-		"reserved": ch("a", "224.0.0.251", 5004, "PCMU", "both", 1),
-		"ipv6":     ch("a", "ff02::1", 5004, "PCMU", "both", 1),
-		"low port": ch("a", "239.1.1.1", 80, "PCMU", "both", 1),
-		"codec":    ch("a", "239.1.1.1", 5004, "OPUS", "both", 1),
-		"role":     ch("a", "239.1.1.1", 5004, "PCMU", "talk", 1),
-		"priority": ch("a", "239.1.1.1", 5004, "PCMU", "both", 26),
-		"no label": ch("", "239.1.1.1", 5004, "PCMU", "both", 1),
-	} {
-		if r := put(http.StatusBadRequest, bad); len(r.body) == 0 {
-			t.Errorf("%s: empty error body", name)
-		}
+	// Paging options travel with the channels; leaving them out keeps them.
+	opts := map[string]any{"allowInDnd": true, "barge": 3, "priorityActive": false, "timeout": 60, "intercomBarge": true}
+	og := c.must(http.StatusOK, "PUT", path+"/multicast", map[string]any{"channels": []any{link(dock, "both"), link(out, "listen")}, "options": opts}).json(t)
+	if o := og["pagingOptions"].(map[string]any); o["allowInDnd"] != true || o["barge"] != float64(3) || o["priorityActive"] != false ||
+		o["timeout"] != float64(60) || o["intercomBarge"] != true {
+		t.Fatalf("paging options = %v", o)
 	}
-	put(http.StatusBadRequest, ch("a", "239.1.1.1", 5004, "PCMU", "both", 1), ch("b", "239.1.1.1", 5004, "PCMA", "listen", 2))
+	if o := put(http.StatusOK, link(dock, "both"), link(out, "listen")).json(t)["pagingOptions"].(map[string]any); o["barge"] != float64(3) {
+		t.Fatalf("paging options dropped by a PUT without options: %v", o)
+	}
+	for _, bad := range []map[string]any{{"barge": 11}, {"barge": -1}, {"timeout": 3601}} {
+		c.must(http.StatusBadRequest, "PUT", path+"/multicast", map[string]any{"channels": []any{}, "options": bad})
+	}
+	put(http.StatusBadRequest, link(site, "both"))
+	put(http.StatusBadRequest, link("999999", "both"))
+	put(http.StatusBadRequest, link(dock, "talk"))
+	put(http.StatusBadRequest, link(dock, "both"), link(dock, "listen"))
 	var many []map[string]any
-	for i := range 11 {
-		many = append(many, ch(fmt.Sprintf("c%d", i), fmt.Sprintf("239.1.1.%d", i+1), 5004, "PCMU", "both", 1))
+	for range 11 {
+		many = append(many, link(dock, "both"))
 	}
 	put(http.StatusBadRequest, many...)
 	c.must(http.StatusBadRequest, "PUT", path+"/multicast", map[string]any{})
 	c.must(http.StatusNotFound, "PUT", "/api/v1/phone-groups/999999/multicast", map[string]any{"channels": []any{}})
 
-	// PTT.
+	// PTT on the catalog's site channel.
 	pttPath := path + "/ptt"
-	good := map[string]any{"enabled": true, "address": "224.0.1.116:5001", "codec": "PCMU", "defaultChannel": 1,
+	siteID, _ := strconv.ParseInt(site, 10, 64)
+	good := map[string]any{"enabled": true, "channelId": siteID, "defaultChannel": 1,
 		"channels": []map[string]any{{"channel": 1, "label": "All", "transmit": true, "subscribe": true}, {"channel": 24, "label": "Priority", "transmit": true, "subscribe": false}}}
 	pg := c.must(http.StatusOK, "PUT", pttPath, good).json(t)
-	ptt := pg["ptt"].(map[string]any)
-	if ptt["enabled"] != true || len(ptt["channels"].([]any)) != 2 || ptt["defaultChannel"] != float64(1) {
+	ptt = pg["ptt"].(map[string]any)
+	if ptt["enabled"] != true || len(ptt["channels"].([]any)) != 2 || ptt["address"] != "239.1.1.1:5001" || ptt["codec"] != "G722" {
 		t.Fatalf("ptt = %v", ptt)
 	}
 	if len(pg["multicast"].([]any)) != 2 {
 		t.Fatalf("setting PTT dropped the multicast channels: %v", pg["multicast"])
 	}
+	// Priority/emergency channels and group paging (channels 26 to 50).
+	gp := map[string]any{"enabled": true, "channelId": siteID, "defaultChannel": 1, "priorityChannel": 20, "emergencyChannel": 25,
+		"groupPaging": true, "defaultGroup": 27, "priorityGroup": 48, "emergencyGroup": 50,
+		"channels": []map[string]any{{"channel": 1, "label": "All", "transmit": true, "subscribe": true}, {"channel": 27, "label": "Floor", "transmit": true, "subscribe": true}}}
+	ptt = c.must(http.StatusOK, "PUT", pttPath, gp).json(t)["ptt"].(map[string]any)
+	if ptt["groupPaging"] != true || ptt["defaultGroup"] != float64(27) || ptt["priorityChannel"] != float64(20) || ptt["priorityGroup"] != float64(48) || len(ptt["channels"].([]any)) != 2 {
+		t.Fatalf("group paging ptt = %v", ptt)
+	}
 	for name, mutate := range map[string]func(m map[string]any){
-		"address": func(m map[string]any) { m["address"] = "10.0.0.1:5001" },
-		"default": func(m map[string]any) { m["defaultChannel"] = 5 },
-		"codec":   func(m map[string]any) { m["codec"] = "PCMA" },
+		"default group":  func(m map[string]any) { m["defaultGroup"] = 30 },
+		"priority group": func(m map[string]any) { m["priorityGroup"] = 20 },
+		"priority 26":    func(m map[string]any) { m["priorityChannel"] = 26 },
+		"emergency 0":    func(m map[string]any) { m["emergencyChannel"] = 0 },
+		"channel 51": func(m map[string]any) {
+			m["channels"] = []map[string]any{{"channel": 51, "label": "x", "transmit": true}}
+		},
+		"group not on tx": func(m map[string]any) { m["defaultGroup"] = 26 },
+	} {
+		body := map[string]any{}
+		for k, v := range gp {
+			body[k] = v
+		}
+		mutate(body)
+		if r := c.do("PUT", pttPath, body); r.code != http.StatusBadRequest {
+			t.Errorf("ptt %s: status %d, want 400", name, r.code)
+		}
+	}
+	c.must(http.StatusOK, "PUT", pttPath, good)
+	dockID, _ := strconv.ParseInt(dock, 10, 64)
+	for name, mutate := range map[string]func(m map[string]any){
+		"paging channel": func(m map[string]any) { m["channelId"] = dockID },
+		"no channel":     func(m map[string]any) { m["channelId"] = 999999 },
+		"default":        func(m map[string]any) { m["defaultChannel"] = 5 },
 		"twice": func(m map[string]any) {
 			m["channels"] = []map[string]any{{"channel": 1, "label": "a", "transmit": true}, {"channel": 1, "label": "b", "transmit": true}}
 		},
@@ -919,23 +1002,43 @@ func TestPhoneGroupMulticastAndPTT(t *testing.T) {
 
 	c.must(http.StatusNotFound, "PUT", "/api/v1/phone-groups/999999/ptt", good)
 
-	// A paging group may page a listening G.711 channel, with no members.
+	// A phone's PTT channel override takes a PTT channel or null.
+	phone := p.phone("c074ad000836", map[string]any{"vendor": "grandstream", "model": "WP836"})
+	phonePath := "/api/v1/phones/" + rowID(phone)
+	if got := c.must(http.StatusOK, "PATCH", phonePath, map[string]any{"pttChannelId": siteID}).json(t); got["pttChannelId"] != float64(siteID) {
+		t.Fatalf("phone PTT override = %v", got["pttChannelId"])
+	}
+	c.must(http.StatusBadRequest, "PATCH", phonePath, map[string]any{"pttChannelId": dockID})
+	if got := c.must(http.StatusOK, "PATCH", phonePath, map[string]any{"pttChannelId": nil}).json(t); got["pttChannelId"] != nil {
+		t.Fatalf("phone PTT override not cleared: %v", got["pttChannelId"])
+	}
+
+	// A paging group may page an enabled G.711 paging channel, with no members.
 	grp := func(channel any, want int) response {
 		body := map[string]any{"name": "dock", "code": "*61", "members": []int{}, "multicastChannelId": channel}
 		return c.must(want, "POST", "/api/v1/paging-groups", body)
 	}
 	c.must(http.StatusBadRequest, "POST", "/api/v1/paging-groups", map[string]any{"name": "none", "code": "*62", "members": []int{}})
 	grp(999999, http.StatusBadRequest)
-	chans := mc
-	grp(json.Number(rowID(chans[1].(map[string]any))), http.StatusBadRequest) // G.722
+	grp(json.Number(out), http.StatusBadRequest)   // G.722
+	grp(json.Number(site), http.StatusBadRequest)  // PTT
+	grp(json.Number(gsPTT), http.StatusBadRequest) // PTT
 	made := grp(json.Number(dock), http.StatusCreated).json(t)
 	if made["multicastChannelId"] == nil || made["multicastChannel"].(map[string]any)["address"] != "239.255.0.1" {
 		t.Fatalf("paging group = %v", made)
 	}
-	// Dropping the channel unlinks the paging group (its channel set to null).
-	put(http.StatusOK, ch("Out", "239.255.0.2", 5006, "G722", "listen", 2))
+	// The paged channel stays: no delete, no kind change.
+	c.must(http.StatusConflict, "DELETE", cat+"/"+dock, nil)
+	c.must(http.StatusConflict, "PUT", cat+"/"+dock, ch("Dock", "239.255.0.1", 5004, "PCMU", "ptt", 1))
+	// Dropping the group's link keeps the paging group on the channel.
+	put(http.StatusOK, link(out, "listen"))
 	after := c.must(http.StatusOK, "GET", "/api/v1/paging-groups/"+rowID(made), nil).json(t)
-	if after["multicastChannelId"] != nil {
-		t.Fatalf("paging group still points at the removed channel: %v", after)
+	if after["multicastChannelId"] == nil {
+		t.Fatalf("paging group lost its channel when a phone group unlinked it: %v", after)
+	}
+	// Deleting a channel the group links drops the link.
+	c.must(http.StatusNoContent, "DELETE", cat+"/"+out, nil)
+	if mc := c.must(http.StatusOK, "GET", path, nil).json(t)["multicast"].([]any); len(mc) != 0 {
+		t.Fatalf("deleted channel still linked: %v", mc)
 	}
 }
