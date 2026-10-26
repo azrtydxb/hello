@@ -848,3 +848,38 @@ func TestConferenceWaitMusic(t *testing.T) {
 		t.Fatalf("the waiting participant hears peak %d: no music on hold", got)
 	}
 }
+
+// TestConferenceHaltOnStop fails if a room's mixer keeps running after its
+// server has stopped: a stopped node must send no more conference audio, or
+// it feeds RTP into ports a later relay or party binds.
+func TestConferenceHaltOnStop(t *testing.T) {
+	pbx := startPBX(t, confDevices(), withRooms(room800()))
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	if _, err := seatJoin(t, a, "800"); err != nil {
+		t.Fatalf("a joins: %v", err)
+	}
+	var room *confRoom
+	eventually(t, "room mixing", func() bool {
+		room = pbx.srv.conf.get("800")
+		if room == nil {
+			return false
+		}
+		ticks, _, _ := room.mix.Stats()
+		return ticks > 0
+	})
+
+	pbx.stop()
+	select {
+	case <-pbx.srv.done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("server did not stop")
+	}
+	// Serve halts the mixers just after done closes: the clock must settle.
+	eventually(t, "mixer stops after the server stopped", func() bool {
+		before, _, _ := room.mix.Stats()
+		time.Sleep(100 * time.Millisecond) // five mixer ticks
+		after, _, _ := room.mix.Stats()
+		return after == before
+	})
+}

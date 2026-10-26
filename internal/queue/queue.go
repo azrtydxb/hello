@@ -1,5 +1,5 @@
 // Package queue is the state and the pure logic of ACD call queues
-// (migration 00037). The configuration lives in PostgreSQL and reaches
+// (migration 00040). The configuration lives in PostgreSQL and reaches
 // hello-sip as a snapshot; what changes while calls wait (the waiting
 // callers, which agent is logged in or paused, who has just finished a call)
 // lives in the Store, in Valkey, so every SIP node and hello-control see the

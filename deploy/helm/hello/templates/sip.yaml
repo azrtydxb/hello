@@ -141,6 +141,10 @@ spec:
               value: "false"
             - name: HELLO_MEDIA_RECORDING_NOTICE
               value: {{ $sip.recordingNotice | quote }}
+            - name: HELLO_VOICEMAIL_LANGUAGE
+              value: {{ .Values.global.voicemailLanguage | default "en" | quote }}
+            - name: HELLO_TIMEZONE
+              value: {{ .Values.global.timezone | default "UTC" | quote }}
             {{- with $sip.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

@@ -86,6 +86,12 @@ func (s *server) putTTSSettings(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "save tts settings", err)
 		return
 	}
+	s.speech.Forget()
+	if t.Configured {
+		// The static voicemail prompts are generated now, in the background,
+		// so the first caller after a change does not wait for them.
+		go s.prewarmVoicemail() //nolint:gosec // G118: it must outlive the request that triggered it
+	}
 	writeJSON(w, http.StatusOK, t)
 }
 
@@ -95,6 +101,7 @@ func (s *server) deleteTTSKey(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "clear tts key", err)
 		return
 	}
+	s.speech.Forget()
 	writeJSON(w, http.StatusOK, t)
 }
 
@@ -385,8 +392,8 @@ func (s *server) putVoicemailGreeting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var f fieldErrs
-	if in.Slot != "greeting" && in.Slot != "unreachable" {
-		f.add("slot", "must be greeting or unreachable")
+	if in.Slot != "greeting" && in.Slot != "unreachable" && in.Slot != "busy" {
+		f.add("slot", "must be greeting, busy or unreachable")
 	}
 	if in.Source != "announcement" && in.Source != "text" {
 		f.add("source", "must be announcement or text")
@@ -405,8 +412,11 @@ func (s *server) putVoicemailGreeting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prevObject, prevMeta := prev.GreetingObject, prev.GreetingTTS
-	if in.Slot == "unreachable" {
+	switch in.Slot {
+	case "unreachable":
 		prevObject, prevMeta = prev.UnreachableObject, prev.UnreachableTTS
+	case "busy":
+		prevObject, prevMeta = prev.BusyObject, prev.BusyTTS
 	}
 
 	var (
@@ -455,9 +465,12 @@ func (s *server) putVoicemailGreeting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	change := store.VoicemailBoxChange{}
-	if in.Slot == "greeting" {
+	switch in.Slot {
+	case "greeting":
 		change.Greeting, change.GreetingTTS = &object, meta
-	} else {
+	case "busy":
+		change.Busy, change.BusyTTS = &object, meta
+	default:
 		change.Unreachable, change.UnreachableTTS = &object, meta
 	}
 	b, err := s.Store.UpdateVoicemailBox(r.Context(), actor(r).String(), id, change, s.check())

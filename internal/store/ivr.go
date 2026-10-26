@@ -36,7 +36,7 @@ const (
 	IVRPaging       = "paging"
 	IVRMenuDest     = "ivr"
 	IVRExternal     = "external"
-	// IVRTimeCondition names a time condition (migration 00035), which picks
+	// IVRTimeCondition names a time condition (migration 00038), which picks
 	// one of its own destinations when the call arrives.
 	IVRTimeCondition = "time_condition"
 )

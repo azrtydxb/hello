@@ -17,7 +17,7 @@ type QueueMember struct {
 	Position  int
 }
 
-// Queue is a call queue (migration 00037). Prompt names are announcement
+// Queue is a call queue (migration 00040). Prompt names are announcement
 // names (resolved with Snapshot.Announcement); empty means none.
 type Queue struct {
 	ID                                       int64

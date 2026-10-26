@@ -419,6 +419,7 @@ shows otherwise.
   The `Fkey` value format `<number>@1/b` and the `--Dsskey Config<page>--:`
   section names come from Fanvil exports and a production template, not from
   a Fanvil document.
+- Feature key synchronization on every vendor (see [Feature key synchronization](#feature-key-synchronization-dnd-and-call-forwarding)).
 - Time zones on a phone: see [Time zones](#time-zones); the Fanvil keys
   (`Time Zone`, `DST Type` and the rule fields) and the Poly daylight-saving
   keys are unconfirmed on hardware.
@@ -495,6 +496,82 @@ manual (Line >> SIP >> Basic Settings) lists "Subscribe For Voice Message",
 `SIP1 Subscribe`, `SIP1 MWI Num` and `SIP1 Sub Expire` in a Fanvil
 configuration export (the manual does not print key names). Neither vendor
 has been tested on hardware.
+
+## Feature key synchronization (DND and call forwarding)
+
+The DND and Call Forward keys of a phone and Hello's per-extension settings
+follow each other, in both directions, over `SUBSCRIBE`/`NOTIFY` with
+`Event: as-feature-event` (the Broadsoft Feature Event package, ECMA-323 XML,
+which Grandstream, Yealink and Poly implement).
+
+- **Phone to Hello.** A key press arrives as a `SetDoNotDisturb` or
+  `SetForwarding` document (`forwardImmediate`, `forwardBusy` or
+  `forwardNoAns`, with `activateForward`, `forwardDN` and, for no answer,
+  `ringCount`) in the body of the phone's `SUBSCRIBE`. Hello applies it the
+  way the feature codes `*78` and `*72` do: it is queued to the settings
+  writer, which updates the extension, writes the audit event and publishes
+  the configuration change to every node. A document naming another
+  extension, or a `SUBSCRIBE` addressed to another extension, is `403`; a
+  malformed document is `400`; a settings store that is not taking changes is
+  `503`.
+- **Hello to phone.** Every configuration reload (a change from the UI, the
+  API, the AI assistant or a feature code) compares what each subscribed
+  phone was last told with the extension and sends a `NOTIFY` for what
+  changed: a `DoNotDisturbEvent` or a `ForwardingEvent` per feature. A new
+  or refreshed subscription gets the whole state, one `NOTIFY` per feature.
+- **Authentication.** The subscriber is digest-authenticated as a device, and
+  may only watch and change the extension of that device.
+- **High availability.** A subscription lives on the node that accepted it,
+  like the BLF and MWI ones, and every node watches the configuration, so
+  each node keeps its own subscribers current. A refresh that reaches a node
+  which has never seen the dialog (after a failover or restart) is adopted
+  from the request itself and answered with the full state; nothing waits
+  for a 481 and a new `SUBSCRIBE`. `Expires` is held between 60 and 3600
+  seconds.
+- **Ring count.** The no-answer ring count is stored on the extension
+  (`noAnswerRings`, 0 to 20; 0 = the system ring timeout) and sets how long
+  the extension rings before the no-answer forward or voicemail, about six
+  seconds a ring. It is on the extension's page, in the API and set by the
+  phone's key.
+
+What the built-in templates write:
+
+| Vendor      | Setting written                                                                                                                                                       | Status                                                                               |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Grandstream | `P2325 = 1` (Feature Key Synchronization, account 1) and `P198 = 102` (Special Feature: Broadsoft, which the feature requires); the same numbers on every model       | in Grandstream's config templates and guides for GXP, GRP, WP and DP; not on a phone |
+| Yealink     | `account.1.feature_key_sync.enable`, `account.1.dnd.feature_key_sync.enable`, `account.1.forward.feature_key_sync.enable`, `features.feature_key_sync.enable` all `1` | from Yealink template sets in other open PBXs; not on a phone                        |
+| Poly        | `reg.1.serverFeatureControl.dnd` and `.cf`, `voIpProt.SIP.serverFeatureControl.dnd` and `.cf` all `1`                                                                 | `reg.1` keys from other open PBXs' VVX templates; `voIpProt` keys unverified         |
+| Fanvil      | `SIP1 Feature Sync = 1`                                                                                                                                               | key name from a Fanvil X-series export; its meaning is unverified                    |
+| Snom        | no as-feature-event setting exists; `dnd_on_code`, `dnd_off_code`, `fwd_all_on_code`, `fwd_busy_on_code`, `fwd_time_on_code` and the `_off_` codes dial Hello's codes | keys documented (Snom Service Hub, D-series); placement unverified                   |
+
+Grandstream local call features. The template also writes `P191 = 0`
+(Enable Local Call Features; the default is 1 on the WP8x6 and WP810/822/825),
+so the phone dials `*72`, `*73`, `*90` to `*93` and the DND codes to Hello
+instead of acting on them itself, and writes Hello's codes as the strings
+its keys dial: WP8x6 `P2344`/`P2345` (DND), `P26013`/`P26014` (forward
+always), `P26009`/`P26010` (busy), `P26011`/`P26012` (no answer); WP856
+`P2344`/`P2345` only; WP810/822/825 `P191` only (their template has no code
+strings). The phone's other star codes (caller ID, call waiting) then go to
+Hello too, which does not implement them. The Record key is mapped to
+Hello's `*1` toggle: WP8x6 `P26028`/`P26029` = `*1` (with `P29066 = 0`),
+WP856 `P6760 = 2` (record on the server). All from Grandstream's config
+templates, none seen on a phone.
+
+Grandstream: the Administration Guide ("Feature Key Synchronization") says
+DND and Call Forward then follow the Broadsoft server and the phone no
+longer handles them itself, which is why Special Feature has to be
+Broadsoft. A Grandstream phone set to Special Feature "Broadsoft" may behave
+differently in other Broadsoft-specific ways; check a phone after the next
+resync. Snom phones cannot be notified: a key press dials Hello's feature
+code, so Snom syncs from the phone to Hello only, and its indicator follows
+the phone's own state.
+
+The `NOTIFY` XML follows what FreeSWITCH's `mod_sofia` sends and reads for
+these phones, but one document per `NOTIFY` (it packs the whole state in one
+multipart body, which does not fit a UDP datagram). None of this has been
+seen on a real phone: check that pressing the DND key shows in the
+extension's page, and that changing DND in the UI lights the phone's
+indicator within a few seconds.
 
 ## Remote resync and reboot (check-sync)
 

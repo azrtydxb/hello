@@ -72,6 +72,9 @@ type ExtUpdate struct {
 	ForwardBusy     *string
 	ForwardNoAnswer *string
 	CallWaiting     *bool
+	// NoAnswerRings is the no-answer ring count a phone's feature key set
+	// (as-feature-event ringCount); 0 means the system default.
+	NoAnswerRings *int
 }
 
 // SettingsSink takes extension-feature changes and applies them later: the
@@ -325,12 +328,6 @@ func recordWord(v string) (on, ok bool) {
 		return false, true
 	}
 	return false, false
-}
-
-// handleMessage answers an inbound MESSAGE 200; the MWI MESSAGEs are
-// outbound only.
-func (s *Server) handleMessage(req *sip.Request, tx sip.ServerTransaction) {
-	s.respond(tx, req, sip.StatusOK, "OK")
 }
 
 // isDTMFInfo reports whether an INFO Content-Type carries a DTMF digit:

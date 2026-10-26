@@ -70,10 +70,18 @@ func validateForwardTarget(f *fieldErrs, path, v string) {
 type voicemailBoxView struct {
 	store.VoicemailBox
 	EmailDelivery bool `json:"emailDelivery"`
+	// AIVoice is whether a text-to-speech key is configured, so an empty
+	// greeting slot is spoken in the AI voice ("Default (AI voice)") rather
+	// than left silent.
+	AIVoice bool `json:"aiVoice"`
 }
 
 func (s *server) boxView(ctx context.Context, b store.VoicemailBox) voicemailBoxView {
-	return voicemailBoxView{VoicemailBox: b, EmailDelivery: s.emailDelivery(ctx)}
+	v := voicemailBoxView{VoicemailBox: b, EmailDelivery: s.emailDelivery(ctx)}
+	if t, err := s.Store.GetTTSSettings(ctx); err == nil {
+		v.AIVoice = t.Configured && t.Model != ""
+	}
+	return v
 }
 
 func (s *server) getVoicemailBox(w http.ResponseWriter, r *http.Request) {
@@ -105,16 +113,15 @@ func (s *server) putVoicemailBox(w http.ResponseWriter, r *http.Request) {
 // address is not settable; an administrator sets "password" and "email".
 func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int64, self bool) {
 	var (
-		change   store.VoicemailBoxChange
-		greeting []byte
-		unreach  []byte
+		change  store.VoicemailBoxChange
+		uploads = map[string][]byte{}
 	)
 	switch ct := r.Header.Get("Content-Type"); {
 	case strings.HasPrefix(ct, "multipart/"):
 		// Streamed (MultipartReader, no spooling to memory or disk) and the
 		// body is bounded first, so an oversized upload cannot exhaust it.
 		r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
-		if err := readVoicemailUpload(r, &change, &greeting, &unreach, self); err != nil {
+		if err := readVoicemailUpload(r, &change, uploads, self); err != nil {
 			badRequest(w, err.Error())
 			return
 		}
@@ -160,39 +167,40 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 	// not leave the box pointing at nothing; the old object is removed only
 	// after the row names the new one.
 	uploaded := map[string]string{}
-	for name, data := range map[string][]byte{"greeting": greeting, "unreachable": unreach} {
-		if data == nil {
-			continue
-		}
+	for name, data := range uploads {
 		if s.Objects == nil {
 			writeError(w, http.StatusServiceUnavailable, "unavailable", "object storage is unavailable; try again shortly")
 			return
 		}
-		object := fmt.Sprintf("box/%d/%s-%d.wav", id, name, time.Now().Unix())
+		object := fmt.Sprintf("box/%d/%s-%d.wav", id, name, time.Now().UnixNano())
 		if err := s.Objects.Put(r.Context(), object, bytes.NewReader(data), int64(len(data))); err != nil {
 			s.Log.Error("voicemail: upload greeting", "error", err)
 			writeError(w, http.StatusBadGateway, "upstream", "object storage upload failed; try again shortly")
 			return
 		}
 		uploaded[name] = object
-		if name == "greeting" {
+		switch name {
+		case "greeting":
 			change.Greeting = &object
-		} else {
+		case "unreachable":
 			change.Unreachable = &object
+		case "busy":
+			change.Busy = &object
+		case "name":
+			change.Name = &object
 		}
 	}
-	if change.Email == nil && change.Password == nil && change.Greeting == nil && change.Unreachable == nil {
-		badRequest(w, "password, email, greeting or unreachable is required")
+	if change.Email == nil && change.Password == nil && len(uploads) == 0 {
+		badRequest(w, "password, email, greeting, busy, unreachable or name is required")
 		return
 	}
 	// The previous greetings, so they can go once the row names the new ones.
 	var replaced []string
 	if prev, err := s.Store.GetVoicemailBox(r.Context(), id); err == nil {
-		if change.Greeting != nil && prev.GreetingObject != "" {
-			replaced = append(replaced, prev.GreetingObject)
-		}
-		if change.Unreachable != nil && prev.UnreachableObject != "" {
-			replaced = append(replaced, prev.UnreachableObject)
+		for slot := range uploads {
+			if old := slotObject(prev, slot); old != "" {
+				replaced = append(replaced, old)
+			}
 		}
 	}
 	b, err := s.Store.UpdateVoicemailBox(r.Context(), actor(r).String(), id, change, s.check())
@@ -217,6 +225,26 @@ func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int
 	writeJSON(w, http.StatusOK, s.boxView(r.Context(), b))
 }
 
+// greetingSlots are the audio slots of a box: the general greeting (also the
+// unavailable one), the busy greeting, the unreachable greeting and the
+// owner's recorded name.
+var greetingSlots = []string{"greeting", "busy", "unreachable", "name"}
+
+// slotObject is the object key a box holds in slot.
+func slotObject(b store.VoicemailBox, slot string) string {
+	switch slot {
+	case "greeting":
+		return b.GreetingObject
+	case "busy":
+		return b.BusyObject
+	case "unreachable":
+		return b.UnreachableObject
+	case "name":
+		return b.NameObject
+	}
+	return ""
+}
+
 // isWAV checks the RIFF/WAVE container header; the caller decides about the
 // payload inside it.
 func isWAV(b []byte) bool {
@@ -225,7 +253,7 @@ func isWAV(b []byte) bool {
 
 // readVoicemailUpload walks a multipart body and fills in the box change and
 // the greeting uploads. Every field is bounded; unknown parts are skipped.
-func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, greeting, unreach *[]byte, self bool) error {
+func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, uploads map[string][]byte, self bool) error {
 	mr, err := r.MultipartReader()
 	if err != nil {
 		return errors.New("invalid multipart body")
@@ -239,8 +267,8 @@ func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, gree
 			return errors.New("invalid multipart body")
 		}
 		name := part.FormName()
-		if self && (name == "password" || name == "email") || !self && name == "pin" {
-			name = "" // the other mode's field is ignored
+		if self && (name == "password" || name == "email" || name == "busy" || name == "name") || !self && name == "pin" {
+			name = "" // the other mode's field is ignored (an owner sets the busy greeting and name from the phone)
 		} else if self && name == "pin" {
 			name = "password"
 		}
@@ -261,7 +289,7 @@ func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, gree
 			if v := strings.TrimSpace(string(b)); v != "" {
 				change.Email = &v
 			}
-		case "greeting", "unreachable":
+		case "greeting", "unreachable", "busy", "name":
 			data, err := io.ReadAll(io.LimitReader(part, maxGreetingBytes+1))
 			if err != nil {
 				return errors.New("could not read " + name)
@@ -280,12 +308,7 @@ func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, gree
 			if err != nil {
 				return fmt.Errorf("%s: %s; %s", name, strings.TrimPrefix(err.Error(), "media: "), wavAdvice)
 			}
-			data = norm
-			if name == "greeting" {
-				*greeting = data
-			} else {
-				*unreach = data
-			}
+			uploads[name] = norm
 		}
 		_ = part.Close()
 	}

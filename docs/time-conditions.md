@@ -138,4 +138,4 @@ this has not been tried on real hardware yet.
   to the next call.
 - A paging destination cannot take a call that is already ringing, so as a
   ring group failover (through a time condition) it rejects the call.
-- Migrations `00035_time_conditions.sql` and `00036_time_condition_codes.sql` are additive, so a rolling upgrade works.
+- Migrations `00038_time_conditions.sql` and `00039_time_condition_codes.sql` are additive, so a rolling upgrade works.

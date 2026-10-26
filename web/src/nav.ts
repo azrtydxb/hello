@@ -62,6 +62,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         minRole: "user",
       },
       {
+        label: "Messages",
+        path: "/me/messages",
+        phase: 5,
+        icon: "message-square",
+        minRole: "user",
+      },
+      {
         label: "Profile",
         path: "/me/profile",
         phase: 5,
@@ -165,6 +172,14 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "gauge",
       },
       { label: "Call history", path: "/history", phase: 1, icon: "history" },
+      {
+        label: "Messages",
+        path: "/messages",
+        phase: 5,
+        icon: "messages-square",
+        // Sending is a write; reading the text is admin only (the page says so).
+        minRole: "operator",
+      },
     ],
   },
   {

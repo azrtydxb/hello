@@ -30,6 +30,8 @@
 {{- /* MWI (spec S-1): P99 = Subscribe for MWI [R8x6 TPL, R8x6 section 5; WP822 same key]; P33 = voicemail access number, defaulting to Hello's voicemail feature code. */}}
     <P99>1</P99>
     <P33>{{xml (or .Line.VoicemailCode "*97")}}</P33>
+{{- /* Text messages (SIP MESSAGE, RFC 3428): P22650 = 1 makes account 1 the designated account for instant messaging (WP8x6 Administration Guide "Instant Message" and the phone-feature-parity spec S-8, R8x6 section 5). Hello answers 202/200 and delivers to every phone of the extension. UNVERIFIED on hardware: not confirmed on a WP826 or WP822, and the value (1 = account 1) is read from the guide, not from a phone's exported configuration. Phones without the key ignore it. */}}
+    <P22650>1</P22650>
 {{- /* Call waiting (phone-feature-parity S-18), written from the extension's flag so the phone agrees with Hello. P26063 = account 1 "Enable Call Waiting" (WP8x6) / "Disable Call Waiting" (WP822): 1 = on, 2 = off in both templates (wp8x6_config_1.0.3.39 reads 0 Default, 1 Yes, 2 No; wp810_822_825_config_1.0.11.83 reads 0 Default, 1 No, 2 Yes, the question inverted). P91 = the phone-wide switch: 0 = on, 1 = off in both. P186 = "Enable Call Waiting Tone" (WP8x6 and WP820 templates): 0 = tone, 1 = no tone; the WP822 template has no such key and ignores it, its tone is P347/P1555 which stay at the phone default. Taken from Grandstream's published config templates, not yet confirmed on a phone (verify, lab item 26). */}}
 {{- /* The WP856 template (wp856_config_1.0.3.16: "Enable Call Waiting. 0 Default, 1 No, 2 Yes") reads P26063 the other way round: 2 = on, 1 = off, and has no P91 or P186. */}}
 {{- if .Phone.CWInverted}}
@@ -42,6 +44,47 @@
     <P26063>2</P26063>
     <P91>1</P91>
     <P186>1</P186>
+{{- end}}
+{{- /* Feature Key Synchronization (spec S-7): the phone's DND and call-forward keys follow Hello and Hello's follow the phone, over SUBSCRIBE/NOTIFY Event: as-feature-event. P2325 = Feature Key Synchronization, account 1 (account 2 is P2425, 3 is P2525); P198 = Special Feature, 102 = Broadsoft, which the Administration Guide says the feature needs ("When using this feature, Special Feature needs to be set to BroadSoft"). Both keys are in Grandstream's own config templates (config-template-10212026.zip) for the GXP11xx/14xx/16xx/21xx/22xx, GRP26xx, WP810/820/822/825/856/8x6 and DP75x with the same numbers on every model; the WP820 template documents P2325 as "0 Disable, 1 BroadSoft/Metaswitch". Verified against the vendor templates and guides, not on a phone (verify). */}}
+    <P198>102</P198>
+    <P2325>1</P2325>
+{{- /* Local call features (spec S-7): P191 = Enable (Local) Call Features, default 1 on the WP8x6 and WP810/822/825 and 0 on the WP856. On, the phone acts on *72/*73/*90-*93 and its own DND and forward menus itself and Hello never sees them. Off, the phone dials the codes to Hello, whose feature codes are written below as the strings the DND and forward keys dial. Switching it off also hands the phone's other star codes (caller ID *67/*82, call waiting *70/*71) to Hello, which does not implement them. Keys per Grandstream's templates: WP8x6 (wp8x6_config_1.0.3.39) P2344/P2345 DND on/off, P26013/P26014 forward always on/off, P26009/P26010 busy, P26011/P26012 no answer (the _target fields P29092-P29094 stay empty so the user's key asks for the number); WP856 (wp856_config_1.0.3.16) only P2344/P2345; WP810/822/825 (wp810_822_825_config_1.0.11.83) only P191. Record key: the WP8x6 P26028/P26029 are the codes the Record key sends to turn recording on and off (P29066 = 0 key default: on), set to Hello's *1 toggle; the WP856 P6760 = 2 Record Mode "on UCM" hands recording to the server. Verified in the vendor templates, not on a phone (verify). */}}
+    <P191>0</P191>
+{{- with .Codes.DNDOn}}
+{{- if or (eq $.Phone.Family "8x6") (eq $.Phone.Family "856")}}
+    <P2344>{{xml .}}</P2344>
+{{- end}}
+{{- end}}
+{{- with .Codes.DNDOff}}
+{{- if or (eq $.Phone.Family "8x6") (eq $.Phone.Family "856")}}
+    <P2345>{{xml .}}</P2345>
+{{- end}}
+{{- end}}
+{{- if eq .Phone.Family "8x6"}}
+{{- with .Codes.ForwardOn}}
+    <P26013>{{xml .}}</P26013>
+{{- end}}
+{{- with .Codes.ForwardOff}}
+    <P26014>{{xml .}}</P26014>
+{{- end}}
+{{- with .Codes.ForwardBusyOn}}
+    <P26009>{{xml .}}</P26009>
+{{- end}}
+{{- with .Codes.ForwardBusyOff}}
+    <P26010>{{xml .}}</P26010>
+{{- end}}
+{{- with .Codes.ForwardNoAnswerOn}}
+    <P26011>{{xml .}}</P26011>
+{{- end}}
+{{- with .Codes.ForwardNoAnswerOff}}
+    <P26012>{{xml .}}</P26012>
+{{- end}}
+    <P29066>0</P29066>
+    <P26028>*1</P26028>
+    <P26029>*1</P26029>
+{{- end}}
+{{- if eq .Phone.Family "856"}}
+    <P6760>2</P6760>
 {{- end}}
 {{- /* Emergency numbers from Hello's emergency routes (CALL-47): P8385 on the WP8x6, P25675 on the WP856; the WP8xx template has none. Call park and retrieve codes (CALL-16): P60069 and P2336 on the WP8x6 and WP856. */}}
 {{- if .Emergency}}

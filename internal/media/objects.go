@@ -148,6 +148,15 @@ func (o *minioObjects) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
+// Remove deletes the voicemail object under key (a greeting replaced from the
+// phone, a message deleted from it). An absent object is not an error.
+func (o *minioObjects) Remove(ctx context.Context, key string) error {
+	if err := o.client.RemoveObject(ctx, voicemailBucket, key, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("media: remove voicemail object %s: %w", key, err)
+	}
+	return nil
+}
+
 // PutRecording stores the audio of one call recording under key in bucket
 // hello-recordings. The recording flow retries around this (three attempts
 // in the SIP stream's storeRecording); Objects itself stays a single honest

@@ -72,6 +72,8 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/extensions/{id}/voicemail", auth.ScopeRead, auth.RoleViewer, false, s.getVoicemailBox},
 		{"PUT", "/api/v1/extensions/{id}/voicemail", auth.ScopeWrite, auth.RoleOperator, false, s.putVoicemailBox},
 		{"PUT", "/api/v1/extensions/{id}/voicemail/greeting", auth.ScopeWrite, auth.RoleOperator, false, s.putVoicemailGreeting},
+		{"POST", "/api/v1/extensions/{id}/voicemail/greeting/preview", auth.ScopeWrite, auth.RoleOperator, false, s.previewVoicemailGreeting},
+		{"DELETE", "/api/v1/extensions/{id}/voicemail/greeting/{slot}", auth.ScopeWrite, auth.RoleOperator, false, s.revertVoicemailGreeting},
 
 		{"GET", "/api/v1/voicemail/boxes", auth.ScopeRead, auth.RoleViewer, false, s.listVoicemailBoxes},
 		{"GET", "/api/v1/voicemail/messages", auth.ScopeRead, auth.RoleViewer, false, s.listVoicemailMessages},
@@ -277,6 +279,16 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/settings/smtp", auth.ScopeAdmin, auth.RoleAdmin, false, s.getSMTP},
 		{"PUT", "/api/v1/settings/smtp", auth.ScopeAdmin, auth.RoleAdmin, false, s.putSMTP},
 		{"POST", "/api/v1/settings/smtp/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testSMTP},
+
+		{"GET", "/api/v1/messages", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessages},
+		{"POST", "/api/v1/messages", auth.ScopeWrite, auth.RoleOperator, false, s.sendMessage},
+		{"GET", "/api/v1/messages/conversations", auth.ScopeAdmin, auth.RoleAdmin, false, s.listMessageConversations},
+		{"GET", "/api/v1/messages/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.getMessageSettings},
+		{"PUT", "/api/v1/messages/settings", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMessageSettings},
+		{"POST", "/api/v1/messages/purge", auth.ScopeAdmin, auth.RoleAdmin, false, s.purgeMessages},
+		{"GET", "/api/v1/me/messages", auth.ScopeRead, auth.RoleUser, false, s.listMyTexts},
+		{"POST", "/api/v1/me/messages", auth.ScopeWrite, auth.RoleUser, false, s.sendMyText},
+		{"GET", "/api/v1/me/messages/conversations", auth.ScopeRead, auth.RoleUser, false, s.listMyTextConversations},
 
 		{"GET", "/api/v1/phone-groups", auth.ScopeRead, auth.RoleViewer, false, s.listPhoneGroups},
 		{"POST", "/api/v1/phone-groups", auth.ScopeAdmin, auth.RoleAdmin, false, s.createPhoneGroup},

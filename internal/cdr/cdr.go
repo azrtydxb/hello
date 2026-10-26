@@ -76,7 +76,7 @@ type Record struct {
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
 	PageLegs []PageLeg
-	// QueueLegs is what the call did in a call queue (migration 00037): one
+	// QueueLegs is what the call did in a call queue (migration 00040): one
 	// row per event, in order; empty for a call that never queued.
 	QueueLegs []QueueLeg
 }

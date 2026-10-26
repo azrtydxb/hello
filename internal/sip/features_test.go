@@ -5,6 +5,7 @@ package sip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -63,6 +64,10 @@ type fakeVMStore struct {
 	counts  [][2]int // per insert: unread, total after
 	failIns bool
 	lookups int // Box calls: one per voicemail application start
+
+	contacts  map[string]string // number -> phonebook name
+	greetings map[int64]map[string]string
+	deleted   []int64
 }
 
 func newVMStore() *fakeVMStore {
@@ -84,14 +89,14 @@ func (f *fakeVMStore) PasswordOK(_ context.Context, boxID int64, password string
 	return ok && password == want, nil
 }
 
-func (f *fakeVMStore) InsertMessage(_ context.Context, boxID int64, object, caller string, durationMs int64) (int64, error) {
+func (f *fakeVMStore) InsertMessage(_ context.Context, boxID int64, object, caller, callerName string, durationMs int64) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failIns {
 		return 0, errDown
 	}
 	f.nextID++
-	m := VoicemailMessage{ID: f.nextID, BoxID: boxID, MinioObject: object, Caller: caller, DurationMs: durationMs, CreatedAt: time.Now()}
+	m := VoicemailMessage{ID: f.nextID, BoxID: boxID, MinioObject: object, Caller: caller, CallerName: callerName, DurationMs: durationMs, CreatedAt: time.Now()}
 	f.msgs = append(f.msgs, m)
 	unread := 0
 	for _, m := range f.msgs {
@@ -139,6 +144,73 @@ func (f *fakeVMStore) MarkHeard(_ context.Context, id int64) error {
 		}
 	}
 	return nil
+}
+
+func (f *fakeVMStore) DeleteMessage(_ context.Context, boxID, id int64) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.msgs {
+		if f.msgs[i].ID == id && f.msgs[i].BoxID == boxID {
+			obj := f.msgs[i].MinioObject
+			f.msgs = append(f.msgs[:i], f.msgs[i+1:]...)
+			f.deleted = append(f.deleted, id)
+			return obj, nil
+		}
+	}
+	return "", errors.New("no such message")
+}
+
+func (f *fakeVMStore) SetPIN(_ context.Context, boxID int64, pin string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pwOK[boxID] = pin
+	return nil
+}
+
+func (f *fakeVMStore) SetGreeting(_ context.Context, boxID int64, slot, object string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.greetings == nil {
+		f.greetings = map[int64]map[string]string{}
+	}
+	if f.greetings[boxID] == nil {
+		f.greetings[boxID] = map[string]string{}
+	}
+	prev := f.greetings[boxID][slot]
+	f.greetings[boxID][slot] = object
+	for ext, b := range f.boxes {
+		if b.ID == boxID {
+			switch slot {
+			case "greeting":
+				b.GreetingObject = object
+			case "busy":
+				b.BusyObject = object
+			case "unreachable":
+				b.UnreachableObject = object
+			case "name":
+				b.NameObject = object
+			}
+			f.boxes[ext] = b
+		}
+	}
+	return prev, nil
+}
+
+func (f *fakeVMStore) ResetGreetings(ctx context.Context, boxID int64) ([]string, error) {
+	var out []string
+	for _, slot := range []string{"greeting", "busy", "unreachable"} {
+		prev, _ := f.SetGreeting(ctx, boxID, slot, "")
+		if prev != "" {
+			out = append(out, prev)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeVMStore) ContactName(_ context.Context, number, _ string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.contacts[number], nil
 }
 
 // fakeObjects is the audio store. failPuts makes the first N puts fail, so

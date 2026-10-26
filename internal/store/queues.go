@@ -1,6 +1,6 @@
 package store
 
-// ACD call queues (migration 00037). The configuration lives here; what
+// ACD call queues (migration 00040). The configuration lives here; what
 // changes while calls wait (callers, agent login, pause) lives in Valkey
 // (internal/queue). Every mutation runs through configChange, so it is
 // audited, bumps the configuration revision and notifies hello-sip.
@@ -27,7 +27,7 @@ const (
 // timeout, full and no-agents destinations.
 const IVRQueueDest = "queue"
 
-// Queue feature-code actions (migration 00037).
+// Queue feature-code actions (migration 00040).
 const (
 	ActionQueueLogin   = "queue_login"
 	ActionQueueLogout  = "queue_logout"

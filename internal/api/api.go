@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/ai"
@@ -22,6 +23,7 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/timecond"
 	"github.com/azrtydxb/hello/internal/tts"
+	"github.com/azrtydxb/hello/internal/ttscache"
 	"github.com/azrtydxb/hello/internal/version"
 )
 
@@ -278,6 +280,9 @@ type Config struct {
 	// lookup keys of stored numbers are built in.
 	Phonebooks PhonebookStore
 	Dialing    phonebook.Dialing
+	// Messages is the SIP MESSAGE persistence; nil answers 503 on the
+	// message routes.
+	Messages MessageStore
 	// AI is the OAuth authorization server (spec ai-external-access); nil
 	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
 	// routes answer 404 and bearer tokens get no audience check.
@@ -293,9 +298,23 @@ type Config struct {
 	// TTS generates prompt audio through OpenRouter; nil means the real
 	// client. Generation only happens on an operator's explicit request.
 	TTS Synthesizer
+	// PromptLanguage is the language of the spoken voicemail prompts
+	// (HELLO_VOICEMAIL_LANGUAGE; hello-control always sets it): the default
+	// greeting a preview speaks and the prompts pre-generated when the TTS
+	// settings are saved. Empty is English for a preview and turns the
+	// pre-generation off.
+	PromptLanguage string
 	// AIAgent is the in-product AI agent (spec ai-agent); nil or off makes
 	// every AI agent operation but getAIStatus answer 503 ai_disabled.
 	AIAgent *ai.Service
+
+	// speech is the voicemail voice: prompts synthesized once per model,
+	// voice and text, kept in the voicemail bucket under tts/ (the same
+	// cache hello-sip reads), so a preview here warms the call. prewarmMu
+	// serializes the background pre-generation of the static prompts. Both
+	// are set by Handler.
+	speech    *ttscache.Cache
+	prewarmMu *sync.Mutex
 }
 
 type server struct{ Config }
@@ -312,6 +331,7 @@ func Handler(c Config) http.Handler {
 	if c.TTS == nil {
 		c.TTS = &tts.Client{}
 	}
+	c.speech, c.prewarmMu = newSpeechCache(c), &sync.Mutex{}
 	s := &server{c}
 	opts := auth.Options{Cookies: true}
 	if c.AI != nil {

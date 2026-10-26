@@ -113,6 +113,12 @@ type Config struct {
 	HATakeoverPoll    time.Duration
 	HATakeoverJitter  time.Duration
 
+	// PromptLanguage is the language of the spoken voicemail prompts ("en",
+	// "nl"; empty is English) and Timezone the IANA zone message times are
+	// spoken in (empty is UTC).
+	PromptLanguage string
+	Timezone       string
+
 	// PushRate is how many check-sync pushes the cluster claims per minute
 	// (HELLO_PROV_PUSH_RATE; zero means 20).
 	PushRate int
@@ -140,6 +146,10 @@ type Deps struct {
 	Voicemails VoicemailStore
 	// Objects is the voicemail audio store (MinIO); nil disables voicemail.
 	Objects ObjectStore
+	// Speech speaks voicemail prompts in the configured text-to-speech voice
+	// (ttscache.Cache); nil means voicemail uses its tones and recordings
+	// only.
+	Speech Speaker
 	// MailboxEvents carries mailbox changes made by the control plane so
 	// MWI NOTIFYs go out at once; nil leaves only the safety-net re-read.
 	MailboxEvents MailboxEvents
@@ -171,6 +181,9 @@ type Deps struct {
 	// Queues is the call queues' shared state (Valkey); nil disables call
 	// queues (a call to a queue is refused with 503).
 	Queues queue.Store
+	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
+	// MESSAGE 503.
+	Messages MessageQueue
 	// Conferences is the shared conference state (room ownership, live state,
 	// control commands); nil keeps every room on this node alone.
 	Conferences Conferences
@@ -281,6 +294,13 @@ type Server struct {
 	// pageMu): a group has one active page.
 	pages  map[int64]*call
 	pageMu sync.Mutex
+
+	// SIP MESSAGE delivery (messages.go): extensions whose device just
+	// registered, a pending full sweep, and the delivery loop's wake-up.
+	msgMu    sync.Mutex
+	msgKick  map[string]struct{}
+	msgSweep bool
+	msgWake  chan struct{}
 	// conf holds the conference rooms this node mixes (spec S-34).
 	conf *confHub
 	// confLamp is the last state told to each conference key's subscribers.
@@ -390,6 +410,8 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		lastEnd:   map[string]time.Time{},
 		digits:    map[*call]*digitBuffer{},
 		pages:     map[int64]*call{},
+		msgKick:   map[string]struct{}{},
+		msgWake:   make(chan struct{}, 1),
 		conf:      newConfHub(),
 		confLamp:  map[string]string{},
 		haOffline: map[string]*haOfflineNode{}, haLastActive: map[string]int{}, haIncSeen: map[string]haIncWatch{},
@@ -480,6 +502,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
 	}
+	if s.deps.Messages != nil {
+		s.bg.Go(func() { s.messageLoop(rctx) })
+	}
 	s.bg.Go(func() { s.confLoop(rctx) })
 	if s.deps.Park != nil {
 		s.bg.Go(func() { s.parkLoop(rctx) })
@@ -530,6 +555,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.serving.Store(false)
 	stop()
 	close(s.done)
+	s.confHalt()
 	_ = ua.Close()
 	s.bgMu.Lock()
 	s.bgClosed = true
@@ -811,6 +837,7 @@ func (s *Server) SnapshotChanged(old, cur *snapshot.Snapshot) {
 		return
 	}
 	s.tcSnapshotChanged(old, cur)
+	s.notifyFeatureChanges(cur)
 	var gone []string
 	for _, u := range old.Usernames() {
 		if _, ok := cur.DeviceByUsername(u); !ok {

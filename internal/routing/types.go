@@ -76,6 +76,10 @@ type Trunk struct {
 	// InternalDialing gates what the trunk may dial in the extension
 	// namespace (spec S-2); zero value: mode "off".
 	InternalDialing Dialing
+	// Messaging turns SMS over SIP (SIP MESSAGE) on for this trunk, both
+	// ways. Off by default; an inbound MESSAGE from a trunk is refused
+	// unless this is on and the source is the trunk's.
+	Messaging bool
 	// Codecs is the audio codec allow-list offered to the trunk, in the
 	// caller's order (names: PCMU, PCMA, G722, opus). Empty means the
 	// default, PCMU and PCMA: most carriers accept G.711 only.
