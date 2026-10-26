@@ -71,13 +71,7 @@ func alertInfos(req *sip.Request) []string {
 // ignored, or if the chosen tag and what chose it are missing from the CDR
 // and the trace. The choice reads the snapshot only: the test has no database.
 func TestRingTagChoice(t *testing.T) {
-	r := &fakeRouter{extensions: map[string]bool{"100": true, "200": true}, sources: map[netip.Addr]int64{},
-		trunks: []routing.Trunk{{ID: 7, Name: "carrier-in", Mode: "ip", Enabled: true}}}
-	r.decide = func(c routing.Call, _ routing.TrunkUsability) routing.Decision {
-		d := routing.Decision{Kind: routing.KindInbound, Extension: "200", Route: "Main DID", CallerID: "+971555000111"}
-		d.Trace.Add(`Inbound route "Main DID" matched (exact ` + c.Number + `)`)
-		return d
-	}
+	r := trunkTagRouter()
 	pbx := startPBX(t, tagDevices(), trunkCfgForTags(), withRouter(r, nil), withRingTags(testRingTags()))
 	a := newPhone(t, pbx, "a1", "pa")
 	a.register(t)
@@ -115,6 +109,48 @@ func TestRingTagChoice(t *testing.T) {
 	}
 
 	// A call that entered on a trunk: the trunk rule wins over external.
+	in, cd := trunkRingCall(t, pbx, r, b)
+	if got := alertInfos(in); len(got) != 1 || got[0] != "<http://127.0.0.1/Bellcore-dr5>;info=hello-carrier" {
+		t.Errorf("trunk call Alert-Info = %q", got)
+	}
+	if cd.Direction != "inbound" || cd.RingTag != "carrier" || cd.RingRule != "rule:2 main carrier" {
+		t.Fatalf("trunk CDR = %+v", cd)
+	}
+}
+
+// TestRingTagExternal fails if a call that entered on a trunk, and matched no
+// rule, is not external with the external slot's Alert-Info.
+func TestRingTagExternal(t *testing.T) {
+	r := trunkTagRouter()
+	pbx := startPBX(t, tagDevices(), trunkCfgForTags(), withRouter(r, nil),
+		withRingTags(snapshot.RingTagData{Tags: testRingTags().Tags}))
+	b := newPhone(t, pbx, "b1", "pb1")
+	b.register(t)
+	in, cd := trunkRingCall(t, pbx, r, b)
+	if got := alertInfos(in); len(got) != 1 || got[0] != "<http://127.0.0.1/Bellcore-dr2>;info=hello-external" {
+		t.Errorf("trunk call Alert-Info = %q", got)
+	}
+	if cd.RingTag != "external" || cd.RingRule != "trunk" {
+		t.Fatalf("trunk CDR = %+v", cd)
+	}
+	wantTrace(t, cd.Trace, "Ring tag external (trunk)")
+}
+
+func trunkTagRouter() *fakeRouter {
+	r := &fakeRouter{extensions: map[string]bool{"100": true, "200": true}, sources: map[netip.Addr]int64{},
+		trunks: []routing.Trunk{{ID: 7, Name: "carrier-in", Mode: "ip", Enabled: true}}}
+	r.decide = func(c routing.Call, _ routing.TrunkUsability) routing.Decision {
+		d := routing.Decision{Kind: routing.KindInbound, Extension: "200", Route: "Main DID", CallerID: "+971555000111"}
+		d.Trace.Add(`Inbound route "Main DID" matched (exact ` + c.Number + `)`)
+		return d
+	}
+	return r
+}
+
+// trunkRingCall places a call from the trunk to extension 200 (b) and returns
+// the INVITE b got and the call's CDR.
+func trunkRingCall(t *testing.T, pbx *testPBX, r *fakeRouter, b *phone) (*sip.Request, cdr.Record) {
+	t.Helper()
 	carrier := newPhone(t, pbx, "carrier", "")
 	ap, _ := netip.ParseAddrPort(carrier.addr)
 	r.setSource(ap.Addr(), 7)
@@ -127,34 +163,8 @@ func TestRingTagChoice(t *testing.T) {
 	}
 	_ = dcs.Ack(t.Context())
 	in := waitReq(t, b.invites, "INVITE from the trunk")
-	if got := alertInfos(in); len(got) != 1 || got[0] != "<http://127.0.0.1/Bellcore-dr5>;info=hello-carrier" {
-		t.Errorf("trunk call Alert-Info = %q", got)
-	}
 	hangup(t, dcs)
-	cd := pbx.nextCDR(t)
-	if cd.Direction != "inbound" || cd.RingTag != "carrier" || cd.RingRule != "rule:2 main carrier" {
-		t.Fatalf("trunk CDR = %+v", cd)
-	}
-
-	// Without the rule the same call is external.
-	pbx.snaps.p.Load().WithRingTags(snapshot.RingTagData{Tags: testRingTags().Tags})
-	dcs, err = carrier.dua.WriteInvite(t.Context(), carrierInvite(carrier, pbx, "+97140000200"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := dcs.WaitAnswer(t.Context(), sipgo.AnswerOptions{}); err != nil {
-		t.Fatalf("second INVITE from the trunk: %v", err)
-	}
-	_ = dcs.Ack(t.Context())
-	in = waitReq(t, b.invites, "INVITE from the trunk")
-	if got := alertInfos(in); len(got) != 1 || got[0] != "<http://127.0.0.1/Bellcore-dr2>;info=hello-external" {
-		t.Errorf("trunk call Alert-Info = %q", got)
-	}
-	hangup(t, dcs)
-	cd = pbx.nextCDR(t)
-	if cd.RingTag != "external" || cd.RingRule != "trunk" {
-		t.Fatalf("trunk CDR = %+v", cd)
-	}
+	return in, pbx.nextCDR(t)
 }
 
 func trunkCfgForTags() pbxOpt { return trunkCfg(newFakeTrunkState()) }
