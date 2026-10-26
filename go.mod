@@ -6,6 +6,7 @@ require (
 	github.com/azrtydxb/go-ai-sdk v0.8.0
 	github.com/emiago/sipgo v1.6.0
 	github.com/google/jsonschema-go v0.4.3
+	github.com/hajimehoshi/go-mp3 v0.3.4
 	github.com/icholy/digest v1.2.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/kazzmir/opus-go v1.7.0
@@ -28,7 +29,6 @@ require (
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.3 // indirect
