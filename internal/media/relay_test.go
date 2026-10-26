@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+// The relay tests draw their leg ports from a range of their own. The SIP
+// tests use the production default, 20000-21000, and go test runs packages
+// (and other checkouts' test runs) at the same time on one host: with a
+// shared range a foreign relay holds or sends to the ports a test expects,
+// and a stray datagram latches a leg onto the wrong peer.
+const testRelayMin, testRelayMax = 23000, 23999
+
 // A pair of raw UDP sockets acting as the two phones. Each sends RTP to
 // its relay leg and receives what the relay relays to it.
 type relayPeer struct {
@@ -15,6 +22,10 @@ type relayPeer struct {
 	seq  uint16
 	ts   uint32
 	ssrc uint32
+	// only, when set, makes recv skip datagrams from any other source
+	// port: a socket this host closed earlier can leave a foreign sender
+	// aimed at the ephemeral port this peer was just given.
+	only int
 }
 
 func startPeer(t *testing.T, dst *net.UDPAddr) *relayPeer {
@@ -45,9 +56,17 @@ func (p *relayPeer) recv(t *testing.T) *RTPPacket {
 	t.Helper()
 	buf := make([]byte, rtpMaxPacket)
 	_ = p.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-	n, _, err := p.conn.ReadFromUDP(buf)
-	if err != nil {
-		t.Fatalf("peer read: %v", err)
+	var n int
+	for {
+		var src *net.UDPAddr
+		var err error
+		n, src, err = p.conn.ReadFromUDP(buf)
+		if err != nil {
+			t.Fatalf("peer read: %v", err)
+		}
+		if p.only == 0 || src.Port == p.only {
+			break
+		}
 	}
 	pkt, ok := ParseRTP(buf[:n])
 	if !ok {
@@ -61,7 +80,7 @@ func (p *relayPeer) recv(t *testing.T) *RTPPacket {
 // named "a" (caller) and "b" (callee).
 func testRelay(t *testing.T) (*Relay, *relayPeer, *relayPeer) {
 	t.Helper()
-	r, err := NewRelay(20000, 21000)
+	r, err := NewRelay(testRelayMin, testRelayMax)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +98,7 @@ func testRelay(t *testing.T) (*Relay, *relayPeer, *relayPeer) {
 	lb := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: portB}
 	pa := startPeer(t, la)
 	pb := startPeer(t, lb)
+	pa.only, pb.only = portA, portB
 	r.SetTarget("a", pa.addr())
 	r.SetTarget("b", pb.addr())
 	r.Start()
@@ -309,7 +329,7 @@ func TestRelayPortExhaustion(t *testing.T) {
 // node down instead of closing its own relay and counting a failure (spec
 // failure mode).
 func TestRelayPanicRecovery(t *testing.T) {
-	r, err := NewRelay(20000, 21000)
+	r, err := NewRelay(testRelayMin, testRelayMax)
 	if err != nil {
 		t.Fatal(err)
 	}

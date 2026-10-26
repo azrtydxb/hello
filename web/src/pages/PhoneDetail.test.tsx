@@ -224,4 +224,58 @@ describe("Phone detail", () => {
     ).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reboot" })).toBeDisabled();
   });
+
+  it("overrides the PTT channel of a WP836 and shows where it talks", async () => {
+    const ptt = (id: number, label: string, address: string) => ({
+      id,
+      label,
+      address,
+      port: 5001,
+      codec: "PCMU",
+      kind: "ptt",
+      priority: id,
+      enabled: true,
+    });
+    const wp = phone({ vendor: "grandstream", model: "WP836", groupId: null });
+    const calls = api(wp, {
+      "GET /api/v1/multicast-channels": () =>
+        json({
+          items: [
+            ptt(1, "PTT", "224.0.1.116"),
+            ptt(2, "Floor", "224.0.1.117"),
+            { ...ptt(3, "Dock", "239.255.0.1"), kind: "paging", port: 5004 },
+          ],
+        }),
+      "PATCH /api/v1/phones/5": () => json({ ...wp, pttChannelId: 2 }),
+    });
+    renderApp("/phones/5");
+    const effective = await screen.findByTestId("phone-ptt-effective");
+    await waitFor(() =>
+      expect(effective).toHaveTextContent("224.0.1.116:5001"),
+    );
+    const pick = screen.getByLabelText("PTT channel");
+    expect(
+      Array.from(pick.querySelectorAll("option")).map((o) => o.textContent),
+    ).toEqual([
+      "Group's channel (or the catalog default)",
+      "PTT (224.0.1.116:5001, PCMU)",
+      "Floor (224.0.1.117:5001, PCMU)",
+    ]);
+    fireEvent.change(pick, { target: { value: "2" } });
+    expect(effective).toHaveTextContent("224.0.1.117:5001");
+    fireEvent.click(screen.getByRole("button", { name: "Save PTT channel" }));
+    expect(await screen.findByText(/PTT channel saved/)).toBeInTheDocument();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/phones/5",
+      body: { pttChannelId: 2 },
+    });
+  });
+
+  it("offers no PTT channel to a phone without a PTT key", async () => {
+    api(phone());
+    renderApp("/phones/5");
+    await screen.findByRole("heading", { level: 1, name: "Front desk" });
+    expect(screen.queryByLabelText("PTT channel")).toBeNull();
+  });
 });

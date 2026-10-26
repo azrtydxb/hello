@@ -316,7 +316,9 @@ func TestUserAccountsMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.Role != auth.RoleAdmin || !u.Enabled || u.AuthMethod != "local" || u.MustChangePassword ||
+	// The user was created after migration 00008, so it has that column's
+	// default role; the migration must keep it, not promote or demote it.
+	if u.Role != auth.RoleViewer || !u.Enabled || u.AuthMethod != "local" || u.MustChangePassword ||
 		len(u.ExtensionIDs) != 1 || u.ExtensionIDs[0] != ext || u.ExtensionID == nil || !u.VoicemailEmail.Notify || !u.VoicemailEmail.Attach || u.VoicemailEmail.After != "none" {
 		t.Fatalf("migrated user = %+v", u)
 	}
