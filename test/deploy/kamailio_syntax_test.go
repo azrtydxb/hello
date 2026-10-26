@@ -60,7 +60,11 @@ func TestKamailioConfigSyntax(t *testing.T) {
 	for _, name := range names {
 		env := variants[name]
 		t.Run(name, func(t *testing.T) {
-			args := []string{"run", "--rm", "-v", dir + ":/etc/kamailio:ro"}
+			// docker create + cp + start, not a bind mount: in CI the Docker
+			// daemon is a sidecar that cannot see the runner's temp files.
+			ctr := "kamailio-cfgcheck-" + strings.ReplaceAll(strings.ToLower(name), " ", "-")
+			_ = exec.Command(docker, "rm", "-f", ctr).Run()
+			args := []string{"create", "--name", ctr}
 			keys := make([]string, 0, len(env))
 			for k := range env {
 				keys = append(keys, k)
@@ -70,7 +74,14 @@ func TestKamailioConfigSyntax(t *testing.T) {
 				args = append(args, "-e", k+"="+env[k])
 			}
 			args = append(args, image, "-c", "-f", "/etc/kamailio/kamailio.cfg")
-			out, err := exec.Command(docker, args...).CombinedOutput()
+			if out, err := exec.Command(docker, args...).CombinedOutput(); err != nil {
+				t.Fatalf("docker create: %v\n%s", err, out)
+			}
+			t.Cleanup(func() { _ = exec.Command(docker, "rm", "-f", ctr).Run() })
+			if out, err := exec.Command(docker, "cp", dir+"/.", ctr+":/etc/kamailio/").CombinedOutput(); err != nil {
+				t.Fatalf("docker cp: %v\n%s", err, out)
+			}
+			out, err := exec.Command(docker, "start", "-a", ctr).CombinedOutput()
 			if err != nil {
 				t.Fatalf("kamailio -c rejected the config with env %v: %v\n%s", env, err, out)
 			}
