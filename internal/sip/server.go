@@ -891,10 +891,15 @@ func (s *Server) recountRegistrations(ctx context.Context) {
 		return
 	}
 	n := 0
+	byTransport := map[string]int{"udp": 0, "tcp": 0, "tls": 0}
 	for _, b := range bs {
 		if b.ReceivedNode == s.cfg.NodeID {
 			n++
+			byTransport[normTransport(b.Transport)]++
 		}
+	}
+	for t, c := range byTransport {
+		s.m.RegistrationsByTransport.WithLabelValues(t).Set(float64(c))
 	}
 	s.m.Registrations.Set(float64(n))
 	s.registrations.Store(int64(n))

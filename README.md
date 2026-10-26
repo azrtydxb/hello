@@ -22,7 +22,8 @@ findings and proposals). For the IVR / auto-attendant see
 [docs/ivr.md](docs/ivr.md), and for call queues [docs/queues.md](docs/queues.md). For time and date routing (schedules, holiday calendars, time conditions, the day/night toggle) see
 [docs/time-conditions.md](docs/time-conditions.md). To run Hello on Kubernetes (Helm chart, SIP
 networking, highly available state, rolling upgrades) see
-[docs/kubernetes.md](docs/kubernetes.md).
+[docs/kubernetes.md](docs/kubernetes.md). For SIP over TLS and `sips:` see
+[docs/tls.md](docs/tls.md).
 
 ## Layout
 

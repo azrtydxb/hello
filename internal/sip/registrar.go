@@ -205,7 +205,7 @@ func (s *Server) applyContacts(req *sip.Request, dev snapshot.Device, aor string
 				Device:       dev.Username,
 				ContactURI:   c.uri,
 				Source:       s.clientSource(req), // received/rport, or the trusted proxy's X-Hello-Client
-				Transport:    "udp",
+				Transport:    s.clientTransport(req),
 				UserAgent:    userAgent,
 				Path:         s.bindingPath(req, exp),
 				ReceivedNode: s.cfg.NodeID,
@@ -240,7 +240,7 @@ func (s *Server) bindingPath(req *sip.Request, exp time.Time) []string {
 			return path
 		}
 	}
-	return []string{s.pathURI(s.flowToken(req.Source(), "udp", exp))}
+	return []string{s.pathURI(s.flowToken(req.Source(), "udp", exp))} // direct mode is UDP only
 }
 
 // registerAttemptRecorder keeps each enabled device's recent REGISTER

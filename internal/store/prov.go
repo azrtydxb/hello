@@ -37,6 +37,11 @@ type ProvSettings struct {
 	PublicURL string
 	// SIPServer is the host:port rendered configs register with.
 	SIPServer string
+	// SIPTLSServer and SIPTLSModels are HELLO_PROV_SIP_TLS_SERVER and
+	// HELLO_PROV_SIP_TLS_MODELS: the phones prov.TLSModelMatch selects
+	// register with SIPTLSServer over TLS (S-14).
+	SIPTLSServer string
+	SIPTLSModels []string
 	// Domain is HELLO_SIP_DOMAIN.
 	Domain string
 	Expiry time.Duration
@@ -52,6 +57,20 @@ type ProvSettings struct {
 	// Deployment lists the vendors whose redirect credentials the
 	// deployment sets (they count as configured whatever is stored).
 	Deployment map[prov.Vendor]bool
+}
+
+// server is the registrar a phone of vendor and model registers with: the
+// TLS address for a model HELLO_PROV_SIP_TLS_MODELS selects while
+// HELLO_PROV_SIP_TLS_SERVER is set, the UDP address otherwise.
+func (p ProvSettings) server(v prov.Vendor, model string) prov.Server {
+	srv := prov.Server{Transport: "udp", Expiry: int(p.Expiry / time.Second)}
+	if p.SIPTLSServer != "" && prov.TLSModelMatch(p.SIPTLSModels, v, model) {
+		srv.Host, srv.Port = splitHostPort(p.SIPTLSServer)
+		srv.Transport = "tls"
+		return srv
+	}
+	srv.Host, srv.Port = splitHostPort(p.SIPServer)
+	return srv
 }
 
 // WithProv sets the provisioning settings and returns s.

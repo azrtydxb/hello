@@ -688,3 +688,20 @@ of"), paging by code. A stored value the list no longer has stays selectable as
 is not a target of another. An empty target is refused with a kind-specific
 message. `conference` is also in the API enum and still has no chooser; not part
 of this change.
+
+## SIP over TLS terminates at the edge (2026-10-26)
+
+Phone-feature-parity S-14 (delivery PR 23) says "hello-sip listens on TLS 5061".
+Hello's phones already reach Kamailio, not hello-sip, so Kamailio (tls module)
+terminates TLS and the hello-sip nodes keep UDP inside the edge network.
+Kamailio reports the phone leg's transport in `X-Hello-Transport` (udp, tcp, tls;
+trusted proxies only), the registrar stores it on the binding, and the `sips:`
+rule uses it: a `sips:` request needs a TLS caller and rings only TLS bindings,
+and is refused with 480 otherwise, also for trunks and external SIP URIs. TLS is
+off until `KAMAILIO_TLS_PORT` is set, so an image without `tls.so` still starts.
+Provisioning points the models in `HELLO_PROV_SIP_TLS_MODELS` (default
+`grandstream:WP`) at `HELLO_PROV_SIP_TLS_SERVER`; Snom has no confirmed transport
+key and stays on UDP. The `HELLO_SIP_TLS` and `HELLO_SIP_TLS_CERT` settings of the
+spec's config list are not used: the certificate belongs to Kamailio. Later PRs
+(SRTP, DTLS-SRTP) offer crypto only on legs where `bindingOnTLS` or the caller's
+`clientTransport` is TLS.

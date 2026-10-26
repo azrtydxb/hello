@@ -176,10 +176,13 @@ type Line struct {
 
 // Server is the registrar the phone registers with.
 type Server struct {
-	Host      string
-	Port      int
-	Transport string // always "udp": Hello is UDP-only
-	Expiry    int    // registration expiry, seconds
+	Host string
+	Port int
+	// Transport is "udp" (the default) or "tls": TLS for a phone whose
+	// vendor has a transport key and whose model HELLO_PROV_SIP_TLS_MODELS
+	// lists, registering with HELLO_PROV_SIP_TLS_SERVER (S-14).
+	Transport string
+	Expiry    int // registration expiry, seconds
 }
 
 // BLFKey is one busy-lamp-field key. Render places the keys of a Yealink,

@@ -253,6 +253,31 @@ services:
     volumes: [provcerts:/certs]
     network_mode: none
 
+  # The SIP-over-TLS certificate Kamailio presents (phone-feature-parity
+  # S-14; lab only): its own throwaway CA and a leaf for the names a lab
+  # phone connects to. Generated once per volume. The tests read the CA with
+  # `docker compose cp kamailio:/etc/hello-tls/ca.crt`.
+  sip-certs:
+    image: alpine/openssl:3.5.9
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        cd /certs
+        [ -s tls.crt ] && exit 0
+        printf '%s\n' '[req]' 'distinguished_name=dn' 'prompt=no' '[dn]' 'CN=Hello lab SIP CA' \
+          '[ca]' 'basicConstraints=critical,CA:TRUE' 'keyUsage=critical,keyCertSign,cRLSign' 'subjectKeyIdentifier=hash' > ca.cnf
+        printf '%s\n' '[req]' 'distinguished_name=dn' 'prompt=no' '[dn]' 'CN=localhost' \
+          '[leaf]' 'basicConstraints=critical,CA:FALSE' 'keyUsage=critical,digitalSignature,keyEncipherment' 'extendedKeyUsage=serverAuth' \
+          'subjectAltName=DNS:localhost,IP:127.0.0.1,DNS:kamailio,IP:10.89.53.10' > leaf.cnf
+        openssl req -x509 -config ca.cnf -extensions ca -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 30 -keyout ca.key -out ca.crt
+        openssl req -new -config leaf.cnf -newkey rsa:2048 -nodes -keyout tls.key -out tls.csr
+        openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 30 -extfile leaf.cnf -extensions leaf -out tls.part
+        mv tls.part tls.crt
+        rm -f ca.key ca.srl tls.csr ca.cnf leaf.cnf
+        chmod 0444 ca.crt tls.crt tls.key
+    volumes: [siptls:/certs]
+    network_mode: none
+
   hello-control-1:
     <<: *control
     depends_on:
@@ -327,19 +352,25 @@ services:
       # Above the SIP nodes' HELLO_SIP_RING_TIMEOUT (10s here): a caller
       # whose node dies mid-ring gets 408 after this many ms.
       KAMAILIO_INVITE_TIMEOUT: "25000"
+      # SIP over TLS (S-14): host TCP 5081 -> 5061, the certificate from
+      # sip-certs at /etc/hello-tls (read by deploy/kamailio/tls.cfg).
+      KAMAILIO_TLS_PORT: "5061"
+      KAMAILIO_PUBLIC_TLS_PORT: ${HELLO_KAMAILIO_PUBLIC_TLS_PORT:-5081}
     volumes:
       - ../kamailio:/etc/kamailio:ro
+      - siptls:/etc/hello-tls:ro
     # started, not healthy: the edge must come up while a SIP node is down
     # and probe it inactive (dispatcher), not wait for it.
     depends_on:
       hello-sip-1: { condition: service_started }
       hello-sip-2: { condition: service_started }
+      sip-certs: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://10.89.53.10:9090/healthz"]
       interval: 5s
       timeout: 3s
       retries: 12
-    ports: ["5080:5060/udp"]
+    ports: ["5080:5060/udp", "5081:5061/tcp"]
     networks:
       edge: { ipv4_address: 10.89.53.10 }
     # The idle/edge services (kamailio, hello-ui, carrier-primary,
@@ -403,3 +434,4 @@ networks:
 volumes:
   pgdata:
   provcerts:
+  siptls:
