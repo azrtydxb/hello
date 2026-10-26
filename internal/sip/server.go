@@ -196,6 +196,9 @@ type Deps struct {
 	// Park is the shared call-park store (Valkey); nil disables call park,
 	// retrieve and cross-node pickup. A parked party hears music on hold.
 	Park ParkState
+	// Events receives call events (ringing, answered, ended, missed,
+	// recording ready) for the event stream; nil emits none.
+	Events EventSink
 }
 
 // Server is one SIP node.

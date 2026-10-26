@@ -35,6 +35,7 @@ import {
   IntegrationsApiAccess,
   IntegrationsOverview,
 } from "./pages/Integrations";
+import { IntegrationEvents } from "./pages/IntegrationEvents";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
 import { AIProposalDetail } from "./pages/AIProposalDetail";
@@ -140,6 +141,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/users": Users,
   "/integrations": IntegrationsOverview,
   "/integrations/api-access": IntegrationsApiAccess,
+  "/integrations/events": IntegrationEvents,
 };
 
 /** A load that never answers, for what a self-service user may not read. */

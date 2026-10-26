@@ -250,6 +250,9 @@ type Config struct {
 	// rooms' live state and control queue (spec S-34); nil answers 503.
 	Conferences    ConferenceStore
 	ConferenceLive ConferenceLive
+	// Events is the call-event pipeline (stream, history, tickets); nil
+	// answers 503 on the event routes.
+	Events EventService
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
 	// Objects is the voicemail audio store; nil makes the audio routes and
@@ -343,7 +346,13 @@ func Handler(c Config) http.Handler {
 	for _, rt := range s.routes() {
 		h := s.aiGuard(rt.Pattern, rt.H)
 		if !rt.Public {
-			h = authed(auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, h)))
+			guarded := auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, h))
+			h = authed(guarded)
+			if rt.Pattern == "/api/v1/events/stream" {
+				// A client that cannot send an Authorization header
+				// redeems a single-use ticket instead.
+				h = s.withEventTicket(h, guarded)
+			}
 		}
 		mux.Handle(rt.Method+" "+rt.Pattern, h)
 	}

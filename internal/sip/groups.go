@@ -261,6 +261,8 @@ func (c *call) setupHunt(bindings []livestate.Binding, order []groupMember, g sn
 					continue // a member already passed, still winding down
 				}
 				switch ev.kind {
+				case evRinging:
+					c.noteRinging(ev.leg.binding.Extension)
 				case evAnswered:
 					member.Stop()
 					c.answer(ev.leg)
