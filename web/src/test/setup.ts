@@ -19,3 +19,20 @@ afterEach(() => {
   window.localStorage.clear();
   delete document.documentElement.dataset.theme;
 });
+
+// jsdom has no layout engine. The graph library measures nodes with a
+// ResizeObserver and reads the zoom from a DOMMatrix, so give it inert ones.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  class InertResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  Object.assign(globalThis, { ResizeObserver: InertResizeObserver });
+}
+if (typeof globalThis.DOMMatrixReadOnly === "undefined") {
+  class InertMatrix {
+    m22 = 1;
+  }
+  Object.assign(globalThis, { DOMMatrixReadOnly: InertMatrix });
+}

@@ -621,6 +621,53 @@ Feature and paging codes start with `*` and cannot equal a plain number;
 they keep the `dialGuard` prefix rules. Time conditions have no number of
 their own.
 
+## Flow canvas P2: the read-only canvas (2026-10-26)
+
+Built per `.procoder/specs/flow-canvas.md` (P2). Choices the spec left open:
+
+- Migration `00042_flow_canvas.sql` adds `flow_canvases` and `flow_canvas_nodes`
+  only (`config_batches` belongs to P3). The `node_id` CHECK is a shape check
+  (`<kind>:<id>`), not the kind list: the API validates the kind against the
+  catalogue, so a new node type (P1, P7) needs no migration.
+- Canvases and layout are not configuration: no `configChange`, no revision
+  bump, no notify. Each write is audited in its own transaction (`flow_canvas`
+  `create|update|delete|layout`). `layout_version` moves on every layout save;
+  a save made against an older one is `409 layout_stale` and saves nothing.
+- Layout of an object that no longer exists is dropped on `GET .../{id}` and
+  pruned on every layout save, by checking each node id against the graph
+  built from the live tables (devices and phones included).
+- `PATCH` takes `viewport` but not `null`: the viewport is replaced, never
+  cleared. The UI offers "Save view" (an explicit button) rather than saving on
+  every pan, which would fill the audit trail.
+- The UI filters the full graph (`scope=all`) by the canvas's positions instead
+  of the spec's `scope=canvas:<id>`: the "not on this canvas" list needs the
+  whole graph anyway, and one read keeps a single source of truth. "Import
+  flow" does use the server's `scope=closure:<id>`. No change to
+  `getFlowGraph`, so P1's work on it does not conflict.
+- Edges to an off-canvas node are drawn as one stub per edge end, up to 150;
+  past that the page says how many are left out. Clicking a stub adds the node
+  (operators) or opens its panel (viewers).
+- One generic node component draws every kind from the catalogue. A port an
+  edge uses that the catalogue does not list (an IVR key) is added, typed like
+  the node's first port of that direction. Handle ids are `in:<port>` and
+  `out:<port>` because an input and an output may share a name.
+- Port colours are `--flow-port-<type>`, mapped to Azrty tokens where one
+  exists (call, voicemail, member, prompt, device) and to the spec's hex
+  elsewhere (carrier, schedule, hold music), lifted on the dark theme.
+- Dagre runs in a Web Worker from 150 nodes and cancels through an
+  `AbortSignal`; below that, and where `Worker` does not exist (tests), it runs
+  on the calling thread. New nodes are placed to the right of what is on the
+  canvas.
+- Keyboard: nodes are focusable; arrow keys move focus to the nearest node in
+  that direction (stubs included); Enter or Space opens the panel (or adds a
+  stub); Alt+arrow nudges a node by 20 px (operators); Escape closes the panel
+  and returns focus to the node. React Flow's own arrow-key moving is off.
+- The panel is view-only in P2: the object's summary fields, its connections
+  (followable), its warnings and a link to the page that edits it. The nav item
+  is "Call flows" at the top of the Call flow group; the canvas route is
+  lazy-loaded.
+- Exact dependency pins: `@xyflow/react` 12.12.0, `@dagrejs/dagre` 3.1.3.
+
 ## Flow canvas P1: unified destinations and guards (2026-10-26)
 
 Migration 00041 widens `inbound_routes.destination_kind` with `ring_group`,
@@ -743,6 +790,48 @@ Phones are re-pointed to the VIP via check-sync and .101 is retired after.
 
 - A: VRRP VIP, two hostNetwork Kamailio (chosen)
 - B: Cilium LB-IPAM LoadBalancer with L2 announcement
+
+## Ring group fallback to an extension or another group (2026-10-26)
+
+Decision 3's deviation (a ring group's fallback cannot ring an extension or
+another group) is lifted: the ring state machine can open a new ring stage.
+
+- Failure kinds `extension` (a number) and `ring_group` (a name), migration
+  `00043` (additive, through `pg_temp.hello_check_values`; numbered after
+  the flow canvas migration `00042` merged first). I found while
+  writing it that `00041` never widened `ring_groups.failure_kind`, although
+  the spec said so; the spec is corrected.
+- Run time (`groupFailover`, `internal/sip/groups.go`). `openFailoverStage`
+  abandons and cancels the earlier stage's legs, bumps `stageSeq`, resets
+  `setupClosed` and gives the call a fresh `setupDone` (as an IVR menu does), so
+  late events of the old legs never reach the new setup. The failover then
+  runs the target's own ring and waits in a nested `setup` or `setupHunt`; the
+  setup loop that handed over returns when it is done, so ring-all and hunt
+  groups both work as origin and as target without a second state machine.
+  `ringGroup` follows the existing convention that a nil `tx` means the call has
+  begun.
+- Extension target: its features apply from the new stage on. DND or nothing
+  registered go to its voicemail box when it has one (else 603 or 480); an
+  unanswered ring follows its no-answer forward or voicemail (`c.stages`
+  carries the target). The box is the target's: `vmExt` is set, and
+  `exhausted` sets it when the stage came from a group failover (the dialled
+  string is the group number). Forward-always of the target is not followed, as
+  with a forward stage.
+- Group target: its strategy, members and failure destination apply; a group
+  with no member to ring falls through to its own fallback at once.
+- Loops: the groups rung are kept in `gfChain` and the extensions in the
+  forward chain (`callStages.visited`); a repeat, a group naming itself or a
+  chain longer than `groupFailMaxDepth` (= `queueMaxDepth`, 8) ends the call
+  with 408 "forward loop" and the existing `loop` metric. The IVR path
+  (`ivrRingGroup`) applies the same fallbacks to the menu's caller with its
+  `visited` chain.
+- API and store: the target must be well formed and exist, a group cannot name
+  itself, and the store refuses deleting, renaming or renumbering the group or
+  extension another group falls back to (`refuseIfGroupFailsTo`), like the IVR
+  references. The flow catalogue offers both from the group's `noAnswer` port.
+- Not done: `exhausted` after a forward stage still uses the dialled
+  extension's box for voicemail (the same class of bug as the group one); it
+  is reported, not changed here.
 ## SIP over TLS terminates at the edge (2026-10-26)
 
 Phone-feature-parity S-14 (delivery PR 23) says "hello-sip listens on TLS 5061".

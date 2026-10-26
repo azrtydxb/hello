@@ -132,6 +132,9 @@ const (
 	ForwardUnreach  = "unreachable"
 	ForwardDND      = "dnd"
 	ForwardLoop     = "loop"
+	// ForwardGroupFailover is a ring group handing the call to an extension
+	// or another group when nobody answered.
+	ForwardGroupFailover = "group_failover"
 )
 
 // Trunk attempt results for hello_trunk_calls_total.

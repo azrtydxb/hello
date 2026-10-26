@@ -115,6 +115,7 @@ jobs:
               - 'internal/api/**'
               - 'internal/ai/**'
               - 'internal/cdr/**'
+              - 'internal/events/**'
               - 'internal/snapshot/**'
               - 'test/integration/**'
               - 'go.mod'

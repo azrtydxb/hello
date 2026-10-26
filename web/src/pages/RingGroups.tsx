@@ -107,6 +107,10 @@ function failureText(g: RingGroup): string {
       return `Queue ${g.failureTarget || UNKNOWN}`;
     case "time_condition":
       return `Time condition ${g.failureTarget || UNKNOWN}`;
+    case "extension":
+      return `Extension ${g.failureTarget || UNKNOWN}`;
+    case "ring_group":
+      return `Ring group ${g.failureTarget || UNKNOWN}`;
     default:
       return "Hang up";
   }
@@ -484,6 +488,16 @@ function validateGroup(d: GroupDraft): Record<string, string> {
   if (d.failureKind === "time_condition" && d.failureTarget.trim() === "") {
     e.failureTarget = "Choose the time condition.";
   }
+  if (d.failureKind === "extension" && d.failureTarget.trim() === "") {
+    e.failureTarget = "Choose the extension to ring.";
+  }
+  if (d.failureKind === "ring_group") {
+    if (d.failureTarget.trim() === "") {
+      e.failureTarget = "Choose the ring group to ring.";
+    } else if (d.failureTarget.trim() === d.name.trim()) {
+      e.failureTarget = "A group cannot fall back to itself.";
+    }
+  }
   if (d.failureKind === "voicemail") {
     if (d.failureTarget.trim() === "") {
       e.failureTarget = "Enter the extension whose box takes the call.";
@@ -492,6 +506,20 @@ function validateGroup(d: GroupDraft): Record<string, string> {
     }
   }
   return e;
+}
+
+/** A target select's options: a stored value the list lacks stays selectable. */
+function choices(
+  options: { value: string; label: string }[],
+  current: string,
+): { value: string; label: string }[] {
+  return [
+    { value: "", label: "Choose…" },
+    ...(current !== "" && !options.some((o) => o.value === current)
+      ? [{ value: current, label: `${current} (not found)` }]
+      : []),
+    ...options,
+  ];
 }
 
 /** The create/edit drawer for one group. */
@@ -517,8 +545,12 @@ function RingGroupDrawer({
   const [pick, setPick] = useState("");
   const [menus, setMenus] = useState<IvrMenu[]>([]);
   const [timeConds, setTimeConds] = useState<TimeCondition[]>([]);
+  const [groups, setGroups] = useState<RingGroup[]>([]);
   useEffect(() => {
     const controller = new AbortController();
+    listRingGroups(controller.signal)
+      .then(setGroups)
+      .catch(() => undefined); // the picker stays empty; saving still works
     listTimeConditions(controller.signal)
       .then(setTimeConds)
       .catch(() => undefined); // the picker stays empty; saving still works
@@ -820,9 +852,50 @@ function RingGroupDrawer({
               { value: "ivr", label: "IVR menu" },
               { value: "queue", label: "Call queue" },
               { value: "time_condition", label: "Time condition" },
+              { value: "extension", label: "Extension" },
+              { value: "ring_group", label: "Ring group" },
             ]}
-            onChange={(e) => set("failureKind", e.target.value as FailureKind)}
+            onChange={(e) =>
+              setD((prev) => ({
+                ...prev,
+                failureKind: e.target.value as FailureKind,
+                failureTarget: "", // a target belongs to its kind
+              }))
+            }
           />
+          {d.failureKind === "extension" && (
+            <Select
+              id={fid("failureTarget")}
+              label="Extension"
+              value={d.failureTarget}
+              error={errors.failureTarget}
+              hint="Rings the extension as a new call: its own forwarding and voicemail apply."
+              options={choices(
+                extensions.map((x) => ({
+                  value: x.number,
+                  label: x.name ? `${x.number} · ${x.name}` : x.number,
+                })),
+                d.failureTarget,
+              )}
+              onChange={(e) => set("failureTarget", e.target.value)}
+            />
+          )}
+          {d.failureKind === "ring_group" && (
+            <Select
+              id={fid("failureTarget")}
+              label="Ring group"
+              value={d.failureTarget}
+              error={errors.failureTarget}
+              hint="Rings the other group with its own strategy and fallback."
+              options={choices(
+                groups
+                  .filter((x) => x.name !== d.name.trim())
+                  .map((x) => ({ value: x.name, label: x.name })),
+                d.failureTarget,
+              )}
+              onChange={(e) => set("failureTarget", e.target.value)}
+            />
+          )}
           {d.failureKind === "ivr" && (
             <Select
               id={fid("failureTarget")}
@@ -879,7 +952,9 @@ function RingGroupDrawer({
           {d.failureKind !== "none" &&
             d.failureKind !== "ivr" &&
             d.failureKind !== "queue" &&
-            d.failureKind !== "time_condition" && (
+            d.failureKind !== "time_condition" &&
+            d.failureKind !== "extension" &&
+            d.failureKind !== "ring_group" && (
               <Input
                 id={fid("failureTarget")}
                 label={
