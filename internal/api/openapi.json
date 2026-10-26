@@ -297,9 +297,7 @@
         "operationId": "changePassword",
         "summary": "Change my password",
         "description": "Sets a new password for the signed-in user after checking the current one. Only a browser session may do it, not a token, and it ends the user's other sessions. Clears the forced-change flag an administrator set, which blocks every other operation until it is changed. Needs a password of 10 to 128 characters that differs from the current one.",
-        "tags": [
-          "auth"
-        ],
+        "tags": ["auth"],
         "requestBody": {
           "required": true,
           "content": {
@@ -339,9 +337,7 @@
         "operationId": "listUsers",
         "summary": "Every user with their role and linked extensions",
         "description": "Admin only. Lists every user with their role, state, email, linked extensions and voicemail email options; never a password or its hash.",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "responses": {
           "200": {
             "description": "Users, by id",
@@ -373,9 +369,7 @@
         "operationId": "createUser",
         "summary": "Create a user",
         "description": "Admin only, audited. Creates a local user with an initial password the administrator sets (10 to 128 characters; argon2id-hashed, never returned). The user must choose a new password at first login unless mustChangePassword is false. extensionIds links the user to extensions, at most one user per extension (409 when taken, 400 when one does not exist); the first is the primary extension whose phones receive the user's personal contacts. Role user is the extension self-service role.",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "requestBody": {
           "required": true,
           "content": {
@@ -425,9 +419,7 @@
         "operationId": "getUser",
         "summary": "One user",
         "description": "Admin only. Returns one user with their role, state and linked extensions.",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -467,9 +459,7 @@
         "operationId": "updateUser",
         "summary": "Change a user",
         "description": "Admin only, audited. Changes the role, display name, email, enabled state, extensions, voicemail email options or password. The new role applies on the user's next request, whatever credential it carries. A disabled user cannot sign in, their sessions end and their tokens stop working. Setting password resets it (10 to 128 characters) and makes the user choose a new one at next login unless mustChangePassword is false. Demoting or disabling the last enabled admin answers 409 last_admin, and an administrator cannot disable their own account (409 self_disable). extensionIds replaces the user's extensions (409 when another user has one, 400 when one does not exist); the legacy extensionId links exactly one extension or, with null, none; give one of them, not both.",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -532,9 +522,7 @@
         "operationId": "deleteUser",
         "summary": "Delete a user",
         "description": "Admin only, audited. Deletes the user with their sessions, tokens and personal contacts. Deleting the last enabled admin answers 409 last_admin and an administrator cannot delete their own account (409 self_delete).",
-        "tags": [
-          "users"
-        ],
+        "tags": ["users"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -579,9 +567,7 @@
         "operationId": "updateMyProfile",
         "summary": "Change my profile",
         "description": "Changes the signed-in user's display name, email address and voicemail email options (notify, attach the recording, and what happens to a message after it was mailed: nothing, mark as read or delete). At least one field is required. Returns the profile as auth/me does.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "requestBody": {
           "required": true,
           "content": {
@@ -628,9 +614,7 @@
         "operationId": "listMyExtensions",
         "summary": "My extensions",
         "description": "Lists the extensions the signed-in user is linked to, with the display label and the DND and forwarding settings they may change; nothing else about the extension, no SIP credentials and no devices.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "responses": {
           "200": {
             "description": "The user's extensions",
@@ -664,9 +648,7 @@
         "operationId": "updateMyExtension",
         "summary": "Change my extension's label, DND or forwarding",
         "description": "Changes the display label, do-not-disturb and the always, busy and no-answer forwarding of one of the signed-in user's own extensions. An extension that is not the user's answers 404, exactly like one that does not exist. At least one field is required; a forwarding target is empty (off) or 2 to 32 of 0-9 * # with an optional leading +.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -721,9 +703,7 @@
         "operationId": "getMyVoicemail",
         "summary": "My voicemail box",
         "description": "Returns whether the voicemail box of one of the signed-in user's own extensions has a PIN and greetings. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -763,9 +743,7 @@
         "operationId": "updateMyVoicemail",
         "summary": "Change my voicemail PIN or greetings",
         "description": "Changes the PIN and uploads or replaces greetings of the signed-in user's own voicemail box. JSON with pin (4 to 10 digits), or multipart/form-data with pin plus optional greeting and unreachable PCM WAV files of at most 5 MiB, such as a recording made in the browser. The box email address is not settable here. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -849,9 +827,7 @@
         "operationId": "listMyVoicemailMessages",
         "summary": "My voicemail messages",
         "description": "Lists the messages in the voicemail box of one of the signed-in user's own extensions, newest first. An extension that is not the user's answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -904,9 +880,7 @@
         "operationId": "markMyVoicemailMessageHeard",
         "summary": "Mark my message heard",
         "description": "Marks a message in one of the signed-in user's own boxes as heard, or unheard with {\"heard\": false}. A message in anyone else's box answers 404, exactly like one that does not exist.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -961,9 +935,7 @@
         "operationId": "deleteMyVoicemailMessage",
         "summary": "Delete my message",
         "description": "Deletes a message from one of the signed-in user's own boxes with its audio. A message in anyone else's box answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -998,9 +970,7 @@
         "operationId": "getMyVoicemailMessageAudio",
         "summary": "Play or download my message",
         "description": "Streams a message of one of the signed-in user's own boxes (WAV, Range supported); with download=1 the browser saves it as a file. A message in anyone else's box answers 404.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -1010,9 +980,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": [
-                "1"
-              ]
+              "enum": ["1"]
             },
             "description": "Send as an attachment."
           }
@@ -1071,9 +1039,7 @@
         "operationId": "listMyCalls",
         "summary": "My call history",
         "description": "Lists the calls in which one of the signed-in user's own extensions was the caller or the callee, newest first, without routes, trunks or signalling detail.",
-        "tags": [
-          "me"
-        ],
+        "tags": ["me"],
         "parameters": [
           {
             "name": "limit",
@@ -1131,9 +1097,7 @@
         "operationId": "getSmtpSettings",
         "summary": "System email (SMTP) settings",
         "description": "Admin only. Returns the SMTP settings voicemail email is sent with and where they come from: the console (database), the deployment's SMTP_* environment, or none. The password is never returned; passwordSet says whether one is stored.",
-        "tags": [
-          "settings"
-        ],
+        "tags": ["settings"],
         "responses": {
           "200": {
             "description": "The settings",
@@ -1168,9 +1132,7 @@
         "operationId": "putSmtpSettings",
         "summary": "Save the system email (SMTP) settings",
         "description": "Admin only, audited. Saves the SMTP host, port, transport security (none, starttls or tls), username, from address and password. The password is sealed in the database; omit it to keep the stored one, or send an empty string to clear it. An empty host clears the saved settings, and the deployment's environment settings apply again. Changes apply to the next send, without a restart.",
-        "tags": [
-          "settings"
-        ],
+        "tags": ["settings"],
         "requestBody": {
           "required": true,
           "content": {
@@ -1220,9 +1182,7 @@
         "operationId": "testSmtpSettings",
         "summary": "Send a test email",
         "description": "Admin only. Sends one test email to the given address with the settings in force and answers when the server accepted it or why it did not (502 smtp_failed). The test runs now and is not queued.",
-        "tags": [
-          "settings"
-        ],
+        "tags": ["settings"],
         "requestBody": {
           "required": true,
           "content": {
@@ -1395,7 +1355,7 @@
       "patch": {
         "operationId": "updateExtension",
         "summary": "Change an extension's number or name",
-        "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields.",
+        "description": "Changes an extension's number, name or external caller ID; only the fields sent change. Changing the number is 409 while a route refers to it (inbound destination or outbound source extension) (the message names the routes). Changes are checked as a whole routing configuration; a 400 lists failing fields. A 400 lists each failing field (number, name, externalNumber) in error.fields. Renumbering an extension an IVR menu names is refused (409).",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -1449,7 +1409,7 @@
       "delete": {
         "operationId": "deleteExtension",
         "summary": "Delete an extension and its devices",
-        "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes.",
+        "description": "Deletes an extension together with its devices. 409 while a route refers to the extension (an inbound route rings it, or an outbound route is restricted to it as a source); the message names the routes. An extension an IVR menu names (as a destination or voicemail box) cannot be deleted (409).",
         "tags": ["extensions"],
         "parameters": [
           {
@@ -2875,9 +2835,7 @@
         "operationId": "getFlowCatalogue",
         "summary": "Read the flow node and port catalogue",
         "description": "Returns every node kind of the flow canvas with its ports, each port's type (and the colour and shape that type is drawn with) and, for every output, the inputs it may connect to. An entry whose `requires` is set is allowed in principle but cannot be stored until what it names exists. Use it to learn which objects can be joined before changing the configuration.",
-        "tags": [
-          "flow"
-        ],
+        "tags": ["flow"],
         "responses": {
           "200": {
             "description": "Read the flow node and port catalogue",
@@ -2909,9 +2867,7 @@
         "operationId": "getFlowGraph",
         "summary": "Read the call flow as a graph",
         "description": "Draws the saved configuration as nodes (trunks, routes, extensions, ring groups, announcements, paging groups, feature codes and the terminals calls end in) and edges between their ports. Every edge names the owner: the one field of one object it is stored in, so connecting or disconnecting is one update of that object. A target that resolves to nothing is a `missing` node with a `dangling_reference` warning. Targets resolve as hello-sip does: ring group name, then extension number. Each node's `version` changes whenever the object does. Nothing is stored: the graph is built from the live tables.",
-        "tags": [
-          "flow"
-        ],
+        "tags": ["flow"],
         "parameters": [
           {
             "name": "scope",
@@ -2929,9 +2885,7 @@
             "description": "`devices` adds devices and phones, which are left out by default.",
             "schema": {
               "type": "string",
-              "enum": [
-                "devices"
-              ]
+              "enum": ["devices"]
             }
           }
         ],
@@ -2985,9 +2939,7 @@
         "operationId": "getFlowRevision",
         "summary": "Read the configuration revision",
         "description": "Returns the revision every configuration change advances. Poll it to know when a graph read earlier is out of date.",
-        "tags": [
-          "flow"
-        ],
+        "tags": ["flow"],
         "responses": {
           "200": {
             "description": "Read the configuration revision",
@@ -3711,9 +3663,7 @@
         "operationId": "getTtsSettings",
         "summary": "The text-to-speech settings",
         "description": "Returns the text-to-speech provider settings: whether an OpenRouter API key is set (never the key), the last four characters of it, and the default model and voice.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Settings",
@@ -3743,9 +3693,7 @@
         "operationId": "putTtsSettings",
         "summary": "Set the OpenRouter key and the default model and voice",
         "description": "Sets the OpenRouter API key (write-only, sealed in the database and never returned) and the default ElevenLabs model and voice used when a prompt does not name its own.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "requestBody": {
           "required": true,
           "content": {
@@ -3806,9 +3754,7 @@
         "operationId": "deleteTtsKey",
         "summary": "Remove the stored OpenRouter key",
         "description": "Removes the stored OpenRouter API key. Prompts already generated keep playing; new ones cannot be generated until a key is set again.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Settings",
@@ -3840,9 +3786,7 @@
         "operationId": "testTtsKey",
         "summary": "Test the OpenRouter connection",
         "description": "Checks with OpenRouter that the stored API key is accepted. Spends no credits.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "The key is accepted",
@@ -3850,9 +3794,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "ok"
-                  ],
+                  "required": ["ok"],
                   "properties": {
                     "ok": {
                       "type": "boolean"
@@ -3890,9 +3832,7 @@
         "operationId": "listTtsVoices",
         "summary": "List the ElevenLabs models and voices",
         "description": "Lists the ElevenLabs text-to-speech models OpenRouter offers and the voices of each, for the model and voice pickers.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Models",
@@ -3900,9 +3840,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "models"
-                  ],
+                  "required": ["models"],
                   "properties": {
                     "models": {
                       "type": "array",
@@ -3938,19 +3876,14 @@
         "operationId": "generateNewAnnouncement",
         "summary": "Create an announcement from text",
         "description": "Creates an announcement and generates its audio once from text through the text-to-speech provider; the WAV is stored and played from storage ever after.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name",
-                  "text"
-                ],
+                "required": ["name", "text"],
                 "properties": {
                   "name": {
                     "type": "string",
@@ -4023,9 +3956,7 @@
         "operationId": "putVoicemailGreeting",
         "summary": "Set a greeting from an announcement or from text",
         "description": "Sets a voicemail box's greeting or unreachable audio from an existing announcement, or from text generated once through the text-to-speech provider. Uploading a WAV stays on the voicemail box update.",
-        "tags": [
-          "voicemail"
-        ],
+        "tags": ["voicemail"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4037,25 +3968,16 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "slot",
-                  "source"
-                ],
+                "required": ["slot", "source"],
                 "properties": {
                   "slot": {
                     "type": "string",
-                    "enum": [
-                      "greeting",
-                      "unreachable"
-                    ],
+                    "enum": ["greeting", "unreachable"],
                     "description": "Which audio to set."
                   },
                   "source": {
                     "type": "string",
-                    "enum": [
-                      "announcement",
-                      "text"
-                    ],
+                    "enum": ["announcement", "text"],
                     "description": "Where the audio comes from."
                   },
                   "announcementId": {
@@ -4179,7 +4101,7 @@
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "WAV bytes, at most 10 MiB; the bytes are checked, not the declared content type."
+                    "description": "WAV bytes, at most 64 MiB; the bytes are checked, not the declared content type. Uncompressed PCM (8, 16, 24 or 32 bit) or float WAV, mono or stereo; stereo is mixed to mono and stored as 16-bit PCM at the file's own sample rate up to 48 kHz (higher rates are reduced to 48 kHz)."
                   }
                 }
               }
@@ -4231,9 +4153,7 @@
         "operationId": "saveAnnouncementPrompt",
         "summary": "Save an announcement's prompt text",
         "description": "Saves the authored text, voice and model of an announcement without generating audio. The announcement then shows as edited since its last generation until it is generated again.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4245,9 +4165,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "text"
-                ],
+                "required": ["text"],
                 "properties": {
                   "text": {
                     "type": "string",
@@ -4327,7 +4245,7 @@
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "WAV bytes, at most 10 MiB; the bytes are checked, not the declared content type."
+                    "description": "WAV bytes, at most 64 MiB; the bytes are checked, not the declared content type. Uncompressed PCM (8, 16, 24 or 32 bit) or float WAV, mono or stereo; stereo is mixed to mono and stored as 16-bit PCM at the file's own sample rate up to 48 kHz (higher rates are reduced to 48 kHz)."
                   }
                 }
               }
@@ -4376,7 +4294,7 @@
       "delete": {
         "operationId": "deleteAnnouncement",
         "summary": "Delete an announcement",
-        "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time.",
+        "description": "Deletes an announcement and its audio. Removes the row and the audio object in the hello-announcements bucket; destinations that named it skip the step at call time. An announcement that an IVR menu plays or names as a destination cannot be deleted (409).",
         "tags": ["media"],
         "parameters": [
           {
@@ -4389,6 +4307,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -4410,9 +4331,7 @@
         "operationId": "generateAnnouncement",
         "summary": "Generate or regenerate an announcement's audio from text",
         "description": "Generates the announcement's audio from its text through the text-to-speech provider and stores it. Idempotent: when the stored audio already came from the same text, voice and model nothing is generated unless force is set. Playback never calls the provider.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4669,7 +4588,7 @@
       "patch": {
         "operationId": "updateRingGroup",
         "summary": "Change a ring/hunt group",
-        "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored.",
+        "description": "Changes a ring or hunt group; only the fields sent change. Absent fields keep their value; a members list replaces the whole member list. The result is validated as a whole before it is stored. A group that an IVR menu names cannot be renamed (409).",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -4703,6 +4622,9 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
@@ -4720,7 +4642,7 @@
       "delete": {
         "operationId": "deleteRingGroup",
         "summary": "Delete a ring/hunt group",
-        "description": "Deletes a ring or hunt group. The members go with it.",
+        "description": "Deletes a ring or hunt group. The members go with it. A group that an IVR menu names cannot be deleted (409).",
         "tags": ["ring-groups"],
         "parameters": [
           {
@@ -4733,6 +4655,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -4749,14 +4674,230 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/multicast-channels": {
+      "get": {
+        "operationId": "listMulticastChannels",
+        "summary": "List multicast channels",
+        "description": "Lists the multicast channel catalog: paging channels that phone groups listen on and paging groups send to, and push-to-talk channels that Grandstream WP8x6 phones use for PTT, by kind, priority and id.",
+        "tags": ["paging-groups"],
+        "responses": {
+          "200": {
+            "description": "The channels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastChannelList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createMulticastChannel",
+        "summary": "Add a multicast channel",
+        "description": "Adds a channel to the catalog. The address must be IPv4 multicast outside 224.0.0.0/24, the port 1024 to 65535 and the address and port unique in the catalog; kind defaults to paging, priority to 1 and enabled to true. Admin only.",
+        "tags": ["paging-groups"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MulticastChannelInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastChannel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/multicast-channels/{id}": {
+      "get": {
+        "operationId": "getMulticastChannel",
+        "summary": "One multicast channel",
+        "description": "Returns one channel of the catalog.",
+        "tags": ["paging-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastChannel"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putMulticastChannel",
+        "summary": "Change a multicast channel",
+        "description": "Replaces a channel of the catalog. Its kind cannot change while a phone group, paging group or phone uses it. Phones pick up the change at their next configuration fetch. Admin only.",
+        "tags": ["paging-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MulticastChannelInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastChannel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteMulticastChannel",
+        "summary": "Delete a multicast channel",
+        "description": "Deletes a channel from the catalog and unlinks it from phone groups; a group or phone that used it for PTT falls back to the catalog's first PTT channel. A channel a paging group sends to cannot be deleted. Admin only.",
+        "tags": ["paging-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/moh-classes": {
       "get": {
         "operationId": "listMOHClasses",
         "summary": "List music on hold classes",
         "description": "Lists every music on hold class with its playlist. A class is a named playlist of announcements played in a loop or shuffled to a held or parked party, and optionally to a caller instead of ringback.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "responses": {
           "200": {
             "description": "Classes ordered by name",
@@ -4786,9 +4927,7 @@
         "operationId": "createMOHClass",
         "summary": "Create a music on hold class",
         "description": "Creates a class from announcement ids. Marking it default clears the flag on the previous default. A class with no announcements plays the built-in tone. Validation failures list each failing field in error.fields.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "requestBody": {
           "required": true,
           "content": {
@@ -4836,9 +4975,7 @@
         "operationId": "getMOHClass",
         "summary": "One music on hold class",
         "description": "Returns one class by id.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4876,9 +5013,7 @@
         "operationId": "putMOHClass",
         "summary": "Replace a music on hold class",
         "description": "Replaces a class as a whole, playlist included. A hold already playing keeps its music until it resumes.",
-        "tags": [
-          "media"
-        ],
+        "tags": ["media"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -4932,8 +5067,553 @@
         "operationId": "deleteMOHClass",
         "summary": "Delete a music on hold class",
         "description": "Deletes a class. Extensions, ring groups and inbound routes that named it fall back to the global default class, or the built-in tone.",
+        "tags": ["media"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/park-lots": {
+      "get": {
+        "operationId": "listParkLots",
+        "summary": "List park lots",
+        "description": "Lists the call park lots: each is a range of slot numbers a call can be parked in, with the time a parked call waits before it rings its parker again and the ring window before it goes to the parker's voicemail.",
         "tags": [
-          "media"
+          "park"
+        ],
+        "responses": {
+          "200": {
+            "description": "Park lots",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParkLotList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createParkLot",
+        "summary": "Create a park lot",
+        "description": "Creates a park lot. The slot range must not overlap another lot, an extension number or a ring group name. Dialling the park code during a call parks it in the first free slot; dialling the retrieve code and a slot, or the slot itself, retrieves it. Validation failures list each failing field in error.fields.",
+        "tags": [
+          "park"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParkLotInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParkLot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/park-lots/announcement/generate": {
+      "post": {
+        "operationId": "generateParkAnnouncement",
+        "summary": "Generate the spoken park slot announcement",
+        "description": "Generates the clips that speak a park slot to the parker, once, through the text-to-speech provider. They are the announcements park.slot (\"Your call is parked in slot\") and park.digit.0 to park.digit.9. A clip whose audio already came from the same text, voice and model is skipped, and so is a recording uploaded under that name, unless force is set. While any clip is missing the parker hears the slot as one DTMF tone per digit.",
+        "tags": [
+          "park"
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "voiceId": {
+                    "type": "string",
+                    "description": "The voice to speak in; empty uses the default voice from the text-to-speech settings."
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "description": "The OpenRouter ElevenLabs model; empty uses the default model from the text-to-speech settings."
+                  },
+                  "force": {
+                    "type": "boolean",
+                    "description": "Regenerate every clip, replacing uploaded recordings and audio that already matches."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The park clips, and how many this call generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "announcements": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Announcement"
+                      }
+                    },
+                    "generated": {
+                      "type": "integer",
+                      "description": "Clips generated by this call; 0 when all were already current."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "spends text-to-speech credits; started from the console"
+        }
+      }
+    },
+    "/api/v1/park-lots/{id}": {
+      "get": {
+        "operationId": "getParkLot",
+        "summary": "One park lot",
+        "description": "Returns one park lot by id.",
+        "tags": [
+          "park"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The park lot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParkLot"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putParkLot",
+        "summary": "Replace a park lot",
+        "description": "Replaces a park lot as a whole. Calls already parked keep their slot until they are retrieved or time out. A range that overlaps another lot, an extension number or a ring group name is refused with 400.",
+        "tags": [
+          "park"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ParkLotInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParkLot"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteParkLot",
+        "summary": "Delete a park lot",
+        "description": "Deletes a park lot. Calls already parked in it keep their slot until they are retrieved or time out.",
+        "tags": [
+          "park"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/parked-calls": {
+      "get": {
+        "operationId": "listParkedCalls",
+        "summary": "List the calls parked now",
+        "description": "Lists the calls parked right now on every node: the slot, the lot, who parked the call, who is parked, when, and when the call returns to its parker. Needs Valkey.",
+        "tags": [
+          "park"
+        ],
+        "responses": {
+          "200": {
+            "description": "Parked calls",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParkedCallList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/pickup-groups": {
+      "get": {
+        "operationId": "listPickupGroups",
+        "summary": "List pickup groups",
+        "description": "Lists the call pickup groups: a member may answer a call ringing any other member. An extension in no pickup group may pick up calls ringing the other members of its ring groups.",
+        "tags": [
+          "pickup"
+        ],
+        "responses": {
+          "200": {
+            "description": "Pickup groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupGroupList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createPickupGroup",
+        "summary": "Create a pickup group",
+        "description": "Creates a pickup group of 1-200 extensions. Group pickup answers the oldest call ringing another member; directed pickup answers a named member's call. Validation failures list each failing field in error.fields.",
+        "tags": [
+          "pickup"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickupGroupInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/pickup-groups/{id}": {
+      "get": {
+        "operationId": "getPickupGroup",
+        "summary": "One pickup group",
+        "description": "Returns one pickup group by id.",
+        "tags": [
+          "pickup"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The pickup group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupGroup"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putPickupGroup",
+        "summary": "Replace a pickup group",
+        "description": "Replaces a pickup group as a whole, member list included.",
+        "tags": [
+          "pickup"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PickupGroupInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PickupGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deletePickupGroup",
+        "summary": "Delete a pickup group",
+        "description": "Deletes a pickup group. Its members fall back to the pickup scope of their ring groups.",
+        "tags": [
+          "pickup"
         ],
         "parameters": [
           {
@@ -5082,7 +5762,7 @@
       "put": {
         "operationId": "putPagingGroup",
         "summary": "Replace a paging group",
-        "description": "Replaces a paging group as a whole, member and caller lists included. A page already running keeps the member set it started with.",
+        "description": "Replaces a paging group as a whole, member and caller lists included. A page already running keeps the member set it started with. Changing the code of a group an IVR menu names is refused (409).",
         "tags": ["paging-groups"],
         "parameters": [
           {
@@ -5136,7 +5816,7 @@
       "delete": {
         "operationId": "deletePagingGroup",
         "summary": "Delete a paging group",
-        "description": "Deletes a paging group. Its member and caller lists go with it.",
+        "description": "Deletes a paging group. Its member and caller lists go with it. A paging group that an IVR menu names cannot be deleted (409).",
         "tags": ["paging-groups"],
         "parameters": [
           {
@@ -5149,6 +5829,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -5229,7 +5912,9 @@
             "description": "No hello-sip node reported the test page in time",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/Error" }
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
               }
             }
           }
@@ -5275,7 +5960,7 @@
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
-        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, call_waiting_on, call_waiting_off.",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed. Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -6079,9 +6764,6 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -6126,9 +6808,6 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -6159,9 +6838,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6208,9 +6884,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6281,9 +6954,6 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
           "500": {
             "$ref": "#/components/responses/Internal"
           },
@@ -6342,9 +7012,6 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -7446,7 +8113,15 @@
                     "description": "The scopes to grant.",
                     "items": {
                       "type": "string",
-                      "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+                      "enum": [
+                        "read",
+                        "write",
+                        "admin",
+                        "secrets",
+                        "calls",
+                        "events",
+                        "recordings"
+                      ]
                     }
                   }
                 }
@@ -10674,7 +11349,7 @@
       "put": {
         "operationId": "setPhoneGroupMulticast",
         "summary": "Set a phone group's multicast paging channels",
-        "description": "Replaces the group's multicast paging channels (at most 10). Every phone of the group is provisioned to listen on the channels that listen and to send on those that send; Hello is not in the media path, which works on a LAN where multicast is delivered. Addresses must be IPv4 multicast outside 224.0.0.0/24, ports 1024 to 65535, codecs PCMU, PCMA or G722, and no listen address twice. A paging group can name one of these channels to send its page there too. Admin only.",
+        "description": "Replaces the catalog paging channels the group uses (at most 10), each with a role. Every phone of the group is provisioned to listen on the channels that listen and to send on those that send; Hello is not in the media path, which works on a LAN where multicast is delivered. A group with no channels listens on every enabled paging channel of the catalog. The optional options set how the phones take a page and an intercom call: paging in DND, barge, priority, timeout and intercom barging (off by default). Channels are added in Paging > Multicast channels (POST /multicast-channels). Admin only.",
         "tags": ["phone-groups"],
         "parameters": [
           {
@@ -10730,7 +11405,7 @@
       "put": {
         "operationId": "setPhoneGroupPTT",
         "summary": "Set a phone group's push-to-talk settings",
-        "description": "Replaces the group's push-to-talk settings: whether PTT is on, the PTT and group paging multicast address, codec, default channel and the channels (1 to 25) with label and whether the phone may transmit and subscribe. Only Grandstream WP8x6 phones are given them. Admin only.",
+        "description": "Replaces the group's push-to-talk and group paging settings: whether PTT is on, the catalog PTT channel (null: the catalog's first enabled PTT channel, by default 224.0.1.116:5001 PCMU), the default, priority and emergency channels, whether group paging is on with its default, priority and emergency group channels, and the channels (1 to 25 PTT, 26 to 50 group paging) with label and whether the phone may transmit and subscribe. A new group has PTT on with channel 1, priority 24 and emergency 25, and group paging off. Grandstream WP phones are given them (WP8x6, WP856, WP820; the WP810/822/825 keys are unverified); a phone may override the PTT channel with PATCH /phones/{id} pttChannelId. Admin only.",
         "tags": ["phone-groups"],
         "parameters": [
           {
@@ -10779,6 +11454,212 @@
         },
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ivr-menus": {
+      "get": {
+        "operationId": "listIVRMenus",
+        "summary": "List IVR menus",
+        "description": "Lists every IVR / auto-attendant menu with its options.",
+        "tags": ["ivr-menus"],
+        "responses": {
+          "200": {
+            "description": "IVR menus",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenuList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createIVRMenu",
+        "summary": "Create an IVR menu",
+        "description": "Creates an IVR menu: it answers, plays its greeting (an announcement), collects digits and routes the call to the option's destination. Validation failures list each failing field in error.fields; digits must be unique, referenced announcements and destinations must exist and automatic exits (timeout, invalid) must not loop back to the menu. A menu with a paging destination (an option, the timeout or the invalid exit) needs the admin role and scope, like paging groups; otherwise 403.",
+        "tags": ["ivr-menus"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IVRMenuInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenu"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ivr-menus/{id}": {
+      "get": {
+        "operationId": "getIVRMenu",
+        "summary": "One IVR menu",
+        "description": "Returns one IVR menu by id.",
+        "tags": ["ivr-menus"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The IVR menu",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenu"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putIVRMenu",
+        "summary": "Replace an IVR menu",
+        "description": "Replaces an IVR menu as a whole, options included. A menu that a route, ring group, feature code or another menu names cannot be renamed. Calls already in the menu finish with the settings they started with. A menu with a paging destination (an option, the timeout or the invalid exit) needs the admin role and scope, like paging groups; otherwise 403.",
+        "tags": ["ivr-menus"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IVRMenuInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IVRMenu"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteIVRMenu",
+        "summary": "Delete an IVR menu",
+        "description": "Deletes an IVR menu and its options. A menu that an inbound route, ring group, feature code or another menu names cannot be deleted (409).",
+        "tags": ["ivr-menus"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
         "x-hello-mcp": true
       }
     }
@@ -11044,6 +11925,10 @@
           "groupId": {
             "type": ["integer", "null"],
             "description": "Id of the phone group the phone belongs to; null for none."
+          },
+          "pttChannelId": {
+            "type": ["integer", "null"],
+            "description": "The phone's own PTT channel (a catalog PTT channel); null uses its group's."
           }
         }
       },
@@ -11436,6 +12321,10 @@
           "groupId": {
             "type": ["integer", "null"],
             "description": "Id of a phone group, which decides the address books the phone is delivered; null for none."
+          },
+          "pttChannelId": {
+            "type": ["integer", "null"],
+            "description": "A catalog PTT channel the phone's PTT button uses instead of its group's (Grandstream WP8x6 only); null for the group's."
           }
         }
       },
@@ -11999,7 +12888,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external"]
+            "enum": ["none", "voicemail", "external", "announcement", "ivr"]
           },
           "mohClassId": {
             "oneOf": [
@@ -12079,7 +12968,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external"],
+            "enum": ["none", "voicemail", "external", "announcement", "ivr"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
           "mohClassId": {
@@ -12181,7 +13070,7 @@
           },
           "failureKind": {
             "type": "string",
-            "enum": ["none", "voicemail", "external"],
+            "enum": ["none", "voicemail", "external", "announcement", "ivr"],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
           "mohClassId": {
@@ -12274,7 +13163,9 @@
         "required": ["id", "extension", "result", "contacts", "node"],
         "description": "The outcome of a paging-group test page.",
         "properties": {
-          "id": { "type": "string" },
+          "id": {
+            "type": "string"
+          },
           "extension": {
             "type": "string",
             "description": "The member that was paged"
@@ -12305,15 +13196,21 @@
               "type": "object",
               "required": ["device", "userAgent", "result", "headers"],
               "properties": {
-                "device": { "type": "string" },
-                "userAgent": { "type": "string" },
+                "device": {
+                  "type": "string"
+                },
+                "userAgent": {
+                  "type": "string"
+                },
                 "result": {
                   "type": "string",
                   "enum": ["answered", "busy", "no_answer", "failed"]
                 },
                 "headers": {
                   "type": "array",
-                  "items": { "type": "string" },
+                  "items": {
+                    "type": "string"
+                  },
                   "description": "The auto-answer headers the INVITE carried, as Name: value"
                 }
               }
@@ -12344,10 +13241,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "loop",
-              "shuffle"
-            ],
+            "enum": ["loop", "shuffle"],
             "description": "loop plays the tracks in order and starts over; shuffle plays them in a fresh random order each pass."
           },
           "isDefault": {
@@ -12358,10 +13252,7 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": [
-                "announcementId",
-                "name"
-              ],
+              "required": ["announcementId", "name"],
               "properties": {
                 "announcementId": {
                   "type": "integer",
@@ -12385,9 +13276,7 @@
       },
       "MOHClassInput": {
         "type": "object",
-        "required": [
-          "name"
-        ],
+        "required": ["name"],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -12398,10 +13287,7 @@
           },
           "mode": {
             "type": "string",
-            "enum": [
-              "loop",
-              "shuffle"
-            ],
+            "enum": ["loop", "shuffle"],
             "description": "Default loop."
           },
           "isDefault": {
@@ -12421,6 +13307,112 @@
       },
       "MOHClassList": {
         "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MOHClass"
+            }
+          }
+        }
+      },
+      "ParkLot": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "slotStart",
+          "slotEnd",
+          "returnSecs",
+          "voicemailSecs",
+          "enabled",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slotStart": {
+            "type": "integer",
+            "description": "The first slot number."
+          },
+          "slotEnd": {
+            "type": "integer",
+            "description": "The last slot number."
+          },
+          "returnSecs": {
+            "type": "integer",
+            "description": "Seconds an unretrieved call waits before it rings its parker again."
+          },
+          "voicemailSecs": {
+            "type": "integer",
+            "description": "Seconds the parker's phones then ring before the call goes to the parker's voicemail (or is ended when the parker has none)."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ParkLotInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "slotStart",
+          "slotEnd"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique lot name (letters, digits, . _ -)."
+          },
+          "slotStart": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99999,
+            "description": "The first slot number."
+          },
+          "slotEnd": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99999,
+            "description": "The last slot number; at most 100 slots per lot, and no overlap with another lot, an extension number or a ring group name."
+          },
+          "returnSecs": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 3600,
+            "description": "Defaults to 120."
+          },
+          "voicemailSecs": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 3600,
+            "description": "Defaults to 60."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to true; a disabled lot parks no new calls."
+          }
+        }
+      },
+      "ParkLotList": {
+        "type": "object",
         "required": [
           "items"
         ],
@@ -12428,7 +13420,155 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/MOHClass"
+              "$ref": "#/components/schemas/ParkLot"
+            }
+          }
+        }
+      },
+      "ParkedCall": {
+        "type": "object",
+        "required": [
+          "slot",
+          "lot",
+          "node",
+          "callId",
+          "correlationId",
+          "parkedBy",
+          "caller",
+          "callerName",
+          "parkedAt",
+          "returnAt",
+          "phase"
+        ],
+        "description": "A call parked in a slot right now.",
+        "properties": {
+          "slot": {
+            "type": "string"
+          },
+          "lot": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string",
+            "description": "The hello-sip node holding the call's dialog and media."
+          },
+          "callId": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string"
+          },
+          "parkedBy": {
+            "type": "string",
+            "description": "The extension that parked the call."
+          },
+          "caller": {
+            "type": "string",
+            "description": "The parked party's number."
+          },
+          "callerName": {
+            "type": "string"
+          },
+          "parkedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "returnAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the call rings its parker again."
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "parked",
+              "returning"
+            ]
+          }
+        }
+      },
+      "ParkedCallList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ParkedCall"
+            }
+          }
+        }
+      },
+      "PickupGroup": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "members",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PagingExtension"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PickupGroupInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "members"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique group name (letters, digits, . _ -)."
+          },
+          "members": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Extension ids, 1-200."
+          }
+        }
+      },
+      "PickupGroupList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PickupGroup"
             }
           }
         }
@@ -12483,19 +13623,18 @@
           "multicastChannelId": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "A multicast channel of a phone group the page is also sent to, or null."
+            "description": "A catalog paging channel the page is also sent to, or null."
           },
           "multicastChannel": {
             "type": ["object", "null"],
             "description": "The multicast channel the page is also sent to (read-only).",
             "properties": {
               "id": { "type": "integer", "format": "int64" },
-              "groupId": { "type": "integer", "format": "int64" },
-              "groupName": { "type": "string" },
               "label": { "type": "string" },
               "address": { "type": "string" },
               "port": { "type": "integer" },
-              "codec": { "type": "string" }
+              "codec": { "type": "string" },
+              "enabled": { "type": "boolean" }
             }
           },
           "createdAt": {
@@ -12553,7 +13692,7 @@
           "multicastChannelId": {
             "type": ["integer", "null"],
             "format": "int64",
-            "description": "A multicast channel of a phone group to page as well: the page's audio is also sent to its address, which the group's phones listen on. The channel must listen (role listen or both) and use PCMU or PCMA. With a channel, members may be empty."
+            "description": "A multicast channel of the catalog to page as well: the page's audio is also sent to its address, which the phones listening on it play. The channel must be an enabled paging channel using PCMU or PCMA. With a channel, members may be empty."
           }
         }
       },
@@ -12571,9 +13710,7 @@
       },
       "FlowRevision": {
         "type": "object",
-        "required": [
-          "configRevision"
-        ],
+        "required": ["configRevision"],
         "properties": {
           "configRevision": {
             "type": "integer",
@@ -12583,10 +13720,7 @@
       },
       "FlowTarget": {
         "type": "object",
-        "required": [
-          "kind",
-          "port"
-        ],
+        "required": ["kind", "port"],
         "properties": {
           "kind": {
             "type": "string"
@@ -12606,23 +13740,14 @@
       },
       "FlowPort": {
         "type": "object",
-        "required": [
-          "id",
-          "direction",
-          "type",
-          "many",
-          "label"
-        ],
+        "required": ["id", "direction", "type", "many", "label"],
         "properties": {
           "id": {
             "type": "string"
           },
           "direction": {
             "type": "string",
-            "enum": [
-              "in",
-              "out"
-            ]
+            "enum": ["in", "out"]
           },
           "type": {
             "type": "string",
@@ -12657,11 +13782,7 @@
       },
       "FlowNodeType": {
         "type": "object",
-        "required": [
-          "kind",
-          "label",
-          "ports"
-        ],
+        "required": ["kind", "label", "ports"],
         "properties": {
           "kind": {
             "type": "string"
@@ -12688,12 +13809,7 @@
       },
       "FlowPortStyle": {
         "type": "object",
-        "required": [
-          "type",
-          "label",
-          "colour",
-          "shape"
-        ],
+        "required": ["type", "label", "colour", "shape"],
         "properties": {
           "type": {
             "type": "string"
@@ -12711,10 +13827,7 @@
       },
       "FlowCatalogue": {
         "type": "object",
-        "required": [
-          "portTypes",
-          "nodes"
-        ],
+        "required": ["portTypes", "nodes"],
         "properties": {
           "portTypes": {
             "type": "array",
@@ -12732,10 +13845,7 @@
       },
       "FlowRef": {
         "type": "object",
-        "required": [
-          "node",
-          "port"
-        ],
+        "required": ["node", "port"],
         "properties": {
           "node": {
             "type": "string"
@@ -12747,10 +13857,7 @@
       },
       "FlowOwner": {
         "type": "object",
-        "required": [
-          "node",
-          "field"
-        ],
+        "required": ["node", "field"],
         "properties": {
           "node": {
             "type": "string"
@@ -12762,12 +13869,7 @@
       },
       "FlowNode": {
         "type": "object",
-        "required": [
-          "id",
-          "kind",
-          "label",
-          "summary"
-        ],
+        "required": ["id", "kind", "label", "summary"],
         "properties": {
           "id": {
             "type": "string",
@@ -12791,12 +13893,7 @@
       },
       "FlowEdge": {
         "type": "object",
-        "required": [
-          "id",
-          "source",
-          "target",
-          "owner"
-        ],
+        "required": ["id", "source", "target", "owner"],
         "properties": {
           "id": {
             "type": "string"
@@ -12823,11 +13920,7 @@
       },
       "FlowWarning": {
         "type": "object",
-        "required": [
-          "node",
-          "code",
-          "message"
-        ],
+        "required": ["node", "code", "message"],
         "properties": {
           "node": {
             "type": "string"
@@ -12847,12 +13940,7 @@
       },
       "FlowGraph": {
         "type": "object",
-        "required": [
-          "configRevision",
-          "nodes",
-          "edges",
-          "warnings"
-        ],
+        "required": ["configRevision", "nodes", "edges", "warnings"],
         "properties": {
           "configRevision": {
             "type": "integer",
@@ -12899,8 +13987,13 @@
               "attended_transfer",
               "announcement",
               "intercom",
+              "ivr",
               "call_waiting_on",
-              "call_waiting_off"
+              "call_waiting_off",
+              "park",
+              "park_retrieve",
+              "pickup_group",
+              "pickup_directed"
             ]
           },
           "argument": {
@@ -12952,8 +14045,13 @@
                     "attended_transfer",
                     "announcement",
                     "intercom",
+                    "ivr",
                     "call_waiting_on",
-                    "call_waiting_off"
+                    "call_waiting_off",
+                    "park",
+                    "park_retrieve",
+                    "pickup_group",
+                    "pickup_directed"
                   ]
                 },
                 "argument": {
@@ -13032,6 +14130,8 @@
                 "type": "string",
                 "enum": [
                   "bad_request",
+                  "graph_too_large",
+                  "config_changing",
                   "unauthorized",
                   "not_found",
                   "conflict",
@@ -13119,9 +14219,7 @@
           },
           "authMethod": {
             "type": "string",
-            "enum": [
-              "local"
-            ],
+            "enum": ["local"],
             "description": "How the user signs in."
           },
           "mustChangePassword": {
@@ -13146,11 +14244,7 @@
       },
       "MeExtension": {
         "type": "object",
-        "required": [
-          "id",
-          "number",
-          "name"
-        ],
+        "required": ["id", "number", "name"],
         "properties": {
           "id": {
             "type": "integer",
@@ -13166,11 +14260,7 @@
       },
       "VoicemailEmailPrefs": {
         "type": "object",
-        "required": [
-          "notify",
-          "attach",
-          "after"
-        ],
+        "required": ["notify", "attach", "after"],
         "properties": {
           "notify": {
             "type": "boolean",
@@ -13182,23 +14272,14 @@
           },
           "after": {
             "type": "string",
-            "enum": [
-              "none",
-              "mark_read",
-              "delete"
-            ],
+            "enum": ["none", "mark_read", "delete"],
             "description": "What happens to the message once the email was sent: nothing, mark as read, or delete."
           }
         }
       },
       "Role": {
         "type": "string",
-        "enum": [
-          "user",
-          "viewer",
-          "operator",
-          "admin"
-        ],
+        "enum": ["user", "viewer", "operator", "admin"],
         "description": "user: only the self-service operations on the user's own linked extensions; viewer: every read operation; operator: also every write operation; admin: also every admin and secrets operation"
       },
       "User": {
@@ -13234,9 +14315,7 @@
           },
           "authMethod": {
             "type": "string",
-            "enum": [
-              "local"
-            ]
+            "enum": ["local"]
           },
           "role": {
             "$ref": "#/components/schemas/Role"
@@ -13249,10 +14328,7 @@
             "type": "boolean"
           },
           "extensionId": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "format": "int64",
             "description": "The primary extension, whose phones receive the user's personal contacts; null when unlinked."
           },
@@ -13288,10 +14364,7 @@
       "PasswordChange": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "currentPassword",
-          "newPassword"
-        ],
+        "required": ["currentPassword", "newPassword"],
         "properties": {
           "currentPassword": {
             "type": "string",
@@ -13310,11 +14383,7 @@
       "UserCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "username",
-          "role",
-          "password"
-        ],
+        "required": ["username", "role", "password"],
         "properties": {
           "username": {
             "type": "string",
@@ -13332,9 +14401,7 @@
           },
           "authMethod": {
             "type": "string",
-            "enum": [
-              "local"
-            ],
+            "enum": ["local"],
             "default": "local",
             "description": "How the user signs in; local passwords only."
           },
@@ -13382,11 +14449,7 @@
           },
           "after": {
             "type": "string",
-            "enum": [
-              "none",
-              "mark_read",
-              "delete"
-            ],
+            "enum": ["none", "mark_read", "delete"],
             "description": "What happens to the message once the email was sent."
           }
         }
@@ -13433,10 +14496,7 @@
             "description": "Replaces the user's extensions."
           },
           "extensionId": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": ["integer", "null"],
             "format": "int64",
             "description": "Link exactly this extension (replacing others); null unlinks all. Use extensionIds instead."
           },
@@ -13508,9 +14568,7 @@
       },
       "SelfExtensionList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -13582,28 +14640,12 @@
       "SelfVoicemailUpdate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "pin"
-        ],
+        "required": ["pin"],
         "properties": {
           "pin": {
             "type": "string",
             "pattern": "^[0-9]{4,10}$",
             "description": "The new PIN, 4 to 10 digits."
-          }
-        }
-      },
-      "VoicemailMessageList": {
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VoicemailMessage"
-            }
           }
         }
       },
@@ -13651,10 +14693,7 @@
       },
       "SelfCallPage": {
         "type": "object",
-        "required": [
-          "items",
-          "next"
-        ],
+        "required": ["items", "next"],
         "properties": {
           "items": {
             "type": "array",
@@ -13702,17 +14741,10 @@
           },
           "source": {
             "type": "string",
-            "enum": [
-              "database",
-              "environment",
-              "none"
-            ]
+            "enum": ["database", "environment", "none"]
           },
           "updatedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "format": "date-time"
           }
         }
@@ -13720,12 +14752,7 @@
       "SmtpSettingsUpdate": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "host",
-          "port",
-          "security",
-          "from"
-        ],
+        "required": ["host", "port", "security", "from"],
         "properties": {
           "host": {
             "type": "string",
@@ -13739,11 +14766,7 @@
           },
           "security": {
             "type": "string",
-            "enum": [
-              "none",
-              "starttls",
-              "tls"
-            ],
+            "enum": ["none", "starttls", "tls"],
             "description": "Transport security."
           },
           "username": {
@@ -13755,10 +14778,7 @@
             "description": "The sender address."
           },
           "password": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": ["string", "null"],
             "maxLength": 512,
             "x-hello-secret": true,
             "description": "Omit to keep the stored password; an empty string clears it."
@@ -13768,9 +14788,7 @@
       "SmtpTest": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "to"
-        ],
+        "required": ["to"],
         "properties": {
           "to": {
             "type": "string",
@@ -13795,7 +14813,15 @@
             "description": "The token's scopes, at most the caller's; absent means read, write and admin (secrets must be named).",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "expiresAt": {
@@ -13844,7 +14870,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "expiresAt": {
@@ -13893,7 +14927,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "expiresAt": {
@@ -14221,11 +15263,7 @@
       },
       "TtsModel": {
         "type": "object",
-        "required": [
-          "id",
-          "name",
-          "voices"
-        ],
+        "required": ["id", "name", "voices"],
         "properties": {
           "id": {
             "type": "string"
@@ -14243,10 +15281,7 @@
       },
       "GenerationResult": {
         "type": "object",
-        "required": [
-          "announcement",
-          "regenerated"
-        ],
+        "required": ["announcement", "regenerated"],
         "properties": {
           "announcement": {
             "$ref": "#/components/schemas/Announcement"
@@ -14258,10 +15293,7 @@
         }
       },
       "TtsRecord": {
-        "type": [
-          "object",
-          "null"
-        ],
+        "type": ["object", "null"],
         "properties": {
           "text": {
             "type": "string"
@@ -14283,10 +15315,7 @@
       },
       "VoicemailGreetingResult": {
         "type": "object",
-        "required": [
-          "box",
-          "regenerated"
-        ],
+        "required": ["box", "regenerated"],
         "properties": {
           "box": {
             "$ref": "#/components/schemas/VoicemailBox"
@@ -14868,7 +15897,8 @@
           "defaultCallerId",
           "enabled",
           "destinations",
-          "internalDialing"
+          "internalDialing",
+          "codecs"
         ],
         "properties": {
           "id": {
@@ -14949,6 +15979,16 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "codecs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "enum": ["PCMU", "PCMA", "G722", "opus"]
+            },
+            "description": "Audio codec allow-list offered to the carrier, in preference order. Names are case-insensitive and stored as PCMU, PCMA, G722 or opus; none may repeat. Default PCMU, PCMA."
           },
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing"
@@ -15038,6 +16078,15 @@
             "maxLength": 256,
             "description": "Sealed with AES-256-GCM under HELLO_SECRET_KEY and never returned. On PATCH: omitted keeps it, \"\" clears it, a value replaces it."
           },
+          "codecs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "string"
+            },
+            "description": "Audio codec allow-list offered to the carrier, in preference order. Names are case-insensitive and stored as PCMU, PCMA, G722 or opus; none may repeat. Default PCMU, PCMA."
+          },
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing",
             "description": "The trunk's internal-number dialing policy: what it may dial in the extension namespace. Default mode \"off\" dials no internal number, so a new trunk reaches nothing internal. Set whole: a body that carries internalDialing replaces the policy."
@@ -15126,6 +16175,15 @@
             "writeOnly": true,
             "maxLength": 256,
             "description": "Sealed with AES-256-GCM under HELLO_SECRET_KEY and never returned. On PATCH: omitted keeps it, \"\" clears it, a value replaces it."
+          },
+          "codecs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+              "type": "string"
+            },
+            "description": "Audio codec allow-list offered to the carrier, in preference order. Names are case-insensitive and stored as PCMU, PCMA, G722 or opus; none may repeat. Default PCMU, PCMA."
           },
           "internalDialing": {
             "$ref": "#/components/schemas/InternalDialing",
@@ -15535,7 +16593,7 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri", "internal"]
+            "enum": ["extension", "external", "sip_uri", "internal", "ivr"]
           },
           "mohClassId": {
             "oneOf": [
@@ -15556,7 +16614,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "An extension number, an external number, an IVR menu name, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean"
@@ -15626,7 +16684,7 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri", "internal"],
+            "enum": ["extension", "external", "sip_uri", "internal", "ivr"],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
           "mohClassId": {
@@ -15719,7 +16777,7 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri", "internal"],
+            "enum": ["extension", "external", "sip_uri", "internal", "ivr"],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
           "mohClassId": {
@@ -15994,7 +17052,9 @@
                   "type": "object",
                   "required": ["extension", "device", "result"],
                   "properties": {
-                    "extension": { "type": "string" },
+                    "extension": {
+                      "type": "string"
+                    },
                     "device": {
                       "type": "string",
                       "description": "The member contact's device; empty when the member was never rung"
@@ -16405,7 +17465,15 @@
               "properties": {
                 "name": {
                   "type": "string",
-                  "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+                  "enum": [
+                    "read",
+                    "write",
+                    "admin",
+                    "secrets",
+                    "calls",
+                    "events",
+                    "recordings"
+                  ]
                 },
                 "description": {
                   "type": "string"
@@ -16464,7 +17532,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "resources": {
@@ -16482,7 +17558,15 @@
             "description": "The scopes the caller's role may grant.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           }
         }
@@ -16530,7 +17614,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "resources": {
@@ -16630,7 +17722,15 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "enabled": {
@@ -16686,7 +17786,15 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "enabled": {
@@ -16721,7 +17829,15 @@
             "description": "The scopes it may hold.",
             "items": {
               "type": "string",
-              "enum": ["read", "write", "admin", "secrets", "calls", "events", "recordings"]
+              "enum": [
+                "read",
+                "write",
+                "admin",
+                "secrets",
+                "calls",
+                "events",
+                "recordings"
+              ]
             }
           },
           "enabled": {
@@ -18083,7 +19199,7 @@
       },
       "MulticastChannelInput": {
         "type": "object",
-        "required": ["label", "address", "port", "codec", "role", "priority"],
+        "required": ["label", "address", "port", "codec"],
         "properties": {
           "label": {
             "type": "string",
@@ -18100,25 +19216,74 @@
           "codec": {
             "type": "string",
             "enum": ["PCMU", "PCMA", "G722"],
-            "description": "Codec of the channel"
+            "description": "Codec of the channel; a PTT channel takes PCMU or G722, and a paging group sends only to PCMU or PCMA"
           },
-          "role": {
+          "priority": {
+            "type": "integer",
+            "description": "Priority or channel number, 1 (highest) to 25; default 1"
+          },
+          "kind": {
             "type": "string",
-            "enum": ["listen", "send", "both"],
-            "description": "Whether the phones listen on it, send to it or both"
+            "enum": ["paging", "ptt"],
+            "description": "paging: phones listen and paging groups send; ptt: the Grandstream WP8x6 PTT and group paging address. Default paging"
           },
-          "priority": { "type": "integer", "description": "1 (highest) to 25" }
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether phones and paging groups use the channel; default true"
+          }
         }
       },
       "MulticastChannel": {
         "allOf": [
-          { "$ref": "#/components/schemas/MulticastChannelInput" },
+          {
+            "$ref": "#/components/schemas/MulticastChannelInput"
+          },
           {
             "type": "object",
-            "required": ["id"],
+            "required": ["id", "kind", "priority", "enabled"],
             "properties": { "id": { "type": "integer", "format": "int64" } }
           }
         ]
+      },
+      "MulticastChannelList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MulticastChannel" }
+          }
+        }
+      },
+      "PhoneGroupMulticastLink": {
+        "type": "object",
+        "required": ["channelId", "role"],
+        "properties": {
+          "channelId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "A paging channel of the catalog"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["listen", "send", "both"],
+            "description": "Whether the group's phones listen on it, send to it or both"
+          }
+        }
+      },
+      "PhoneGroupChannel": {
+        "type": "object",
+        "description": "A catalog channel as a phone group uses it.",
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "label": { "type": "string" },
+          "address": { "type": "string" },
+          "port": { "type": "integer" },
+          "codec": { "type": "string" },
+          "role": { "type": "string", "enum": ["listen", "send", "both"] },
+          "priority": { "type": "integer" },
+          "enabled": { "type": "boolean" }
+        }
       },
       "PhoneGroupMulticast": {
         "type": "object",
@@ -18127,8 +19292,47 @@
         "properties": {
           "channels": {
             "type": "array",
-            "description": "The group's channels in priority order; replaces the whole list",
-            "items": { "$ref": "#/components/schemas/MulticastChannelInput" }
+            "description": "The group's catalog channels in order; replaces the whole list",
+            "items": { "$ref": "#/components/schemas/PhoneGroupMulticastLink" }
+          },
+          "options": {
+            "$ref": "#/components/schemas/PagingOptions",
+            "description": "How the group's phones take a page and an intercom call; left out, the stored options stay"
+          }
+        }
+      },
+      "PagingOptions": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "allowInDnd": {
+            "type": "boolean",
+            "default": false,
+            "description": "Multicast pages play while the phone is in Do Not Disturb (Grandstream P8381; WP8x6 and WP810/822/825)"
+          },
+          "barge": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "default": 0,
+            "description": "Paging barge (Grandstream P1566): 0 off; otherwise a page on a channel of this priority or higher (1 is highest) interrupts a call"
+          },
+          "priorityActive": {
+            "type": "boolean",
+            "default": true,
+            "description": "Paging priority active (Grandstream P1567): a higher-priority page interrupts a lower one"
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3600,
+            "default": 0,
+            "description": "Multicast paging timeout in seconds, 0 for none (Grandstream P22532, WP8x6 only)"
+          },
+          "intercomBarge": {
+            "type": "boolean",
+            "default": false,
+            "description": "An intercom call is answered even during a call (Grandstream P26019, Yealink features.intercom.barge); off by default"
           }
         }
       },
@@ -18138,7 +19342,9 @@
         "properties": {
           "channel": {
             "type": "integer",
-            "description": "Channel number, 1 to 25"
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Channel number: 1 to 25 push-to-talk, 26 to 50 group paging"
           },
           "label": {
             "type": "string",
@@ -18156,38 +19362,78 @@
       },
       "PhoneGroupPTT": {
         "type": "object",
-        "required": [
-          "enabled",
-          "address",
-          "codec",
-          "defaultChannel",
-          "channels"
-        ],
+        "required": ["enabled", "defaultChannel"],
         "properties": {
           "enabled": {
             "type": "boolean",
-            "description": "Push-to-talk is on for the group's WP8x6 phones"
+            "description": "Push-to-talk is on for the group's Grandstream WP phones (WP8x6, WP856, WP820; the WP810/822/825 keys are unverified)"
+          },
+          "channelId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The catalog PTT channel (kind ptt); null for the catalog's first enabled PTT channel"
           },
           "address": {
             "type": "string",
-            "description": "IPv4 multicast address and port of PTT and group paging, default 224.0.1.116:5001"
+            "readOnly": true,
+            "description": "The effective PTT and group paging address and port (read-only), default 224.0.1.116:5001"
           },
           "codec": {
             "type": "string",
             "enum": ["PCMU", "G722"],
-            "description": "PTT codec"
+            "readOnly": true,
+            "description": "The effective PTT codec (read-only)"
           },
           "defaultChannel": {
             "type": "integer",
-            "description": "The channel the PTT button talks on; one of the channels, and it must transmit"
+            "description": "The channel the PTT button talks on (1, 2, 24 or 25); one of the channels, and it must transmit"
+          },
+          "priorityChannel": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 24,
+            "description": "The PTT priority channel (Grandstream P22185)"
+          },
+          "emergencyChannel": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25,
+            "default": 25,
+            "description": "The PTT emergency channel (Grandstream P22186)"
           },
           "acceptWhileBusy": {
             "type": "boolean",
-            "description": "Accept PTT while in a call"
+            "description": "Accept PTT and group pages while in a call"
+          },
+          "groupPaging": {
+            "type": "boolean",
+            "default": false,
+            "description": "Group paging (channels 26 to 50, on the PTT address and codec) is on for the group's WP phones (Grandstream P22194)"
+          },
+          "defaultGroup": {
+            "type": "integer",
+            "enum": [26, 27, 49, 50],
+            "default": 26,
+            "description": "The group channel the phone pages on (Grandstream P22199); one of the group channels when there are any, and it must transmit"
+          },
+          "priorityGroup": {
+            "type": "integer",
+            "minimum": 26,
+            "maximum": 50,
+            "default": 49,
+            "description": "The group paging priority channel (Grandstream P22200)"
+          },
+          "emergencyGroup": {
+            "type": "integer",
+            "minimum": 26,
+            "maximum": 50,
+            "default": 50,
+            "description": "The group paging emergency channel (Grandstream P22201)"
           },
           "channels": {
             "type": "array",
-            "description": "The channels, 1 to 25",
+            "description": "The channels: 1 to 25 push-to-talk, 26 to 50 group paging; with none, the default channel (and with group paging on the default group channel) is defined with transmit and subscribe",
             "items": { "$ref": "#/components/schemas/PTTChannel" }
           }
         }
@@ -18234,10 +19480,11 @@
           },
           "multicast": {
             "type": "array",
-            "description": "The group's multicast paging channels",
-            "items": { "$ref": "#/components/schemas/MulticastChannel" }
+            "description": "The catalog paging channels the group uses; empty means every enabled paging channel",
+            "items": { "$ref": "#/components/schemas/PhoneGroupChannel" }
           },
           "ptt": { "$ref": "#/components/schemas/PhoneGroupPTT" },
+          "pagingOptions": { "$ref": "#/components/schemas/PagingOptions" },
           "phoneCount": {
             "type": "integer"
           },
@@ -18309,6 +19556,241 @@
               "format": "int64"
             },
             "description": "Named books in delivery order; an empty list removes them all."
+          }
+        }
+      },
+      "IVRDestination": {
+        "type": "object",
+        "required": ["kind", "target"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "hangup",
+              "extension",
+              "ring_group",
+              "voicemail",
+              "announcement",
+              "paging",
+              "ivr",
+              "external"
+            ],
+            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; or an external number routed through the outbound routes."
+          },
+          "target": {
+            "type": "string",
+            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr); a page code such as *60 (paging); a number (external)."
+          }
+        }
+      },
+      "IVROption": {
+        "type": "object",
+        "required": ["digit", "kind", "target"],
+        "additionalProperties": false,
+        "properties": {
+          "digit": {
+            "type": "string",
+            "pattern": "^[0-9*#]$",
+            "description": "The key; each digit may appear once per menu."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IVRDestination/properties/kind"
+          },
+          "target": {
+            "$ref": "#/components/schemas/IVRDestination/properties/target"
+          }
+        }
+      },
+      "IVRMenu": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "number",
+          "enabled",
+          "greetingId",
+          "greetingName",
+          "invalidPromptId",
+          "invalidPromptName",
+          "timeoutPromptId",
+          "timeoutPromptName",
+          "digitTimeout",
+          "interDigitTimeout",
+          "maxRetries",
+          "allowDirectDial",
+          "timeout",
+          "invalid",
+          "options",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "description": "The number that dials the menu directly; empty when it is only a destination."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "greetingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The announcement played first."
+          },
+          "greetingName": {
+            "type": "string"
+          },
+          "invalidPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement played after an invalid choice; null replays the greeting."
+          },
+          "invalidPromptName": {
+            "type": "string"
+          },
+          "timeoutPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Announcement played after a timeout; null replays the greeting."
+          },
+          "timeoutPromptName": {
+            "type": "string"
+          },
+          "digitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Seconds to wait for the first digit after the prompt."
+          },
+          "interDigitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "description": "Seconds to wait between the digits of a directly dialled extension."
+          },
+          "maxRetries": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "How often the menu repeats after a timeout or an invalid choice before the matching exit destination applies."
+          },
+          "allowDirectDial": {
+            "type": "boolean",
+            "description": "Whether the caller may dial an extension number from the menu."
+          },
+          "timeout": {
+            "$ref": "#/components/schemas/IVRDestination"
+          },
+          "invalid": {
+            "$ref": "#/components/schemas/IVRDestination"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IVROption"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "IVRMenuInput": {
+        "type": "object",
+        "required": ["name", "greetingId"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique menu name (letters, digits, . _ -)."
+          },
+          "number": {
+            "type": "string",
+            "pattern": "^([0-9]{2,16})?$",
+            "description": "Optional number that dials the menu; must not be an extension number or ring group name."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Defaults to true; a disabled menu answers 404."
+          },
+          "greetingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Id of the greeting announcement."
+          },
+          "invalidPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Id of the announcement played after an invalid choice; null replays the greeting."
+          },
+          "timeoutPromptId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "Id of the announcement played after a timeout; null replays the greeting."
+          },
+          "digitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Defaults to 5."
+          },
+          "interDigitTimeout": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30,
+            "description": "Defaults to 3."
+          },
+          "maxRetries": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "Defaults to 3."
+          },
+          "allowDirectDial": {
+            "type": "boolean",
+            "description": "Defaults to false."
+          },
+          "timeout": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where the call goes once the retries are used up after silence. Defaults to hangup."
+          },
+          "invalid": {
+            "$ref": "#/components/schemas/IVRDestination",
+            "description": "Where the call goes once the retries are used up after invalid choices. Defaults to hangup."
+          },
+          "options": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {
+              "$ref": "#/components/schemas/IVROption"
+            },
+            "description": "The menu's keys and where each sends the call; each digit once."
+          }
+        }
+      },
+      "IVRMenuList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IVRMenu"
+            }
           }
         }
       }

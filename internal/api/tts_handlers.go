@@ -2,7 +2,7 @@ package api
 
 // Text-to-speech prompts. The operator authors text in the console and asks
 // for it to be generated; the audio is made once through OpenRouter (an
-// ElevenLabs model), stored as an 8 kHz WAV and played from storage ever
+// ElevenLabs model), stored as a WAV at the model's own sample rate and played from storage ever
 // after. Nothing here runs at call time, and a generation only happens on an
 // explicit request: saving text, listing voices and playing never call the
 // provider. The OpenRouter key is sealed in the database, write-only through
@@ -25,7 +25,7 @@ import (
 // Synthesizer is the text-to-speech provider; *tts.Client implements it and
 // the tests replace it with a fake, so no test touches the network.
 type Synthesizer interface {
-	// Synthesize returns 8 kHz 16-bit mono WAV audio for text.
+	// Synthesize returns 16-bit mono WAV audio for text.
 	Synthesize(ctx context.Context, key, model, voice, text string) ([]byte, error)
 	CheckKey(ctx context.Context, key string) error
 	Voices(ctx context.Context, key string) ([]tts.Model, error)
@@ -474,4 +474,83 @@ func (s *server) putVoicemailGreeting(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"box": s.boxView(r.Context(), b), "regenerated": true})
+}
+
+// Park slot announcement.
+
+// parkClips are the announcements the SIP side joins to speak a park slot
+// to the parker: the lead-in, then one clip per digit. The names match
+// internal/sip (parkSlotPrompt, parkDigitPrompt); while any is missing the
+// parker hears the slot as tones.
+var parkClips = [][2]string{
+	{"park.slot", "Your call is parked in slot"},
+	{"park.digit.0", "zero"}, {"park.digit.1", "one"}, {"park.digit.2", "two"},
+	{"park.digit.3", "three"}, {"park.digit.4", "four"}, {"park.digit.5", "five"},
+	{"park.digit.6", "six"}, {"park.digit.7", "seven"}, {"park.digit.8", "eight"},
+	{"park.digit.9", "nine"},
+}
+
+// generateParkAnnouncement is POST /api/v1/park-lots/announcement/generate:
+// generates the spoken park slot clips once. A clip whose audio already came
+// from the same text, voice and model is skipped, and so is one the operator
+// uploaded under that name (their own recording wins), unless force is set.
+func (s *server) generateParkAnnouncement(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		VoiceID string `json:"voiceId"`
+		ModelID string `json:"modelId"`
+		Force   bool   `json:"force"`
+	}
+	if r.ContentLength != 0 && !decode(w, r, &in) { // the body is optional
+		return
+	}
+	if _, ok := s.ttsKey(w, r); !ok {
+		return
+	}
+	if s.Objects == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "object storage is unavailable; try again shortly")
+		return
+	}
+	out := struct {
+		Announcements []store.Announcement `json:"announcements"`
+		Generated     int                  `json:"generated"`
+	}{Announcements: []store.Announcement{}}
+	for _, clip := range parkClips {
+		name := clip[0]
+		p := promptInput{Text: clip[1], VoiceID: in.VoiceID, ModelID: in.ModelID}
+		if !s.resolvePrompt(w, r, &p) {
+			return
+		}
+		a, exists, err := s.Store.AnnouncementByName(r.Context(), name)
+		if err != nil {
+			s.internal(w, "read announcement", err)
+			return
+		}
+		if exists && !in.Force && (a.TextHash == "" || a.TextHash == store.PromptHash(p.Text, p.VoiceID, p.ModelID)) {
+			out.Announcements = append(out.Announcements, a)
+			continue
+		}
+		wav, ok := s.synthesize(w, r, "announcement", name, p)
+		if !ok {
+			return
+		}
+		object := fmt.Sprintf("ann/%s.wav", name)
+		if err := s.Objects.PutAnnouncement(r.Context(), object, bytes.NewReader(wav), int64(len(wav))); err != nil {
+			s.Log.Error("media: store generated announcement", "error", err)
+			writeError(w, http.StatusBadGateway, "upstream", "object storage upload failed; try again shortly")
+			return
+		}
+		if exists {
+			a, err = s.Store.MarkAnnouncementGenerated(r.Context(), actor(r).String(), a.ID, p.Text, p.VoiceID, p.ModelID)
+		} else {
+			a, err = s.Store.CreateGeneratedAnnouncement(r.Context(), actor(r).String(), name, object,
+				p.Text, p.VoiceID, p.ModelID, s.check())
+		}
+		if err != nil {
+			s.configError(w, "announcement", err)
+			return
+		}
+		out.Announcements = append(out.Announcements, a)
+		out.Generated++
+	}
+	writeJSON(w, http.StatusOK, out)
 }

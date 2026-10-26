@@ -98,7 +98,7 @@ func TestMOHClasses(t *testing.T) {
 	}
 	gPath := fmt.Sprintf("/api/v1/ring-groups/%v", group["id"])
 	c.must(http.StatusBadRequest, "PATCH", gPath, map[string]any{"mohClassId": 999999})
-	if g := c.must(http.StatusOK, "PATCH", gPath, map[string]any{"name": "701"}).json(t); fmt.Sprint(g["mohClassId"]) != id || g["mohRingback"] != true {
+	if g := c.must(http.StatusOK, "PATCH", gPath, map[string]any{"name": "750"}).json(t); fmt.Sprint(g["mohClassId"]) != id || g["mohRingback"] != true {
 		t.Fatalf("an unrelated patch dropped the music settings: %v", g)
 	}
 
