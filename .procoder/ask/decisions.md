@@ -620,3 +620,43 @@ documents (422 on those endpoints), so the OpenAPI spec is unchanged.
 Feature and paging codes start with `*` and cannot equal a plain number;
 they keep the `dialGuard` prefix rules. Time conditions have no number of
 their own.
+
+## MCP completeness: JSON bodies, skills, drift guards (branch mcp-skills-complete)
+
+- Body-format gaps are closed by adding an `application/json` form to the
+  existing operations (the pattern of `updateExtensionVoicemail`), not by new
+  routes: one handler, one validation path, no route or role table change.
+  - `createAnnouncement` / `replaceAnnouncement`: `{name, audioBase64}` /
+    `{audioBase64}`. Cap 700 KiB of decoded audio, because an MCP request is at
+    most 1 MiB (spec S-13) and base64 adds a third. Same `checkAnnouncementAudio`
+    as multipart. Multipart (64 MiB) stays for the console.
+  - `importPhones`: `{rows: [{mac, vendor, model, extension, label?, blf?}]}`
+    is turned into the CSV records `checkImport` validates; `text/csv` stays.
+  - `importPhonebook`: `{rows: [{first_name, ...}]}` is rendered as CSV and read
+    by `phonebook.ParseCSV`, so every CSV rule applies; multipart stays.
+- Firmware upload stays excluded: images are tens of MB, far over the 1 MiB
+  MCP request, so base64 is not sane. Category `payload-too-large`, only
+  `uploadFirmware` may use it (test).
+- `importMyContacts` stays excluded under `private-data` (its old reason was
+  the body format, which is not accepted; the real reason is that a user's own
+  address book is private).
+- Every `x-hello-mcp.exclude` now has a structured `category`, one of
+  `apispec.ExcludeCategories` (credentials, private-data, self-service,
+  human-in-the-loop, disruptive-device, paid-credits, binary-download,
+  payload-too-large, session, spec-document). `apispec.Load` rejects a missing
+  or unknown category; `TestMCPExclusionCategories` rejects reasons that blame a
+  multipart/CSV/binary request body.
+- Guards against future gaps:
+  1. Route coverage: `TestRoutesMatchOpenAPI` (existing, kept) fails on a route
+     without an operation and on scope/role drift.
+  2. Exclusion reasons: `TestMCPExclusionCategories` + the loader check above.
+  3. Skill coverage: `TestSkillsTeachEveryTool` fails when an included tool is
+     named by no skill, or an API area (first path segment) has no taught tool;
+     `untaught` / `untaughtAreas` are explicit, reasoned allowlists (empty).
+- The skill name check now only treats a camelCase inline identifier as a tool
+  name when it starts like an operationId (list, get, create...), so body fields
+  such as `extensionId` can be written in code.
+- Skills added: hello-ivr-and-hours, hello-call-handling, hello-phones,
+  hello-flow-graph; hello-troubleshoot extended (cluster drain, AI findings,
+  TTS settings, version, concurrency); hello-setup gets revertVoicemailGreeting.
+- No migration needed.

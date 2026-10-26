@@ -21,3 +21,22 @@
 | `listPhoneFetches`     | read  | A phone's provisioning fetches.                                      |
 | `getProvSettings`      | read  | Provisioning URLs and DHCP option values.                            |
 | `listPresence`         | read  | Device presence (idle, ringing, on call, DND).                       |
+| `drainNode`            | admin | Ask a member to finish its calls and take no new ones.               |
+| `undrainNode`          | admin | Cancel a drain.                                                      |
+| `getVersion`           | read  | Build, commit and configuration revision of the answering node.      |
+| `getMe`                | read  | Who the credentials belong to, with role and scopes.                 |
+| `cdrConcurrency`       | read  | How many calls were up at once over 1h, 6h or 24h.                   |
+| `listSkills`           | read  | The skills this server ships.                                        |
+| `getAIStatus`          | read  | Whether the AI agent is on, budget and open counts.                  |
+| `getAISettings`        | read  | External AI access, MCP and API URLs, what each scope allows.        |
+| `listAIFindings`       | read  | Findings raised by the detectors, ranked.                            |
+| `getAIFinding`         | read  | One finding with evidence and history.                               |
+| `listAIProposals`      | read  | Changes the AI agent proposed; none apply by themselves.             |
+| `getAIProposal`        | read  | One proposal with before, after and current state.                   |
+| `listAIAgents`         | read  | Background agents with last and next run.                            |
+| `listAISessions`       | read  | The caller's assistant sessions.                                     |
+| `getAISession`         | read  | One session with its messages.                                       |
+| `getAITask`            | read  | An AI task's status.                                                 |
+| `getTtsSettings`       | admin | Whether a text-to-speech key is set, default model and voice.        |
+| `listTtsVoices`        | write | Models and voices offered by the provider.                           |
+| `deleteTtsKey`         | admin | Remove the stored text-to-speech key.                                |

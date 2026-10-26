@@ -69,6 +69,50 @@ registering, failed, misconfigured, disabled) with the last response code,
 and each destination's health from OPTIONS pings. `getTrunk` shows the
 configuration (never the password). See [trunk states](references/trunks.md).
 
+## Which release, who am I, what is live
+
+- `getVersion` answers the build, commit and configuration revision of the
+  node that replied; `getMe` says whose credentials you are using and with
+  which role and scopes (check it when a call is refused with 403).
+- `listCalls` lists the calls in progress now; `listRegistrations` the
+  registered contacts. `cdrConcurrency` (`range` 1h, 6h or 24h) shows how many
+  calls were up at once, to size trunks or find busy hours; `countCDRs` gives
+  totals and failures for the same filters as `listCDRs`.
+- `listPresence` shows each device as idle, ringing, on-call or dnd.
+- `listSkills` lists the skills this server ships, so a client can offer them.
+
+## Cluster depth: maintenance and draining
+
+`getCluster` and `listClusterNodes` give the state. Before maintenance on a
+node, `drainNode` (path `id` is the node's HELLO_NODE_ID, admin only) lets it
+finish its calls and stop taking new ones; `undrainNode` cancels it. Draining
+the last READY SIP node answers 409; do not pass `force=true` unless the user
+has said that dropping call capacity is acceptable. Ask before draining.
+
+## Findings and proposals from the AI agent
+
+Hello can run background detectors and an assistant of its own. They only
+suggest: nothing changes until an operator applies a proposal in the console.
+
+- `getAIStatus`: is it on, why not, token use against the budget, open counts.
+- `listAIFindings` (filter `status`, `severity`, `type`) and `getAIFinding`:
+  what the detectors found, with evidence and the health score. Start here for
+  "is anything wrong with my PBX".
+- `listAIProposals` and `getAIProposal`: suggested changes with the stored
+  before and after and the object's current state. Explain them; never claim a
+  proposal was applied.
+- `listAIAgents`, `getAISettings` (the MCP and API URLs and what each scope
+  allows), `listAISessions`, `getAISession` and `getAITask` for the assistant's
+  own sessions and tasks.
+
+## Text-to-speech settings
+
+`getTtsSettings` (admin) says whether a key is set (never the key), its last
+four characters, and the default model and voice; `listTtsVoices` lists the
+models and voices to pick from. `deleteTtsKey` removes the stored key: prompts
+already generated keep playing but no new one can be made; ask first. Setting
+the key and generating audio happen in the console only.
+
 ## Answering
 
 Say what you found, what it means and what to do, in that order. Quote the
@@ -79,5 +123,6 @@ it in the console.
 
 - [Tools](references/tools.md) - every tool this skill uses.
 - [Cluster states](references/cluster.md)
+- The `hello-flow-graph` skill shows where a call can go.
 - [Registration verdicts and SIP codes](references/registration.md)
 - [Trunk states](references/trunks.md)

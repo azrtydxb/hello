@@ -37,7 +37,10 @@ type Operation struct {
 	// Exclude is x-hello-mcp's exclusion reason; empty means the operation
 	// is an MCP tool.
 	Exclude string
-	Params  []Param
+	// ExcludeCategory is x-hello-mcp's category, one of ExcludeCategories;
+	// set exactly when Exclude is.
+	ExcludeCategory string
+	Params          []Param
 	// Body is the request body, nil when the operation takes none.
 	Body *Body
 	// Output is the 2xx JSON schema with $refs inlined; nil without one.
@@ -158,11 +161,11 @@ func (s *Spec) operation(path, method string, raw map[string]any, shared []any) 
 		}
 		op.Role = r
 	}
-	exclude, err := mcpExclusion(raw["x-hello-mcp"])
+	exclude, category, err := mcpExclusion(raw["x-hello-mcp"])
 	if err != nil {
 		return op, err
 	}
-	op.Exclude = exclude
+	op.Exclude, op.ExcludeCategory = exclude, category
 	params, err := s.params(shared, raw["parameters"])
 	if err != nil {
 		return op, err
@@ -187,24 +190,45 @@ func (s *Spec) operation(path, method string, raw map[string]any, shared []any) 
 	return op, nil
 }
 
+// ExcludeCategories are the only reasons an operation may be kept out of the
+// MCP tools, each with what it means. A request body that is multipart, CSV
+// or binary is not one of them: such an operation gets a JSON form of its
+// body instead.
+var ExcludeCategories = map[string]string{
+	"credentials":       "credentials, secrets, tokens, users and roles: an agent never manages access",
+	"private-data":      "a person's private data: contacts, messages, assistant conversations",
+	"self-service":      "acts as the signed-in user's own extension",
+	"human-in-the-loop": "destructive or irreversible, a person must decide",
+	"disruptive-device": "disrupts a physical device: reboot, ring",
+	"paid-credits":      "spends paid text-to-speech credits",
+	"binary-download":   "a download (audio, CSV, zip) for a person, not data for an agent",
+	"payload-too-large": "its payload cannot fit in an MCP request (1 MiB) even encoded as JSON",
+	"session":           "starts or ends a browser session",
+	"spec-document":     "the API document itself",
+}
+
 // mcpExclusion reads x-hello-mcp: absent or true is a tool, an object
-// carries the exclusion reason.
-func mcpExclusion(v any) (string, error) {
+// carries the exclusion reason and one of ExcludeCategories.
+func mcpExclusion(v any) (reason, category string, err error) {
 	switch m := v.(type) {
 	case nil:
-		return "", nil
+		return "", "", nil
 	case bool:
 		if !m {
-			return "", errors.New(`x-hello-mcp is false; exclude with {"exclude": "<reason>"}`)
+			return "", "", errors.New(`x-hello-mcp is false; exclude with {"exclude": "<reason>", "category": "<category>"}`)
 		}
-		return "", nil
+		return "", "", nil
 	case map[string]any:
-		if r := str(m["exclude"]); r != "" {
-			return r, nil
+		r, c := str(m["exclude"]), str(m["category"])
+		if r == "" {
+			return "", "", errors.New("x-hello-mcp object without an exclude reason")
 		}
-		return "", errors.New("x-hello-mcp object without an exclude reason")
+		if _, ok := ExcludeCategories[c]; !ok {
+			return "", "", fmt.Errorf("x-hello-mcp category %q is not one of the exclusion categories (a body format is never a reason: add a JSON form)", c)
+		}
+		return r, c, nil
 	default:
-		return "", fmt.Errorf("x-hello-mcp is %T", m)
+		return "", "", fmt.Errorf("x-hello-mcp is %T", m)
 	}
 }
 

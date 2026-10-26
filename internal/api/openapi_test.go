@@ -149,6 +149,41 @@ func TestOpenAPIForTools(t *testing.T) {
 	}
 }
 
+// bodyFormatReason matches an exclusion reason that blames a request body
+// format. That is never a reason: the operation gets a JSON form instead.
+var bodyFormatReason = regexp.MustCompile(`(?i)multipart|text/csv|csv (file |body )?upload|file upload|binary request`)
+
+// TestMCPExclusionCategories fails if an operation is kept out of the MCP
+// tools without one of the fixed reason categories (apispec.ExcludeCategories),
+// if a reason blames a multipart, CSV or binary request body (add a JSON form
+// of the body instead), or if an operation with a body that has no JSON form
+// is left a tool. A category that nothing uses is not an error; an unknown
+// one fails the document's load.
+func TestMCPExclusionCategories(t *testing.T) {
+	excluded := 0
+	for _, op := range loadSpec(t).Operations() {
+		if op.Exclude == "" {
+			if op.ExcludeCategory != "" {
+				t.Errorf("%s: category %q on a tool", op.ID, op.ExcludeCategory)
+			}
+			continue
+		}
+		excluded++
+		if _, ok := apispec.ExcludeCategories[op.ExcludeCategory]; !ok {
+			t.Errorf("%s: exclusion category %q is not one of the fixed categories", op.ID, op.ExcludeCategory)
+		}
+		if bodyFormatReason.MatchString(op.Exclude) {
+			t.Errorf("%s: %q blames a body format; give the operation a JSON request body instead", op.ID, op.Exclude)
+		}
+		if op.ExcludeCategory == "payload-too-large" && op.ID != "uploadFirmware" {
+			t.Errorf("%s: only operations whose payload cannot fit a 1 MiB MCP request may use payload-too-large", op.ID)
+		}
+	}
+	if excluded < 50 {
+		t.Fatalf("only %d exclusions found", excluded)
+	}
+}
+
 // checkSecrets walks an inlined schema for string properties named like a
 // credential without x-hello-secret.
 func checkSecrets(t *testing.T, where string, schema map[string]any, at string) {
