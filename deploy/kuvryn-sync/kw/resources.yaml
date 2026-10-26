@@ -1085,12 +1085,15 @@ spec:
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-b21e26d11766548b77d005b165a187e6407f64cd
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-a93fd23e3ecf671ba02ce60d10bb0b48860c6574
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
           env:
+            - name: HELLO_TIMEZONE
+              # Voicemail speaks message times in this zone (sip falls back to UTC).
+              value: Asia/Dubai
             - name: HELLO_NODE_ID
               # Fixed, not the pod name: a Deployment pod gets a new name on every
               # rollout, which left a stale OFFLINE member per deploy. A node
@@ -1304,12 +1307,15 @@ spec:
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-b21e26d11766548b77d005b165a187e6407f64cd
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-a93fd23e3ecf671ba02ce60d10bb0b48860c6574
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
           imagePullPolicy: Always
           env:
+            - name: HELLO_TIMEZONE
+              # Voicemail speaks message times in this zone (sip falls back to UTC).
+              value: Asia/Dubai
             - name: HELLO_NODE_ID
               # Fixed, not the pod name: a Deployment pod gets a new name on every
               # rollout, which left a stale OFFLINE member per deploy. A node
@@ -1496,7 +1502,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-b21e26d11766548b77d005b165a187e6407f64cd
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-a93fd23e3ecf671ba02ce60d10bb0b48860c6574
           command:
             - sh
             - -c
@@ -1543,7 +1549,7 @@ spec:
               value: "false"
       containers:
         - name: hello-control
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-b21e26d11766548b77d005b165a187e6407f64cd
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-a93fd23e3ecf671ba02ce60d10bb0b48860c6574
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1773,7 +1779,7 @@ spec:
               cpu: 50m
               memory: 64Mi
             limits:
-              memory: 256Mi
+              memory: 512Mi
       volumes:
         - name: prov-ca
           secret:
@@ -1835,7 +1841,7 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-ui:sha-b21e26d11766548b77d005b165a187e6407f64cd
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-ui:sha-a93fd23e3ecf671ba02ce60d10bb0b48860c6574
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
