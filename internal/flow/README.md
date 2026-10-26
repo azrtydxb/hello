@@ -86,6 +86,7 @@ in `drift_test.go` and `drift_db_test.go`.
 - The catalogue lists exactly what is stored, and the runtime limits what can
   be stored: IVR keys, time condition branches and queue exits cannot go to a
   conference room, a ring group fallback cannot go to a paging group or a
-  conference room, because a started call cannot join or be paged into them;
-  and a ring group fallback cannot ring an extension or another group,
-  because the group's ring stage has ended. See S-3 of the spec.
+  conference room, because a started call cannot join or be paged into them.
+  A ring group fallback can ring an extension or another group: the ring
+  state machine opens a new ring stage for it (`groupFailover`). See S-3 of
+  the spec.
