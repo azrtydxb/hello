@@ -797,7 +797,8 @@ Decision 3's deviation (a ring group's fallback cannot ring an extension or
 another group) is lifted: the ring state machine can open a new ring stage.
 
 - Failure kinds `extension` (a number) and `ring_group` (a name), migration
-  `00042` (additive, through `pg_temp.hello_check_values`). I found while
+  `00043` (additive, through `pg_temp.hello_check_values`; numbered after
+  the flow canvas migration `00042` merged first). I found while
   writing it that `00041` never widened `ring_groups.failure_kind`, although
   the spec said so; the spec is corrected.
 - Run time (`groupFailover`, `internal/sip/groups.go`). `openFailoverStage`
