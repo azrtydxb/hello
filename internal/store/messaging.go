@@ -661,8 +661,8 @@ func (s *Store) MaintainMessaging(ctx context.Context) (MessagingMaintenance, er
 			DELETE FROM conversations WHERE id IN (
 				SELECT c.id FROM conversations c JOIN msg_channels ch ON ch.id = c.channel_id
 				WHERE c.status IN ('resolved', 'spam')
-				  AND coalesce(c.resolved_at, c.last_message_at) < now() - make_interval(days => CASE WHEN ch.kind = 'webchat' THEN $1 ELSE $2 END)
-				ORDER BY c.id LIMIT $3)`, set.RetentionChatDays, set.RetentionSMSDays, purgeBatch)
+				  AND coalesce(c.resolved_at, c.last_message_at) < now() - make_interval(days => CASE WHEN ch.kind = 'webchat' THEN $1::int ELSE $2::int END)
+				ORDER BY c.id LIMIT $3::int)`, set.RetentionChatDays, set.RetentionSMSDays, purgeBatch)
 		if err != nil {
 			return out, err
 		}

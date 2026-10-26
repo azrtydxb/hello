@@ -279,6 +279,9 @@ func TestAuthRequired(t *testing.T) {
 		if method == "DELETE" || strings.HasSuffix(path, "/logout") {
 			continue // keep the good token and its state for the other routes
 		}
+		if strings.HasSuffix(path, "/inbox/stream") {
+			continue // an event stream that never ends: TestInboxStream opens it
+		}
 		if r := authed.do(method, path, nil); r.code == http.StatusUnauthorized {
 			t.Errorf("%s with a valid token = 401", op)
 		}
