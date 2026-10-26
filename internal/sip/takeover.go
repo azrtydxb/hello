@@ -600,6 +600,10 @@ func legName(caller bool) string {
 // record) and the call replicates from here on.
 func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	defer contain(s.log, "takeover")
+	if st.State == haPhasePark {
+		s.takeOverPark(st, from)
+		return
+	}
 	if st.Legs[1].CallID == "" {
 		s.takeOverSolo(st, from)
 		return
@@ -913,10 +917,18 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 	c := s.haNewCall(st, from, a, nil, start)
 	c.haSolo = true
 	var (
-		body []byte
-		sess media.Session
+		body      []byte
+		sess      media.Session
+		confMedia *media.Party
 	)
 	switch st.State {
+	case haPhaseConference:
+		ans, party, err := s.confNewParty(a.remoteSDP)
+		if err != nil {
+			s.haAbandon(st, from, "conference media: "+err.Error())
+			return
+		}
+		body, confMedia = ans, party
 	case haPhaseVoicemail:
 		anchor := s.voicemailAnchor([]byte(a.remoteSDP))
 		if anchor == nil {
@@ -970,6 +982,9 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		if sess != nil {
 			_ = sess.Close()
 		}
+		if confMedia != nil {
+			confMedia.Close()
+		}
 		c.addTrace(fmt.Sprintf("Takeover from %s failed: the caller did not answer the re-INVITE", from))
 		c.end(sip.StatusServiceUnavailable, cdr.SideSystem, "takeover failed: the caller did not answer the re-INVITE", ResultFailed)
 		s.m.ZombieCalls.Inc()
@@ -1000,6 +1015,15 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 	c.haArmMaxDuration(st.AnsweredAt, start)
 	c.haSettleClaim(c.replicate())
 	go c.haLoop()
+	if st.State == haPhaseConference {
+		room := strings.TrimPrefix(st.StateDetail, confHADetail)
+		c.mu.Lock()
+		c.kind = cdr.KindConference
+		c.mu.Unlock()
+		c.addTrace("Conference participant rejoins room " + room + " after the takeover")
+		go c.confTakeoverJoin(room, confMedia, body)
+		return
+	}
 	if st.State == haPhaseVoicemail {
 		mode, reason, box := parseVoicemailDetail(st.StateDetail)
 		if box != "" {
@@ -1009,6 +1033,10 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		}
 		c.addTrace("Voicemail restarts from its greeting after the takeover")
 		go c.voicemailFlow(mode, reason, sess)
+		return
+	}
+	if st.State == haPhaseIVR {
+		c.ivrResume(strings.TrimPrefix(st.StateDetail, haIVRDetailPrefix))
 		return
 	}
 	obj := strings.TrimPrefix(st.StateDetail, haRecordDetailPrefix)

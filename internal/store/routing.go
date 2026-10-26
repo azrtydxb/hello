@@ -948,7 +948,38 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 	if err := rows.Err(); err != nil {
 		return snap, err
 	}
-	return snap, nil
+	_ = rows.Close()
+	mrows, err := q.QueryContext(ctx, `SELECT name FROM ivr_menus`)
+	if err != nil {
+		return snap, err
+	}
+	cfg.IVRMenus = map[string]bool{}
+	for mrows.Next() {
+		var n string
+		if err := mrows.Scan(&n); err != nil {
+			_ = mrows.Close()
+			return snap, err
+		}
+		cfg.IVRMenus[n] = true
+	}
+	_ = mrows.Close()
+	if err := mrows.Err(); err != nil {
+		return snap, err
+	}
+	crows, err := q.QueryContext(ctx, `SELECT number, name FROM conference_rooms`)
+	if err != nil {
+		return snap, err
+	}
+	defer func() { _ = crows.Close() }()
+	cfg.Conferences = map[string]string{}
+	for crows.Next() {
+		var n, name string
+		if err := crows.Scan(&n, &name); err != nil {
+			return snap, err
+		}
+		cfg.Conferences[n] = name
+	}
+	return snap, crows.Err()
 }
 
 // routingTrunks converts the stored trunks to the engine's type. A trunk

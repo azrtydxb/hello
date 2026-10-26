@@ -167,6 +167,18 @@ type Deps struct {
 	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
 	// MESSAGE 503.
 	Messages MessageQueue
+	// Conferences is the shared conference state (room ownership, live state,
+	// control commands); nil keeps every room on this node alone.
+	Conferences Conferences
+	// ConferenceAudit records conference control actions in the audit log;
+	// nil records none.
+	ConferenceAudit ConferenceAudit
+	// ConferenceHold supplies the audio of a participant waiting for a
+	// leader (music on hold plugs in here); nil plays the built-in wait tone.
+	ConferenceHold ConferenceHold
+	// Park is the shared call-park store (Valkey); nil disables call park,
+	// retrieve and cross-node pickup. A parked party hears music on hold.
+	Park ParkState
 }
 
 // Server is one SIP node.
@@ -184,7 +196,10 @@ type Server struct {
 	client  *sipgo.Client
 	uas     *sipgo.DialogUA // A legs: callers
 	uac     *sipgo.DialogUA // B legs: forks
-	bg      sync.WaitGroup
+	// uacElsewhere is uac with "Call completed elsewhere" on its CANCELs,
+	// for the ringing legs of a picked-up call.
+	uacElsewhere *sipgo.DialogUA
+	bg           sync.WaitGroup
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
 	// (a call ending as the node stops) must not start more work on it.
 	bgMu     sync.Mutex
@@ -202,6 +217,10 @@ type Server struct {
 	// answerHook, when set (tests only), runs as a call's winning fork is
 	// connected, before the call is marked connected.
 	answerHook atomic.Pointer[func()]
+	// callerByeHook, when set (tests only), runs after a caller's BYE has
+	// been accepted on the dialog and before the call is hung up, so a
+	// test can hold the BYE/ACK race open.
+	callerByeHook atomic.Pointer[func()]
 	// abortHook, when set (tests only), runs inside abort after it has
 	// taken the setup's ownership before it signals the setup goroutine, so
 	// a test can inject the fork failure that races the abort.
@@ -233,6 +252,8 @@ type Server struct {
 	// mohCache holds decoded music on hold announcements (guarded by mohMu).
 	mohMu    sync.Mutex
 	mohCache map[string]mohAudioEntry
+	// mohLoading are the fetches in flight (guarded by mohMu).
+	mohLoading map[string]*mohLoad
 
 	// Presence (S-10) and feature-code (S-11) state. subs holds the live
 	// dialog subscriptions by Call-ID, byExt the per-extension index used
@@ -263,6 +284,11 @@ type Server struct {
 	msgKick  map[string]struct{}
 	msgSweep bool
 	msgWake  chan struct{}
+	// conf holds the conference rooms this node mixes (spec S-34).
+	conf *confHub
+	// confLamp is the last state told to each conference key's subscribers.
+	confLampMu sync.Mutex
+	confLamp   map[string]string
 }
 
 // SetMediaAnchor wires the voicemail media anchor; without it voicemail
@@ -369,6 +395,8 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		pages:     map[int64]*call{},
 		msgKick:   map[string]struct{}{},
 		msgWake:   make(chan struct{}, 1),
+		conf:      newConfHub(),
+		confLamp:  map[string]string{},
 		haOffline: map[string]*haOfflineNode{}, haLastActive: map[string]int{}, haIncSeen: map[string]haIncWatch{},
 	}
 	setDefault(&cfg.HADialogHeartbeat, 5*time.Second)
@@ -426,6 +454,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.refreshPeers(ctx) // before serving, so the edge knows its peers
 	s.uas = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
 	s.uac = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
+	s.uacElsewhere = newElsewhereUA(ua, client, s.uac)
 
 	s.handle(srv, sip.OPTIONS, s.handleOptions)
 	s.handle(srv, sip.REGISTER, s.handleRegister)
@@ -457,6 +486,10 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.Messages != nil {
 		s.bg.Go(func() { s.messageLoop(rctx) })
+	}
+	s.bg.Go(func() { s.confLoop(rctx) })
+	if s.deps.Park != nil {
+		s.bg.Go(func() { s.parkLoop(rctx) })
 	}
 	if s.deps.HAState != nil && s.deps.Membership != nil && s.cfg.HATakeoverEnabled {
 		// A takeover re-INVITEs from the listening socket, which sipgo
@@ -778,6 +811,9 @@ func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why 
 // SnapshotChanged removes the bindings of devices that are no longer in the
 // snapshot (deleted or disabled). Use it as the watcher's OnReload.
 func (s *Server) SnapshotChanged(old, cur *snapshot.Snapshot) {
+	if cur != nil {
+		s.confRefresh(cur)
+	}
 	if old == nil || cur == nil {
 		return
 	}
@@ -878,7 +914,9 @@ func (s *Server) ConnectedCalls() int {
 	n := 0
 	for _, c := range calls {
 		c.mu.Lock()
-		if c.connected && !c.ended {
+		// A participant the owner mixes for another node is that node's to
+		// recover; its owner's death does not lose it.
+		if c.connected && !c.ended && !c.confPeer {
 			n++
 		}
 		c.mu.Unlock()

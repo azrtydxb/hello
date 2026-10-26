@@ -83,10 +83,14 @@
 {{- else}}
     <P298>1</P298>
 {{- end}}
-{{- /* Paging button and multicast paging (phone-feature-parity S-30, phonebooks-ptt P-15). Keys from Grandstream's own config templates wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83 (config-template_09302026) and the WP8x6 Administration Guide "PTT/Paging": P22208 multicast paging on, P1568 codec (0 PCMU, 8 PCMA, 9 G.722), P1569 and up listening address and label pairs (ten slots); the WP8x6 only: P22556 PTT/Paging, P82317 side key (0 PTT/Paging), P22177 PTT, P22183 PTT/group paging address, P22184 default channel, P22179 accept while busy, P22180 codec, channels 1 to 25 at P82001 + 5 (n-1): available, transmit, subscribe, join, name. P26072 (WP8x6) plays the warning beep before an auto answer and P26071 (WP8x6) does not mute on answer. All unverified on a phone (verify). */}}
-{{- if or .Phone.PTTCapable (eq .Phone.Family "856")}}
+{{- /* Paging button, multicast paging, PTT and group paging (phone-feature-parity S-30, phonebooks-ptt P-15). Keys from Grandstream's own config templates (Grandstream config-template-10212026.zip): wp8x6_config_1.0.3.39 (WP816/826/836), wp856_config_1.0.3.16, wp810_822_825_config_1.0.11.83 (WP810/822/825), wp820_config_1.0.7.90, and the WP8x6 Administration Guide "PTT/Paging". Every Grandstream: P22208 multicast paging on, P1568 codec (0 PCMU, 8 PCMA, 9 G.722), P1569 and up listening address and label pairs (ten slots), P1566 paging barge (0 off, 1-10), P1567 paging priority active, P26019 barge by Call-Info/Alert-Info (intercom barging, default off). WP8x6 and WP8xx: P8381 page in DND. WP8x6: P22532 multicast call timeout (s), P22556 PTT/Paging switch. WP8x6 and WP856: P82317 side key (0 PTT/Paging), P26072 beep before an auto answer, P26071 do not mute on answer. PTT (WP8x6, WP856, WP8xx, WP820): P22177 PTT, P22183 PTT/group paging address, P22184 default, P22185 priority, P22186 emergency channel, P22179 accept while busy, P22180 codec; group paging: P22194 on, P22199 default, P22200 priority, P22201 emergency group, P22196 accept while busy, P22197 codec. Channel slots: WP8x6, WP856 and WP8xx at P82001 + 5 (n-1) for channels 1 to 50 (available, transmit, subscribe, join, name); the WP820 as digit strings P22187-P22192 (PTT) and P22203-P22207 (group), with its own codec numbers (0 G.711, 1 G.722). The WP8xx template has no PTT keys although its handset has PTT (WP8xx User Guide, "PTT (Push-to-talk) functionality"): the WP8x6 keys are written to it unverified. A WP always gets PTT (its PTT key otherwise reads "not configured"): channel 1 on the catalog's PTT channel unless its group says otherwise. All unverified on a phone (verify). */}}
+{{- $wp := .Phone.WP}}
+{{- if or (eq $wp "WP8x6") (eq $wp "WP856") (eq $wp "WP820")}}
     <P26072>1</P26072>
     <P26071>0</P26071>
+{{- end}}
+{{- with .Paging}}
+    <P26019>{{.IntercomBarge}}</P26019>
 {{- end}}
 {{- with .Multicast}}
     <P22208>1</P22208>
@@ -95,16 +99,43 @@
     <P{{.Param}}>{{xml .HostPort}}</P{{.Param}}>
     <P{{add .Param 1}}>{{xml .Label}}</P{{add .Param 1}}>
 {{- end}}
+{{- with $.Paging}}
+    <P1566>{{.Barge}}</P1566>
+    <P1567>{{.PriorityActive}}</P1567>
+{{- if or (eq $wp "WP8x6") (eq $wp "WP8xx")}}
+    <P8381>{{.AllowInDND}}</P8381>
 {{- end}}
-{{- if or .PTT (and .Multicast .Multicast.PagingKey)}}
+{{- if eq $wp "WP8x6"}}
+    <P22532>{{.Timeout}}</P22532>
+{{- end}}
+{{- end}}
+{{- end}}
+{{- if or (and .PTT (or .PTT.Enabled .PTT.GroupPaging)) (and .Multicast .Multicast.PagingKey)}}
+{{- if eq $wp "WP8x6"}}
     <P22556>1</P22556>
+{{- end}}
+{{- if or (eq $wp "WP8x6") (eq $wp "WP856")}}
     <P82317>0</P82317>
 {{- end}}
+{{- end}}
 {{- with .PTT}}
-    <P22177>1</P22177>
+{{- if or .Enabled .GroupPaging}}
     <P22183>{{xml .Address}}</P22183>
+{{- end}}
+{{- if .Enabled}}
+    <P22177>1</P22177>
     <P22184>{{.DefaultChannel}}</P22184>
+    <P22185>{{.PriorityChannel}}</P22185>
+    <P22186>{{.EmergencyChannel}}</P22186>
     <P22179>{{.AcceptBusy}}</P22179>
+{{- if eq $wp "WP820"}}
+    <P22180>{{.CodecWP820}}</P22180>
+    <P22187>{{.ChannelMasks.Available}}</P22187>
+    <P22188>{{.ChannelMasks.Available}}</P22188>
+    <P22189>{{.ChannelMasks.Transmit}}</P22189>
+    <P22190>{{.ChannelMasks.Subscribe}}</P22190>
+    <P22192>{{xml .ChannelMasks.Labels}}</P22192>
+{{- else}}
     <P22180>{{.CodecGS}}</P22180>
 {{- range .Channels}}
     <P{{.Base}}>{{.Available}}</P{{.Base}}>
@@ -112,6 +143,36 @@
     <P{{add .Base 2}}>{{.Subscribe}}</P{{add .Base 2}}>
     <P{{add .Base 3}}>{{.Available}}</P{{add .Base 3}}>
     <P{{add .Base 4}}>{{xml .Label}}</P{{add .Base 4}}>
+{{- end}}
+{{- end}}
+{{- else}}
+    <P22177>0</P22177>
+{{- end}}
+{{- if .GroupPaging}}
+    <P22194>1</P22194>
+    <P22199>{{.DefaultGroup}}</P22199>
+    <P22200>{{.PriorityGroup}}</P22200>
+    <P22201>{{.EmergencyGroup}}</P22201>
+    <P22196>{{.AcceptBusy}}</P22196>
+{{- if eq $wp "WP820"}}
+    <P22197>{{.CodecWP820}}</P22197>
+    <P22203>{{.GroupMasks.Available}}</P22203>
+    <P22204>{{.GroupMasks.Available}}</P22204>
+    <P22205>{{.GroupMasks.Transmit}}</P22205>
+    <P22206>{{.GroupMasks.Subscribe}}</P22206>
+    <P22207>{{xml .GroupMasks.Labels}}</P22207>
+{{- else}}
+    <P22197>{{.CodecGS}}</P22197>
+{{- range .Groups}}
+    <P{{.Base}}>{{.Available}}</P{{.Base}}>
+    <P{{add .Base 1}}>{{.Transmit}}</P{{add .Base 1}}>
+    <P{{add .Base 2}}>{{.Subscribe}}</P{{add .Base 2}}>
+    <P{{add .Base 3}}>{{.Available}}</P{{add .Base 3}}>
+    <P{{add .Base 4}}>{{xml .Label}}</P{{add .Base 4}}>
+{{- end}}
+{{- end}}
+{{- else}}
+    <P22194>0</P22194>
 {{- end}}
 {{- end}}
     <P2>{{xml .Phone.AdminPassword}}</P2>

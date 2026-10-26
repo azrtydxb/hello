@@ -39,9 +39,27 @@ type mohPlayer struct {
 	classID            int64
 }
 
+// mohCacheBudget bounds the decoded audio the announcement cache keeps, in
+// bytes of stored-rate PCM. A 5 minute track stored at 48 kHz is about
+// 29 MB, so the budget holds a couple of long tracks; the oldest entries go
+// first. A stream keeps the track it is playing alive regardless.
+const mohCacheBudget = 96 << 20
+
+// mohAudioEntry is one decoded announcement. The track holds the audio at
+// the rate it was stored at and the copies resampled for each codec rate
+// asked of it, so every held call shares one decode and one resample per
+// rate instead of paying for its own.
 type mohAudioEntry struct {
-	pcm []byte
-	at  time.Time
+	track *media.PCMTrack
+	size  int
+	at    time.Time
+}
+
+// mohLoad is a fetch in flight, so a burst of holds on a cold cache decodes
+// the track once.
+type mohLoad struct {
+	done  chan struct{}
+	track *media.PCMTrack
 }
 
 // noteMOHRoute records the matched inbound route's music on hold settings.
@@ -317,27 +335,28 @@ func (c *call) stopMOHPlayer(p *mohPlayer) {
 	}
 }
 
-// mohPlaylist is a class's tracks, decoded, with its play order.
+// mohPlaylist is a class's tracks with their play order. Tracks are loaded
+// one at a time as the stream reaches them, not all up front: a class of
+// long songs would otherwise hold every song decoded for every held call,
+// and a hold would stay silent until the last one had downloaded.
 type mohPlaylist struct {
-	tracks  [][]byte
+	objs    []string
+	load    func(obj string) media.Track // nil when the object cannot be loaded
 	shuffle bool
 	order   []int
 	pos     int
 	last    int
 }
 
-// next returns the next track's PCM: in order for a loop, in a fresh random
-// order per pass (never repeating the previous track back to back) for a
-// shuffle.
-func (p *mohPlaylist) next() []byte {
-	n := len(p.tracks)
-	if n == 0 {
-		return nil
-	}
+// pick is the index of the next object: in order for a loop, in a fresh
+// random order per pass (never repeating the previous track back to back)
+// for a shuffle.
+func (p *mohPlaylist) pick() int {
+	n := len(p.objs)
 	if !p.shuffle || n == 1 {
-		t := p.tracks[p.pos%n]
+		i := p.pos % n
 		p.pos++
-		return t
+		return i
 	}
 	if p.pos >= len(p.order) {
 		//nolint:gosec // G404: shuffle order of hold music, not security-relevant.
@@ -349,59 +368,141 @@ func (p *mohPlaylist) next() []byte {
 	}
 	p.last = p.order[p.pos]
 	p.pos++
-	return p.tracks[p.last]
+	return p.last
 }
 
-// mohPlaylist loads a class's announcements. A class with none, or none that
-// load, plays the built-in track, so a hold never hears silence.
+// next returns the next track that loads. When none of the class's objects
+// load (or it has none) the built-in track plays, so a hold never hears
+// silence.
+func (p *mohPlaylist) next() media.Track {
+	for range p.objs {
+		if t := p.load(p.objs[p.pick()]); t != nil {
+			return t
+		}
+	}
+	return media.DefaultMOHTrack()
+}
+
+// mohPlaylist builds a class's playlist.
 func (s *Server) mohPlaylist(ctx context.Context, cl snapshot.MOHClass) *mohPlaylist {
-	pl := &mohPlaylist{shuffle: cl.Shuffle, last: -1}
-	for _, obj := range cl.Objects {
-		if ctx.Err() != nil {
-			break
-		}
-		if pcm, ok := s.mohAudio(ctx, obj); ok {
-			pl.tracks = append(pl.tracks, pcm)
-		}
+	return &mohPlaylist{
+		objs:    cl.Objects,
+		shuffle: cl.Shuffle,
+		last:    -1,
+		load: func(obj string) media.Track {
+			if ctx.Err() != nil {
+				return nil
+			}
+			if t, ok := s.mohAudio(ctx, obj); ok {
+				return t
+			}
+			return nil
+		},
 	}
-	if len(pl.tracks) == 0 {
-		pl.tracks = [][]byte{media.DefaultMOHPCM()}
-	}
-	return pl
 }
 
-// mohAudio fetches and decodes one announcement object, cached briefly.
-func (s *Server) mohAudio(ctx context.Context, obj string) ([]byte, bool) {
+// mohAudio fetches and decodes one announcement object, cached briefly. The
+// track keeps the audio at its stored rate (up to 48 kHz) and resamples it
+// to the rate of each codec that plays it, once per rate.
+func (s *Server) mohAudio(ctx context.Context, obj string) (*media.PCMTrack, bool) {
 	s.mohMu.Lock()
-	e, ok := s.mohCache[obj]
-	s.mohMu.Unlock()
-	if ok && time.Since(e.at) < mohCacheTTL {
-		return e.pcm, true
+	if e, ok := s.mohCache[obj]; ok && time.Since(e.at) < mohCacheTTL {
+		s.mohMu.Unlock()
+		return e.track, true
 	}
+	if ld, busy := s.mohLoading[obj]; busy {
+		s.mohMu.Unlock()
+		select {
+		case <-ld.done:
+		case <-ctx.Done():
+			return nil, false
+		}
+		if ld.track != nil {
+			return ld.track, true
+		}
+		return nil, false // the loader failed; do not retry in a storm
+	}
+	ld := &mohLoad{done: make(chan struct{})}
+	if s.mohLoading == nil {
+		s.mohLoading = map[string]*mohLoad{}
+	}
+	s.mohLoading[obj] = ld
+	s.mohMu.Unlock()
+
+	// Release the waiters however the fetch ends, a panic included.
+	defer func() {
+		s.mohMu.Lock()
+		delete(s.mohLoading, obj)
+		s.mohMu.Unlock()
+		close(ld.done)
+	}()
+	track, size := s.fetchMOH(ctx, obj)
+	if track == nil {
+		return nil, false
+	}
+	s.mohMu.Lock()
+	ld.track = track
+	s.cacheMOH(obj, mohAudioEntry{track: track, size: size, at: time.Now()})
+	s.mohMu.Unlock()
+	return track, true
+}
+
+// fetchMOH downloads and decodes one announcement.
+func (s *Server) fetchMOH(ctx context.Context, obj string) (*media.PCMTrack, int) {
 	objs := s.deps.Objects
 	if objs == nil {
-		return nil, false
+		return nil, 0
 	}
 	fctx, cancel := context.WithTimeout(ctx, s.cfg.StateTimeout)
 	raw, err := objs.GetAnnouncement(fctx, obj)
 	cancel()
 	if err != nil {
 		s.log.Debug("music on hold announcement unavailable", "object", obj, "error", err)
-		return nil, false
+		return nil, 0
 	}
 	pcm, rate, err := media.DecodeWAV(raw)
 	if err != nil || len(pcm) == 0 {
-		s.log.Debug("music on hold announcement is not a WAV", "object", obj)
-		return nil, false
+		s.log.Debug("music on hold announcement is not a WAV", "object", obj, "error", err)
+		return nil, 0
 	}
-	pcm = downsampleTo8k(pcm, rate)
-	s.mohMu.Lock()
+	// An asset this far above the stored-rate cap predates the cap or was
+	// written by something else; bring it to 48 kHz now rather than at every
+	// downsample.
+	if rate > media.MaxStoredRate {
+		if pcm, err = media.Resample(pcm, rate, media.MaxStoredRate); err != nil {
+			s.log.Debug("music on hold announcement cannot be resampled", "object", obj, "error", err)
+			return nil, 0
+		}
+		rate = media.MaxStoredRate
+	}
+	return media.NewPCMTrack(pcm, rate), len(pcm)
+}
+
+// cacheMOH stores an entry, dropping expired ones and then the oldest until
+// the budget holds. The caller holds mohMu.
+func (s *Server) cacheMOH(obj string, e mohAudioEntry) {
 	if s.mohCache == nil {
 		s.mohCache = map[string]mohAudioEntry{}
 	}
-	s.mohCache[obj] = mohAudioEntry{pcm: pcm, at: time.Now()}
-	s.mohMu.Unlock()
-	return pcm, true
+	s.mohCache[obj] = e
+	total := 0
+	for k, v := range s.mohCache {
+		if time.Since(v.at) >= mohCacheTTL {
+			delete(s.mohCache, k)
+			continue
+		}
+		total += v.size
+	}
+	for total > mohCacheBudget && len(s.mohCache) > 1 {
+		oldest, at := "", time.Now().Add(time.Hour)
+		for k, v := range s.mohCache {
+			if k != obj && v.at.Before(at) {
+				oldest, at = k, v.at
+			}
+		}
+		total -= s.mohCache[oldest].size
+		delete(s.mohCache, oldest)
+	}
 }
 
 // setHAPeerDir overrides the replicated direction of the dialog that did not
@@ -428,26 +529,4 @@ func (c *call) endMOH() {
 			p.cancel()
 		}
 	}
-}
-
-// downsampleTo8k averages 16-bit mono PCM down to 8 kHz when its rate is a
-// multiple of 8000; other rates pass through unchanged (the relay's stream
-// is 8 kHz G.711).
-func downsampleTo8k(pcm []byte, rate int) []byte {
-	if rate <= 8000 || rate%8000 != 0 {
-		return pcm
-	}
-	k := rate / 8000
-	n := len(pcm) / 2 / k
-	out := make([]byte, 2*n)
-	for i := range n {
-		sum := 0
-		for j := range k {
-			o := 2 * (i*k + j)
-			sum += int(int16(uint16(pcm[o]) | uint16(pcm[o+1])<<8)) //nolint:gosec // G115: PCM sample bytes.
-		}
-		v := uint16(int16(sum / k)) //nolint:gosec // G115: PCM sample bytes.
-		out[2*i], out[2*i+1] = byte(v), byte(v>>8)
-	}
-	return out
 }

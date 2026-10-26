@@ -171,7 +171,8 @@ func run(args []string) error {
 		Messages:      messageQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "messages")},
 		Voicemails:    voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings,
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
-		HAState: live, Membership: members, PageTests: live,
+		HAState: live, Membership: members, PageTests: live, Park: live,
+		Conferences: live, ConferenceAudit: controlStore,
 	})
 	if err != nil {
 		return err

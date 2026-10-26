@@ -244,7 +244,7 @@ func hasCredential(n any) bool {
 	case map[string]any:
 		for k, c := range t {
 			l := strings.ToLower(k)
-			if l == "password" || l == "pin" || l == "secret" || strings.HasSuffix(l, "password") || hasCredential(c) {
+			if l == "password" || l == "pin" || l == "secret" || strings.HasSuffix(l, "password") || strings.HasSuffix(l, "pin") || hasCredential(c) {
 				return true
 			}
 		}

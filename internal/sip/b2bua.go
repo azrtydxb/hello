@@ -129,12 +129,38 @@ type call struct {
 	// anchorHost is the advertised IPv4 for relay SDP answers.
 	anchorHost string
 
+	// Server conference (spec S-34). conf is this node's participant when
+	// the call is a member of a room mixed here; confFwd is set while the
+	// call reaches its room through the node that owns it; confPeer marks
+	// the owner's side of such a forwarded call (the forwarding node writes
+	// the CDR); confRehomed marks a forwarded call whose owner died and
+	// whose far end now lives on this node. All guarded by mu except
+	// confOnce.
+	conf         *confPart
+	confRoom     *confRoom
+	confAnswer   []byte
+	confDone     chan struct{}
+	confOnce     sync.Once
+	confFwd      *confFwd
+	confPeer     bool
+	confPeerNode string
+	confRehomed  bool
+
 	// kind is the CDR kind: call (default), page or intercom (Phase E).
 	// autoAnswer adds the auto-answer headers to this call's legs (an
 	// intercom call only, spec P-16). page is the state of a server page.
 	kind       string
 	autoAnswer bool
 	page       *pageState
+
+	// park is the parking of a held call (spec S-6); link joins a parked,
+	// retrieved, picked-up or returned call to its bridged peer. pickedUp
+	// and pickupCh carry a pickup to the setup goroutine (spec S-50).
+	// All guarded by mu.
+	park     *parkState
+	link     *callLink
+	pickedUp bool
+	pickupCh chan *pickupReq
 
 	groupName     string
 	groupStrategy string
@@ -183,6 +209,21 @@ type call struct {
 	// transferNotify reports a transfer's outcome to the transferee's
 	// dialog (set by transferBlindVia for the rethreaded call).
 	transferNotify func(fragment string, final bool)
+
+	// IVR state (ivr.go). ivr is the menu session, ivrCancel stops its
+	// flow with the call, ivrAnswered is when the menu answered (billing
+	// starts there), vmExt names the voicemail box a menu hands the call to
+	// (empty: the dialled extension's), vmTap taps the caller's RTP for that
+	// recording and bridgedExt is the extension the menu connected the call
+	// to, whose presence the end of the call restores. All guarded by mu.
+	ivr         *ivrState
+	ivrCancel   context.CancelFunc
+	ivrAnswered time.Time
+	vmExt       string
+	vmTap       func(leg string, pkt *media.RTPPacket)
+	bridgedExt  string
+	// ivrUnrecoverable is set when a dial-out cannot be done after a takeover.
+	ivrUnrecoverable bool
 }
 
 // callStages is the forwarding/DND context of the extension a call is
@@ -222,6 +263,9 @@ type leg struct {
 	mu    sync.Mutex
 	dcs   *sipgo.DialogClientSession
 	acked bool
+	// elsewhere: the leg was cancelled because the call was answered
+	// elsewhere (a pickup); its dialog sends the CANCEL with that Reason.
+	elsewhere bool
 
 	// A trunk attempt (trunk set) or a SIP URI target (uri set); neither
 	// means a phone binding.
@@ -277,6 +321,21 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		s.unavailable(tx, req)
 		return
 	}
+	if node, ok := s.confForwardFrom(req); ok {
+		// Another node reached the caller and sends the call here, to the
+		// node that mixes the room (spec S-34).
+		cfg, found := snap.Conference(req.Recipient.User)
+		c := s.newCall(req)
+		from := req.From()
+		c.callerNum, c.callerName = from.Address.User, from.DisplayName
+		if !found {
+			s.respond(tx, req, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "conference room unknown", ResultNotFound)
+			return
+		}
+		c.joinConference(req, tx, snap, cfg, node)
+		return
+	}
 	if req.GetHeader("Authorization") == nil {
 		if t, ok := s.trunkSource(req, snap); ok {
 			s.inboundCall(req, tx, snap, t)
@@ -297,6 +356,26 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	// store keeps page codes from colliding with feature codes.
 	if g, ok := snap.PagingGroup(c.dialled); ok {
 		c.handlePage(tx, snap, g)
+		return
+	}
+	// A conference room's number joins the room (spec S-34).
+	if cfg, ok := snap.Conference(c.dialled); ok {
+		c.joinConference(req, tx, snap, cfg, "")
+		return
+	}
+	// An IVR menu's number answers and runs the menu.
+	if m, ok := snap.IVRMenuByNumber(c.dialled); ok {
+		c.startIVR(tx, snap, m)
+		return
+	}
+	// A park slot dialled as a number retrieves the call parked there, and
+	// an INVITE with Replaces naming an early dialog picks that call up.
+	if _, ok := snap.ParkLotOf(c.dialled); ok {
+		c.handleRetrieve(tx, snap, c.dialled)
+		return
+	}
+	if h := req.GetHeader("Replaces"); h != nil {
+		c.handleReplacesPickup(tx, snap, h.Value())
 		return
 	}
 	// A feature code dialled as a call (*78, *72599, *97) is dispatched here
@@ -351,6 +430,7 @@ func (s *Server) newCall(req *sip.Request) *call {
 		dialled: req.Recipient.User, start: time.Now(), inv: req, direction: cdr.DirectionInternal,
 		canceled: make(chan struct{}), stopHB: make(chan struct{}), setupDone: make(chan struct{}),
 		aborted: make(chan struct{}), haStop: make(chan struct{}),
+		pickupCh: make(chan *pickupReq, 1),
 	}
 }
 
@@ -391,9 +471,25 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 		// a phone's own call the two are the same.
 		c.rewritten = dec.Extension
 		c.ringTarget(req, tx, snap, dec.Extension)
+	case dec.Kind == routing.KindInbound && dec.IVR != "":
+		m, ok := snap.IVRMenu(dec.IVR)
+		if !ok {
+			s.respond(tx, req, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "IVR menu "+dec.IVR+" does not exist", ResultNotFound)
+			return
+		}
+		c.startIVR(tx, snap, m)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
 		c.considerAnchor(snap, EndpointInfo{}) // external URI: caller-side triggers only
 		c.ringURI(req, tx, dec)
+	case dec.Kind == routing.KindInbound && dec.Conference != "":
+		cfg, ok := snap.Conference(dec.Conference)
+		if !ok {
+			s.respond(tx, req, sip.StatusNotFound, "Not Found")
+			c.record(sip.StatusNotFound, cdr.SideSystem, "conference room unknown", ResultNotFound)
+			return
+		}
+		c.joinConference(req, tx, snap, cfg, "")
 	default:
 		code, reason := dec.RejectCode, dec.Reason
 		if code < 300 {
@@ -533,6 +629,11 @@ func (c *call) setup(pending int) {
 					}
 				}
 			}
+		case req := <-c.pickupCh:
+			// A picker claimed the call (spec S-50): this goroutine is the
+			// only one that may answer the caller.
+			c.answerPickup(req)
+			return
 		case <-c.canceled:
 			if c.closeSetup() {
 				c.cancelForks(nil)
@@ -728,6 +829,7 @@ func (c *call) answer(w *leg) {
 		if len(bres.Body()) > 0 {
 			if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
 				c.relay.SetTarget(legCallee, udpAddr(ans.Address, ans.Port))
+				allowSignalSource(c.relay, legCallee, bres.Source())
 				calleeAns = ans
 			}
 		}
@@ -762,6 +864,12 @@ func (c *call) answer(w *leg) {
 		}
 		return
 	}
+	if c.dss.LoadState() == sip.DialogStateEnded {
+		// The caller's BYE overtook its ACK: handleBye has accepted it and
+		// ends the call (and the callee's leg) as the caller's hangup.
+		c.addTrace("Caller hung up before acknowledging the answer")
+		return
+	}
 	c.mu.Lock()
 	cancelled = c.isCancelled
 	c.connected = false
@@ -776,10 +884,21 @@ func (c *call) answer(w *leg) {
 	c.end(sip.StatusOK, cdr.SideSystem, "no ACK from caller", ResultFailed)
 }
 
+// callerByeHeld runs the test-only callerByeHook, if one is set.
+func (s *Server) callerByeHeld() {
+	if h := s.callerByeHook.Load(); h != nil {
+		(*h)()
+	}
+}
+
 // hangup ends a connected call from one side and sends BYE to the other.
 // The dialogs stay routable until that BYE completes, so a caller ACK still
 // in flight confirms the A dialog the BYE needs.
 func (c *call) hangup(side string) {
+	if c.isLinked() {
+		c.linkedHangup(side, "")
+		return
+	}
 	if c.page != nil {
 		c.pageHangup(side)
 		return
@@ -807,7 +926,9 @@ func (c *call) hangup(side string) {
 			return
 		}
 		if side == cdr.SideCaller {
-			w.bye()
+			if w != nil { // a callee-less call (voicemail, a conference room) has no fork to end
+				w.bye()
+			}
 		} else {
 			c.byeA()
 		}
@@ -915,6 +1036,10 @@ func (c *call) expire() {
 // endBoth ends a connected call for a system reason (max duration, drain
 // timeout): BYE to both legs, CDR side system.
 func (c *call) endBoth(reason string) {
+	if c.isLinked() {
+		c.linkedHangup(cdr.SideSystem, reason)
+		return
+	}
 	if c.page != nil {
 		c.pageEndBoth(reason)
 		return
@@ -976,6 +1101,7 @@ func (c *call) end(status int, side, reason, result string) {
 		c.mu.Unlock()
 		c.endMOH()
 		c.closeMedia()
+		c.stopIVR()
 		c.pageStop()
 		if held {
 			c.s.m.HoldActive.Dec()
@@ -985,6 +1111,12 @@ func (c *call) end(status int, side, reason, result string) {
 		cn, cd, de := c.callerNum, c.callerDevice, c.dialled
 		c.mu.Unlock()
 		c.s.restorePresenceOf(cn, cd, de)
+		c.mu.Lock()
+		be := c.bridgedExt
+		c.mu.Unlock()
+		if be != "" && be != de {
+			c.s.restorePresenceOf("", "", be)
+		}
 		if c.haStop != nil {
 			close(c.haStop)
 		}
@@ -1091,6 +1223,12 @@ func (c *call) record(status int, side, reason, result string) {
 		if p, l, j, ok := c.qualityStats(); ok {
 			r.RTPPackets, r.RTPLost, r.RTPJitterMs = &p, &l, &j
 		}
+	}
+	c.mu.Lock()
+	peer := c.confPeer
+	c.mu.Unlock()
+	if peer {
+		return // the node that reached the caller writes the participation's CDR
 	}
 	c.s.deps.CDRs.Enqueue(r)
 }
@@ -1203,6 +1341,9 @@ func (l *leg) drive(report func(legEvent)) {
 	}
 	l.mu.Lock()
 	l.dcs = dcs
+	if l.elsewhere {
+		dcs.UA = s.uacElsewhere
+	}
 	l.mu.Unlock()
 	opts := sipgo.AnswerOptions{OnResponse: func(r *sip.Response) error {
 		switch {
@@ -1244,9 +1385,12 @@ func (l *leg) drive(report func(legEvent)) {
 // report hands a fork's outcome to setup, or drops it when setup has
 // already returned (so the fork's goroutine never blocks on a full queue).
 func (c *call) report(ev legEvent) {
+	c.mu.Lock()
+	done := c.setupDone // an IVR menu replaces it with its own
+	c.mu.Unlock()
 	select {
 	case c.events <- ev:
-	case <-c.setupDone:
+	case <-done:
 	}
 }
 
@@ -1295,22 +1439,26 @@ func (l *leg) invite() (*sip.Request, error) {
 	req.AppendHeader(&callID)
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: 1, MethodName: sip.INVITE})
 	maxFwd := sip.MaxForwardsHeader(70)
-	if mf := c.inv.MaxForwards(); mf != nil && mf.Val() > 1 {
+	if c.inv == nil {
+		// A call a survivor took over (an IVR menu dialling out) has no INVITE.
+	} else if mf := c.inv.MaxForwards(); mf != nil && mf.Val() > 1 {
 		maxFwd = sip.MaxForwardsHeader(mf.Val() - 1)
 	}
 	req.AppendHeader(&maxFwd)
 	req.AppendHeader(sip.HeaderClone(&s.contact))
 	req.AppendHeader(sip.NewHeader("Allow", allow))
-	if body := c.inv.Body(); len(body) > 0 {
-		if ct := c.inv.ContentType(); ct != nil {
-			req.AppendHeader(sip.HeaderClone(ct))
+	if body := c.offerSDP(); len(body) > 0 {
+		if c.inv != nil {
+			if ct := c.inv.ContentType(); ct != nil {
+				req.AppendHeader(sip.HeaderClone(ct))
+			}
 		}
 		req.SetBody(body)
 	}
 	// An anchored call terminates media: the fork's offer is the anchor's
 	// leg-b port, not the caller's SDP (spec S-2).
 	if l.c.isAnchored() {
-		if off, err := media.ParseAudioSDP(c.inv.Body()); err == nil {
+		if off, err := media.ParseAudioSDP(c.offerSDP()); err == nil {
 			if body := l.c.anchoredOfferB(off, legCodecs(l)); len(body) > 0 {
 				req.SetBody(body)
 				req.RemoveHeader("Content-Type")
@@ -1319,6 +1467,9 @@ func (l *leg) invite() (*sip.Request, error) {
 		}
 	}
 	l.addPagingHeaders(req)
+	for _, h := range c.confForwardHeaders(l.callID) {
+		req.AppendHeader(h)
+	}
 	req.SetTransport("UDP")
 	switch {
 	case l.trunk != nil:
@@ -1364,6 +1515,9 @@ func (l *leg) ack(body []byte, contentType string) {
 // bye ends this fork's dialog; a 2xx not yet acknowledged is ACKed first,
 // as RFC 3261 requires and sipgo enforces.
 func (l *leg) bye() {
+	if l == nil {
+		return
+	}
 	dcs := l.session()
 	if dcs == nil || dcs.InviteResponse == nil || !dcs.InviteResponse.IsSuccess() {
 		return
@@ -1388,6 +1542,9 @@ func (s *Server) handleAck(req *sip.Request, tx sip.ServerTransaction) {
 		return // a taken-over call's ACKs need no relay (its 200s are terminal)
 	}
 	c := ref.c
+	if c.isLinked() && (ref.leg != nil || req.CSeq().SeqNo != c.inv.CSeq().SeqNo) {
+		return // a linked call has no peer dialog to relay an ACK to
+	}
 	inviteAck := ref.leg == nil && req.CSeq().SeqNo == c.inv.CSeq().SeqNo
 	c.mu.Lock()
 	w, lateAck, dss := c.winner, c.lateAck, c.dss
@@ -1567,6 +1724,12 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	c := ref.c
 	if hom := c.homed(); hom != nil {
+		if side, linked := c.linkSide(); linked {
+			// A taken-over parked or bridged call: its one party hung up.
+			s.respond(tx, req, sip.StatusOK, "OK")
+			c.linkedHangup(side, "")
+			return
+		}
 		s.haByeRequest(c, hom, ref.leg != nil, req, tx)
 		return
 	}
@@ -1588,6 +1751,7 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 				return
 			}
 		}
+		s.callerByeHeld()
 		s.m.response(sip.StatusOK)
 		c.hangup(cdr.SideCaller)
 	default: // matchDialog only matches the caller's leg or the winner's
@@ -1609,6 +1773,10 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	c := ref.c
+	if c.isLinked() {
+		s.linkedReinvite(c, req, tx)
+		return
+	}
 	if c.page != nil {
 		// A page is one-way by construction: no hold, no renegotiation.
 		s.respond(tx, req, sip.StatusNotAcceptableHere, "Not Acceptable Here")
@@ -1627,6 +1795,9 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	defer c.endInDialog()
+	if c.confInDialog(req, tx) {
+		return // a conference participant: answered from its own media socket
+	}
 	if hom := c.homed(); hom != nil {
 		// A taken-over call terminates media in dialog from the replicated
 		// relay: hold direction mirrored, the peer re-INVITEd the same way.

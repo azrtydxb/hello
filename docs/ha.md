@@ -133,6 +133,16 @@ This table is normative: it is what Hello does. The Test column names the test t
 | **Delayed or out-of-order NOTIFY**           | —                                                         | —                                                                                                                                              | Each reload reads the database's current revision, so a late NOTIFY never applies an older one; a reload that finds the revision already loaded is skipped. A missed NOTIFY is caught by the 30 s poll | Automatic                                                                                                                   | Phase 1 `TestWatcherNotifyPollAndRetention`                                                                      |
 | **Kamailio dies**                            | Your monitoring                                           | —                                                                                                                                              | Nothing new reaches the cluster through it                                                                                                                                                             | In production, a second Kamailio takes over the VIP or SRV target (below). In the lab Kamailio is a single point of failure | Manual: [Kamailio loss](#kamailio-loss)                                                                          |
 
+## Conference rooms
+
+A conference room is mixed on one node, its owner, chosen by a lease in Valkey.
+A join that lands on another node is forwarded to the owner, and a room
+survives the death of the owner or of a node holding forwarded callers: the
+participants are taken over like any call and the room moves to a survivor.
+Participants are asked for the PIN again after a recovery, and a leader's mutes
+and lock are not carried over. The design, the table of what each failure does
+and the limitations are in [Conference rooms](conference.md#high-availability).
+
 ## Drain a node for maintenance
 
 1. Open **Cluster** and choose **Drain** on the node, or call
@@ -241,7 +251,22 @@ destination — have one dialog, the caller's. The taker re-INVITEs the
 caller onto media of its own (a fresh voicemail anchor, or a relay) and
 restarts the application from its beginning: voicemail replays the greeting
 and beep and records afresh (what the caller had said on the dead node is
-lost), an announcement plays from the top and then hangs up as before.
+lost), an announcement plays from the top and then hangs up as before. A
+caller in an IVR menu is recovered the same way (the relay carries the
+caller): the menu restarts from its greeting on the taker. Once the menu has
+connected the caller to a phone the call is an ordinary two-leg call and is
+taken over as one. The taker can dial out from a restarted menu too. The caller's number and
+media offer come from the replicated dialog and the routing context from the
+snapshot, so it rings the option's extension, ring group or external number
+with new legs offered the taker's own relay, and the answering leg becomes the
+callee dialog of the taken-over call (the caller's BYE reaches it). The
+caller's display name and device name are not replicated; the caller's own
+phone is skipped by its replicated contact instead. What cannot be recovered
+is not treated as a no-answer: a paging destination (a page's member dialogs
+are not replicated, so a survivor could not hang them up) and a dial-out whose
+replicated state lacks the caller's offer send the call to the menu's
+invalid-choice exit instead (`TestIVRTakeoverDialsOut`,
+`TestIVRTakeoverUnrecoverableFallsBack`).
 
 Each claim is counted against the dead node in Valkey. Past the dialog TTL,
 exactly one survivor counts the dead node's calls that nobody claimed (its

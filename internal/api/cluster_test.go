@@ -90,6 +90,7 @@ func TestClusterAPI(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	pinMembers(t, vc, "hello-sip-1", "hello-sip-2", "hello-sip-3", "hello-control-1")
 	// hello-sip-3 stopped: only its tombstone remains.
 	if err := vc.Do(ctx, vc.B().Del().Key("hello:member:hello-sip-3").Build()).Error(); err != nil {
 		t.Fatal(err)
@@ -141,6 +142,7 @@ func TestClusterAPI(t *testing.T) {
 	if err := members.Publish(ctx, cluster.Member{ID: "hello-sip-1", Kind: cluster.KindSIP, State: cluster.Draining, Version: "v3.0.0", StartedAt: now, Heartbeat: now}); err != nil {
 		t.Fatal(err)
 	}
+	pinMembers(t, vc, "hello-sip-1")
 	r := c.must(http.StatusConflict, "POST", "/api/v1/cluster/nodes/hello-sip-2/drain", nil)
 	if !strings.Contains(string(r.body), "would leave no READY SIP node") || drained("hello-sip-2") || len(e.audits()) != 1 {
 		t.Fatalf("last READY node: %s, requested %v, audits %d", r.body, drained("hello-sip-2"), len(e.audits()))
@@ -212,7 +214,22 @@ func drainEnv(t *testing.T) (*env, *client, *cluster.Store, valkey.Client) {
 			t.Fatal(err)
 		}
 	}
+	pinMembers(t, vc, "hello-sip-1", "hello-sip-2")
 	return e, e.login(), members, vc
+}
+
+// pinMembers extends the published records of ids far beyond cluster.TTL.
+// Nothing heartbeats for these fake nodes, and a loaded runner (the race
+// detector, parallel packages) takes longer than the 4s record TTL to run
+// these tests, which turned the nodes OFFLINE mid-test. PEXPIRE keeps the
+// record's content and leaves a deleted key deleted.
+func pinMembers(t *testing.T, vc valkey.Client, ids ...string) {
+	t.Helper()
+	for _, id := range ids {
+		if err := vc.Do(context.Background(), vc.B().Pexpire().Key("hello:member:"+id).Milliseconds(int64(10*time.Minute/time.Millisecond)).Build()).Error(); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // TestDrainGuardRequests fails if a SIP node with a pending drain request
@@ -276,6 +293,7 @@ func TestUndrainByID(t *testing.T) {
 	if err := members.Publish(ctx, cluster.Member{ID: "hello-sip-2", Kind: cluster.KindSIP, State: cluster.Draining, StartedAt: now, Heartbeat: now}); err != nil {
 		t.Fatal(err)
 	}
+	pinMembers(t, vc, "hello-sip-2")
 	r := c.must(http.StatusConflict, "DELETE", "/api/v1/cluster/nodes/hello-sip-2/drain", nil)
 	if !strings.Contains(string(r.body), "not drained by request") {
 		t.Fatalf("undrain without request: %s", r.body)

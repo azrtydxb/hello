@@ -40,6 +40,12 @@ var Models = []Model{
 	{Vendor: "fanvil", Model: "X5U", Firmware: "2.12.1.4", OUI: "0c383e", Common: "F0V0X5U00000.cfg"},
 }
 
+// WP836 is the Grandstream WP836 Wi-Fi handset (firmware 1.0.1.80), the
+// model whose Park softkey sends a REFER to the park code (P60069) and
+// retrieves with P2336. It is not one of Models: the WP template variant has
+// its own acceptance tests.
+var WP836 = Model{Vendor: "grandstream", Model: "WP836", Firmware: "1.0.1.80", OUI: "c074ad", Common: "cfgwp836.xml"}
+
 // UserAgent is what the phone with MAC mac (12 lowercase hex digits)
 // sends: Yealink, Grandstream and Fanvil include the MAC, Poly and Snom do
 // not (Poly only with device.prov.tagSerialNo; Snom's is unconfirmed).

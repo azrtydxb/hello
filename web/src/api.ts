@@ -196,7 +196,7 @@ export interface PageLegResult {
 /** GET /api/v1/cdrs/{id}: the CDR plus its routing trace. */
 export interface CdrDetail extends Cdr {
   /** call, page or intercom. */
-  kind?: "call" | "page" | "intercom";
+  kind?: "call" | "page" | "intercom" | "conference";
   /** A page's outcome per member, in the order they were paged. */
   pageLegs?: PageLegResult[];
   trace: TraceStep[];
@@ -358,7 +358,7 @@ export interface InboundRouteFields {
   schedule: Schedule | null;
   callerIdTransform: Transform;
   /** "internal" looks the DID up in the extension namespace. */
-  destinationKind: "extension" | "internal" | "external" | "sip_uri";
+  destinationKind: "extension" | "internal" | "external" | "sip_uri" | "ivr";
   destination: string;
   enabled: boolean;
   /** Music on hold class of the calls this route delivers; null = the default. */
@@ -1061,12 +1061,15 @@ export const RING_STRATEGY_LABEL: Record<RingStrategy, string> = {
 };
 
 /** Where a call goes when every member missed it. */
-export type FailureKind = "none" | "voicemail" | "external";
+export type FailureKind =
+  "none" | "voicemail" | "external" | "announcement" | "ivr";
 
 export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   none: "Hang up",
   voicemail: "A member's voicemail box",
   external: "An external number",
+  announcement: "An announcement",
+  ivr: "An IVR menu",
 };
 
 /** One member of a ring group; `position` is 1-based ring order. */
@@ -1152,7 +1155,7 @@ export interface PagingGroupFields {
   members: Id[];
   /** Extension ids allowed to page; empty means any internal extension. */
   callers: Id[];
-  /** A phone group's multicast channel to page as well; omit for none. */
+  /** A catalog paging channel to page as well; omit for none. */
   multicastChannelId?: Id | null;
 }
 
@@ -1169,12 +1172,11 @@ export interface PagingGroup {
   /** The multicast channel the page also goes to. */
   multicastChannel?: {
     id: Id;
-    groupId: Id;
-    groupName: string;
     label: string;
     address: string;
     port: number;
     codec: string;
+    enabled: boolean;
   } | null;
   createdAt: string;
   updatedAt: string;
@@ -1220,6 +1222,275 @@ export const testPagingGroup = (groupId: Id, extension?: string) =>
 export const deletePagingGroup = (groupId: Id) =>
   request<void>("DELETE", `/api/v1/paging-groups/${id(groupId)}`);
 
+// --- conference rooms ------------------------------------------------------------
+
+export type ConferenceSound = "none" | "tone" | "announcement";
+
+/** One participant of a live room. */
+export interface ConferenceParticipant {
+  /** Identifies the participant in control commands. */
+  id: string;
+  number: string;
+  name: string;
+  leader: boolean;
+  muted: boolean;
+  /** A leader or operator muted the participant, who cannot unmute itself. */
+  mutedByLeader: boolean;
+  waiting: boolean;
+  joinedAt: string;
+}
+
+/** A room's live state, published by the SIP node that mixes it. */
+export interface ConferenceLive {
+  room: string;
+  node: string;
+  locked: boolean;
+  recording: boolean;
+  participants: ConferenceParticipant[];
+  updatedAt: string;
+}
+
+/** A conference room as returned. The PINs are write-only: only whether each is set comes back. */
+export interface Conference {
+  id: Id;
+  name: string;
+  number: string;
+  hasUserPin: boolean;
+  hasLeaderPin: boolean;
+  maxParticipants: number;
+  waitForLeader: boolean;
+  muteOnEntry: boolean;
+  entryExit: ConferenceSound;
+  entryAnnouncement: string;
+  exitAnnouncement: string;
+  record: boolean;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  live: ConferenceLive | null;
+}
+
+/** The writable fields of a room (PUT replaces it). A PIN left out is kept; "" clears it. */
+export interface ConferenceFields {
+  name: string;
+  number: string;
+  userPin?: string;
+  leaderPin?: string;
+  maxParticipants: number;
+  waitForLeader: boolean;
+  muteOnEntry: boolean;
+  entryExit: ConferenceSound;
+  entryAnnouncement: string;
+  exitAnnouncement: string;
+  record: boolean;
+  enabled: boolean;
+}
+
+export type ConferenceAction =
+  | "mute"
+  | "unmute"
+  | "kick"
+  | "lock"
+  | "unlock"
+  | "mute_all"
+  | "unmute_all"
+  | "end";
+
+export const listConferences = (signal?: AbortSignal) =>
+  list<Conference>("/api/v1/conferences", signal);
+
+export const createConference = (input: ConferenceFields) =>
+  request<Conference>("POST", "/api/v1/conferences", { body: input });
+
+export const putConference = (roomId: Id, input: ConferenceFields) =>
+  request<Conference>("PUT", `/api/v1/conferences/${id(roomId)}`, {
+    body: input,
+  });
+
+export const deleteConference = (roomId: Id) =>
+  request<void>("DELETE", `/api/v1/conferences/${id(roomId)}`);
+
+/** Queues a control command (mute, kick, lock, ...) for the node that mixes the room. */
+export const controlConference = (
+  roomId: Id,
+  action: ConferenceAction,
+  participant?: string,
+) =>
+  request<{ queued: boolean; node: string; commandId: string }>(
+    "POST",
+    `/api/v1/conferences/${id(roomId)}/control`,
+    { body: participant === undefined ? { action } : { action, participant } },
+  );
+
+// --- IVR menus -------------------------------------------------------------------
+
+/** Where an IVR option, timeout or invalid choice sends the call. */
+export const IVR_DESTINATION_KINDS = [
+  "hangup",
+  "extension",
+  "ring_group",
+  "voicemail",
+  "announcement",
+  "paging",
+  "ivr",
+  "external",
+] as const;
+
+export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
+
+export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
+  hangup: "Hang up",
+  extension: "Extension",
+  ring_group: "Ring group",
+  voicemail: "Voicemail box",
+  announcement: "Announcement, then hang up",
+  paging: "Paging group",
+  ivr: "Another IVR menu",
+  external: "External number",
+};
+
+/**
+ * A destination. The target is an extension number (extension, voicemail), a
+ * name (ring_group, announcement, ivr), a page code (paging) or a number
+ * (external); empty for hangup.
+ */
+export interface IvrDestination {
+  kind: IvrDestinationKind;
+  target: string;
+}
+
+/** One key of a menu and where it leads. */
+export interface IvrOption extends IvrDestination {
+  /** 0-9, * or #; each once per menu. */
+  digit: string;
+}
+
+/** The writable fields of an IVR menu (PUT replaces the whole menu). */
+export interface IvrMenuFields {
+  name: string;
+  /** Dials the menu directly; "" when it is only a destination. */
+  number: string;
+  enabled: boolean;
+  greetingId: Id;
+  /** null replays the greeting. */
+  invalidPromptId: Id | null;
+  timeoutPromptId: Id | null;
+  digitTimeout: number;
+  interDigitTimeout: number;
+  maxRetries: number;
+  allowDirectDial: boolean;
+  timeout: IvrDestination;
+  invalid: IvrDestination;
+  options: IvrOption[];
+}
+
+/** An IVR menu as returned; the prompt names are read-only. */
+export interface IvrMenu extends IvrMenuFields {
+  id: Id;
+  greetingName: string;
+  invalidPromptName: string;
+  timeoutPromptName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// --- call park and call pickup -------------------------------------------------
+
+/** The writable fields of a park lot (PUT replaces the whole lot). */
+export interface ParkLotFields {
+  name: string;
+  /** The first and last slot number; at most 100 slots. */
+  slotStart: number;
+  slotEnd: number;
+  /** Seconds before an unretrieved call rings its parker again. */
+  returnSecs: number;
+  /** Seconds the parker then rings before the call goes to voicemail. */
+  voicemailSecs: number;
+  enabled: boolean;
+}
+
+/** A park lot as returned. */
+export interface ParkLot extends ParkLotFields {
+  id: Id;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listIvrMenus = (signal?: AbortSignal) =>
+  list<IvrMenu>("/api/v1/ivr-menus", signal);
+
+export const createIvrMenu = (input: IvrMenuFields) =>
+  request<IvrMenu>("POST", "/api/v1/ivr-menus", { body: input });
+
+export const putIvrMenu = (menuId: Id, input: IvrMenuFields) =>
+  request<IvrMenu>("PUT", `/api/v1/ivr-menus/${id(menuId)}`, { body: input });
+
+export const deleteIvrMenu = (menuId: Id) =>
+  request<void>("DELETE", `/api/v1/ivr-menus/${id(menuId)}`);
+
+export const listParkLots = (signal?: AbortSignal) =>
+  list<ParkLot>("/api/v1/park-lots", signal);
+
+export const createParkLot = (input: ParkLotFields) =>
+  request<ParkLot>("POST", "/api/v1/park-lots", { body: input });
+
+export const putParkLot = (lotId: Id, input: ParkLotFields) =>
+  request<ParkLot>("PUT", `/api/v1/park-lots/${id(lotId)}`, { body: input });
+
+export const deleteParkLot = (lotId: Id) =>
+  request<void>("DELETE", `/api/v1/park-lots/${id(lotId)}`);
+
+/** One call parked right now (GET /api/v1/parked-calls). */
+export interface ParkedCall {
+  slot: string;
+  lot: string;
+  node: string;
+  callId: string;
+  correlationId: string;
+  /** The extension that parked the call. */
+  parkedBy: string;
+  /** The parked party's number and name. */
+  caller: string;
+  callerName: string;
+  parkedAt: string;
+  /** When the call rings its parker again. */
+  returnAt: string;
+  phase: "parked" | "returning";
+}
+
+export const listParkedCalls = (signal?: AbortSignal) =>
+  list<ParkedCall>("/api/v1/parked-calls", signal);
+
+/** The writable fields of a pickup group (PUT replaces the whole group). */
+export interface PickupGroupFields {
+  name: string;
+  /** Extension ids. */
+  members: Id[];
+}
+
+/** A pickup group as returned. */
+export interface PickupGroup {
+  id: Id;
+  name: string;
+  members: PagingExtension[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listPickupGroups = (signal?: AbortSignal) =>
+  list<PickupGroup>("/api/v1/pickup-groups", signal);
+
+export const createPickupGroup = (input: PickupGroupFields) =>
+  request<PickupGroup>("POST", "/api/v1/pickup-groups", { body: input });
+
+export const putPickupGroup = (groupId: Id, input: PickupGroupFields) =>
+  request<PickupGroup>("PUT", `/api/v1/pickup-groups/${id(groupId)}`, {
+    body: input,
+  });
+
+export const deletePickupGroup = (groupId: Id) =>
+  request<void>("DELETE", `/api/v1/pickup-groups/${id(groupId)}`);
+
 // --- feature codes and presence -------------------------------------------------
 
 /** A DTMF feature code (GET/PUT /api/v1/feature-codes). */
@@ -1248,8 +1519,13 @@ export const FEATURE_CODE_ACTIONS = [
   "attended_transfer",
   "announcement",
   "intercom",
+  "ivr",
   "call_waiting_on",
   "call_waiting_off",
+  "park",
+  "park_retrieve",
+  "pickup_group",
+  "pickup_directed",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
@@ -1267,8 +1543,13 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   attended_transfer: "Attended transfer",
   announcement: "Play announcement",
   intercom: "Intercom (auto-answer)",
+  ivr: "IVR menu",
   call_waiting_on: "Call waiting on",
   call_waiting_off: "Call waiting off",
+  park: "Park the call",
+  park_retrieve: "Retrieve a parked call",
+  pickup_group: "Pick up a call in your group",
+  pickup_directed: "Pick up an extension's call",
 };
 
 /** GET /api/v1/feature-codes. */
@@ -1371,7 +1652,7 @@ export const listAnnouncements = (signal?: AbortSignal) =>
   list<Announcement>("/api/v1/announcements", signal);
 
 /** The largest announcement WAV the server accepts (spec S-5). */
-export const MAX_ANNOUNCEMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_ANNOUNCEMENT_BYTES = 64 * 1024 * 1024;
 
 /**
  * POST /api/v1/announcements: multipart with `name` and `file` (WAV) parts.

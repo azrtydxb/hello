@@ -385,13 +385,13 @@ that both do G.722 talk wideband and anything else falls back to G.711 (see
 account Hello provisions); another account of a multi-account model takes
 the same keys with its own number:
 
-| Vendor      | Keys                                                                                                                                                                                              |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.N.codec.g722.enable` and `.priority = 1`, then `opus`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0` |
+| Vendor      | Keys                                                                                                                                                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.N.codec.g722.enable` and `.priority = 1`, then `opus`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0`                |
 | Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 9 (G.722), 123 (Opus, models that have it), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...) |
-| Snom        | `codec_priority_list idx="N"` = `g722,opus,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                             |
-| Fanvil      | `SIPN Voice Codec Map` = `G722,opus,G711U,G711A`                                                                                                                                                  |
-| Poly        | `voice.codecPref.G722="1"`, `.Opus="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                  |
+| Snom        | `codec_priority_list idx="N"` = `g722,opus,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                              |
+| Fanvil      | `SIPN Voice Codec Map` = `G722,opus,G711U,G711A`                                                                                                                                                                    |
+| Poly        | `voice.codecPref.G722="1"`, `.Opus="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                    |
 
 Opus is listed only for models known to support it (`internal/prov/codecs.go`);
 an unknown model gets G.722, PCMU and PCMA. The keys are from the vendors'
@@ -475,12 +475,12 @@ its listener reconnects, in case an event was lost. Watch
 
 The built-in templates provision the subscription and the voicemail number:
 
-| Vendor      | Setting written                                                       | Status                                   |
-| ----------- | --------------------------------------------------------------------- | ---------------------------------------- |
-| Grandstream | `P99 = 1` (Subscribe for MWI), `P33` voicemail number (`*97` default) | Grandstream template keys (WP8x6, WP822) |
-| Yealink     | `account.1.subscribe_mwi = 1`, `voice_mail.number.1`                  | verify on hardware                       |
-| Poly        | `msg.mwi.1.subscribe`, `msg.mwi.1.callBack`                           | verify on hardware                       |
-| Snom        | `user_mailbox` (`*97` default)                                        | key documented; unverified on hardware   |
+| Vendor      | Setting written                                                         | Status                                            |
+| ----------- | ----------------------------------------------------------------------- | ------------------------------------------------- |
+| Grandstream | `P99 = 1` (Subscribe for MWI), `P33` voicemail number (`*97` default)   | Grandstream template keys (WP8x6, WP822)          |
+| Yealink     | `account.1.subscribe_mwi = 1`, `voice_mail.number.1`                    | verify on hardware                                |
+| Poly        | `msg.mwi.1.subscribe`, `msg.mwi.1.callBack`                             | verify on hardware                                |
+| Snom        | `user_mailbox` (`*97` default)                                          | key documented; unverified on hardware            |
 | Fanvil      | `SIP1 Subscribe = 1`, `SIP1 Sub Expire`, `SIP1 MWI Num` (`*97` default) | keys from a Fanvil export; unverified on hardware |
 
 Sources. Snom: Service Hub, D-series settings, `user_mailbox` (service.snom.com,
@@ -606,16 +606,16 @@ a priority, and one or more files, each a file-name pattern (`{mac}`,
 
 Templates see only these values:
 
-| Value       | Fields                                                                                                                            |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                              |
-| `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                             |
-| `.Server`   | `Host`, `Port`, `Transport` (`udp`), `Expiry` (seconds)                                                                           |
-| `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`        |
-| `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                       |
+| Value       | Fields                                                                                                                                                               |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.Phone`    | `MAC`, `MACUpper`, `Model`, `Label`, `AdminPassword`                                                                                                                 |
+| `.Line`     | `Username`, `AuthName`, `Password`, `DisplayName`, `Label`, `Domain`, `VoicemailCode`                                                                                |
+| `.Server`   | `Host`, `Port`, `Transport` (`udp`), `Expiry` (seconds)                                                                                                              |
+| `.BLF`      | a list of `Number`, `Label`, `URI`, placed on the model's keys: `Slot`, `Module`, `Page`, `Section`, `PageStart`, `Pickup`                                           |
+| `.Prov`     | `URL` (this phone's), `CAURL`, `CACertPEM`, `CACertBase64`, `ResyncSeconds`                                                                                          |
 | `.Codes`    | the PBX's star codes: `DNDOn`, `DNDOff`, `ForwardOn`, `ForwardOff`, `ForwardBusyOn`/`Off`, `ForwardNoAnswerOn`/`Off`, `PickupDirected` (empty when the PBX has none) |
-| `.Firmware` | `URL` (the file), `Dir` (its directory, no trailing slash), `Version`, `Via` (1 HTTP, 2 HTTPS), or nil when no firmware is pinned |
-| `.Time`     | `Zone`, `NTP`, `TZ` (the zone per vendor, see [Time zones](#time-zones))                                                          |
+| `.Firmware` | `URL` (the file), `Dir` (its directory, no trailing slash), `Version`, `Via` (1 HTTP, 2 HTTPS), or nil when no firmware is pinned                                    |
+| `.Time`     | `Zone`, `NTP`, `TZ` (the zone per vendor, see [Time zones](#time-zones))                                                                                             |
 
 Functions: `xml` (escape), `upper`, `lower`, `default`, `add`, `mul`, `div`,
 `urlhost` (`https://h:8/p/x/` gives `h:8`) and `urlpath` (the same gives
@@ -910,13 +910,13 @@ answer by themselves on the speaker.
   **not yet verified on hardware** (the lab test marks each as "needs
   hardware"):
 
-  | Vendor      | Key written                                                                                                                                                                                   | Source                                                                                                                                                                                                                  |
-  | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | Grandstream | `P298 = 1` Allow Auto Answer by Call-Info/Alert-Info (the plain Auto Answer, P90, stays off); WP8x6 only: `P26072 = 1` warning beep before an auto answer, `P26071 = 0` do not mute on answer | Grandstream config templates `wp810_822_825_config_1.0.11.83` and `wp8x6_config_1.0.3.39` (config-template_09302026); WP8x6 Administration Guide, "Call Settings". Barge by header (`P26019`) stays at its default, off |
-  | Yealink     | `features.intercom.allow = 1`, `features.intercom.tone = 1`, `features.intercom.mute = 0`, `features.intercom.barge = 0`                                                                      | Yealink SIP IP Phones Administrator Guide, "Intercom"; the `Alert-Info: Ring Answer` value is still to be confirmed                                                                                                     |
-  | Poly        | `voIpProt.SIP.alertInfo.1.value = "Auto Answer"`, class `ringAutoAnswer`                                                                                                                      | Poly UC Software Administrator Guide, `voIpProt.SIP.alertInfo`                                                                                                                                                          |
-  | Snom        | `answer_after_policy = idle`: answer an intercom call by itself only on an idle phone; Hello sends `Alert-Info: <http://www.notused.com>;info=alert-autoanswer;delay=0`                       | Snom Service Hub, "Intercom - Paging feature" (the header form) and `answer_after_policy` (off, idle, always, not_busy; D series); the PBX must pass the header unaltered                                               |
-  | Fanvil      | `P1 Enable Intercom = 1`, `P1 Intercom Mute = 0`, `P1 Intercom Tone = 1`, `P1 Intercom Barge = 0` (the line's own `SIP1 Auto Answer` stays off) | Fanvil XU series manual, Features >> Intercom (Enable Intercom: accept a call with an Alert-Info header and answer it after a delay; Mute, Tone, Barge); key names from a Fanvil configuration export. Hello sends `Call-Info: answer-after=0` and `Alert-Info: info=Auto Answer`, unverified on hardware |
+  | Vendor      | Key written                                                                                                                                                                                   | Source                                                                                                                                                                                                                                                                                                    |
+  | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Grandstream | `P298 = 1` Allow Auto Answer by Call-Info/Alert-Info (the plain Auto Answer, P90, stays off); WP8x6 only: `P26072 = 1` warning beep before an auto answer, `P26071 = 0` do not mute on answer | Grandstream config templates `wp810_822_825_config_1.0.11.83` and `wp8x6_config_1.0.3.39` (config-template_09302026); WP8x6 Administration Guide, "Call Settings". Intercom barging `P26019` follows the group's paging option (off by default)                                                           |
+  | Yealink     | `features.intercom.allow = 1`, `features.intercom.tone = 1`, `features.intercom.mute = 0`, `features.intercom.barge` the group's intercom barging option (0 by default)                       | Yealink SIP IP Phones Administrator Guide, "Intercom"; the `Alert-Info: Ring Answer` value is still to be confirmed                                                                                                                                                                                       |
+  | Poly        | `voIpProt.SIP.alertInfo.1.value = "Auto Answer"`, class `ringAutoAnswer`                                                                                                                      | Poly UC Software Administrator Guide, `voIpProt.SIP.alertInfo`                                                                                                                                                                                                                                            |
+  | Snom        | `answer_after_policy = idle`: answer an intercom call by itself only on an idle phone; Hello sends `Alert-Info: <http://www.notused.com>;info=alert-autoanswer;delay=0`                       | Snom Service Hub, "Intercom - Paging feature" (the header form) and `answer_after_policy` (off, idle, always, not_busy; D series); the PBX must pass the header unaltered                                                                                                                                 |
+  | Fanvil      | `P1 Enable Intercom = 1`, `P1 Intercom Mute = 0`, `P1 Intercom Tone = 1`, `P1 Intercom Barge = 0` (the line's own `SIP1 Auto Answer` stays off)                                               | Fanvil XU series manual, Features >> Intercom (Enable Intercom: accept a call with an Alert-Info header and answer it after a delay; Mute, Tone, Barge); key names from a Fanvil configuration export. Hello sends `Call-Info: answer-after=0` and `Alert-Info: info=Auto Answer`, unverified on hardware |
 
   The Grandstream speaker volume for pages has no P-value in these
   templates (only the PTT emergency channel volume, `P22181`); the warning
@@ -928,19 +928,29 @@ answer by themselves on the speaker.
   `User-Agent` at registration (`auto-answer` for Grandstream and unknown
   phones).
 
-### Multicast paging and push-to-talk (phone groups)
+### Multicast paging and push-to-talk
 
-A phone group can have **multicast paging channels** (`PUT
-/api/v1/phone-groups/{id}/multicast`, or the group's dialog under Phones,
-Groups): a label, an IPv4 multicast address and port, a codec (PCMU, PCMA or
-G.722), a role (listen, send or both) and a priority (1 to 25), at most ten,
-no listen address twice, and none in `224.0.0.0/24`. Every phone of the group
-is provisioned to listen on the channels that listen and to send to those
-that send. The audio is the phones' own: Hello is not in the media path, so
-it works only on a LAN where multicast is delivered (IGMP snooping and the
-router must pass it), it does not cross subnets, and multicast has no
-authentication, so anyone on the LAN can send to the group. For paging across
-subnets use a server paging group.
+**The channel catalog.** Multicast channels are defined once, under Paging,
+Multicast channels (`/api/v1/multicast-channels`): a name, an IPv4 multicast
+address and port (1024 to 65535, none in `224.0.0.0/24`, no address:port
+twice), a codec (PCMU, PCMA or G.722), a priority (1 to 25), a kind and
+whether it is enabled. A **paging** channel is one phones listen on (and a
+paging group can send to); a **push-to-talk** channel is what the PTT key of a
+Grandstream WP talks on (PCMU or G.722). The migration
+seeds one PTT channel, `224.0.1.116:5001` PCMU, the Grandstream default, and
+turns the channels phone groups had into catalog paging channels. A channel a
+paging group sends to cannot be deleted or made a PTT channel (`409`);
+deleting a PTT channel clears the phones and groups that picked it.
+
+**Phone groups** (`PUT /api/v1/phone-groups/{id}/multicast`, or the group's
+dialog under Phones, Groups) pick paging channels from the catalog, each with
+a role (listen, send or both), at most ten. A phone listens on its group's
+channels; a phone with no group, or a group that picks none, listens on every
+enabled paging channel. The audio is the phones' own: Hello is not in the
+media path, so it works only on a LAN where multicast is delivered (IGMP
+snooping and the router must pass it), it does not cross subnets, and
+multicast has no authentication, so anyone on the LAN can send to the group.
+For paging across subnets use a server paging group.
 
 | Vendor       | Keys written                                                                                                                                                                                | Source                                                                                                                     |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -949,26 +959,59 @@ subnets use a server paging group.
 | Poly         | `ptt.pageMode.enable`, `.address` and `.port` of the first listening channel, `.codec`, `ptt.pageMode.group.N.label` and `.subscribed`                                                      | Poly UC Software Administrator Guide, "Group Paging"; unverified                                                           |
 | Snom, Fanvil | none                                                                                                                                                                                        | no provisioning key found                                                                                                  |
 
+**Paging options.** A phone group's multicast settings carry how its phones
+take a page (`options` in `PUT /api/v1/phone-groups/{id}/multicast`, the
+"Paging options" in the group's dialog; a phone with no group gets the
+defaults): play pages in DND (`P8381`, WP8x6 and WP810/822/825; off), paging
+barge (`P1566`: 0 off, or the priority 1 to 10 at or above which a page
+interrupts a call; 0), paging priority active (`P1567`; on), the paging
+timeout in seconds (`P22532`, WP8x6 only; 0, none) and intercom barging
+(`P26019` on every Grandstream, `features.intercom.barge` on Yealink; **off**:
+an intercom call during a call then rings as a waiting call rather than
+cutting in).
+
 **Grandstream paging button.** The WP822 and the WP8x6 report "not configured
 on the phone" when you press the PTT/paging button until multicast paging has
 a listening address (the button sends to it). The WP8x6 side key also needs
-the PTT/Paging feature on: Hello writes `P22556 = 1` and the side key
-function `P82317 = 0` (PTT/Paging). A WP822 has no PTT channel settings in
-its template and gets the multicast keys only.
+the PTT/Paging feature on: Hello writes `P22556 = 1` (WP8x6 only) and the side
+key function `P82317 = 0` (PTT/Paging; WP8x6 and WP856).
 
-**Push-to-talk (WP8x6 only)** (`PUT /api/v1/phone-groups/{id}/ptt`): when on,
-Hello writes `P22177 = 1`, the PTT/group paging address `P22183` (default
-`224.0.1.116:5001`, one address for every channel), the default channel
-`P22184` (1, 2, 24 or 25, and it must transmit), accept while busy `P22179`,
-the codec `P22180` (PCMU or G.722) and, for each channel 1 to 25 at
-`P82001 + 5 (n - 1)`, Available, Transmit, Subscribe, Join and Name (channels
-not defined are switched off). Pressing the button talks on the default
-channel, and every phone of the group that subscribes to it hears it.
-Source: the WP8x6 config template and Administration Guide, "PTT/Paging";
+**Push-to-talk and group paging (Grandstream WP).** Every Grandstream WP gets
+a working PTT key with no setup. The keys per family:
+
+| Family              | PTT keys                                                                                                                                                                                                                | Source                                             |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| WP816, WP826, WP836 | `P22556 = 1`, `P82317 = 0`, `P22177`, `P22183` address, `P22184` default, `P22185` priority, `P22186` emergency, `P22179` accept while busy, `P22180` codec (0 PCMU, 9 G.722), channels 1 to 50 at `P82001 + 5 (n - 1)` | `wp8x6_config_1.0.3.39`                            |
+| WP856               | the same without `P22556` (not in its template)                                                                                                                                                                         | `wp856_config_1.0.3.16`                            |
+| WP820               | `P22177`, `P22183` to `P22186`, `P22179`, `P22180` (0 G.711, 1 G.722), channels as 25-digit strings: `P22187` available, `P22188` join, `P22189` transmit, `P22190` subscribe, `P22192` labels joined by `^`            | `wp820_config_1.0.7.90`                            |
+| WP810, WP822, WP825 | the WP8x6 keys without `P22556` and `P82317`: **unverified**, the template has no PTT keys although the user guide documents PTT and group paging on the handset                                                        | `wp810_822_825_config_1.0.11.83`, WP8xx user guide |
+
+Group paging (channels 26 to 50, on the PTT address and codec): `P22194` on,
+`P22199` default group (26, 27, 49 or 50), `P22200` priority, `P22201`
+emergency, `P22196` accept while busy, `P22197` codec, and the channels at
+`P82126` onward (WP820: `P22203` to `P22207` strings). A group with PTT off
+writes `P22177 = 0`, with group paging off `P22194 = 0`.
+
+The defaults: PTT on, address `224.0.1.116:5001` PCMU, default channel 1,
+priority 24, emergency 25, channel 1 named "Channel 1" (available, transmit,
+subscribe, join); group paging off (default group 26, priority 49, emergency
+50). The PTT channel is, in order: the phone's own override (`PATCH
+/api/v1/phones/{id}` `pttChannelId`, the phone's page under Phones), its
+group's PTT channel, the first enabled catalog PTT channel by priority, or
+that default. A phone group's PTT settings (`PUT
+/api/v1/phone-groups/{id}/ptt`, the group's dialog) set the channel, the
+default (1, 2, 24 or 25, and it must transmit), priority and emergency
+channels, accept while busy, group paging with its default, priority and
+emergency group channels, and the channels 1 to 50 (channels not defined are
+switched off). Pressing the key talks on the default channel, and every phone
+that subscribes to it hears it. Phones pick up a change at their next resync
+(Phones, Resync); a phone that does not apply it live needs a reboot.
+Source: the Grandstream config templates above (config-template_09302026)
+and the WP816, WP826 and WP836 Administration Guide, "PTT/Paging";
 unverified on a phone.
 
-- **Multicast from a paging group.** A paging group can name one listening
-  G.711 channel of a phone group (the paging group's "Also page a multicast
+- **Multicast from a paging group.** A paging group can name one enabled
+  G.711 catalog paging channel (the paging group's "Also page a multicast
   channel", `multicastChannelId`). Dialling its code then also sends the
   caller's audio to the channel's address, converted to the channel's G.711
   law, so the phones that listen on the channel hear the page with the codec
@@ -997,9 +1040,8 @@ the extension's page in the console or `PATCH /api/v1/extensions/{id}`).
   page never interrupts a call), whatever the switch says. An intercom call
   to an extension in a call rings it as a normal call instead of
   auto-answering, whatever the switch says; the call-waiting flag is not
-  consulted on that path. Call parking and pickup do not exist in Hello yet;
-  when they do, they must not consult the flag either (a pickup answers a
-  call that is already ringing).
+  consulted on that path. Call parking and pickup do not consult the flag
+  either (a pickup answers a call that is already ringing).
 - **How busy is decided.** An extension is busy while any connected call of
   the cluster has it as caller, as the dialled number, or as the extension
   whose phone answered (a ring group member, a forward target). Every node
@@ -1031,6 +1073,113 @@ the extension's page in the console or `PATCH /api/v1/extensions/{id}`).
   The WP822 and WP836 call-waiting tone is the phone's own
   (`P347` and its gain `P1555`, left at their defaults); the lab check
   listens for it with the flag on and expects silence with it off.
+
+## Call park and call pickup
+
+Hello parks a call so any phone can pick it up, and lets a phone answer a
+colleague's ringing call.
+
+**Feature codes.** All of them are ordinary feature codes (System in the
+console, `PUT /api/v1/feature-codes`), so every one is configurable. The
+defaults avoid every code Hello already uses, and in particular the paging
+groups, which take codes of the same `*` plus 2 to 4 digits shape (the
+phonebooks-ptt default is `*8<n>`; a site may use `*60`):
+
+| Action            | Default | What it does                                                                      |
+| ----------------- | ------- | --------------------------------------------------------------------------------- |
+| `park`            | `*74`   | During a call: parks it in the first free slot; `*74701` parks in slot 701        |
+| `park_retrieve`   | `*75`   | `*75701` retrieves the call parked in slot 701                                    |
+| `pickup_group`    | `*40`   | Answers the oldest call ringing anyone in your pickup scope                       |
+| `pickup_directed` | `*41`   | `*41200` answers the call ringing extension 200, if it is in your pickup scope    |
+
+The specification's own defaults for pickup (`*60`, `*61<ext>`) collide with a
+paging group on `*60`, so Hello uses `*40` and `*41<ext>` instead. Hello
+refuses (400, with the colliding items named) any feature code, paging code
+or park slot that overlaps another: equal, or one a prefix of the other
+(a code takes its argument after it, so `*8` would shadow `*80`), or a park
+slot that equals an extension number, ring group name or queue number. A write that adds
+no new overlap is never blocked by an overlap that already existed. A
+migration on an existing install adds the four defaults only where none of
+them overlaps what is there.
+
+**Parking.** Three ways park a connected call, each by the phone whose user
+is the parker:
+
+- dialling the park code during the call (`*74`, or `*74` plus a slot). A
+  bare `*74` parks after a 1.5 second pause, a full slot at once, `#` ends the
+  digits early;
+- a blind REFER to the park code. This is what the Grandstream WP8x6 Park
+  softkey sends once `P60069` holds the park code; Hello provisions it, and
+  `P2336` for the retrieve softkey, on those models;
+- a blind REFER to the park code plus a slot.
+
+The parker hears the slot spoken ("Your call is parked in slot seven zero
+one") and its dialog is released. The spoken slot is built from eleven
+announcements (`park.slot` and `park.digit.0` to `park.digit.9`). An operator
+creates them once with the text-to-speech provider (Park and pickup in the
+console, Generate spoken slot announcement, or
+`POST /api/v1/park-lots/announcement/generate`); any of them can be replaced
+by an uploaded recording, which a later generate keeps. While one is missing
+the parker hears the slot as DTMF tones instead (one tone pair per digit).
+The parked party stays on Hello's media anchor and hears music on hold.
+The parked call's slot is one record in Valkey (`hello:park:slot:<slot>`), kept
+alive by the node holding the call and visible to every node.
+
+**Retrieving.** Dial `*75` plus the slot, or the slot itself (`701`), from any
+phone on any node. The slot is claimed atomically, so two phones racing for it
+cannot both connect: the second gets `404`. The retriever's phone is pointed at
+the held party's relay leg (on another node too: the node that holds the call
+does the media work), the two calls are linked, and either hang-up ends the
+other. A BLF key on a slot number (`Event: dialog` on 701 to 720) shows whether
+it is occupied, on phones that have BLF keys.
+
+**Timeout.** A call nobody retrieves rings its parker's phones again after the
+lot's return time (default 120 s). The parker answering reconnects them. If
+nobody answers within the lot's ring window (default 60 s) the parked party
+moves to the parker's voicemail, or is ended when the parker has no voicemail.
+
+**Park lots.** A lot is a range of slots (default `default`, 701 to 720; at
+most 100 slots, at most 10 lots) with the two times above (Park and pickup in
+the console, `/api/v1/park-lots`). `GET /api/v1/parked-calls` and the console's
+live Parked now list show every parked call in the cluster.
+
+**Pickup.** An extension may answer a call that is ringing another extension
+in its _pickup scope_: the other members of every pickup group it belongs to
+(Park and pickup in the console, `/api/v1/pickup-groups`); with no pickup
+group, the other members of the ring groups it belongs to. Group pickup
+(`*40`) answers the oldest ringing call in scope; directed pickup (`*41` plus
+the extension) answers that extension's call and is refused with `403` outside
+the scope. An INVITE with a `Replaces` header naming a ringing leg's early
+dialog does the same. The picked-up call's other ringing phones are cancelled,
+and the caller and the picker are connected through the caller's media anchor.
+When nothing in scope is ringing the dialler gets `404`, which phones play as
+their own error tone. A call that is not anchored (no SDP offer) cannot be
+picked up. Two phones picking up the same call cannot both connect.
+
+**What the CDR records.** The parked call's CDR carries "Parked in slot N by X"
+and "Retrieved from slot N by Y" in its trace; the retriever's or picker's own
+call has its own CDR. A picked-up call's trace says "Call picked up by Y".
+`hello_park_total{kind,result}` counts park, retrieve, return and pickup
+outcomes.
+
+**Provisioning.** Grandstream WP816, WP826 and WP836: `P60069` (park code) and
+`P2336` (retrieve code). Yealink: `features.pickup.group_pickup_code` and
+`features.pickup.direct_pickup_code`. Poly: `call.groupCallPickupString` and
+`call.directedCallPickupString`. All are from the vendors' documentation and are
+**not yet verified on a phone**; they are written only when the corresponding
+feature code is configured.
+
+**Limits.** A parked or picked-up call does not follow the in-call HA takeover
+of an ordinary call: if the node holding it dies, the parked party's call is
+lost and its slot lapses within 20 seconds (see `docs/ha.md`).
+
+**Hold on a retrieved call.** A hold from either side of a retrieved call is
+passed on to the other party as a `sendonly` re-INVITE (on another node too),
+and a resume as `sendrecv`, as on any bridged call.
+
+**Pickup cancels.** The ringing phones a pickup cancels get
+`Reason: SIP;cause=200;text="Call completed elsewhere"` on the CANCEL, so they
+do not log the call as missed.
 
 ## Security model and its limits
 

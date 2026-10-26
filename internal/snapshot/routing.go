@@ -167,6 +167,23 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 	if err := loadInbound(ctx, db, &cfg); err != nil {
 		return cfg, nil, err
 	}
+	cfg.Conferences = map[string]string{}
+	crows, err := db.Query(ctx, `SELECT number, name FROM conference_rooms`)
+	if err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: conference rooms: %w", err)
+	}
+	for crows.Next() {
+		var n, name string
+		if err := crows.Scan(&n, &name); err != nil {
+			crows.Close()
+			return cfg, nil, fmt.Errorf("snapshot: scan conference room: %w", err)
+		}
+		cfg.Conferences[n] = name
+	}
+	crows.Close()
+	if err := crows.Err(); err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: conference rooms: %w", err)
+	}
 	rows, err = db.Query(ctx, `SELECT number, external_number FROM extensions`)
 	if err != nil {
 		return cfg, nil, fmt.Errorf("snapshot: external numbers: %w", err)
@@ -182,6 +199,23 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return cfg, nil, fmt.Errorf("snapshot: external numbers: %w", err)
+	}
+	rows, err = db.Query(ctx, `SELECT name FROM ivr_menus`)
+	if err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: ivr menus: %w", err)
+	}
+	cfg.IVRMenus = map[string]bool{}
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return cfg, nil, fmt.Errorf("snapshot: scan ivr menu: %w", err)
+		}
+		cfg.IVRMenus[n] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: ivr menus: %w", err)
 	}
 	return cfg, bad, nil
 }

@@ -307,6 +307,15 @@ func (l *LazyValkey) ClearAuthFailures(ctx context.Context, ip string) error {
 	return c.live.ClearAuthFailures(ctx, ip)
 }
 
+// ParkList implements ParkedLive.
+func (l *LazyValkey) ParkList(ctx context.Context) ([]livestate.ParkedCall, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.ParkList(ctx)
+}
+
 // EnqueuePageTest implements PageTester.
 func (l *LazyValkey) EnqueuePageTest(ctx context.Context, r livestate.PageTestRequest) error {
 	c, err := l.get()
@@ -314,6 +323,24 @@ func (l *LazyValkey) EnqueuePageTest(ctx context.Context, r livestate.PageTestRe
 		return err
 	}
 	return c.live.EnqueuePageTest(ctx, r)
+}
+
+// ConfStates implements ConferenceLive.
+func (l *LazyValkey) ConfStates(ctx context.Context, numbers []string) (map[string]livestate.ConfRoomState, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.ConfStates(ctx, numbers)
+}
+
+// EnqueueConfCommand implements ConferenceLive.
+func (l *LazyValkey) EnqueueConfCommand(ctx context.Context, node string, cmd livestate.ConfCommand) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.live.EnqueueConfCommand(ctx, node, cmd)
 }
 
 // GetPageTestResult implements PageTester.

@@ -116,8 +116,8 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "internal"
-	Destination     string // empty for "internal" (the DID names the target)
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference"
+	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr", the room number for "conference"
 	Enabled         bool
 	// MOHClassID is the music on hold class of calls the route delivers
 	// (0 = the global default); MOHRingback plays it to the caller instead
@@ -134,6 +134,12 @@ type Config struct {
 	// Extensions maps every extension number to its external number ("" if
 	// none); membership means "is an internal extension".
 	Extensions map[string]string
+	// IVRMenus is the set of IVR menu names an inbound route may name as
+	// its "ivr" destination.
+	IVRMenus map[string]bool
+	// Conferences maps every conference room number to its name (spec
+	// S-34); membership means "an inbound route may target this room".
+	Conferences map[string]string
 	// ResolvedIPs maps a trunk ID to the IPs its destination hostnames
 	// resolved to, for source validation. hello-sip fills it off the call
 	// path (DNS); hello-control's route tester may leave it empty.
@@ -185,8 +191,13 @@ type Decision struct {
 	Kind Kind
 	// Extension is the internal/inbound target extension; SIPURI the
 	// inbound SIP URI.
-	Extension     string
-	SIPURI        string
+	Extension string
+	SIPURI    string
+	// IVR is the IVR menu an inbound route sends the call to.
+	IVR string
+	// Conference is the room number of an inbound call routed to a
+	// conference room (spec S-34).
+	Conference    string
 	Number        string      // rewritten number sent to the carrier
 	CallerID      string      // caller ID to present
 	Route         string      // name of the matched route

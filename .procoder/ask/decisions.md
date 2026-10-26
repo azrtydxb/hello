@@ -445,6 +445,26 @@ Spec: `.procoder/specs/flow-canvas.md`. The user answered all five:
 
 Decision: accepted by the user (2026-10-25), all of the above. Migration numbers 00017-00023 belong to other in-flight branches (tts, ivr, codecs, time-conditions, moh, park-pickup, queues); the flow canvas uses 00024 and up.
 
+## Server conference rooms (2026-10-25)
+
+`hello-pbx-spec.md` §3 listed "large-scale conferencing" as a non-goal, and the phone-feature-parity spec (S-34) kept server rooms out of scope in its earlier table rows.
+
+Question: should Hello now build server conference rooms (audio mixing on the PBX, with a number, PINs and a live control UI), reversing that non-goal?
+
+Decision: the user answered "yes" (2026-10-25). Conference rooms are in scope and the §3 non-goal is amended accordingly. Rooms are audio only, mixed on one SIP node per room (ownership in Valkey, see `docs/conference.md`).
+
+In the same answer the user also said they want these features, which other agents specify separately and which this entry does not scope or change:
+
+- SMS, WhatsApp and live chat
+- video
+- browser calling (WebRTC)
+- mobile apps
+- Microsoft Teams integration
+
+The §3 non-goal list still names WebRTC and the rest until those specs land; only the conferencing non-goal changed here.
+
+Video follows rooms: the user wants conference video, and video recording later (clients spec). The room keeps its state per participant and its media behind a codec interface so a video track can be added beside the audio.
+
 ## 2026-10-25: Clients and video (browser softphone, mobile apps, video, Teams)
 
 The user decided to add four things: a WebRTC softphone in the web UI, iOS and Android apps with push for incoming calls, video calls, and Microsoft Teams integration. This reverses the WebRTC non-goal in `hello-pbx-spec.md` §3. Spec: `.procoder/specs/clients-webrtc-mobile-video.md` (draft; its five open questions are for the user). Hard ordering from the user: TLS and SRTP (`phone-feature-parity.md` S-13 to S-16) come before any WebRTC phase.
@@ -494,6 +514,7 @@ Spec: `.procoder/specs/messaging-channels.md`, now approved. The user answered q
 5. **AI: suggest-only triage and drafts first.** Auto-reply is off by default and enabled per number. It answers only from admin FAQ snippets, sends at most 3 replies per conversation, discloses itself and goes through the private-endpoint guard. Rationale: customer-visible AI output needs grounding, a cap and a human handoff before it can be trusted.
 
 Decision: accepted by the user (2026-10-25).
+
 ## Phone onboarding queue (2026-10-25)
 
 Spec: `.procoder/specs/phone-onboarding.md`. The user wants to join a brand-new phone to the network (DHCP option 66 at `http://prov.hello.kw.watteel.lab/p/boot/`) and have it show up in a queue that phones are created from, instead of knowing its MAC first.
@@ -508,3 +529,35 @@ Decision (the user's brief, 2026-10-25): an unknown MAC's config request keeps i
 - **Roles:** operator and admin (the write scope, which is the operator-level scope), for the reads too; viewers see neither the page nor the queue. Dismiss can add the MAC to an ignore list, which is listed and reversible.
 
 The user can change any of them; none is hard to undo.
+
+## Drain-test flake: one fix, not two (2026-10-26)
+
+- #179 and #180 both fixed the same OFFLINE-mid-test drain flake in `internal/api/cluster_test.go`. #180 (`pinMembers`: PEXPIRE the fake member records) merged first, so #179 keeps main's file and drops its `keepReady` re-publisher. Re-publishing READY every 500 ms could also overwrite the state a drain test is asserting on.
+
+## IVR menu numbers join the park-slot dial space (2026-10-26)
+
+IVR (#142) merged after park/pickup (#161), whose migration took 00032, so
+the IVR migration is renumbered to 00033. An IVR menu number and a park slot
+are both dialled as a plain number, so they must not collide: the dial-space
+guard (`loadDialItems`) now counts IVR menu numbers among the names a park
+slot may not equal, and creating or renumbering a menu runs `checkNotSlot`.
+Both directions are covered by `TestIVRNumberNotParkSlot`. The IVR test
+helper `countRTP` became `countPhoneRTP`, because park's tests brought their
+own `countRTP` with a different signature.
+
+## Conference room numbers join the dial space (2026-10-26)
+
+Conference rooms (#172) merged after park/pickup (00032) and IVR (00033), so
+its migration is renumbered to 00034 and its CHECK changes
+(`inbound_routes.destination_kind`, `cdrs.kind`) now go through
+`pg_temp.hello_check_values`, adding/removing only `conference` so the other
+features' values survive in both directions. A room number is dialled like an
+extension, so it joins the shared dial space: a room may not take a park slot
+or an IVR menu number, and an IVR menu, a park lot, an extension (created or
+renumbered) or a ring group (created or renamed) may not take a room number.
+`TestConferenceNumberDialSpace` covers each direction. Main's music-on-hold
+now hands out `media.Track`s, so the conference hold loop reads
+`PCMAt(media.MixRate)` per track. In the B2BUA INVITE path the room-number
+check runs before IVR, park-slot and Replaces handling (the guards keep these
+disjoint, so the order only matters for speed); for in-dialog INFO DTMF the
+conference consumers run before the IVR one for the same reason.
