@@ -453,7 +453,7 @@ func (s *Server) sendFeatureNotify(sub *subscription, contentType string, body [
 	req.SetBody(body)
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	res, err := s.client.Do(ctx, req)
+	res, err := s.do(ctx, req)
 	if err != nil {
 		s.log.Debug("feature NOTIFY failed", "device", sub.device, "error", err)
 		return false

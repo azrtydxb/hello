@@ -418,7 +418,7 @@ func (s *Server) sendStateNotify(sub *subscription, state string, expires int, r
 	req.SetBody(body)
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	res, err := s.client.Do(ctx, req)
+	res, err := s.do(ctx, req)
 	if err != nil {
 		s.log.Debug("presence NOTIFY failed", "device", sub.device, "error", err)
 		return

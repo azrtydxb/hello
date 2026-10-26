@@ -217,7 +217,7 @@ func (s *Server) haReinvite(l *haLeg, body []byte) (*sip.Response, bool) {
 	l.useCSeq()
 	ctx, cancel := context.WithTimeout(context.Background(), haReinviteTimeout)
 	defer cancel()
-	res, err := s.client.Do(ctx, req)
+	res, err := s.do(ctx, req)
 	if err != nil || res == nil {
 		return nil, false
 	}
@@ -252,7 +252,7 @@ func (s *Server) haBye(l *haLeg) {
 	l.useCSeq()
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	if res, err := s.client.Do(ctx, req); err == nil && res != nil {
+	if res, err := s.do(ctx, req); err == nil && res != nil {
 		s.m.response(res.StatusCode)
 	}
 }
@@ -890,7 +890,7 @@ func (s *Server) haReferFailed(l *haLeg) {
 	req.AppendHeader(sip.NewHeader("Subscription-State", "terminated;reason=noresource"))
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	res, err := s.client.Do(ctx, req)
+	res, err := s.do(ctx, req)
 	if err != nil {
 		s.log.Debug("takeover refer NOTIFY failed", "error", err)
 		return

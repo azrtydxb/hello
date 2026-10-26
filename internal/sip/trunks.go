@@ -416,7 +416,7 @@ func (m *trunkManager) register(ctx context.Context, t routing.Trunk, d routing.
 	req.SetDestination(m.destAddr(d))
 	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	res, err := m.s.client.Do(rctx, req)
+	res, err := m.s.do(rctx, req)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -424,7 +424,7 @@ func (m *trunkManager) register(ctx context.Context, t routing.Trunk, d routing.
 		if t.Password == "" {
 			return res.StatusCode, 0, errors.New("challenged but the trunk has no password")
 		}
-		res, err = m.s.client.DoDigestAuth(rctx, req, res, sipgo.DigestAuth{Username: t.Username, Password: t.Password})
+		res, err = m.s.doDigest(rctx, req, res, sipgo.DigestAuth{Username: t.Username, Password: t.Password})
 		if err != nil {
 			return 0, 0, err
 		}
@@ -485,7 +485,7 @@ func (m *trunkManager) options(ctx context.Context, t routing.Trunk, d routing.D
 	timeout := min(m.s.cfg.TrunkOptionsTimeout, interval)
 	octx, cancel := context.WithTimeout(ctx, timeout)
 	start := time.Now()
-	res, err := m.s.client.Do(octx, req)
+	res, err := m.s.do(octx, req)
 	cancel()
 	if ctx.Err() != nil {
 		return

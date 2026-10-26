@@ -219,7 +219,7 @@ func (s *Server) checkSyncContact(ctx context.Context, user, realm, ha1MD5, ha1S
 	if err != nil {
 		return PushResult{Status: PushFailed, Detail: err.Error()}
 	}
-	res, err := s.client.Do(ctx, req)
+	res, err := s.do(ctx, req)
 	if err != nil {
 		return pushError(err)
 	}
@@ -238,7 +238,7 @@ func (s *Server) checkSyncContact(ctx context.Context, user, realm, ha1MD5, ha1S
 		req.AppendHeader(sip.NewHeader(authHdr, cred.String()))
 		req.CSeq().SeqNo++
 		req.RemoveHeader("Via")
-		if res, err = s.client.Do(ctx, req); err != nil {
+		if res, err = s.do(ctx, req); err != nil {
 			return pushError(err)
 		}
 		s.m.response(res.StatusCode)
