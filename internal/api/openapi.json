@@ -1945,7 +1945,7 @@
       "get": {
         "operationId": "exportCDRs",
         "summary": "Call detail records as CSV, newest first",
-        "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe.",
+        "description": "Exports the filtered call records as a CSV download. The CDRs matching the filters, at most 10000 rows. A cell a spreadsheet would evaluate as a formula gets a leading apostrophe. The caller_codec and callee_codec columns are empty when no codec was negotiated.",
         "tags": ["history"],
         "parameters": [
           {
@@ -18549,6 +18549,16 @@
           "rtpJitterMs": {
             "type": ["number", "null"],
             "description": "Larger of the two directions' interarrival jitter in ms; null when not measured."
+          },
+          "callerCodec": {
+            "type": ["string", "null"],
+            "example": "opus/48000",
+            "description": "Audio codec the caller leg ended on, as name/clock rate (PCMU/8000, G722/8000, opus/48000); null when none was negotiated (a call that was not answered) and for records written before migration 00042. A re-INVITE that switches codec replaces it, so it is the last codec of the call."
+          },
+          "calleeCodec": {
+            "type": ["string", "null"],
+            "example": "PCMU/8000",
+            "description": "Audio codec the callee leg ended on, as callerCodec; null for a call Hello ends itself (voicemail, conference, IVR, queue), which has no callee leg."
           },
           "kind": {
             "type": "string",

@@ -131,3 +131,34 @@ func TestCodecLogDirect(t *testing.T) {
 	wantAll(t, lines[0], "media_mode=direct", "codec=PCMU", "leg=caller")
 	wantAll(t, lines[1], "media_mode=direct", "codec=PCMU", "leg=callee")
 }
+
+// TestCDRCodecNames: the codec each leg ended on is what the CDR stores, as
+// "name/clock rate". An anchored call has both legs on the callee's choice, a
+// call Hello ends itself has the caller leg only, a re-INVITE that switches
+// the codec replaces it, and a call with no media has none. It fails if the
+// CDR names a codec the log did not, keeps the first codec after a switch, or
+// invents a callee leg.
+func TestCDRCodecNames(t *testing.T) {
+	c, _ := codecLogCall(t)
+	if a, b := c.legCodecNames(); a != "" || b != "" {
+		t.Fatalf("a call with no media has codecs %q / %q", a, b)
+	}
+	off, _ := media.ParseAudioSDP([]byte(codecLogOffer))
+	ans, _ := media.ParseAudioSDP([]byte(codecLogCalleeAnswer))
+	c.anchoredAnswerA(off, ans)
+	if a, b := c.legCodecNames(); a != "PCMU/8000" || b != "PCMU/8000" {
+		t.Fatalf("anchored call codecs = %q / %q, want PCMU/8000 on both", a, b)
+	}
+	g722only := off.Narrow(9)
+	g722only.Codecs = g722only.Codecs[:1]
+	c.midCallOffer(g722only)
+	if a, b := c.legCodecNames(); a != "G722/8000" || b != "G722/8000" {
+		t.Fatalf("codecs after a switch = %q / %q, want G722/8000 on both", a, b)
+	}
+
+	term, _ := codecLogCall(t)
+	term.anchoredAnswerAs("IVR", off, media.AudioSDP{})
+	if a, b := term.legCodecNames(); a != "G722/8000" || b != "" {
+		t.Fatalf("terminated call codecs = %q / %q, want G722/8000 and none", a, b)
+	}
+}

@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { json, ME, mockApi, renderApp } from "../test/api";
 
@@ -141,6 +141,39 @@ describe("Call History", () => {
     ).toBeVisible();
   });
 
+  it("shows the negotiated codec of each call, or a dash when none was recorded", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/cdrs?limit=50": () =>
+        json({
+          items: [
+            {
+              ...cdr(3, "same"),
+              callerCodec: "G722/8000",
+              calleeCodec: "G722/8000",
+            },
+            {
+              ...cdr(2, "mixed"),
+              callerCodec: "opus/48000",
+              calleeCodec: "PCMU/8000",
+            },
+            { ...cdr(1, "none"), callerCodec: null, calleeCodec: null },
+          ],
+          next: "",
+        }),
+    });
+    renderApp("/history");
+
+    expect(
+      await screen.findByRole("columnheader", { name: "Codec" }),
+    ).toBeVisible();
+    const row = (name: string) => screen.getByText(name).closest("tr")!;
+    expect(within(row("same")).getByText("G722/8000")).toBeVisible();
+    expect(
+      within(row("mixed")).getByText("opus/48000 → PCMU/8000"),
+    ).toBeVisible();
+    expect(within(row("none")).queryByText(/\//)).toBeNull();
+  });
 
   it("says so when the history cannot load", async () => {
     mockApi({

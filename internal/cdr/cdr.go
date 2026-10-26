@@ -71,6 +71,11 @@ type Record struct {
 	RTPPackets  *int64
 	RTPLost     *int64
 	RTPJitterMs *float64
+	// CallerCodec and CalleeCodec are the audio codec each leg ended on, as
+	// "name/clock rate" ("PCMU/8000", "opus/48000"); empty (NULL) for a leg
+	// that had no media negotiated (migration 00042).
+	CallerCodec string
+	CalleeCodec string
 	// Kind is call (default), page or intercom.
 	Kind string
 	// PageLegs is a page's outcome per member (migration 00014), one row
@@ -166,9 +171,9 @@ const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
-    rtp_packets, rtp_lost, rtp_jitter_ms, kind)
+    rtp_packets, rtp_lost, rtp_jitter_ms, kind, caller_codec, callee_codec)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $28, $29)
 ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
 p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
@@ -277,8 +282,16 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
-		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, string(lj), string(qj))
+		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, string(lj), string(qj),
+		nullString(r.CallerCodec), nullString(r.CalleeCodec))
 	return err
+}
+
+func nullString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func nullTime(t time.Time) any {

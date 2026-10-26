@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -183,6 +184,19 @@ func TestWriterPostgres(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT rtp_packets, rtp_lost, rtp_jitter_ms FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&qp, &ql, &qj); err != nil || qp != nil || ql != nil || qj != nil {
 		t.Fatalf("unmeasured quality = %v %v %v, %v", qp, ql, qj, err)
 	}
+	var cc, ce *string
+	if err := pool.QueryRow(ctx, "SELECT caller_codec, callee_codec FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&cc, &ce); err != nil || cc != nil || ce != nil {
+		t.Fatalf("codecs of a record without any = %v %v, %v, want NULL", cc, ce, err)
+	}
+	codec := Record{CorrelationID: "corr-codec", SIPCallID: "call-codec", StartTime: start, EndTime: start.Add(time.Second),
+		SIPNode: "sip-1", FinalStatus: 200, TerminationSide: SideCaller, CallerCodec: "opus/48000", CalleeCodec: "PCMU/8000"}
+	if err := w.write(ctx, codec); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT caller_codec, callee_codec FROM cdrs WHERE correlation_id = 'corr-codec'").Scan(&cc, &ce); err != nil ||
+		cc == nil || ce == nil || *cc != "opus/48000" || *ce != "PCMU/8000" {
+		t.Fatalf("stored codecs = %v %v, %v", cc, ce, err)
+	}
 	var dir string
 	if err := pool.QueryRow(ctx, "SELECT direction FROM cdrs WHERE correlation_id = 'corr-1'").Scan(&dir); err != nil || dir != "internal" {
 		t.Fatalf("default direction = %q, %v", dir, err)
@@ -236,8 +250,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 27 {
-		t.Fatalf("insert takes %d arguments, want 27", len(db.args))
+	if len(db.args) != 29 {
+		t.Fatalf("insert takes %d arguments, want 29", len(db.args))
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
@@ -256,5 +270,31 @@ func TestCallQualityCDR(t *testing.T) {
 	gp, gl, gj := db.args[21].(*int64), db.args[22].(*int64), db.args[23].(*float64)
 	if *gp != 1000 || *gl != 12 || *gj != 37.5 {
 		t.Fatalf("quality = %d, %d, %v", *gp, *gl, *gj)
+	}
+}
+
+// TestCDRCodecColumns fails if the codec columns are not the last two insert
+// arguments, are not NULL for a leg without a codec, or carry anything but
+// the record's strings.
+func TestCDRCodecColumns(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	r := Record{CorrelationID: "c", StartTime: now, EndTime: now}
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if len(db.args) != 29 || db.args[27] != nil || db.args[28] != nil {
+		t.Fatalf("args 28, 29 = %#v, %#v (of %d), want nil, nil of 29", db.args[27], db.args[28], len(db.args))
+	}
+	r.CallerCodec, r.CalleeCodec = "opus/48000", "PCMU/8000"
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[27] != "opus/48000" || db.args[28] != "PCMU/8000" {
+		t.Fatalf("codecs = %#v, %#v", db.args[27], db.args[28])
+	}
+	if !strings.Contains(insert, "caller_codec, callee_codec)") || !strings.Contains(insert, "$28, $29)") {
+		t.Fatal("the insert does not name the codec columns with $28 and $29")
 	}
 }

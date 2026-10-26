@@ -59,6 +59,20 @@ Spoken voicemail prompts are cached WAVs at the session's rate
 (`tts/hd/<sha256>.wav`, stored at the voice's own rate in the voicemail bucket); see
 [voicemail.md](voicemail.md) for the key layout.
 
+**Which codec a call used.** Every call that connects logs one `call codec`
+line per leg (`leg`, `media_mode`, `codec`, `clock_rate`, `payload_type`,
+`ptime`, `reason`) and the call
+detail record keeps the codec each leg ended on, as `name/clock rate`:
+`callerCodec` and `calleeCodec` in `GET /api/v1/cdrs` and `/api/v1/cdrs/{id}`
+(`caller_codec` and `callee_codec` columns, migration 00042; the CSV export
+ends with the same two), shown as the Codec column of Call history and the
+two codec rows of a call's detail. A re-INVITE that switches the codec
+replaces it, so the record names the last codec of the call. A leg with no
+negotiated media is null: a call that was not answered, the callee side of a
+call Hello ends itself (voicemail, conference, IVR, queue), and every call
+recorded before the migration. G.722 shows as `G722/8000`, as its RTP clock
+is 8000 (see above).
+
 **Recording** decodes G.711, G.722 and Opus to PCM and mixes the two
 directions into one WAV at the higher of their sample rates; any other
 codec is stored as it came with the codec noted.

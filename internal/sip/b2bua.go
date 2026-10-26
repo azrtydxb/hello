@@ -1260,6 +1260,9 @@ func (c *call) record(status int, side, reason, result string) {
 	c.mu.Lock()
 	r.QueueLegs = append([]cdr.QueueLeg(nil), c.qLegs...)
 	c.mu.Unlock()
+	if !answer.IsZero() {
+		r.CallerCodec, r.CalleeCodec = c.legCodecNames()
+	}
 	c.s.m.Calls.WithLabelValues(result).Inc()
 	if c.groupName != "" {
 		c.s.m.GroupCalls.WithLabelValues(c.groupName, c.groupStrategy, result).Inc()

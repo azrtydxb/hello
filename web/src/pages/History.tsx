@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import { errorMessage, type Cdr, type CdrPage } from "../api";
 import {
   cdrExportUrl,
+  codecSummary,
   getCdrCounts,
   listCdrPage,
   type CdrCounts,
@@ -174,6 +175,12 @@ export function History() {
       label: "Trunk",
       mono: true,
       render: (c) => c.trunk || "—",
+    },
+    {
+      key: "codec",
+      label: "Codec",
+      mono: true,
+      render: (c) => codecSummary(c),
     },
     {
       key: "status",
