@@ -28,10 +28,6 @@ const (
 	MaxScheduleRanges  = 100
 )
 
-// DestinationKinds a time condition may use: the IVR set, which already
-// includes another time condition.
-var timeCondDestKinds = IVRDestinationKinds
-
 // --- schedules ---------------------------------------------------------------
 
 // Schedule is a named weekly schedule as the API shows it.
@@ -638,6 +634,15 @@ func (in TimeConditionInput) destinations() []tcDest {
 // conditions leads back to it. id is 0 for a new one.
 func checkTimeCondition(ctx context.Context, tx *sql.Tx, id int64, in TimeConditionInput) error {
 	var n int
+	// A taken name is a conflict (409) whatever else the request gets wrong,
+	// as the unique index would report it; checked first so a duplicate is
+	// not reported as, say, its toggle number being in use.
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM time_conditions WHERE name = $1 AND id <> $2`, in.Name, id).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("%w: time_conditions_name_key", ErrConflict)
+	}
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM schedules WHERE id = $1`, in.ScheduleID).Scan(&n); err != nil {
 		return err
 	}
@@ -874,7 +879,7 @@ func (s *Store) SetTimeConditionOverride(ctx context.Context, actor string, id i
 	}
 	var out TimeCondition
 	err := s.configChange(ctx, actor, "override", "time_condition", nil, func(tx *sql.Tx) (int64, error) {
-		if err := setOverride(ctx, tx, `id = $1`, id, actor, mode); err != nil {
+		if err := setOverride(ctx, tx, id, actor, mode); err != nil {
 			return id, err
 		}
 		ts, err := listTimeConditions(ctx, tx, ` WHERE t.id = $1`, id)
@@ -886,13 +891,13 @@ func (s *Store) SetTimeConditionOverride(ctx context.Context, actor string, id i
 	return out, err
 }
 
-func setOverride(ctx context.Context, tx *sql.Tx, where string, key any, actor, mode string) error {
+func setOverride(ctx context.Context, tx *sql.Tx, id int64, actor, mode string) error {
 	var at any
 	if mode != timecond.OverrideAuto {
 		at = time.Now().UTC()
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE time_conditions SET override = $2, override_at = $3, override_by = $4, updated_at = now()
-		WHERE `+where, key, mode, at, actor)
+		WHERE id = $1`, id, mode, at, actor)
 	if err != nil {
 		return err
 	}
@@ -944,7 +949,7 @@ func (s *Store) ApplyTimeConditionToggle(ctx context.Context, actor, number, mod
 				}
 			}
 		}
-		if err := setOverride(ctx, tx, `id = $1`, t.ID, actor, mode); err != nil {
+		if err := setOverride(ctx, tx, t.ID, actor, mode); err != nil {
 			return t.ID, err
 		}
 		ts, err = listTimeConditions(ctx, tx, ` WHERE t.id = $1`, t.ID)
