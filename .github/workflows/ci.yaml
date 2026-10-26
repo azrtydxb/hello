@@ -753,6 +753,11 @@ jobs:
     # called without re-registering, then restarts both instances one at a time.
     # Full tier: on a pull request only when the change touches the edge (the
     # first step decides); always on main, the nightly cron and dispatch.
+    # Starts after the unit jobs finish (whatever their result): a kind control
+    # plane is etcd on the runner's disk, and on the shared 4-core runners it
+    # times out requests (load average 10) while go, chart and web are running.
+    needs: [go, chart, web, kamailio-config]
+    if: ${{ !cancelled() }}
     runs-on: arc-azrtydxb
     timeout-minutes: 50
     env:
@@ -836,6 +841,17 @@ jobs:
           apiVersion: kind.x-k8s.io/v1alpha4
           nodes:
             - role: control-plane
+              # A throwaway cluster on a busy runner: etcd without fsync and
+              # with relaxed timeouts, or it times out requests under load.
+              kubeadmConfigPatches:
+                - |
+                  kind: ClusterConfiguration
+                  etcd:
+                    local:
+                      extraArgs:
+                        unsafe-no-fsync: "true"
+                        heartbeat-interval: "500"
+                        election-timeout: "5000"
             - role: worker
             - role: worker
           EOF
