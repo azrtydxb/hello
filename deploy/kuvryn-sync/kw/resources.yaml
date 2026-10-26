@@ -13,7 +13,10 @@
 # 2026-10-04): HELLO_SIP_TRUSTED_PROXIES is kw's pod CIDR 10.42.0.0/16 (node
 # podCIDRs), HELLO_DNS_RESOLVER is kube-dns 10.43.0.10, KAMAILIO_PUBLIC_HOST
 # is node master-11 192.168.10.101, where the hostNetwork kamailio pod binds
-# 30508 (udp+tcp) itself.
+# 30508 (udp+tcp) itself. Since kamailio-ha phase 1 a second kamailio pod runs
+# on master-12 (192.168.10.102) beside it, each advertising its own node
+# address; the phones stay provisioned with 192.168.10.101 until the VIP
+# phases (.procoder/specs/kamailio-ha.md).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -30,9 +33,9 @@ data:
   # Verbatim copy of deploy/kamailio/kamailio.cfg, enforced by
   # test/deploy (TestKwKamailioConfigMatchesSource); kw-specific values come
   # from the #!trydefenv parameters, never text edits. The pod runs with
-  # hostNetwork on master-11 and its env sets KAMAILIO_LISTEN_IP from
-  # status.podIP (the node address 192.168.10.101), so the "hello" socket's
-  # Path and Record-Route name it, and the phones sockets bind
+  # hostNetwork on master-11 and master-12 and its env sets KAMAILIO_LISTEN_IP
+  # from status.podIP (the node address, 192.168.10.101 on master-11), so the
+  # "hello" socket's Path and Record-Route name it, and the phones sockets bind
   # KAMAILIO_PHONES_PORT 30508 there and advertise
   # KAMAILIO_PUBLIC_HOST:30508.
   kamailio.cfg: |
@@ -835,11 +838,26 @@ metadata:
     app.kubernetes.io/component: edge
     app.kubernetes.io/managed-by: kuvryn-sync
 spec:
-  replicas: 1
-  # hostNetwork: the new pod binds the same host ports, so the old one
-  # must be gone first; a rolling update crash-loops it until then.
+  # Two Kamailio, one per node (master-11, master-12), identically
+  # configured: either serves any phone and any in-dialog request that
+  # carries a Route (it keeps no state Hello needs).
+  replicas: 2
+  # One at a time, by construction. hostNetwork pods bind the node's ports,
+  # so a surge pod could not start beside the one it replaces; maxSurge 0
+  # takes the old pod down first, and maxUnavailable 1 lets the controller
+  # touch the second only once the first replacement is Ready (and has stayed
+  # so for minReadySeconds). Sync applies every Deployment at once, so this
+  # is what keeps a config or image change from restarting both. The
+  # required anti-affinity below puts a replacement back on its own node (it
+  # also keeps it off the node that still holds the pod being replaced).
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  # A replacement must be up for a while before its peer is touched: the
+  # dispatcher's first OPTIONS probes (every 4s) have run by then.
+  minReadySeconds: 10
   selector:
     matchLabels:
       app.kubernetes.io/name: hello
@@ -865,8 +883,29 @@ spec:
       hostNetwork: true
       # Keep cluster DNS (the dispatcher's hello-sip-N Service names).
       dnsPolicy: ClusterFirstWithHostNet
-      nodeSelector:
-        kubernetes.io/hostname: master-11
+      affinity:
+        # Only the two nodes phones may reach Kamailio on: master-11
+        # (192.168.10.101, the address every phone is provisioned with) and
+        # master-12 (192.168.10.102).
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: In
+                    values:
+                      - master-11
+                      - master-12
+        # One per node: both bind the node's own ports, and two on one node
+        # would make the other node a spare that serves nobody.
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: hello
+                  app.kubernetes.io/instance: hello
+                  app.kubernetes.io/component: edge
+              topologyKey: kubernetes.io/hostname
       securityContext:
         # /run/kamailio is an emptyDir the kamailio user (102) must write its
         # ctl socket and RPC FIFO into; group ownership via fsGroup.
@@ -939,23 +978,28 @@ spec:
                 - ALL
           env:
             - name: KAMAILIO_LISTEN_IP
-              # The pod IP, i.e. master-11's address (hostNetwork): the
+              # The pod IP, i.e. its node's address (hostNetwork): the
               # "hello" socket (5070) carries it to hello nodes, and the
               # phones sockets bind it at KAMAILIO_PHONES_PORT.
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
             - name: KAMAILIO_PUBLIC_HOST
-              # Where phones reach this Kamailio: master-11's address, which
-              # the pod binds directly (nodeSelector above).
-              value: 192.168.10.101
+              # Where phones reach this Kamailio: its own node's address,
+              # which the pod binds directly (master-11 is 192.168.10.101, the
+              # address the phones are provisioned with; master-12 is
+              # 192.168.10.102, reached by a test phone only). The VIP
+              # phases replace this with one shared address.
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
             - name: KAMAILIO_PUBLIC_PORT
               value: "30508"
             - name: KAMAILIO_PHONES_PORT
               # Bound on the node, so the same as the advertised port.
               value: "30508"
             - name: KAMAILIO_METRICS_PORT
-              # 9090 is taken on master-11 (truenas-csi-node).
+              # 9090 is taken on master-11 and master-12 (truenas-csi-node).
               value: "9071"
             - name: KAMAILIO_INVITE_TIMEOUT
               # Above HELLO_SIP_RING_TIMEOUT (10s), as in the lab.
@@ -1018,8 +1062,9 @@ metadata:
     app.kubernetes.io/component: edge
     app.kubernetes.io/managed-by: kuvryn-sync
 spec:
-  # In-cluster only (metrics). Phones reach the hostNetwork pod directly at
-  # 192.168.10.101:30508; a NodePort would SNAT them (and hold the port).
+  # In-cluster only (metrics). Phones reach a hostNetwork pod directly at its
+  # node address (192.168.10.101:30508 for every provisioned phone); a
+  # NodePort would SNAT them (and hold the port).
   type: ClusterIP
   selector:
     app.kubernetes.io/name: hello
@@ -1030,6 +1075,29 @@ spec:
       port: 9090
       protocol: TCP
       targetPort: metrics
+---
+# At most one Kamailio is voluntarily disrupted at a time (a node drain by
+# kured, an eviction): the other is the survivor that carries the phones. The
+# Deployment's own rollout rule (maxUnavailable 1) covers updates; this covers
+# everything else. Needs the deployer Role extended once
+# (deploy/kuvryn-sync/rbac-kamailio-ha.yaml).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kamailio
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/component: edge
 ---
 apiVersion: apps/v1
 kind: Deployment
