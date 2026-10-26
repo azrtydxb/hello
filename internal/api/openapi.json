@@ -16323,6 +16323,221 @@
         "x-hello-role": "operator",
         "x-hello-mcp": true
       }
+    },
+    "/api/v1/events": {
+      "get": {
+        "operationId": "listEvents",
+        "summary": "Call event history",
+        "description": "Lists stored call events (kept for HELLO_EVENT_RETENTION_DAYS, 7 by default) in cursor order. A user, or a service account with an extensionScope, sees only events about its own extensions; the viewer, operator and admin roles see all. Page with nextCursor.",
+        "tags": ["events"],
+        "parameters": [
+          {
+            "name": "types",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated event types; a pattern ending in .* (call.*) matches a prefix."
+          },
+          {
+            "name": "extension",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about this extension."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            },
+            "description": "asc (default) returns events after the cursor, oldest first; desc returns events before it, newest first."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Return events after this cursor (order asc)."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Return events before this cursor (order desc)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "description": "Page size, 1 to 1000 (default 100)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "events",
+        "x-hello-role": "user",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/events/stream": {
+      "get": {
+        "operationId": "streamEvents",
+        "summary": "Live call events (server-sent events)",
+        "description": "Opens a text/event-stream of call events. Each event has id: (its cursor), event: (its type) and data: (the Event as JSON); a comment keeps the connection alive every 15 seconds. Reconnect with the Last-Event-ID header to receive what was missed (events are replayed from the stored history); a client that falls behind is disconnected and resumes the same way. Authenticate with a bearer token, the session cookie, or ?ticket= from POST /events/tickets. At most 5 streams per credential and 200 per pod. A user, or a service account with an extensionScope, receives only events about its own extensions.",
+        "tags": ["events"],
+        "parameters": [
+          {
+            "name": "types",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated event types; a pattern ending in .* (call.*) matches a prefix."
+          },
+          {
+            "name": "extension",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about this extension."
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Resume after this cursor."
+          },
+          {
+            "name": "lastEventId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Resume after this cursor, for clients that cannot set the header."
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "A single-use ticket from POST /events/tickets, for clients that cannot send an Authorization header."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The event stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyStreams"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "events",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "a long-lived stream does not fit a tool call; the history operation lists events"
+        }
+      }
+    },
+    "/api/v1/events/tickets": {
+      "post": {
+        "operationId": "createEventTicket",
+        "summary": "Mint an event stream ticket",
+        "description": "Returns a single-use ticket, valid for 30 seconds, that authenticates one GET /events/stream as the caller with ?ticket=. For browsers' EventSource of another origin and other clients that cannot send an Authorization header.",
+        "tags": ["events"],
+        "responses": {
+          "201": {
+            "description": "The ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventTicket"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "events",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "mints a credential-like ticket for a stream; not for an AI agent"
+        }
+      }
     }
   },
   "components": {
@@ -16489,6 +16704,23 @@
       },
       "Upstream": {
         "description": "Object storage (MinIO) answered with an error; try again shortly (code upstream)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "TooManyStreams": {
+        "description": "Too many open event streams for this credential or pod; see Retry-After",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            }
+          }
+        },
         "content": {
           "application/json": {
             "schema": {
@@ -17907,7 +18139,9 @@
               "announcement",
               "ivr",
               "time_condition",
-              "queue"
+              "queue",
+              "extension",
+              "ring_group"
             ]
           },
           "mohClassId": {
@@ -17995,7 +18229,9 @@
               "announcement",
               "ivr",
               "time_condition",
-              "queue"
+              "queue",
+              "extension",
+              "ring_group"
             ],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
@@ -18017,7 +18253,7 @@
           },
           "failureTarget": {
             "type": "string",
-            "description": "The voicemail extension or external number, or the name of the announcement, IVR menu, queue or time condition, that failureKind names."
+            "description": "The voicemail extension, extension or external number, or the name of the announcement, IVR menu, queue, time condition or ring group, that failureKind names. An extension or ring group starts a new ring: the extension's own forwarding and voicemail apply, and a ring group uses its own strategy and failure destination. A group cannot name itself, and a chain that returns to a group or extension already rung is cut at run time."
           },
           "members": {
             "type": "array",
@@ -18105,7 +18341,9 @@
               "announcement",
               "ivr",
               "time_condition",
-              "queue"
+              "queue",
+              "extension",
+              "ring_group"
             ],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
           },
@@ -18127,7 +18365,7 @@
           },
           "failureTarget": {
             "type": "string",
-            "description": "The voicemail extension or external number, or the name of the announcement, IVR menu, queue or time condition, that failureKind names."
+            "description": "The voicemail extension, extension or external number, or the name of the announcement, IVR menu, queue, time condition or ring group, that failureKind names. An extension or ring group starts a new ring: the extension's own forwarding and voicemail apply, and a ring group uses its own strategy and failure destination. A group cannot name itself, and a chain that returns to a group or extension already rung is cut at run time."
           },
           "members": {
             "type": "array",
@@ -26731,6 +26969,186 @@
               "type": "string"
             },
             "description": "Limit the login to these queues."
+          }
+        }
+      },
+      "EventParty": {
+        "type": "object",
+        "description": "One end of a call.",
+        "properties": {
+          "number": {
+            "type": "string",
+            "description": "The number as presented."
+          },
+          "name": {
+            "type": "string",
+            "description": "The display name, when known."
+          },
+          "extension": {
+            "type": "string",
+            "description": "The extension number when this end is an extension."
+          }
+        }
+      },
+      "EventData": {
+        "type": "object",
+        "description": "The payload of a call event. Fields that do not apply to the event type are omitted. Recording audio, SIP bodies and DTMF are never in an event.",
+        "required": ["callId", "from", "to"],
+        "properties": {
+          "callId": {
+            "type": "string",
+            "description": "The call's correlation id, the same on every event of the call and on its CDR."
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["internal", "inbound", "outbound"]
+          },
+          "extension": {
+            "type": "string",
+            "description": "The extension the event is about (the subject). A call between two extensions, or one that rings a group, yields one event per extension."
+          },
+          "from": {
+            "$ref": "#/components/schemas/EventParty"
+          },
+          "to": {
+            "$ref": "#/components/schemas/EventParty"
+          },
+          "trunk": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "answeredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "billableMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "disposition": {
+            "type": "string",
+            "description": "How the call ended: answered, no_answer, busy, cancelled, unavailable or failed.",
+            "enum": [
+              "answered",
+              "no_answer",
+              "busy",
+              "cancelled",
+              "unavailable",
+              "failed"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why a call.missed event was raised.",
+            "enum": ["no_answer", "busy", "dnd", "cancelled", "unreachable"]
+          },
+          "originateId": {
+            "type": "string",
+            "description": "The click-to-call request that placed the call, when one did."
+          },
+          "cdrId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The call detail record (call.completed)."
+          },
+          "recordingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The stored recording (call.recording.ready)."
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "description": "A call event. Delivery is at least once: the id identifies an event and receivers dedupe on it.",
+        "required": ["apiVersion", "id", "type", "createdAt", "data"],
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "description": "Envelope version; changes are additive.",
+            "example": "1"
+          },
+          "id": {
+            "type": "string",
+            "description": "Unique and stable across redelivery."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "call.ringing",
+              "call.answered",
+              "call.ended",
+              "call.missed",
+              "call.recording.ready",
+              "call.completed"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/EventData"
+          }
+        }
+      },
+      "EventEntry": {
+        "description": "An event with its cursor.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Event"
+          },
+          {
+            "type": "object",
+            "required": ["cursor"],
+            "properties": {
+              "cursor": {
+                "type": "string",
+                "description": "Orders events and resumes a stream (Last-Event-ID, after, before). Opaque to clients apart from that."
+              }
+            }
+          }
+        ]
+      },
+      "EventPage": {
+        "type": "object",
+        "required": ["items", "nextCursor"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventEntry"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "The cursor to pass as after (order asc) or before (order desc) for the next page; empty when there is no more."
+          }
+        }
+      },
+      "EventTicket": {
+        "type": "object",
+        "required": ["ticket", "expiresAt"],
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "description": "Pass as ?ticket= on GET /events/stream. Single use, valid 30 seconds, shown once.",
+            "x-hello-secret": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

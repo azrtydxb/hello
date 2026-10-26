@@ -19,6 +19,9 @@ func TestRoutesTable(t *testing.T) {
 		// agents' own /me/inbox routes ask the user role like the other
 		// self-service routes, and the handlers refuse a viewer.
 		auth.ScopeMessages: auth.RoleOperator,
+		// The events scope guards the call-event routes, which every role
+		// reads (a user only their own extensions' events).
+		auth.ScopeEvents: auth.RoleViewer,
 	}
 	secrets := map[string]bool{
 		"POST /api/v1/devices/{id}/rotate-secret":        true,
@@ -41,7 +44,7 @@ func TestRoutesTable(t *testing.T) {
 		case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
 			return true
 		}
-		return strings.HasPrefix(r.Pattern, "/api/v1/me/")
+		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events")
 	}
 	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true}
 	seen := map[string]bool{}
