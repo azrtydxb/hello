@@ -32,7 +32,7 @@ type VoicemailBox struct {
 	BusyObject string
 	NameObject string
 	// PromptLanguage is the box's own prompt language ("en", "nl"; "" means
-	// inherit the deployment language), migration 00043.
+	// inherit the deployment language), migration 00044.
 	PromptLanguage string
 }
 
