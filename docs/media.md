@@ -123,7 +123,7 @@ Deleting a class clears every pick that named it; those fall through to the
 next level.
 
 **Waiting music instead of ringback.** A ring group or inbound route with
-*Play music instead of ringback* answers the caller with `183 Session
+_Play music instead of ringback_ answers the caller with `183 Session
 Progress` and the anchor's SDP, then plays its class while the destination
 rings; the music stops when the destination answers (or the call moves on to
 voicemail or an announcement). The group's setting wins over the route's. A
@@ -147,6 +147,12 @@ from the start of the playlist toward the same leg (`TestMusicOnHoldTakeover`).
 API: `GET/POST /api/v1/moh-classes`, `GET/PUT/DELETE /api/v1/moh-classes/{id}`;
 `mohClassId` on extensions, ring groups and inbound routes, and `mohRingback`
 on the last two. Migration `00021_music_on_hold`.
+
+The one exception is a [conference room](conference.md): it decodes every
+participant to a common 8 kHz mixing rate, mixes, and encodes each
+participant's mix in that participant's own codec (G.711, G.722 and Opus; the
+wideband ones are converted to and from 8 kHz). Each participant uses one RTP
+port from the range below.
 
 ## Metrics
 

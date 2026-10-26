@@ -252,7 +252,14 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	if h := req.ContentType(); h != nil && isDTMFInfo(h.Value()) {
 		if d, ok := dtmfDigit(req.Body()); ok {
-			if ref.leg != nil || !ref.c.ivrDigit(legCaller, d) {
+			switch {
+			case ref.leg == nil && ref.c.confDigit(d):
+				// A conference participant's key press is a room control.
+			case ref.leg == nil && ref.c.confFwdActive():
+				ref.c.confForwardDigit(d) // the owner's participant reads it
+			case ref.leg == nil && ref.c.ivrDigit(legCaller, d):
+				// A digit for the IVR menu the caller is in.
+			default:
 				s.dispatchDigit(ref.c, ref.leg == nil, d)
 			}
 		}

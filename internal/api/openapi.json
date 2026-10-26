@@ -5100,9 +5100,7 @@
         "operationId": "listParkLots",
         "summary": "List park lots",
         "description": "Lists the call park lots: each is a range of slot numbers a call can be parked in, with the time a parked call waits before it rings its parker again and the ring window before it goes to the parker's voicemail.",
-        "tags": [
-          "park"
-        ],
+        "tags": ["park"],
         "responses": {
           "200": {
             "description": "Park lots",
@@ -5132,9 +5130,7 @@
         "operationId": "createParkLot",
         "summary": "Create a park lot",
         "description": "Creates a park lot. The slot range must not overlap another lot, an extension number or a ring group name. Dialling the park code during a call parks it in the first free slot; dialling the retrieve code and a slot, or the slot itself, retrieves it. Validation failures list each failing field in error.fields.",
-        "tags": [
-          "park"
-        ],
+        "tags": ["park"],
         "requestBody": {
           "required": true,
           "content": {
@@ -5182,9 +5178,7 @@
         "operationId": "generateParkAnnouncement",
         "summary": "Generate the spoken park slot announcement",
         "description": "Generates the clips that speak a park slot to the parker, once, through the text-to-speech provider. They are the announcements park.slot (\"Your call is parked in slot\") and park.digit.0 to park.digit.9. A clip whose audio already came from the same text, voice and model is skipped, and so is a recording uploaded under that name, unless force is set. While any clip is missing the parker hears the slot as one DTMF tone per digit.",
-        "tags": [
-          "park"
-        ],
+        "tags": ["park"],
         "requestBody": {
           "required": false,
           "content": {
@@ -5266,9 +5260,7 @@
         "operationId": "getParkLot",
         "summary": "One park lot",
         "description": "Returns one park lot by id.",
-        "tags": [
-          "park"
-        ],
+        "tags": ["park"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -5306,9 +5298,7 @@
         "operationId": "putParkLot",
         "summary": "Replace a park lot",
         "description": "Replaces a park lot as a whole. Calls already parked keep their slot until they are retrieved or time out. A range that overlaps another lot, an extension number or a ring group name is refused with 400.",
-        "tags": [
-          "park"
-        ],
+        "tags": ["park"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -5362,9 +5352,7 @@
         "operationId": "deleteParkLot",
         "summary": "Delete a park lot",
         "description": "Deletes a park lot. Calls already parked in it keep their slot until they are retrieved or time out.",
-        "tags": [
-          "park"
-        ],
+        "tags": ["park"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -5397,9 +5385,7 @@
         "operationId": "listParkedCalls",
         "summary": "List the calls parked now",
         "description": "Lists the calls parked right now on every node: the slot, the lot, who parked the call, who is parked, when, and when the call returns to its parker. Needs Valkey.",
-        "tags": [
-          "park"
-        ],
+        "tags": ["park"],
         "responses": {
           "200": {
             "description": "Parked calls",
@@ -5434,9 +5420,7 @@
         "operationId": "listPickupGroups",
         "summary": "List pickup groups",
         "description": "Lists the call pickup groups: a member may answer a call ringing any other member. An extension in no pickup group may pick up calls ringing the other members of its ring groups.",
-        "tags": [
-          "pickup"
-        ],
+        "tags": ["pickup"],
         "responses": {
           "200": {
             "description": "Pickup groups",
@@ -5466,9 +5450,7 @@
         "operationId": "createPickupGroup",
         "summary": "Create a pickup group",
         "description": "Creates a pickup group of 1-200 extensions. Group pickup answers the oldest call ringing another member; directed pickup answers a named member's call. Validation failures list each failing field in error.fields.",
-        "tags": [
-          "pickup"
-        ],
+        "tags": ["pickup"],
         "requestBody": {
           "required": true,
           "content": {
@@ -5516,9 +5498,7 @@
         "operationId": "getPickupGroup",
         "summary": "One pickup group",
         "description": "Returns one pickup group by id.",
-        "tags": [
-          "pickup"
-        ],
+        "tags": ["pickup"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -5556,9 +5536,7 @@
         "operationId": "putPickupGroup",
         "summary": "Replace a pickup group",
         "description": "Replaces a pickup group as a whole, member list included.",
-        "tags": [
-          "pickup"
-        ],
+        "tags": ["pickup"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -5612,9 +5590,7 @@
         "operationId": "deletePickupGroup",
         "summary": "Delete a pickup group",
         "description": "Deletes a pickup group. Its members fall back to the pickup scope of their ring groups.",
-        "tags": [
-          "pickup"
-        ],
+        "tags": ["pickup"],
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -5924,6 +5900,286 @@
         "x-hello-mcp": {
           "exclude": "rings a physical phone"
         }
+      }
+    },
+    "/api/v1/conferences": {
+      "get": {
+        "operationId": "listConferences",
+        "summary": "List conference rooms",
+        "description": "Lists every server conference room with its live state (who is in it, who is muted, whether it is locked) when a room has participants. PINs are never returned; hasUserPin and hasLeaderPin say whether each is set.",
+        "tags": ["conferences"],
+        "responses": {
+          "200": {
+            "description": "Conference rooms",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConferenceList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createConference",
+        "summary": "Create a conference room",
+        "description": "Creates a room dialled by its number (2-10 digits, not an extension or ring group number). The user PIN and leader PIN are write-only. A DID route can target the room with destinationKind \"conference\". Validation failures list each failing field in error.fields.",
+        "tags": ["conferences"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConferenceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conference"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/conferences/{id}": {
+      "get": {
+        "operationId": "getConference",
+        "summary": "Get a conference room",
+        "description": "Returns one room with its live state, if it has participants.",
+        "tags": ["conferences"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The room",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conference"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "updateConference",
+        "summary": "Replace a conference room",
+        "description": "Replaces the room's settings. A PIN left out is kept, an empty string clears it. Renumbering a room that a route targets is refused with 409.",
+        "tags": ["conferences"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConferenceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The room",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conference"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteConference",
+        "summary": "Delete a conference room",
+        "description": "Deletes the room. A room that an inbound route still targets is refused with 409 naming the routes.",
+        "tags": ["conferences"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/conferences/{id}/control": {
+      "post": {
+        "operationId": "controlConference",
+        "summary": "Control a live conference room",
+        "description": "Queues a control command for the SIP node that mixes the room: mute or unmute a participant, remove (kick) one, lock or unlock the room, mute or unmute everyone but the leaders, or end the room. The owner applies it within about half a second; read the room to see the effect. The request is recorded in the audit log.",
+        "tags": ["conferences"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConferenceControl"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The command was queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConferenceControlAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/feature-codes": {
@@ -13369,11 +13625,7 @@
       },
       "ParkLotInput": {
         "type": "object",
-        "required": [
-          "name",
-          "slotStart",
-          "slotEnd"
-        ],
+        "required": ["name", "slotStart", "slotEnd"],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -13413,9 +13665,7 @@
       },
       "ParkLotList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -13480,18 +13730,13 @@
           },
           "phase": {
             "type": "string",
-            "enum": [
-              "parked",
-              "returning"
-            ]
+            "enum": ["parked", "returning"]
           }
         }
       },
       "ParkedCallList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -13503,13 +13748,7 @@
       },
       "PickupGroup": {
         "type": "object",
-        "required": [
-          "id",
-          "name",
-          "members",
-          "createdAt",
-          "updatedAt"
-        ],
+        "required": ["id", "name", "members", "createdAt", "updatedAt"],
         "properties": {
           "id": {
             "type": "integer",
@@ -13536,10 +13775,7 @@
       },
       "PickupGroupInput": {
         "type": "object",
-        "required": [
-          "name",
-          "members"
-        ],
+        "required": ["name", "members"],
         "additionalProperties": false,
         "properties": {
           "name": {
@@ -13561,9 +13797,7 @@
       },
       "PickupGroupList": {
         "type": "object",
-        "required": [
-          "items"
-        ],
+        "required": ["items"],
         "properties": {
           "items": {
             "type": "array",
@@ -13704,6 +13938,305 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PagingGroup"
+            }
+          }
+        }
+      },
+      "Conference": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "number",
+          "hasUserPin",
+          "hasLeaderPin",
+          "maxParticipants",
+          "waitForLeader",
+          "muteOnEntry",
+          "entryExit",
+          "entryAnnouncement",
+          "exitAnnouncement",
+          "record",
+          "enabled",
+          "createdAt",
+          "updatedAt",
+          "live"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "pattern": "^[0-9]{2,10}$",
+            "description": "The number dialled to join the room."
+          },
+          "hasUserPin": {
+            "type": "boolean",
+            "description": "Whether callers must key a PIN to join. The PIN itself is never returned."
+          },
+          "hasLeaderPin": {
+            "type": "boolean",
+            "description": "Whether a leader PIN is set. A leader can lock the room, remove participants, mute everyone and starts a room that waits for one."
+          },
+          "maxParticipants": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 50,
+            "description": "Seats, counting participants still entering a PIN or waiting for a leader."
+          },
+          "waitForLeader": {
+            "type": "boolean",
+            "description": "Participants wait, hearing the hold source, until a leader is in the room."
+          },
+          "muteOnEntry": {
+            "type": "boolean",
+            "description": "Everyone but a leader joins muted and unmutes with *6."
+          },
+          "entryExit": {
+            "type": "string",
+            "enum": ["none", "tone", "announcement"],
+            "description": "What the room hears when someone joins or leaves."
+          },
+          "entryAnnouncement": {
+            "type": "string",
+            "description": "An announcement played when someone joins (entryExit announcement); empty falls back to the tone."
+          },
+          "exitAnnouncement": {
+            "type": "string",
+            "description": "An announcement played when someone leaves; empty falls back to the tone."
+          },
+          "record": {
+            "type": "boolean",
+            "description": "Record the room's mix to the recordings store while it has participants, in segments of ten minutes."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "live": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ConferenceLive"
+              }
+            ],
+            "description": "The room's live state, or null when it has no participants or live state is unavailable."
+          }
+        }
+      },
+      "ConferenceInput": {
+        "type": "object",
+        "required": ["name", "number"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The room's display name."
+          },
+          "number": {
+            "type": "string",
+            "pattern": "^[0-9]{2,10}$",
+            "description": "The number dialled to join the room (2-10 digits)."
+          },
+          "userPin": {
+            "type": "string",
+            "pattern": "^([0-9]{4,10})?$",
+            "x-hello-secret": true,
+            "description": "Write-only. 4-10 digits; empty clears it; left out keeps it."
+          },
+          "leaderPin": {
+            "type": "string",
+            "pattern": "^([0-9]{4,10})?$",
+            "x-hello-secret": true,
+            "description": "Write-only. 4-10 digits and different from the user PIN; empty clears it; left out keeps it."
+          },
+          "maxParticipants": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 50,
+            "default": 10,
+            "description": "Seats, 2 to 50; the default is 10."
+          },
+          "waitForLeader": {
+            "type": "boolean",
+            "default": false,
+            "description": "Participants wait until a leader is in the room."
+          },
+          "muteOnEntry": {
+            "type": "boolean",
+            "default": false,
+            "description": "Everyone but a leader joins muted."
+          },
+          "entryExit": {
+            "type": "string",
+            "enum": ["none", "tone", "announcement"],
+            "default": "tone",
+            "description": "What the room hears when someone joins or leaves: none, a tone, or an announcement."
+          },
+          "entryAnnouncement": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{0,64}$",
+            "description": "The announcement played on a join (entryExit announcement)."
+          },
+          "exitAnnouncement": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{0,64}$",
+            "description": "The announcement played on a leave."
+          },
+          "record": {
+            "type": "boolean",
+            "default": false,
+            "description": "Record the room while it has participants."
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "A disabled room refuses callers."
+          }
+        }
+      },
+      "ConferenceLive": {
+        "type": "object",
+        "required": [
+          "room",
+          "node",
+          "locked",
+          "recording",
+          "participants",
+          "updatedAt"
+        ],
+        "properties": {
+          "room": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string",
+            "description": "The SIP node that mixes the room."
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "recording": {
+            "type": "boolean"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConferenceParticipant"
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ConferenceParticipant": {
+        "type": "object",
+        "required": [
+          "id",
+          "number",
+          "name",
+          "leader",
+          "muted",
+          "mutedByLeader",
+          "waiting",
+          "joinedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Identifies the participant in control commands."
+          },
+          "number": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "leader": {
+            "type": "boolean"
+          },
+          "muted": {
+            "type": "boolean"
+          },
+          "mutedByLeader": {
+            "type": "boolean",
+            "description": "A leader or an operator muted the participant, who cannot unmute itself."
+          },
+          "waiting": {
+            "type": "boolean"
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ConferenceControl": {
+        "type": "object",
+        "required": ["action"],
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "mute",
+              "unmute",
+              "kick",
+              "lock",
+              "unlock",
+              "mute_all",
+              "unmute_all",
+              "end"
+            ],
+            "description": "The control action."
+          },
+          "participant": {
+            "type": "string",
+            "description": "Required for mute, unmute and kick; not allowed otherwise."
+          }
+        }
+      },
+      "ConferenceControlAccepted": {
+        "type": "object",
+        "required": ["queued", "node", "commandId"],
+        "properties": {
+          "queued": {
+            "type": "boolean"
+          },
+          "node": {
+            "type": "string"
+          },
+          "commandId": {
+            "type": "string"
+          }
+        }
+      },
+      "ConferenceList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Conference"
             }
           }
         }
@@ -15738,8 +16271,8 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["call", "page", "intercom"],
-            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call."
+            "enum": ["call", "page", "intercom", "conference"],
+            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room."
           }
         },
         "description": "Null times are omitted."
@@ -16593,7 +17126,14 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri", "internal", "ivr"]
+            "enum": [
+              "extension",
+              "external",
+              "sip_uri",
+              "internal",
+              "ivr",
+              "conference"
+            ]
           },
           "mohClassId": {
             "oneOf": [
@@ -16684,7 +17224,14 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri", "internal", "ivr"],
+            "enum": [
+              "extension",
+              "external",
+              "sip_uri",
+              "internal",
+              "ivr",
+              "conference"
+            ],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
           "mohClassId": {
@@ -16777,7 +17324,14 @@
           },
           "destinationKind": {
             "type": "string",
-            "enum": ["extension", "external", "sip_uri", "internal", "ivr"],
+            "enum": [
+              "extension",
+              "external",
+              "sip_uri",
+              "internal",
+              "ivr",
+              "conference"
+            ],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
           "mohClassId": {
@@ -16900,6 +17454,10 @@
           },
           "sipUri": {
             "type": "string"
+          },
+          "conference": {
+            "type": "string",
+            "description": "The conference room number an inbound route sends the call to, when it does."
           },
           "number": {
             "type": "string"

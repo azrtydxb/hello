@@ -325,6 +325,24 @@ func (l *LazyValkey) EnqueuePageTest(ctx context.Context, r livestate.PageTestRe
 	return c.live.EnqueuePageTest(ctx, r)
 }
 
+// ConfStates implements ConferenceLive.
+func (l *LazyValkey) ConfStates(ctx context.Context, numbers []string) (map[string]livestate.ConfRoomState, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.ConfStates(ctx, numbers)
+}
+
+// EnqueueConfCommand implements ConferenceLive.
+func (l *LazyValkey) EnqueueConfCommand(ctx context.Context, node string, cmd livestate.ConfCommand) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.live.EnqueueConfCommand(ctx, node, cmd)
+}
+
 // GetPageTestResult implements PageTester.
 func (l *LazyValkey) GetPageTestResult(ctx context.Context, id string) (livestate.PageTestResult, bool, error) {
 	c, err := l.get()

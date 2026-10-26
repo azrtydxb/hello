@@ -44,6 +44,7 @@ const (
 	KindIVR           = "ivr"
 	KindAnnouncement  = "announcement"
 	KindPagingGroup   = "pagingGroup"
+	KindConference    = "conference"
 	KindFeatureCode   = "featureCode"
 	KindTimeCond      = "timeCondition"
 	KindSchedule      = "schedule"
@@ -146,6 +147,7 @@ func callTargets(kinds map[string]string) []Target {
 		tg(KindIVR, "call").need(ReqIVR),
 		tg(KindAnnouncement, "call"),
 		tg(KindPagingGroup, "call"),
+		tg(KindConference, "call"),
 		tg(KindTimeCond, "call").need(ReqTimeCond),
 		tg(KindExternal, "call"),
 		tg(KindSIPURI, "call"),
@@ -181,6 +183,7 @@ func buildCatalogue() Catalogue {
 		"ivr.call":            ReqIVR,
 		"announcement.call":   unify,
 		"pagingGroup.call":    unify,
+		"conference.call":     ungated,
 		"timeCondition.call":  ReqTimeCond,
 		"external.call":       ungated,
 		"sipUri.call":         ungated,
@@ -218,6 +221,7 @@ func buildCatalogue() Catalogue {
 		"ivr.call":            ReqIVR,
 		"announcement.call":   ReqIVR,
 		"pagingGroup.call":    ReqIVR,
+		"conference.call":     ReqIVR,
 		"timeCondition.call":  ReqTimeCond,
 		"external.call":       ReqIVR,
 	})
@@ -228,6 +232,7 @@ func buildCatalogue() Catalogue {
 		"ivr.call":            ReqTimeCond,
 		"announcement.call":   ReqTimeCond,
 		"pagingGroup.call":    ReqTimeCond,
+		"conference.call":     ReqTimeCond,
 		"timeCondition.call":  ReqTimeCond,
 		"external.call":       ReqTimeCond,
 	})
@@ -303,6 +308,7 @@ func buildCatalogue() Catalogue {
 				in("members", PortMember, true, "Members"),
 				in("callers", PortMember, true, "Allowed callers"),
 			}},
+			{Kind: KindConference, Label: "Conference room", Terminal: true, Ports: []Port{in("call", PortCall, true, "Join the room")}},
 			{Kind: KindFeatureCode, Label: "Feature code", Ports: []Port{
 				out("target", PortCall, false, "Target", "argument", tg(KindAnnouncement, "call"),
 					tg(KindIVR, "call").need(ReqIVR), tg(KindPagingGroup, "call").need(unify)),
