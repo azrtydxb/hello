@@ -92,6 +92,7 @@ export function IntegrationEvents() {
     }),
     [type, extension],
   );
+  const shown: Connection = paused ? "paused" : conn;
   const extensionInvalid = extension !== "" && filter.extension === "";
 
   const add = useCallback((incoming: EventEntry[]) => {
@@ -102,10 +103,7 @@ export function IntegrationEvents() {
   }, []);
 
   useEffect(() => {
-    if (paused) {
-      setConn("paused");
-      return;
-    }
+    if (paused) return;
     const controller = new AbortController();
     const { signal } = controller;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -113,11 +111,7 @@ export function IntegrationEvents() {
     let attempt = 0;
     const key = JSON.stringify(filter);
     const fresh = loadedFor.current !== key;
-    if (fresh) {
-      setRows([]);
-      cursor.current = "";
-      loadedFor.current = key;
-    }
+    loadedFor.current = key;
 
     const armStall = (run: AbortController) => {
       clearTimeout(stall);
@@ -128,6 +122,11 @@ export function IntegrationEvents() {
     };
 
     async function loop() {
+      setConn("connecting");
+      if (fresh) {
+        setRows([]);
+        cursor.current = "";
+      }
       try {
         if (!fresh) throw undefined; // resuming: the stream replays from the cursor
         const page = await listEvents(
@@ -198,7 +197,7 @@ export function IntegrationEvents() {
         description="The call events integrations receive: ringing, answered, ended, missed, recording ready and completed. The newest are on top; the tail follows the live stream."
         actions={
           <>
-            <LiveTag live={conn === "live"} />
+            <LiveTag live={shown === "live"} />
             <Button
               variant="secondary"
               onClick={() => setPaused((p) => !p)}
@@ -210,7 +209,7 @@ export function IntegrationEvents() {
         }
       />
       <div className="pf-stack">
-        {conn === "stalled" && (
+        {shown === "stalled" && (
           <Alert tone="warn" title="Stream stalled">
             No data for {STALL_MS / 1000} seconds. Reconnecting; a proxy that
             buffers responses can cause this.
@@ -246,15 +245,7 @@ export function IntegrationEvents() {
             error={extensionInvalid ? "2 to 10 digits" : undefined}
             mono
           />
-          <Badge tone="outline">
-            {conn === "live"
-              ? "connected"
-              : conn === "paused"
-                ? "paused"
-                : conn === "stalled"
-                  ? "stalled"
-                  : conn}
-          </Badge>
+          <Badge tone="outline">{shown === "live" ? "connected" : shown}</Badge>
         </div>
         <div className="az-card pf-card pf-card--tight">
           {rows.length === 0 ? (
