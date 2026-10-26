@@ -42,6 +42,7 @@ import {
   DestinationPicker,
   type DestinationChoices,
 } from "../components/IvrDestination";
+import { listTimeConditions, type TimeCondition } from "../api/timecond";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { FormAlert } from "./callflow/ui";
 import { announcementAudioPath } from "../api/media";
@@ -64,6 +65,7 @@ function useChoices(): { choices: DestinationChoices; error: string | null } {
   const [ringGroups, setRingGroups] = useState<RingGroup[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [pagingGroups, setPagingGroups] = useState<PagingGroup[]>([]);
+  const [timeConditions, setTimeConditions] = useState<TimeCondition[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -74,10 +76,20 @@ function useChoices(): { choices: DestinationChoices; error: string | null } {
     listRingGroups(controller.signal).then(setRingGroups).catch(fail);
     listAnnouncements(controller.signal).then(setAnnouncements).catch(fail);
     listPagingGroups(controller.signal).then(setPagingGroups).catch(fail);
+    listTimeConditions(controller.signal)
+      .then(setTimeConditions)
+      .catch(() => undefined); // the picker stays empty; saving still works
     return () => controller.abort();
   }, []);
   return {
-    choices: { extensions, ringGroups, announcements, pagingGroups, menus: [] },
+    choices: {
+      extensions,
+      ringGroups,
+      announcements,
+      pagingGroups,
+      menus: [],
+      timeConditions,
+    },
     error,
   };
 }

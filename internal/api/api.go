@@ -20,6 +20,7 @@ import (
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/hello/internal/timecond"
 	"github.com/azrtydxb/hello/internal/tts"
 	"github.com/azrtydxb/hello/internal/version"
 )
@@ -94,6 +95,24 @@ type Store interface {
 	CreateIVRMenu(ctx context.Context, actor string, in store.IVRMenuInput, check store.Check) (store.IVRMenu, error)
 	UpdateIVRMenu(ctx context.Context, actor string, id int64, in store.IVRMenuInput, check store.Check) (store.IVRMenu, error)
 	DeleteIVRMenu(ctx context.Context, actor string, id int64, check store.Check) error
+	ListSchedules(ctx context.Context) ([]store.Schedule, error)
+	GetSchedule(ctx context.Context, id int64) (store.Schedule, error)
+	CreateSchedule(ctx context.Context, actor string, in store.ScheduleInput, check store.Check) (store.Schedule, error)
+	UpdateSchedule(ctx context.Context, actor string, id int64, in store.ScheduleInput, check store.Check) (store.Schedule, error)
+	DeleteSchedule(ctx context.Context, actor string, id int64, check store.Check) error
+	ListCalendars(ctx context.Context) ([]store.Calendar, error)
+	GetCalendar(ctx context.Context, id int64) (store.Calendar, error)
+	CreateCalendar(ctx context.Context, actor string, in store.CalendarInput, check store.Check) (store.Calendar, error)
+	UpdateCalendar(ctx context.Context, actor string, id int64, in store.CalendarInput, check store.Check) (store.Calendar, error)
+	ImportCalendarEntries(ctx context.Context, actor string, id int64, entries []timecond.Entry, replace bool, check store.Check) (store.Calendar, error)
+	DeleteCalendar(ctx context.Context, actor string, id int64, check store.Check) error
+	ListTimeConditions(ctx context.Context) ([]store.TimeCondition, error)
+	GetTimeCondition(ctx context.Context, id int64) (store.TimeCondition, error)
+	CreateTimeCondition(ctx context.Context, actor string, in store.TimeConditionInput, check store.Check) (store.TimeCondition, error)
+	UpdateTimeCondition(ctx context.Context, actor string, id int64, in store.TimeConditionInput, check store.Check) (store.TimeCondition, error)
+	DeleteTimeCondition(ctx context.Context, actor string, id int64, check store.Check) error
+	SetTimeConditionOverride(ctx context.Context, actor string, id int64, mode string) (store.TimeCondition, error)
+	EvaluateTimeCondition(ctx context.Context, id int64, at time.Time, ignoreOverride bool) (store.TimeConditionEvaluation, error)
 	ListParkLots(ctx context.Context) ([]store.ParkLot, error)
 	GetParkLot(ctx context.Context, id int64) (store.ParkLot, error)
 	CreateParkLot(ctx context.Context, actor string, in store.ParkLotInput, check store.Check) (store.ParkLot, error)
@@ -239,6 +258,9 @@ type Config struct {
 	// set); the voicemail box responses carry it so the console can say
 	// email is not configured instead of showing messages stuck pending.
 	EmailDelivery bool
+	// DefaultTimeZone is the zone a new schedule gets when the request names
+	// none: the phones time zone setting (HELLO_PROV_TIMEZONE).
+	DefaultTimeZone string
 	// SMTPEnv is the deployment's SMTP_* settings, used while no settings
 	// are saved in the console; SMTPDeliver replaces the SMTP send in tests.
 	SMTPEnv     mailer.Settings

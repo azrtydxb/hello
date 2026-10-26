@@ -21,6 +21,8 @@ const (
 	IVRMenuKind     = "ivr"
 	IVRExternal     = "external"
 	IVRQueue        = "queue"
+	// IVRTimeCondition names a time condition (migration 00034).
+	IVRTimeCondition = "time_condition"
 )
 
 // IVRDest is where a menu option, timeout or invalid choice sends the call.

@@ -398,6 +398,8 @@ func queueReferences(ctx context.Context, tx *sql.Tx, id int64, name string) ([]
 			OR EXISTS (SELECT 1 FROM ivr_menu_options o WHERE o.menu_id = ivr_menus.id AND o.dest_kind = 'queue' AND o.dest_target = $1)`, "IVR menu", []any{name}},
 		{`SELECT name FROM queues WHERE id <> $2 AND ((timeout_kind = 'queue' AND timeout_target = $1)
 			OR (full_kind = 'queue' AND full_target = $1) OR (no_agents_kind = 'queue' AND no_agents_target = $1))`, "queue", []any{name, id}},
+		{`SELECT name FROM time_conditions WHERE (open_kind = 'queue' AND open_target = $1)
+			OR (closed_kind = 'queue' AND closed_target = $1) OR (holiday_kind = 'queue' AND holiday_target = $1)`, "time condition", []any{name}},
 	} {
 		rows, err := tx.QueryContext(ctx, q.query, q.args...)
 		if err != nil {

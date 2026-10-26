@@ -49,6 +49,7 @@ import {
   DestinationPicker,
   type DestinationChoices,
 } from "../components/IvrDestination";
+import { listTimeConditions, type TimeCondition } from "../api/timecond";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { FormAlert } from "./callflow/ui";
 import { Can } from "../role";
@@ -74,6 +75,7 @@ function useChoices(): { choices: Choices; error: string | null } {
   const [pagingGroups, setPagingGroups] = useState<PagingGroup[]>([]);
   const [menus, setMenus] = useState<IvrMenu[]>([]);
   const [mohClasses, setMohClasses] = useState<MOHClass[]>([]);
+  const [timeConditions, setTimeConditions] = useState<TimeCondition[]>([]);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -86,6 +88,9 @@ function useChoices(): { choices: Choices; error: string | null } {
     listPagingGroups(controller.signal).then(setPagingGroups).catch(fail);
     listIvrMenus(controller.signal).then(setMenus).catch(fail);
     listMOHClasses(controller.signal).then(setMohClasses).catch(fail);
+    listTimeConditions(controller.signal)
+      .then(setTimeConditions)
+      .catch(() => undefined); // the picker stays empty; saving still works
     return () => controller.abort();
   }, []);
   return {
@@ -95,6 +100,7 @@ function useChoices(): { choices: Choices; error: string | null } {
       announcements,
       pagingGroups,
       menus,
+      timeConditions,
       all: extensions,
       mohClasses,
     },

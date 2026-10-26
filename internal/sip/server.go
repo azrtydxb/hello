@@ -150,6 +150,9 @@ type Deps struct {
 	// them to PostgreSQL and bumping the configuration revision; nil makes
 	// the mutating feature codes answer 503.
 	Settings SettingsSink
+	// TimeConditions applies the day/night feature code to a time
+	// condition; nil makes it answer 503.
+	TimeConditions TimeConditionSettings
 	// Media holds the anchored-media metrics; nil disables them (tests).
 	Media *media.Metrics
 	// Recordings is the recordings metadata store (PostgreSQL); nil
@@ -787,6 +790,7 @@ func (s *Server) SnapshotChanged(old, cur *snapshot.Snapshot) {
 	if old == nil || cur == nil {
 		return
 	}
+	s.tcSnapshotChanged(old, cur)
 	var gone []string
 	for _, u := range old.Usernames() {
 		if _, ok := cur.DeviceByUsername(u); !ok {

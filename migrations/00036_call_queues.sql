@@ -28,13 +28,13 @@ CREATE TABLE queues (
     join_empty          BOOLEAN     NOT NULL DEFAULT TRUE,
     leave_empty         BOOLEAN     NOT NULL DEFAULT FALSE,
     timeout_kind        TEXT        NOT NULL DEFAULT 'hangup'
-        CHECK (timeout_kind IN ('hangup','extension','ring_group','voicemail','announcement','paging','ivr','external','queue')),
+        CHECK (timeout_kind IN ('hangup','extension','ring_group','voicemail','announcement','paging','ivr','external','queue','time_condition')),
     timeout_target      TEXT        NOT NULL DEFAULT '',
     full_kind           TEXT        NOT NULL DEFAULT 'hangup'
-        CHECK (full_kind IN ('hangup','extension','ring_group','voicemail','announcement','paging','ivr','external','queue')),
+        CHECK (full_kind IN ('hangup','extension','ring_group','voicemail','announcement','paging','ivr','external','queue','time_condition')),
     full_target         TEXT        NOT NULL DEFAULT '',
     no_agents_kind      TEXT        NOT NULL DEFAULT 'hangup'
-        CHECK (no_agents_kind IN ('hangup','extension','ring_group','voicemail','announcement','paging','ivr','external','queue')),
+        CHECK (no_agents_kind IN ('hangup','extension','ring_group','voicemail','announcement','paging','ivr','external','queue','time_condition')),
     no_agents_target    TEXT        NOT NULL DEFAULT '',
     -- The music on hold class (migration 00029) the waiting caller hears;
     -- NULL means the global default.
@@ -124,6 +124,10 @@ SELECT pg_temp.hello_check_values('ring_groups', 'ring_groups_failure_kind_check
 SELECT pg_temp.hello_check_values('ivr_menus', 'ivr_menus_timeout_kind_check', ARRAY['queue'], ARRAY[]::text[]);
 SELECT pg_temp.hello_check_values('ivr_menus', 'ivr_menus_invalid_kind_check', ARRAY['queue'], ARRAY[]::text[]);
 SELECT pg_temp.hello_check_values('ivr_menu_options', 'ivr_menu_options_dest_kind_check', ARRAY['queue'], ARRAY[]::text[]);
+-- A time condition may send its callers to a queue.
+SELECT pg_temp.hello_check_values('time_conditions', 'time_conditions_open_kind_check', ARRAY['queue'], ARRAY[]::text[]);
+SELECT pg_temp.hello_check_values('time_conditions', 'time_conditions_closed_kind_check', ARRAY['queue'], ARRAY[]::text[]);
+SELECT pg_temp.hello_check_values('time_conditions', 'time_conditions_holiday_kind_check', ARRAY['queue'], ARRAY[]::text[]);
 SELECT pg_temp.hello_check_values('feature_codes', 'feature_codes_action_check',
     ARRAY['queue_login', 'queue_logout', 'queue_pause', 'queue_unpause'], ARRAY[]::text[]);
 DROP FUNCTION pg_temp.hello_check_values(regclass, text, text[], text[]);
@@ -146,6 +150,9 @@ UPDATE ring_groups SET failure_kind = 'none', failure_target = '' WHERE failure_
 UPDATE ivr_menus SET timeout_kind = 'hangup', timeout_target = '' WHERE timeout_kind = 'queue';
 UPDATE ivr_menus SET invalid_kind = 'hangup', invalid_target = '' WHERE invalid_kind = 'queue';
 DELETE FROM ivr_menu_options WHERE dest_kind = 'queue';
+UPDATE time_conditions SET open_kind = 'hangup', open_target = '', open_then = '' WHERE open_kind = 'queue';
+UPDATE time_conditions SET closed_kind = 'hangup', closed_target = '', closed_then = '' WHERE closed_kind = 'queue';
+UPDATE time_conditions SET holiday_kind = '', holiday_target = '', holiday_then = '' WHERE holiday_kind = 'queue';
 DELETE FROM feature_codes WHERE action IN ('queue_login', 'queue_logout', 'queue_pause', 'queue_unpause');
 
 -- +goose StatementBegin
@@ -180,6 +187,9 @@ SELECT pg_temp.hello_check_values('ring_groups', 'ring_groups_failure_kind_check
 SELECT pg_temp.hello_check_values('ivr_menus', 'ivr_menus_timeout_kind_check', ARRAY[]::text[], ARRAY['queue']);
 SELECT pg_temp.hello_check_values('ivr_menus', 'ivr_menus_invalid_kind_check', ARRAY[]::text[], ARRAY['queue']);
 SELECT pg_temp.hello_check_values('ivr_menu_options', 'ivr_menu_options_dest_kind_check', ARRAY[]::text[], ARRAY['queue']);
+SELECT pg_temp.hello_check_values('time_conditions', 'time_conditions_open_kind_check', ARRAY[]::text[], ARRAY['queue']);
+SELECT pg_temp.hello_check_values('time_conditions', 'time_conditions_closed_kind_check', ARRAY[]::text[], ARRAY['queue']);
+SELECT pg_temp.hello_check_values('time_conditions', 'time_conditions_holiday_kind_check', ARRAY[]::text[], ARRAY['queue']);
 SELECT pg_temp.hello_check_values('feature_codes', 'feature_codes_action_check',
     ARRAY[]::text[], ARRAY['queue_login', 'queue_logout', 'queue_pause', 'queue_unpause']);
 DROP FUNCTION pg_temp.hello_check_values(regclass, text, text[], text[]);

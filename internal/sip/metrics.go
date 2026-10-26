@@ -78,6 +78,9 @@ type Metrics struct {
 	QueueAbandoned *prometheus.CounterVec   // queue
 	QueueCalls     *prometheus.CounterVec   // queue, event
 	QueueAgents    *prometheus.GaugeVec     // queue, state
+	// TimeConditionTotal counts time condition decisions: open, closed,
+	// holiday, forced_open, forced_closed, loop, missing and toggled.
+	TimeConditionTotal *prometheus.CounterVec // result
 
 	// Phase 7 (in-call HA, spec S-13). DialogReplicated counts replication
 	// writes by result; DialogTakeovers the calls this node took over;
@@ -227,6 +230,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.QueueAgents = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "hello_queue_agents", Help: "Agents per queue by state (available, on_call, ringing, dnd, wrapping, paused, logged_out); reported by one node at a time.",
 	}, []string{"queue", "state"})
+	m.TimeConditionTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_time_condition_total", Help: "Time condition decisions (open, closed, holiday, forced_open, forced_closed, loop, missing, toggled).",
+	}, []string{"result"})
 	m.PagingLegs = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_paging_legs_total", Help: "Page member legs by result (answered, busy, dnd, no_answer, no_registration).",
 	}, []string{"result"})
@@ -245,7 +251,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls,
-		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.TimeConditionTotal,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	return m

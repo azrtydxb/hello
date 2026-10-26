@@ -5936,7 +5936,7 @@
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
-        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, ivr, queue_login, queue_logout, queue_pause, queue_unpause (the argument of queue_pause is the pause reason), call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed. Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, ivr, queue_login, queue_logout, queue_pause, queue_unpause (the argument of queue_pause is the pause reason), call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed, time_condition (the argument is the time condition's name), tc_override (the argument is toggle, open, closed or auto). Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -11639,6 +11639,821 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/schedules": {
+      "get": {
+        "operationId": "listSchedules",
+        "summary": "List schedules",
+        "description": "Lists every schedule.",
+        "tags": ["time-conditions"],
+        "responses": {
+          "200": {
+            "description": "Schedules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createSchedule",
+        "summary": "Create a schedule",
+        "description": "Creates a named weekly schedule: open-hours ranges per weekday (several per day allowed, an end before the start crosses midnight) in an IANA time zone, which defaults to the phones' time zone setting, plus the calendars (holidays) it consults. Overlapping ranges on one day and unknown calendars are refused.",
+        "tags": ["time-conditions"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/schedules/{id}": {
+      "get": {
+        "operationId": "getSchedule",
+        "summary": "One schedule",
+        "description": "Returns one schedule by id.",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putSchedule",
+        "summary": "Replace a schedule",
+        "description": "Replaces a schedule as a whole: its ranges and calendars. The change reaches the SIP nodes with the next configuration revision.",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Schedule"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteSchedule",
+        "summary": "Delete a schedule",
+        "description": "Deletes a schedule. A schedule that a time condition uses cannot be deleted (409).",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/calendars": {
+      "get": {
+        "operationId": "listCalendars",
+        "summary": "List calendars",
+        "description": "Lists every calendar.",
+        "tags": ["time-conditions"],
+        "responses": {
+          "200": {
+            "description": "Calendars",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createCalendar",
+        "summary": "Create a calendar",
+        "description": "Creates a holiday / exception calendar with its entries: single dates, date ranges, yearly recurring dates, whole days or part of a day, each closing the covered time or replacing the weekly hours with special open hours.",
+        "tags": ["time-conditions"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Calendar"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/calendars/{id}": {
+      "get": {
+        "operationId": "getCalendar",
+        "summary": "One calendar",
+        "description": "Returns one calendar by id.",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The calendar",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Calendar"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putCalendar",
+        "summary": "Replace a calendar",
+        "description": "Replaces a calendar as a whole, entries included.",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Calendar"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteCalendar",
+        "summary": "Delete a calendar",
+        "description": "Deletes a calendar. A calendar that a schedule consults cannot be deleted (409).",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/time-conditions": {
+      "get": {
+        "operationId": "listTimeConditions",
+        "summary": "List time conditions",
+        "description": "Lists every time condition.",
+        "tags": ["time-conditions"],
+        "responses": {
+          "200": {
+            "description": "Time conditions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeConditionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createTimeCondition",
+        "summary": "Create a time condition",
+        "description": "Creates a time condition: a schedule, a destination when open, a destination when closed and an optional separate destination for holidays. Destinations are the IVR destination kinds plus another time condition; a chain of time conditions that leads back to itself is refused. It starts in automatic mode. Inbound routes, IVR options and exits, ring group failover and feature codes can name it.",
+        "tags": ["time-conditions"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeConditionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeCondition"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/time-conditions/{id}": {
+      "get": {
+        "operationId": "getTimeCondition",
+        "summary": "One time condition",
+        "description": "Returns one time condition by id.",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The time condition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeCondition"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putTimeCondition",
+        "summary": "Replace a time condition",
+        "description": "Replaces a time condition's schedule and destinations; the manual override is kept. A time condition that something names cannot be renamed.",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeConditionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeCondition"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteTimeCondition",
+        "summary": "Delete a time condition",
+        "description": "Deletes a time condition. One that an inbound route, ring group, feature code, IVR menu or another time condition names cannot be deleted (409).",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/calendars/{id}/import": {
+      "post": {
+        "operationId": "importCalendar",
+        "summary": "Import dates into a calendar",
+        "description": "Reads a list of dates into the calendar, either one entry per line (a date 2026-12-25, a range 2026-12-24..2026-12-26 or a yearly date 12-25, then optional words: a time range 13:00-17:00, closed, open=09:00-13:00,14:00-16:00, yearly, and the label) or an iCalendar file (BEGIN:VCALENDAR). Nothing is stored when any line is bad; the errors name the lines. With replace the calendar's entries are replaced, otherwise the new ones are added.",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarImport"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Imported",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarImportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/time-conditions/{id}/override": {
+      "put": {
+        "operationId": "setTimeConditionOverride",
+        "summary": "Set the day/night override",
+        "description": "Forces the time condition open or closed, or returns it to the schedule (auto). The override is stored in the database, so it survives restarts and HA failover, and reaches every SIP node with the next configuration revision. The feature code *28<n> does the same from a phone.",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeConditionOverride"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The time condition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeCondition"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/time-conditions/{id}/evaluate": {
+      "get": {
+        "operationId": "evaluateTimeCondition",
+        "summary": "What would the time condition do",
+        "description": "Answers what the time condition would do now, or at the given time: the branch (open, closed or holiday), why, whether the override forced it, the destination, and the destination reached after following time conditions that name each other. Nothing is changed.",
+        "tags": ["time-conditions"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "at",
+            "in": "query",
+            "description": "The instant to evaluate: an RFC 3339 time, or YYYY-MM-DDTHH:MM read in the schedule's time zone. Defaults to now.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ignoreOverride",
+            "in": "query",
+            "description": "true evaluates the schedule alone, as if the override were auto.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The evaluation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeConditionEvaluation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/time-settings": {
+      "get": {
+        "operationId": "getTimeSettings",
+        "summary": "Default time zone",
+        "description": "Returns the time zone a new schedule gets when the request names none: the phones' time zone setting (HELLO_PROV_TIMEZONE).",
+        "tags": ["time-conditions"],
+        "responses": {
+          "200": {
+            "description": "The default time zone",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/queues": {
       "get": {
         "operationId": "listQueues",
@@ -13209,6 +14024,7 @@
               "external",
               "announcement",
               "ivr",
+              "time_condition",
               "queue"
             ]
           },
@@ -13296,6 +14112,7 @@
               "external",
               "announcement",
               "ivr",
+              "time_condition",
               "queue"
             ],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
@@ -13405,6 +14222,7 @@
               "external",
               "announcement",
               "ivr",
+              "time_condition",
               "queue"
             ],
             "description": "What happens when nobody answers: nothing, voicemail, an external number or an announcement."
@@ -14321,6 +15139,8 @@
               "park_retrieve",
               "pickup_group",
               "pickup_directed",
+              "time_condition",
+              "tc_override",
               "queue_login",
               "queue_logout",
               "queue_pause",
@@ -14383,6 +15203,8 @@
                     "park_retrieve",
                     "pickup_group",
                     "pickup_directed",
+                    "time_condition",
+                    "tc_override",
                     "queue_login",
                     "queue_logout",
                     "queue_pause",
@@ -16921,6 +17743,7 @@
               "sip_uri",
               "internal",
               "ivr",
+              "time_condition",
               "queue"
             ]
           },
@@ -17019,6 +17842,7 @@
               "sip_uri",
               "internal",
               "ivr",
+              "time_condition",
               "queue"
             ],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
@@ -17119,6 +17943,7 @@
               "sip_uri",
               "internal",
               "ivr",
+              "time_condition",
               "queue"
             ],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
@@ -20001,13 +20826,14 @@
               "paging",
               "ivr",
               "external",
+              "time_condition",
               "queue"
             ],
-            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; or an external number routed through the outbound routes."
+            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; a call queue; a time condition; or an external number routed through the outbound routes."
           },
           "target": {
             "type": "string",
-            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue); a page code such as *60 (paging); a number (external)."
+            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition); a page code such as *60 (paging); a number (external)."
           }
         }
       },
@@ -20218,6 +21044,544 @@
             "items": {
               "$ref": "#/components/schemas/IVRMenu"
             }
+          }
+        }
+      },
+      "DayRange": {
+        "type": "object",
+        "required": ["day", "start", "end"],
+        "additionalProperties": false,
+        "properties": {
+          "day": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6,
+            "description": "Weekday the range starts on: 0 is Sunday."
+          },
+          "start": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "description": "HH:MM, 24-hour."
+          },
+          "end": {
+            "type": "string",
+            "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+            "description": "HH:MM, 24-hour; 24:00 is the end of the day. An end before the start crosses midnight."
+          }
+        }
+      },
+      "HoursRange": {
+        "type": "object",
+        "required": ["start", "end"],
+        "additionalProperties": false,
+        "properties": {
+          "start": {
+            "type": "string",
+            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+            "description": "HH:MM, 24-hour."
+          },
+          "end": {
+            "type": "string",
+            "pattern": "^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$",
+            "description": "HH:MM, 24-hour; 24:00 is the end of the day. An end before the start crosses midnight."
+          }
+        }
+      },
+      "ScheduleInput": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique schedule name (letters, digits, . _ -)."
+          },
+          "timeZone": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_+/-]{1,64}$",
+            "description": "IANA time zone of the ranges and calendar dates; defaults to the phones' time zone setting (see getTimeSettings)."
+          },
+          "ranges": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/DayRange"
+            },
+            "description": "Open hours, several per day allowed; ranges on one day must not overlap."
+          },
+          "calendarIds": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "The calendars (holidays, exceptions) the schedule consults."
+          }
+        }
+      },
+      "ScheduleList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Schedule"
+            }
+          }
+        }
+      },
+      "CalendarEntry": {
+        "type": "object",
+        "required": ["start"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Read-only; ignored on write."
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "For example Christmas Day."
+          },
+          "start": {
+            "type": "string",
+            "description": "First day: YYYY-MM-DD, or MM-DD when yearly."
+          },
+          "end": {
+            "type": "string",
+            "description": "Last day, inclusive; defaults to the start. When yearly a range may wrap the new year (12-31 to 01-02)."
+          },
+          "yearly": {
+            "type": "boolean",
+            "description": "Repeat every year; the year of the dates is ignored."
+          },
+          "allDay": {
+            "type": "boolean",
+            "description": "Covers whole days. False needs startTime and endTime; omitted with no times it is true."
+          },
+          "startTime": {
+            "type": "string",
+            "description": "HH:MM; with endTime the part of each day covered."
+          },
+          "endTime": {
+            "type": "string",
+            "description": "HH:MM or 24:00; before the start crosses midnight."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["closed", "open"],
+            "description": "closed (default) closes the covered time (a holiday); open replaces the weekly hours of the covered days with hours."
+          },
+          "hours": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/components/schemas/HoursRange"
+            },
+            "description": "The open hours of an open entry."
+          }
+        }
+      },
+      "CalendarInput": {
+        "type": "object",
+        "required": ["name"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique calendar name (letters, digits, . _ -)."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "Free text, at most 500 characters."
+          },
+          "entries": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "$ref": "#/components/schemas/CalendarEntry"
+            },
+            "description": "The exceptions; a replace sends them all."
+          }
+        }
+      },
+      "Calendar": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "entries",
+          "schedules",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique calendar name (letters, digits, . _ -)."
+          },
+          "description": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalendarEntry"
+            }
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Names of the schedules that consult it, read-only."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CalendarList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Calendar"
+            }
+          }
+        }
+      },
+      "CalendarImport": {
+        "type": "object",
+        "required": ["text"],
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The dates: one entry per line, or an iCalendar file."
+          },
+          "replace": {
+            "type": "boolean",
+            "description": "Replace the calendar's entries instead of adding to them."
+          }
+        }
+      },
+      "CalendarImportResult": {
+        "type": "object",
+        "required": ["imported", "calendar"],
+        "properties": {
+          "imported": {
+            "type": "integer"
+          },
+          "calendar": {
+            "$ref": "#/components/schemas/Calendar"
+          }
+        }
+      },
+      "TimeConditionDestination": {
+        "type": "object",
+        "required": ["kind", "target"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "hangup",
+              "extension",
+              "ring_group",
+              "voicemail",
+              "announcement",
+              "paging",
+              "ivr",
+              "external",
+              "queue",
+              "time_condition"
+            ],
+            "description": "The IVR destination kinds, plus another time condition."
+          },
+          "target": {
+            "type": "string",
+            "description": "Empty for hangup; an extension number (extension, voicemail); a name (ring_group, announcement, ivr, queue, time_condition); a page code (paging); a number (external)."
+          },
+          "thenVoicemail": {
+            "type": "string",
+            "description": "For an announcement: the extension whose voicemail box takes the call after it. Empty ends the call."
+          }
+        }
+      },
+      "TimeConditionInput": {
+        "type": "object",
+        "required": ["name", "scheduleId"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique time condition name (letters, digits, . _ -)."
+          },
+          "scheduleId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Id of the schedule that decides open and closed."
+          },
+          "open": {
+            "$ref": "#/components/schemas/TimeConditionDestination",
+            "description": "Where the call goes while the schedule is open. Defaults to hangup."
+          },
+          "closed": {
+            "$ref": "#/components/schemas/TimeConditionDestination",
+            "description": "Where the call goes while it is closed. Defaults to hangup."
+          },
+          "holiday": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TimeConditionDestination"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the call goes on a holiday (a calendar entry closed it); null uses the closed destination."
+          },
+          "toggleNumber": {
+            "type": "string",
+            "pattern": "^([0-9]{1,4})?$",
+            "description": "The digits dialled after the day/night feature code (*28<n>); empty means no feature-code toggle."
+          }
+        }
+      },
+      "TimeCondition": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "scheduleId",
+          "scheduleName",
+          "open",
+          "closed",
+          "holiday",
+          "override",
+          "overrideAt",
+          "overrideBy",
+          "toggleNumber",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Unique time condition name (letters, digits, . _ -)."
+          },
+          "scheduleId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "scheduleName": {
+            "type": "string"
+          },
+          "open": {
+            "$ref": "#/components/schemas/TimeConditionDestination"
+          },
+          "closed": {
+            "$ref": "#/components/schemas/TimeConditionDestination"
+          },
+          "holiday": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TimeConditionDestination"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "override": {
+            "type": "string",
+            "enum": ["auto", "open", "closed"]
+          },
+          "overrideAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "overrideBy": {
+            "type": "string"
+          },
+          "toggleNumber": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TimeConditionList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimeCondition"
+            }
+          }
+        }
+      },
+      "TimeConditionOverride": {
+        "type": "object",
+        "required": ["override"],
+        "additionalProperties": false,
+        "properties": {
+          "override": {
+            "type": "string",
+            "enum": ["auto", "open", "closed"],
+            "description": "auto follows the schedule; open and closed force a branch until changed back."
+          }
+        }
+      },
+      "TimeSettings": {
+        "type": "object",
+        "required": ["timeZone"],
+        "properties": {
+          "timeZone": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_+/-]{1,64}$",
+            "description": "IANA time zone name such as Asia/Dubai."
+          }
+        }
+      },
+      "ScheduleVerdict": {
+        "type": "object",
+        "required": ["open", "holiday", "reason", "local"],
+        "properties": {
+          "open": {
+            "type": "boolean"
+          },
+          "holiday": {
+            "type": "boolean",
+            "description": "A calendar entry closed it, or the day has special hours and this is outside them."
+          },
+          "reason": {
+            "type": "string"
+          },
+          "local": {
+            "type": "string",
+            "description": "The instant in the schedule's zone."
+          }
+        }
+      },
+      "TimeConditionDecision": {
+        "type": "object",
+        "required": ["branch", "why", "forced", "destination", "verdict"],
+        "properties": {
+          "branch": {
+            "type": "string",
+            "enum": ["open", "closed", "holiday"]
+          },
+          "why": {
+            "type": "string"
+          },
+          "forced": {
+            "type": "boolean",
+            "description": "The manual override decided."
+          },
+          "destination": {
+            "$ref": "#/components/schemas/TimeConditionDestination"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/ScheduleVerdict",
+            "description": "The schedule's own answer, also when an override replaced it."
+          }
+        }
+      },
+      "TimeConditionStep": {
+        "type": "object",
+        "required": ["condition", "branch", "why", "forced", "destination"],
+        "properties": {
+          "condition": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string",
+            "enum": ["open", "closed", "holiday"]
+          },
+          "why": {
+            "type": "string"
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/TimeConditionDestination"
+          }
+        }
+      },
+      "TimeConditionEvaluation": {
+        "type": "object",
+        "required": ["name", "at", "override", "decision", "resolution"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "override": {
+            "type": "string",
+            "enum": ["auto", "open", "closed"],
+            "description": "The override taken into account (auto when ignoreOverride was set)."
+          },
+          "decision": {
+            "$ref": "#/components/schemas/TimeConditionDecision"
+          },
+          "resolution": {
+            "type": "object",
+            "required": ["steps", "destination"],
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TimeConditionStep"
+                },
+                "description": "The time conditions passed, in order."
+              },
+              "destination": {
+                "$ref": "#/components/schemas/TimeConditionDestination"
+              }
+            }
+          },
+          "error": {
+            "type": "string",
+            "description": "Set when the chain of time conditions cannot be followed; the call would be rejected."
           }
         }
       },

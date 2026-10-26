@@ -27,6 +27,7 @@ type Table struct {
 	extensions map[string]string
 	ivrMenus   map[string]bool
 	queues     map[string]bool
+	timeConds  map[string]bool
 	resolved   map[int64][]netip.Addr
 	// dial holds the compiled internal dialing patterns of every trunk
 	// whose policy mode is "patterns" (compileDialing in inbound.go).
@@ -65,6 +66,7 @@ func Compile(cfg Config) (*Table, []FieldError) {
 		extensions: maps.Clone(cfg.Extensions),
 		ivrMenus:   maps.Clone(cfg.IVRMenus),
 		queues:     maps.Clone(cfg.Queues),
+		timeConds:  maps.Clone(cfg.TimeConditions),
 		resolved:   make(map[int64][]netip.Addr, len(cfg.ResolvedIPs)),
 		dial:       make(map[int64][]dialPattern, len(cfg.Trunks)),
 	}
@@ -297,6 +299,10 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 		if _, ok := t.extensions[r.Destination]; !ok {
 			addErr(errs, p+".destination", fmt.Sprintf("extension %s does not exist", quote(r.Destination)))
 		}
+	case "time_condition":
+		if !t.timeConds[r.Destination] {
+			addErr(errs, p+".destination", fmt.Sprintf("time condition %s does not exist", quote(r.Destination)))
+		}
 	case "ivr":
 		if !t.ivrMenus[r.Destination] {
 			addErr(errs, p+".destination", fmt.Sprintf("IVR menu %s does not exist", quote(r.Destination)))
@@ -320,7 +326,7 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 			addErr(errs, p+".destination", "must be a sip: or sips: URI without whitespace")
 		}
 	default:
-		addErr(errs, p+".destinationKind", `must be "extension", "external", "internal", "ivr", "queue" or "sip_uri"`)
+		addErr(errs, p+".destinationKind", `must be "extension", "external", "internal", "ivr", "queue", "sip_uri" or "time_condition"`)
 	}
 }
 

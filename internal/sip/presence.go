@@ -118,8 +118,11 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 		ext = req.Recipient.User
 		_, isSlot := snap.ParkLotOf(ext)
 		if !snap.HasExtension(ext) && !isSlot {
-			// An agent's login or pause lamp (*45101): not an extension.
-			if _, _, ok := queueBLFTarget(snap, ext); !ok {
+			// An agent's login or pause lamp (*45101) or a key on a day/night
+			// toggle code (*28<n>) is a BLF too.
+			_, _, isAgent := queueBLFTarget(snap, ext)
+			_, isToggle := tcToggleCode(snap, ext)
+			if !isAgent && !isToggle {
 				s.respond(tx, req, sip.StatusNotFound, "Not Found")
 				return
 			}
@@ -173,6 +176,8 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 		if _, slot := snap.ParkLotOf(ext); slot {
 			// A park slot's lamp shows occupancy (spec S-6).
 			init = slotState(s.slotOccupied(ext))
+		} else if t, ok := tcToggleCode(snap, ext); ok {
+			init = tcLampState(t)
 		} else if !snap.HasExtension(ext) {
 			if st := s.queueStore(); st != nil {
 				cctx, cancel := s.stateCtx()

@@ -41,8 +41,9 @@ tried first, a higher penalty only once every lower one has been tried.
 The queue sends a caller on when the maximum wait passes (**timeout**), the
 queue is **full**, or **no agent** is logged in. Each uses the IVR destination
 kinds: hang up, extension, ring group, voicemail, announcement, paging group,
-IVR menu, external number and **another queue**. A queue whose destinations
-lead back to itself through other queues is refused.
+IVR menu, external number, time condition and **another queue**. A queue whose
+destinations lead back to itself through other queues is refused. A time
+condition can in turn send its callers to a queue.
 
 ### Announcements
 

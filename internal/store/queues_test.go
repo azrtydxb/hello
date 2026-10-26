@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/azrtydxb/hello/internal/timecond"
 )
 
 func queueInput(name, number string) QueueInput {
@@ -39,5 +41,43 @@ func TestQueueNumberNotParkSlot(t *testing.T) {
 	_, err = s.CreateParkLot(ctx, "t", ParkLotInput{Name: "upstairs", SlotStart: 795, SlotEnd: 805, ReturnSecs: 120, VoicemailSecs: 60, Enabled: true}, nil)
 	if !errors.As(err, &ve) || !strings.Contains(fmt.Sprint(ve.Fields), "queue support") {
 		t.Fatalf("park lot over queue 800: %v, want an error naming the queue", err)
+	}
+}
+
+// TestQueueTimeConditionCrossReferences: a time condition may send its
+// callers to a queue and a queue may fail over to a time condition, and
+// neither can then be deleted while the other names it. It fails if the
+// CHECK lists of either table refuse the other kind, or a delete leaves a
+// dangling reference.
+func TestQueueTimeConditionCrossReferences(t *testing.T) {
+	s := scratchStore(t)
+	ctx := context.Background()
+	q, err := s.CreateQueue(ctx, "t", queueInput("support", "800"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, err := s.CreateSchedule(ctx, "t", ScheduleInput{Name: "office", TimeZone: "UTC"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tc, err := s.CreateTimeCondition(ctx, "t", TimeConditionInput{
+		Name: "hours", ScheduleID: sc.ID,
+		Open:   timecond.Dest{Kind: timecond.KindQueue, Target: "support"},
+		Closed: timecond.Dest{Kind: timecond.KindHangup},
+	}, nil)
+	if err != nil {
+		t.Fatalf("time condition to a queue: %v", err)
+	}
+	var iu *InUseError
+	if err := s.DeleteQueue(ctx, "t", q.ID, nil); !errors.As(err, &iu) || !strings.Contains(iu.Msg, "time condition hours") {
+		t.Fatalf("delete queue named by a time condition: %v, want an in-use error naming it", err)
+	}
+	in := queueInput("support", "800")
+	in.Timeout = IVRDestination{Kind: IVRTimeCondition, Target: "hours"}
+	if _, err := s.UpdateQueue(ctx, "t", q.ID, in, nil); err != nil {
+		t.Fatalf("queue failing over to a time condition: %v", err)
+	}
+	if err := s.DeleteTimeCondition(ctx, "t", tc.ID, nil); !errors.As(err, &iu) || !strings.Contains(iu.Msg, "queue support") {
+		t.Fatalf("delete time condition named by a queue: %v, want an in-use error naming it", err)
 	}
 }
