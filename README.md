@@ -20,7 +20,7 @@ voicemail greetings from text, [docs/voicemail.md](docs/voicemail.md) for the sp
 [docs/ai-agent.md](docs/ai-agent.md) for the in-product AI agent (assistant,
 findings and proposals). For the IVR / auto-attendant see
 [docs/ivr.md](docs/ivr.md), and for call queues [docs/queues.md](docs/queues.md). For time and date routing (schedules, holiday calendars, time conditions, the day/night toggle) see
-[docs/time-conditions.md](docs/time-conditions.md). For ring tags and distinctive ringing (which tag a call rings with, and the `Alert-Info` header phones map to a tone) see [docs/ring-tags.md](docs/ring-tags.md). To run Hello on Kubernetes (Helm chart, SIP
+[docs/time-conditions.md](docs/time-conditions.md). For the call events that integrations read (live stream, history, scopes) see [docs/integrations.md](docs/integrations.md). For ring tags and distinctive ringing (which tag a call rings with, and the `Alert-Info` header phones map to a tone) see [docs/ring-tags.md](docs/ring-tags.md). To run Hello on Kubernetes (Helm chart, SIP
 networking, highly available state, rolling upgrades) see
 [docs/kubernetes.md](docs/kubernetes.md).
 
@@ -110,6 +110,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_SECRET_KEY`                                | both    | required: 32 bytes, base64; encrypts trunk passwords; identical on every node                                                 |
 | `HELLO_BOOTSTRAP_ADMIN_PASSWORD`                  | control | unset; creates user `admin` when no user exists                                                                               |
 | `HELLO_SESSION_TTL`                               | control | `12h`                                                                                                                         |
+| `HELLO_EVENT_RETENTION_DAYS`                      | control | `7`; how long call events are stored, 1 to 30 (docs/integrations.md)                                                          |
 | `HELLO_SIP_BIND_ADDR`                             | sip     | `0.0.0.0:5060`                                                                                                                |
 | `HELLO_SIP_ADVERTISED_ADDR`                       | sip     | the bind address, which must then be a specific IP                                                                            |
 | `HELLO_SIP_NONCE_SECRET`                          | sip     | required, at least 32 bytes, identical on every SIP node                                                                      |

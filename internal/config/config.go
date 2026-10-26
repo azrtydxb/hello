@@ -60,6 +60,9 @@ type Control struct {
 	// BootstrapAdminPassword creates the first admin user when none exist.
 	BootstrapAdminPassword string
 	SessionTTL             time.Duration
+	// EventRetentionDays is how long call events stay in the database
+	// (HELLO_EVENT_RETENTION_DAYS, 1 to 30, default 7).
+	EventRetentionDays int
 	// MinIO (voicemail audio) and SMTP (voicemail email). SMTP is optional:
 	// an empty SmtpHost disables the mailer.
 	MinioEndpoint      string
@@ -383,6 +386,10 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		AuthFailLimit:          r.positiveInt("HELLO_SIP_AUTH_FAIL_LIMIT", 10),
 		BootstrapAdminPassword: r.optional("HELLO_BOOTSTRAP_ADMIN_PASSWORD", ""),
 		SessionTTL:             r.duration("HELLO_SESSION_TTL", 12*time.Hour),
+	}
+	c.EventRetentionDays = r.positiveInt("HELLO_EVENT_RETENTION_DAYS", 7)
+	if c.EventRetentionDays > 30 {
+		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
 	}
 	c.Database = r.database(c.DatabaseURL)
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()

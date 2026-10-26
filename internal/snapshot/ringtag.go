@@ -8,7 +8,7 @@ import (
 	"github.com/azrtydxb/hello/internal/ringtag"
 )
 
-// Ring tags (migration 00044): the tags, their Bellcore slots and the ordered
+// Ring tags (migration 00046): the tags, their Bellcore slots and the ordered
 // rules are compiled once per revision, so choosing the tag of a call never
 // touches PostgreSQL.
 

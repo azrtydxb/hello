@@ -232,6 +232,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "key-round",
         minRole: "admin",
       },
+      {
+        label: "Events",
+        path: "/integrations/events",
+        phase: 5,
+        icon: "radio-tower",
+      },
     ],
   },
   {
