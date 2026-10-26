@@ -877,6 +877,8 @@ func TestPhoneGroupMulticastAndPTT(t *testing.T) {
 		}
 	}
 	c.must(http.StatusNotFound, "GET", cat+"/999999", nil)
+	c.must(http.StatusNotFound, "PUT", cat+"/999999", ch("Gone", "239.255.9.9", 5004, "PCMU", "paging", 1))
+	c.must(http.StatusNotFound, "DELETE", cat+"/999999", nil)
 	upd := c.must(http.StatusOK, "PUT", cat+"/"+out, ch("Outside", "239.255.0.2", 5006, "G722", "paging", 2)).json(t)
 	if upd["label"] != "Outside" {
 		t.Fatalf("updated channel = %v", upd)
