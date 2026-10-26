@@ -168,6 +168,9 @@ func (c *call) startVoicemail(mode int, reason string) {
 	if !c.answerSelf(answer) {
 		return
 	}
+	if sess != nil {
+		c.logTerminatedCodec("answer", "voicemail", answer)
+	}
 	if sess != nil && s.deps.HAState != nil {
 		// The voicemail call replicates like any (incall-ha S-5): a taker
 		// re-INVITEs the caller onto its own anchor and restarts the

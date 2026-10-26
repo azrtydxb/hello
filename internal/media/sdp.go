@@ -35,6 +35,9 @@ type AudioSDP struct {
 	// DTMFRate is its clock rate, 8000 when the SDP omits it.
 	DTMFPayloadType uint8
 	DTMFRate        int
+	// Ptime is the a=ptime packetisation time in milliseconds, 0 when the
+	// SDP does not say.
+	Ptime int
 }
 
 // ParseAudioSDP extracts the connection address, the audio port and the
@@ -111,6 +114,12 @@ func ParseAudioSDP(offer []byte) (AudioSDP, error) {
 					if _, seen := fmtps[uint8(n)]; !seen {
 						fmtps[uint8(n)] = strings.TrimSpace(params)
 					}
+				}
+				continue
+			}
+			if rest, ok := strings.CutPrefix(line[2:], "ptime:"); ok {
+				if n, err := strconv.Atoi(strings.TrimSpace(rest)); err == nil && n > 0 && out.Ptime == 0 {
+					out.Ptime = n
 				}
 				continue
 			}
