@@ -103,7 +103,9 @@ An anchored call plays music to a party the other side puts on hold: a
 the other leg, and the holder's own stream is muted meanwhile (an `inactive`
 hold is offered to the held phone as `sendonly` so it can hear). A resume
 (`sendrecv`), the hangup, or a takeover that finds the call no longer held
-stops it. Parking (S-6) uses the same player.
+stops it. Parking (S-6) uses the same player: the parked party hears the
+class a hold by the parker would pick, until it is retrieved, answered by
+the parker again or moved to voicemail.
 
 Music comes from **MOH classes** (Media, Music on hold): a named, ordered
 playlist of announcements, played in a loop or shuffled (a shuffle plays every

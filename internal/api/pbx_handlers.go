@@ -42,7 +42,8 @@ var (
 	strategies = []string{"ring-all", "sequential", "round-robin", "longest-idle", "weighted"}
 	fcActions  = []string{"forward_always", "forward_busy", "forward_no_answer", "dnd_on", "dnd_off",
 		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom",
-		"call_waiting_on", "call_waiting_off"}
+		"call_waiting_on", "call_waiting_off",
+		"park", "park_retrieve", "pickup_group", "pickup_directed"}
 )
 
 // voicemailLimits bound greeting uploads.

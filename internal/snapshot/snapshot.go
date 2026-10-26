@@ -12,6 +12,7 @@ import (
 	"maps"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -131,6 +132,42 @@ const (
 	PagingEmergency = "emergency"
 )
 
+// ParkLot is a range of park slots (migration 00032, spec S-6): a parked call
+// holds one slot number, retrieved by dialling the retrieve code and the
+// number (or the number itself). ReturnSecs is how long it waits before it
+// rings the parker again; VoicemailSecs how long it then rings before it goes
+// to the parker's voicemail (0: it is dropped instead).
+type ParkLot struct {
+	ID            int64
+	Name          string
+	Start, End    int
+	ReturnSecs    int
+	VoicemailSecs int
+}
+
+// Slots lists the lot's slot numbers.
+func (l ParkLot) Slots() []string {
+	out := make([]string, 0, l.End-l.Start+1)
+	for n := l.Start; n <= l.End; n++ {
+		out = append(out, strconv.Itoa(n))
+	}
+	return out
+}
+
+// Has reports whether slot is one of the lot's numbers.
+func (l ParkLot) Has(slot string) bool {
+	n, err := strconv.Atoi(slot)
+	return err == nil && strconv.Itoa(n) == slot && n >= l.Start && n <= l.End
+}
+
+// PickupGroup is a call pickup group (migration 00032, spec S-50): a member
+// may answer a call ringing any other member. Members are extension numbers.
+type PickupGroup struct {
+	ID      int64
+	Name    string
+	Members []string
+}
+
 // FeatureCode is one DTMF feature code and the action it performs. Action
 // is one of forward_always, forward_busy, forward_no_answer, dnd_on,
 // dnd_off, voicemail, blind_transfer, attended_transfer and, since
@@ -158,6 +195,10 @@ type Snapshot struct {
 	codes  map[string]FeatureCode
 	pages  map[string]PagingGroup
 	anns   map[string]string
+	// parkLots are the enabled park lots in slot order; pickups the pickup
+	// groups (migration 00032).
+	parkLots []ParkLot
+	pickups  []PickupGroup
 	// mohs maps a music on hold class ID to its playlist; mohDefault is the
 	// global default class (0 when none is set).
 	mohs       map[int64]MOHClass
@@ -229,6 +270,82 @@ func (s *Snapshot) WithPagingGroups(groups []PagingGroup) *Snapshot {
 func (s *Snapshot) PagingGroup(code string) (PagingGroup, bool) {
 	g, ok := s.pages[code]
 	return g, ok
+}
+
+// WithParkLots installs the enabled park lots (tests and Load); they are kept
+// in slot order.
+func (s *Snapshot) WithParkLots(lots []ParkLot) *Snapshot {
+	s.parkLots = slices.Clone(lots)
+	slices.SortFunc(s.parkLots, func(a, b ParkLot) int { return a.Start - b.Start })
+	return s
+}
+
+// WithPickupGroups installs the pickup groups (tests and Load).
+func (s *Snapshot) WithPickupGroups(groups []PickupGroup) *Snapshot {
+	s.pickups = slices.Clone(groups)
+	return s
+}
+
+// ParkLots returns the enabled park lots in slot order.
+func (s *Snapshot) ParkLots() []ParkLot { return s.parkLots }
+
+// ParkLotOf returns the enabled lot that has slot as one of its numbers.
+func (s *Snapshot) ParkLotOf(slot string) (ParkLot, bool) {
+	for _, l := range s.parkLots {
+		if l.Has(slot) {
+			return l, true
+		}
+	}
+	return ParkLot{}, false
+}
+
+// PickupGroups returns the pickup groups.
+func (s *Snapshot) PickupGroups() []PickupGroup { return s.pickups }
+
+// PickupScope returns the extension numbers whose ringing calls ext may pick
+// up, ext itself excluded, sorted: the other members of every pickup group
+// ext belongs to; with no pickup group, the other members of the ring groups
+// ext is a member of (spec S-50, default 4).
+func (s *Snapshot) PickupScope(ext string) []string {
+	set := map[string]bool{}
+	explicit := false
+	for _, g := range s.pickups {
+		if !slices.Contains(g.Members, ext) {
+			continue
+		}
+		explicit = true
+		for _, m := range g.Members {
+			set[m] = true
+		}
+	}
+	if !explicit {
+		for _, e := range s.groups {
+			in := false
+			for _, m := range e.members {
+				in = in || m.Extension == ext
+			}
+			if !in {
+				continue
+			}
+			for _, m := range e.members {
+				if m.Extension != "" {
+					set[m.Extension] = true
+				}
+			}
+		}
+	}
+	delete(set, ext)
+	out := make([]string, 0, len(set))
+	for m := range set {
+		out = append(out, m)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// CanPickUp reports whether picker may answer a call ringing target.
+func (s *Snapshot) CanPickUp(picker, target string) bool {
+	return picker != target && slices.Contains(s.PickupScope(picker), target)
 }
 
 // WithAnnouncements installs the announcement set: name -> MinIO object
@@ -468,13 +585,21 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	lots, err := loadParkLots(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	pickups, err := loadPickupGroups(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	mohs, err := loadMOHClasses(ctx, db)
 	if err != nil {
 		return nil, err
 	}
 	return New(rev, domain, devices).WithExtensions(bare...).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithMOHClasses(mohs), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs), nil
 }
 
 // loadMOHClasses reads the music on hold classes with their playlists
@@ -542,6 +667,52 @@ func loadAnnouncements(ctx context.Context, db Querier) (map[string]string, erro
 		anns[name] = obj
 	}
 	return anns, rows.Err()
+}
+
+// loadParkLots reads the enabled park lots, so parking never touches the
+// database.
+func loadParkLots(ctx context.Context, db Querier) ([]ParkLot, error) {
+	rows, err := db.Query(ctx, `SELECT id, name, slot_start, slot_end, return_secs, voicemail_secs
+FROM park_lots WHERE enabled ORDER BY slot_start`)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot: park lots: %w", err)
+	}
+	defer rows.Close()
+	var lots []ParkLot
+	for rows.Next() {
+		var l ParkLot
+		if err := rows.Scan(&l.ID, &l.Name, &l.Start, &l.End, &l.ReturnSecs, &l.VoicemailSecs); err != nil {
+			return nil, fmt.Errorf("snapshot: scan park lot: %w", err)
+		}
+		lots = append(lots, l)
+	}
+	return lots, rows.Err()
+}
+
+// loadPickupGroups reads the pickup groups with their member extension
+// numbers.
+func loadPickupGroups(ctx context.Context, db Querier) ([]PickupGroup, error) {
+	rows, err := db.Query(ctx, `SELECT g.id, g.name, e.number FROM pickup_groups g
+JOIN pickup_group_members m ON m.group_id = g.id JOIN extensions e ON e.id = m.extension_id
+ORDER BY g.id, e.number`)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot: pickup groups: %w", err)
+	}
+	defer rows.Close()
+	var groups []PickupGroup
+	for rows.Next() {
+		var id int64
+		var name, number string
+		if err := rows.Scan(&id, &name, &number); err != nil {
+			return nil, fmt.Errorf("snapshot: scan pickup member: %w", err)
+		}
+		if n := len(groups); n == 0 || groups[n-1].ID != id {
+			groups = append(groups, PickupGroup{ID: id, Name: name})
+		}
+		g := &groups[len(groups)-1]
+		g.Members = append(g.Members, number)
+	}
+	return groups, rows.Err()
 }
 
 // loadPagingGroups reads the paging groups with their member and allowed

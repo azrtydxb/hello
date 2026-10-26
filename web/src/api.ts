@@ -1217,6 +1217,91 @@ export const testPagingGroup = (groupId: Id, extension?: string) =>
 export const deletePagingGroup = (groupId: Id) =>
   request<void>("DELETE", `/api/v1/paging-groups/${id(groupId)}`);
 
+// --- call park and call pickup -------------------------------------------------
+
+/** The writable fields of a park lot (PUT replaces the whole lot). */
+export interface ParkLotFields {
+  name: string;
+  /** The first and last slot number; at most 100 slots. */
+  slotStart: number;
+  slotEnd: number;
+  /** Seconds before an unretrieved call rings its parker again. */
+  returnSecs: number;
+  /** Seconds the parker then rings before the call goes to voicemail. */
+  voicemailSecs: number;
+  enabled: boolean;
+}
+
+/** A park lot as returned. */
+export interface ParkLot extends ParkLotFields {
+  id: Id;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listParkLots = (signal?: AbortSignal) =>
+  list<ParkLot>("/api/v1/park-lots", signal);
+
+export const createParkLot = (input: ParkLotFields) =>
+  request<ParkLot>("POST", "/api/v1/park-lots", { body: input });
+
+export const putParkLot = (lotId: Id, input: ParkLotFields) =>
+  request<ParkLot>("PUT", `/api/v1/park-lots/${id(lotId)}`, { body: input });
+
+export const deleteParkLot = (lotId: Id) =>
+  request<void>("DELETE", `/api/v1/park-lots/${id(lotId)}`);
+
+/** One call parked right now (GET /api/v1/parked-calls). */
+export interface ParkedCall {
+  slot: string;
+  lot: string;
+  node: string;
+  callId: string;
+  correlationId: string;
+  /** The extension that parked the call. */
+  parkedBy: string;
+  /** The parked party's number and name. */
+  caller: string;
+  callerName: string;
+  parkedAt: string;
+  /** When the call rings its parker again. */
+  returnAt: string;
+  phase: "parked" | "returning";
+}
+
+export const listParkedCalls = (signal?: AbortSignal) =>
+  list<ParkedCall>("/api/v1/parked-calls", signal);
+
+/** The writable fields of a pickup group (PUT replaces the whole group). */
+export interface PickupGroupFields {
+  name: string;
+  /** Extension ids. */
+  members: Id[];
+}
+
+/** A pickup group as returned. */
+export interface PickupGroup {
+  id: Id;
+  name: string;
+  members: PagingExtension[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listPickupGroups = (signal?: AbortSignal) =>
+  list<PickupGroup>("/api/v1/pickup-groups", signal);
+
+export const createPickupGroup = (input: PickupGroupFields) =>
+  request<PickupGroup>("POST", "/api/v1/pickup-groups", { body: input });
+
+export const putPickupGroup = (groupId: Id, input: PickupGroupFields) =>
+  request<PickupGroup>("PUT", `/api/v1/pickup-groups/${id(groupId)}`, {
+    body: input,
+  });
+
+export const deletePickupGroup = (groupId: Id) =>
+  request<void>("DELETE", `/api/v1/pickup-groups/${id(groupId)}`);
+
 // --- feature codes and presence -------------------------------------------------
 
 /** A DTMF feature code (GET/PUT /api/v1/feature-codes). */
@@ -1247,6 +1332,10 @@ export const FEATURE_CODE_ACTIONS = [
   "intercom",
   "call_waiting_on",
   "call_waiting_off",
+  "park",
+  "park_retrieve",
+  "pickup_group",
+  "pickup_directed",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
@@ -1266,6 +1355,10 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   intercom: "Intercom (auto-answer)",
   call_waiting_on: "Call waiting on",
   call_waiting_off: "Call waiting off",
+  park: "Park the call",
+  park_retrieve: "Retrieve a parked call",
+  pickup_group: "Pick up a call in your group",
+  pickup_directed: "Pick up an extension's call",
 };
 
 /** GET /api/v1/feature-codes. */

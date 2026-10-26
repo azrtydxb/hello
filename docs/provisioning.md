@@ -1040,9 +1040,8 @@ the extension's page in the console or `PATCH /api/v1/extensions/{id}`).
   page never interrupts a call), whatever the switch says. An intercom call
   to an extension in a call rings it as a normal call instead of
   auto-answering, whatever the switch says; the call-waiting flag is not
-  consulted on that path. Call parking and pickup do not exist in Hello yet;
-  when they do, they must not consult the flag either (a pickup answers a
-  call that is already ringing).
+  consulted on that path. Call parking and pickup do not consult the flag
+  either (a pickup answers a call that is already ringing).
 - **How busy is decided.** An extension is busy while any connected call of
   the cluster has it as caller, as the dialled number, or as the extension
   whose phone answered (a ring group member, a forward target). Every node
@@ -1074,6 +1073,113 @@ the extension's page in the console or `PATCH /api/v1/extensions/{id}`).
   The WP822 and WP836 call-waiting tone is the phone's own
   (`P347` and its gain `P1555`, left at their defaults); the lab check
   listens for it with the flag on and expects silence with it off.
+
+## Call park and call pickup
+
+Hello parks a call so any phone can pick it up, and lets a phone answer a
+colleague's ringing call.
+
+**Feature codes.** All of them are ordinary feature codes (System in the
+console, `PUT /api/v1/feature-codes`), so every one is configurable. The
+defaults avoid every code Hello already uses, and in particular the paging
+groups, which take codes of the same `*` plus 2 to 4 digits shape (the
+phonebooks-ptt default is `*8<n>`; a site may use `*60`):
+
+| Action            | Default | What it does                                                                      |
+| ----------------- | ------- | --------------------------------------------------------------------------------- |
+| `park`            | `*74`   | During a call: parks it in the first free slot; `*74701` parks in slot 701        |
+| `park_retrieve`   | `*75`   | `*75701` retrieves the call parked in slot 701                                    |
+| `pickup_group`    | `*40`   | Answers the oldest call ringing anyone in your pickup scope                       |
+| `pickup_directed` | `*41`   | `*41200` answers the call ringing extension 200, if it is in your pickup scope    |
+
+The specification's own defaults for pickup (`*60`, `*61<ext>`) collide with a
+paging group on `*60`, so Hello uses `*40` and `*41<ext>` instead. Hello
+refuses (400, with the colliding items named) any feature code, paging code
+or park slot that overlaps another: equal, or one a prefix of the other
+(a code takes its argument after it, so `*8` would shadow `*80`), or a park
+slot that equals an extension number, ring group name or queue number. A write that adds
+no new overlap is never blocked by an overlap that already existed. A
+migration on an existing install adds the four defaults only where none of
+them overlaps what is there.
+
+**Parking.** Three ways park a connected call, each by the phone whose user
+is the parker:
+
+- dialling the park code during the call (`*74`, or `*74` plus a slot). A
+  bare `*74` parks after a 1.5 second pause, a full slot at once, `#` ends the
+  digits early;
+- a blind REFER to the park code. This is what the Grandstream WP8x6 Park
+  softkey sends once `P60069` holds the park code; Hello provisions it, and
+  `P2336` for the retrieve softkey, on those models;
+- a blind REFER to the park code plus a slot.
+
+The parker hears the slot spoken ("Your call is parked in slot seven zero
+one") and its dialog is released. The spoken slot is built from eleven
+announcements (`park.slot` and `park.digit.0` to `park.digit.9`). An operator
+creates them once with the text-to-speech provider (Park and pickup in the
+console, Generate spoken slot announcement, or
+`POST /api/v1/park-lots/announcement/generate`); any of them can be replaced
+by an uploaded recording, which a later generate keeps. While one is missing
+the parker hears the slot as DTMF tones instead (one tone pair per digit).
+The parked party stays on Hello's media anchor and hears music on hold.
+The parked call's slot is one record in Valkey (`hello:park:slot:<slot>`), kept
+alive by the node holding the call and visible to every node.
+
+**Retrieving.** Dial `*75` plus the slot, or the slot itself (`701`), from any
+phone on any node. The slot is claimed atomically, so two phones racing for it
+cannot both connect: the second gets `404`. The retriever's phone is pointed at
+the held party's relay leg (on another node too: the node that holds the call
+does the media work), the two calls are linked, and either hang-up ends the
+other. A BLF key on a slot number (`Event: dialog` on 701 to 720) shows whether
+it is occupied, on phones that have BLF keys.
+
+**Timeout.** A call nobody retrieves rings its parker's phones again after the
+lot's return time (default 120 s). The parker answering reconnects them. If
+nobody answers within the lot's ring window (default 60 s) the parked party
+moves to the parker's voicemail, or is ended when the parker has no voicemail.
+
+**Park lots.** A lot is a range of slots (default `default`, 701 to 720; at
+most 100 slots, at most 10 lots) with the two times above (Park and pickup in
+the console, `/api/v1/park-lots`). `GET /api/v1/parked-calls` and the console's
+live Parked now list show every parked call in the cluster.
+
+**Pickup.** An extension may answer a call that is ringing another extension
+in its _pickup scope_: the other members of every pickup group it belongs to
+(Park and pickup in the console, `/api/v1/pickup-groups`); with no pickup
+group, the other members of the ring groups it belongs to. Group pickup
+(`*40`) answers the oldest ringing call in scope; directed pickup (`*41` plus
+the extension) answers that extension's call and is refused with `403` outside
+the scope. An INVITE with a `Replaces` header naming a ringing leg's early
+dialog does the same. The picked-up call's other ringing phones are cancelled,
+and the caller and the picker are connected through the caller's media anchor.
+When nothing in scope is ringing the dialler gets `404`, which phones play as
+their own error tone. A call that is not anchored (no SDP offer) cannot be
+picked up. Two phones picking up the same call cannot both connect.
+
+**What the CDR records.** The parked call's CDR carries "Parked in slot N by X"
+and "Retrieved from slot N by Y" in its trace; the retriever's or picker's own
+call has its own CDR. A picked-up call's trace says "Call picked up by Y".
+`hello_park_total{kind,result}` counts park, retrieve, return and pickup
+outcomes.
+
+**Provisioning.** Grandstream WP816, WP826 and WP836: `P60069` (park code) and
+`P2336` (retrieve code). Yealink: `features.pickup.group_pickup_code` and
+`features.pickup.direct_pickup_code`. Poly: `call.groupCallPickupString` and
+`call.directedCallPickupString`. All are from the vendors' documentation and are
+**not yet verified on a phone**; they are written only when the corresponding
+feature code is configured.
+
+**Limits.** A parked or picked-up call does not follow the in-call HA takeover
+of an ordinary call: if the node holding it dies, the parked party's call is
+lost and its slot lapses within 20 seconds (see `docs/ha.md`).
+
+**Hold on a retrieved call.** A hold from either side of a retrieved call is
+passed on to the other party as a `sendonly` re-INVITE (on another node too),
+and a resume as `sendrecv`, as on any bridged call.
+
+**Pickup cancels.** The ringing phones a pickup cancels get
+`Reason: SIP;cause=200;text="Call completed elsewhere"` on the CANCEL, so they
+do not log the call as missed.
 
 ## Security model and its limits
 

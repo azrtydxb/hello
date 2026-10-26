@@ -600,6 +600,10 @@ func legName(caller bool) string {
 // record) and the call replicates from here on.
 func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	defer contain(s.log, "takeover")
+	if st.State == haPhasePark {
+		s.takeOverPark(st, from)
+		return
+	}
 	if st.Legs[1].CallID == "" {
 		s.takeOverSolo(st, from)
 		return

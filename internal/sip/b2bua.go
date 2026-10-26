@@ -136,6 +136,15 @@ type call struct {
 	autoAnswer bool
 	page       *pageState
 
+	// park is the parking of a held call (spec S-6); link joins a parked,
+	// retrieved, picked-up or returned call to its bridged peer. pickedUp
+	// and pickupCh carry a pickup to the setup goroutine (spec S-50).
+	// All guarded by mu.
+	park     *parkState
+	link     *callLink
+	pickedUp bool
+	pickupCh chan *pickupReq
+
 	groupName     string
 	groupStrategy string
 	groupFn       func()
@@ -222,6 +231,9 @@ type leg struct {
 	mu    sync.Mutex
 	dcs   *sipgo.DialogClientSession
 	acked bool
+	// elsewhere: the leg was cancelled because the call was answered
+	// elsewhere (a pickup); its dialog sends the CANCEL with that Reason.
+	elsewhere bool
 
 	// A trunk attempt (trunk set) or a SIP URI target (uri set); neither
 	// means a phone binding.
@@ -299,6 +311,16 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		c.handlePage(tx, snap, g)
 		return
 	}
+	// A park slot dialled as a number retrieves the call parked there, and
+	// an INVITE with Replaces naming an early dialog picks that call up.
+	if _, ok := snap.ParkLotOf(c.dialled); ok {
+		c.handleRetrieve(tx, snap, c.dialled)
+		return
+	}
+	if h := req.GetHeader("Replaces"); h != nil {
+		c.handleReplacesPickup(tx, snap, h.Value())
+		return
+	}
 	// A feature code dialled as a call (*78, *72599, *97) is dispatched here
 	// and never reaches routing.
 	if fc, arg, ok := matchFeatureCode(snap, c.dialled); ok {
@@ -351,6 +373,7 @@ func (s *Server) newCall(req *sip.Request) *call {
 		dialled: req.Recipient.User, start: time.Now(), inv: req, direction: cdr.DirectionInternal,
 		canceled: make(chan struct{}), stopHB: make(chan struct{}), setupDone: make(chan struct{}),
 		aborted: make(chan struct{}), haStop: make(chan struct{}),
+		pickupCh: make(chan *pickupReq, 1),
 	}
 }
 
@@ -533,6 +556,11 @@ func (c *call) setup(pending int) {
 					}
 				}
 			}
+		case req := <-c.pickupCh:
+			// A picker claimed the call (spec S-50): this goroutine is the
+			// only one that may answer the caller.
+			c.answerPickup(req)
+			return
 		case <-c.canceled:
 			if c.closeSetup() {
 				c.cancelForks(nil)
@@ -794,6 +822,10 @@ func (s *Server) callerByeHeld() {
 // The dialogs stay routable until that BYE completes, so a caller ACK still
 // in flight confirms the A dialog the BYE needs.
 func (c *call) hangup(side string) {
+	if c.isLinked() {
+		c.linkedHangup(side, "")
+		return
+	}
 	if c.page != nil {
 		c.pageHangup(side)
 		return
@@ -929,6 +961,10 @@ func (c *call) expire() {
 // endBoth ends a connected call for a system reason (max duration, drain
 // timeout): BYE to both legs, CDR side system.
 func (c *call) endBoth(reason string) {
+	if c.isLinked() {
+		c.linkedHangup(cdr.SideSystem, reason)
+		return
+	}
 	if c.page != nil {
 		c.pageEndBoth(reason)
 		return
@@ -1217,6 +1253,9 @@ func (l *leg) drive(report func(legEvent)) {
 	}
 	l.mu.Lock()
 	l.dcs = dcs
+	if l.elsewhere {
+		dcs.UA = s.uacElsewhere
+	}
 	l.mu.Unlock()
 	opts := sipgo.AnswerOptions{OnResponse: func(r *sip.Response) error {
 		switch {
@@ -1402,6 +1441,9 @@ func (s *Server) handleAck(req *sip.Request, tx sip.ServerTransaction) {
 		return // a taken-over call's ACKs need no relay (its 200s are terminal)
 	}
 	c := ref.c
+	if c.isLinked() && (ref.leg != nil || req.CSeq().SeqNo != c.inv.CSeq().SeqNo) {
+		return // a linked call has no peer dialog to relay an ACK to
+	}
 	inviteAck := ref.leg == nil && req.CSeq().SeqNo == c.inv.CSeq().SeqNo
 	c.mu.Lock()
 	w, lateAck, dss := c.winner, c.lateAck, c.dss
@@ -1581,6 +1623,12 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	c := ref.c
 	if hom := c.homed(); hom != nil {
+		if side, linked := c.linkSide(); linked {
+			// A taken-over parked or bridged call: its one party hung up.
+			s.respond(tx, req, sip.StatusOK, "OK")
+			c.linkedHangup(side, "")
+			return
+		}
 		s.haByeRequest(c, hom, ref.leg != nil, req, tx)
 		return
 	}
@@ -1624,6 +1672,10 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	c := ref.c
+	if c.isLinked() {
+		s.linkedReinvite(c, req, tx)
+		return
+	}
 	if c.page != nil {
 		// A page is one-way by construction: no hold, no renegotiation.
 		s.respond(tx, req, sip.StatusNotAcceptableHere, "Not Acceptable Here")

@@ -777,16 +777,11 @@ func (c *call) storeRecording(rec *media.Recorder, by string) {
 // relayDTMF is the relay's RFC 2833 DTMF hook: *1 toggles the recording
 // (spec S-4). Digits also flow into the call's feature-code buffer, so an
 // INFO dtmf-relay *1 and an in-band *1 behave the same.
-func (c *call) relayDTMF(_ string, digit byte) {
-	buf := c.s.bufferFor(c)
-	all := buf.push([]byte{digit})
-	if digit == '*' {
-		return // the 1 follows
-	}
-	if len(all) >= 2 && all[len(all)-2] == '*' && digit == '1' {
-		buf.take()
-		c.toggleRecording()
-	}
+func (c *call) relayDTMF(leg string, digit byte) {
+	// RFC 2833 digits feed the same feature-code collection as INFO ones
+	// (the *1 recording toggle included), so a code dialled mid-call acts
+	// on an anchored call too.
+	c.s.dispatchDigit(c, leg == legCaller, digit)
 }
 
 // handleAnchoredInDialog terminates a re-INVITE/UPDATE on an anchored
@@ -1061,4 +1056,19 @@ func allowSignalSource(relay *media.Relay, leg, source string) {
 	if ip := net.ParseIP(host); ip != nil {
 		relay.AllowSource(leg, ip)
 	}
+}
+
+// handOverLeg points a relay leg at a phone that takes it over from another
+// one. The earlier phone's vouched address is replaced by the new phone's
+// signalling source before the target moves, so neither the old phone nor a
+// stranger can claim the leg, and a phone behind NAT (whose SDP names a
+// private address) still has its media accepted.
+func handOverLeg(relay *media.Relay, leg string, target *net.UDPAddr, source string) {
+	host, _ := splitHostPort(source)
+	if ip := net.ParseIP(host); ip != nil {
+		relay.ResetSources(leg, ip)
+	} else {
+		relay.ResetSources(leg)
+	}
+	relay.SetTarget(leg, target)
 }

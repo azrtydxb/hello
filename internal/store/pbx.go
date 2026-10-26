@@ -499,6 +499,9 @@ func (s *Store) GetRingGroup(ctx context.Context, id int64) (RingGroup, error) {
 func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupInput, check Check) (RingGroup, error) {
 	var g RingGroup
 	err := s.configChange(ctx, actor, "create", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		if err := checkNotSlot(ctx, tx, "name", in.Name); err != nil {
+			return 0, err
+		}
 		var id int64
 		if err := checkMOHClass(ctx, tx, "mohClassId", in.MOHClassID); err != nil {
 			return 0, err
@@ -525,6 +528,9 @@ func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupI
 func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in RingGroupInput, check Check) (RingGroup, error) {
 	var g RingGroup
 	err := s.configChange(ctx, actor, "update", "ring_group", check, func(tx *sql.Tx) (int64, error) {
+		if err := checkNotSlot(ctx, tx, "name", in.Name); err != nil {
+			return id, err
+		}
 		if err := checkMOHClass(ctx, tx, "mohClassId", in.MOHClassID); err != nil {
 			return id, err
 		}
@@ -624,22 +630,23 @@ func (s *Store) PutFeatureCodes(ctx context.Context, actor string, codes []Featu
 		if err := checkFeatureCodesAgainstPaging(ctx, tx, codes); err != nil {
 			return "", err
 		}
-		for _, c := range codes {
-			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO feature_codes (code, action, argument) VALUES ($1, $2, $3)
-				ON CONFLICT (code) DO UPDATE SET action = EXCLUDED.action, argument = EXCLUDED.argument`,
-				c.Code, c.Action, c.Argument); err != nil {
-				return "", err
+		err := dialGuard(ctx, tx, "items", func() error {
+			for _, c := range codes {
+				if _, err := tx.ExecContext(ctx, `
+					INSERT INTO feature_codes (code, action, argument) VALUES ($1, $2, $3)
+					ON CONFLICT (code) DO UPDATE SET action = EXCLUDED.action, argument = EXCLUDED.argument`,
+					c.Code, c.Action, c.Argument); err != nil {
+					return err
+				}
 			}
-		}
-		kept := make([]string, len(codes))
-		for i, c := range codes {
-			kept[i] = c.Code
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM feature_codes WHERE code <> ALL($1)`, kept); err != nil {
-			return "", err
-		}
-		return "list", nil
+			kept := make([]string, len(codes))
+			for i, c := range codes {
+				kept[i] = c.Code
+			}
+			_, err := tx.ExecContext(ctx, `DELETE FROM feature_codes WHERE code <> ALL($1)`, kept)
+			return err
+		})
+		return "list", err
 	})
 }
 
@@ -660,6 +667,10 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*80", Action: "intercom"},
 		{Code: "*70", Action: "call_waiting_off"},
 		{Code: "*71", Action: "call_waiting_on"},
+		{Code: "*74", Action: "park"},
+		{Code: "*75", Action: "park_retrieve"},
+		{Code: "*40", Action: "pickup_group"},
+		{Code: "*41", Action: "pickup_directed"},
 		{Code: "##", Action: "attended_transfer"},
 	}
 }
