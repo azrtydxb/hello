@@ -13029,6 +13029,7 @@
                     "attended_transfer",
                     "announcement",
                     "intercom",
+                    "ivr",
                     "call_waiting_on",
                     "call_waiting_off"
                   ]
