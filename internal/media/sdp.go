@@ -272,8 +272,10 @@ func codecAllowed(c Codec, allow []string) bool {
 // G.711 only, the codecs every carrier accepts.
 var DefaultTrunkCodecs = []string{"PCMU", "PCMA"}
 
-// PhoneCodecs are the codecs offered to and between phones.
-var PhoneCodecs = []string{"G722", "opus", "PCMU", "PCMA"}
+// PhoneCodecs are the codecs offered to and between phones, in Hello's
+// preference order (Filter keeps the sender's own order, so for a filter
+// this is the membership list).
+var PhoneCodecs = []string{"opus", "G722", "PCMU", "PCMA"}
 
 // Narrow returns the SDP reduced to the one codec with payload type pt, and
 // the telephone-event that goes with it. When pt is not listed the SDP's
@@ -333,13 +335,14 @@ func (a AudioSDP) Pick(prefs ...string) (AudioSDP, bool) {
 }
 
 // Terminated is the answer for media Hello ends itself (voicemail,
-// announcements, IVR, paging): G.722 when offered, otherwise the offer's
-// first G.711, and Opus only when nothing else is on offer.
+// announcements, IVR, conference): Opus when this build has it and the offer
+// lists it, then G.722, then the offer's first G.711. Paging keeps its own
+// G.722 preference (internal/sip/page.go).
 func (a AudioSDP) Terminated() (AudioSDP, bool) {
 	if !OpusAvailable {
 		return a.Pick("g722", "g711")
 	}
-	return a.Pick("g722", "g711", "opus")
+	return a.Pick("opus", "g722", "g711")
 }
 
 // AnswerFor builds the SDP body's codec list for the caller out of the

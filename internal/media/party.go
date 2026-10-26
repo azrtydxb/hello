@@ -119,7 +119,7 @@ type Party struct {
 // NewParty binds a socket for the participant's media from the port range
 // [minPort, maxPort] (0 for both lets the kernel choose, as the tests do),
 // negotiates the codec from offer the way every call Hello terminates does
-// (G.722 when offered, else G.711, Opus only when nothing else is on offer)
+// (Opus when offered and built in, else G.722, else G.711)
 // and returns the answer SDP advertising host.
 func NewParty(host string, minPort, maxPort int, offer []byte) ([]byte, *Party, error) {
 	ip := net.ParseIP(host)

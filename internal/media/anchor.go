@@ -37,8 +37,8 @@ func NewAnchor(host string, log *slog.Logger) *Anchor {
 // AdvertisedHost is the IPv4 the anchor writes into SDP answers.
 func (a *Anchor) AdvertisedHost() string { return a.host }
 
-// Answer parses the caller's SDP offer, picks the codec (G.722 when offered,
-// else the first G.711, else Opus), binds a UDP socket for the anchored
+// Answer parses the caller's SDP offer, picks the codec (Opus when offered and
+// built in, else G.722, else the first G.711), binds a UDP socket for the anchored
 // leg, starts the receive loop and returns the local answer SDP plus the
 // Session. The socket binds an explicit port (bindRTP); a bind
 // can still fail (exhaustion, a race with a just-closed socket), so the

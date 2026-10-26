@@ -73,15 +73,15 @@ func inOrder(text string, needles ...string) bool {
 	return true
 }
 
-// TestBuiltinCodecOrder fails if a vendor template stops putting G.722 first
-// (then Opus where the model has it, then PCMU and PCMA) with the vendor's
+// TestBuiltinCodecOrder fails if a vendor template stops putting Opus first
+// where the model has it (then G.722, PCMU and PCMA; G.722 first otherwise) with the vendor's
 // own keys.
 func TestBuiltinCodecOrder(t *testing.T) {
 	t.Run("yealink opus model", func(t *testing.T) {
 		out := renderCodecs(t, Yealink, "T54W")
 		for _, want := range []string{
-			"account.1.codec.g722.enable = 1\naccount.1.codec.g722.priority = 1\n",
-			"account.1.codec.opus.enable = 1\naccount.1.codec.opus.priority = 2\n",
+			"account.1.codec.opus.enable = 1\naccount.1.codec.opus.priority = 1\n",
+			"account.1.codec.g722.enable = 1\naccount.1.codec.g722.priority = 2\n",
 			"account.1.codec.pcmu.enable = 1\naccount.1.codec.pcmu.priority = 3\n",
 			"account.1.codec.pcma.enable = 1\naccount.1.codec.pcma.priority = 4\n",
 			"account.1.codec.g729.enable = 0\n",
@@ -94,6 +94,7 @@ func TestBuiltinCodecOrder(t *testing.T) {
 	t.Run("yealink without opus", func(t *testing.T) {
 		out := renderCodecs(t, Yealink, "T31P")
 		if !strings.Contains(out, "account.1.codec.opus.enable = 0\n") ||
+			!strings.Contains(out, "account.1.codec.g722.priority = 1\n") ||
 			!strings.Contains(out, "account.1.codec.pcmu.priority = 2\n") ||
 			!strings.Contains(out, "account.1.codec.pcma.priority = 3\n") ||
 			strings.Contains(out, "account.1.codec.opus.priority") {
@@ -102,8 +103,8 @@ func TestBuiltinCodecOrder(t *testing.T) {
 	})
 	t.Run("grandstream", func(t *testing.T) {
 		out := renderCodecs(t, Grandstream, "GRP2614")
-		// 9 G.722, 123 Opus, 0 PCMU, 8 PCMA, then the last codec repeated.
-		if !inOrder(out, "<P57>9</P57>", "<P58>123</P58>", "<P59>0</P59>", "<P60>8</P60>", "<P61>8</P61>", "<P62>8</P62>") {
+		// 123 Opus, 9 G.722, 0 PCMU, 8 PCMA, then the last codec repeated.
+		if !inOrder(out, "<P57>123</P57>", "<P58>9</P58>", "<P59>0</P59>", "<P60>8</P60>", "<P61>8</P61>", "<P62>8</P62>") {
 			t.Errorf("Grandstream choices:\n%s", out)
 		}
 		old := renderCodecs(t, Grandstream, "GXP1405")
@@ -112,7 +113,7 @@ func TestBuiltinCodecOrder(t *testing.T) {
 		}
 	})
 	t.Run("snom", func(t *testing.T) {
-		if out := renderCodecs(t, Snom, "D785"); !strings.Contains(out, `>g722,opus,pcmu,pcma,telephone-event</codec_priority_list>`) {
+		if out := renderCodecs(t, Snom, "D785"); !strings.Contains(out, `>opus,g722,pcmu,pcma,telephone-event</codec_priority_list>`) {
 			t.Errorf("Snom codec list:\n%s", out)
 		}
 		if out := renderCodecs(t, Snom, "D315"); !strings.Contains(out, `>g722,pcmu,pcma,telephone-event</codec_priority_list>`) {
@@ -120,7 +121,7 @@ func TestBuiltinCodecOrder(t *testing.T) {
 		}
 	})
 	t.Run("fanvil", func(t *testing.T) {
-		if out := renderCodecs(t, Fanvil, "X6U"); !strings.Contains(out, "SIP1 Voice Codec Map :G722,opus,G711U,G711A\n") {
+		if out := renderCodecs(t, Fanvil, "X6U"); !strings.Contains(out, "SIP1 Voice Codec Map :opus,G722,G711U,G711A\n") {
 			t.Errorf("Fanvil codec map:\n%s", out)
 		}
 		if out := renderCodecs(t, Fanvil, "X3S"); !strings.Contains(out, "SIP1 Voice Codec Map :G722,G711U,G711A\n") {
@@ -129,7 +130,7 @@ func TestBuiltinCodecOrder(t *testing.T) {
 	})
 	t.Run("poly", func(t *testing.T) {
 		out := renderCodecs(t, Poly, "VVX 450")
-		if !inOrder(out, `voice.codecPref.G722="1"`, `voice.codecPref.Opus="2"`, `voice.codecPref.G711_Mu="3"`, `voice.codecPref.G711_A="4"`) {
+		if !inOrder(out, `voice.codecPref.Opus="1"`, `voice.codecPref.G722="2"`, `voice.codecPref.G711_Mu="3"`, `voice.codecPref.G711_A="4"`) {
 			t.Errorf("Poly codec preferences:\n%s", out)
 		}
 		old := renderCodecs(t, Poly, "SoundPoint IP 331")
