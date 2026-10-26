@@ -737,3 +737,49 @@ of"), paging by code. A stored value the list no longer has stays selectable as
 is not a target of another. An empty target is refused with a kind-specific
 message. `conference` is also in the API enum and still has no chooser; not part
 of this change.
+
+## Prefer Opus over G.722 (2026-10-26) — decided: Opus first everywhere
+
+Opus is almost never used: provisioned phones list G.722 before Opus, and
+Hello-terminated media (MOH, IVR, voicemail) picks Opus only as a last resort.
+
+- Opus first everywhere: provisioning (Opus models) and Hello's own audio; paging stays G.722
+- Opus first for Hello's own audio only; provisioning order unchanged
+- Keep G.722 first (no change)
+
+## Build every unbuilt item from the 2026-10-26 audit (2026-10-26) — decided: build and track all
+
+An audit found specced work never built. The user: "you need to build, and
+track all items and partials you discovered". The tracker is
+`.procoder/tracking/unbuilt.md`; every row ends in a merged PR or an explicit
+hardware/external-account wait.
+
+Competitor gaps, all chosen (multi-select, every option picked):
+
+- Backup and restore, follow-me, blocklist, queue callback
+- 2FA, dial-by-name, voicemail groups, fax
+- Boss/secretary, multi-language prompts, codec in call history, phone LDAP
+  directory (this reverses the earlier "No LDAP" decision for phones)
+
+Voicemail language — decided: keep English default, add Dutch as a per-box option.
+
+- Dutch default
+- Keep English default (chosen)
+- English only
+
+Kamailio HA: option A vs B to be discussed before choosing; the user agreed
+phones may be re-pointed to the new address via check-sync and `.101`
+retired afterwards. VIP address chosen after the A/B discussion.
+
+## Kamailio HA option and VIP (2026-10-26) — decided: Option A, VIP 192.168.10.109
+
+After discussing A against B the user chose A ("A, choose any that is free"):
+two hostNetwork Kamailio (master-11, master-12) behind a VRRP VIP
+(keepalived or kube-vip, ARP mode). The VIP is 192.168.10.109: outside
+Cilium LB-IPAM's .120-.159, not a node (.101-.108, .245-.246), no ARP reply
+on 2026-10-26. 192.168.10.100 answers with master-12's MAC, so a VIP
+mechanism may already run for the API server; check it before adding one.
+Phones are re-pointed to the VIP via check-sync and .101 is retired after.
+
+- A: VRRP VIP, two hostNetwork Kamailio (chosen)
+- B: Cilium LB-IPAM LoadBalancer with L2 announcement
