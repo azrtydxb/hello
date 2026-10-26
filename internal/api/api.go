@@ -205,6 +205,10 @@ type Config struct {
 	// 503. PageTestWait bounds the wait for the result (0 means 20 s).
 	PageTests    PageTester
 	PageTestWait time.Duration
+	// Conferences is the conference room persistence and ConferenceLive the
+	// rooms' live state and control queue (spec S-34); nil answers 503.
+	Conferences    ConferenceStore
+	ConferenceLive ConferenceLive
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
 	// Objects is the voicemail audio store; nil makes the audio routes and

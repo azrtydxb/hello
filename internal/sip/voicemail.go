@@ -27,7 +27,7 @@ type VoicemailBox struct {
 	GreetingObject    string
 	UnreachableObject string
 	// BusyObject is the custom greeting for a busy extension and NameObject
-	// the owner's recorded name (migration 00034). An empty one means the
+	// the owner's recorded name (migration 00035). An empty one means the
 	// default spoken prompt.
 	BusyObject string
 	NameObject string

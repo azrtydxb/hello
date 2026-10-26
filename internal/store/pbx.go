@@ -26,7 +26,7 @@ type VoicemailBox struct {
 	GreetingObject    string `json:"greetingObject"`
 	UnreachableObject string `json:"unreachableObject"`
 	// BusyObject is the custom greeting for a busy extension and NameObject
-	// the owner's recorded name (migration 00034); "" means the default
+	// the owner's recorded name (migration 00035); "" means the default
 	// spoken prompt is used.
 	BusyObject string `json:"busyObject"`
 	NameObject string `json:"nameObject"`
@@ -667,12 +667,16 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 }
 
 // checkRingGroupIVR checks a ring group's IVR interplay inside the change's
-// transaction: a new name must not be an IVR menu's number, and an IVR
+// transaction: a new name must not be an IVR menu's or a conference room's
+// number, and an IVR
 // failure destination must name an existing menu. cur is the stored name ("" on
 // create).
 func checkRingGroupIVR(ctx context.Context, tx *sql.Tx, cur string, in RingGroupInput) error {
 	if in.Name != cur {
 		if err := refuseIVRNumber(ctx, tx, "name", in.Name); err != nil {
+			return err
+		}
+		if err := conferenceNumberTaken(ctx, tx, "name", in.Name); err != nil {
 			return err
 		}
 	}

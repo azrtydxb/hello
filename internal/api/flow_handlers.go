@@ -116,6 +116,11 @@ func (s *server) flowInput(r *http.Request, devices bool) (flow.Input, error) {
 	if in.PagingGroups, err = st.ListPagingGroups(ctx); err != nil {
 		return in, err
 	}
+	if s.Conferences != nil {
+		if in.Conferences, err = s.Conferences.ListConferences(ctx); err != nil {
+			return in, err
+		}
+	}
 	if in.Announcements, err = st.ListAnnouncements(ctx); err != nil {
 		return in, err
 	}
