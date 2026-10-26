@@ -19,6 +19,7 @@ import {
   errorMessage,
   fieldErrors,
   listAnnouncements,
+  listConferences,
   listExtensions,
   listInboundRoutes,
   listIvrMenus,
@@ -37,6 +38,7 @@ import {
   type IvrMenu,
   type OutboundRoute,
   type OutboundRouteFields,
+  type Conference,
   type PagingGroup,
   type RingGroup,
   type RouteDirection,
@@ -425,6 +427,7 @@ const DESTINATION_KIND: Record<
   voicemail: { label: "Voicemail", icon: "voicemail" },
   announcement: { label: "Announcement", icon: "megaphone" },
   paging: { label: "Paging group", icon: "megaphone" },
+  conference: { label: "Conference room", icon: "users" },
 };
 
 function Destination({
@@ -1201,7 +1204,9 @@ function validateInbound(d: InboundDraft): Record<string, string> {
   if (d.destination.trim() === "") {
     e.destination = isListed(d.destinationKind)
       ? `Choose a ${LISTED_NOUN[d.destinationKind]}.`
-      : "Enter where calls go.";
+      : d.destinationKind === "conference"
+        ? "Choose a conference room."
+        : "Enter where calls go.";
   }
   return e;
 }
@@ -1237,6 +1242,7 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   voicemail: "Voicemail box of",
   announcement: "Announcement",
   paging: "Paging group",
+  conference: "Conference room",
 };
 
 type ListedKind = "ring_group" | "voicemail" | "announcement" | "paging";
@@ -1248,6 +1254,19 @@ const LISTED_NOUN: Record<ListedKind, string> = {
   announcement: "announcement",
   paging: "paging group",
 };
+
+/** Conference rooms are chosen by room number, which the route stores. */
+function conferenceOptions(rooms: readonly Conference[], current: string) {
+  const head = { value: "", label: "Choose…" };
+  const list = rooms.map((c) => ({
+    value: c.number,
+    label: c.name ? `${c.number} · ${c.name}` : c.number,
+  }));
+  if (current !== "" && !list.some((o) => o.value === current)) {
+    return [head, { value: current, label: `${current} (not found)` }, ...list];
+  }
+  return [head, ...list];
+}
 
 /** Destination kinds whose target is chosen from a list of stored objects. */
 function isListed(k: InboundDraft["destinationKind"]): k is ListedKind {
@@ -1274,6 +1293,7 @@ function InboundDrawer({
   const [ringGroups, setRingGroups] = useState<RingGroup[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [pagingGroups, setPagingGroups] = useState<PagingGroup[]>([]);
+  const [rooms, setRooms] = useState<Conference[]>([]);
   useEffect(() => {
     const controller = new AbortController();
     // The pickers stay empty when a list fails; saving still works.
@@ -1288,6 +1308,9 @@ function InboundDrawer({
       .catch(() => undefined);
     listPagingGroups(controller.signal)
       .then(setPagingGroups)
+      .catch(() => undefined);
+    listConferences(controller.signal)
+      .then(setRooms)
       .catch(() => undefined);
     listTimeConditions(controller.signal)
       .then(setTimeConds)
@@ -1422,6 +1445,7 @@ function InboundDrawer({
               { value: "voicemail", label: "Voicemail" },
               { value: "announcement", label: "Announcement" },
               { value: "paging", label: "Paging group" },
+              { value: "conference", label: "Conference room" },
             ]}
             onChange={(e) =>
               // The target belongs to the kind: a name chosen for one kind
@@ -1482,6 +1506,15 @@ function InboundDrawer({
                   : []),
                 ...menus.map((m) => ({ value: m.name, label: m.name })),
               ]}
+              onChange={(e) => set("destination", e.target.value)}
+            />
+          ) : d.destinationKind === "conference" ? (
+            <Select
+              id={id("destination")}
+              label={DESTINATION_LABEL.conference}
+              value={d.destination}
+              error={v.errors.destination}
+              options={conferenceOptions(rooms, d.destination)}
               onChange={(e) => set("destination", e.target.value)}
             />
           ) : isListed(d.destinationKind) ? (

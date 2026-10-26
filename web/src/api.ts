@@ -371,7 +371,8 @@ export interface InboundRouteFields {
     | "ring_group"
     | "voicemail"
     | "announcement"
-    | "paging";
+    | "paging"
+    | "conference";
   destination: string;
   enabled: boolean;
   /** Music on hold class of the calls this route delivers; null = the default. */

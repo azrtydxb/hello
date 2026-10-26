@@ -695,5 +695,12 @@ and announcement by name, voicemail by extension number (labelled "Voicemail box
 of"), paging by code. A stored value the list no longer has stays selectable as
 "(not found)". Choosing a kind clears the target, since a name valid for one kind
 is not a target of another. An empty target is refused with a kind-specific
-message. `conference` is also in the API enum and still has no chooser; not part
-of this change.
+message. `conference` was left for a follow-up (see below).
+
+## Routes form: conference destination (2026-10-26)
+
+The inbound route drawer also offers `conference` ("Conference room"). The target
+is chosen from the rooms list (`GET /api/v1/conferences`) and stored as the room
+number, labelled "number · name"; a stored number the list no longer has stays
+selectable as "(not found)". An empty target is refused with "Choose a conference
+room." This closes the gap noted for flow canvas P1.
