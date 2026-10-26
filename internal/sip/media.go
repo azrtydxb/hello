@@ -240,6 +240,7 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	offered := off.Filter(nil)
 	relay.SetCodecs(legCaller, offered.Codecs, offered.DTMFPayloadType)
 	relay.SetTarget(legCaller, udpAddr(off.Address, off.Port))
+	allowSignalSource(relay, legCaller, c.inv.Source())
 	portB, err := relay.AddLeg(legCallee)
 	if err != nil {
 		relay.Close()
@@ -1055,4 +1056,15 @@ func (c *call) byeCallerRaw() {
 		return
 	}
 	c.s.m.response(res.StatusCode)
+}
+
+// allowSignalSource tells the relay which address a leg's signalling came
+// from. A phone behind NAT names a private address in its SDP, while its
+// media arrives from the public address its signalling came from; the relay
+// accepts a leg's media only from the SDP address or one vouched for here.
+func allowSignalSource(relay *media.Relay, leg, source string) {
+	host, _ := splitHostPort(source)
+	if ip := net.ParseIP(host); ip != nil {
+		relay.AllowSource(leg, ip)
+	}
 }
