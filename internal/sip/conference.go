@@ -834,6 +834,18 @@ func (s *Server) confLoop(ctx context.Context) {
 	}
 }
 
+// confHalt stops the mixers of the rooms this node mixes, once the server
+// has stopped: a stopped node sends no more conference audio. A mixer left
+// running would keep sending to its participants' RTP addresses, ports a
+// later relay or party (in tests, another node in the same process) may
+// bind. Leases and shared state stay as a crashed node leaves them: their
+// lapse is what moves a room to another node.
+func (s *Server) confHalt() {
+	for _, r := range s.conf.snapshotRooms() {
+		r.mix.Close()
+	}
+}
+
 // confOccupied reports whether a room has participants anywhere in the
 // cluster: here, or in the owner's published state.
 func (s *Server) confOccupied(number string) bool {

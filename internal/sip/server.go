@@ -112,6 +112,12 @@ type Config struct {
 	HATakeoverPoll    time.Duration
 	HATakeoverJitter  time.Duration
 
+	// PromptLanguage is the language of the spoken voicemail prompts ("en",
+	// "nl"; empty is English) and Timezone the IANA zone message times are
+	// spoken in (empty is UTC).
+	PromptLanguage string
+	Timezone       string
+
 	// PushRate is how many check-sync pushes the cluster claims per minute
 	// (HELLO_PROV_PUSH_RATE; zero means 20).
 	PushRate int
@@ -139,6 +145,10 @@ type Deps struct {
 	Voicemails VoicemailStore
 	// Objects is the voicemail audio store (MinIO); nil disables voicemail.
 	Objects ObjectStore
+	// Speech speaks voicemail prompts in the configured text-to-speech voice
+	// (ttscache.Cache); nil means voicemail uses its tones and recordings
+	// only.
+	Speech Speaker
 	// MailboxEvents carries mailbox changes made by the control plane so
 	// MWI NOTIFYs go out at once; nil leaves only the safety-net re-read.
 	MailboxEvents MailboxEvents
@@ -522,6 +532,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.serving.Store(false)
 	stop()
 	close(s.done)
+	s.confHalt()
 	_ = ua.Close()
 	s.bgMu.Lock()
 	s.bgClosed = true

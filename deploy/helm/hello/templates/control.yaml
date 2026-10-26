@@ -100,6 +100,8 @@ spec:
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_BASE_URL" "key" "base-url" "optional" true) | nindent 12 }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_MODEL" "key" "model" "optional" true) | nindent 12 }}
             {{- include "hello.secretEnv" (dict "root" . "env" "HELLO_AI_API_KEY" "key" "api-key" "optional" true) | nindent 12 }}
+            - name: HELLO_VOICEMAIL_LANGUAGE
+              value: {{ .Values.global.voicemailLanguage | default "en" | quote }}
             {{- with .Values.global.publicUrl }}
             - name: HELLO_PUBLIC_URL
               value: {{ . | quote }}

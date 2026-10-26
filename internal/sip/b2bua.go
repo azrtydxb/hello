@@ -100,7 +100,10 @@ type call struct {
 	qmu       sync.Mutex
 	quality   *media.RelayStats
 	vmSession media.Session
-	held      bool
+	// vmTarget is the extension a *97 call retrieves (the caller's own, or
+	// the one dialled after the code).
+	vmTarget string
+	held     bool
 
 	// Music on hold (S-33), guarded by mu: moh plays to the held party,
 	// ringMOH to a caller in place of ringback; the route and group carry

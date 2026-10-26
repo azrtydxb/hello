@@ -3186,7 +3186,7 @@
       "put": {
         "operationId": "updateExtensionVoicemail",
         "summary": "Change a voicemail box",
-        "description": "Changes an extension's voicemail box: PIN, notification email and, through the multipart form, greetings. JSON with password and/or email, or multipart/form-data with the same fields plus optional `greeting` and `unreachable` WAV files (PCM, 5 MiB max); greetings land in the hello-voicemail bucket and the previous object is removed. At least one field is required. The password is stored as a hash and never returned.",
+        "description": "Changes an extension's voicemail box: PIN, notification email and, through the multipart form, greetings. JSON with password and/or email, or multipart/form-data with the same fields plus optional `greeting`, `busy`, `unreachable` and `name` WAV files (PCM, 5 MiB max); they land in the hello-voicemail bucket and the previous object is removed. A slot with no audio of its own is spoken in the configured AI voice. At least one field is required. The password is stored as a hash and never returned.",
         "tags": ["voicemail"],
         "parameters": [
           {
@@ -3220,7 +3220,17 @@
                   "greeting": {
                     "type": "string",
                     "format": "binary",
-                    "description": "The busy/no-answer greeting, a PCM WAV of at most 5 MiB."
+                    "description": "The general (unavailable, no-answer, do-not-disturb) greeting, a PCM WAV of at most 5 MiB."
+                  },
+                  "busy": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The greeting played when the extension is busy, a PCM WAV of at most 5 MiB; without one callers hear the general greeting, or the default spoken one."
+                  },
+                  "name": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The owner's name, a PCM WAV of at most 5 MiB, played inside the default spoken greeting."
                   },
                   "unreachable": {
                     "type": "string",
@@ -3972,8 +3982,12 @@
                 "properties": {
                   "slot": {
                     "type": "string",
-                    "enum": ["greeting", "unreachable"],
-                    "description": "Which audio to set."
+                    "enum": [
+                      "greeting",
+                      "busy",
+                      "unreachable"
+                    ],
+                    "description": "Which audio to set: the general (unavailable) greeting, the busy greeting or the unreachable greeting."
                   },
                   "source": {
                     "type": "string",
@@ -4047,6 +4061,142 @@
         "x-hello-mcp": {
           "exclude": "spends text-to-speech credits; started from the console"
         }
+      }
+    },
+    "/api/v1/extensions/{id}/voicemail/greeting/preview": {
+      "post": {
+        "operationId": "previewVoicemailGreeting",
+        "summary": "Hear the default spoken greeting of a voicemail box",
+        "description": "Speaks the default greeting of the extension's voicemail box in the configured text-to-speech voice and returns it as WAV audio: \"<name or extension> is not available, please leave a message after the tone\", or its busy or unreachable wording. This is what callers hear when the box has no recording of its own for that variant. The audio is stored in the shared prompt cache, so the first call after a voice change spends text-to-speech credits and later ones do not. A box's own recorded name is not part of the preview.",
+        "tags": [
+          "voicemail"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "slot": {
+                    "type": "string",
+                    "enum": [
+                      "greeting",
+                      "busy",
+                      "unreachable"
+                    ],
+                    "description": "Which variant to hear; greeting (the default) is the unavailable greeting."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The greeting as 16-bit mono WAV audio at the voice's own sample rate",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/Upstream"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "spends text-to-speech credits and returns binary audio; started from the console"
+        }
+      }
+    },
+    "/api/v1/extensions/{id}/voicemail/greeting/{slot}": {
+      "delete": {
+        "operationId": "revertVoicemailGreeting",
+        "summary": "Revert a voicemail greeting to the default",
+        "description": "Removes the box's own audio in a slot (an upload, a recording made from the phone, or a generated greeting) so callers hear the default spoken prompt again. Reverting a slot that already uses the default succeeds and changes nothing.",
+        "tags": [
+          "voicemail"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "slot",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "greeting",
+                "busy",
+                "unreachable",
+                "name"
+              ]
+            },
+            "description": "Which audio to remove: the general (unavailable) greeting, the busy greeting, the unreachable greeting or the owner's recorded name."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The box",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailBox"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
       }
     },
     "/api/v1/announcements": {
@@ -12879,9 +13029,12 @@
           "email",
           "greetingObject",
           "unreachableObject",
+          "busyObject",
+          "nameObject",
           "createdAt",
           "updatedAt",
-          "emailDelivery"
+          "emailDelivery",
+          "aiVoice"
         ],
         "properties": {
           "id": {
@@ -12908,10 +13061,21 @@
             "type": "string",
             "description": "Object key of the unreachable greeting; empty for none."
           },
+          "busyObject": {
+            "type": "string",
+            "description": "Object key of the busy greeting; empty for none (callers hear the general greeting, or the default spoken one)."
+          },
+          "nameObject": {
+            "type": "string",
+            "description": "Object key of the owner's recorded name, played inside the default spoken greeting; empty for none (the display name is spoken)."
+          },
           "greetingTts": {
             "$ref": "#/components/schemas/TtsRecord"
           },
           "unreachableTts": {
+            "$ref": "#/components/schemas/TtsRecord"
+          },
+          "busyTts": {
             "$ref": "#/components/schemas/TtsRecord"
           },
           "createdAt": {
@@ -12925,13 +13089,17 @@
           "emailDelivery": {
             "type": "boolean",
             "description": "Whether this deployment can email voicemail (SMTP is configured). When false, messages are not emailed whatever the box's address."
+          },
+          "aiVoice": {
+            "type": "boolean",
+            "description": "Whether a text-to-speech key is configured. A greeting slot with no audio of its own is then spoken in the configured AI voice (Default (AI voice)); without it callers hear no greeting before the tone."
           }
         }
       },
       "VoicemailBoxUpdate": {
         "type": "object",
         "additionalProperties": false,
-        "description": "JSON body of PUT /api/v1/extensions/{id}/voicemail; multipart/form-data carries the same fields plus greeting and unreachable files.",
+        "description": "JSON body of PUT /api/v1/extensions/{id}/voicemail; multipart/form-data carries the same fields plus greeting, busy, unreachable and name files.",
         "properties": {
           "password": {
             "type": "string",
@@ -13010,6 +13178,10 @@
           "caller": {
             "type": "string",
             "description": "The caller's number."
+          },
+          "callerName": {
+            "type": "string",
+            "description": "The caller-ID display name the call carried; empty when it carried none."
           },
           "durationMs": {
             "type": "integer",

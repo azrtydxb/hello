@@ -53,6 +53,9 @@ at any rate from 8 to 48 kHz; the rate a file has is resampled to the session's,
 so existing 8 kHz assets keep working and voicemail left over a G.722 call is
 stored at 16 kHz. Sessions (voicemail, IVR) run at 16 kHz on Opus; announcements,
 the recording notice and music on hold are played to Opus legs at 48 kHz.
+Spoken voicemail prompts are cached WAVs at the session's rate
+(`tts/hd/<sha256>.wav`, stored at the voice's own rate in the voicemail bucket); see
+[voicemail.md](voicemail.md) for the key layout.
 
 **Recording** decodes G.711, G.722 and Opus to PCM and mixes the two
 directions into one WAV at the higher of their sample rates; any other

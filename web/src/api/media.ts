@@ -6,6 +6,7 @@ import {
   list,
   recordingAudioPath,
   request,
+  responseJson,
   type Announcement,
   type Id,
   type Recording,
@@ -40,15 +41,90 @@ export interface VoicemailBoxDetail {
   greetingObject?: string;
   /** MinIO key of the unreachable greeting; "" when none. */
   unreachableObject?: string;
+  /** MinIO key of the busy greeting; "" when none. */
+  busyObject?: string;
+  /** MinIO key of the owner's recorded name; "" when none. */
+  nameObject?: string;
   createdAt: string;
   updatedAt: string;
   /** How the greeting was generated from text; null for uploaded audio. */
   greetingTts?: TtsRecord | null;
   /** How the unreachable greeting was generated; null for uploaded audio. */
   unreachableTts?: TtsRecord | null;
+  /** How the busy greeting was generated; null for uploaded audio. */
+  busyTts?: TtsRecord | null;
   /** Whether this deployment can email voicemail (SMTP is configured). */
   emailDelivery?: boolean;
+  /**
+   * Whether a text-to-speech key is set: a greeting slot with no audio of
+   * its own is then spoken in the AI voice ("Default (AI voice)").
+   */
+  aiVoice?: boolean;
 }
+
+/** The audio slots of a box. */
+export type GreetingSlot = "greeting" | "busy" | "unreachable" | "name";
+
+/** The slots whose default is a spoken greeting that can be previewed. */
+export type PreviewSlot = Exclude<GreetingSlot, "name">;
+
+/** Whether a slot holds the box's own audio (an upload, recording or text). */
+export function isCustomGreeting(
+  box: VoicemailBoxDetail,
+  slot: GreetingSlot,
+): boolean {
+  const object = {
+    greeting: box.greetingObject,
+    busy: box.busyObject,
+    unreachable: box.unreachableObject,
+    name: box.nameObject,
+  }[slot];
+  return Boolean(object);
+}
+
+/** The status badge text of a slot: Custom, or what callers hear instead. */
+export function greetingStatus(
+  box: VoicemailBoxDetail,
+  slot: GreetingSlot,
+): "Custom" | "Default (AI voice)" | "Default (no voice set)" {
+  if (isCustomGreeting(box, slot)) return "Custom";
+  return box.aiVoice === false ? "Default (no voice set)" : "Default (AI voice)";
+}
+
+/**
+ * POST /api/v1/extensions/{id}/voicemail/greeting/preview: the default
+ * spoken greeting of a variant, as WAV audio. The first request after a
+ * voice change generates it (and spends credits); later ones are stored.
+ */
+export async function previewDefaultGreeting(
+  extensionId: Id,
+  slot: PreviewSlot,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const path = `/api/v1/extensions/${seg(extensionId)}/voicemail/greeting/preview`;
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { Accept: "audio/wav", "Content-Type": "application/json" },
+    body: JSON.stringify({ slot }),
+    credentials: "same-origin",
+    signal,
+  });
+  if (!res.ok) {
+    // responseJson throws the API error envelope as an ApiError.
+    await responseJson<unknown>(res, "POST", path);
+  }
+  return res.blob();
+}
+
+/**
+ * DELETE /api/v1/extensions/{id}/voicemail/greeting/{slot}: drop the box's
+ * own audio so callers hear the default spoken prompt again.
+ */
+export const revertGreeting = (extensionId: Id, slot: GreetingSlot) =>
+  request<VoicemailBoxDetail>(
+    "DELETE",
+    `/api/v1/extensions/${seg(extensionId)}/voicemail/greeting/${slot}`,
+  );
 
 /** GET /api/v1/extensions/{id}/voicemail. */
 export const getVoicemailBoxDetail = (extensionId: Id, signal?: AbortSignal) =>
@@ -65,7 +141,8 @@ export function greetingLabel(box: VoicemailBoxDetail): string {
   if (greeting && unreachable) return "Greeting + unreachable uploaded";
   if (greeting) return "Greeting uploaded";
   if (unreachable) return "Unreachable greeting uploaded";
-  return "Default greeting";
+  if (box.busyObject) return "Busy greeting uploaded";
+  return box.aiVoice ? "Default greeting (AI voice)" : "Default greeting";
 }
 
 // --- recordings ---------------------------------------------------------------

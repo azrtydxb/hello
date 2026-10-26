@@ -796,7 +796,7 @@ func (c *call) ivrVoicemailExit(ctx context.Context, snap *snapshot.Snapshot, ex
 	c.vmExt = ext
 	c.haPhase, c.haDetail = "", "" // a voicemail call after the menu is not replayed by a taker
 	c.mu.Unlock()
-	box := c.boxDetails()
+	box := c.boxDetails(ext)
 	c.vmLeave(ctx, &relaySession{c: c, relay: relay}, box, reason)
 	c.ivrHangup()
 	return "", true

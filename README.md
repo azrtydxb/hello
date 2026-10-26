@@ -16,7 +16,7 @@ endpoints; anchoring arrives in Phase 5. See [docs/phones.md](docs/phones.md)
 for phones, [docs/provisioning.md](docs/provisioning.md) for configuring
 them automatically, [docs/trunks.md](docs/trunks.md) for trunks,
 [docs/voice-prompts.md](docs/voice-prompts.md) for generating announcements and
-voicemail greetings from text, [docs/ai-access.md](docs/ai-access.md) for connecting AI agents over MCP and
+voicemail greetings from text, [docs/voicemail.md](docs/voicemail.md) for the spoken voicemail and `*97` menus, [docs/ai-access.md](docs/ai-access.md) for connecting AI agents over MCP and
 [docs/ai-agent.md](docs/ai-agent.md) for the in-product AI agent (assistant,
 findings and proposals). For the IVR / auto-attendant see
 [docs/ivr.md](docs/ivr.md). To run Hello on Kubernetes (Helm chart, SIP
@@ -139,6 +139,8 @@ naming the key, if one is missing or malformed.
 | `HELLO_PROV_AUTO_RESYNC`                          | control | `false`; push a resync to a phone 30 s after a change to what its configuration renders from                                  |
 | `HELLO_DIAL_INTL_PREFIX` / `_COUNTRY_CODE`        | control | `00` / unset; digits standing for `+`, and the country code a leading `0` belongs to (lookup keys)                            |
 | `HELLO_PROV_TIMEZONE` / `_NTP`                    | control | `UTC` / `pool.ntp.org`                                                                                                        |
+| `HELLO_VOICEMAIL_LANGUAGE`                        | both    | `en`; language of the spoken voicemail prompts (`en`, `nl`), docs/voicemail.md                                                |
+| `HELLO_TIMEZONE`                                  | sip     | `HELLO_PROV_TIMEZONE`, else `UTC`; the zone message times are spoken in                                                       |
 | `HELLO_PROV_AUDIT_RETENTION`                      | control | `90d`; how long the fetch audit is kept                                                                                       |
 | `HELLO_PROV_RATE_*`                               | control | `IP_PER_MIN` `60`, `DENIED_PER_10MIN` `10`, `PHONE_PER_HOUR` `30`                                                             |
 | `HELLO_PROV_SNOM_*` etc.                          | control | unset; vendor redirect credentials (`_SNOM_`, `_YEALINK_`, `_YMCS_`, `_GDMS_`), see docs/provisioning.md                      |

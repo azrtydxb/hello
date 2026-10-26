@@ -78,6 +78,9 @@ type Control struct {
 	// Dial is the numbering context of the address books (HELLO_DIAL_*,
 	// spec P-8): how a stored or dialled number reduces to a lookup key.
 	Dial phonebook.Dialing
+	// VoicePromptLanguage (HELLO_VOICEMAIL_LANGUAGE, default en) is the
+	// language of the spoken voicemail prompts; Timezone words message times.
+	VoicePromptLanguage string
 	// AI is external AI access: OAuth and MCP (spec ai-external-access).
 	AI AI
 	// AIAgent is the in-product AI agent (HELLO_AI_*, spec ai-agent).
@@ -271,8 +274,16 @@ type SIP struct {
 	// PushRate (HELLO_PROV_PUSH_RATE, default 20) is how many check-sync
 	// pushes the cluster sends per minute.
 	PushRate int
+	// VoicePromptLanguage (HELLO_VOICEMAIL_LANGUAGE, default en) is the
+	// language of the spoken voicemail prompts. Timezone (HELLO_TIMEZONE,
+	// else HELLO_PROV_TIMEZONE, else UTC) is the zone message times are
+	// spoken in. Dial (HELLO_DIAL_*) reduces a caller's number to the lookup
+	// key of the address books, so a message can name a known contact.
+	VoicePromptLanguage string
+	Timezone            string
+	Dial                phonebook.Dialing
 	// SecretKey (HELLO_SECRET_KEY) opens trunk passwords sealed by
-	// hello-control.
+	// hello-control and the text-to-speech key.
 	SecretKey      string
 	MinioEndpoint  string
 	MinioAccessKey string
@@ -389,6 +400,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	}
 	c.Prov = r.prov()
 	c.Dial = r.dialing()
+	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
 	c.AI = r.ai()
 	c.AIAgent = r.aiAgent()
 	return c, r.err()
@@ -722,6 +734,12 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 		MaxCallDuration:    r.duration("HELLO_SIP_MAX_CALL_DURATION", 4*time.Hour),
 		PushRate:           r.positiveInt("HELLO_PROV_PUSH_RATE", 20),
 	}
+	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
+	c.Timezone = r.optional("HELLO_TIMEZONE", r.optional("HELLO_PROV_TIMEZONE", "UTC"))
+	if _, err := time.LoadLocation(c.Timezone); err != nil {
+		r.fail("HELLO_TIMEZONE", errors.New("must be a time zone name such as Europe/Brussels"))
+	}
+	c.Dial = r.dialing()
 	c.PageMaxDuration = time.Duration(r.positiveInt("HELLO_PAGE_MAX_SECONDS", 120)) * time.Second
 	c.PageConcurrent = r.positiveInt("HELLO_PAGE_CONCURRENT", 5)
 	c.PageFanout = r.positiveInt("HELLO_PAGE_FANOUT", 200)

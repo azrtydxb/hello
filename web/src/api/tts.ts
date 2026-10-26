@@ -122,7 +122,7 @@ export interface TtsRecord {
 
 /** PUT /api/v1/extensions/{id}/voicemail/greeting. */
 export type GreetingRequest = {
-  slot: "greeting" | "unreachable";
+  slot: "greeting" | "busy" | "unreachable";
 } & (
   | { source: "announcement"; announcementId: Id }
   | ({ source: "text" } & PromptInput)
