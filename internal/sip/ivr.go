@@ -166,7 +166,7 @@ func (c *call) soloAnswer(phase, detail, what string) bool {
 	}
 	// No callee: the anchor answers with the best codec it shares with the
 	// caller, as an announcement destination does.
-	body := c.anchoredAnswerA(off, media.AudioSDP{})
+	body := c.anchoredAnswerAs(what, off, media.AudioSDP{})
 	c.mu.Lock()
 	cancelled := c.isCancelled
 	aborted := closed(c.aborted)
@@ -1032,6 +1032,9 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 	if relay := c.anchorRelay(); relay != nil && bres != nil && len(bres.Body()) > 0 {
 		if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
 			relay.SetTarget(legCallee, udpAddr(ans.Address, ans.Port))
+			// The caller keeps the codec the application answered with; the
+			// destination answered the offer it was given.
+			c.logCodec("bridge", legCallee, "anchored", "", ans)
 		}
 	}
 	c.mu.Lock()

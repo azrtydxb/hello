@@ -11,15 +11,16 @@
     <P34>{{xml .Line.Password}}</P34>
     <P3>{{xml .Line.DisplayName}}</P3>
     <P130>0</P130>
-{{- /* HD voice: Preferred Vocoder choices 1 to 6 of account 1 (P57, P58, P59, P60, P61, P62; Grandstream config templates, "Preferred Vocoder"): 0 PCMU, 8 PCMA, 9 G.722, 123 Opus (the models that have it; payload type P2385 stays at its default 123). Order G.722, Opus, PCMU, PCMA; the choices after the last codec repeat it, which the phone ignores, so no other codec is offered. Another account of a multi-account model has its own choice keys (account 2 P451 to P456, account 3 P551 to P556, and so on in steps of 100); Hello provisions account 1. Unverified on hardware (verify). */}}
-    <P57>9</P57>
+{{- /* HD voice: Preferred Vocoder choices 1 to 6 of account 1 (P57, P58, P59, P60, P61, P62; Grandstream config templates, "Preferred Vocoder"): 0 PCMU, 8 PCMA, 9 G.722, 123 Opus (the models that have it; payload type P2385 stays at its default 123). Order Opus (the models that have it), G.722, PCMU, PCMA; the choices after the last codec repeat it, which the phone ignores, so no other codec is offered. Another account of a multi-account model has its own choice keys (account 2 P451 to P456, account 3 P551 to P556, and so on in steps of 100); Hello provisions account 1. Unverified on hardware (verify). */}}
 {{- if .Codecs.Opus}}
-    <P58>123</P58>
+    <P57>123</P57>
+    <P58>9</P58>
     <P59>0</P59>
     <P60>8</P60>
     <P61>8</P61>
     <P62>8</P62>
 {{- else}}
+    <P57>9</P57>
     <P58>0</P58>
     <P59>8</P59>
     <P60>8</P60>

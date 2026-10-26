@@ -377,9 +377,10 @@ keeps its unlimited attendant list.
 
 ### HD voice codec order
 
-Every built-in template puts G.722 first, then Opus on the models that have
-it, then PCMU and PCMA, and leaves the other codecs (G.729, G.726, G.723,
-iLBC) off. Hello offers phones G.722, Opus, PCMU and PCMA only, so two phones
+Every built-in template puts Opus first on the models that have it, then
+G.722, PCMU and PCMA (G.722 first on models without Opus), and leaves the
+other codecs (G.729, G.726, G.723, iLBC) off. Hello offers phones Opus,
+G.722, PCMU and PCMA only, so two phones that both do Opus talk Opus, two
 that both do G.722 talk wideband and anything else falls back to G.711 (see
 [Media anchoring](media.md#codecs-hd-voice)). The keys, for account 1 (the
 account Hello provisions); another account of a multi-account model takes
@@ -387,11 +388,11 @@ the same keys with its own number:
 
 | Vendor      | Keys                                                                                                                                                                                                                |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.N.codec.g722.enable` and `.priority = 1`, then `opus`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0`                |
-| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 9 (G.722), 123 (Opus, models that have it), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...) |
-| Snom        | `codec_priority_list idx="N"` = `g722,opus,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                              |
-| Fanvil      | `SIPN Voice Codec Map` = `G722,opus,G711U,G711A`                                                                                                                                                                    |
-| Poly        | `voice.codecPref.G722="1"`, `.Opus="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                    |
+| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0`                |
+| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...) |
+| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                              |
+| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                    |
+| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                    |
 
 Opus is listed only for models known to support it (`internal/prov/codecs.go`);
 an unknown model gets G.722, PCMU and PCMA. The keys are from the vendors'
