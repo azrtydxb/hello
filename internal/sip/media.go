@@ -1046,7 +1046,7 @@ func (c *call) byeCallerRaw() {
 	req.SetTransport("UDP")
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	res, err := c.s.client.Do(ctx, req)
+	res, err := c.s.do(ctx, req)
 	if err != nil {
 		c.s.log.Debug("announcement BYE failed", "error", err)
 		return

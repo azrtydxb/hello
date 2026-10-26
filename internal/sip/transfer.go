@@ -434,7 +434,7 @@ func (c *call) notifyReferDialog(inv *sip.Request, res *sip.Response, fragment s
 	req.SetTransport("UDP")
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	r, err := s.client.Do(ctx, req)
+	r, err := s.do(ctx, req)
 	if err != nil {
 		s.log.Debug("refer NOTIFY failed", "error", err)
 		return
@@ -629,7 +629,7 @@ func reinvite(dcs *sipgo.DialogClientSession, body []byte) ([]byte, bool) {
 	req.SetTransport("UDP")
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	res, err := dcs.Do(ctx, req)
+	res, err := requireResponse(dcs.Do(ctx, req))
 	if err != nil || res == nil || !res.IsSuccess() {
 		return nil, false
 	}
@@ -660,7 +660,7 @@ func reinviteA(dss *sipgo.DialogServerSession, body []byte) ([]byte, bool) {
 	req.SetTransport("UDP")
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	res, err := dss.Do(ctx, req)
+	res, err := requireResponse(dss.Do(ctx, req))
 	if err != nil || res == nil || !res.IsSuccess() {
 		return nil, false
 	}
@@ -710,7 +710,7 @@ func byeDialog(s *Server, dss *sipgo.DialogServerSession) {
 	req.SetTransport("UDP")
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	res, err := s.client.Do(ctx, req)
+	res, err := s.do(ctx, req)
 	if err != nil {
 		s.log.Debug("dialog BYE failed", "error", err)
 		return
