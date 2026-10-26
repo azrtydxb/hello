@@ -199,6 +199,10 @@ type Server struct {
 	// answerHook, when set (tests only), runs as a call's winning fork is
 	// connected, before the call is marked connected.
 	answerHook atomic.Pointer[func()]
+	// callerByeHook, when set (tests only), runs after a caller's BYE has
+	// been accepted on the dialog and before the call is hung up, so a
+	// test can hold the BYE/ACK race open.
+	callerByeHook atomic.Pointer[func()]
 	// abortHook, when set (tests only), runs inside abort after it has
 	// taken the setup's ownership before it signals the setup goroutine, so
 	// a test can inject the fork failure that races the abort.
