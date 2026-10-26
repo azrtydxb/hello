@@ -320,12 +320,6 @@ func recordWord(v string) (on, ok bool) {
 	return false, false
 }
 
-// handleMessage answers an inbound MESSAGE 200; the MWI MESSAGEs are
-// outbound only.
-func (s *Server) handleMessage(req *sip.Request, tx sip.ServerTransaction) {
-	s.respond(tx, req, sip.StatusOK, "OK")
-}
-
 // isDTMFInfo reports whether an INFO Content-Type carries a DTMF digit:
 // application/dtmf-relay or application/dtmf.
 func isDTMFInfo(contentType string) bool {

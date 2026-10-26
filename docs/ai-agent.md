@@ -123,6 +123,7 @@ Only these operations may appear in a proposal; anything else, every admin-scope
 | `deleteInboundRoute`  | `DELETE /api/v1/routes/inbound/{id}`  | operator | delete (marked, needs confirmation) |
 | `updateTrunk`         | `PATCH /api/v1/trunks/{id}`           | operator | change                              |
 | `updatePhone`         | `PATCH /api/v1/phones/{id}`           | operator | change                              |
+| `sendMessage`         | `POST /api/v1/messages`               | operator | change                              |
 
 ## Detectors and findings
 

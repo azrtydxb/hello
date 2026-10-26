@@ -8,7 +8,7 @@ import (
 	"github.com/azrtydxb/hello/internal/timecond"
 )
 
-// TimeConditions (migration 00037) are routable objects that pick a
+// TimeConditions (migration 00038) are routable objects that pick a
 // destination from a schedule and its calendars. The snapshot carries each
 // with its manual override, so the override reaches every node with the
 // revision that changed it and survives a restart or failover.

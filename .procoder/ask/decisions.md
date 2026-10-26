@@ -595,3 +595,11 @@ latch retargeted to the foreign stream. Serve now closes the mixers of the
 rooms this node holds once it stops (`confHalt`). Leases and shared state
 stay as a crashed node leaves them, because their lapse is what re-homes a
 room. `TestConferenceHaltOnStop` fails without the call.
+
+## SIP messages migration at 00037 (2026-10-26)
+
+Conference rooms (00034), feature key sync (00035) and voicemail voice
+(00036) merged first, so the SIP messaging migration is 00037; the migrate
+rollback counts follow it. The Yealink template keeps both the text-message
+key and the feature-key-sync keys, and hello-sip's deps carry both the
+message queue and the voicemail dial/speech wiring.

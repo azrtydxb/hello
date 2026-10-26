@@ -24,14 +24,30 @@ type pushQueue struct {
 // Watch listens until ctx ends, reconnecting with backoff. Each (re)connect
 // wakes once, so pushes queued while disconnected are claimed.
 func (q pushQueue) Watch(ctx context.Context, wake func()) {
+	listen(ctx, q.cfg, q.log, listenPush, "check-sync", wake)
+}
+
+// The LISTEN statements, built at compile time from the store package's
+// channel names: LISTEN takes no parameters, so the statement is a constant
+// rather than text assembled at run time.
+const (
+	listenPush    = "LISTEN " + store.PushChannel
+	listenMessage = "LISTEN " + store.MessageChannel
+)
+
+// listen is a PostgreSQL LISTEN loop on a dedicated connection: it runs
+// statement (listenPush or listenMessage), then calls wake after every
+// (re)connect and for every notification until ctx ends, reconnecting with
+// backoff.
+func listen(ctx context.Context, cfg *pgx.ConnConfig, log *slog.Logger, statement, what string, wake func()) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		start := time.Now()
-		err := q.session(ctx, wake)
+		err := listenSession(ctx, cfg, statement, wake)
 		if ctx.Err() != nil {
 			return
 		}
-		q.log.Warn("check-sync listener lost; reconnecting", "error", err)
+		log.Warn(what+" listener lost; reconnecting", "error", err)
 		if time.Since(start) > time.Minute {
 			backoff = time.Second
 		}
@@ -44,8 +60,8 @@ func (q pushQueue) Watch(ctx context.Context, wake func()) {
 	}
 }
 
-func (q pushQueue) session(ctx context.Context, wake func()) error {
-	conn, err := pgx.ConnectConfig(ctx, q.cfg)
+func listenSession(ctx context.Context, cfg *pgx.ConnConfig, statement string, wake func()) error {
+	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -54,8 +70,7 @@ func (q pushQueue) session(ctx context.Context, wake func()) error {
 		defer cancel()
 		_ = conn.Close(cctx)
 	}()
-	// The channel name is store.PushChannel; LISTEN takes no parameters.
-	if _, err := conn.Exec(ctx, "LISTEN hello_checksync"); err != nil {
+	if _, err := conn.Exec(ctx, statement); err != nil {
 		return err
 	}
 	wake()

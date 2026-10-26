@@ -108,7 +108,7 @@ CREATE UNIQUE INDEX time_conditions_toggle_number ON time_conditions (toggle_num
 -- failover and inbound routes. Each list is read from the live constraint,
 -- so values other migrations added (applied in either order) are kept. The
 -- helper is dropped again so a later migration on the same session can
--- define its own. The feature-code actions follow in 00038.
+-- define its own. The feature-code actions follow in 00039.
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION pg_temp.hello_check_values(tbl regclass, cname text, add_vals text[], drop_vals text[])
 RETURNS void LANGUAGE plpgsql AS $fn$

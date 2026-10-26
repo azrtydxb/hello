@@ -89,6 +89,8 @@ interface TrunkDraft {
   defaultCallerId: string;
   enabled: boolean;
   destinations: DestinationDraft[];
+  /** SMS over SIP (SIP MESSAGE) through this trunk. */
+  messaging: boolean;
   /** What the trunk may dial in the extension namespace. */
   dialingMode: DialingMode;
   /** The patterns, one per line; used only in mode "patterns". */
@@ -101,10 +103,26 @@ interface TrunkDraft {
 
 /** The codecs a trunk may be offered, in the order they are stored. */
 const TRUNK_CODECS: { name: string; label: string; hint: string }[] = [
-  { name: "PCMU", label: "PCMU (G.711 u-law)", hint: "Narrowband; every carrier." },
-  { name: "PCMA", label: "PCMA (G.711 A-law)", hint: "Narrowband; every carrier." },
-  { name: "G722", label: "G.722", hint: "HD voice; only if the carrier supports it." },
-  { name: "opus", label: "Opus", hint: "HD voice; rarely offered by carriers." },
+  {
+    name: "PCMU",
+    label: "PCMU (G.711 u-law)",
+    hint: "Narrowband; every carrier.",
+  },
+  {
+    name: "PCMA",
+    label: "PCMA (G.711 A-law)",
+    hint: "Narrowband; every carrier.",
+  },
+  {
+    name: "G722",
+    label: "G.722",
+    hint: "HD voice; only if the carrier supports it.",
+  },
+  {
+    name: "opus",
+    label: "Opus",
+    hint: "HD voice; rarely offered by carriers.",
+  },
 ];
 
 const DEFAULT_TRUNK_CODECS = ["PCMU", "PCMA"];
@@ -129,6 +147,7 @@ const NEW_TRUNK: TrunkDraft = {
   defaultCallerId: "",
   enabled: true,
   destinations: [NEW_DESTINATION],
+  messaging: false,
   dialingMode: "off",
   dialingPatterns: "",
   dialingConfirm: false,
@@ -155,6 +174,7 @@ function toDraft(t: Trunk): TrunkDraft {
       priority: String(d.priority),
       weight: String(d.weight),
     })),
+    messaging: t.messaging === true,
     dialingMode:
       dialing?.mode === "patterns" || dialing?.mode === "all"
         ? dialing.mode
@@ -245,6 +265,7 @@ function toInput(d: TrunkDraft): TrunkInput {
       weight: Number(x.weight),
     })),
     internalDialing: toDialingInput(d),
+    messaging: d.messaging,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
   };
 }
@@ -285,6 +306,7 @@ function knownKeys(d: TrunkDraft): string[] {
     "internalDialing.mode",
     "internalDialing.patterns",
     "internalDialing.confirm",
+    "messaging",
     ...d.destinations.flatMap((_, i) => [
       `destinations[${i}]`,
       ...["host", "port", "priority", "weight"].map(
@@ -536,6 +558,7 @@ function TrunkCard({
             label: "Internal dialing",
             value: dialingLabel(t.internalDialing),
           },
+          { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
           { label: "Password", value: password },
         ]
       : [
@@ -555,6 +578,7 @@ function TrunkCard({
             label: "Internal dialing",
             value: dialingLabel(t.internalDialing),
           },
+          { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
           { label: "Password", value: password },
         ];
 
@@ -923,15 +947,21 @@ function TrunkDrawer({
             checked={draft.enabled}
             onChange={(e) => set("enabled", e.target.checked)}
           />
+          <Switch
+            label="SMS over SIP"
+            hint="Send and receive text messages (SIP MESSAGE) through this trunk. Incoming texts reach the extension an inbound route names for the number; only from this trunk's addresses. Off by default."
+            labelPosition="end"
+            checked={draft.messaging}
+            onChange={(e) => set("messaging", e.target.checked)}
+          />
         </fieldset>
 
         <fieldset className="cf-form__section">
           <legend className="az-eyebrow">Codecs</legend>
           <p className="cf-form__note">
-            The audio codecs offered to this trunk, in the caller's order.
-            Most carriers accept G.711 only, so G.722 and Opus are off until
-            you allow them. Phones are always offered everything they
-            support.
+            The audio codecs offered to this trunk, in the caller's order. Most
+            carriers accept G.711 only, so G.722 and Opus are off until you
+            allow them. Phones are always offered everything they support.
           </p>
           <div className="cf-field-group">
             {TRUNK_CODECS.map((c) => (

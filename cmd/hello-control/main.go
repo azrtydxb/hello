@@ -175,6 +175,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Phonebooks:      st,
 		Conferences:     st,
 		ConferenceLive:  vk,
+		Messages:        st,
 		Dialing:         cfg.Dial,
 		PromptLanguage:  cfg.VoicePromptLanguage,
 		Prov:            provAPI(cfg, settings, deployment, objs, log),
