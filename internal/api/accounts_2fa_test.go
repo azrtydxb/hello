@@ -319,6 +319,10 @@ func TestTOTPPolicy(t *testing.T) {
 		if r, _ := m["require2faRoles"].([]any); len(r) != 1 {
 			t.Fatalf("policy = %v", m)
 		}
+		m = wantJSON(t, acctCall(h, "carol", "GET", "/api/v1/auth/2fa-policy", nil), 200, "read policy")
+		if r, _ := m["require2faRoles"].([]any); len(r) != 1 {
+			t.Fatalf("read policy = %v", m)
+		}
 	})
 	t.Run("an unknown role is a 400", func(t *testing.T) {
 		if rec := acctCall(h, "carol", "PUT", "/api/v1/auth/2fa-policy", map[string]any{"require2faRoles": []string{"root"}}); rec.Code != 400 {
