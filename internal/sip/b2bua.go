@@ -67,7 +67,11 @@ type call struct {
 	connected   bool
 	ended       bool
 	hungUp      bool
-	stageSeq    int // the current forwarding stage; legs carry the stage they belong to
+	// gfDepth counts ring group failovers and gfChain the groups rung, so a
+	// failover chain that returns on itself is cut (groups.go).
+	gfDepth  int
+	gfChain  []string
+	stageSeq int // the current forwarding stage; legs carry the stage they belong to
 	// invTx is the caller INVITE's server transaction, kept so a
 	// callee-less answer (voicemail) can respond without sipgo's dialog
 	// ACK-wait; vmTag is the To tag that answer carries.

@@ -609,8 +609,18 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		if !usernameRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be the name of a time condition")
 		}
+	case "extension":
+		if !numberRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be an extension number")
+		}
+	case "ring_group":
+		if !usernameRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be the name of a ring group")
+		} else if in.FailureTarget == in.Name {
+			f.add("failureTarget", "a ring group cannot fail over to itself")
+		}
 	default:
-		f.add("failureKind", `must be "none", "voicemail", "external", "announcement", "ivr", "queue" or "time_condition"`)
+		f.add("failureKind", `must be "none", "voicemail", "external", "announcement", "ivr", "queue", "time_condition", "extension" or "ring_group"`)
 	}
 	if len(in.Members) == 0 || len(in.Members) > 50 {
 		f.add("members", "must have 1-50 members")

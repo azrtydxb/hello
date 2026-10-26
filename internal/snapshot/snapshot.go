@@ -85,7 +85,8 @@ type RingGroup struct {
 	// FailureKind is none, voicemail (FailureTarget names an extension
 	// whose box takes the call), external (FailureTarget is a number) or
 	// announcement (FailureTarget names an announcement, migration 00005;
-	// spec S-5).
+	// spec S-5), ivr, queue, time_condition, extension (a number) or
+	// ring_group (a name); the last two start a new ring stage.
 	FailureKind, FailureTarget string
 	// MOHClassID is the music on hold class of calls to the group (0: the
 	// global default); MOHRingback plays it instead of ringback while the
