@@ -52,7 +52,7 @@ jobs:
       image: golang:1.27-bookworm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
       # Go refuses to stamp VCS info for a workspace owned by another uid.
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -181,7 +181,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Restore the Go caches
@@ -259,7 +259,7 @@ jobs:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
       # node:26 no longer bundles corepack, so pnpm comes from npm.
       - run: npm install -g pnpm@10
       - run: pnpm install --frozen-lockfile
@@ -297,7 +297,7 @@ jobs:
           --health-cmd "valkey-cli ping" --health-interval 5s --health-retries 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       # On the ARC kubernetes-mode runners the job container and its services
@@ -339,7 +339,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
       # Evidence first: what the runner actually has decides whether this
       # job can work here at all.
       - name: Docker and compose on the runner
@@ -390,7 +390,7 @@ jobs:
       HELLO_REQUIRE_HELM: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+      - uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
       - name: Trust the mounted workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install helm and kubeconform
@@ -480,7 +480,7 @@ jobs:
       # never poison the layers main builds from.
       # Kuvryn Ant buildcache feed (GitHub OIDC): cache-write is off outside push events.
       - id: ant-cache-1
-        uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
         with:
           build-cache: "true"
           cache-name: control
@@ -502,7 +502,7 @@ jobs:
           cache-from: ${{ steps.ant-cache-1.outputs.cache-from }}
           cache-to: ${{ steps.ant-cache-1.outputs.cache-to }}
       - id: ant-cache-2
-        uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
         with:
           build-cache: "true"
           cache-name: sip
@@ -522,7 +522,7 @@ jobs:
           cache-from: ${{ steps.ant-cache-2.outputs.cache-from }}
           cache-to: ${{ steps.ant-cache-2.outputs.cache-to }}
       - id: ant-cache-3
-        uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
         with:
           build-cache: "true"
           cache-name: ui
@@ -542,7 +542,7 @@ jobs:
           cache-from: ${{ steps.ant-cache-3.outputs.cache-from }}
           cache-to: ${{ steps.ant-cache-3.outputs.cache-to }}
       - id: ant-cache-4
-        uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
         with:
           build-cache: "true"
           cache-name: kamailio
@@ -748,7 +748,7 @@ jobs:
       # Reads the build cache kind-upgrade writes on main (same cache names,
       # same arch); publish itself never writes it.
       - id: ant
-        uses: azrtydxb/ant-setup-action@549f7472cf26b0885441ed9f9a7fab0277545000 # v1
+        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
         with:
           build-cache: "true"
           cache-name: ${{ matrix.image.cache }}
