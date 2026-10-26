@@ -1,0 +1,194 @@
+{
+  "configRevision": 7,
+  "nodes": [
+    {
+      "id": "anyTrunk:any",
+      "kind": "anyTrunk",
+      "label": "Any trunk",
+      "summary": {}
+    },
+    {
+      "id": "extension:10",
+      "kind": "extension",
+      "label": "101 E101",
+      "summary": {
+        "dnd": false,
+        "name": "E101",
+        "noAnswerEnd": "voicemail",
+        "number": "101",
+        "voicemail": true
+      },
+      "version": "d49b70d62eb16a78"
+    },
+    {
+      "id": "external:+3225550000",
+      "kind": "external",
+      "label": "+3225550000",
+      "summary": {
+        "number": "+3225550000"
+      }
+    },
+    {
+      "id": "inboundRoute:1",
+      "kind": "inboundRoute",
+      "label": "anywhere",
+      "summary": {
+        "did": "",
+        "didKind": "any",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "76cf549a8f3b622a"
+    },
+    {
+      "id": "inboundRoute:2",
+      "kind": "inboundRoute",
+      "label": "on-b",
+      "summary": {
+        "did": "5",
+        "didKind": "exact",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "1b4ba2596188107a"
+    },
+    {
+      "id": "inboundRoute:3",
+      "kind": "inboundRoute",
+      "label": "ext",
+      "summary": {
+        "did": "6",
+        "didKind": "exact",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "e294cd6a14864e75"
+    },
+    {
+      "id": "trunk:1",
+      "kind": "trunk",
+      "label": "a",
+      "summary": {
+        "enabled": true,
+        "maxCalls": 0,
+        "mode": ""
+      },
+      "version": "73a3e8d61d739eec"
+    },
+    {
+      "id": "trunk:2",
+      "kind": "trunk",
+      "label": "b",
+      "summary": {
+        "enabled": true,
+        "maxCalls": 0,
+        "mode": ""
+      },
+      "version": "1e3eda472a4b0256"
+    }
+  ],
+  "edges": [
+    {
+      "id": "anyTrunk:any.inbound-\u003einboundRoute:1.trunk",
+      "source": {
+        "node": "anyTrunk:any",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:1",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "trunkId"
+      }
+    },
+    {
+      "id": "inboundRoute:1.destination-\u003eextension:10.ring",
+      "source": {
+        "node": "inboundRoute:1",
+        "port": "destination"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "inboundRoute:2.destination-\u003eextension:10.ring",
+      "source": {
+        "node": "inboundRoute:2",
+        "port": "destination"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "inboundRoute:2",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "inboundRoute:3.destination-\u003eexternal:+3225550000.call",
+      "source": {
+        "node": "inboundRoute:3",
+        "port": "destination"
+      },
+      "target": {
+        "node": "external:+3225550000",
+        "port": "call"
+      },
+      "owner": {
+        "node": "inboundRoute:3",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "trunk:1.inbound-\u003einboundRoute:3.trunk",
+      "source": {
+        "node": "trunk:1",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:3",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:3",
+        "field": "trunkId"
+      }
+    },
+    {
+      "id": "trunk:2.inbound-\u003einboundRoute:2.trunk",
+      "source": {
+        "node": "trunk:2",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:2",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:2",
+        "field": "trunkId"
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "node": "inboundRoute:2",
+      "code": "shadowed_route",
+      "message": "route \"anywhere\" always matches first for this DID"
+    },
+    {
+      "node": "inboundRoute:3",
+      "code": "shadowed_route",
+      "message": "route \"anywhere\" always matches first for this DID"
+    }
+  ]
+}

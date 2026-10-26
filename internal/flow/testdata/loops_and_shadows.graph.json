@@ -1,0 +1,451 @@
+{
+  "configRevision": 9,
+  "nodes": [
+    {
+      "id": "announcement:1",
+      "kind": "announcement",
+      "label": "silent",
+      "summary": {
+        "generated": false
+      },
+      "version": "a6ad10cc909748f5"
+    },
+    {
+      "id": "anyTrunk:any",
+      "kind": "anyTrunk",
+      "label": "Any trunk",
+      "summary": {}
+    },
+    {
+      "id": "extension:10",
+      "kind": "extension",
+      "label": "101 A",
+      "summary": {
+        "dnd": false,
+        "name": "A",
+        "noAnswerEnd": "hangup",
+        "number": "101",
+        "voicemail": false
+      },
+      "version": "14c8574344c2d618"
+    },
+    {
+      "id": "extension:11",
+      "kind": "extension",
+      "label": "102 B",
+      "summary": {
+        "dnd": false,
+        "name": "B",
+        "noAnswerEnd": "hangup",
+        "number": "102",
+        "voicemail": false
+      },
+      "version": "34b7ddefdf5966d8"
+    },
+    {
+      "id": "inboundRoute:1",
+      "kind": "inboundRoute",
+      "label": "catch-all",
+      "summary": {
+        "did": "",
+        "didKind": "any",
+        "enabled": true,
+        "position": 1
+      },
+      "version": "1c3405f218b8ab44"
+    },
+    {
+      "id": "inboundRoute:2",
+      "kind": "inboundRoute",
+      "label": "later",
+      "summary": {
+        "did": "5",
+        "didKind": "exact",
+        "enabled": true,
+        "position": 2
+      },
+      "version": "b2679588f333512d"
+    },
+    {
+      "id": "inboundRoute:3",
+      "kind": "inboundRoute",
+      "label": "prefix",
+      "summary": {
+        "did": "32",
+        "didKind": "prefix",
+        "enabled": true,
+        "position": 3
+      },
+      "version": "c20c1ec79a3cce71"
+    },
+    {
+      "id": "ivr:1",
+      "kind": "ivr",
+      "label": "a",
+      "summary": {
+        "allowDirectDial": false,
+        "digitTimeout": 0,
+        "directDial": false,
+        "enabled": true,
+        "maxRetries": 0,
+        "number": "",
+        "options": 1
+      },
+      "version": "fcfe1548718be5f3"
+    },
+    {
+      "id": "ivr:2",
+      "kind": "ivr",
+      "label": "b",
+      "summary": {
+        "allowDirectDial": false,
+        "digitTimeout": 0,
+        "directDial": false,
+        "enabled": true,
+        "maxRetries": 0,
+        "number": "",
+        "options": 1
+      },
+      "version": "1ad846dfb7b12d92"
+    },
+    {
+      "id": "ivr:3",
+      "kind": "ivr",
+      "label": "self",
+      "summary": {
+        "allowDirectDial": false,
+        "digitTimeout": 0,
+        "directDial": false,
+        "enabled": true,
+        "maxRetries": 0,
+        "number": "900",
+        "options": 1
+      },
+      "version": "468f1864edf024fd"
+    },
+    {
+      "id": "trunk:1",
+      "kind": "trunk",
+      "label": "carrier",
+      "summary": {
+        "enabled": true,
+        "maxCalls": 0,
+        "mode": ""
+      },
+      "version": "a1c8094ed281196e"
+    }
+  ],
+  "edges": [
+    {
+      "id": "announcement:1.audio-\u003eivr:1.greeting",
+      "source": {
+        "node": "announcement:1",
+        "port": "audio"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "greeting"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "greetingId"
+      }
+    },
+    {
+      "id": "announcement:1.audio-\u003eivr:2.greeting",
+      "source": {
+        "node": "announcement:1",
+        "port": "audio"
+      },
+      "target": {
+        "node": "ivr:2",
+        "port": "greeting"
+      },
+      "owner": {
+        "node": "ivr:2",
+        "field": "greetingId"
+      }
+    },
+    {
+      "id": "anyTrunk:any.inbound-\u003einboundRoute:1.trunk",
+      "source": {
+        "node": "anyTrunk:any",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:1",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "trunkId"
+      }
+    },
+    {
+      "id": "extension:10.forwardAlways-\u003eextension:11.ring",
+      "source": {
+        "node": "extension:10",
+        "port": "forwardAlways"
+      },
+      "target": {
+        "node": "extension:11",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "extension:10",
+        "field": "forwardAlways"
+      }
+    },
+    {
+      "id": "extension:11.forwardAlways-\u003eextension:10.ring",
+      "source": {
+        "node": "extension:11",
+        "port": "forwardAlways"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "extension:11",
+        "field": "forwardAlways"
+      }
+    },
+    {
+      "id": "inboundRoute:1.destination-\u003eivr:1.call",
+      "source": {
+        "node": "inboundRoute:1",
+        "port": "destination"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "inboundRoute:2.destination-\u003eextension:10.ring",
+      "source": {
+        "node": "inboundRoute:2",
+        "port": "destination"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "inboundRoute:2",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "inboundRoute:3.destination-\u003eextension:10.ring",
+      "source": {
+        "node": "inboundRoute:3",
+        "port": "destination"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "inboundRoute:3",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "ivr:1.invalid-\u003eivr:2.call",
+      "source": {
+        "node": "ivr:1",
+        "port": "invalid"
+      },
+      "target": {
+        "node": "ivr:2",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "invalid"
+      }
+    },
+    {
+      "id": "ivr:1.key:1-\u003eivr:2.call",
+      "source": {
+        "node": "ivr:1",
+        "port": "key:1"
+      },
+      "target": {
+        "node": "ivr:2",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "options"
+      },
+      "data": {
+        "digit": "1"
+      }
+    },
+    {
+      "id": "ivr:1.timeout-\u003eivr:2.call",
+      "source": {
+        "node": "ivr:1",
+        "port": "timeout"
+      },
+      "target": {
+        "node": "ivr:2",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "timeout"
+      }
+    },
+    {
+      "id": "ivr:2.invalid-\u003eivr:1.call",
+      "source": {
+        "node": "ivr:2",
+        "port": "invalid"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:2",
+        "field": "invalid"
+      }
+    },
+    {
+      "id": "ivr:2.key:1-\u003eivr:1.call",
+      "source": {
+        "node": "ivr:2",
+        "port": "key:1"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:2",
+        "field": "options"
+      },
+      "data": {
+        "digit": "1"
+      }
+    },
+    {
+      "id": "ivr:2.timeout-\u003eivr:1.call",
+      "source": {
+        "node": "ivr:2",
+        "port": "timeout"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:2",
+        "field": "timeout"
+      }
+    },
+    {
+      "id": "ivr:3.key:1-\u003eivr:3.call",
+      "source": {
+        "node": "ivr:3",
+        "port": "key:1"
+      },
+      "target": {
+        "node": "ivr:3",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:3",
+        "field": "options"
+      },
+      "data": {
+        "digit": "1"
+      }
+    },
+    {
+      "id": "trunk:1.inbound-\u003einboundRoute:2.trunk",
+      "source": {
+        "node": "trunk:1",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:2",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:2",
+        "field": "trunkId"
+      }
+    },
+    {
+      "id": "trunk:1.inbound-\u003einboundRoute:3.trunk",
+      "source": {
+        "node": "trunk:1",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:3",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:3",
+        "field": "trunkId"
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "node": "extension:10",
+      "code": "loop",
+      "message": "calls can go round in a circle and never leave: 101 A -\u003e 102 B"
+    },
+    {
+      "node": "extension:11",
+      "code": "loop",
+      "message": "calls can go round in a circle and never leave: 101 A -\u003e 102 B"
+    },
+    {
+      "node": "inboundRoute:2",
+      "code": "shadowed_route",
+      "message": "route \"catch-all\" always matches first for this DID"
+    },
+    {
+      "node": "inboundRoute:3",
+      "code": "shadowed_route",
+      "message": "route \"catch-all\" always matches first for this DID"
+    },
+    {
+      "node": "ivr:1",
+      "code": "loop",
+      "message": "calls can go round in a circle and never leave: a -\u003e b"
+    },
+    {
+      "node": "ivr:1",
+      "code": "no_greeting",
+      "message": "the greeting \"silent\" has no audio"
+    },
+    {
+      "node": "ivr:2",
+      "code": "loop",
+      "message": "calls can go round in a circle and never leave: a -\u003e b"
+    },
+    {
+      "node": "ivr:2",
+      "code": "no_greeting",
+      "message": "the greeting \"silent\" has no audio"
+    },
+    {
+      "node": "ivr:3",
+      "code": "no_greeting",
+      "message": "the menu has no greeting announcement"
+    }
+  ]
+}

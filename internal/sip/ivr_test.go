@@ -524,3 +524,43 @@ func TestIVRInboundRoute(t *testing.T) {
 		t.Fatalf("CDR = %+v", cd)
 	}
 }
+
+// TestInboundRingGroupDestination: an inbound route of kind ring_group (the
+// unified destinations, migration 00041) rings the named group, whatever its
+// name. It fails if the engine's decision is not carried out by the shared
+// destination dispatcher.
+func TestInboundRingGroupDestination(t *testing.T) {
+	cr := newCarrier(t, "acct", "pw")
+	tr := cr.trunk(1, "carrier-in", "ip")
+	tr.SourceCIDRs = []netip.Prefix{netip.MustParsePrefix("127.0.0.1/32")}
+	cfg := routing.Config{
+		Trunks: []routing.Trunk{tr},
+		Inbound: []routing.InboundRoute{{ID: 1, Position: 1, Name: "Sales DID", DIDKind: "exact", DID: "+97140000100",
+			DestinationKind: "ring_group", Destination: "sales", Enabled: true}},
+		Extensions: map[string]string{"100": ""},
+		Named:      map[string]bool{"ring_group:sales": true},
+	}
+	pbx := startPBX(t, callerDevices(), trunkCfg(newFakeTrunkState()), withEngine(t, cfg), withMedia(false),
+		withFeatures(func(s *snapshot.Snapshot) {
+			s.WithRingGroups([]snapshot.RingGroup{{ID: 1, Name: "sales", Strategy: "ring-all", RingTimeout: 5, MemberDelay: 1}},
+				[][]snapshot.RingGroupMember{{{ExtensionID: 1, Extension: "100", Position: 1}}})
+		}))
+	callee := newPhone(t, pbx, "a1", "pa")
+	callee.register(t)
+	callee.setCallee(answerAfter(nil))
+	from := newPhone(t, pbx, "carrier", "")
+	dcs, err := from.dua.WriteInvite(t.Context(), carrierInvite(from, pbx, "+97140000100"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dcs.WaitAnswer(t.Context(), sipgo.AnswerOptions{}); err != nil {
+		t.Fatalf("inbound call to the group: %v", err)
+	}
+	_ = dcs.Ack(t.Context())
+	waitReq(t, callee.invites, "INVITE to the group's member")
+	hangup(t, dcs)
+	cd := pbx.nextCDR(t)
+	if cd.Direction != "inbound" || cd.Route != "Sales DID" {
+		t.Fatalf("CDR = %+v", cd)
+	}
+}

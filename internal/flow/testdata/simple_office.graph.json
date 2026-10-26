@@ -1,0 +1,234 @@
+{
+  "configRevision": 3,
+  "nodes": [
+    {
+      "id": "dialPlan:internal",
+      "kind": "dialPlan",
+      "label": "Internal callers",
+      "summary": {}
+    },
+    {
+      "id": "extension:10",
+      "kind": "extension",
+      "label": "101 E101",
+      "summary": {
+        "dnd": false,
+        "name": "E101",
+        "noAnswerEnd": "voicemail",
+        "number": "101",
+        "voicemail": true
+      },
+      "version": "d49b70d62eb16a78"
+    },
+    {
+      "id": "extension:11",
+      "kind": "extension",
+      "label": "102 E102",
+      "summary": {
+        "dnd": false,
+        "name": "E102",
+        "noAnswerEnd": "voicemail",
+        "number": "102",
+        "voicemail": true
+      },
+      "version": "e77d21b65e9ee911"
+    },
+    {
+      "id": "extension:12",
+      "kind": "extension",
+      "label": "103 E103",
+      "summary": {
+        "dnd": false,
+        "name": "E103",
+        "noAnswerEnd": "forward",
+        "number": "103",
+        "voicemail": false
+      },
+      "version": "c0dfeea7e1e69cbf"
+    },
+    {
+      "id": "inboundRoute:1",
+      "kind": "inboundRoute",
+      "label": "main",
+      "summary": {
+        "did": "+3225551111",
+        "didKind": "exact",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "6702bf3d5d6131bc"
+    },
+    {
+      "id": "outboundRoute:1",
+      "kind": "outboundRoute",
+      "label": "out",
+      "summary": {
+        "emergency": false,
+        "enabled": true,
+        "match": "0",
+        "matchKind": "prefix",
+        "position": 0
+      },
+      "version": "125b2deeb774220e"
+    },
+    {
+      "id": "ringGroup:1",
+      "kind": "ringGroup",
+      "label": "sales",
+      "summary": {
+        "members": 2,
+        "ringTimeout": 20,
+        "strategy": "ring-all"
+      },
+      "version": "cb07725d25fb927f"
+    },
+    {
+      "id": "trunk:1",
+      "kind": "trunk",
+      "label": "carrier",
+      "summary": {
+        "enabled": true,
+        "maxCalls": 0,
+        "mode": "ip"
+      },
+      "version": "860a98d8e08872d7"
+    }
+  ],
+  "edges": [
+    {
+      "id": "dialPlan:internal.dial-\u003eoutboundRoute:1.dial",
+      "source": {
+        "node": "dialPlan:internal",
+        "port": "dial"
+      },
+      "target": {
+        "node": "outboundRoute:1",
+        "port": "dial"
+      },
+      "owner": {
+        "node": "outboundRoute:1",
+        "field": ""
+      },
+      "implicit": true
+    },
+    {
+      "id": "extension:10.member-\u003eringGroup:1.members",
+      "source": {
+        "node": "extension:10",
+        "port": "member"
+      },
+      "target": {
+        "node": "ringGroup:1",
+        "port": "members"
+      },
+      "owner": {
+        "node": "ringGroup:1",
+        "field": "members"
+      },
+      "data": {
+        "delay": 0,
+        "position": 1,
+        "weight": 1
+      }
+    },
+    {
+      "id": "extension:11.member-\u003eringGroup:1.members",
+      "source": {
+        "node": "extension:11",
+        "port": "member"
+      },
+      "target": {
+        "node": "ringGroup:1",
+        "port": "members"
+      },
+      "owner": {
+        "node": "ringGroup:1",
+        "field": "members"
+      },
+      "data": {
+        "delay": 5,
+        "position": 2,
+        "weight": 1
+      }
+    },
+    {
+      "id": "extension:12.forwardNoAnswer-\u003eextension:11.ring",
+      "source": {
+        "node": "extension:12",
+        "port": "forwardNoAnswer"
+      },
+      "target": {
+        "node": "extension:11",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "extension:12",
+        "field": "forwardNoAnswer"
+      }
+    },
+    {
+      "id": "inboundRoute:1.destination-\u003eringGroup:1.ring",
+      "source": {
+        "node": "inboundRoute:1",
+        "port": "destination"
+      },
+      "target": {
+        "node": "ringGroup:1",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "outboundRoute:1.trunks-\u003etrunk:1.carrier",
+      "source": {
+        "node": "outboundRoute:1",
+        "port": "trunks"
+      },
+      "target": {
+        "node": "trunk:1",
+        "port": "carrier"
+      },
+      "owner": {
+        "node": "outboundRoute:1",
+        "field": "trunks"
+      },
+      "data": {
+        "order": 1
+      }
+    },
+    {
+      "id": "ringGroup:1.noAnswer-\u003eextension:10.voicemail",
+      "source": {
+        "node": "ringGroup:1",
+        "port": "noAnswer"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "voicemail"
+      },
+      "owner": {
+        "node": "ringGroup:1",
+        "field": "failureKind+failureTarget"
+      }
+    },
+    {
+      "id": "trunk:1.inbound-\u003einboundRoute:1.trunk",
+      "source": {
+        "node": "trunk:1",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:1",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "trunkId"
+      }
+    }
+  ],
+  "warnings": []
+}

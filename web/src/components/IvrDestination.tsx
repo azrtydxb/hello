@@ -42,7 +42,7 @@ function withCurrent(options: Option[], current: string): Option[] {
   return [head, ...options];
 }
 
-function targetOptions(
+export function targetOptions(
   kind: IvrDestinationKind,
   c: DestinationChoices,
   value: string,

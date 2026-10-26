@@ -367,7 +367,11 @@ export interface InboundRouteFields {
     | "sip_uri"
     | "ivr"
     | "queue"
-    | "time_condition";
+    | "time_condition"
+    | "ring_group"
+    | "voicemail"
+    | "announcement"
+    | "paging";
   destination: string;
   enabled: boolean;
   /** Music on hold class of the calls this route delivers; null = the default. */
