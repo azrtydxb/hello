@@ -225,7 +225,10 @@ func (l *labEnv) manifests(t *testing.T) []byte {
 		seen++
 		switch key {
 		case "ConfigMap/hello-kamailio":
-			asMap(d["data"])["dispatcher.list"] = fmt.Sprintf("1 sip:%s:%d 0 0 duid=hello-sip-1\n", l.runnerIP, l.stubPort)
+			// The Hello node is the test itself, on the runner: a name that
+			// cluster DNS answers (a headless Service, as on kw) with the
+			// runner's address.
+			asMap(d["data"])["dispatcher.list"] = fmt.Sprintf("1 sip:hello-sip-1.%s.svc.cluster.local:%d 0 0 duid=hello-sip-1\n", l.namespace, l.stubPort)
 		case "Deployment/kamailio":
 			l.patchDeployment(t, d)
 		}
@@ -239,6 +242,34 @@ func (l *labEnv) manifests(t *testing.T) []byte {
 	if seen != len(keep) {
 		t.Fatalf("found %d of the %d kw edge objects", seen, len(keep))
 	}
+	fmt.Fprintf(&out, `---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-sip-1
+  namespace: %[1]s
+spec:
+  clusterIP: None
+  ports:
+    - name: sip
+      port: %[3]d
+      protocol: UDP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: hello-sip-1
+  namespace: %[1]s
+  labels:
+    kubernetes.io/service-name: hello-sip-1
+addressType: IPv4
+ports:
+  - name: sip
+    port: %[3]d
+    protocol: UDP
+endpoints:
+  - addresses: ["%[2]s"]
+`, l.namespace, l.runnerIP, l.stubPort)
 	return out.Bytes()
 }
 

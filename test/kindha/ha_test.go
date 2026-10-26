@@ -407,8 +407,8 @@ func TestKamailioHA(t *testing.T) {
 	l.apply(t)
 	l.waitPodsReady(t, 2, 3*time.Minute)
 	first := l.waitVIP(t, time.Minute)
-	t.Logf("VIP %s is held by %s; Lease holder: %s", l.vip, first,
-		strings.TrimSpace(l.kubectl(t, "-n", l.namespace, "get", "lease", "kamailio-vip", "-o", "jsonpath={.spec.holderIdentity}")))
+	holderID, _ := l.tryKubectl("-n", l.namespace, "get", "lease", "kamailio-vip", "-o", "jsonpath={.spec.holderIdentity}")
+	t.Logf("VIP %s is held by %s; Lease holder: %s", l.vip, first, strings.TrimSpace(holderID))
 	// The other node never holds it as well.
 	if h := l.holders(); len(h) != 1 {
 		t.Fatalf("VIP held by %v, want exactly one node", h)
