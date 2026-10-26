@@ -272,6 +272,7 @@ func (c *call) joinConference(req *sip.Request, tx sip.ServerTransaction, snap *
 	c.mu.Lock()
 	c.mediaMode = "anchored"
 	c.mu.Unlock()
+	c.logTerminatedCodec("answer", "conference", answer)
 	if s.deps.HAState != nil && !c.confPeer {
 		// A local participant replicates like any call Hello answers
 		// itself: a taker re-INVITEs the phone onto its own mixer and the

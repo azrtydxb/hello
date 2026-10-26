@@ -324,22 +324,45 @@ func (c *call) recTap(leg string, pkt *media.RTPPacket) {
 // G.711). The negotiated codecs are noted for the relay and the recording
 // tap.
 func (c *call) anchoredAnswerA(offer, calleeAnswer media.AudioSDP) []byte {
+	return c.anchoredAnswerAs("", offer, calleeAnswer)
+}
+
+// anchoredAnswerAs is anchoredAnswerA for a call Hello answers itself when
+// there is no callee answer: app names the application that terminates the
+// media (IVR, queue, ...) in the codec log, "hello" when empty.
+func (c *call) anchoredAnswerAs(app string, offer, calleeAnswer media.AudioSDP) []byte {
 	r := c.relay
 	if r == nil {
 		return nil
 	}
 	ans := media.AnswerFor(offer, calleeAnswer)
-	c.applyNegotiated(ans)
+	if len(calleeAnswer.Codecs) > 0 {
+		app = ""
+	} else if app == "" {
+		app = "hello"
+	}
+	c.applyNegotiated(ans, "answer", app)
 	return ans.Build(c.anchorHost, r.LegPort(legCaller), "sendrecv")
 }
 
 // applyNegotiated records the codecs the call settled on: the relay's two
-// legs, the recording tap and the replicated dialog state all follow.
-func (c *call) applyNegotiated(ans media.AudioSDP) {
+// legs, the recording tap and the replicated dialog state all follow. why
+// is what chose them (logged with the codec, see logCodec; empty for a
+// choice that is logged elsewhere); app is the Hello application that
+// terminates the media, empty when the call is bridged.
+func (c *call) applyNegotiated(ans media.AudioSDP, why, app string) {
 	c.mu.Lock()
 	c.negotiated = ans
 	r, rec := c.relay, c.rec
 	c.mu.Unlock()
+	if why != "" {
+		if app != "" {
+			c.logCodec(why, legCaller, "terminated", app, ans)
+		} else {
+			c.logCodec(why, legCaller, "anchored", "", ans)
+			c.logCodec(why, legCallee, "anchored", "", ans)
+		}
+	}
 	if r != nil {
 		r.SetCodecs(legCaller, ans.Codecs, ans.DTMFPayloadType)
 		r.SetCodecs(legCallee, ans.Codecs, ans.DTMFPayloadType)
@@ -347,6 +370,79 @@ func (c *call) applyNegotiated(ans media.AudioSDP) {
 	if rec != nil {
 		rec.setCodecs(ans.Codecs)
 	}
+}
+
+// logCodec logs the audio codec a call leg's media settled on, one INFO
+// line, and notes it in the call's trace. leg is legCaller or legCallee,
+// mode "anchored", "terminated" (Hello ends the media itself: app names the
+// application) or "direct"; why says what chose the codec (answer,
+// re-invite, takeover, ...). A re-invite that leaves the leg's codec as it
+// was logged is not repeated. Only the codec's parameters are logged, never
+// the SDP.
+func (c *call) logCodec(why, leg, mode, app string, a media.AudioSDP) {
+	cd := a.Codec
+	if cd.Name == "" && len(a.Codecs) > 0 {
+		cd = a.Codecs[0]
+	}
+	if cd.Name == "" {
+		return
+	}
+	key := fmt.Sprintf("%s/%d/%d", cd.Name, cd.ClockRate, cd.PT)
+	c.mu.Lock()
+	prev := c.codecSeen[leg]
+	if c.codecSeen == nil {
+		c.codecSeen = map[string]string{}
+	}
+	c.codecSeen[leg] = key
+	c.mu.Unlock()
+	if why == "re-invite" && prev == key {
+		return
+	}
+	ptime := a.Ptime
+	if mode == "terminated" {
+		ptime = 20 // Hello's own media packetises at 20 ms, whatever the offer said
+	}
+	side := "caller"
+	if leg == legCallee {
+		side = "callee"
+	}
+	args := []any{"component", "sip", "correlation_id", c.id, "call_id", c.callID, "caller", c.callerNum,
+		"leg", side, "media_mode", mode, "codec", cd.Name, "clock_rate", cd.ClockRate, "payload_type", cd.PT}
+	if ptime > 0 {
+		args = append(args, "ptime", ptime)
+	}
+	if app != "" {
+		args = append(args, "app", app)
+	}
+	args = append(args, "reason", why)
+	c.s.log.Info("call codec", args...)
+	text := fmt.Sprintf("Codec %s/%d (pt %d) on the %s leg, %s (%s)", cd.Name, cd.ClockRate, cd.PT, side, mode, why)
+	if app != "" {
+		text = fmt.Sprintf("Codec %s/%d (pt %d) on the %s leg, terminated by Hello: %s (%s)", cd.Name, cd.ClockRate, cd.PT, side, app, why)
+	}
+	c.addTrace(text)
+}
+
+// logDirectCodec logs the codec of an SDP answer that passes between the
+// two phones untouched (a direct call): both legs speak it.
+func (c *call) logDirectCodec(why string, answer []byte) {
+	ans, err := media.ParseAudioSDP(answer)
+	if err != nil {
+		return
+	}
+	c.logCodec(why, legCaller, "direct", "", ans)
+	c.logCodec(why, legCallee, "direct", "", ans)
+}
+
+// logTerminatedCodec logs the codec of the SDP answer Hello gave a caller it
+// terminates media for (voicemail, conference, takeovers); app names the
+// application.
+func (c *call) logTerminatedCodec(why, app string, answer []byte) {
+	ans, err := media.ParseAudioSDP(answer)
+	if err != nil {
+		return
+	}
+	c.logCodec(why, legCaller, "terminated", app, ans)
 }
 
 // negotiatedOr is the codec set the call runs on: what applyNegotiated
@@ -370,7 +466,7 @@ func (c *call) midCallOffer(offer media.AudioSDP) media.AudioSDP {
 	pt := c.negotiated.PayloadType
 	c.mu.Unlock()
 	n := offer.Narrow(pt)
-	c.applyNegotiated(n)
+	c.applyNegotiated(n, "re-invite", "")
 	return n
 }
 
@@ -551,7 +647,7 @@ func (c *call) reanchorLive(reason AnchorReason) bool {
 	// The call already runs on one codec: offer it, nothing else, so the
 	// two ends keep it across the move.
 	cur := c.negotiatedOr(off)
-	c.applyNegotiated(cur)
+	c.applyNegotiated(cur, "", "") // logged with the answer below
 	var calleeAns media.AudioSDP
 	if ansB, ok := reinvite(w, cur.Build(host, relay.LegPort(legCallee), "sendrecv")); ok {
 		if a, err := media.ParseAudioSDP(ansB); err == nil {
@@ -915,6 +1011,9 @@ func (c *call) mirrorInDialog(req *sip.Request, tx sip.ServerTransaction, fromCa
 		relayed.AppendHeader(sip.HeaderClone(ct))
 	}
 	s.send(tx, relayed)
+	if res.StatusCode == sip.StatusOK && !c.isAnchored() {
+		c.logDirectCodec("re-invite", res.Body())
+	}
 }
 
 // announcementDestination answers the caller through the anchor, plays the
@@ -938,7 +1037,7 @@ func (c *call) announcementDestination(name string) {
 			return
 		}
 	}
-	answer := c.anchoredAnswerA(parsedOffer(c), media.AudioSDP{})
+	answer := c.anchoredAnswerAs("announcement", parsedOffer(c), media.AudioSDP{})
 	if !c.answerSelf(answer) {
 		return
 	}

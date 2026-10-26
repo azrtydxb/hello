@@ -775,7 +775,7 @@ func (c2 *call) handOverAnchored(from *call, l *leg) bool {
 	haAim(relay, legCallee, cAns)
 	targetAns, _ := media.ParseAudioSDP(cAns)
 	neg := media.AnswerFor(off, targetAns)
-	c2.applyNegotiated(neg)
+	c2.applyNegotiated(neg, "transfer", "")
 	aOffer := neg.Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(from.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
@@ -809,7 +809,7 @@ func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
 	haAim(relay, legCallee, cAns)
 	targetAns, _ := media.ParseAudioSDP(cAns)
 	neg := media.AnswerFor(off, targetAns)
-	other.applyNegotiated(neg)
+	other.applyNegotiated(neg, "transfer", "")
 	aOffer := neg.Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(other.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)

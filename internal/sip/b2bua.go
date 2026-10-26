@@ -129,6 +129,9 @@ type call struct {
 	// negotiated is the codec set the call runs on (the callee's choice as
 	// the caller was answered, see anchoredAnswerA); zero before the answer.
 	negotiated media.AudioSDP
+	// codecSeen is the last codec logged per leg (logCodec), so a re-INVITE
+	// that keeps it is not logged again.
+	codecSeen map[string]string
 	// anchorHost is the advertised IPv4 for relay SDP answers.
 	anchorHost string
 
@@ -872,6 +875,8 @@ func (c *call) answer(w *leg) {
 		}
 		off, _ := media.ParseAudioSDP(c.inv.Body())
 		body = c.anchoredAnswerA(off, calleeAns)
+	} else {
+		c.logDirectCodec("answer", bres.Body())
 	}
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
 	if ct := bres.ContentType(); ct != nil {
