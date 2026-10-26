@@ -87,6 +87,9 @@ func (s *Store) CreateExtension(ctx context.Context, actor, number, name, extern
 		if err := refuseIVRNumber(ctx, tx, "number", number); err != nil {
 			return 0, err
 		}
+		if err := checkExtensionNotSlot(ctx, tx, number); err != nil {
+			return 0, err
+		}
 		var err error
 		e, err = scanExtension(tx.QueryRowContext(ctx,
 			`INSERT INTO extensions (number, name, external_number) VALUES ($1, $2, $3) RETURNING `+extensionCols,
@@ -142,6 +145,11 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 		}
 		if err := checkMOHClass(ctx, tx, "mohClassId", c.MOHClassID); err != nil {
 			return id, err
+		}
+		if c.Number != nil && *c.Number != number {
+			if err := checkExtensionNotSlot(ctx, tx, *c.Number); err != nil {
+				return id, err
+			}
 		}
 		e, err = scanExtension(tx.QueryRowContext(ctx, `
 			UPDATE extensions SET number = COALESCE($2, number), name = COALESCE($3, name),

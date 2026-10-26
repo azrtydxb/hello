@@ -244,6 +244,12 @@ func (s *Server) nextCSeq(callID string, counters ...uint32) uint32 {
 // false while the call is not a recoverable connected two-leg call: an
 // announcement or voicemail call has no second endpoint to re-INVITE.
 func (c *call) haState() (livestate.DialogState, bool) {
+	c.mu.Lock()
+	parked := c.park != nil
+	c.mu.Unlock()
+	if parked {
+		return c.haParkState() // a call waiting in a park slot (spec S-6)
+	}
 	if hom := c.homed(); hom != nil {
 		return c.haHomedState(hom)
 	}

@@ -1,6 +1,6 @@
 package store
 
-// IVR / auto-attendant menus (migration 00031). A menu plays an announcement,
+// IVR / auto-attendant menus (migration 00033). A menu plays an announcement,
 // collects DTMF digits and sends the call to the destination of the chosen
 // option. Every mutation runs through configChange, so it is audited, bumps
 // the configuration revision and notifies hello-sip.
@@ -250,6 +250,9 @@ func checkIVRMenu(ctx context.Context, tx *sql.Tx, id int64, in IVRMenuInput) er
 		}
 		if n > 0 {
 			return fieldError("number", "is already an extension number or a ring group name")
+		}
+		if err := checkNotSlot(ctx, tx, "number", in.Number); err != nil {
+			return err
 		}
 	}
 	selfRef := func(d IVRDestination) bool { return d.Kind == IVRMenuDest && d.Target == in.Name }

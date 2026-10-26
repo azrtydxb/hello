@@ -89,6 +89,46 @@ func TestRelayNewTargetRestartsSourcePolicy(t *testing.T) {
 	}
 }
 
+// TestRelayResetSourcesHandsTheLegOver fails if a leg taken over by another
+// phone (park retrieve, park return, pickup) still accepts the earlier
+// phone's vouched or pinned address, or refuses the new phone behind NAT
+// whose SDP names a private address but whose signalling source is vouched.
+func TestRelayResetSourcesHandsTheLegOver(t *testing.T) {
+	r, err := NewRelay(23000, 23999)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := r.AddLeg("a"); err != nil {
+		t.Fatal(err)
+	}
+	r.SetTarget("a", udp("192.168.1.10", 4000))
+	r.AllowSource("a", net.ParseIP("198.51.100.7"))
+	l := r.findLeg("a")
+	if !l.sourceOK(udp("198.51.100.7", 4000)) {
+		t.Fatal("the first phone's vouched address was refused")
+	}
+	r.ResetSources("a", net.ParseIP("198.51.100.20"))
+	r.SetTarget("a", udp("10.0.0.5", 4000))
+	if l.sourceOK(udp("198.51.100.7", 4000)) {
+		t.Error("the earlier phone's address still accepted after the handover")
+	}
+	if l.sourceOK(udp("198.51.100.9", 4000)) {
+		t.Error("a stranger was accepted after the handover")
+	}
+	if !l.sourceOK(udp("198.51.100.20", 4000)) {
+		t.Error("the new phone's vouched signalling address was refused")
+	}
+	r.ResetSources("a")
+	r.SetTarget("a", udp("203.0.113.5", 4000))
+	if l.sourceOK(udp("198.51.100.20", 4000)) {
+		t.Error("ResetSources without a vouch kept the old vouched address")
+	}
+	if !l.sourceOK(udp("203.0.113.5", 4000)) {
+		t.Error("the new SDP address was refused")
+	}
+}
+
 // TestRelayDropsForeignSource fails if a datagram from an address the leg
 // does not expect is counted, latched or relayed: a third party sending to
 // the relay port must neither inject audio into the call nor redirect the

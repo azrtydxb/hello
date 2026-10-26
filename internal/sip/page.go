@@ -601,6 +601,12 @@ func (c *call) pageAnswerCaller() {
 		c.mu.Unlock()
 		return
 	}
+	if c.dss.LoadState() == sip.DialogStateEnded {
+		// The caller's BYE overtook its ACK: pageBye has accepted it and
+		// ends the page (and its members) as the caller's hangup.
+		c.addTrace("Caller hung up before acknowledging the answer")
+		return
+	}
 	c.mu.Lock()
 	cancelled = c.isCancelled
 	c.connected = false
@@ -846,6 +852,7 @@ func (s *Server) pageBye(c *call, ref dialogRef, req *sip.Request, tx sip.Server
 			s.respond(tx, req, sip.StatusBadRequest, "Bad Request")
 			return
 		}
+		s.callerByeHeld()
 		s.m.response(sip.StatusOK)
 		c.hangup(cdr.SideCaller)
 		return

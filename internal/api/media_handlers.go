@@ -17,10 +17,13 @@ import (
 	"github.com/azrtydxb/hello/internal/media"
 )
 
-// Announcement upload bounds: a 10 MiB WAV (spec S-5) at most, plus headroom
-// for the multipart frame and the name field.
+// Announcement upload bounds: a 64 MiB WAV at most, plus headroom for the
+// multipart frame and the name field. That holds a ~5 minute 48 kHz stereo
+// 16-bit song (about 55 MB) with room to spare; the stored copy is mono and
+// half that size. The reverse proxies in front of the console allow 520 MiB,
+// and MinIO takes the object as a multipart upload past 16 MiB on its own.
 const (
-	maxAnnouncementBytes  = 10 << 20
+	maxAnnouncementBytes  = 64 << 20
 	maxAnnouncementUpload = maxAnnouncementBytes + (1 << 20)
 )
 
@@ -124,7 +127,7 @@ func (s *server) listAnnouncements(w http.ResponseWriter, r *http.Request) {
 }
 
 // createAnnouncement is POST /api/v1/announcements: multipart with a name
-// field and a WAV file part named "file" (at most 10 MiB, contract 6). The
+// field and a WAV file part named "file" (at most 64 MiB). The
 // bytes decide: a client-declared audio content type is not trusted.
 func (s *server) createAnnouncement(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
@@ -263,9 +266,10 @@ func (s *server) announcementAudio(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkAnnouncementAudio adds the file errors of an upload: required, RIFF/WAVE
-// by its bytes, and playable. It returns the audio to store: a WAV at another
-// sample rate is resampled to the 8 kHz the call plane plays at; anything that
-// is not 16-bit mono PCM is refused with the reason.
+// by its bytes, and playable. It returns the audio to store: 16-bit mono PCM at
+// the file's own sample rate (capped at 48 kHz; the call plane resamples to
+// each call's rate when it plays), with stereo down-mixed and 8, 24 and 32-bit
+// integer or float PCM converted. Compressed WAVs are refused with the reason.
 func checkAnnouncementAudio(f *fieldErrs, data []byte) []byte {
 	if len(data) == 0 {
 		f.add("file", "a WAV file is required")
@@ -277,7 +281,7 @@ func checkAnnouncementAudio(f *fieldErrs, data []byte) []byte {
 	}
 	out, err := media.NormalizeWAV(data)
 	if err != nil {
-		f.add("file", "%s; upload a 16-bit mono PCM WAV file", strings.TrimPrefix(err.Error(), "media: "))
+		f.add("file", "%s; %s", strings.TrimPrefix(err.Error(), "media: "), wavAdvice)
 		return data
 	}
 	return out
@@ -328,15 +332,35 @@ func readAnnouncementUpload(r *http.Request, name *string, data *[]byte) error {
 				*name = v
 			}
 		case "file":
-			b, err := io.ReadAll(io.LimitReader(part, maxAnnouncementBytes+1))
+			b, err := readUpload(part, maxAnnouncementBytes+1, r.ContentLength)
 			if err != nil {
 				return errors.New("could not read file")
 			}
 			if len(b) > maxAnnouncementBytes {
-				return errors.New("file is larger than 10 MiB")
+				return errors.New("file is larger than 64 MiB")
 			}
 			*data = b
 		}
 		_ = part.Close()
 	}
+}
+
+// wavAdvice tells an uploader what to send instead of a WAV Hello cannot use.
+const wavAdvice = "upload an uncompressed PCM or float WAV file (8, 16, 24 or 32 bit, mono or stereo)"
+
+// readUpload reads at most limit bytes of a multipart part. total is the
+// request's Content-Length (or -1): it sizes the buffer once, so a 55 MB WAV
+// is not copied through a chain of doubling buffers that would hold twice
+// its size at the peak.
+func readUpload(part io.Reader, limit, total int64) ([]byte, error) {
+	var buf bytes.Buffer
+	if total > 0 {
+		// The request is a little larger than the file; bytes.Buffer needs
+		// slack past the last byte or it reallocates at EOF.
+		buf.Grow(int(min(total, limit)) + 1024)
+	}
+	if _, err := buf.ReadFrom(io.LimitReader(part, limit)); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

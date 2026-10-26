@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/azrtydxb/hello/internal/phonebook"
 )
 
 // Paging limits (spec P-17).
@@ -46,8 +48,8 @@ type PagingGroup struct {
 	Enabled  bool              `json:"enabled"`
 	Members  []PagingExtension `json:"members"`
 	Callers  []PagingExtension `json:"callers"`
-	// MulticastChannelID names a multicast channel of a phone group the page
-	// is also sent to (migration 00016); MulticastChannel describes it.
+	// MulticastChannelID names a catalog paging channel (Paging > Multicast
+	// channels) the page is also sent to; MulticastChannel describes it.
 	MulticastChannelID *int64           `json:"multicastChannelId"`
 	MulticastChannel   *PagingMulticast `json:"multicastChannel"`
 	CreatedAt          time.Time        `json:"createdAt"`
@@ -70,20 +72,18 @@ type PagingGroupInput struct {
 // PagingMulticast describes the multicast channel of a paging group
 // (read-only).
 type PagingMulticast struct {
-	ID        int64  `json:"id"`
-	GroupID   int64  `json:"groupId"`
-	GroupName string `json:"groupName"`
-	Label     string `json:"label"`
-	Address   string `json:"address"`
-	Port      int    `json:"port"`
-	Codec     string `json:"codec"`
+	ID      int64  `json:"id"`
+	Label   string `json:"label"`
+	Address string `json:"address"`
+	Port    int    `json:"port"`
+	Codec   string `json:"codec"`
+	Enabled bool   `json:"enabled"`
 }
 
 func listPagingGroups(ctx context.Context, q querier, where string, args ...any) ([]PagingGroup, error) {
 	rows, err := q.QueryContext(ctx, `SELECT g.id, g.name, g.code, g.priority, g.enabled, g.created_at, g.updated_at,
-			g.multicast_channel_id, c.id, c.group_id, pg.name, c.label, c.address, c.port, c.codec
-		FROM paging_groups g LEFT JOIN multicast_channels c ON c.id = g.multicast_channel_id
-		LEFT JOIN phone_groups pg ON pg.id = c.group_id `+where+` ORDER BY g.id`, args...)
+			g.multicast_channel_id, c.id, c.label, c.address, c.port, c.codec, c.enabled
+		FROM paging_groups g LEFT JOIN multicast_channels c ON c.id = g.multicast_channel_id `+where+` ORDER BY g.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -92,16 +92,16 @@ func listPagingGroups(ctx context.Context, q querier, where string, args ...any)
 	var ids []int64
 	for rows.Next() {
 		var g PagingGroup
-		var cid, cgroup sql.NullInt64
-		var cgname, clabel, caddr, ccodec sql.NullString
-		var cport sql.NullInt64
+		var cid, cport sql.NullInt64
+		var clabel, caddr, ccodec sql.NullString
+		var cenabled sql.NullBool
 		if err := rows.Scan(&g.ID, &g.Name, &g.Code, &g.Priority, &g.Enabled, &g.CreatedAt, &g.UpdatedAt,
-			&g.MulticastChannelID, &cid, &cgroup, &cgname, &clabel, &caddr, &cport, &ccodec); err != nil {
+			&g.MulticastChannelID, &cid, &clabel, &caddr, &cport, &ccodec, &cenabled); err != nil {
 			return nil, err
 		}
 		if cid.Valid {
-			g.MulticastChannel = &PagingMulticast{ID: cid.Int64, GroupID: cgroup.Int64, GroupName: cgname.String,
-				Label: clabel.String, Address: caddr.String, Port: int(cport.Int64), Codec: ccodec.String}
+			g.MulticastChannel = &PagingMulticast{ID: cid.Int64, Label: clabel.String, Address: caddr.String,
+				Port: int(cport.Int64), Codec: ccodec.String, Enabled: cenabled.Bool}
 		}
 		g.Members, g.Callers = []PagingExtension{}, []PagingExtension{}
 		out = append(out, g)
@@ -194,21 +194,24 @@ func checkPageCode(ctx context.Context, tx *sql.Tx, code string) error {
 }
 
 // checkPagingChannel refuses a multicast channel Hello cannot page: one that
-// does not exist, that the phones do not listen on, or whose codec is not
-// G.711 (Hello does not transcode to G.722).
+// does not exist, is not a paging channel, is disabled, or whose codec is
+// not G.711 (Hello does not transcode to G.722).
 func checkPagingChannel(ctx context.Context, tx *sql.Tx, id *int64) error {
 	if id == nil {
 		return nil
 	}
-	var role, codec string
-	err := tx.QueryRowContext(ctx, `SELECT role, codec FROM multicast_channels WHERE id = $1`, *id).Scan(&role, &codec)
+	var kind, codec string
+	var enabled bool
+	err := tx.QueryRowContext(ctx, `SELECT kind, codec, enabled FROM multicast_channels WHERE id = $1`, *id).Scan(&kind, &codec, &enabled)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return fieldError("multicastChannelId", "no such multicast channel")
 	case err != nil:
 		return err
-	case role == "send":
-		return fieldError("multicastChannelId", "the phones do not listen on this channel (its role is send)")
+	case kind != phonebook.KindPaging:
+		return fieldError("multicastChannelId", "a PTT channel cannot be paged; pick a paging channel")
+	case !enabled:
+		return fieldError("multicastChannelId", "the multicast channel is disabled")
 	case codec != "PCMU" && codec != "PCMA":
 		return fieldError("multicastChannelId", "Hello pages G.711 only; the channel's codec is "+codec)
 	}
@@ -266,8 +269,10 @@ func (s *Store) CreatePagingGroup(ctx context.Context, actor string, in PagingGr
 			return 0, err
 		}
 		var id int64
-		if err := tx.QueryRowContext(ctx, `INSERT INTO paging_groups (name, code, priority, enabled, multicast_channel_id)
-			VALUES ($1, $2, $3, $4, $5) RETURNING id`, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID).Scan(&id); err != nil {
+		if err := dialGuard(ctx, tx, "code", func() error {
+			return tx.QueryRowContext(ctx, `INSERT INTO paging_groups (name, code, priority, enabled, multicast_channel_id)
+				VALUES ($1, $2, $3, $4, $5) RETURNING id`, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID).Scan(&id)
+		}); err != nil {
 			return 0, err
 		}
 		if err := writePagingLists(ctx, tx, id, in); err != nil {
@@ -301,12 +306,14 @@ func (s *Store) UpdatePagingGroup(ctx context.Context, actor string, id int64, i
 		if err := checkPagingChannel(ctx, tx, in.MulticastChannelID); err != nil {
 			return id, err
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE paging_groups SET name = $2, code = $3, priority = $4, enabled = $5,
-			multicast_channel_id = $6, updated_at = now() WHERE id = $1`, id, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID)
-		if err != nil {
-			return id, err
-		}
-		if err := requireRow(res); err != nil {
+		if err := dialGuard(ctx, tx, "code", func() error {
+			res, err := tx.ExecContext(ctx, `UPDATE paging_groups SET name = $2, code = $3, priority = $4, enabled = $5,
+				multicast_channel_id = $6, updated_at = now() WHERE id = $1`, id, in.Name, in.Code, in.Priority, in.Enabled, in.MulticastChannelID)
+			if err != nil {
+				return err
+			}
+			return requireRow(res)
+		}); err != nil {
 			return id, err
 		}
 		if err := writePagingLists(ctx, tx, id, in); err != nil {

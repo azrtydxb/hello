@@ -338,6 +338,12 @@ func (o *Outgoing) Hangup(ctx context.Context) error {
 	return o.sess.Bye(ctx)
 }
 
+// Refer sends an in-dialog REFER with the given Refer-To (a blind transfer,
+// or the Park softkey's REFER to the park code) and returns the response.
+func (o *Outgoing) Refer(ctx context.Context, referTo string) (*sip.Response, error) {
+	return refer(ctx, o.sess.InviteResponse.Contact(), o.sess.InviteRequest, referTo, o.sess.Do)
+}
+
 // Ended is closed when the dialog ends from either side.
 func (o *Outgoing) Ended() <-chan struct{} { return ended(&o.sess.Dialog) }
 
@@ -389,6 +395,24 @@ func (i *Incoming) Canceled() <-chan struct{} { return i.canceled }
 func (i *Incoming) Hangup(ctx context.Context) error {
 	defer func() { _ = i.sess.Close() }()
 	return i.sess.Bye(ctx)
+}
+
+// Refer sends an in-dialog REFER with the given Refer-To and returns the
+// response; the phone that was called is the one whose Park softkey does it.
+func (i *Incoming) Refer(ctx context.Context, referTo string) (*sip.Response, error) {
+	return refer(ctx, i.sess.InviteRequest.Contact(), i.sess.InviteRequest, referTo, i.sess.Do)
+}
+
+// refer builds a REFER to the dialog's remote target and sends it with do.
+func refer(ctx context.Context, remote *sip.ContactHeader, inv *sip.Request, referTo string,
+	do func(context.Context, *sip.Request) (*sip.Response, error)) (*sip.Response, error) {
+	target := inv.Recipient
+	if remote != nil {
+		target = remote.Address
+	}
+	req := sip.NewRequest(sip.REFER, *target.Clone())
+	req.AppendHeader(sip.NewHeader("Refer-To", referTo))
+	return do(ctx, req)
 }
 
 // Ended is closed when the dialog ends from either side.

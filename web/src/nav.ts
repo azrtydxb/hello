@@ -119,6 +119,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       },
       { label: "Paging", path: "/paging", phase: 5, icon: "megaphone" },
       { label: "IVR", path: "/ivr", phase: 5, icon: "list-tree" },
+      {
+        label: "Park and pickup",
+        path: "/park",
+        phase: 5,
+        icon: "square-parking",
+      },
     ],
   },
   {

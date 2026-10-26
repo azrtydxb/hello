@@ -69,6 +69,11 @@ export interface Phone {
   templateId: Id | null;
   /** The phone group, which decides its address books; null for none. */
   groupId?: Id | null;
+  /**
+   * The phone's own PTT channel (catalog, kind ptt); null uses its group's.
+   * Grandstream WP phones only.
+   */
+  pttChannelId?: Id | null;
   /** BLF keys: extension numbers, in key order. */
   blf: string[];
   enabled: boolean;
@@ -115,6 +120,7 @@ export type PhonePatch = Partial<
   Omit<PhoneInput, "mac" | "groupId"> & {
     templateId: Id | null;
     groupId: Id | null;
+    pttChannelId: Id | null;
   }
 >;
 

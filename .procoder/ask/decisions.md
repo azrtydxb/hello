@@ -509,3 +509,18 @@ Decision (the user's brief, 2026-10-25): an unknown MAC's config request keeps i
 - **Roles:** operator and admin (the write scope, which is the operator-level scope), for the reads too; viewers see neither the page nor the queue. Dismiss can add the MAC to an ignore list, which is listed and reversible.
 
 The user can change any of them; none is hard to undo.
+
+## Drain-test flake: one fix, not two (2026-10-26)
+
+- #179 and #180 both fixed the same OFFLINE-mid-test drain flake in `internal/api/cluster_test.go`. #180 (`pinMembers`: PEXPIRE the fake member records) merged first, so #179 keeps main's file and drops its `keepReady` re-publisher. Re-publishing READY every 500 ms could also overwrite the state a drain test is asserting on.
+
+## IVR menu numbers join the park-slot dial space (2026-10-26)
+
+IVR (#142) merged after park/pickup (#161), whose migration took 00032, so
+the IVR migration is renumbered to 00033. An IVR menu number and a park slot
+are both dialled as a plain number, so they must not collide: the dial-space
+guard (`loadDialItems`) now counts IVR menu numbers among the names a park
+slot may not equal, and creating or renumbering a menu runs `checkNotSlot`.
+Both directions are covered by `TestIVRNumberNotParkSlot`. The IVR test
+helper `countRTP` became `countPhoneRTP`, because park's tests brought their
+own `countRTP` with a different signature.

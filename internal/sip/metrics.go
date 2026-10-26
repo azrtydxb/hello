@@ -51,6 +51,7 @@ type Metrics struct {
 	VoicemailStorage      prometheus.Gauge
 	VoicemailEmail        *prometheus.CounterVec // result
 	Transfers             *prometheus.CounterVec // kind, result
+	Parks                 *prometheus.CounterVec // kind, result
 	Forwarded             *prometheus.CounterVec // kind
 	GroupCalls            *prometheus.CounterVec // group, strategy, result
 	PresenceSubscriptions prometheus.Gauge
@@ -173,6 +174,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.Transfers = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_transfers_total", Help: "Blind and attended transfers by kind and result.",
 	}, []string{"kind", "result"})
+	m.Parks = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_park_total", Help: "Call park and pickup operations by kind (park, retrieve, return, pickup) and result.",
+	}, []string{"kind", "result"})
 	m.Forwarded = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_forwarded_calls_total", Help: "Forwarded call attempts by forwarding kind.",
 	}, []string{"kind"})
@@ -214,7 +218,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	})
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
-		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Forwarded, m.GroupCalls,
+		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls,
 		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	return m
