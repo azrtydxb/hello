@@ -249,20 +249,8 @@ func checkIVRDestination(ctx context.Context, tx *sql.Tx, d ivrDest) error {
 // number is free, the destinations exist and the automatic transitions
 // (timeout and invalid) do not loop.
 func checkIVRMenu(ctx context.Context, tx *sql.Tx, id int64, in IVRMenuInput) error {
-	if in.Number != "" {
-		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM extensions WHERE number = $1)
-			+ (SELECT count(*) FROM ring_groups WHERE name = $1)
-			+ (SELECT count(*) FROM queues WHERE number = $1)
-			+ (SELECT count(*) FROM conference_rooms WHERE number = $1)`, in.Number).Scan(&n); err != nil {
-			return err
-		}
-		if n > 0 {
-			return fieldError("number", "is already an extension number, a ring group name, a queue number or a conference room number")
-		}
-		if err := checkNotSlot(ctx, tx, "number", in.Number); err != nil {
-			return err
-		}
+	if err := checkDialNumber(ctx, tx, "number", in.Number, numIVRMenu); err != nil {
+		return err
 	}
 	selfRef := func(d IVRDestination) bool { return d.Kind == IVRMenuDest && d.Target == in.Name }
 	for _, d := range in.destinations() {
@@ -570,19 +558,4 @@ func requireIVRMenuTx(ctx context.Context, tx *sql.Tx, path, name string) error 
 		return fieldError(path, fmt.Sprintf("IVR menu %q does not exist", name))
 	}
 	return nil
-}
-
-// refuseIVRNumber refuses an extension number or ring group name that an IVR
-// menu already answers on: the menu's number is matched first, so the
-// extension or group would never ring.
-func refuseIVRNumber(ctx context.Context, tx *sql.Tx, path, number string) error {
-	var name string
-	err := tx.QueryRowContext(ctx, `SELECT name FROM ivr_menus WHERE number = $1 AND number <> ''`, number).Scan(&name)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		return nil
-	case err != nil:
-		return err
-	}
-	return fieldError(path, "is already the number of IVR menu "+name)
 }

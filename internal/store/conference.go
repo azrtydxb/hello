@@ -113,35 +113,6 @@ func (s *Store) ConferenceByNumber(ctx context.Context, number string) (Conferen
 	return c, mapErr(err)
 }
 
-// checkConferenceNumber refuses a room number an extension, a ring group, an
-// IVR menu or a call queue already answers to, or a park lot's slots use.
-func checkConferenceNumber(ctx context.Context, tx *sql.Tx, number string) error {
-	var taken string
-	switch err := tx.QueryRowContext(ctx, `SELECT 'an extension' FROM extensions WHERE number = $1
-		UNION ALL SELECT 'a ring group' FROM ring_groups WHERE name = $1
-		UNION ALL SELECT 'an IVR menu' FROM ivr_menus WHERE number = $1
-		UNION ALL SELECT 'a queue' FROM queues WHERE number = $1 LIMIT 1`, number).Scan(&taken); {
-	case errors.Is(err, sql.ErrNoRows):
-		return checkNotSlot(ctx, tx, "number", number)
-	case err != nil:
-		return err
-	}
-	return fieldError("number", fmt.Sprintf("is already %s number", taken))
-}
-
-// conferenceNumberTaken reports whether a room is dialled as number, for the
-// extension and ring group creators.
-func conferenceNumberTaken(ctx context.Context, tx *sql.Tx, path, number string) error {
-	var one int
-	switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM conference_rooms WHERE number = $1`, number).Scan(&one); {
-	case errors.Is(err, sql.ErrNoRows):
-		return nil
-	case err != nil:
-		return err
-	}
-	return fieldError(path, "is a conference room number")
-}
-
 // setConferencePIN seals one PIN for room id, or clears it.
 func (s *Store) setConferencePIN(ctx context.Context, tx *sql.Tx, id int64, which string, ch PINChange) error {
 	if !ch.Set {
@@ -217,7 +188,7 @@ func (s *Store) CreateConference(ctx context.Context, actor string, in Conferenc
 		if n >= MaxConferenceRooms {
 			return 0, &InUseError{Msg: fmt.Sprintf("at most %d conference rooms", MaxConferenceRooms)}
 		}
-		if err := checkConferenceNumber(ctx, tx, in.Number); err != nil {
+		if err := checkDialNumber(ctx, tx, "number", in.Number, numConference); err != nil {
 			return 0, err
 		}
 		var id int64
@@ -255,7 +226,7 @@ func (s *Store) UpdateConference(ctx context.Context, actor string, id int64, in
 			return id, mapErr(err)
 		}
 		if old != in.Number {
-			if err := checkConferenceNumber(ctx, tx, in.Number); err != nil {
+			if err := checkDialNumber(ctx, tx, "number", in.Number, numConference); err != nil {
 				return id, err
 			}
 			routes, err := routeNames(ctx, tx, `SELECT name FROM inbound_routes WHERE destination_kind = 'conference' AND destination = $1`, old)
