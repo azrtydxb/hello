@@ -458,6 +458,34 @@ describe("Extensions", () => {
     ).not.toBeChecked();
   });
 
+  it("sets the ring count before the no-answer forward and validates it", async () => {
+    const calls = api([EXT], {
+      "GET /api/v1/devices": () => json({ items: [DEVICE] }),
+      "GET /api/v1/registrations": () => json({ items: [] }),
+      "GET /api/v1/presence": () => json({ items: [] }),
+      "PATCH /api/v1/extensions/1": () => json({ ...EXT, noAnswerRings: 4 }),
+    });
+    renderApp("/extensions");
+    const drawer = await openDrawer();
+    const rings = within(drawer).getByLabelText("Rings before no answer");
+    fireEvent.change(rings, { target: { value: "99" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+    expect(
+      await within(drawer).findByText(/1 to 20 rings/, {
+        selector: "[role=alert], .az-field-error, *",
+      }),
+    ).toBeVisible();
+    expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(0);
+    fireEvent.change(rings, { target: { value: "4" } });
+    fireEvent.click(within(drawer).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Extension 100 saved.")).toBeVisible();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/extensions/1",
+      body: { noAnswerRings: 4 },
+    });
+  });
+
   it("validates forwarding targets before sending", async () => {
     const calls = api([EXT]);
     renderApp("/extensions");

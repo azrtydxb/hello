@@ -802,6 +802,7 @@ func (s *Server) SnapshotChanged(old, cur *snapshot.Snapshot) {
 	if old == nil || cur == nil {
 		return
 	}
+	s.notifyFeatureChanges(cur)
 	var gone []string
 	for _, u := range old.Usernames() {
 		if _, ok := cur.DeviceByUsername(u); !ok {

@@ -15499,6 +15499,7 @@
           "recordDefault",
           "allowIntercom",
           "callWaiting",
+          "noAnswerRings",
           "directoryHidden"
         ],
         "properties": {
@@ -15574,6 +15575,12 @@
               }
             ],
             "description": "Music on hold class callers hear while this extension holds them; null uses the global default."
+          },
+          "noAnswerRings": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20,
+            "description": "Rings before the no-answer forward or voicemail (about 6 seconds each); 0 uses the system ring timeout. The phone's feature key sets it too."
           },
           "directoryHidden": {
             "type": "boolean",
@@ -15673,6 +15680,12 @@
               }
             ],
             "description": "Music on hold class callers hear while this extension holds them; null clears it (global default)."
+          },
+          "noAnswerRings": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20,
+            "description": "Rings before the no-answer forward or voicemail (about 6 seconds each); 0 uses the system ring timeout. The phone's feature key sets it too."
           },
           "directoryHidden": {
             "type": "boolean",

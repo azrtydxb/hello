@@ -52,6 +52,10 @@ const FORWARD_PATTERN = /^(\+?[0-9]{2,20})?$/;
 const FORWARD_HINT =
   "Empty = off; or 2 to 20 digits, optionally starting with +.";
 
+/** Rings before the no-answer forward: empty or 0 = the system default. */
+const RINGS_PATTERN = /^([0-9]|1[0-9]|20)?$/;
+const RINGS_HINT = "Empty or 0 = the system default; otherwise 1 to 20 rings.";
+
 const FIELDS = [
   "number",
   "name",
@@ -60,6 +64,7 @@ const FIELDS = [
   "forwardAlways",
   "forwardBusy",
   "forwardNoAnswer",
+  "noAnswerRings",
   "voicemailEnabled",
   "recordDefault",
 ] as const;
@@ -73,6 +78,7 @@ interface Draft {
   forwardAlways: string;
   forwardBusy: string;
   forwardNoAnswer: string;
+  noAnswerRings: string;
 }
 
 function validate(d: Draft): Errors {
@@ -91,6 +97,9 @@ function validate(d: Draft): Errors {
     "forwardNoAnswer",
   ] as const) {
     if (!FORWARD_PATTERN.test(d[key].trim())) errors[key] = FORWARD_HINT;
+  }
+  if (!RINGS_PATTERN.test(d.noAnswerRings.trim())) {
+    errors.noAnswerRings = RINGS_HINT;
   }
   return errors;
 }
@@ -382,6 +391,7 @@ function NewExtension({
       forwardAlways: "",
       forwardBusy: "",
       forwardNoAnswer: "",
+      noAnswerRings: "",
     });
     setErrors(found);
     if (hasErrors(found)) return;
@@ -490,6 +500,7 @@ function ExtensionDrawer({
     forwardAlways: ext.forwardAlways ?? "",
     forwardBusy: ext.forwardBusy ?? "",
     forwardNoAnswer: ext.forwardNoAnswer ?? "",
+    noAnswerRings: ext.noAnswerRings ? String(ext.noAnswerRings) : "",
   });
   const [dnd, setDnd] = useState(ext.dnd ?? false);
   const [voicemail, setVoicemail] = useState(ext.voicemailEnabled !== false);
@@ -522,6 +533,9 @@ function ExtensionDrawer({
       if (draft[key].trim() !== (ext[key] ?? ""))
         patch[key] = draft[key].trim();
     }
+    const rings =
+      draft.noAnswerRings.trim() === "" ? 0 : Number(draft.noAnswerRings);
+    if (rings !== (ext.noAnswerRings ?? 0)) patch.noAnswerRings = rings;
     if (dnd !== (ext.dnd ?? false)) patch.dnd = dnd;
     if (voicemail !== (ext.voicemailEnabled !== false)) {
       patch.voicemailEnabled = voicemail;
@@ -723,6 +737,18 @@ function ExtensionDrawer({
               error={errors.forwardNoAnswer}
               value={draft.forwardNoAnswer}
               onChange={set("forwardNoAnswer")}
+            />
+            <Input
+              id="ext-no-answer-rings"
+              label="Rings before no answer"
+              mono
+              size="sm"
+              inputMode="numeric"
+              placeholder="Default"
+              hint={RINGS_HINT}
+              error={errors.noAnswerRings}
+              value={draft.noAnswerRings}
+              onChange={set("noAnswerRings")}
             />
           </div>
 
