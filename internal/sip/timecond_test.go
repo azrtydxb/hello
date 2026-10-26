@@ -38,6 +38,13 @@ func (f *fakeTCSettings) Toggle(_ context.Context, _, number, mode string, _ tim
 	return "office", "closed", nil
 }
 
+// setFail makes later toggles fail, under the lock a call in flight reads it with.
+func (f *fakeTCSettings) setFail(fail bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fail = fail
+}
+
 func (f *fakeTCSettings) got() [][2]string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -192,7 +199,7 @@ func TestTimeConditionToggleCode(t *testing.T) {
 	if got := responseCode(waitCall(t, dial(t.Context(), a, "*289")).err); got != 404 {
 		t.Fatalf("unknown toggle number = %d, want 404", got)
 	}
-	set.fail = true
+	set.setFail(true)
 	if got := responseCode(waitCall(t, dial(t.Context(), a, "*281")).err); got != 503 {
 		t.Fatalf("store down = %d, want 503", got)
 	}
