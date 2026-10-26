@@ -566,6 +566,11 @@
     );
 }
 
+.cf-row__fields--key {
+  grid-template-columns: minmax(70px, 1fr) minmax(min(100%, 160px), 3fr);
+  align-items: end;
+}
+
 .cf-row__label {
   display: flex;
   align-items: center;

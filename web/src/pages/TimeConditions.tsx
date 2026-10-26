@@ -85,6 +85,7 @@ export function TimeConditions() {
       />
       <Tabs<Tab>
         aria-label="Time conditions, schedules and calendars"
+        className="cf-tabs"
         idPrefix="tc"
         value={tab}
         onChange={setTab}

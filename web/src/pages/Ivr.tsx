@@ -659,24 +659,25 @@ function IvrDrawer({
               role="group"
               aria-label={`Key ${o.digit}`}
             >
-              <Select
-                id={`ivr-option-${i}-digit`}
-                label="Key"
-                size="sm"
-                value={o.digit}
-                error={errors[`options[${i}].digit`]}
-                options={[o.digit, ...free]}
-                onChange={(e) => setOption(i, { digit: e.target.value })}
-              />
-              <DestinationPicker
-                id={`ivr-option-${i}`}
-                label="Goes to"
-                value={o}
-                choices={choices}
-                kindError={errors[`options[${i}].kind`]}
-                targetError={errors[`options[${i}].target`]}
-                onChange={(next) => setOption(i, next)}
-              />
+              <div className="cf-row__fields cf-row__fields--key">
+                <Select
+                  id={`ivr-option-${i}-digit`}
+                  label="Key"
+                  value={o.digit}
+                  error={errors[`options[${i}].digit`]}
+                  options={[o.digit, ...free]}
+                  onChange={(e) => setOption(i, { digit: e.target.value })}
+                />
+                <DestinationPicker
+                  id={`ivr-option-${i}`}
+                  label="Goes to"
+                  value={o}
+                  choices={choices}
+                  kindError={errors[`options[${i}].kind`]}
+                  targetError={errors[`options[${i}].target`]}
+                  onChange={(next) => setOption(i, next)}
+                />
+              </div>
               <IconButton
                 icon="trash-2"
                 label={`Remove key ${o.digit}`}
