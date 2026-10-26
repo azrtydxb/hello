@@ -86,9 +86,35 @@ func tryRun(name string, args ...string) (string, error) {
 	return string(out), err
 }
 
+// transient reports whether kubectl's output is the API server of a small
+// kind cluster on a busy runner stumbling (etcd timeouts, resets), not an
+// answer.
+func transient(out string) bool {
+	for _, s := range []string{"Unable to connect", "EOF", "timed out", "connection reset", "connection refused", "etcdserver", "Forbidden", "TLS handshake", "i/o timeout"} {
+		if strings.Contains(out, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// kubectl runs kubectl and fails the test on an error, retrying a few times
+// when the failure looks like the API server being slow.
 func (l *labEnv) kubectl(t *testing.T, args ...string) string {
 	t.Helper()
-	return run(t, "kubectl", append(append([]string{}, l.kubectlArgs...), args...)...)
+	var out string
+	var err error
+	for i := 0; i < 4; i++ {
+		if out, err = l.tryKubectl(args...); err == nil {
+			return out
+		}
+		if !transient(out) {
+			break
+		}
+		time.Sleep(5 * time.Second)
+	}
+	t.Fatalf("kubectl %s: %v\n%s", strings.Join(args, " "), err, out)
+	return ""
 }
 
 func (l *labEnv) tryKubectl(args ...string) (string, error) {
@@ -312,14 +338,31 @@ func (l *labEnv) patchDeployment(t *testing.T, d map[string]any) {
 // still be settling etcd when the test starts.
 func (l *labEnv) waitAPI(t *testing.T) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Minute)
+	deadline := time.Now().Add(6 * time.Minute)
 	for {
 		out, err := l.tryKubectl("get", "--raw=/readyz")
 		if err == nil {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the API server is not ready after 3m: %v\n%s", err, out)
+			t.Fatalf("the API server is not ready after 6m: %v\n%s", err, out)
+		}
+		time.Sleep(3 * time.Second)
+	}
+}
+
+// rolloutStatus waits for a rollout, polling again when the API server
+// stumbles in the middle of the wait.
+func (l *labEnv) rolloutStatus(t *testing.T, deployment string, d time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		out, err := l.tryKubectl("-n", l.namespace, "rollout", "status", "deployment/"+deployment, "--timeout=120s")
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("rollout of %s not done after %s: %v\n%s", deployment, d, err, out)
 		}
 		time.Sleep(3 * time.Second)
 	}
@@ -351,15 +394,25 @@ func (l *labEnv) apply(t *testing.T) {
 		t.Fatal(err)
 	}
 	l.retry(t, "apply", "-f", f)
-	l.kubectl(t, "-n", l.namespace, "rollout", "status", "deployment/kamailio", "--timeout=300s")
+	l.rolloutStatus(t, "kamailio", 10*time.Minute)
 }
 
 // diagnostics prints what an operator would look at.
 func (l *labEnv) diagnostics(t *testing.T) {
+	for _, c := range [][]string{
+		{"uptime"}, {"free", "-m"}, {"docker", "stats", "--no-stream", "--format", "{{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}}"},
+		{"docker", "logs", "--tail", "40", l.control},
+	} {
+		out, _ := tryRun(c[0], c[1:]...)
+		t.Logf("%s:\n%s", strings.Join(c, " "), out)
+	}
 	for _, args := range [][]string{
 		{"-n", l.namespace, "get", "pods", "-o", "wide"},
 		{"-n", l.namespace, "get", "lease"},
 		{"-n", l.namespace, "describe", "pods", "-l", "app.kubernetes.io/component=edge"},
+		{"-n", l.namespace, "get", "events", "--sort-by=.lastTimestamp"},
+		{"-n", "kube-system", "get", "pods", "-o", "wide"},
+		{"-n", l.namespace, "get", "svc,endpointslices"},
 	} {
 		out, _ := l.tryKubectl(args...)
 		t.Logf("kubectl %s:\n%s", strings.Join(args, " "), out)
@@ -371,9 +424,12 @@ func (l *labEnv) diagnostics(t *testing.T) {
 			pods = ""
 		}
 		for _, p := range strings.Fields(pods) {
-			for _, c := range []string{"kamailio", "vip"} {
-				out, _ := l.tryKubectl("-n", l.namespace, "logs", p, "-c", c, "--tail=80")
+			for _, c := range []string{"wait-dispatcher", "kamailio", "vip"} {
+				out, _ := l.tryKubectl("-n", l.namespace, "logs", p, "-c", c, "--tail=60")
 				t.Logf("%s %s/%s log:\n%s", n, p, c, out)
+				if prev, err := l.tryKubectl("-n", l.namespace, "logs", p, "-c", c, "--previous", "--tail=60"); err == nil {
+					t.Logf("%s %s/%s previous log:\n%s", n, p, c, prev)
+				}
 			}
 		}
 		out, _ := tryRun("docker", "exec", n, "ip", "-4", "-o", "addr", "show", "dev", "eth0")

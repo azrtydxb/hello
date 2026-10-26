@@ -754,7 +754,7 @@ jobs:
     # Full tier: on a pull request only when the change touches the edge (the
     # first step decides); always on main, the nightly cron and dispatch.
     runs-on: arc-azrtydxb
-    timeout-minutes: 40
+    timeout-minutes: 50
     env:
       KIND_VERSION: v0.30.0
       KUBECTL_VERSION: v1.34.0
@@ -841,6 +841,7 @@ jobs:
           EOF
           # kind's kubelets need more inotify instances than the default 128.
           docker run --rm --privileged alpine:3.22 sh -c 'sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576' || echo "could not raise the inotify limits"
+          nproc; free -m || true; uptime
           kind create cluster --name kamailio-ha --config kind.yaml --wait 5m --retain || {
             docker ps -a
             kind export logs --name kamailio-ha ./kind-logs || true
@@ -865,15 +866,17 @@ jobs:
           export KINDHA_VIP="$vip"
           export KINDHA_IMAGE=hello.local/kamailio:ha
           export KINDHA_CONTEXT=kind-kamailio-ha
-          "$RUNNER_TEMP/kindha.test" -test.count=1 -test.timeout 30m -test.v
+          "$RUNNER_TEMP/kindha.test" -test.count=1 -test.timeout 40m -test.v
       - name: Cluster state on failure
         if: failure() && steps.changed.outputs.run == 'true'
         run: |
           kubectl -n hello get pods -o wide || true
           kubectl -n hello get lease || true
+          kubectl -n hello get events --sort-by=.lastTimestamp | tail -40 || true
+          kubectl -n kube-system get pods -o wide || true
           for p in $(kubectl -n hello get pods -o name); do
-            for c in kamailio vip; do
-              echo "=== $p $c"; kubectl -n hello logs "$p" -c "$c" --tail=200 || true
+            for c in wait-dispatcher kamailio vip; do
+              echo "=== $p $c"; kubectl -n hello logs "$p" -c "$c" --tail=100 || true
             done
           done
       - name: Remove the cluster

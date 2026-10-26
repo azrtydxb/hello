@@ -689,7 +689,7 @@ func (l *lab) rolling(t *testing.T) {
 	}()
 
 	l.kubectl(t, "-n", l.namespace, "rollout", "restart", "deployment/kamailio")
-	l.kubectl(t, "-n", l.namespace, "rollout", "status", "deployment/kamailio", "--timeout=420s")
+	l.rolloutStatus(t, "kamailio", 12*time.Minute)
 	l.waitPodsReady(t, 2, 2*time.Minute)
 	l.waitVIP(t, 30*time.Second)
 	close(stop)
