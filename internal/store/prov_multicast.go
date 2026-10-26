@@ -26,7 +26,7 @@ import (
 // the group's, else the defaults.
 func (s *Store) multicastInfo(ctx context.Context, phoneID int64, v prov.Vendor, model string) (*prov.MulticastInfo, *prov.PTTInfo, *prov.PagingOptions, error) {
 	var group, override sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `SELECT group_id, ptt_channel_id FROM phones WHERE id = $1`, phoneID).Scan(&group, &override)
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT group_id, ptt_channel_id FROM phones WHERE id = $1`, phoneID).Scan(&group, &override)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, nil, prov.ErrNotFound
 	}
@@ -35,7 +35,7 @@ func (s *Store) multicastInfo(ctx context.Context, phoneID int64, v prov.Vendor,
 	}
 	var g *phonebook.Group
 	if group.Valid {
-		gg, err := getPhoneGroup(ctx, s.db, group.Int64)
+		gg, err := getPhoneGroup(ctx, s.q(ctx), group.Int64)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -51,7 +51,7 @@ func (s *Store) multicastInfo(ctx context.Context, phoneID int64, v prov.Vendor,
 			}
 		}
 	} else {
-		all, err := catalogChannels(ctx, s.db, phonebook.KindPaging, true)
+		all, err := catalogChannels(ctx, s.q(ctx), phonebook.KindPaging, true)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -74,7 +74,7 @@ func (s *Store) multicastInfo(ctx context.Context, phoneID int64, v prov.Vendor,
 	if !ptt {
 		return mc, nil, opts, nil
 	}
-	ptts, err := catalogChannels(ctx, s.db, phonebook.KindPTT, true)
+	ptts, err := catalogChannels(ctx, s.q(ctx), phonebook.KindPTT, true)
 	if err != nil {
 		return nil, nil, nil, err
 	}
