@@ -809,13 +809,18 @@ func TestConferenceKeyLamp(t *testing.T) {
 		}
 	}
 	seat.leave()
-	f.mu.Lock()
-	delete(f.states, "800") // the owner's state expires once the room empties
-	f.mu.Unlock()
+	// The owner's state expires once the room empties (Valkey's TTL; the
+	// fake has none, and a publish in flight can land after the delete).
+	expire := time.NewTicker(100 * time.Millisecond)
+	defer expire.Stop()
 	out := false
-	deadline = time.After(8 * time.Second)
+	deadline = time.After(10 * time.Second)
 	for !out {
 		select {
+		case <-expire.C:
+			f.mu.Lock()
+			delete(f.states, "800")
+			f.mu.Unlock()
 		case n := <-b.notifies:
 			out = !strings.Contains(string(n.Body()), "confirmed")
 		case <-deadline:
