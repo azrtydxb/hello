@@ -300,6 +300,11 @@ func (c *call) groupFail(snap *snapshot.Snapshot, g snapshot.RingGroup) {
 		e, ok := snap.Extension(g.FailureTarget)
 		if ok && c.voicemailConfigured(e) {
 			c.addTrace(fmt.Sprintf("Group %s: to voicemail of %s", g.Name, g.FailureTarget))
+			// The message goes to the failure target's box, not to the box
+			// named after the dialled group number.
+			c.mu.Lock()
+			c.vmExt = g.FailureTarget
+			c.mu.Unlock()
 			c.startVoicemail(vmLeave, "group-failure")
 			return
 		}

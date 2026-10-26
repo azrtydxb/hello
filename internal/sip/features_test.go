@@ -63,7 +63,8 @@ type fakeVMStore struct {
 	msgs    []VoicemailMessage
 	counts  [][2]int // per insert: unread, total after
 	failIns bool
-	lookups int // Box calls: one per voicemail application start
+	lookups int      // Box calls: one per voicemail application start
+	looked  []string // the extension of each Box call, in order
 
 	contacts  map[string]string // number -> phonebook name
 	greetings map[int64]map[string]string
@@ -78,6 +79,7 @@ func (f *fakeVMStore) Box(_ context.Context, ext string) (VoicemailBox, bool, er
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lookups++
+	f.looked = append(f.looked, ext)
 	b, ok := f.boxes[ext]
 	return b, ok, nil
 }
@@ -672,6 +674,53 @@ func TestRingGroupsIntegration(t *testing.T) {
 	if v := pbx.metric(t, "hello_group_calls_total", map[string]string{"group": "700", "strategy": "ring-all", "result": "answered"}); v != 2 {
 		t.Fatalf("failure destination did not answer the call: %v", v)
 	}
+}
+
+// TestRingGroupVoicemailFailureBox fails if a ring group whose failure is
+// voicemail records the message into the box named after the dialled group
+// number (700) instead of the failure target's box (100).
+func TestRingGroupVoicemailFailureBox(t *testing.T) {
+	vm := newVMStore()
+	vm.boxes["100"] = VoicemailBox{ID: 7, Extension: "100"}
+	vm.boxes["700"] = VoicemailBox{ID: 8, Extension: "700"} // the wrong box exists too
+	objs := &fakeObjects{}
+	groups := func(s *snapshot.Snapshot) {
+		s.WithExtensionData([]snapshot.Extension{{Number: "100", VoicemailEnabled: true, VoicemailBoxID: 7}})
+		g := snapshot.RingGroup{ID: 1, Name: "700", Strategy: "ring-all", RingTimeout: 30, MemberDelay: 2,
+			FailureKind: "voicemail", FailureTarget: "100"}
+		s.WithRingGroups([]snapshot.RingGroup{g}, [][]snapshot.RingGroupMember{
+			{{ExtensionID: 2, Extension: "200", Position: 1, Weight: 1}},
+		})
+	}
+	pbx := startPBX(t, callerDevices(), shortRing(400*time.Millisecond), withFeatures(groups), withVoicemail(vm, objs))
+	anchored(pbx)
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	b := newPhone(t, pbx, "b1", "pb1")
+	b.register(t)
+	b.setCallee(ringForever())
+	r := waitCall(t, dial(t.Context(), a, "700"))
+	if r.err != nil {
+		t.Fatalf("group call: %v", r.err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		vm.mu.Lock()
+		got := append([]string(nil), vm.looked...)
+		vm.mu.Unlock()
+		if len(got) > 0 {
+			if got[0] != "100" {
+				t.Fatalf("voicemail opened box %q, want the failure target's box 100", got[0])
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("voicemail application never looked up a box")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	hangup(t, r.dcs)
+	_ = pbx.nextCDR(t)
 }
 
 // TestHuntGroup fails if two members ring at once, or if the hunt does not
