@@ -48,37 +48,77 @@ CREATE TABLE ivr_menu_options (
     PRIMARY KEY (menu_id, digit)
 );
 
-ALTER TABLE ring_groups DROP CONSTRAINT ring_groups_failure_kind_check;
-ALTER TABLE ring_groups ADD CONSTRAINT ring_groups_failure_kind_check
-  CHECK (failure_kind IN ('none','voicemail','external','announcement','ivr'));
+-- Widen the CHECK lists. Each list is read from the live constraint, so
+-- values other migrations added (applied in either order) are kept. The
+-- helper is dropped again so a later migration on the same session can
+-- define its own.
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION pg_temp.hello_check_values(tbl regclass, cname text, add_vals text[], drop_vals text[])
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+    def  text;
+    col  text;
+    vals text[];
+BEGIN
+    SELECT pg_get_constraintdef(c.oid) INTO def
+      FROM pg_constraint c WHERE c.conrelid = tbl AND c.conname = cname;
+    IF def IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % not found', cname, tbl;
+    END IF;
+    col := substring(def FROM '^CHECK \(+([a-z_]+) = ANY');
+    IF col IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % has an unexpected form: %', cname, tbl, def;
+    END IF;
+    SELECT array_agg(m[1]) INTO vals FROM regexp_matches(def, '''([^'']*)''', 'g') AS t(m);
+    SELECT array_agg(DISTINCT v ORDER BY v) INTO vals
+      FROM unnest(vals || add_vals) AS u(v) WHERE v <> ALL (drop_vals);
+    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', tbl, cname);
+    EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I CHECK (%I IN (%s))', tbl, cname, col,
+        (SELECT string_agg(quote_literal(v), ',') FROM unnest(vals) AS u(v)));
+END
+$fn$;
+-- +goose StatementEnd
 
-ALTER TABLE feature_codes DROP CONSTRAINT feature_codes_action_check;
-ALTER TABLE feature_codes ADD CONSTRAINT feature_codes_action_check
-  CHECK (action IN ('forward_always','forward_busy','forward_no_answer','dnd_on','dnd_off',
-                    'voicemail','blind_transfer','attended_transfer','announcement','page','intercom',
-                    'call_waiting_on','call_waiting_off','ivr'));
-
-ALTER TABLE inbound_routes DROP CONSTRAINT inbound_routes_destination_kind_check;
-ALTER TABLE inbound_routes ADD CONSTRAINT inbound_routes_destination_kind_check
-  CHECK (destination_kind IN ('extension','external','sip_uri','internal','ivr'));
+SELECT pg_temp.hello_check_values('ring_groups', 'ring_groups_failure_kind_check', ARRAY['ivr'], ARRAY[]::text[]);
+SELECT pg_temp.hello_check_values('feature_codes', 'feature_codes_action_check', ARRAY['ivr'], ARRAY[]::text[]);
+SELECT pg_temp.hello_check_values('inbound_routes', 'inbound_routes_destination_kind_check', ARRAY['ivr'], ARRAY[]::text[]);
+DROP FUNCTION pg_temp.hello_check_values(regclass, text, text[], text[]);
 
 -- +goose Down
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION pg_temp.hello_check_values(tbl regclass, cname text, add_vals text[], drop_vals text[])
+RETURNS void LANGUAGE plpgsql AS $fn$
+DECLARE
+    def  text;
+    col  text;
+    vals text[];
+BEGIN
+    SELECT pg_get_constraintdef(c.oid) INTO def
+      FROM pg_constraint c WHERE c.conrelid = tbl AND c.conname = cname;
+    IF def IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % not found', cname, tbl;
+    END IF;
+    col := substring(def FROM '^CHECK \(+([a-z_]+) = ANY');
+    IF col IS NULL THEN
+        RAISE EXCEPTION 'constraint % on % has an unexpected form: %', cname, tbl, def;
+    END IF;
+    SELECT array_agg(m[1]) INTO vals FROM regexp_matches(def, '''([^'']*)''', 'g') AS t(m);
+    SELECT array_agg(DISTINCT v ORDER BY v) INTO vals
+      FROM unnest(vals || add_vals) AS u(v) WHERE v <> ALL (drop_vals);
+    EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', tbl, cname);
+    EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I CHECK (%I IN (%s))', tbl, cname, col,
+        (SELECT string_agg(quote_literal(v), ',') FROM unnest(vals) AS u(v)));
+END
+$fn$;
+-- +goose StatementEnd
+
 DELETE FROM inbound_routes WHERE destination_kind = 'ivr';
-ALTER TABLE inbound_routes DROP CONSTRAINT inbound_routes_destination_kind_check;
-ALTER TABLE inbound_routes ADD CONSTRAINT inbound_routes_destination_kind_check
-  CHECK (destination_kind IN ('extension','external','sip_uri','internal'));
-
+SELECT pg_temp.hello_check_values('inbound_routes', 'inbound_routes_destination_kind_check', ARRAY[]::text[], ARRAY['ivr']);
 DELETE FROM feature_codes WHERE action = 'ivr';
-ALTER TABLE feature_codes DROP CONSTRAINT feature_codes_action_check;
-ALTER TABLE feature_codes ADD CONSTRAINT feature_codes_action_check
-  CHECK (action IN ('forward_always','forward_busy','forward_no_answer','dnd_on','dnd_off',
-                    'voicemail','blind_transfer','attended_transfer','announcement','page','intercom',
-                    'call_waiting_on','call_waiting_off'));
-
+SELECT pg_temp.hello_check_values('feature_codes', 'feature_codes_action_check', ARRAY[]::text[], ARRAY['ivr']);
 UPDATE ring_groups SET failure_kind = 'none', failure_target = '' WHERE failure_kind = 'ivr';
-ALTER TABLE ring_groups DROP CONSTRAINT ring_groups_failure_kind_check;
-ALTER TABLE ring_groups ADD CONSTRAINT ring_groups_failure_kind_check
-  CHECK (failure_kind IN ('none','voicemail','external','announcement'));
+SELECT pg_temp.hello_check_values('ring_groups', 'ring_groups_failure_kind_check', ARRAY[]::text[], ARRAY['ivr']);
+DROP FUNCTION pg_temp.hello_check_values(regclass, text, text[], text[]);
 
 DROP TABLE ivr_menu_options;
 DROP TABLE ivr_menus;
