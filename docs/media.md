@@ -20,8 +20,9 @@ add the anchor, but Hello does not remove it mid-call.
 
 ## Codecs (HD voice)
 
-Two phones that both support G.722 talk wideband end to end, and Opus works
-where both ends have it. G.711 (PCMU, PCMA) is the fallback for everything
+Phones talk Opus where both ends have it, G.722 wideband where both do, and
+the built-in provisioning templates list them in that order (Opus, G.722,
+PCMU, PCMA). G.711 (PCMU, PCMA) is the fallback for everything
 else.
 
 **Negotiation.** Hello forwards a filtered copy of the caller's codec list
@@ -46,9 +47,10 @@ rate; a phone that offers only `telephone-event/16000` with G.722 is
 answered with that.
 
 **Media Hello ends itself** (voicemail, announcements, the recording notice,
-paging, IVR) is a session with its own sample rate: 16 kHz when the caller
-offered G.722 (it is answered with G.722), 8 kHz G.711 otherwise; an
-Opus-only caller is answered with Opus. Prompts and recordings are WAV files
+IVR, conference rooms) is a session with its own sample rate: the caller is
+answered with Opus when it offered Opus and the build has it (16 kHz), else
+with G.722 (16 kHz), else G.711 (8 kHz). Paging and multicast stay G.722
+(or G.711), as a multicast page cannot carry Opus. Prompts and recordings are WAV files
 at any rate from 8 to 48 kHz; the rate a file has is resampled to the session's,
 so existing 8 kHz assets keep working and voicemail left over a G.722 call is
 stored at 16 kHz. Sessions (voicemail, IVR) run at 16 kHz on Opus; announcements,

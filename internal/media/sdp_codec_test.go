@@ -240,27 +240,55 @@ func TestTelephoneEventForG722(t *testing.T) {
 	}
 }
 
-// Hello-terminated media picks G.722 when offered, otherwise G.711 in the
-// offer's order, otherwise Opus.
+// Hello-terminated media picks Opus when this build has it and the offer
+// lists it, then G.722, then G.711 in the offer's order.
 func TestTerminatedPreference(t *testing.T) {
+	opus := []string{"rtpmap:96 opus/48000/2"}
 	for _, c := range []struct {
-		name string
-		pts  string
-		attr []string
-		want uint8
+		name     string
+		pts      string
+		attr     []string
+		want     uint8
+		wantNoOp uint8 // the answer in a build without Opus (0: same as want)
 	}{
-		{"g722 offered", "0 8 9", nil, 9},
-		{"g711 only, pcma first", "8 0", nil, 8},
-		{"opus and pcmu", "96 0", []string{"rtpmap:96 opus/48000/2"}, 0},
-		{"opus only", "96", []string{"rtpmap:96 opus/48000/2"}, 96},
+		{"g722 offered", "0 8 9", nil, 9, 0},
+		{"g711 only, pcma first", "8 0", nil, 8, 0},
+		{"opus and pcmu", "96 0", opus, 96, 0},
+		{"opus after g722", "9 96 0", opus, 96, 9},
+		{"opus first of everything", "96 9 0 8", opus, 96, 9},
+		{"opus only", "96", opus, 96, 96},
 	} {
-		if c.want == 96 && !OpusAvailable {
-			continue
+		want := c.want
+		if !OpusAvailable {
+			if c.wantNoOp == 96 {
+				continue // nothing Hello can answer with
+			}
+			if c.wantNoOp != 0 {
+				want = c.wantNoOp
+			} else if want == 96 {
+				want = 0
+			}
 		}
 		got, ok := mustParse(t, sdp(c.pts, c.attr...)).Terminated()
-		if !ok || got.PayloadType != c.want || len(got.Codecs) != 1 {
-			t.Errorf("%s: got %d (ok %v, %d codecs), want %d", c.name, got.PayloadType, ok, len(got.Codecs), c.want)
+		if !ok || got.PayloadType != want || len(got.Codecs) != 1 {
+			t.Errorf("%s: got %d (ok %v, %d codecs), want %d", c.name, got.PayloadType, ok, len(got.Codecs), want)
 		}
+	}
+}
+
+// An Opus answer carries the 48000 telephone-event and nothing else.
+func TestTerminatedOpusEvents(t *testing.T) {
+	if !OpusAvailable {
+		t.Skip("no Opus in this build")
+	}
+	offer := mustParse(t, sdp("9 111 126 127", "rtpmap:111 opus/48000/2", "rtpmap:126 telephone-event/8000", "rtpmap:127 telephone-event/48000"))
+	term, ok := offer.Terminated()
+	if !ok || term.PayloadType != 111 || term.DTMFPayloadType != 127 || term.DTMFRate != 48000 {
+		t.Fatalf("terminated %+v", term)
+	}
+	body := string(term.Build("192.0.2.1", 31000, "sendrecv"))
+	if !strings.Contains(body, "m=audio 31000 RTP/AVP 111 127\r\n") || !strings.Contains(body, "a=rtpmap:127 telephone-event/48000\r\n") {
+		t.Errorf("answer:\n%s", body)
 	}
 }
 

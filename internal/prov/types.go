@@ -114,8 +114,8 @@ type RenderData struct {
 	// DND and forward keys dial them; a code the PBX does not define is
 	// empty.
 	Codes FeatureCodes
-	// Codecs is the HD voice codec plan: G.722 first, Opus where the model
-	// has it, then PCMU and PCMA (see CodecInfo).
+	// Codecs is the HD voice codec plan: Opus first where the model has
+	// it, then G.722, PCMU and PCMA (see CodecInfo).
 	Codecs CodecInfo
 	// Emergency is the comma-separated emergency numbers of Hello's
 	// emergency-flagged outbound routes (digits only), empty when none.
