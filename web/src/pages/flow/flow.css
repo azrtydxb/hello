@@ -1,0 +1,474 @@
+/*
+ * The call-flow canvas (spec flow-canvas). Tokens only; the port colours are
+ * the --flow-port-<type> variables below, mapped to Azrty tokens so both
+ * themes stay legible. Shape carries the port type as well as colour (S-2).
+ */
+
+:root {
+  --flow-port-call: var(--az-info-strong);
+  --flow-port-voicemail: var(--az-chart-6);
+  --flow-port-member: var(--az-good-strong);
+  --flow-port-prompt: var(--az-warn-strong);
+  --flow-port-device: var(--az-muted);
+  /* No Azrty token has these hues: the spec's values, lifted on dark. */
+  --flow-port-carrier: #fb923c;
+  --flow-port-schedule: #2dd4bf;
+  --flow-port-holdMusic: #f472b6;
+}
+
+[data-theme="light"] {
+  --flow-port-carrier: #ea580c;
+  --flow-port-schedule: #0d9488;
+  --flow-port-holdMusic: #db2777;
+}
+
+.flow-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* The canvas needs the width of the window, not the reading column. */
+.app-page:has(.flow-page) {
+  max-width: none;
+  padding-bottom: 20px;
+}
+
+.flow-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: calc(100dvh - 150px);
+  min-height: 460px;
+}
+
+.flow-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.flow-toolbar__status {
+  color: var(--az-muted);
+  font-size: var(--az-text-sm);
+  min-height: 1.2em;
+}
+
+.flow-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) auto;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.flow-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  background: var(--az-surface);
+  border: 1px solid var(--az-border);
+  border-radius: var(--az-radius-lg);
+}
+
+.flow-side__title {
+  margin: 0;
+  font-size: var(--az-text-md);
+}
+
+.flow-side__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.flow-group > summary {
+  cursor: pointer;
+  padding: 6px 0;
+  color: var(--az-text-2);
+  font-weight: 600;
+}
+
+.flow-group__items {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+}
+
+.flow-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--az-radius-sm);
+  font-size: var(--az-text-sm);
+}
+
+.flow-item[draggable="true"] {
+  cursor: grab;
+}
+
+.flow-item:hover {
+  background: var(--az-hover);
+}
+
+.flow-item__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--az-bg);
+  border: 1px solid var(--az-border);
+  border-radius: var(--az-radius-lg);
+  overflow: hidden;
+}
+
+.flow-stage .react-flow {
+  --xy-background-color: var(--az-bg);
+  --xy-edge-stroke-default: var(--az-muted);
+  --xy-edge-label-color-default: var(--az-text-2);
+  --xy-edge-label-background-color-default: var(--az-surface);
+  --xy-minimap-background-color-default: var(--az-surface);
+  --xy-minimap-mask-background-color-default: rgb(0 0 0 / 0.35);
+  --xy-controls-button-background-color-default: var(--az-surface);
+  --xy-controls-button-background-color-hover-default: var(--az-hover);
+  --xy-controls-button-color-default: var(--az-text);
+  --xy-controls-button-border-color-default: var(--az-border);
+  --xy-attribution-background-color-default: transparent;
+  font-family: var(--az-font-sans);
+}
+
+.flow-stage .react-flow__node {
+  border-radius: var(--az-radius-lg);
+}
+
+.flow-stage .react-flow__node:focus-visible {
+  outline: 2px solid var(--az-focus-ring);
+  outline-offset: 2px;
+}
+
+.flow-panel {
+  width: 440px;
+  max-width: 44vw;
+  min-height: 0;
+  display: flex;
+}
+
+.flow-panel .az-drawer {
+  max-width: 100%;
+  width: 100%;
+  max-height: 100%;
+}
+
+.flow-panel__section {
+  margin-top: 16px;
+}
+
+.flow-panel__section h3 {
+  margin: 0 0 6px;
+  font-size: var(--az-text-md);
+}
+
+.flow-panel__links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.flow-linkbtn {
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  color: var(--az-accent-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* --- nodes ---------------------------------------------------------------- */
+
+.flow-node {
+  width: 248px;
+  background: var(--az-surface);
+  border: 1px solid var(--az-border-strong);
+  border-radius: var(--az-radius-lg);
+  color: var(--az-text);
+  font-size: var(--az-text-sm);
+}
+
+.flow-node--pseudo {
+  border-style: dashed;
+}
+
+.flow-node--selected {
+  border-color: var(--az-indicator);
+  box-shadow: 0 0 0 2px var(--az-indicator);
+}
+
+.flow-node--warn {
+  border-color: var(--az-warn-strong);
+}
+
+.flow-node--missing {
+  border-color: var(--az-bad-strong);
+  background: var(--az-bad-tint);
+}
+
+.flow-node__head {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  height: 58px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--az-border);
+  overflow: hidden;
+}
+
+.flow-node__kind {
+  color: var(--az-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.flow-node__title {
+  font-weight: 600;
+  font-size: var(--az-text-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-right: 44px;
+}
+
+.flow-node__summary {
+  color: var(--az-muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-node__warn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+}
+
+.flow-node__ports {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 0 0 10px;
+}
+
+.flow-node__col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.flow-node__col--out {
+  text-align: right;
+}
+
+.flow-port {
+  position: relative;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+}
+
+.flow-port--out {
+  justify-content: flex-end;
+}
+
+.flow-port__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--az-text-2);
+}
+
+/* --- port handles: colour from the type, shape from the catalogue --------- */
+
+.flow-handle.react-flow__handle {
+  width: 14px;
+  height: 14px;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: currentColor;
+  top: 50%;
+}
+
+.flow-handle.react-flow__handle-left {
+  left: 0;
+  transform: translate(-50%, -50%);
+}
+
+.flow-handle.react-flow__handle-right {
+  right: 0;
+  transform: translate(50%, -50%);
+}
+
+.flow-handle--circle,
+.flow-handle--circle-notch {
+  border-radius: 50%;
+}
+
+.flow-handle--circle-notch {
+  mask: radial-gradient(circle at 100% 50%, transparent 3.5px, #000 4px);
+}
+
+.flow-handle--square {
+  border-radius: 2px;
+}
+
+.flow-handle--diamond.react-flow__handle {
+  width: 17px;
+  height: 17px;
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+.flow-handle--triangle {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.flow-handle--hexagon.react-flow__handle {
+  width: 16px;
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+
+.flow-handle--small-square.react-flow__handle {
+  width: 9px;
+  height: 9px;
+}
+
+.flow-handle--stub.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  color: var(--az-muted);
+}
+
+/* --- edges and stubs ------------------------------------------------------ */
+
+.flow-stage .flow-edge .react-flow__edge-path {
+  stroke-width: 2;
+}
+
+.flow-stage .flow-edge--implicit .react-flow__edge-path {
+  stroke-dasharray: 2 5;
+}
+
+.flow-stage .flow-edge--stub .react-flow__edge-path {
+  stroke: var(--az-muted);
+  stroke-dasharray: 6 4;
+}
+
+.flow-stub {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  width: 190px;
+  height: 40px;
+  padding: 0 12px;
+  background: transparent;
+  border: 1px dashed var(--az-muted);
+  border-radius: var(--az-radius-md);
+  color: var(--az-text-2);
+  cursor: pointer;
+}
+
+.flow-stub:hover {
+  background: var(--az-hover);
+}
+
+.flow-stub__kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--az-muted);
+}
+
+.flow-stub__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--az-text-sm);
+}
+
+.flow-stub__warn {
+  position: absolute;
+  top: 3px;
+  right: 8px;
+  color: var(--az-warn-strong);
+  font-weight: 700;
+}
+
+/* --- legend --------------------------------------------------------------- */
+
+.flow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--az-text-2);
+  font-size: var(--az-text-sm);
+}
+
+.flow-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.flow-legend .flow-handle.react-flow__handle {
+  position: static;
+  display: inline-block;
+  transform: none;
+  flex: none;
+}
+
+@media (max-width: 1100px) {
+  .flow-shell {
+    grid-template-columns: 220px minmax(0, 1fr) auto;
+  }
+  .flow-panel {
+    width: 360px;
+  }
+}
+
+.flow-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}

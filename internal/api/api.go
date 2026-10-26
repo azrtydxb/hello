@@ -115,6 +115,12 @@ type Store interface {
 	DeleteTimeCondition(ctx context.Context, actor string, id int64, check store.Check) error
 	SetTimeConditionOverride(ctx context.Context, actor string, id int64, mode string) (store.TimeCondition, error)
 	EvaluateTimeCondition(ctx context.Context, id int64, at time.Time, ignoreOverride bool) (store.TimeConditionEvaluation, error)
+	ListFlowCanvases(ctx context.Context) ([]store.FlowCanvas, error)
+	GetFlowCanvas(ctx context.Context, id int64) (store.FlowCanvas, []store.FlowCanvasNode, error)
+	CreateFlowCanvas(ctx context.Context, actor, name, description string) (store.FlowCanvas, error)
+	UpdateFlowCanvas(ctx context.Context, actor string, id int64, c store.FlowCanvasChange) (store.FlowCanvas, error)
+	DeleteFlowCanvas(ctx context.Context, actor string, id int64) error
+	PutFlowLayout(ctx context.Context, actor string, id int64, w store.FlowLayoutWrite) (store.FlowCanvas, []store.FlowCanvasNode, error)
 	ListParkLots(ctx context.Context) ([]store.ParkLot, error)
 	GetParkLot(ctx context.Context, id int64) (store.ParkLot, error)
 	CreateParkLot(ctx context.Context, actor string, in store.ParkLotInput, check store.Check) (store.ParkLot, error)
