@@ -136,4 +136,8 @@ func TestConferenceRooms(t *testing.T) {
 	c.must(http.StatusNoContent, "DELETE", fmt.Sprintf("/api/v1/routes/inbound/%d", int64(routeID)), nil)
 	c.must(http.StatusNoContent, "DELETE", idPath, nil)
 	c.must(http.StatusNotFound, "GET", idPath, nil)
+	// An unknown room is 404 on every route that names one.
+	c.must(http.StatusNotFound, "PUT", "/api/v1/conferences/987654", map[string]any{"name": "x", "number": "899"})
+	c.must(http.StatusNotFound, "DELETE", "/api/v1/conferences/987654", nil)
+	c.must(http.StatusNotFound, "POST", "/api/v1/conferences/987654/control", map[string]any{"action": "lock"})
 }
