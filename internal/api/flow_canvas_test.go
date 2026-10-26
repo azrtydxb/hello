@@ -212,6 +212,7 @@ func TestFlowCanvasHandlers(t *testing.T) {
 		"neg version":  {"layoutVersion": -1},
 		"unknown kind": {"layoutVersion": 0, "nodes": []any{node("bogus:1", 0, 0)}},
 		"no id":        {"layoutVersion": 0, "nodes": []any{node("extension:", 0, 0)}},
+		"control char": {"layoutVersion": 0, "nodes": []any{node("missing:a\nb", 0, 0)}},
 		"far away":     {"layoutVersion": 0, "nodes": []any{node("extension:1", 5e6, 0)}},
 		"bad remove":   {"layoutVersion": 0, "remove": []any{"nope"}},
 	} {

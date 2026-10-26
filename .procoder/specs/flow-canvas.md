@@ -1,8 +1,8 @@
 # flow-canvas
 
-Status: approved (2026-10-25)
+Status: approved (2026-10-25). P0 and P1 delivered, and the graph side of P7 (every merged object type is in the catalogue and the graph), 2026-10-26. The **[assumed]** shapes were checked against the merged code and are now real; where they differed the text below says so.
 
-Source: user request 2026-10-25 ("a special configuration canvas as an alternative to some of the forms … connect trunks, extensions, groups, IVRs … right panel … connector dots … colored … our AI agent should be able to use our canvas, build it, change it, answer questions on it"). Builds on `ai-external-access` (OpenAPI → MCP tools, roles, scopes, in-process replay), `ai-agent` (suggest-only proposals, S-10..S-14), `trunks-routing`, `pbx-features`, and the unmerged branches `ivr` (PR #142: `migrations/00018_ivr.sql`, `IvrDestination`), `time-conditions`, `music-on-hold`, `tts-prompts` (`migrations/00017_tts_prompts.sql`).
+Source: user request 2026-10-25 ("a special configuration canvas as an alternative to some of the forms … connect trunks, extensions, groups, IVRs … right panel … connector dots … colored … our AI agent should be able to use our canvas, build it, change it, answer questions on it"). Builds on `ai-external-access` (OpenAPI → MCP tools, roles, scopes, in-process replay), `ai-agent` (suggest-only proposals, S-10..S-14), `trunks-routing`, `pbx-features`, and the features that have since merged: IVR (`migrations/00033_ivr.sql`), time conditions (`00038`, `00039`), music on hold (`00029`), call queues (`00040`), conferences (`00034`), park and pickup (`00032`), multicast channels (`00016`, `00031`) and TTS prompts (`00017`).
 
 Facts this design rests on (verified in the tree on 2026-10-25):
 
@@ -11,7 +11,7 @@ Facts this design rests on (verified in the tree on 2026-10-25):
 - Foreign keys: `devices.extension_id`, `phones.device_id`, `ring_group_members`, `paging_group_members/callers`, `outbound_route_trunks`, `inbound_routes.trunk_id` (NULL = any trunk), `ivr_menus.greeting_id/invalid_prompt_id/timeout_prompt_id → announcements`.
 - MCP tools are generated one per OpenAPI operation (`internal/mcp/tools.go`); the assistant's read tools are an explicit list in `internal/ai/assistant/tools.go`; proposals carry ≤ 8 `{operationId, pathParams, body}` actions from `proposal.Allowlist`.
 - `web/` depends only on react 19, react-dom and react-router 8; forms live as private `XxxDrawer` components inside each page and save directly; the design system has `Drawer` (with `inline`), `ConfirmDialog`, `Badge`, `Alert`.
-- Branches `time-conditions` and `music-on-hold` have no commits beyond `ivr`/main yet: their shapes below are assumed contracts (marked **[assumed]**).
+- Everything the spec once marked **[assumed]** is on main and was checked on 2026-10-26. Differences from the assumed shapes: a time condition has no `holidays` input (a calendar attaches to a *schedule*, through `schedule_calendars`, and the condition's `holiday` branch is driven by the calendars of its schedule); queues, conferences, park lots, pickup groups and multicast channels are real node types; IVR/time-condition/queue destinations also accept `queue` and `time_condition`, and the IVR option kinds are stored as `hangup|extension|ring_group|voicemail|announcement|paging|ivr|external|time_condition|queue`.
 
 ## Problem
 
@@ -35,20 +35,28 @@ Hello's configuration is a set of forms, one object at a time. The call flow of 
   |---|---|---|
   | Trunk (`trunk`) | `carrier` (carrier, many, from outbound routes) | `inbound` (carrier, many → inbound routes) |
   | Any trunk (`anyTrunk`, pseudo) | – | `inbound` (carrier → inbound routes with `trunkId` null) |
-  | Inbound route / DID (`inboundRoute`) | `trunk` (carrier, 0..1) | `destination` (call, 1) |
+  | Inbound route / DID (`inboundRoute`) | `trunk` (carrier, 0..1), `holdMusic` (0..1) | `destination` (call, 1): every call target |
   | Internal callers (`dialPlan`, pseudo) | – | `dial` (carrier → outbound routes) |
   | Outbound route (`outboundRoute`) | `dial` (carrier, 1) | `trunks` (carrier, ordered, many; edge label = try order) |
-  | Extension (`extension`) | `ring` (call, many), `voicemail` (voicemail, many; disabled when `voicemailEnabled` is false), `devices` (device, many) | `forwardAlways`, `forwardBusy`, `forwardNoAnswer` (call, 0..1 each), `member` (member, many); implicit dotted `noAnswer → own voicemail` when no forward is set and voicemail is on |
+  | Extension (`extension`) | `ring` (call, many), `voicemail` (voicemail, many; disabled when `voicemailEnabled` is false), `devices` (device, many), `holdMusic` (0..1) | `forwardAlways`, `forwardBusy`, `forwardNoAnswer` (call, 0..1 each: extension, numeric ring group, external number), `member` (member, many → ring group, paging group members/callers, queue, pickup group); implicit dotted `noAnswer → own voicemail` when no forward is set and voicemail is on |
   | Device (`device`), Phone (`phone`) | phone: – ; device: `phone` (device, 0..1) | device: `extension` (device, 1); phone: `device` (device, 0..1) |
-  | Ring group (`ringGroup`) | `ring` (call, many), `members` (member, ordered, many; position/weight/delay on the edge) | `noAnswer` (call, 0..1; unconnected = hang up). Answered calls end in the group: no port. |
-  | IVR menu (`ivr`) | `call` (call, many), `greeting` (prompt, 1, required), `invalidPrompt`, `timeoutPrompt` (prompt, 0..1) | one port per configured key `0-9 * #` (call), plus a ghost "add key" port; `timeout`, `invalid` (call); `directDial` shown as a badge, not a port |
-  | Announcement (`announcement`, TTS-generated ones badged) | `call` (call, many: play, then hang up) | `audio` (prompt, many → IVR prompt inputs) |
-  | Paging group (`pagingGroup`) | `call` (call, many), `members` (member), `callers` (member) | – |
-  | Feature code (`featureCode`, only actions with a target: `announcement`, `page`, `ivr`) | – | `target` (call, 1) |
-  | Time condition (`timeCondition`) **[assumed]** | `call` (call, many), `schedule` (schedule, 1), `holidays` (schedule, 0..1) | `open`, `closed`, `holiday` (call, 0..1 each); day/night override shown as a badge with a toggle in the panel |
-  | Schedule, Holiday calendar (`schedule`, `holidayCalendar`) **[assumed]** | – | `use` (schedule, many) |
-  | MOH class (`mohClass`) **[assumed]** | – | `use` (hold music, many → `holdMusic` inputs on the nodes music-on-hold allows) |
+  | Ring group (`ringGroup`) | `ring` (call, many), `members` (member, ordered, many; position/weight/delay on the edge), `holdMusic` (0..1) | `noAnswer` (call, 0..1; unconnected = hang up): extension, voicemail, ring group, IVR, queue, announcement, time condition, external. Answered calls end in the group: no port. |
+  | IVR menu (`ivr`) | `call` (call, many), `greeting` (prompt, 1, required), `invalidPrompt`, `timeoutPrompt` (prompt, 0..1) | one `key:<digit>` port per configured key `0-9 * #` (call), plus a ghost "add key" port; `timeout`, `invalid` (call); `directDial` shown as a badge, not a port |
+  | Call queue (`queue`) | `call` (call, many), `members` (member, many; position, penalty and dynamic on the edge), `holdMusic`, `periodicPrompt`, `positionPrompt`, `waitPrompt`, `minutesPrompt`, `breakoutPrompt` (0..1 each) | `timeout`, `full`, `noAgents` (call, 0..1), `breakout` (voicemail, 0..1: the extension whose box takes the breakout message) |
+  | Announcement (`announcement`, TTS-generated ones badged `generated`, with `textEdited` and the voice) | `call` (call, many: play, then hang up) | `audio` (prompt, many → IVR prompts, queue prompts, MOH class `tracks`, conference entry/exit announcements) |
+  | Paging group (`pagingGroup`) | `call` (call, many), `members` (member), `callers` (member) | `multicast` (call, 0..1 → a multicast channel the page is also sent to) |
+  | Multicast channel (`multicastChannel`) | `page` (call, many) | – |
+  | Conference room (`conference`) | `call` (call, many), `entryAnnouncement`, `exitAnnouncement` (prompt, 0..1) | – (the call stays in the room) |
+  | Park lot (`parkLot`) | – | – (parking and retrieving are feature codes and transfers to a slot, chosen at call time) |
+  | Pickup group (`pickupGroup`) | `members` (member, many) | – |
+  | Feature code (`featureCode`, only actions with a target: `announcement`, `ivr`, `time_condition`) | – | `target` (call, 1) |
+  | Time condition (`timeCondition`) | `call` (call, many), `schedule` (schedule, 1) | `open`, `closed`, `holiday` (call, 0..1 each; with no `holiday` branch the closed destination serves holidays); day/night override shown as a badge (`forced`, `override`, `overrideAt`) with a toggle in the panel |
+  | Schedule (`schedule`) | `calendars` (schedule, many) | `use` (schedule → time condition `schedule`) |
+  | Holiday calendar (`holidayCalendar`) | – | `use` (schedule → schedule `calendars`) |
+  | MOH class (`mohClass`) | `tracks` (prompt, ordered, many; position on the edge) | `use` (hold music, many → `holdMusic` of extension, ring group, inbound route, queue) |
   | External number (`external`), SIP URI (`sipUri`), DID-as-extension (`internalDid`), Missing (`missing`) | `call` | – (terminal; created from the target string; `missing` is a red node for a target that resolves to nothing) |
+
+  Every "call goes to..." output stores a `(kind, target)` pair; `StoredKinds` in `internal/flow/kinds.go` maps each kind to the input it reaches and `TestCatalogueDrift` keeps it in step with the database and the API.
 
 - [S-2] **Port types and colours.** Each port type has a colour and a shape, so the canvas stays readable for colour-blind users. The colours are CSS variables `--flow-port-<type>` mapped to azrty tokens.
 
@@ -65,20 +73,21 @@ Hello's configuration is a set of forms, one object at a time. The call flow of 
 
   Red is never a port colour: it marks validation errors only. An edge into a node that isn't on this canvas is a grey dashed stub labelled with the target.
 
-- [S-3] **Compatibility matrix** (✓ allowed today; **Q3** = allowed once destination kinds are unified, decision 3; **TC** = once `time-conditions` lands). Rows are outputs, columns are inputs.
+- [S-3] **Compatibility.** The catalogue (`Targets` of each output) is the single source; the table below is a summary. Decision 3 is implemented by migration `00041` (inbound routes accept `ring_group`, `voicemail`, `announcement` and `paging` besides the older kinds), on top of the destination kinds the IVR, time condition and queue migrations added.
 
-  | Output \ input | Ext `ring` | Ext `voicemail` | RG `ring` | IVR `call` | Ann `call` | Paging `call` | TC `call` | External | SIP URI | DID-as-ext |
-  |---|---|---|---|---|---|---|---|---|---|---|
-  | Inbound `destination` | ✓ | Q3 | ✓ when the group name is numeric (kind `extension`); Q3 natively | ✓ (`ivr`) | Q3 | Q3 | TC | ✓ | ✓ | ✓ (`internal`) |
-  | Extension forwards | ✓ | – | ✓ when numeric | ✓ when the menu has a `number` | – | – | – | ✓ | – | – |
-  | Ring group `noAnswer` | Q3 | ✓ (`voicemail`) | Q3 | ✓ (`ivr`) | ✓ (`announcement`) | Q3 | TC | ✓ (`external`) | – | – |
-  | IVR keys / `timeout` / `invalid` | ✓ | ✓ | ✓ | ✓ (not itself) | ✓ | ✓ | TC | ✓ | – | – |
-  | Feature code `target` | – | – | – | ✓ (`ivr`) | ✓ (`announcement`) | ✓ (`page`) | – | – | – | – |
-  | TC `open/closed/holiday` | TC | TC | TC | TC | TC | TC | TC (no cycle) | TC | – | – |
+  | Output \ input | Ext `ring` | Ext `voicemail` | RG `ring` | IVR | Queue | Ann | Paging | Conf | TC | External | SIP URI | DID-as-ext |
+  |---|---|---|---|---|---|---|---|---|---|---|---|---|
+  | Inbound `destination` | ✓ | ✓ | ✓ (`ring_group`; `extension` also takes a numeric group name) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+  | Extension forwards | ✓ | – | ✓ when numeric | – | – | – | – | – | – | ✓ | – | – |
+  | Ring group `noAnswer` | – | ✓ | – | ✓ | ✓ | ✓ | – | – | ✓ | ✓ | – | – |
+  | IVR keys / `timeout` / `invalid`, queue `timeout`/`full`/`noAgents`, TC `open/closed/holiday` | ✓ | ✓ | ✓ | ✓ (a menu's own key may return to itself) | ✓ | ✓ | ✓ | – | ✓ | ✓ | – | – |
+  | Feature code `target` | – | – | – | ✓ | – | ✓ | – | – | ✓ | – | – | – |
 
-  Resource ports: `audio` → IVR `greeting/invalidPrompt/timeoutPrompt`; `member` → RG `members`, Paging `members`, Paging `callers`; Trunk/Any-trunk `inbound` → Inbound `trunk`; Dial plan → Outbound `dial`; Outbound `trunks` → Trunk `carrier`; `schedule`/`holidays` → TC; MOH `use` → `holdMusic`; Device → Extension `devices`; Phone → Device. Anything else is refused, with a tooltip saying why ("Ring group names must be numeric to be dialled from a forward").
+  **Deviation from decision 3:** a call that has already started cannot be handed to a paging group or a conference room (the runtime pages and joins only from the INVITE), so ring group fallbacks and every exit of an IVR, queue or time condition do not offer those two; a ring group's fallback also cannot ring an extension or another ring group, because the group's ring stage has ended and the setup loop cannot open a new one (it can only for forwards, `advanceStage`); and extension forwards stay what the stored number can express (a forward to an IVR menu, queue or time condition is not stored; hello-sip resolves a forward as ring group, then extension, then outbound route). Park is not a destination at all: a call is parked by a feature code or a transfer to a slot. These are runtime limits, not catalogue choices; the catalogue lists exactly what is stored.
 
-- [S-4] **Edge ownership.** Every edge is stored in exactly one field of one object, its *owner*. The graph lists `owner: {node, field}` on every edge, and connecting or disconnecting becomes one update of the owner. Owners: inbound route (`trunkId`, `destinationKind`+`destination`), outbound route (`trunks[]`), extension (`forward*`), ring group (`members[]`, `failureKind`+`failureTarget`), paging group (`members[]`, `callers[]`), IVR (`options[]`, `timeout`, `invalid`, `*PromptId`, `greetingId`), feature codes (`argument`; the PUT replaces the whole table), device (`extensionId`), phone (`deviceId`), time condition and MOH users **[assumed]**.
+  Resource ports: `audio` → IVR `greeting/invalidPrompt/timeoutPrompt`, queue prompts, MOH `tracks`, conference announcements; `member` → RG `members`, Paging `members`/`callers`, queue `members`, pickup group `members`; Trunk/Any-trunk `inbound` → Inbound `trunk`; Dial plan → Outbound `dial`; Outbound `trunks` → Trunk `carrier`; MOH `use` → `holdMusic`; `schedule` `use` → TC `schedule`; calendar `use` → schedule `calendars`; Paging `multicast` → multicast channel `page`; Device → Extension `devices`; Phone → Device. Anything else is refused, with a tooltip saying why ("Ring group names must be numeric to be dialled from a forward").
+
+- [S-4] **Edge ownership.** Every edge is stored in exactly one field of one object, its *owner*. The graph lists `owner: {node, field}` on every edge, and connecting or disconnecting becomes one update of the owner. Owners: inbound route (`trunkId`, `destinationKind`+`destination`), outbound route (`trunks[]`), extension (`forward*`), ring group (`members[]`, `failureKind`+`failureTarget`), paging group (`members[]`, `callers[]`), IVR (`options[]`, `timeout`, `invalid`, `*PromptId`, `greetingId`), feature codes (`argument`; the PUT replaces the whole table), device (`extensionId`), phone (`deviceId`), time condition (`open`/`closed`/`holiday`, `scheduleId`), schedule (`calendarIds`), queue (`members[]`, `timeout`/`full`/`noAgents`, `*PromptId`, `breakoutVoicemail`, `mohClassId`), MOH class (`announcementIds`) and the objects that use hold music (`mohClassId` on extension, ring group, inbound route and queue), pickup group (`members[]`), conference (`entryAnnouncement`, `exitAnnouncement`), paging group (`multicastChannelId`).
 - [S-5] **Name resolution.** Target strings resolve with the same rules hello-sip uses: ring group name first, then extension number, then IVR `number`. Kinds that name things (`ring_group`, `ivr`, `announcement`, `paging`) resolve directly. Anything else becomes `external`/`sipUri`. A target that resolves to nothing becomes a `missing` node with error `dangling_reference`.
 
 ### Source of truth and layout
@@ -125,7 +134,7 @@ Hello's configuration is a set of forms, one object at a time. The call flow of 
   - extension: forwards and DND, ring, then the no-answer forward or voicemail;
   - ring group: members, then the `noAnswer` branch;
   - IVR: the key given in `digits`; with no digits, every configured key is listed as a branch, to depth 6;
-  - time condition: evaluated in-process with the same function behind `time-conditions`' evaluate endpoint at `at`, including the override **[assumed]**.
+  - time condition: evaluated in-process with the same function behind `time-conditions`' evaluate endpoint at `at`, including the override (the `timecond` package's `Resolve`).
   Returns ordered steps `{node, port, text, at?, branches?}`. The canvas trace mode highlights the path and gives a time picker and a keypad. "What happens when X calls DID Y at 20:00 Sunday" is a single call.
 - [S-19] **Proposals on the canvas.** `applyConfigBatch` joins `proposal.Allowlist` as one action whose body is a batch. Validation recurses: every inner op must be on the inner allowlist, which is the existing allowlist plus IVR, time-condition and MOH writes and, if decision 2 allows, `createExtension`/`createIvrMenu`/`createTimeCondition`. The credential-property rule applies. There are at most 50 inner ops. The batch dry-run replaces the routing-only dry-run. Opening a proposal that carries a batch shows it on its canvas (`/flow/:canvasId?proposal=<id>`) as a ghost overlay, using the S-13 diff colours. Apply and dismiss are the existing `applyAIProposal` and `dismissAIProposal`, so the replay uses the applier's credentials and the stale and audit rules are unchanged. The canvas side panel can open the assistant with the canvas and the selected nodes as context.
 - [S-20] **External agents.** `applyConfigBatch` (scope `write`) and `putFlowLayout` are MCP tools for write-scoped clients. A new skill, `skills/hello-flow` ("dry-run, read the diff, apply, then traceFlow to verify"), is checked by `TestSkills`. The in-product assistant gets no write tool (`ai-agent` S-11 is unchanged).
@@ -149,12 +158,15 @@ Consequences for the sections above, where they differ:
 
 - S-19, S-20 and the "in-product assistant gets no write tool" line of S-20 are replaced by decision 2: the assistant gets `applyConfigBatch` as a write tool, in addition to proposals. Its batches use the same dry-run, staleness and audit rules and carry `via` `ai:<session>`. The inner allowlist covers every object type, and the credential-property rule changes to: secret fields may be written but are redacted in every result, diff, audit row and tool output the model sees.
 - S-21: `op_not_batchable` still refuses multipart ops and ops with external effects. Credential ops (`rotateDeviceSecret` and similar) become batchable for the AI path only when their response secret is stripped before it leaves the server.
-- S-3: the **Q3** marks are now allowed; the unification migration is a prerequisite of P4, not optional.
-- S-1: queues, park and pickup join the catalogue as **[assumed]** node types, like time conditions and MOH, when their branches merge.
+- S-3: the **Q3** marks are now allowed; the unification migration (`00041`) is done, with the deviation noted under S-3.
+- S-1: queues, park lots, pickup groups, conferences and multicast channels are catalogue node types (all merged and wired).
 
 ## Migrations
 
-Other in-flight branches have claimed `00017` (tts), `00018` (ivr), `00019` (codecs), `00020` (time-conditions), `00021` (moh), `00022` (park-pickup) and `00023` (queues). The flow canvas uses `00024` and up: `00024_flow_destinations.sql` (decision 3, after the branches merge), then the canvas, layout and batch tables (`flow_canvases`, `flow_canvas_nodes`, `config_batches`) in the next free numbers. Wherever this spec says `000NN`, read `00024+`. P0 adds no migration.
+The in-flight branches this section once listed (`00017` to `00023`) merged under other numbers (`00029` to `00040`). Numbers are taken when a migration merges: highest on main plus one.
+
+- `00041_flow_destinations.sql` (P1, decision 3): widens `inbound_routes.destination_kind` (`ring_group`, `voicemail`, `announcement`, `paging`) and `ring_groups.failure_kind` (`extension`, `ring_group`) through `pg_temp.hello_check_values`, reading the live constraint so other migrations' values are kept. No row changes, so it is safe on a live database. Down: `ring_group` inbound routes become `extension` routes (the same call, as a group name is looked up before an extension number); `voicemail`, `announcement` and `paging` routes are removed, as the earlier destination migrations do.
+- The canvas, layout and batch tables (`flow_canvases`, `flow_canvas_nodes`, `config_batches`) take the next free numbers when P2 and P3 merge.
 
 ## Out of scope
 
@@ -236,24 +248,20 @@ Other in-flight branches have claimed `00017` (tts), `00018` (ivr), `00019` (cod
 
 ## Phasing
 
-- **P0 — graph model (read-only), no migration.** Delivered in PR flow-canvas-p0: `internal/flow` (node and port catalogue, graph builder with owners, name resolution and warnings, closure scope), `getFlowCatalogue`, `getFlowGraph`, `getFlowRevision` in `openapi.json`, unit tests. Only objects on main are wired (trunks, inbound and outbound routes, extensions, ring groups, paging groups, announcements, feature codes, devices, phones). IVR, time-condition, MOH, queue and park nodes are declared in the catalogue with a `requires` marker and get wired as their branches merge.
-- **P1 — destination unification and graph hardening.** Migration `00024` (decision 3) once the branches merge; golden fixtures, `TestCatalogueDrift` against the CHECK constraints, `TestGraphBench`; the remaining warnings (`unreachable`, `loop`, `shadowed_route`, `no_greeting`); wire IVR nodes when `ivr` merges.
+- **P0 — graph model (read-only), no migration.** Delivered in PR flow-canvas-p0: `internal/flow` (node and port catalogue, graph builder with owners, name resolution and warnings, closure scope), `getFlowCatalogue`, `getFlowGraph`, `getFlowRevision` in `openapi.json`, unit tests.
+- **P1 — destination unification and graph hardening. Delivered (PR flow-canvas-p1).** Migration `00041` (decision 3) with the API validation, the routing table (`routing.Config.Named`, `Decision.DestKind/DestTarget`), the `routingTest` result and hello-sip dispatch for the new kinds (inbound routes use the destination dispatcher time conditions use); golden fixtures (`internal/flow/testdata`); `TestCatalogueDrift`; `TestGraphBench`; the warnings `unreachable`, `loop`, `shadowed_route` and `no_greeting`; and the guards listed in `internal/flow/README.md` that fail CI when a feature merges without canvas support. The form pages do not offer the new inbound kinds yet (the API and MCP do; the canvas will).
 - **P2 — read-only canvas.** Add `@xyflow/react` and `@dagrejs/dagre`; canvases and layout migration and API; canvas list, the canvas, the "not on this canvas" sidebar, stubs, import with auto-layout, warnings, panel in read-only view mode. Useful on its own as a map of the PBX.
 - **P3 — batch backend.** `store.WithBatch`, the batch handler (replay in a transaction, placeholders, dry-run, staleness, the end-of-batch routing check, `config_batches`, revert), OpenAPI conformance and role tests.
 - **P4 — editing UI.** Draft reducer, palette create, connect and disconnect from the catalogue, delete with reference listing, rename cascade, panel in draft mode, undo/redo, debounced dry-run validation, diff preview, apply, rebase on revision change.
 - **P5 — trace.** `traceFlow` with routing, extension, ring group and IVR; canvas trace mode. Time conditions join in P7.
 - **P6 — AI.** `assistantTools` plus graph and trace; `applyConfigBatch` in the proposal allowlist with recursive validation; the proposal overlay on the canvas; assistant context from the canvas; skill `hello-flow`; `docs/flow-canvas.md`.
-- **P7 — new node types, per branch as it merges:**
-  - `time-conditions`: time condition, schedule and holiday nodes, override badge, evaluate in trace;
-  - `music-on-hold`: MOH class node and `holdMusic` inputs;
-  - `tts-prompts`: generated-announcement badge and "generate prompt" in the panel.
-  Each adds catalogue rows, resolver cases, owners, batchable ops and golden fixtures. A checklist in `internal/flow/README` makes this mechanical.
-- **Dependencies:** P1 needs `ivr` merged. P7 needs each branch merged. Neither `time-conditions` nor `music-on-hold` has commits yet, so their **[assumed]** shapes are confirmed or adjusted when their specs land, and the catalogue drift test enforces it.
+- **P7 — new node types, per branch as it merges.** The graph side is delivered with P1 for every merged feature: IVR menus and options, time conditions, schedules and holiday calendars, MOH classes and `holdMusic` inputs, queues and queue agents, conferences, park lots, pickup groups, multicast channels, the TTS-generated announcement badge, and the feature-code actions `ivr` and `time_condition` (the others are classified in `FeatureCodeNoTarget`). Still to do in the later phases: batchable ops for the new objects (P3/P6), time conditions in the trace (P5, "evaluate" at `at`, including the override), and "generate prompt" in the panel (P4). A checklist in `internal/flow/README.md` makes each new node mechanical.
+- **Dependencies:** P1 and the graph side of P7 are done. The guards (`TestCatalogueDrift`, `TestResourceCoverage`, `TestNoStaleRequires`) make a future feature fail CI until it is on the canvas or on a reasoned list.
 
 ## Acceptance criteria
 
-- [ ] [S-1] [S-3] `TestCatalogueDrift` in `internal/flow` passes. It fails if any value of a destination-kind CHECK constraint (read with `pg_get_constraintdef`) or OpenAPI enum has no catalogue port, or a catalogue connection maps to a kind the database refuses.
-- [ ] [S-4] [S-5] [S-6] `TestGraphGolden` passes. Fixture configurations (simple office, multi-level IVR, dangling reference, numeric and non-numeric ring group, any-trunk route) produce the stored graph JSON. It fails if an edge lacks its owner or a target resolves differently from `snapshot` lookup order.
+- [x] [S-1] [S-3] `TestCatalogueDrift` in `internal/flow` passes (database part in the `integration` job). It fails if any value of a destination-kind CHECK constraint (read with `pg_get_constraintdef`) or OpenAPI enum has no catalogue port, or a catalogue connection maps to a kind the database refuses.
+- [x] [S-4] [S-5] [S-6] `TestGraphGolden` passes. Fixture configurations (simple office, multi-level IVR, dangling reference, numeric and non-numeric ring group, any-trunk route) produce the stored graph JSON. It fails if an edge lacks its owner or a target resolves differently from `snapshot` lookup order.
 - [ ] [S-4] [S-13] `TestEdgeRoundTrip` passes. For every connection in the catalogue, applying the owner update via batch then reading the graph shows the edge, and clearing it removes it.
 - [ ] [S-13] `TestBatchAtomic` and `TestBatchStale` in `internal/api` pass. They fail if a failing op leaves any change, revision bump or audit row, a dry-run commits, an unrelated revision change rejects, or an overlapping one applies.
 - [ ] [S-21] `TestBatchRoles` passes. It fails if an operator's batch containing an admin-only op applies anything, or a batch carries a secret-returning, multipart or credential op.
@@ -263,4 +271,4 @@ Other in-flight branches have claimed `00017` (tts), `00018` (ivr), `00019` (cod
 - [ ] [S-17] [S-19] [S-20] `TestAssistantTools`, `TestProposalValidation` and `TestSkills` pass with the new tools. They fail if an inner op outside the inner allowlist, a credential property, or more than 50 inner ops is stored.
 - [ ] [S-10] [S-11] [S-12] [S-15] [S-16] `procoder test` passes over `web/`. `draft.test.ts` fails if undo/redo doesn't restore the exact op list, the rebase keeps a conflicting op, or edits to feature codes don't merge into one op. `FlowCanvas.test.tsx` fails if an invalid connection is accepted, a viewer sees edit controls, apply is sent without a diff confirmation, or an error is not shown on its node. The existing page tests pass unchanged after the form extraction.
 - [ ] `TestFlowEndToEnd` in `test/integration` passes. It builds trunk → DID → IVR → ring group → voicemail with one batch, places a call through the trunk fixture pressing `1`, and fails if the call does not reach the group.
-- [ ] `TestGraphBench` (`HELLO_BENCH=1`) passes. It fails if the graph build takes 200 ms or more at 10 000 extensions.
+- [x] `TestGraphBench` (`HELLO_BENCH=1`) passes (about 50 ms at 10 000 extensions). It fails if the graph build takes 200 ms or more at 10 000 extensions.

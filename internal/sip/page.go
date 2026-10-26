@@ -330,6 +330,7 @@ func (c *call) handlePage(tx sip.ServerTransaction, snap *snapshot.Snapshot, g s
 	off.Events = nil // a page carries no DTMF
 	off.Codecs = off.Codecs[:1]
 	off.DTMFPayloadType, off.DTMFRate = 0, 0
+	c.logCodec("answer", legCaller, "terminated", "paging", off)
 	emergency := g.Priority == snapshot.PagingEmergency
 	busy := s.busyExtensions()
 	ps := &pageState{group: g, host: s.anchorHostOr(off.Address), pt: off.PayloadType, codec: off, callerAddr: udpAddr(off.Address, off.Port)}
@@ -683,6 +684,9 @@ func (c *call) pageLegAnswered(l *leg) {
 		return
 	}
 	l.ack(nil, "")
+	if err == nil {
+		c.logCodec("answer", legCallee, "terminated", "paging", ans)
+	}
 	if g711 {
 		ps.fan.AddFallbackTarget(l.callID, addr)
 	} else {

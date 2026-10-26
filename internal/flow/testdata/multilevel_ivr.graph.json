@@ -1,0 +1,379 @@
+{
+  "configRevision": 4,
+  "nodes": [
+    {
+      "id": "announcement:1",
+      "kind": "announcement",
+      "label": "welcome",
+      "summary": {
+        "generated": false
+      },
+      "version": "23851ec6c15bf95f"
+    },
+    {
+      "id": "announcement:2",
+      "kind": "announcement",
+      "label": "sales-menu",
+      "summary": {
+        "generated": false
+      },
+      "version": "e581ec9804dd7245"
+    },
+    {
+      "id": "announcement:3",
+      "kind": "announcement",
+      "label": "bad-key",
+      "summary": {
+        "generated": false
+      },
+      "version": "9046070bd9edf323"
+    },
+    {
+      "id": "extension:10",
+      "kind": "extension",
+      "label": "101 E101",
+      "summary": {
+        "dnd": false,
+        "name": "E101",
+        "noAnswerEnd": "voicemail",
+        "number": "101",
+        "voicemail": true
+      },
+      "version": "d49b70d62eb16a78"
+    },
+    {
+      "id": "extension:11",
+      "kind": "extension",
+      "label": "102 E102",
+      "summary": {
+        "dnd": false,
+        "name": "E102",
+        "noAnswerEnd": "hangup",
+        "number": "102",
+        "voicemail": false
+      },
+      "version": "ed3ff65d5c66505d"
+    },
+    {
+      "id": "inboundRoute:1",
+      "kind": "inboundRoute",
+      "label": "main",
+      "summary": {
+        "did": "",
+        "didKind": "any",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "bb43d26e3359c962"
+    },
+    {
+      "id": "ivr:1",
+      "kind": "ivr",
+      "label": "main",
+      "summary": {
+        "allowDirectDial": false,
+        "digitTimeout": 5,
+        "directDial": false,
+        "enabled": true,
+        "maxRetries": 3,
+        "number": "800",
+        "options": 4
+      },
+      "version": "bce96cb665471df9"
+    },
+    {
+      "id": "ivr:2",
+      "kind": "ivr",
+      "label": "sales",
+      "summary": {
+        "allowDirectDial": false,
+        "digitTimeout": 5,
+        "directDial": false,
+        "enabled": true,
+        "maxRetries": 0,
+        "number": "",
+        "options": 2
+      },
+      "version": "d6585ff30b6c2195"
+    },
+    {
+      "id": "ringGroup:1",
+      "kind": "ringGroup",
+      "label": "support",
+      "summary": {
+        "members": 1,
+        "ringTimeout": 0,
+        "strategy": "ring-all"
+      },
+      "version": "9a97fcae20d6d706"
+    },
+    {
+      "id": "trunk:1",
+      "kind": "trunk",
+      "label": "carrier",
+      "summary": {
+        "enabled": true,
+        "maxCalls": 0,
+        "mode": "ip"
+      },
+      "version": "860a98d8e08872d7"
+    }
+  ],
+  "edges": [
+    {
+      "id": "announcement:1.audio-\u003eivr:1.greeting",
+      "source": {
+        "node": "announcement:1",
+        "port": "audio"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "greeting"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "greetingId"
+      }
+    },
+    {
+      "id": "announcement:2.audio-\u003eivr:2.greeting",
+      "source": {
+        "node": "announcement:2",
+        "port": "audio"
+      },
+      "target": {
+        "node": "ivr:2",
+        "port": "greeting"
+      },
+      "owner": {
+        "node": "ivr:2",
+        "field": "greetingId"
+      }
+    },
+    {
+      "id": "announcement:3.audio-\u003eivr:1.invalidPrompt",
+      "source": {
+        "node": "announcement:3",
+        "port": "audio"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "invalidPrompt"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "invalidPromptId"
+      }
+    },
+    {
+      "id": "extension:10.member-\u003eringGroup:1.members",
+      "source": {
+        "node": "extension:10",
+        "port": "member"
+      },
+      "target": {
+        "node": "ringGroup:1",
+        "port": "members"
+      },
+      "owner": {
+        "node": "ringGroup:1",
+        "field": "members"
+      },
+      "data": {
+        "delay": 0,
+        "position": 1,
+        "weight": 1
+      }
+    },
+    {
+      "id": "inboundRoute:1.destination-\u003eivr:1.call",
+      "source": {
+        "node": "inboundRoute:1",
+        "port": "destination"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "ivr:1.invalid-\u003eringGroup:1.ring",
+      "source": {
+        "node": "ivr:1",
+        "port": "invalid"
+      },
+      "target": {
+        "node": "ringGroup:1",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "invalid"
+      }
+    },
+    {
+      "id": "ivr:1.key:0-\u003eextension:10.ring",
+      "source": {
+        "node": "ivr:1",
+        "port": "key:0"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "options"
+      },
+      "data": {
+        "digit": "0"
+      }
+    },
+    {
+      "id": "ivr:1.key:1-\u003eivr:2.call",
+      "source": {
+        "node": "ivr:1",
+        "port": "key:1"
+      },
+      "target": {
+        "node": "ivr:2",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "options"
+      },
+      "data": {
+        "digit": "1"
+      }
+    },
+    {
+      "id": "ivr:1.key:2-\u003eringGroup:1.ring",
+      "source": {
+        "node": "ivr:1",
+        "port": "key:2"
+      },
+      "target": {
+        "node": "ringGroup:1",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "options"
+      },
+      "data": {
+        "digit": "2"
+      }
+    },
+    {
+      "id": "ivr:1.key:9-\u003eextension:11.voicemail",
+      "source": {
+        "node": "ivr:1",
+        "port": "key:9"
+      },
+      "target": {
+        "node": "extension:11",
+        "port": "voicemail"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "options"
+      },
+      "data": {
+        "digit": "9"
+      }
+    },
+    {
+      "id": "ivr:2.key:*-\u003eivr:1.call",
+      "source": {
+        "node": "ivr:2",
+        "port": "key:*"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:2",
+        "field": "options"
+      },
+      "data": {
+        "digit": "*"
+      }
+    },
+    {
+      "id": "ivr:2.key:1-\u003eextension:10.ring",
+      "source": {
+        "node": "ivr:2",
+        "port": "key:1"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "ivr:2",
+        "field": "options"
+      },
+      "data": {
+        "digit": "1"
+      }
+    },
+    {
+      "id": "ivr:2.timeout-\u003eivr:1.call",
+      "source": {
+        "node": "ivr:2",
+        "port": "timeout"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:2",
+        "field": "timeout"
+      }
+    },
+    {
+      "id": "ringGroup:1.noAnswer-\u003eivr:1.call",
+      "source": {
+        "node": "ringGroup:1",
+        "port": "noAnswer"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ringGroup:1",
+        "field": "failureKind+failureTarget"
+      }
+    },
+    {
+      "id": "trunk:1.inbound-\u003einboundRoute:1.trunk",
+      "source": {
+        "node": "trunk:1",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:1",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "trunkId"
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "node": "ivr:1",
+      "code": "voicemail_disabled_target",
+      "message": "voicemail is off for extension 102"
+    }
+  ]
+}

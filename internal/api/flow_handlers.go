@@ -116,6 +116,33 @@ func (s *server) flowInput(r *http.Request, devices bool) (flow.Input, error) {
 	if in.PagingGroups, err = st.ListPagingGroups(ctx); err != nil {
 		return in, err
 	}
+	if in.IVRMenus, err = st.ListIVRMenus(ctx); err != nil {
+		return in, err
+	}
+	if in.Queues, err = st.ListQueues(ctx); err != nil {
+		return in, err
+	}
+	if in.MulticastChannels, err = st.ListMulticastChannels(ctx); err != nil {
+		return in, err
+	}
+	if in.ParkLots, err = st.ListParkLots(ctx); err != nil {
+		return in, err
+	}
+	if in.PickupGroups, err = st.ListPickupGroups(ctx); err != nil {
+		return in, err
+	}
+	if in.TimeConditions, err = st.ListTimeConditions(ctx); err != nil {
+		return in, err
+	}
+	if in.Schedules, err = st.ListSchedules(ctx); err != nil {
+		return in, err
+	}
+	if in.Calendars, err = st.ListCalendars(ctx); err != nil {
+		return in, err
+	}
+	if in.MOHClasses, err = st.ListMOHClasses(ctx); err != nil {
+		return in, err
+	}
 	if s.Conferences != nil {
 		if in.Conferences, err = s.Conferences.ListConferences(ctx); err != nil {
 			return in, err

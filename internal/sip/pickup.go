@@ -125,7 +125,7 @@ func (c *call) answerPickup(req *pickupReq) {
 	// and the picker share.
 	handOverLeg(relay, legCallee, udpAddr(req.offer.Address, req.offer.Port), req.source)
 	ans := media.AnswerFor(off, req.offer)
-	c.applyNegotiated(ans)
+	c.applyNegotiated(ans, "pickup", "")
 	takerAns := ans.Build(c.anchorHost, relay.LegPort(legCallee), "sendrecv")
 	c.mu.Lock()
 	c.connected = true

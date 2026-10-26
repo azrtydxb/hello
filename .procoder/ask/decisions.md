@@ -625,7 +625,7 @@ their own.
 
 Built per `.procoder/specs/flow-canvas.md` (P2). Choices the spec left open:
 
-- Migration `00041_flow_canvas.sql` adds `flow_canvases` and `flow_canvas_nodes`
+- Migration `00042_flow_canvas.sql` adds `flow_canvases` and `flow_canvas_nodes`
   only (`config_batches` belongs to P3). The `node_id` CHECK is a shape check
   (`<kind>:<id>`), not the kind list: the API validates the kind against the
   catalogue, so a new node type (P1, P7) needs no migration.
@@ -667,3 +667,59 @@ Built per `.procoder/specs/flow-canvas.md` (P2). Choices the spec left open:
   is "Call flows" at the top of the Call flow group; the canvas route is
   lazy-loaded.
 - Exact dependency pins: `@xyflow/react` 12.12.0, `@dagrejs/dagre` 3.1.3.
+
+## Flow canvas P1: unified destinations and guards (2026-10-26)
+
+Migration 00041 widens `inbound_routes.destination_kind` with `ring_group`,
+`voicemail`, `announcement` and `paging`, additively through
+`pg_temp.hello_check_values`. No rows change (an `extension` route that names a
+numeric ring group keeps working). Down converts `ring_group` routes back to
+`extension` routes (the same call) and removes the other new kinds, as the
+earlier destination migrations do.
+
+Why only these kinds. Decision 3 asks for every kind on every output, but:
+- a call that has already started (a ring group fallback, an IVR key, a queue
+  exit, a time condition branch) cannot be handed to a paging group or a
+  conference room: the runtime pages and joins only from the INVITE
+  transaction;
+- a ring group's fallback cannot ring an extension or another group. I built
+  it and the test showed why it cannot: the group's ring stage has ended
+  (`setup` or `setupHunt` closes `setupDone` once per call), so a second stage
+  needs the forwarding machinery (`advanceStage`, which only forwards use) and
+  hunt groups have no loop to return to. Making it work is a change to the
+  ring state machine, not to configuration, so it is left out and written into
+  S-3 of the spec;
+- park is not a destination (a call is parked by a feature code or a
+  transfer to a slot);
+- extension forwards stay extension / numeric ring group / external number,
+  because that is what `sip.forward` resolves.
+The catalogue lists exactly what is stored.
+
+Runtime. Inbound routes of the new kinds are carried out by the destination
+dispatcher time conditions already use (`applyTCDest`), so there is one place
+that knows how to start a ring group, a voicemail box, an announcement or a
+page. The routing table checks the target exists (`routing.Config.Named`,
+loaded by both the store and the snapshot) so a route cannot dangle.
+
+Found, not changed (a bug outside this task): a ring group whose failure kind
+is `voicemail` starts the voicemail flow without setting `c.vmExt`, so the
+message goes to the box named after the dialled group number, not to the
+failure target. The graph draws the edge to the failure target, as the
+configuration says. Worth a separate fix with a test.
+
+Canvas model. Time conditions have no `holidays` input: a calendar attaches to
+a schedule (`schedule_calendars`), so the calendar node feeds the schedule and
+the schedule feeds the condition. Conference rooms stop being terminal nodes
+(they are stored objects with entry and exit announcements). Park lots have no
+ports. `requires` markers are gone from the catalogue; the field stays for a
+feature still in a branch and is policed by `TestNoStaleRequires`.
+
+Guards. `TestCatalogueDrift` (stored kinds, Go lists, OpenAPI enums, and the
+CHECK constraints read with `pg_get_constraintdef` where a database exists),
+`TestResourceCoverage` (every CRUD resource in the OpenAPI document is a node or
+on a reasoned non-flow list) and `TestNoStaleRequires` fail CI when a feature
+merges without canvas support. The database part cannot run in a pull request,
+so the integration job is required green before merge.
+
+The form pages (Routes) do not offer the new inbound kinds yet; they render
+them through the existing fallback. The API and MCP do.

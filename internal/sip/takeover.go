@@ -647,6 +647,8 @@ func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	c.rec = &recording{codecs: off.Codecs}
 	c.negotiated = off
 	c.mu.Unlock()
+	c.logCodec("takeover", legCaller, "anchored", "", off)
+	c.logCodec("takeover", legCallee, "anchored", "", off)
 	relay.OnPacket(c.recTap)
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
 	relay.Start()
@@ -1002,6 +1004,7 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 	c.mu.Lock()
 	c.haPhase, c.haDetail = st.State, st.StateDetail
 	c.mu.Unlock()
+	c.logTerminatedCodec("takeover", st.State, body)
 	s.log.Info("takeover re-homed", "call_id", st.CallID, "from", from, "took", took.String(), "gap", gap.String(), "app", st.State)
 	c.addHATrace(from, took, gap, since)
 	s.m.DialogTakeovers.Inc()

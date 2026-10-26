@@ -23,7 +23,7 @@ CREATE TABLE flow_canvas_nodes (
     canvas_id BIGINT  NOT NULL REFERENCES flow_canvases(id) ON DELETE CASCADE,
     -- <kind>:<id|key>. The kind is checked against the node catalogue by
     -- the API, not here, so a new node type needs no migration.
-    node_id   TEXT    NOT NULL CHECK (node_id ~ '^[A-Za-z]+:[^[:space:]]{1,200}$'),
+    node_id   TEXT    NOT NULL CHECK (node_id ~ '^[A-Za-z]+:.{1,200}$'),
     x         REAL    NOT NULL,
     y         REAL    NOT NULL,
     collapsed BOOLEAN NOT NULL DEFAULT FALSE,

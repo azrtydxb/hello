@@ -1588,3 +1588,29 @@ func TestInboundConference(t *testing.T) {
 		t.Fatalf("a route to a missing room compiled: %v", errs)
 	}
 }
+
+// TestInboundNamedDestinations fails if an inbound route cannot target a
+// ring group, a voicemail box, an announcement or a paging group (the
+// unified destinations), if the decision does not carry the kind and target
+// for hello-sip's dispatcher, or if a missing target compiles.
+func TestInboundNamedDestinations(t *testing.T) {
+	named := map[string]string{"ring_group": "sales", "voicemail": "100", "announcement": "closed", "paging": "*88"}
+	for kind, target := range named {
+		cfg := Config{
+			Trunks: []Trunk{{ID: 1, Name: "carrier", Mode: "ip", Enabled: true, SourceCIDRs: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")},
+				Destinations: []Destination{{Host: "carrier.example.com"}}}},
+			Inbound: []InboundRoute{{ID: 1, Position: 1, Name: "r", DIDKind: "exact", DID: "5551234",
+				DestinationKind: kind, Destination: target, Enabled: true}},
+			Extensions: map[string]string{"100": ""},
+			Named:      map[string]bool{kind + ":" + target: true},
+		}
+		d := mustCompile(t, cfg).Decide(Call{FromTrunk: 1, Number: "5551234", CallerID: "+15550000", At: time.Now()}, nil)
+		if d.Kind != KindInbound || d.DestKind != kind || d.DestTarget != target || d.Extension != "" {
+			t.Errorf("%s: decision = %+v, want an inbound call to %s %s", kind, d, kind, target)
+		}
+		cfg.Named = nil
+		if _, errs := Compile(cfg); len(errs) != 1 || !strings.Contains(errs[0].Message, "does not exist") {
+			t.Errorf("%s: a route to a missing target compiled: %v", kind, errs)
+		}
+	}
+}

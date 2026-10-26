@@ -15757,7 +15757,7 @@
           },
           "failureTarget": {
             "type": "string",
-            "description": "The voicemail extension or external number that failureKind names."
+            "description": "The voicemail extension or external number, or the name of the announcement, IVR menu, queue or time condition, that failureKind names."
           },
           "members": {
             "type": "array",
@@ -15867,7 +15867,7 @@
           },
           "failureTarget": {
             "type": "string",
-            "description": "The voicemail extension or external number that failureKind names."
+            "description": "The voicemail extension or external number, or the name of the announcement, IVR menu, queue or time condition, that failureKind names."
           },
           "members": {
             "type": "array",
@@ -19875,7 +19875,11 @@
               "ivr",
               "conference",
               "time_condition",
-              "queue"
+              "queue",
+              "ring_group",
+              "voicemail",
+              "announcement",
+              "paging"
             ]
           },
           "mohClassId": {
@@ -19897,7 +19901,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, an IVR menu name, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean"
@@ -19975,7 +19979,11 @@
               "ivr",
               "conference",
               "time_condition",
-              "queue"
+              "queue",
+              "ring_group",
+              "voicemail",
+              "announcement",
+              "paging"
             ],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
@@ -19998,7 +20006,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension. Required unless destinationKind is \"internal\", in which case it must be empty."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension. Required unless destinationKind is \"internal\", in which case it must be empty."
           },
           "enabled": {
             "type": "boolean",
@@ -20077,7 +20085,11 @@
               "ivr",
               "conference",
               "time_condition",
-              "queue"
+              "queue",
+              "ring_group",
+              "voicemail",
+              "announcement",
+              "paging"
             ],
             "description": "What destination names: an extension number, an external number, a SIP URI, or \"internal\" to ring the called DID as an extension."
           },
@@ -20100,7 +20112,7 @@
           "destination": {
             "type": "string",
             "example": "101",
-            "description": "An extension number, an external number, or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension."
+            "description": "What destinationKind names: an extension number (extension, voicemail: the box of that extension), an external number, a name (ivr, queue, time_condition, ring_group, announcement), a conference room number, a paging group code such as *88 (paging), or a sip: URI (sips: is refused: Hello is UDP-only in this phase). Empty when destinationKind is \"internal\": the called DID names the extension."
           },
           "enabled": {
             "type": "boolean",
@@ -20205,6 +20217,14 @@
           "conference": {
             "type": "string",
             "description": "The conference room number an inbound route sends the call to, when it does."
+          },
+          "destKind": {
+            "type": "string",
+            "description": "The kind of an inbound route's unified destination (ring_group, voicemail, announcement or paging), when it has one."
+          },
+          "destTarget": {
+            "type": "string",
+            "description": "The ring group name, voicemail box extension number, announcement name or paging code destKind names."
           },
           "number": {
             "type": "string"

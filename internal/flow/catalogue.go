@@ -3,7 +3,10 @@
 // the stored configuration. The canvas is a view: nothing here is stored.
 package flow
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // PortType decides a port's colour and shape in the UI and which ports can
 // be joined: an edge always joins an output to an input.
@@ -42,9 +45,13 @@ const (
 	KindPhone         = "phone"
 	KindRingGroup     = "ringGroup"
 	KindIVR           = "ivr"
+	KindQueue         = "queue"
 	KindAnnouncement  = "announcement"
 	KindPagingGroup   = "pagingGroup"
+	KindMulticast     = "multicastChannel"
 	KindConference    = "conference"
+	KindParkLot       = "parkLot"
+	KindPickupGroup   = "pickupGroup"
 	KindFeatureCode   = "featureCode"
 	KindTimeCond      = "timeCondition"
 	KindSchedule      = "schedule"
@@ -56,18 +63,6 @@ const (
 	KindMissing       = "missing"
 )
 
-// Requires names what must exist before a node kind or a connection works.
-// Empty means it works on the stored configuration today.
-const (
-	// ReqDestinations is the unified destination kinds migration (spec S-3,
-	// decision 3): inbound routes and ring-group fallback accept every call
-	// target kind.
-	ReqDestinations = "destination-unification"
-	ReqIVR          = "ivr"
-	ReqTimeCond     = "time-conditions"
-	ReqMOH          = "music-on-hold"
-)
-
 // Port is one connector dot on a node.
 type Port struct {
 	ID        string    `json:"id"`
@@ -76,6 +71,10 @@ type Port struct {
 	// Many is true when several edges may use the port.
 	Many  bool   `json:"many"`
 	Label string `json:"label"`
+	// PerKey marks a port that is instantiated once per configured key: an
+	// edge uses the port id "<id>:<key>" (an IVR's "key:5"). The catalogue
+	// lists it once under its bare id.
+	PerKey bool `json:"perKey,omitempty"`
 	// Field is the stored field an edge on this port is kept in (its
 	// owner, spec S-4); empty for implicit edges.
 	Field string `json:"field,omitempty"`
@@ -87,7 +86,9 @@ type Port struct {
 type Target struct {
 	Kind string `json:"kind"`
 	Port string `json:"port"`
-	// Requires is non-empty when the connection cannot be stored yet.
+	// Requires is non-empty when the connection cannot be stored yet. It
+	// must name a feature in pendingFeatures; TestNoStaleRequires fails
+	// when that feature has shipped.
 	Requires string `json:"requires,omitempty"`
 	// Note explains a restriction, shown as the tooltip.
 	Note string `json:"note,omitempty"`
@@ -101,10 +102,18 @@ type NodeType struct {
 	Pseudo bool `json:"pseudo,omitempty"`
 	// Terminal nodes are created from a target string.
 	Terminal bool `json:"terminal,omitempty"`
-	// Requires is non-empty when the object is not stored yet.
+	// Requires is non-empty when the object is not stored yet (see
+	// Target.Requires).
 	Requires string `json:"requires,omitempty"`
 	Ports    []Port `json:"ports"`
 }
+
+// pendingFeatures names the features a catalogue entry may wait for, each
+// with an OpenAPI path that exists once the feature has shipped. It is empty
+// when everything the catalogue describes is on main. A new node type for a
+// feature still in a branch adds its marker here and sets Requires on its
+// node and targets; the guard fails when the path appears in the API.
+var pendingFeatures = map[string]string{}
 
 // PortStyle is a port type's presentation.
 type PortStyle struct {
@@ -129,113 +138,49 @@ func out(id string, t PortType, many bool, label, field string, targets ...Targe
 	return Port{ID: id, Direction: Out, Type: t, Many: many, Label: label, Field: field, Targets: targets}
 }
 
-func tg(kind, port string) Target { return Target{Kind: kind, Port: port} }
+func perKey(p Port) Port { p.PerKey = true; return p }
 
-func (t Target) need(req string) Target { t.Requires = req; return t }
+func tg(kind, port string) Target { return Target{Kind: kind, Port: port} }
 
 func (t Target) note(n string) Target { t.Note = n; return t }
 
-// callTargets are the call inputs an unrestricted "call goes to" output may
-// reach (spec S-3, decision 3). The ones the stored kinds cannot express yet
-// carry what they wait for; keep needs empty for the kinds an output stores
-// today.
-func callTargets(kinds map[string]string) []Target {
-	all := []Target{
-		tg(KindExtension, "ring"),
-		tg(KindExtension, "voicemail"),
-		tg(KindRingGroup, "ring"),
-		tg(KindIVR, "call").need(ReqIVR),
-		tg(KindAnnouncement, "call"),
-		tg(KindPagingGroup, "call"),
-		tg(KindConference, "call"),
-		tg(KindTimeCond, "call").need(ReqTimeCond),
-		tg(KindExternal, "call"),
-		tg(KindSIPURI, "call"),
-		tg(KindInternalDID, "call"),
-	}
-	var out []Target
-	for _, t := range all {
-		req, ok := kinds[t.Kind+"."+t.Port]
-		if !ok {
-			continue
-		}
-		if req != "" {
-			t = t.need(req)
-		}
-		out = append(out, t)
-	}
-	return out
-}
+// Call targets of the outputs that store a (kind, target) pair. Each output
+// lists the inputs whose stored kind its CHECK constraint accepts (see
+// StoredKinds); TestCatalogueDrift keeps the two in step.
+var (
+	tExt       = tg(KindExtension, "ring")
+	tVoicemail = tg(KindExtension, "voicemail")
+	tGroup     = tg(KindRingGroup, "ring")
+	tIVR       = tg(KindIVR, "call")
+	tQueue     = tg(KindQueue, "call")
+	tAnn       = tg(KindAnnouncement, "call")
+	tPaging    = tg(KindPagingGroup, "call")
+	tConf      = tg(KindConference, "call")
+	tTC        = tg(KindTimeCond, "call")
+	tExternal  = tg(KindExternal, "call")
+	tSIPURI    = tg(KindSIPURI, "call")
+	tDID       = tg(KindInternalDID, "call")
+)
 
 // buildCatalogue assembles the table. It is a function (not a variable) so
 // every caller gets its own copy.
 func buildCatalogue() Catalogue {
-	const (
-		ungated = ""
-		unify   = ReqDestinations
-	)
-	// Inbound routes store extension|external|sip_uri|internal today; the
-	// rest need the unification migration (and the branches that add them).
-	inboundDest := callTargets(map[string]string{
-		"extension.ring":      ungated,
-		"extension.voicemail": unify,
-		"ringGroup.ring":      ungated, // by numeric group name, kind "extension"
-		"ivr.call":            ReqIVR,
-		"announcement.call":   unify,
-		"pagingGroup.call":    unify,
-		"conference.call":     ungated,
-		"timeCondition.call":  ReqTimeCond,
-		"external.call":       ungated,
-		"sipUri.call":         ungated,
-		"internalDid.call":    ungated,
-	})
-	for i := range inboundDest {
-		if inboundDest[i].Kind == KindRingGroup {
-			inboundDest[i].Note = "Ring group names must be numeric to be dialled from an inbound route"
-		}
-	}
+	// Inbound routes store every kind. An "extension" route may also name a
+	// numeric ring group (the older way); a "ring_group" route names it
+	// directly.
+	inboundDest := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tPaging, tConf, tTC, tExternal, tSIPURI, tDID}
 	// Extension forwards store a number: an extension, a numeric ring group
 	// or an external number.
-	forward := []Target{
-		tg(KindExtension, "ring"),
-		tg(KindRingGroup, "ring").note("Ring group names must be numeric to be dialled from a forward"),
-		tg(KindIVR, "call").need(ReqIVR).note("The menu needs a number"),
-		tg(KindExternal, "call"),
-	}
-	// Ring-group fallback stores none|voicemail|external|announcement today.
-	groupNoAnswer := callTargets(map[string]string{
-		"extension.ring":      unify,
-		"extension.voicemail": ungated,
-		"ringGroup.ring":      unify,
-		"ivr.call":            ReqIVR,
-		"announcement.call":   ungated,
-		"pagingGroup.call":    unify,
-		"timeCondition.call":  ReqTimeCond,
-		"external.call":       ungated,
-	})
-	// IVR keys and exits reach every call kind but a SIP URI or a DID.
-	ivrExit := callTargets(map[string]string{
-		"extension.ring":      ReqIVR,
-		"extension.voicemail": ReqIVR,
-		"ringGroup.ring":      ReqIVR,
-		"ivr.call":            ReqIVR,
-		"announcement.call":   ReqIVR,
-		"pagingGroup.call":    ReqIVR,
-		"conference.call":     ReqIVR,
-		"timeCondition.call":  ReqTimeCond,
-		"external.call":       ReqIVR,
-	})
-	tcExit := callTargets(map[string]string{
-		"extension.ring":      ReqTimeCond,
-		"extension.voicemail": ReqTimeCond,
-		"ringGroup.ring":      ReqTimeCond,
-		"ivr.call":            ReqTimeCond,
-		"announcement.call":   ReqTimeCond,
-		"pagingGroup.call":    ReqTimeCond,
-		"conference.call":     ReqTimeCond,
-		"timeCondition.call":  ReqTimeCond,
-		"external.call":       ReqTimeCond,
-	})
+	forward := []Target{tExt, tGroup.note("Ring group names must be numeric to be dialled from a forward"), tExternal}
+	// Ring-group fallback stores none|voicemail|external|announcement|ivr|
+	// queue|time_condition. A call whose group already rang cannot be given
+	// a new ring stage (to an extension or another group) or handed to a
+	// paging group or a conference room.
+	groupNoAnswer := []Target{tVoicemail, tIVR, tQueue, tAnn, tTC, tExternal}
+	// IVR keys and exits, time condition branches and queue exits store the
+	// same set: hangup, extension, ring group, voicemail, announcement,
+	// paging, IVR, queue, time condition and external number.
+	exit := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tPaging, tTC, tExternal}
 
 	c := Catalogue{
 		PortTypes: []PortStyle{
@@ -258,6 +203,7 @@ func buildCatalogue() Catalogue {
 			}},
 			{Kind: KindInboundRoute, Label: "Inbound route", Ports: []Port{
 				in("trunk", PortCarrier, false, "Trunk"),
+				in("holdMusic", PortHoldMusic, false, "Hold music"),
 				out("destination", PortCall, false, "Destination", "destinationKind+destination", inboundDest...),
 			}},
 			{Kind: KindDialPlan, Label: "Internal callers", Pseudo: true, Ports: []Port{
@@ -271,11 +217,13 @@ func buildCatalogue() Catalogue {
 				in("ring", PortCall, true, "Ring"),
 				in("voicemail", PortVoicemail, true, "Voicemail"),
 				in("devices", PortDevice, true, "Devices"),
+				in("holdMusic", PortHoldMusic, false, "Hold music"),
 				out("forwardAlways", PortCall, false, "Always forward", "forwardAlways", forward...),
 				out("forwardBusy", PortCall, false, "Forward when busy", "forwardBusy", forward...),
 				out("forwardNoAnswer", PortCall, false, "Forward on no answer", "forwardNoAnswer", forward...),
 				out("member", PortMember, true, "Member of", "members",
-					tg(KindRingGroup, "members"), tg(KindPagingGroup, "members"), tg(KindPagingGroup, "callers")),
+					tg(KindRingGroup, "members"), tg(KindPagingGroup, "members"), tg(KindPagingGroup, "callers"),
+					tg(KindQueue, "members"), tg(KindPickupGroup, "members")),
 			}},
 			{Kind: KindDevice, Label: "Device", Ports: []Port{
 				in("phone", PortDevice, false, "Phone"),
@@ -287,48 +235,81 @@ func buildCatalogue() Catalogue {
 			{Kind: KindRingGroup, Label: "Ring group", Ports: []Port{
 				in("ring", PortCall, true, "Ring"),
 				in("members", PortMember, true, "Members"),
+				in("holdMusic", PortHoldMusic, false, "Hold music"),
 				out("noAnswer", PortCall, false, "No answer", "failureKind+failureTarget", groupNoAnswer...),
 			}},
-			{Kind: KindIVR, Label: "IVR menu", Requires: ReqIVR, Ports: []Port{
+			{Kind: KindIVR, Label: "IVR menu", Ports: []Port{
 				in("call", PortCall, true, "Call"),
 				in("greeting", PortPrompt, false, "Greeting"),
 				in("invalidPrompt", PortPrompt, false, "Invalid prompt"),
 				in("timeoutPrompt", PortPrompt, false, "Timeout prompt"),
-				out("key", PortCall, false, "Key (one port per configured key)", "options", ivrExit...),
-				out("timeout", PortCall, false, "Timeout", "timeout", ivrExit...),
-				out("invalid", PortCall, false, "Invalid", "invalid", ivrExit...),
+				perKey(out("key", PortCall, false, "Key (one port per configured key)", "options", exit...)),
+				out("timeout", PortCall, false, "Timeout", "timeout", exit...),
+				out("invalid", PortCall, false, "Invalid", "invalid", exit...),
+			}},
+			{Kind: KindQueue, Label: "Call queue", Ports: []Port{
+				in("call", PortCall, true, "Call"),
+				in("members", PortMember, true, "Agents"),
+				in("holdMusic", PortHoldMusic, false, "Hold music"),
+				in("periodicPrompt", PortPrompt, false, "Periodic announcement"),
+				in("positionPrompt", PortPrompt, false, "Position prompt"),
+				in("waitPrompt", PortPrompt, false, "Wait prompt"),
+				in("minutesPrompt", PortPrompt, false, "Minutes prompt"),
+				in("breakoutPrompt", PortPrompt, false, "Voicemail breakout prompt"),
+				out("timeout", PortCall, false, "Wait too long", "timeout", exit...),
+				out("full", PortCall, false, "Queue full", "full", exit...),
+				out("noAgents", PortCall, false, "No agents", "noAgents", exit...),
+				out("breakout", PortVoicemail, false, "Breakout voicemail", "breakoutVoicemail", tVoicemail),
 			}},
 			{Kind: KindAnnouncement, Label: "Announcement", Ports: []Port{
 				in("call", PortCall, true, "Play, then hang up"),
-				out("audio", PortPrompt, true, "Used as prompt", "", tg(KindIVR, "greeting").need(ReqIVR),
-					tg(KindIVR, "invalidPrompt").need(ReqIVR), tg(KindIVR, "timeoutPrompt").need(ReqIVR)),
+				out("audio", PortPrompt, true, "Used as prompt", "",
+					tg(KindIVR, "greeting"), tg(KindIVR, "invalidPrompt"), tg(KindIVR, "timeoutPrompt"),
+					tg(KindQueue, "periodicPrompt"), tg(KindQueue, "positionPrompt"), tg(KindQueue, "waitPrompt"),
+					tg(KindQueue, "minutesPrompt"), tg(KindQueue, "breakoutPrompt"),
+					tg(KindMOHClass, "tracks"),
+					tg(KindConference, "entryAnnouncement"), tg(KindConference, "exitAnnouncement")),
 			}},
 			{Kind: KindPagingGroup, Label: "Paging group", Ports: []Port{
 				in("call", PortCall, true, "Page"),
 				in("members", PortMember, true, "Members"),
 				in("callers", PortMember, true, "Allowed callers"),
+				out("multicast", PortCall, false, "Also page multicast channel", "multicastChannelId", tg(KindMulticast, "page")),
 			}},
-			{Kind: KindConference, Label: "Conference room", Terminal: true, Ports: []Port{in("call", PortCall, true, "Join the room")}},
+			{Kind: KindMulticast, Label: "Multicast channel", Ports: []Port{
+				in("page", PortCall, true, "Paged by"),
+			}},
+			{Kind: KindConference, Label: "Conference room", Ports: []Port{
+				in("call", PortCall, true, "Join the room"),
+				in("entryAnnouncement", PortPrompt, false, "Entry announcement"),
+				in("exitAnnouncement", PortPrompt, false, "Exit announcement"),
+			}},
+			{Kind: KindParkLot, Label: "Park lot", Ports: []Port{}},
+			{Kind: KindPickupGroup, Label: "Pickup group", Ports: []Port{
+				in("members", PortMember, true, "Members"),
+			}},
 			{Kind: KindFeatureCode, Label: "Feature code", Ports: []Port{
-				out("target", PortCall, false, "Target", "argument", tg(KindAnnouncement, "call"),
-					tg(KindIVR, "call").need(ReqIVR), tg(KindPagingGroup, "call").need(unify)),
+				out("target", PortCall, false, "Target", "argument", tAnn, tIVR, tTC),
 			}},
-			{Kind: KindTimeCond, Label: "Time condition", Requires: ReqTimeCond, Ports: []Port{
+			{Kind: KindTimeCond, Label: "Time condition", Ports: []Port{
 				in("call", PortCall, true, "Call"),
 				in("schedule", PortSchedule, false, "Schedule"),
-				in("holidays", PortSchedule, false, "Holidays"),
-				out("open", PortCall, false, "Open", "open", tcExit...),
-				out("closed", PortCall, false, "Closed", "closed", tcExit...),
-				out("holiday", PortCall, false, "Holiday", "holiday", tcExit...),
+				out("open", PortCall, false, "Open", "open", exit...),
+				out("closed", PortCall, false, "Closed", "closed", exit...),
+				out("holiday", PortCall, false, "Holiday", "holiday", exit...),
 			}},
-			{Kind: KindSchedule, Label: "Schedule", Requires: ReqTimeCond, Ports: []Port{
-				out("use", PortSchedule, true, "Used by", "", tg(KindTimeCond, "schedule"), tg(KindTimeCond, "holidays")),
+			{Kind: KindSchedule, Label: "Schedule", Ports: []Port{
+				in("calendars", PortSchedule, true, "Holiday calendars"),
+				out("use", PortSchedule, true, "Used by", "scheduleId", tg(KindTimeCond, "schedule")),
 			}},
-			{Kind: KindHolidayCal, Label: "Holiday calendar", Requires: ReqTimeCond, Ports: []Port{
-				out("use", PortSchedule, true, "Used by", "", tg(KindTimeCond, "holidays")),
+			{Kind: KindHolidayCal, Label: "Holiday calendar", Ports: []Port{
+				out("use", PortSchedule, true, "Used by", "calendarIds", tg(KindSchedule, "calendars")),
 			}},
-			{Kind: KindMOHClass, Label: "Hold music class", Requires: ReqMOH, Ports: []Port{
-				out("use", PortHoldMusic, true, "Used by", ""),
+			{Kind: KindMOHClass, Label: "Hold music class", Ports: []Port{
+				in("tracks", PortPrompt, true, "Tracks"),
+				out("use", PortHoldMusic, true, "Used by", "mohClassId",
+					tg(KindExtension, "holdMusic"), tg(KindRingGroup, "holdMusic"),
+					tg(KindInboundRoute, "holdMusic"), tg(KindQueue, "holdMusic")),
 			}},
 			{Kind: KindExternal, Label: "External number", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
 			{Kind: KindSIPURI, Label: "SIP URI", Terminal: true, Ports: []Port{in("call", PortCall, true, "Call")}},
@@ -361,6 +342,14 @@ func (c Catalogue) Port(kind, port string) (Port, bool) {
 	for _, p := range n.Ports {
 		if p.ID == port {
 			return p, true
+		}
+	}
+	// A per-key port is addressed as "<id>:<key>".
+	if id, _, ok := strings.Cut(port, ":"); ok {
+		for _, p := range n.Ports {
+			if p.ID == id && p.PerKey {
+				return p, true
+			}
 		}
 	}
 	return Port{}, false

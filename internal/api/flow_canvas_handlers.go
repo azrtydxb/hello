@@ -24,8 +24,9 @@ const (
 	maxLayoutCoord = 1_000_000
 )
 
-// flowNodeIDRe is a stored node id, <kind>:<id|key>.
-var flowNodeIDRe = regexp.MustCompile(`^([A-Za-z]+):\S{1,200}$`)
+// flowNodeIDRe is a stored node id, <kind>:<id|key>. A key may hold spaces
+// (a missing target is named by the string that resolved to nothing).
+var flowNodeIDRe = regexp.MustCompile(`^([A-Za-z]+):[^\x00-\x1f]{1,200}$`)
 
 // flowCanvasDetail is a canvas with the positions saved on it.
 type flowCanvasDetail struct {

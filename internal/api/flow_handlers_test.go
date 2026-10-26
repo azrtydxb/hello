@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/azrtydxb/hello/internal/flow"
+	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -20,6 +21,16 @@ type flowFake struct {
 	bump  bool // advance the revision on every read (a busy configuration)
 	exts  []store.Extension
 	rings []store.RingGroup
+	// The lists of the merged features: the handler must read each one.
+	ivrs     []store.IVRMenu
+	queues   []store.Queue
+	channels []phonebook.Channel
+	lots     []store.ParkLot
+	pickups  []store.PickupGroup
+	tcs      []store.TimeCondition
+	scheds   []store.Schedule
+	cals     []store.Calendar
+	mohs     []store.MOHClass
 }
 
 func (f *flowFake) ConfigRevision(context.Context) (int64, error) {
@@ -43,6 +54,21 @@ func (f *flowFake) ListPagingGroups(context.Context) ([]store.PagingGroup, error
 func (f *flowFake) ListAnnouncements(context.Context) ([]store.Announcement, error) {
 	return nil, nil
 }
+func (f *flowFake) ListIVRMenus(context.Context) ([]store.IVRMenu, error) { return f.ivrs, nil }
+func (f *flowFake) ListQueues(context.Context) ([]store.Queue, error)     { return f.queues, nil }
+func (f *flowFake) ListMulticastChannels(context.Context) ([]phonebook.Channel, error) {
+	return f.channels, nil
+}
+func (f *flowFake) ListParkLots(context.Context) ([]store.ParkLot, error) { return f.lots, nil }
+func (f *flowFake) ListPickupGroups(context.Context) ([]store.PickupGroup, error) {
+	return f.pickups, nil
+}
+func (f *flowFake) ListTimeConditions(context.Context) ([]store.TimeCondition, error) {
+	return f.tcs, nil
+}
+func (f *flowFake) ListSchedules(context.Context) ([]store.Schedule, error)       { return f.scheds, nil }
+func (f *flowFake) ListCalendars(context.Context) ([]store.Calendar, error)       { return f.cals, nil }
+func (f *flowFake) ListMOHClasses(context.Context) ([]store.MOHClass, error)      { return f.mohs, nil }
 func (f *flowFake) ListFeatureCodes(context.Context) ([]store.FeatureCode, error) { return nil, nil }
 
 func flowGet(t *testing.T, f *flowFake, h func(*server) http.HandlerFunc, url string) *httptest.ResponseRecorder {
@@ -84,6 +110,40 @@ func TestFlowGraphHandler(t *testing.T) {
 	f.bump = true
 	if c := flowGet(t, f, get, "/api/v1/flow/graph").Code; c != 503 {
 		t.Errorf("busy configuration status %d", c)
+	}
+}
+
+// TestFlowGraphMergedFeatures fails if the graph handler leaves out the
+// objects of a merged feature: every list the builder takes must be read.
+func TestFlowGraphMergedFeatures(t *testing.T) {
+	f := &flowFake{rev: 2,
+		exts:     []store.Extension{{ID: 1, Number: "100", Name: "Ann"}},
+		ivrs:     []store.IVRMenu{{ID: 1, Name: "menu", Timeout: store.IVRDestination{Kind: "hangup"}, Invalid: store.IVRDestination{Kind: "hangup"}}},
+		queues:   []store.Queue{{ID: 1, Name: "q"}},
+		channels: []phonebook.Channel{{ID: 1, Label: "lobby"}},
+		lots:     []store.ParkLot{{ID: 1, Name: "lot"}},
+		pickups:  []store.PickupGroup{{ID: 1, Name: "front"}},
+		tcs:      []store.TimeCondition{{ID: 1, Name: "hours"}},
+		scheds:   []store.Schedule{{ID: 1, Name: "office"}},
+		cals:     []store.Calendar{{ID: 1, Name: "holidays"}},
+		mohs:     []store.MOHClass{{ID: 1, Name: "jazz"}},
+	}
+	rec := flowGet(t, f, func(s *server) http.HandlerFunc { return s.getFlowGraph }, "/api/v1/flow/graph")
+	if rec.Code != 200 {
+		t.Fatalf("status %d %s", rec.Code, rec.Body)
+	}
+	var g flow.Graph
+	if err := json.Unmarshal(rec.Body.Bytes(), &g); err != nil {
+		t.Fatal(err)
+	}
+	have := map[string]bool{}
+	for _, n := range g.Nodes {
+		have[n.ID] = true
+	}
+	for _, id := range []string{"ivr:1", "queue:1", "multicastChannel:1", "parkLot:1", "pickupGroup:1", "timeCondition:1", "schedule:1", "holidayCalendar:1", "mohClass:1"} {
+		if !have[id] {
+			t.Errorf("node %s is not in the graph", id)
+		}
 	}
 }
 

@@ -1000,6 +1000,26 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 	if err := crows.Err(); err != nil {
 		return snap, err
 	}
+	nrows, err := q.QueryContext(ctx, `SELECT 'ring_group', name FROM ring_groups
+		UNION ALL SELECT 'announcement', name FROM announcements
+		UNION ALL SELECT 'paging', code FROM paging_groups
+		UNION ALL SELECT 'voicemail', e.number FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id`)
+	if err != nil {
+		return snap, err
+	}
+	cfg.Named = map[string]bool{}
+	for nrows.Next() {
+		var kind, target string
+		if err := nrows.Scan(&kind, &target); err != nil {
+			_ = nrows.Close()
+			return snap, err
+		}
+		cfg.Named[kind+":"+target] = true
+	}
+	_ = nrows.Close()
+	if err := nrows.Err(); err != nil {
+		return snap, err
+	}
 	trows, err := q.QueryContext(ctx, `SELECT name FROM time_conditions`)
 	if err != nil {
 		return snap, err

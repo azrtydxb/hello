@@ -222,6 +222,7 @@ func (c *call) attachParty(leg string, offer media.AudioSDP, source string) ([]b
 		return nil, false
 	}
 	handOverLeg(relay, leg, udpAddr(offer.Address, offer.Port), source)
+	c.logCodec("retrieve", leg, "anchored", "", base)
 	return base.Build(host, relay.LegPort(leg), "sendrecv"), true
 }
 
@@ -694,6 +695,7 @@ func (c *call) parkReturnLegs(snap *snapshot.Snapshot, pk *parkState, relay *med
 		from, fromName = c.dialled, ""
 	}
 	sdp := base.Build(host, relay.LegPort(parkerLeg), "sendrecv")
+	c.logCodec("park return", parkerLeg, "anchored", "", base)
 	req := sip.NewRequest(sip.INVITE, sip.Uri{Scheme: "sip", User: pk.parker, Host: s.cfg.Domain})
 	callID := sip.CallIDHeader(newID())
 	req.AppendHeader(&sip.FromHeader{Address: sip.Uri{Scheme: "sip", User: from, Host: s.cfg.Domain},

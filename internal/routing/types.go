@@ -116,7 +116,7 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition"
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging"
 	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr", the room number for "conference", the queue name for "queue"
 	Enabled         bool
 	// MOHClassID is the music on hold class of calls the route delivers
@@ -146,6 +146,11 @@ type Config struct {
 	// Conferences maps every conference room number to its name (spec
 	// S-34); membership means "an inbound route may target this room".
 	Conferences map[string]string
+	// Named is the set of "<kind>:<target>" keys an inbound route of the
+	// unified kinds (NamedKinds) may name: "ring_group:<name>",
+	// "voicemail:<extension number>", "announcement:<name>" and
+	// "paging:<code>".
+	Named map[string]bool
 	// ResolvedIPs maps a trunk ID to the IPs its destination hostnames
 	// resolved to, for source validation. hello-sip fills it off the call
 	// path (DNS); hello-control's route tester may leave it empty.
@@ -207,13 +212,17 @@ type Decision struct {
 	TimeCondition string
 	// Conference is the room number of an inbound call routed to a
 	// conference room (spec S-34).
-	Conference    string
-	Number        string      // rewritten number sent to the carrier
-	CallerID      string      // caller ID to present
-	Route         string      // name of the matched route
-	Candidates    []Candidate // outbound, already filtered by usability
-	FailoverCodes []int
-	Emergency     bool
+	Conference string
+	// DestKind and DestTarget carry an inbound route of a unified kind
+	// (NamedKinds): the stored kind and its target. hello-sip hands them to
+	// the generic destination dispatcher it shares with time conditions.
+	DestKind, DestTarget string
+	Number               string      // rewritten number sent to the carrier
+	CallerID             string      // caller ID to present
+	Route                string      // name of the matched route
+	Candidates           []Candidate // outbound, already filtered by usability
+	FailoverCodes        []int
+	Emergency            bool
 	// MOHClassID and MOHRingback carry the matched inbound route's music on
 	// hold settings (0/false when no inbound route matched).
 	MOHClassID  int64

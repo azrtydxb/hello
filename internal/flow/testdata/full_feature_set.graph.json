@@ -1,0 +1,747 @@
+{
+  "configRevision": 8,
+  "nodes": [
+    {
+      "id": "announcement:1",
+      "kind": "announcement",
+      "label": "welcome",
+      "summary": {
+        "generated": false
+      },
+      "version": "23851ec6c15bf95f"
+    },
+    {
+      "id": "announcement:2",
+      "kind": "announcement",
+      "label": "tts-closed",
+      "summary": {
+        "generated": true,
+        "modelId": "m1",
+        "textEdited": false,
+        "voiceId": "v1"
+      },
+      "version": "d9e4de4095cce785"
+    },
+    {
+      "id": "announcement:3",
+      "kind": "announcement",
+      "label": "hold1",
+      "summary": {
+        "generated": false
+      },
+      "version": "611c8e407b4238b6"
+    },
+    {
+      "id": "announcement:4",
+      "kind": "announcement",
+      "label": "periodic",
+      "summary": {
+        "generated": false
+      },
+      "version": "7b3f7b4d7a91c48f"
+    },
+    {
+      "id": "conference:1",
+      "kind": "conference",
+      "label": "weekly",
+      "summary": {
+        "enabled": true,
+        "maxParticipants": 0,
+        "number": "800",
+        "pin": false,
+        "record": false,
+        "waitForLeader": false
+      },
+      "version": "2fd61b01f3734199"
+    },
+    {
+      "id": "extension:10",
+      "kind": "extension",
+      "label": "101 Ann",
+      "summary": {
+        "dnd": false,
+        "name": "Ann",
+        "noAnswerEnd": "voicemail",
+        "number": "101",
+        "voicemail": true
+      },
+      "version": "4e40fbb629da1cfd"
+    },
+    {
+      "id": "extension:11",
+      "kind": "extension",
+      "label": "102 E102",
+      "summary": {
+        "dnd": false,
+        "name": "E102",
+        "noAnswerEnd": "voicemail",
+        "number": "102",
+        "voicemail": true
+      },
+      "version": "e77d21b65e9ee911"
+    },
+    {
+      "id": "featureCode:*50",
+      "kind": "featureCode",
+      "label": "*50",
+      "summary": {
+        "action": "time_condition",
+        "code": "*50"
+      },
+      "version": "e9d98543297d2fd4"
+    },
+    {
+      "id": "featureCode:*51",
+      "kind": "featureCode",
+      "label": "*51",
+      "summary": {
+        "action": "ivr",
+        "code": "*51"
+      },
+      "version": "7c5b258ecef891a0"
+    },
+    {
+      "id": "holidayCalendar:1",
+      "kind": "holidayCalendar",
+      "label": "holidays",
+      "summary": {
+        "entries": 0,
+        "schedules": 1
+      },
+      "version": "3442bde2aa0aa771"
+    },
+    {
+      "id": "inboundRoute:1",
+      "kind": "inboundRoute",
+      "label": "main",
+      "summary": {
+        "did": "1",
+        "didKind": "exact",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "78f2e92d9362b9bb"
+    },
+    {
+      "id": "inboundRoute:2",
+      "kind": "inboundRoute",
+      "label": "meet",
+      "summary": {
+        "did": "2",
+        "didKind": "exact",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "fda85db1a8a801c6"
+    },
+    {
+      "id": "inboundRoute:3",
+      "kind": "inboundRoute",
+      "label": "page",
+      "summary": {
+        "did": "3",
+        "didKind": "exact",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "9e87d0fa1acae8a8"
+    },
+    {
+      "id": "ivr:1",
+      "kind": "ivr",
+      "label": "menu",
+      "summary": {
+        "allowDirectDial": false,
+        "digitTimeout": 5,
+        "directDial": false,
+        "enabled": true,
+        "maxRetries": 0,
+        "number": "810",
+        "options": 1
+      },
+      "version": "34930e7bdb60dda5"
+    },
+    {
+      "id": "mohClass:1",
+      "kind": "mohClass",
+      "label": "jazz",
+      "summary": {
+        "isDefault": false,
+        "mode": "loop",
+        "tracks": 1
+      },
+      "version": "77adb9ea8a0ae349"
+    },
+    {
+      "id": "multicastChannel:1",
+      "kind": "multicastChannel",
+      "label": "lobby",
+      "summary": {
+        "address": "224.0.1.1",
+        "codec": "PCMU",
+        "enabled": true,
+        "kind": "paging",
+        "port": 5001
+      },
+      "version": "4ba7a5a6bdc468dc"
+    },
+    {
+      "id": "pagingGroup:1",
+      "kind": "pagingGroup",
+      "label": "all",
+      "summary": {
+        "code": "*88",
+        "enabled": true,
+        "members": 1,
+        "priority": ""
+      },
+      "version": "be02a23b577a5111"
+    },
+    {
+      "id": "parkLot:1",
+      "kind": "parkLot",
+      "label": "lot",
+      "summary": {
+        "enabled": true,
+        "returnSecs": 0,
+        "slotEnd": 709,
+        "slotStart": 701,
+        "voicemailSecs": 0
+      },
+      "version": "c0fcac7d083e2ab0"
+    },
+    {
+      "id": "pickupGroup:1",
+      "kind": "pickupGroup",
+      "label": "front",
+      "summary": {
+        "members": 2
+      },
+      "version": "354e4c39acdac69b"
+    },
+    {
+      "id": "queue:1",
+      "kind": "queue",
+      "label": "support",
+      "summary": {
+        "agents": 2,
+        "enabled": true,
+        "maxCallers": 0,
+        "maxWait": 0,
+        "number": "820",
+        "strategy": "ring_all"
+      },
+      "version": "1857bc46cfaf3a77"
+    },
+    {
+      "id": "schedule:1",
+      "kind": "schedule",
+      "label": "office",
+      "summary": {
+        "calendars": 1,
+        "ranges": 0,
+        "timeZone": "Europe/Brussels"
+      },
+      "version": "579b51c61971f8f8"
+    },
+    {
+      "id": "timeCondition:1",
+      "kind": "timeCondition",
+      "label": "hours",
+      "summary": {
+        "forced": true,
+        "override": "closed",
+        "overrideAt": "2026-10-26T08:00:00Z",
+        "schedule": "office",
+        "toggleNumber": "1"
+      },
+      "version": "258329bf59afe1c1"
+    },
+    {
+      "id": "trunk:1",
+      "kind": "trunk",
+      "label": "carrier",
+      "summary": {
+        "enabled": true,
+        "maxCalls": 0,
+        "mode": "ip"
+      },
+      "version": "860a98d8e08872d7"
+    }
+  ],
+  "edges": [
+    {
+      "id": "announcement:1.audio-\u003econference:1.entryAnnouncement",
+      "source": {
+        "node": "announcement:1",
+        "port": "audio"
+      },
+      "target": {
+        "node": "conference:1",
+        "port": "entryAnnouncement"
+      },
+      "owner": {
+        "node": "conference:1",
+        "field": "entryAnnouncement"
+      }
+    },
+    {
+      "id": "announcement:1.audio-\u003eivr:1.greeting",
+      "source": {
+        "node": "announcement:1",
+        "port": "audio"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "greeting"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "greetingId"
+      }
+    },
+    {
+      "id": "announcement:3.audio-\u003emohClass:1.tracks",
+      "source": {
+        "node": "announcement:3",
+        "port": "audio"
+      },
+      "target": {
+        "node": "mohClass:1",
+        "port": "tracks"
+      },
+      "owner": {
+        "node": "mohClass:1",
+        "field": "announcementIds"
+      },
+      "data": {
+        "position": 1
+      }
+    },
+    {
+      "id": "announcement:4.audio-\u003equeue:1.periodicPrompt",
+      "source": {
+        "node": "announcement:4",
+        "port": "audio"
+      },
+      "target": {
+        "node": "queue:1",
+        "port": "periodicPrompt"
+      },
+      "owner": {
+        "node": "queue:1",
+        "field": "periodicPromptId"
+      }
+    },
+    {
+      "id": "extension:10.member-\u003epagingGroup:1.members",
+      "source": {
+        "node": "extension:10",
+        "port": "member"
+      },
+      "target": {
+        "node": "pagingGroup:1",
+        "port": "members"
+      },
+      "owner": {
+        "node": "pagingGroup:1",
+        "field": "members"
+      },
+      "data": {
+        "position": 1
+      }
+    },
+    {
+      "id": "extension:10.member-\u003epickupGroup:1.members",
+      "source": {
+        "node": "extension:10",
+        "port": "member"
+      },
+      "target": {
+        "node": "pickupGroup:1",
+        "port": "members"
+      },
+      "owner": {
+        "node": "pickupGroup:1",
+        "field": "members"
+      }
+    },
+    {
+      "id": "extension:10.member-\u003equeue:1.members",
+      "source": {
+        "node": "extension:10",
+        "port": "member"
+      },
+      "target": {
+        "node": "queue:1",
+        "port": "members"
+      },
+      "owner": {
+        "node": "queue:1",
+        "field": "members"
+      },
+      "data": {
+        "dynamic": false,
+        "penalty": 0,
+        "position": 1
+      }
+    },
+    {
+      "id": "extension:11.member-\u003epickupGroup:1.members",
+      "source": {
+        "node": "extension:11",
+        "port": "member"
+      },
+      "target": {
+        "node": "pickupGroup:1",
+        "port": "members"
+      },
+      "owner": {
+        "node": "pickupGroup:1",
+        "field": "members"
+      }
+    },
+    {
+      "id": "extension:11.member-\u003equeue:1.members",
+      "source": {
+        "node": "extension:11",
+        "port": "member"
+      },
+      "target": {
+        "node": "queue:1",
+        "port": "members"
+      },
+      "owner": {
+        "node": "queue:1",
+        "field": "members"
+      },
+      "data": {
+        "dynamic": true,
+        "penalty": 1,
+        "position": 2
+      }
+    },
+    {
+      "id": "featureCode:*50.target-\u003etimeCondition:1.call",
+      "source": {
+        "node": "featureCode:*50",
+        "port": "target"
+      },
+      "target": {
+        "node": "timeCondition:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "featureCode:*50",
+        "field": "argument"
+      }
+    },
+    {
+      "id": "featureCode:*51.target-\u003eivr:1.call",
+      "source": {
+        "node": "featureCode:*51",
+        "port": "target"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "featureCode:*51",
+        "field": "argument"
+      }
+    },
+    {
+      "id": "holidayCalendar:1.use-\u003eschedule:1.calendars",
+      "source": {
+        "node": "holidayCalendar:1",
+        "port": "use"
+      },
+      "target": {
+        "node": "schedule:1",
+        "port": "calendars"
+      },
+      "owner": {
+        "node": "schedule:1",
+        "field": "calendarIds"
+      }
+    },
+    {
+      "id": "inboundRoute:1.destination-\u003etimeCondition:1.call",
+      "source": {
+        "node": "inboundRoute:1",
+        "port": "destination"
+      },
+      "target": {
+        "node": "timeCondition:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "inboundRoute:2.destination-\u003econference:1.call",
+      "source": {
+        "node": "inboundRoute:2",
+        "port": "destination"
+      },
+      "target": {
+        "node": "conference:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "inboundRoute:2",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "inboundRoute:3.destination-\u003epagingGroup:1.call",
+      "source": {
+        "node": "inboundRoute:3",
+        "port": "destination"
+      },
+      "target": {
+        "node": "pagingGroup:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "inboundRoute:3",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "ivr:1.key:1-\u003equeue:1.call",
+      "source": {
+        "node": "ivr:1",
+        "port": "key:1"
+      },
+      "target": {
+        "node": "queue:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "options"
+      },
+      "data": {
+        "digit": "1"
+      }
+    },
+    {
+      "id": "ivr:1.timeout-\u003etimeCondition:1.call",
+      "source": {
+        "node": "ivr:1",
+        "port": "timeout"
+      },
+      "target": {
+        "node": "timeCondition:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ivr:1",
+        "field": "timeout"
+      }
+    },
+    {
+      "id": "mohClass:1.use-\u003eextension:10.holdMusic",
+      "source": {
+        "node": "mohClass:1",
+        "port": "use"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "holdMusic"
+      },
+      "owner": {
+        "node": "extension:10",
+        "field": "mohClassId"
+      }
+    },
+    {
+      "id": "mohClass:1.use-\u003equeue:1.holdMusic",
+      "source": {
+        "node": "mohClass:1",
+        "port": "use"
+      },
+      "target": {
+        "node": "queue:1",
+        "port": "holdMusic"
+      },
+      "owner": {
+        "node": "queue:1",
+        "field": "mohClassId"
+      }
+    },
+    {
+      "id": "pagingGroup:1.multicast-\u003emulticastChannel:1.page",
+      "source": {
+        "node": "pagingGroup:1",
+        "port": "multicast"
+      },
+      "target": {
+        "node": "multicastChannel:1",
+        "port": "page"
+      },
+      "owner": {
+        "node": "pagingGroup:1",
+        "field": "multicastChannelId"
+      }
+    },
+    {
+      "id": "queue:1.breakout-\u003eextension:10.voicemail",
+      "source": {
+        "node": "queue:1",
+        "port": "breakout"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "voicemail"
+      },
+      "owner": {
+        "node": "queue:1",
+        "field": "breakoutVoicemail"
+      }
+    },
+    {
+      "id": "queue:1.noAgents-\u003eannouncement:2.call",
+      "source": {
+        "node": "queue:1",
+        "port": "noAgents"
+      },
+      "target": {
+        "node": "announcement:2",
+        "port": "call"
+      },
+      "owner": {
+        "node": "queue:1",
+        "field": "noAgents"
+      }
+    },
+    {
+      "id": "queue:1.timeout-\u003eextension:10.voicemail",
+      "source": {
+        "node": "queue:1",
+        "port": "timeout"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "voicemail"
+      },
+      "owner": {
+        "node": "queue:1",
+        "field": "timeout"
+      }
+    },
+    {
+      "id": "schedule:1.use-\u003etimeCondition:1.schedule",
+      "source": {
+        "node": "schedule:1",
+        "port": "use"
+      },
+      "target": {
+        "node": "timeCondition:1",
+        "port": "schedule"
+      },
+      "owner": {
+        "node": "timeCondition:1",
+        "field": "scheduleId"
+      }
+    },
+    {
+      "id": "timeCondition:1.closed-\u003eannouncement:2.call",
+      "source": {
+        "node": "timeCondition:1",
+        "port": "closed"
+      },
+      "target": {
+        "node": "announcement:2",
+        "port": "call"
+      },
+      "owner": {
+        "node": "timeCondition:1",
+        "field": "closed"
+      },
+      "data": {
+        "thenVoicemail": "101"
+      }
+    },
+    {
+      "id": "timeCondition:1.holiday-\u003eivr:1.call",
+      "source": {
+        "node": "timeCondition:1",
+        "port": "holiday"
+      },
+      "target": {
+        "node": "ivr:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "timeCondition:1",
+        "field": "holiday"
+      }
+    },
+    {
+      "id": "timeCondition:1.open-\u003equeue:1.call",
+      "source": {
+        "node": "timeCondition:1",
+        "port": "open"
+      },
+      "target": {
+        "node": "queue:1",
+        "port": "call"
+      },
+      "owner": {
+        "node": "timeCondition:1",
+        "field": "open"
+      }
+    },
+    {
+      "id": "trunk:1.inbound-\u003einboundRoute:1.trunk",
+      "source": {
+        "node": "trunk:1",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:1",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "trunkId"
+      }
+    },
+    {
+      "id": "trunk:1.inbound-\u003einboundRoute:2.trunk",
+      "source": {
+        "node": "trunk:1",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:2",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:2",
+        "field": "trunkId"
+      }
+    },
+    {
+      "id": "trunk:1.inbound-\u003einboundRoute:3.trunk",
+      "source": {
+        "node": "trunk:1",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:3",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:3",
+        "field": "trunkId"
+      }
+    }
+  ],
+  "warnings": []
+}

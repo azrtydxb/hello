@@ -13,6 +13,7 @@ import (
 	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/snapshot"
+	"github.com/azrtydxb/hello/internal/timecond"
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 )
@@ -129,6 +130,9 @@ type call struct {
 	// negotiated is the codec set the call runs on (the callee's choice as
 	// the caller was answered, see anchoredAnswerA); zero before the answer.
 	negotiated media.AudioSDP
+	// codecSeen is the last codec logged per leg (logCodec), so a re-INVITE
+	// that keeps it is not logged again.
+	codecSeen map[string]string
 	// anchorHost is the advertised IPv4 for relay SDP answers.
 	anchorHost string
 
@@ -514,6 +518,10 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 			return
 		}
 		c.startQueue(tx, snap, q)
+	case dec.Kind == routing.KindInbound && dec.DestKind != "":
+		// The unified destinations (migration 00041) share the dispatcher
+		// time conditions use.
+		c.applyTCDest(tx, snap, timecond.Dest{Kind: dec.DestKind, Target: dec.DestTarget})
 	case dec.Kind == routing.KindInbound && dec.TimeCondition != "":
 		c.routeTimeCondition(tx, snap, dec.TimeCondition)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
@@ -872,6 +880,8 @@ func (c *call) answer(w *leg) {
 		}
 		off, _ := media.ParseAudioSDP(c.inv.Body())
 		body = c.anchoredAnswerA(off, calleeAns)
+	} else {
+		c.logDirectCodec("answer", bres.Body())
 	}
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
 	if ct := bres.ContentType(); ct != nil {

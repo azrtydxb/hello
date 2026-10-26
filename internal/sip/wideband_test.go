@@ -197,3 +197,43 @@ func TestFilteredOfferFallsBack(t *testing.T) {
 		t.Errorf("fallback offer %+v", got.Codecs)
 	}
 }
+
+// TestTerminatedMediaPrefersOpus fails if a call Hello answers itself (a
+// conference room here) is not answered with Opus when the phone offers
+// G.722 and Opus, with G.722 when it offers no Opus, or with the 48000
+// telephone-event that goes with Opus.
+func TestTerminatedMediaPrefersOpus(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		sdp  string
+		want uint8
+	}{
+		{"opus and g722", wideSDP("9 96 0 101 102", "rtpmap:96 opus/48000/2", "rtpmap:101 telephone-event/8000", "rtpmap:102 telephone-event/48000"), 96},
+		{"g722 only", wideSDP("9 0 101", "rtpmap:101 telephone-event/8000"), 9},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if c.want == 96 && !media.OpusAvailable {
+				t.Skip("no Opus in this build")
+			}
+			f := newFakeConf()
+			pbx := startPBX(t, confDevices(), withRooms(room800()), withConferences(f, nil))
+			p := newPhone(t, pbx, "a1", "pa")
+			p.sdp = c.sdp
+			p.register(t)
+			r := waitCall(t, dial(t.Context(), p, "800"))
+			if r.err != nil {
+				t.Fatalf("join: %v", r.err)
+			}
+			if got := codecPTs(t, r.dcs.InviteResponse.Body()); len(got) != 1 || got[0] != c.want {
+				t.Errorf("answered %v, want only %d", got, c.want)
+			}
+			if c.want == 96 {
+				ans, err := media.ParseAudioSDP(r.dcs.InviteResponse.Body())
+				if err != nil || ans.DTMFPayloadType != 102 || ans.DTMFRate != 48000 {
+					t.Errorf("answer events %d/%d (%v), want 102/48000", ans.DTMFPayloadType, ans.DTMFRate, err)
+				}
+			}
+			hangup(t, r.dcs)
+		})
+	}
+}
