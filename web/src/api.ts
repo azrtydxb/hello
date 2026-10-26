@@ -1093,7 +1093,9 @@ export type FailureKind =
   | "announcement"
   | "ivr"
   | "queue"
-  | "time_condition";
+  | "time_condition"
+  | "extension"
+  | "ring_group";
 
 export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   none: "Hang up",
@@ -1103,6 +1105,8 @@ export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   ivr: "An IVR menu",
   queue: "A call queue",
   time_condition: "A time condition",
+  extension: "An extension",
+  ring_group: "Another ring group",
 };
 
 /** One member of a ring group; `position` is 1-based ring order. */

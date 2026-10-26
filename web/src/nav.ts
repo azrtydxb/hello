@@ -108,6 +108,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     label: "Call flow",
     items: [
+      { label: "Call flows", path: "/flow", phase: 5, icon: "workflow" },
       { label: "Trunks", path: "/trunks", phase: 2, icon: "cable" },
       { label: "Routes", path: "/routes", phase: 2, icon: "route" },
       {
@@ -224,6 +225,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         phase: 5,
         icon: "key-round",
         minRole: "admin",
+      },
+      {
+        label: "Events",
+        path: "/integrations/events",
+        phase: 5,
+        icon: "radio-tower",
       },
     ],
   },
