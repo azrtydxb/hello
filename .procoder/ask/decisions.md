@@ -848,7 +848,7 @@ dryRun, fn)`: it opens the transaction, takes the configuration lock, reads
   check functions the batch used; `RunBatch` runs them once at the end against
   the baseline, bumps the revision once and notifies once. The audit via is
   `batch:<uuid>`; the outer origin goes on the `config_batches` row.
-- **The batch table** is `00045_config_batches.sql` (`ops`, `results`,
+- **The batch table** is `00046_config_batches.sql` (`ops`, `results`,
   `reverts`, 90 days, pruned on insert). `ops` holds the operations as they ran
   with credential values withheld; `results` holds, per operation, the object
   before and after as its GET returns it, the diff and, for a delete, the
