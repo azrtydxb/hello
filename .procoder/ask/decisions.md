@@ -676,3 +676,11 @@ so the integration job is required green before merge.
 
 The form pages (Routes) do not offer the new inbound kinds yet; they render
 them through the existing fallback. The API and MCP do.
+
+## Ring group voicemail failure box (2026-10-26)
+
+A ring group whose failure kind is `voicemail` now sets `vmExt` to the failure
+target before starting the voicemail application, the same way the IVR and time
+condition paths do. Before, `mailboxExt` fell back to the dialled string (the
+group number), so the message went to the wrong box or to none. Covered by
+`TestRingGroupVoicemailFailureBox`, which fails without the fix.
