@@ -42,7 +42,7 @@ type CDR struct {
 	// PageLegs is a page's outcome per member (migration 00014); set by
 	// GetCDR for a page only.
 	PageLegs []PageLeg `json:"pageLegs,omitempty"`
-	// QueueLegs is what the call did in a call queue (migration 00032); set
+	// QueueLegs is what the call did in a call queue (migration 00036); set
 	// by GetCDR.
 	QueueLegs []QueueLeg `json:"queueLegs,omitempty"`
 }

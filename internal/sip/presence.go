@@ -116,7 +116,8 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 	switch event {
 	case eventDialog:
 		ext = req.Recipient.User
-		if !snap.HasExtension(ext) {
+		_, isSlot := snap.ParkLotOf(ext)
+		if !snap.HasExtension(ext) && !isSlot {
 			// An agent's login or pause lamp (*45101): not an extension.
 			if _, _, ok := queueBLFTarget(snap, ext); !ok {
 				s.respond(tx, req, sip.StatusNotFound, "Not Found")
@@ -169,7 +170,10 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 		if e, ok := snap.Extension(ext); ok && e.DND {
 			init = StateDND
 		}
-		if !snap.HasExtension(ext) {
+		if _, slot := snap.ParkLotOf(ext); slot {
+			// A park slot's lamp shows occupancy (spec S-6).
+			init = slotState(s.slotOccupied(ext))
+		} else if !snap.HasExtension(ext) {
 			if st := s.queueStore(); st != nil {
 				cctx, cancel := s.stateCtx()
 				states, err := st.Agents(cctx)

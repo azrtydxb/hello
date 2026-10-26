@@ -93,7 +93,7 @@ CREATE TABLE cdr_queue_legs (
 -- read from the live constraint, so values other migrations added (which may
 -- be applied in either order) are kept.
 -- +goose StatementBegin
-CREATE FUNCTION pg_temp.hello_check_values(tbl regclass, cname text, add_vals text[], drop_vals text[])
+CREATE OR REPLACE FUNCTION pg_temp.hello_check_values(tbl regclass, cname text, add_vals text[], drop_vals text[])
 RETURNS void LANGUAGE plpgsql AS $fn$
 DECLARE
     def  text;
@@ -126,6 +126,7 @@ SELECT pg_temp.hello_check_values('ivr_menus', 'ivr_menus_invalid_kind_check', A
 SELECT pg_temp.hello_check_values('ivr_menu_options', 'ivr_menu_options_dest_kind_check', ARRAY['queue'], ARRAY[]::text[]);
 SELECT pg_temp.hello_check_values('feature_codes', 'feature_codes_action_check',
     ARRAY['queue_login', 'queue_logout', 'queue_pause', 'queue_unpause'], ARRAY[]::text[]);
+DROP FUNCTION pg_temp.hello_check_values(regclass, text, text[], text[]);
 
 -- Existing installs get the default agent codes when they are free (no other
 -- feature code or page code equal to, a prefix of, or prefixed by them); a
@@ -148,7 +149,7 @@ DELETE FROM ivr_menu_options WHERE dest_kind = 'queue';
 DELETE FROM feature_codes WHERE action IN ('queue_login', 'queue_logout', 'queue_pause', 'queue_unpause');
 
 -- +goose StatementBegin
-CREATE FUNCTION pg_temp.hello_check_values(tbl regclass, cname text, add_vals text[], drop_vals text[])
+CREATE OR REPLACE FUNCTION pg_temp.hello_check_values(tbl regclass, cname text, add_vals text[], drop_vals text[])
 RETURNS void LANGUAGE plpgsql AS $fn$
 DECLARE
     def  text;
@@ -181,6 +182,7 @@ SELECT pg_temp.hello_check_values('ivr_menus', 'ivr_menus_invalid_kind_check', A
 SELECT pg_temp.hello_check_values('ivr_menu_options', 'ivr_menu_options_dest_kind_check', ARRAY[]::text[], ARRAY['queue']);
 SELECT pg_temp.hello_check_values('feature_codes', 'feature_codes_action_check',
     ARRAY[]::text[], ARRAY['queue_login', 'queue_logout', 'queue_pause', 'queue_unpause']);
+DROP FUNCTION pg_temp.hello_check_values(regclass, text, text[], text[]);
 
 DROP TABLE cdr_queue_legs;
 DROP TABLE queue_members;

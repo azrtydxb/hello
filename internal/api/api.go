@@ -94,6 +94,22 @@ type Store interface {
 	CreateIVRMenu(ctx context.Context, actor string, in store.IVRMenuInput, check store.Check) (store.IVRMenu, error)
 	UpdateIVRMenu(ctx context.Context, actor string, id int64, in store.IVRMenuInput, check store.Check) (store.IVRMenu, error)
 	DeleteIVRMenu(ctx context.Context, actor string, id int64, check store.Check) error
+	ListParkLots(ctx context.Context) ([]store.ParkLot, error)
+	GetParkLot(ctx context.Context, id int64) (store.ParkLot, error)
+	CreateParkLot(ctx context.Context, actor string, in store.ParkLotInput, check store.Check) (store.ParkLot, error)
+	UpdateParkLot(ctx context.Context, actor string, id int64, in store.ParkLotInput, check store.Check) (store.ParkLot, error)
+	DeleteParkLot(ctx context.Context, actor string, id int64, check store.Check) error
+
+	ListPickupGroups(ctx context.Context) ([]store.PickupGroup, error)
+	GetPickupGroup(ctx context.Context, id int64) (store.PickupGroup, error)
+	CreatePickupGroup(ctx context.Context, actor string, in store.PickupGroupInput, check store.Check) (store.PickupGroup, error)
+	UpdatePickupGroup(ctx context.Context, actor string, id int64, in store.PickupGroupInput, check store.Check) (store.PickupGroup, error)
+	DeletePickupGroup(ctx context.Context, actor string, id int64, check store.Check) error
+	ListMulticastChannels(ctx context.Context) ([]phonebook.Channel, error)
+	GetMulticastChannel(ctx context.Context, id int64) (phonebook.Channel, error)
+	CreateMulticastChannel(ctx context.Context, actor string, in phonebook.ChannelInput) (phonebook.Channel, error)
+	UpdateMulticastChannel(ctx context.Context, actor string, id int64, in phonebook.ChannelInput) (phonebook.Channel, error)
+	DeleteMulticastChannel(ctx context.Context, actor string, id int64) error
 
 	ListQueues(ctx context.Context) ([]store.Queue, error)
 	GetQueue(ctx context.Context, id int64) (store.Queue, error)
@@ -209,6 +225,8 @@ type Config struct {
 	// 503. PageTestWait bounds the wait for the result (0 means 20 s).
 	PageTests    PageTester
 	PageTestWait time.Duration
+	// Parked is the live view of the occupied park slots; nil answers 503.
+	Parked ParkedLive
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects

@@ -198,7 +198,7 @@ func TestQueueAgentsAndStatus(t *testing.T) {
 	if a := s["agents"].([]any)[0].(map[string]any); a["state"] != "paused" || s["staffed"] != float64(0) {
 		t.Fatalf("agent state = %v, staffed %v", a, s["staffed"])
 	}
-	got = c.must(http.StatusOK, "PUT", "/api/v1/queue-agents/101", map[string]any{"paused": false}).json(t)
+	c.must(http.StatusOK, "PUT", "/api/v1/queue-agents/101", map[string]any{"paused": false})
 	status = c.must(http.StatusOK, "GET", "/api/v1/queues/status", nil).json(t)["items"].([]any)
 	if a := status[0].(map[string]any)["agents"].([]any)[0].(map[string]any); a["state"] != "available" {
 		t.Fatalf("agent after unpause = %v", a)

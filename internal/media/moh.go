@@ -78,13 +78,69 @@ func (r *Relay) Mute(legName string, on bool) {
 	}
 }
 
+// Track is one piece of music on hold, able to deliver itself at the playback
+// rate of whatever codec a leg speaks: 8 kHz for G.711, 16 kHz for G.722,
+// 48 kHz for Opus (see Codec.PlaybackRate). A track stored at 48 kHz therefore reaches an Opus leg
+// untouched and a G.711 leg through one low-pass filtered downsample, never
+// through an 8 kHz detour.
+type Track interface {
+	// PCMAt returns the track as 16-bit mono little-endian PCM at rate. The
+	// slice may be shared between calls and must not be modified.
+	PCMAt(rate int) ([]byte, error)
+}
+
+// PCMTrack is a Track over PCM held in memory. It resamples to a requested
+// rate once and keeps the result, so every stream playing the same track
+// shares one copy per rate.
+type PCMTrack struct {
+	src  []byte
+	rate int
+	mu   sync.Mutex
+	conv map[int][]byte
+}
+
+// NewPCMTrack wraps 16-bit mono PCM sampled at rate.
+func NewPCMTrack(pcm []byte, rate int) *PCMTrack {
+	return &PCMTrack{src: pcm, rate: rate}
+}
+
+// PCMAt implements Track.
+func (t *PCMTrack) PCMAt(rate int) ([]byte, error) {
+	if rate == t.rate {
+		return t.src, nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if out, ok := t.conv[rate]; ok {
+		return out, nil
+	}
+	out, err := Resample(t.src, t.rate, rate)
+	if err != nil {
+		return nil, err
+	}
+	if t.conv == nil {
+		t.conv = map[int][]byte{}
+	}
+	t.conv[rate] = out
+	return out, nil
+}
+
+var mohTrackOnce sync.Once
+var mohTrack *PCMTrack
+
+// DefaultMOHTrack is DefaultMOHPCM as a shared Track.
+func DefaultMOHTrack() Track {
+	mohTrackOnce.Do(func() { mohTrack = NewPCMTrack(DefaultMOHPCM(), sampleRateHz) })
+	return mohTrack
+}
+
 // PlayStream plays tracks into one leg as one continuous RTP stream (a
 // fresh SSRC with its own sequence and timestamp space) until ctx ends or
-// the relay closes. next returns the next track's PCM (16-bit mono, 8 kHz);
-// it is called once per track, so a playlist can loop or shuffle, and an
-// empty result ends the stream. PlayStream returns ctx.Err() when
-// cancelled.
-func (r *Relay) PlayStream(ctx context.Context, legName string, next func() []byte) error {
+// the relay closes. next returns the next track; it is called once per
+// track, so a playlist can loop or shuffle, and a nil or empty result ends
+// the stream. Each track is delivered at the sample rate of the leg's
+// current codec (see Track). PlayStream returns ctx.Err() when cancelled.
+func (r *Relay) PlayStream(ctx context.Context, legName string, next func() Track) error {
 	l := r.findLeg(legName)
 	if l == nil {
 		return errors.New("media: unknown relay leg " + legName)
@@ -102,16 +158,22 @@ func (r *Relay) PlayStream(ctx context.Context, legName string, next func() []by
 	var enc legEncoder
 	defer enc.close()
 	for {
-		pcm := next()
-		if len(pcm) < frameBytes {
+		track := next()
+		if track == nil {
 			return nil
 		}
-		for idx := 0; (idx+1)*frameBytes <= len(pcm); idx++ {
+		for idx := 0; ; idx++ {
 			// The codec is resolved per frame: a mid-call re-INVITE can
 			// change it, and the next frame follows.
-			frame, codec, err := enc.frame(l, pcm, idx)
+			frame, codec, done, err := enc.frame(l, track, idx)
 			if err != nil {
 				return err
+			}
+			if done {
+				if idx == 0 {
+					return nil // a track with no audio ends the stream
+				}
+				break
 			}
 			pkt := BuildRTP(codec.PT, seq, ts, ssrc, first, frame)
 			first = false
@@ -134,15 +196,16 @@ func (r *Relay) PlayStream(ctx context.Context, legName string, next func() []by
 	}
 }
 
-// legEncoder encodes 8 kHz track audio in whatever codec a leg currently
-// speaks: G.711, or G.722 / Opus with the track resampled up. It keeps the
-// stateful encoder and the resampled copy of the current track between
-// frames, and rebuilds them when the leg's codec or the track changes.
+// legEncoder encodes a track in whatever codec a leg currently speaks. It
+// keeps the stateful encoder and the track's PCM at the codec's sample rate
+// between frames, and rebuilds them when the leg's codec or the track
+// changes.
 type legEncoder struct {
 	codec Codec
 	enc   *Encoder
-	src   []byte // the 8 kHz track the cached copy was made from
-	pcm   []byte // src at the codec's sample rate
+	track Track  // the track pcm was taken from
+	rate  int    // the sample rate pcm is at
+	pcm   []byte // track at the codec's sample rate
 }
 
 func (e *legEncoder) close() {
@@ -152,32 +215,31 @@ func (e *legEncoder) close() {
 	}
 }
 
-// frame returns the encoded idx-th 20 ms frame of the 8 kHz track pcm and
-// the codec it is encoded in.
-func (e *legEncoder) frame(l *relayLeg, pcm []byte, idx int) ([]byte, Codec, error) {
-	codec := l.speaks()
+// frame returns the encoded idx-th 20 ms frame of track and the codec it is
+// encoded in. done is true once idx is past the end of the track.
+func (e *legEncoder) frame(l *relayLeg, track Track, idx int) (frame []byte, codec Codec, done bool, err error) {
+	codec = l.speaks()
 	if e.enc == nil || e.codec.PT != codec.PT || e.codec.Kind() != codec.Kind() {
 		e.close()
-		enc, err := NewEncoder(codec)
+		enc, err := NewPlaybackEncoder(codec)
 		if err != nil {
-			return nil, codec, err
+			return nil, codec, false, err
 		}
-		e.enc, e.codec, e.src = enc, codec, nil
+		e.enc, e.codec = enc, codec
 	}
-	if len(e.src) != len(pcm) || len(pcm) == 0 || &e.src[0] != &pcm[0] {
-		out := pcm
-		if rate := codec.SampleRate(); rate != sampleRateHz {
-			var err error
-			if out, err = Resample(pcm, sampleRateHz, rate); err != nil {
-				return nil, codec, fmt.Errorf("media: music resample: %w", err)
-			}
+	if rate := codec.PlaybackRate(); e.track != track || e.rate != rate {
+		pcm, err := track.PCMAt(rate)
+		if err != nil {
+			return nil, codec, false, fmt.Errorf("media: music resample: %w", err)
 		}
-		e.src, e.pcm = pcm, out
+		e.track, e.rate, e.pcm = track, rate, pcm
 	}
-	n := 2 * codec.FrameSamples()
-	chunk := make([]byte, n) // silence-padded when the resampled track runs short
-	if lo := idx * n; lo < len(e.pcm) {
-		copy(chunk, e.pcm[lo:min(lo+n, len(e.pcm))])
+	n := 2 * codec.PlaybackFrameSamples()
+	lo := idx * n
+	if lo >= len(e.pcm) {
+		return nil, codec, true, nil
 	}
-	return e.enc.Encode(chunk), codec, nil
+	chunk := make([]byte, n) // silence-padded when the track ends mid-frame
+	copy(chunk, e.pcm[lo:min(lo+n, len(e.pcm))])
+	return e.enc.Encode(chunk), codec, false, nil
 }

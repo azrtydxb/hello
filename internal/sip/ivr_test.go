@@ -46,9 +46,9 @@ func ivrPBX(t *testing.T, greetSeconds int, menus ...snapshot.IVRMenu) (*testPBX
 	return pbx, objs
 }
 
-// countRTP points the phone's media at a fresh port and counts the
+// countPhoneRTP points the phone's media at a fresh port and counts the
 // datagrams the PBX sends there (set before the phone dials).
-func countRTP(t *testing.T, p *phone) *atomic.Int64 {
+func countPhoneRTP(t *testing.T, p *phone) *atomic.Int64 {
 	t.Helper()
 	conn := rtpSocket(t, p)
 	var n atomic.Int64
@@ -144,7 +144,7 @@ func TestIVRBargeIn(t *testing.T) {
 	pbx, _ := ivrPBX(t, 5, ivrMenu("main", "800", map[string]snapshot.IVRDest{"1": ext("300")}))
 	a, _, c := registerABC(t, pbx)
 	c.setCallee(answerAfter(nil))
-	frames := countRTP(t, a)
+	frames := countPhoneRTP(t, a)
 	r := waitCall(t, dial(t.Context(), a, "800"))
 	if r.err != nil {
 		t.Fatal(r.err)

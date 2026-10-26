@@ -167,13 +167,14 @@ type Group struct {
 	IncludeExtensions bool    `json:"includeExtensions"`
 	IncludeCompany    bool    `json:"includeCompany"`
 	BookIDs           []int64 `json:"bookIds"`
-	// Multicast is the group's multicast paging channels and PTT its
-	// push-to-talk settings (migration 00016).
-	Multicast  []MulticastChannel `json:"multicast"`
-	PTT        PTT                `json:"ptt"`
-	PhoneCount int                `json:"phoneCount"`
-	CreatedAt  time.Time          `json:"createdAt"`
-	UpdatedAt  time.Time          `json:"updatedAt"`
+	// Multicast is the group's multicast paging channels, PagingOptions how
+	// its phones take a page and PTT its push-to-talk and group paging.
+	Multicast     []MulticastChannel `json:"multicast"`
+	PagingOptions PagingOptions      `json:"pagingOptions"`
+	PTT           PTT                `json:"ptt"`
+	PhoneCount    int                `json:"phoneCount"`
+	CreatedAt     time.Time          `json:"createdAt"`
+	UpdatedAt     time.Time          `json:"updatedAt"`
 }
 
 // ValidName reports whether s is a usable book or group name: 1 to max

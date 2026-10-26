@@ -76,6 +76,15 @@ func (s *Server) handleRefer(req *sip.Request, tx sip.ServerTransaction) {
 		s.log.Debug("refer read failed", "error", err)
 	}
 	c.addTrace(fmt.Sprintf("REFER to %s", target))
+	if replaces == "" {
+		if snap := s.deps.Snapshots.Current(); snap != nil {
+			if fc, arg, ok := matchFeatureCode(snap, target); ok && fc.Action == ActionPark {
+				// The Park softkey: a blind REFER to the park code.
+				c.referPark(ref, w, arg)
+				return
+			}
+		}
+	}
 	if replaces != "" {
 		// The outcome goes to the dialog the REFER arrived on.
 		if ref.leg != nil {

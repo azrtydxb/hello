@@ -1,6 +1,6 @@
 package store
 
-// ACD call queues (migration 00032). The configuration lives here; what
+// ACD call queues (migration 00036). The configuration lives here; what
 // changes while calls wait (callers, agent login, pause) lives in Valkey
 // (internal/queue). Every mutation runs through configChange, so it is
 // audited, bumps the configuration revision and notifies hello-sip.
@@ -27,7 +27,7 @@ const (
 // timeout, full and no-agents destinations.
 const IVRQueueDest = "queue"
 
-// Queue feature-code actions (migration 00032).
+// Queue feature-code actions (migration 00036).
 const (
 	ActionQueueLogin   = "queue_login"
 	ActionQueueLogout  = "queue_logout"
@@ -228,6 +228,9 @@ func checkQueue(ctx context.Context, tx *sql.Tx, id int64, in QueueInput) error 
 		}
 		if n > 0 {
 			return fieldError("number", "is already an extension number, a ring group name or an IVR menu number")
+		}
+		if err := checkNotSlot(ctx, tx, "number", in.Number); err != nil {
+			return err
 		}
 	}
 	if in.BreakoutKey != "" {
@@ -441,6 +444,7 @@ func (s *Store) UpdateQueue(ctx context.Context, actor string, id int64, in Queu
 		for i := range sets {
 			sets[i] = fmt.Sprintf("%s = $%d", strings.TrimSpace(sets[i]), i+2)
 		}
+		//nolint:gosec // G202: the SET list is built from the constant queueWriteCols
 		if _, err := tx.ExecContext(ctx, `UPDATE queues SET `+strings.Join(sets, ", ")+`, updated_at = now() WHERE id = $1`,
 			append([]any{id}, in.args()...)...); err != nil {
 			return id, queueFK(err)

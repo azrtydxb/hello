@@ -49,9 +49,10 @@ answered with that.
 paging, IVR) is a session with its own sample rate: 16 kHz when the caller
 offered G.722 (it is answered with G.722), 8 kHz G.711 otherwise; an
 Opus-only caller is answered with Opus. Prompts and recordings are WAV files
-at 8 or 16 kHz; the rate a file has is resampled to the session's, so
-existing 8 kHz assets keep working and voicemail left over a G.722 call is
-stored at 16 kHz.
+at any rate from 8 to 48 kHz; the rate a file has is resampled to the session's,
+so existing 8 kHz assets keep working and voicemail left over a G.722 call is
+stored at 16 kHz. Sessions (voicemail, IVR) run at 16 kHz on Opus; announcements,
+the recording notice and music on hold are played to Opus legs at 48 kHz.
 
 **Recording** decodes G.711, G.722 and Opus to PCM and mixes the two
 directions into one WAV at the higher of their sample rates; any other
@@ -67,6 +68,34 @@ image are unchanged. It is excluded from `-race` builds (its pointer
 arithmetic trips the race detector's checkptr), where Opus calls still relay
 but are not decodable by the recorder or answerable by voicemail.
 
+## Who may send media into a call
+
+The relay's UDP ports are reachable by anyone who can reach the host, so a
+leg does not take audio from just anyone. Each leg accepts RTP from:
+
+- the address its remote SDP names, or an address the signalling vouches
+  for: the source of the caller's INVITE, the source of the callee's
+  answer. A phone behind NAT names a private address in its SDP, while its
+  media arrives from the same public address as its signalling;
+- any address, for the first packet only, when the SDP names none usable
+  (no address, `0.0.0.0` for a hold, or a private/CGNAT one) and the
+  signalling gave no address to vouch for. That packet pins the leg.
+
+Once a leg has its first packet it is pinned to that source **address**. The
+port may change (a new NAT mapping), but a packet from any other address is
+refused: it is not counted, not recorded, not relayed, and cannot move
+where the other side's audio goes. Refusals show as `Rejected` in the
+relay's per-direction stats. A mid-call re-INVITE or takeover that moves
+media is a new negotiation: the next target restarts the policy, and the
+signalling addresses stay vouched.
+
+Limits: the policy is by address, not by RTP stream, so a host that can
+spoof the pinned address (same network segment) is not stopped, and the
+SSRC is not pinned because phones change it legitimately at hold and
+resume. A carrier whose media comes from an address that is neither in its
+SDP nor its signalling source is refused; the symptom is one-way or no
+audio on that trunk and a rising `Rejected` count.
+
 ## Music on hold and waiting music
 
 An anchored call plays music to a party the other side puts on hold: a
@@ -74,7 +103,9 @@ An anchored call plays music to a party the other side puts on hold: a
 the other leg, and the holder's own stream is muted meanwhile (an `inactive`
 hold is offered to the held phone as `sendonly` so it can hear). A resume
 (`sendrecv`), the hangup, or a takeover that finds the call no longer held
-stops it. Parking (S-6) uses the same player.
+stops it. Parking (S-6) uses the same player: the parked party hears the
+class a hold by the parker would pick, until it is retrieved, answered by
+the parker again or moved to voicemail.
 
 Music comes from **MOH classes** (Media, Music on hold): a named, ordered
 playlist of announcements, played in a loop or shuffled (a shuffle plays every
@@ -92,7 +123,7 @@ Deleting a class clears every pick that named it; those fall through to the
 next level.
 
 **Waiting music instead of ringback.** A ring group or inbound route with
-*Play music instead of ringback* answers the caller with `183 Session
+_Play music instead of ringback_ answers the caller with `183 Session
 Progress` and the anchor's SDP, then plays its class while the destination
 rings; the music stops when the destination answers (or the call moves on to
 voicemail or an announcement). The group's setting wins over the route's. A
@@ -100,8 +131,11 @@ phone that ignores early media hears nothing until the answer, which is why
 the setting is off by default.
 
 Tracks are announcements (WAV, uploaded on the Announcements page). They are
-decoded once per 30 seconds and encoded through the leg's negotiated G.711
-law; WAVs at a multiple of 8 kHz are averaged down to 8 kHz. Hello is the only
+decoded once per 30 seconds (and shared by every held call) and encoded in the leg's
+negotiated codec at that codec's rate: 8 kHz for G.711, 16 kHz for G.722, 48 kHz
+for Opus. A track is stored at the rate it was uploaded at (see below), so a
+48 kHz song is not squashed to phone quality first; it is low-pass filtered once
+per rate when a call needs a lower one. Hello is the only
 source of hold music: no built-in phone template writes a music on hold
 setting (Grandstream P2350 stays empty), which `TestPhonesOriginNoMusicOnHold`
 enforces.
@@ -155,3 +189,25 @@ Anchoring triggers are unchanged: NAT detection, `*1` or per-extension
 `record_default`, an announcement destination or pre-transfer prompt,
 voicemail, or `HELLO_MEDIA_FORCE_ANCHOR=true`. On kw the force switch stays
 off; see deploy/kuvryn-sync/kw/resources.yaml for the live env.
+
+## Announcement audio
+
+Uploaded announcements (and TTS output) are stored as 16-bit mono PCM WAV at
+the sample rate of the upload, up to 48 kHz; faster files (96 kHz) are reduced
+to 48 kHz. 48 kHz is Opus's native rate, so a song reaches an Opus call
+without a resample, while an 8 kHz prompt stays 8 kHz (upsampling at upload
+would only grow the file). Accepted: uncompressed PCM at 8, 16, 24 or 32 bit
+and 32/64-bit float, mono or multi-channel (channels are averaged to mono),
+including the WAVE_FORMAT_EXTENSIBLE wrapper. Compressed WAVs (ADPCM, A-law,
+mu-law, MP3) are refused with a message. The upload limit is 64 MiB, enough for
+a five minute 48 kHz stereo song (about 55 MB); the stored copy is mono, about
+29 MB. Voicemail greetings keep their 5 MiB limit.
+
+At play time the audio is resampled to the session or leg rate with a
+Kaiser-windowed sinc low-pass (about 80 dB stop band, cut-off just below the
+target Nyquist frequency), so treble above the target rate is removed rather
+than aliased. Music on hold caches the decoded track and each resampled
+copy, shared by all held calls, with a 96 MiB bound on the decoded cache;
+a class loads its tracks one at a time as they come up. hello-control buffers
+an upload in memory (about 1.5x its size at the peak), so its memory limit
+should allow for it (the chart default is 512Mi).

@@ -5,9 +5,12 @@
 package sip
 
 import (
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo/sip"
 )
@@ -40,6 +43,25 @@ const (
 	ActionCallWaitingOn  = "call_waiting_on"
 	ActionCallWaitingOff = "call_waiting_off"
 )
+
+// handleParkFeatureInvite serves the park, retrieve and pickup codes dialled
+// as a call; ok=false means fc is none of them.
+func (c *call) handleParkFeatureInvite(tx sip.ServerTransaction, fc snapshot.FeatureCode, arg string) bool {
+	snap := c.s.deps.Snapshots.Current()
+	switch fc.Action {
+	case ActionPark:
+		// Park works inside a call (the code dialled, or a REFER to it).
+		c.s.respond(tx, c.inv, sip.StatusForbidden, "Forbidden")
+		c.record(sip.StatusForbidden, cdr.SideSystem, "park code dialled as a call", ResultFailed)
+	case ActionParkRetrieve:
+		c.handleRetrieve(tx, snap, arg)
+	case ActionPickupGroup, ActionPickupDirected:
+		c.handlePickup(tx, snap, fc, arg)
+	default:
+		return false
+	}
+	return true
+}
 
 // ExtUpdate is one queued extension-feature change from a feature code.
 // Pointer fields are optional: nil leaves the column alone.
@@ -82,6 +104,9 @@ func matchFeatureCode(snap *snapshot.Snapshot, dialled string) (snapshot.Feature
 // number is not a feature code.
 func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.FeatureCode, arg string) bool {
 	s := c.s
+	if c.handleParkFeatureInvite(tx, fc, arg) {
+		return true
+	}
 	switch fc.Action {
 	case ActionBlindTransfer, ActionAttendedTransfer:
 		// *2 and ## work only inside a call (in-dialog DTMF, handleInfo).
@@ -232,7 +257,7 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 		return
 	}
-	if h := req.ContentType(); h != nil && strings.Contains(h.Value(), "dtmf-relay") {
+	if h := req.ContentType(); h != nil && isDTMFInfo(h.Value()) {
 		if d, ok := dtmfDigit(req.Body()); ok {
 			if ref.leg != nil || !ref.c.ivrDigit(legCaller, d) {
 				s.dispatchDigit(ref.c, ref.leg == nil, d)
@@ -286,17 +311,41 @@ func (s *Server) handleMessage(req *sip.Request, tx sip.ServerTransaction) {
 	s.respond(tx, req, sip.StatusOK, "OK")
 }
 
-// dtmfDigit reads a digit from a dtmf-relay body ("Signal=2", "Signal: #").
+// isDTMFInfo reports whether an INFO Content-Type carries a DTMF digit:
+// application/dtmf-relay or application/dtmf.
+func isDTMFInfo(contentType string) bool {
+	ct := strings.ToLower(contentType)
+	return strings.Contains(ct, "dtmf-relay") || strings.HasPrefix(strings.TrimSpace(ct), "application/dtmf")
+}
+
+// dtmfDigit reads an ASCII digit from an INFO DTMF body: dtmf-relay
+// ("Signal=2", "Signal: #", "Signal=10" for '*') or a bare application/dtmf
+// body ("*", "#", "5"). A numeric signal of 10-15 is an RFC 4733 event code
+// and is mapped like an RFC 2833 event, so every path yields the same
+// ASCII.
 func dtmfDigit(body []byte) (byte, bool) {
 	for _, line := range strings.Split(string(body), "\n") {
 		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-		if !strings.HasPrefix(strings.ToLower(line), "signal") {
+		if line == "" {
 			continue
 		}
-		rest := strings.TrimLeft(strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(line), "signal"), ":"), " =")
-		if rest != "" {
-			return rest[0], true
+		val := line
+		if strings.HasPrefix(strings.ToLower(line), "signal") {
+			val = strings.TrimLeft(strings.TrimPrefix(line[len("signal"):], ":"), " =")
+		} else if strings.ContainsAny(line, "=:") {
+			continue // another dtmf-relay field such as Duration
 		}
+		val = strings.TrimSpace(val)
+		if val == "" {
+			continue
+		}
+		if n, err := strconv.Atoi(val); err == nil && len(val) > 1 {
+			if n >= 10 && n <= 15 {
+				return media.DTMFDigit(byte(n))
+			}
+			return 0, false
+		}
+		return media.DTMFDigit(val[0])
 	}
 	return 0, false
 }
@@ -345,6 +394,27 @@ func (s *Server) dispatchDigit(c *call, fromCaller bool, d byte) {
 		return // the target digits follow, ended by '#'
 	case ActionBlindTransfer, ActionAttendedTransfer:
 		return // the target digits follow, ended by '#'
+	case ActionPark:
+		// *74 parks to a slot of the system's choosing, *74<slot> to that
+		// slot: a full slot fires at once, '#' ends it, and a pause after
+		// the bare code means "any slot".
+		if _, full := snap.ParkLotOf(arg); full {
+			buf.take()
+			break
+		}
+		if arg == "" {
+			time.AfterFunc(parkDigitWait, func() {
+				defer contain(s.log, "park digit wait")
+				pending := buf.take()
+				if len(pending) == 0 {
+					return
+				}
+				if fc2, arg2, ok := matchFeatureCode(snap, string(pending)); ok && fc2.Action == ActionPark {
+					s.applyInDialogCode(c, fromCaller, fc2, arg2)
+				}
+			})
+		}
+		return
 	default:
 		buf.take()
 	}
@@ -416,6 +486,17 @@ func (s *Server) applyInDialogCode(c *call, fromCaller bool, fc snapshot.Feature
 		return
 	case ActionVoicemail:
 		return // dialling *97 mid-call does nothing
+	case ActionPark:
+		// The phone that dialled the code is the parker.
+		if slot, err := c.parkCall(fromCaller, arg); err != nil {
+			c.addTrace("Park refused: " + err.Error())
+			s.parkMetric("park", "refused")
+		} else {
+			c.addTrace("Park by feature code: slot " + slot)
+		}
+		return
+	case ActionParkRetrieve, ActionPickupGroup, ActionPickupDirected:
+		return // these are dialled as calls, not inside one
 	}
 	upd, ok := featureUpdate(fc, arg, ext)
 	if !ok || s.deps.Settings == nil || !s.deps.Settings.Apply(upd) {

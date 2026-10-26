@@ -43,6 +43,7 @@ var (
 	fcActions  = []string{"forward_always", "forward_busy", "forward_no_answer", "dnd_on", "dnd_off",
 		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr",
 		"call_waiting_on", "call_waiting_off",
+		"park", "park_retrieve", "pickup_group", "pickup_directed",
 		"queue_login", "queue_logout", "queue_pause", "queue_unpause"}
 )
 
@@ -272,11 +273,12 @@ func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, gree
 			if !isWAV(data) {
 				return fmt.Errorf("%s must be a PCM WAV file", name)
 			}
-			// Playback assumes 8 kHz 16-bit mono: other rates are resampled,
-			// other layouts refused with the reason.
+			// Stored as 16-bit mono at the file's own rate (up to 48 kHz;
+			// playback resamples per call): stereo is down-mixed, other
+			// layouts that are not PCM refused with the reason.
 			norm, err := media.NormalizeWAV(data)
 			if err != nil {
-				return fmt.Errorf("%s: %s; upload a 16-bit mono PCM WAV file", name, strings.TrimPrefix(err.Error(), "media: "))
+				return fmt.Errorf("%s: %s; %s", name, strings.TrimPrefix(err.Error(), "media: "), wavAdvice)
 			}
 			data = norm
 			if name == "greeting" {

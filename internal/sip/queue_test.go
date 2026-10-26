@@ -518,7 +518,7 @@ func TestQueueMusicOnHold(t *testing.T) {
 			pbx, objs := queuePBX(t, st, nil, q)
 			a, b, _ := registerABC(t, pbx)
 			b.setCallee(ringForever())
-			frames := countRTP(t, a)
+			frames := countPhoneRTP(t, a)
 			r := waitCall(t, dial(t.Context(), a, "600"))
 			if r.err != nil {
 				t.Fatal(r.err)

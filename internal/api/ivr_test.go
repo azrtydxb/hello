@@ -167,6 +167,12 @@ func TestIVRMenuCRUD(t *testing.T) {
 	}
 	c.must(http.StatusOK, "GET", "/api/v1/ivr-menus/"+id, nil)
 	c.must(http.StatusNotFound, "GET", "/api/v1/ivr-menus/987654", nil)
+
+	// A menu nothing names is deleted; deleting it again is a 404.
+	spare := c.must(http.StatusCreated, "POST", "/api/v1/ivr-menus", map[string]any{"name": "spare", "greetingId": greet.ID}).json(t)
+	sparePath := "/api/v1/ivr-menus/" + fmt.Sprint(spare["id"])
+	c.must(http.StatusNoContent, "DELETE", sparePath, nil)
+	c.must(http.StatusNotFound, "DELETE", sparePath, nil)
 }
 
 // TestIVRNamedObjectsAreProtected: an extension, voicemail box, ring group,

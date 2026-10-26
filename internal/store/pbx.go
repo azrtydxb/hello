@@ -503,6 +503,9 @@ func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupI
 		if err := checkRingGroupIVR(ctx, tx, "", in); err != nil {
 			return 0, err
 		}
+		if err := checkNotSlot(ctx, tx, "name", in.Name); err != nil {
+			return 0, err
+		}
 		var id int64
 		if err := checkMOHClass(ctx, tx, "mohClassId", in.MOHClassID); err != nil {
 			return 0, err
@@ -539,6 +542,9 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 			}
 		}
 		if err := checkRingGroupIVR(ctx, tx, cur, in); err != nil {
+			return id, err
+		}
+		if err := checkNotSlot(ctx, tx, "name", in.Name); err != nil {
 			return id, err
 		}
 		if err := checkMOHClass(ctx, tx, "mohClassId", in.MOHClassID); err != nil {
@@ -670,22 +676,23 @@ func (s *Store) PutFeatureCodes(ctx context.Context, actor string, codes []Featu
 				}
 			}
 		}
-		for _, c := range codes {
-			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO feature_codes (code, action, argument) VALUES ($1, $2, $3)
-				ON CONFLICT (code) DO UPDATE SET action = EXCLUDED.action, argument = EXCLUDED.argument`,
-				c.Code, c.Action, c.Argument); err != nil {
-				return "", err
+		err := dialGuard(ctx, tx, "items", func() error {
+			for _, c := range codes {
+				if _, err := tx.ExecContext(ctx, `
+					INSERT INTO feature_codes (code, action, argument) VALUES ($1, $2, $3)
+					ON CONFLICT (code) DO UPDATE SET action = EXCLUDED.action, argument = EXCLUDED.argument`,
+					c.Code, c.Action, c.Argument); err != nil {
+					return err
+				}
 			}
-		}
-		kept := make([]string, len(codes))
-		for i, c := range codes {
-			kept[i] = c.Code
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM feature_codes WHERE code <> ALL($1)`, kept); err != nil {
-			return "", err
-		}
-		return "list", nil
+			kept := make([]string, len(codes))
+			for i, c := range codes {
+				kept[i] = c.Code
+			}
+			_, err := tx.ExecContext(ctx, `DELETE FROM feature_codes WHERE code <> ALL($1)`, kept)
+			return err
+		})
+		return "list", err
 	})
 }
 
@@ -706,6 +713,10 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*80", Action: "intercom"},
 		{Code: "*70", Action: "call_waiting_off"},
 		{Code: "*71", Action: "call_waiting_on"},
+		{Code: "*74", Action: "park"},
+		{Code: "*75", Action: "park_retrieve"},
+		{Code: "*40", Action: "pickup_group"},
+		{Code: "*41", Action: "pickup_directed"},
 		{Code: "##", Action: "attended_transfer"},
 		{Code: "*45", Action: ActionQueueLogin},
 		{Code: "*46", Action: ActionQueueLogout},

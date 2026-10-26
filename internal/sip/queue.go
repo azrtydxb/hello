@@ -1,4 +1,4 @@
-// ACD call queues (migration 00032). A queue answers the call through the
+// ACD call queues (migration 00036). A queue answers the call through the
 // media relay, holds the caller with music and periodic announcements and
 // offers the call to the next free agent. The caller's dialog is the
 // ordinary answered B2BUA dialog (like an IVR menu's), so the queue reuses
@@ -14,6 +14,7 @@ package sip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -219,7 +220,7 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 	entry, err := st.Join(ctx, queue.Entry{CallID: c.id, Queue: q.Name, Caller: c.callerNum, CallerName: c.callerName,
 		Node: s.cfg.NodeID, EnteredMs: entered}, q.MaxCallers)
 	switch {
-	case err == queue.ErrFull:
+	case errors.Is(err, queue.ErrFull):
 		c.queueLog("queue full", q.Name)
 		c.qLeg(cdr.QueueEnter, q.Name, "", 0, "full")
 		c.queueLeave(ctx, snap, q, menu, "full", q.Full, 0)
@@ -334,7 +335,6 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 			}
 		}
 		if q.AnnounceFrequency > 0 && now.Sub(lastAnn) >= time.Duration(q.AnnounceFrequency)*time.Second {
-			lastAnn = time.Now()
 			moh.halt()
 			if broke := c.queueAnnounce(ctx, snap, q, entry); broke {
 				leave("breakout", snapshot.QueueDest{Kind: snapshot.IVRVoicemail, Target: q.BreakoutBox})

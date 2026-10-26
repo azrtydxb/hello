@@ -168,6 +168,9 @@ type Deps struct {
 	// Queues is the call queues' shared state (Valkey); nil disables call
 	// queues (a call to a queue is refused with 503).
 	Queues queue.Store
+	// Park is the shared call-park store (Valkey); nil disables call park,
+	// retrieve and cross-node pickup. A parked party hears music on hold.
+	Park ParkState
 }
 
 // Server is one SIP node.
@@ -185,7 +188,10 @@ type Server struct {
 	client  *sipgo.Client
 	uas     *sipgo.DialogUA // A legs: callers
 	uac     *sipgo.DialogUA // B legs: forks
-	bg      sync.WaitGroup
+	// uacElsewhere is uac with "Call completed elsewhere" on its CANCELs,
+	// for the ringing legs of a picked-up call.
+	uacElsewhere *sipgo.DialogUA
+	bg           sync.WaitGroup
 	// bgMu guards bgClosed: once shutdown waits for bg, a late call event
 	// (a call ending as the node stops) must not start more work on it.
 	bgMu     sync.Mutex
@@ -238,6 +244,8 @@ type Server struct {
 	// mohCache holds decoded music on hold announcements (guarded by mohMu).
 	mohMu    sync.Mutex
 	mohCache map[string]mohAudioEntry
+	// mohLoading are the fetches in flight (guarded by mohMu).
+	mohLoading map[string]*mohLoad
 
 	// Presence (S-10) and feature-code (S-11) state. subs holds the live
 	// dialog subscriptions by Call-ID, byExt the per-extension index used
@@ -422,6 +430,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.refreshPeers(ctx) // before serving, so the edge knows its peers
 	s.uas = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
 	s.uac = &sipgo.DialogUA{Client: client, ContactHDR: s.contact, RewriteContact: true}
+	s.uacElsewhere = newElsewhereUA(ua, client, s.uac)
 
 	s.handle(srv, sip.OPTIONS, s.handleOptions)
 	s.handle(srv, sip.REGISTER, s.handleRegister)
@@ -451,6 +460,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
+	}
+	if s.deps.Park != nil {
+		s.bg.Go(func() { s.parkLoop(rctx) })
 	}
 	if s.deps.HAState != nil && s.deps.Membership != nil && s.cfg.HATakeoverEnabled {
 		// A takeover re-INVITEs from the listening socket, which sipgo

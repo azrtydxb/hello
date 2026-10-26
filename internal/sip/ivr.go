@@ -1,4 +1,4 @@
-// IVR / auto-attendant (migration 00031). A menu answers the call through
+// IVR / auto-attendant (migration 00033). A menu answers the call through
 // the media relay, plays its greeting (an announcement) with barge-in,
 // collects DTMF digits (RFC 4733 through the relay, SIP INFO through the
 // dialog) and sends the call to the destination of the chosen option. The

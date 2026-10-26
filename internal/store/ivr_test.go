@@ -280,6 +280,48 @@ func TestIVRNumberNotShadowed(t *testing.T) {
 	}
 }
 
+// TestIVRNumberNotParkSlot: an IVR menu number and a park slot are both
+// dialled as a plain number, so neither may take the other's value. It fails
+// if a menu can be created or renumbered onto a slot of the default lot
+// (701-720), or a park lot created or moved over a menu's number.
+func TestIVRNumberNotParkSlot(t *testing.T) {
+	s := scratchStore(t)
+	ctx := context.Background()
+	greet, err := s.CreateAnnouncement(ctx, "t", "greet", "ann/greet.wav", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ve *ValidationError
+	in := ivrInput("main", greet.ID)
+	in.Number = "705"
+	_, err = s.CreateIVRMenu(ctx, "t", in, nil)
+	if !errors.As(err, &ve) || ve.Fields[0].Path != "number" || !strings.Contains(ve.Fields[0].Message, "park lot") {
+		t.Fatalf("create menu on slot 705: %v, want a number error naming the park lot", err)
+	}
+	in.Number = "800"
+	m, err := s.CreateIVRMenu(ctx, "t", in, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.Number = "710"
+	_, err = s.UpdateIVRMenu(ctx, "t", m.ID, in, nil)
+	if !errors.As(err, &ve) || ve.Fields[0].Path != "number" {
+		t.Fatalf("renumber menu onto slot 710: %v, want a number error", err)
+	}
+	_, err = s.CreateParkLot(ctx, "t", ParkLotInput{Name: "upstairs", SlotStart: 795, SlotEnd: 805, ReturnSecs: 120, VoicemailSecs: 60, Enabled: true}, nil)
+	if !errors.As(err, &ve) || !strings.Contains(fmt.Sprint(ve.Fields), "IVR menu main") {
+		t.Fatalf("park lot over menu 800: %v, want an error naming the menu", err)
+	}
+	lot, err := s.CreateParkLot(ctx, "t", ParkLotInput{Name: "upstairs", SlotStart: 901, SlotEnd: 905, ReturnSecs: 120, VoicemailSecs: 60, Enabled: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.UpdateParkLot(ctx, "t", lot.ID, ParkLotInput{Name: "upstairs", SlotStart: 798, SlotEnd: 802, ReturnSecs: 120, VoicemailSecs: 60, Enabled: true}, nil)
+	if !errors.As(err, &ve) {
+		t.Fatalf("move park lot over menu 800: %v, want a validation error", err)
+	}
+}
+
 // TestIVRFeatureCodeAlongsideCallWaiting: after every migration has run, an
 // "ivr" feature code saves next to the call-waiting codes. A later migration
 // that rewrote the action constraint without "ivr" (as 00026 does) makes the
