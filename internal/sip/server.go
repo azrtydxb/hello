@@ -174,6 +174,9 @@ type Deps struct {
 	// PageTests is the queue of paging-group test requests from the admin
 	// API; nil disables them.
 	PageTests PageTests
+	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
+	// MESSAGE 503.
+	Messages MessageQueue
 	// Conferences is the shared conference state (room ownership, live state,
 	// control commands); nil keeps every room on this node alone.
 	Conferences Conferences
@@ -284,6 +287,13 @@ type Server struct {
 	// pageMu): a group has one active page.
 	pages  map[int64]*call
 	pageMu sync.Mutex
+
+	// SIP MESSAGE delivery (messages.go): extensions whose device just
+	// registered, a pending full sweep, and the delivery loop's wake-up.
+	msgMu    sync.Mutex
+	msgKick  map[string]struct{}
+	msgSweep bool
+	msgWake  chan struct{}
 	// conf holds the conference rooms this node mixes (spec S-34).
 	conf *confHub
 	// confLamp is the last state told to each conference key's subscribers.
@@ -393,6 +403,8 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		lastEnd:   map[string]time.Time{},
 		digits:    map[*call]*digitBuffer{},
 		pages:     map[int64]*call{},
+		msgKick:   map[string]struct{}{},
+		msgWake:   make(chan struct{}, 1),
 		conf:      newConfHub(),
 		confLamp:  map[string]string{},
 		haOffline: map[string]*haOfflineNode{}, haLastActive: map[string]int{}, haIncSeen: map[string]haIncWatch{},
@@ -481,6 +493,9 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	}
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
+	}
+	if s.deps.Messages != nil {
+		s.bg.Go(func() { s.messageLoop(rctx) })
 	}
 	s.bg.Go(func() { s.confLoop(rctx) })
 	if s.deps.Park != nil {

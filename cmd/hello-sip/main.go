@@ -172,6 +172,7 @@ func run(args []string) error {
 		Presence:      sip.ValkeyPresence{Client: vk},
 		MailboxEvents: mailboxEvents{cfg: cfg.Database, log: log.With("component", "mailbox")},
 		Pushes:        pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
+		Messages:      messageQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "messages")},
 		Voicemails:    voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings,
 		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),

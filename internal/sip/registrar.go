@@ -93,6 +93,8 @@ func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
 	s.send(tx, res)
 	if len(contacts) > 0 {
 		s.triggerRecount()
+		// Messages stored while the extension had no device go out now.
+		s.kickMessages(dev.Extension)
 	}
 	// A registration refreshes the device's presence: idle, or dnd while the
 	// extension's DND is on (contract 3, "DND from the registrar state").

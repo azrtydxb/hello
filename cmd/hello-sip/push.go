@@ -24,14 +24,23 @@ type pushQueue struct {
 // Watch listens until ctx ends, reconnecting with backoff. Each (re)connect
 // wakes once, so pushes queued while disconnected are claimed.
 func (q pushQueue) Watch(ctx context.Context, wake func()) {
+	listen(ctx, q.cfg, q.log, "hello_checksync", "check-sync", wake)
+}
+
+// listen is a PostgreSQL LISTEN loop on a dedicated connection: it calls
+// wake after every (re)connect and for every notification until ctx ends,
+// reconnecting with backoff. The channel name is a constant of the store
+// package (store.PushChannel, store.MessageChannel); LISTEN takes no
+// parameters.
+func listen(ctx context.Context, cfg *pgx.ConnConfig, log *slog.Logger, channel, what string, wake func()) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		start := time.Now()
-		err := q.session(ctx, wake)
+		err := listenSession(ctx, cfg, channel, wake)
 		if ctx.Err() != nil {
 			return
 		}
-		q.log.Warn("check-sync listener lost; reconnecting", "error", err)
+		log.Warn(what+" listener lost; reconnecting", "error", err)
 		if time.Since(start) > time.Minute {
 			backoff = time.Second
 		}
@@ -44,8 +53,8 @@ func (q pushQueue) Watch(ctx context.Context, wake func()) {
 	}
 }
 
-func (q pushQueue) session(ctx context.Context, wake func()) error {
-	conn, err := pgx.ConnectConfig(ctx, q.cfg)
+func listenSession(ctx context.Context, cfg *pgx.ConnConfig, channel string, wake func()) error {
+	conn, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -54,8 +63,7 @@ func (q pushQueue) session(ctx context.Context, wake func()) error {
 		defer cancel()
 		_ = conn.Close(cctx)
 	}()
-	// The channel name is store.PushChannel; LISTEN takes no parameters.
-	if _, err := conn.Exec(ctx, "LISTEN hello_checksync"); err != nil {
+	if _, err := conn.Exec(ctx, "LISTEN "+pgx.Identifier{channel}.Sanitize()); err != nil {
 		return err
 	}
 	wake()

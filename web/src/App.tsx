@@ -54,6 +54,8 @@ import { NotFound } from "./pages/NotFound";
 import { PhoneDetail } from "./pages/PhoneDetail";
 import { PhoneGroups } from "./pages/PhoneGroups";
 import { MyContacts } from "./pages/MyContacts";
+import { MyMessages } from "./pages/MyMessages";
+import { Messages } from "./pages/Messages";
 import { Phonebooks } from "./pages/Phonebooks";
 import { Onboarding } from "./pages/Onboarding";
 import { Phones } from "./pages/Phones";
@@ -98,6 +100,8 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/onboarding": Onboarding,
   "/phonebooks": Phonebooks,
   "/me/contacts": MyContacts,
+  "/me/messages": MyMessages,
+  "/messages": Messages,
   "/me/voicemail": MyVoicemail,
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,

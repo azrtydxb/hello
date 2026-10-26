@@ -49,7 +49,15 @@ data:
     #     Hello node reaches any phone through Kamailio;
     #   - record-routes initial INVITEs in both directions;
     #   - tells Hello the phone's real source in X-Hello-Client;
-    #   - rate-limits REGISTER and INVITE per source IP (pike).
+    #   - rate-limits REGISTER, INVITE and MESSAGE per source IP (pike).
+    #
+    # SIP MESSAGE (RFC 3428, text messaging) is routed like an initial INVITE:
+    # a phone's MESSAGE goes to a READY hello-sip node (round robin; the node
+    # authenticates the device, vets the From and the target, and stores or
+    # delivers it - Kamailio never relays a phone's MESSAGE to anything but a
+    # Hello node, so it cannot be used as an open relay); Hello's MESSAGE to a
+    # registered phone comes in on the hello socket and follows the registration's
+    # Path to the phone like a check-sync NOTIFY. Message bodies are never logged.
     #
     # It holds no Hello secrets and keeps no call or registration state of its
     # own: the only state is the dispatcher view and an in-memory keep-alive
@@ -396,7 +404,7 @@ data:
     	remove_hf("X-Hello-Client");
     	force_rport();
 
-    	if (is_method("REGISTER|INVITE") && !has_totag()) {
+    	if (is_method("REGISTER|INVITE|MESSAGE") && !has_totag()) {
     		if (!pike_check_req()) {
     			if ($rc == -2) {
     				prom_counter_inc("pike_blocked_total", "1");
@@ -848,7 +856,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: 98ddf4920583e3cc57b2da3506be8c18faa8db48aa888364b7725ae66afdbf80
+        hello.watteel.com/kamailio-config-sha256: c2181bb13ef995400c3f323fb0de08b660b9174452d0addbee1c8afbd24d9559
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's

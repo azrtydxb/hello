@@ -271,6 +271,8 @@ export interface TrunkFields {
   destinations: TrunkDestination[];
   /** What the trunk may dial in the extension namespace. */
   internalDialing: InternalDialing;
+  /** SMS over SIP: text messages may be sent and received through it. */
+  messaging: boolean;
   /**
    * The audio codecs offered to the trunk (store.Trunk.codecs): any of
    * "PCMU", "PCMA", "G722", "opus". Default ["PCMU", "PCMA"]: most carriers
