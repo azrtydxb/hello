@@ -44,6 +44,7 @@ import {
   useRestoreFocus,
   useToast,
 } from "../design/azrty/components";
+import { listVoicemailGroups } from "../api/vmgroups";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { Can } from "../role";
 import { FormAlert } from "./callflow/ui";
@@ -129,6 +130,7 @@ function Conditions() {
   const announcements = useQuietList(listAnnouncements);
   const pagingGroups = useQuietList(listPagingGroups);
   const menus = useQuietList(listIvrMenus);
+  const voicemailGroups = useQuietList(listVoicemailGroups);
   const schedules = useQuietList(listSchedules);
   const timeConditions = list.status === "ready" ? list.items : [];
   const choices: DestinationChoices = {
@@ -138,6 +140,7 @@ function Conditions() {
     pagingGroups,
     menus,
     timeConditions,
+    voicemailGroups,
   };
 
   async function onDelete(t: TimeCondition) {

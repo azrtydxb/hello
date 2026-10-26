@@ -127,6 +127,10 @@ type Store interface {
 	UpdateParkLot(ctx context.Context, actor string, id int64, in store.ParkLotInput, check store.Check) (store.ParkLot, error)
 	DeleteParkLot(ctx context.Context, actor string, id int64, check store.Check) error
 
+	ListVoicemailGroups(ctx context.Context) ([]store.VoicemailGroup, error)
+	CreateVoicemailGroup(ctx context.Context, actor string, in store.VoicemailGroupInput, check store.Check) (store.VoicemailGroup, error)
+	UpdateVoicemailGroup(ctx context.Context, actor string, id int64, in store.VoicemailGroupInput, check store.Check) (store.VoicemailGroup, error)
+	DeleteVoicemailGroup(ctx context.Context, actor string, id int64, check store.Check) error
 	ListPickupGroups(ctx context.Context) ([]store.PickupGroup, error)
 	GetPickupGroup(ctx context.Context, id int64) (store.PickupGroup, error)
 	CreatePickupGroup(ctx context.Context, actor string, in store.PickupGroupInput, check store.Check) (store.PickupGroup, error)

@@ -1,6 +1,7 @@
 import { QueueSelect } from "../components/QueueSelect";
 import { targetOptions } from "../components/IvrDestination";
 import { listTimeConditions, type TimeCondition } from "../api/timecond";
+import { listVoicemailGroups, type VoicemailGroup } from "../api/vmgroups";
 import {
   useEffect,
   useRef,
@@ -423,6 +424,7 @@ const DESTINATION_KIND: Record<
   time_condition: { label: "Time condition", icon: "clock" },
   ring_group: { label: "Ring group", icon: "users-round" },
   voicemail: { label: "Voicemail", icon: "voicemail" },
+  voicemail_group: { label: "Voicemail group", icon: "voicemail" },
   announcement: { label: "Announcement", icon: "megaphone" },
   paging: { label: "Paging group", icon: "megaphone" },
 };
@@ -1235,16 +1237,19 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   time_condition: "Time condition",
   ring_group: "Ring group",
   voicemail: "Voicemail box of",
+  voicemail_group: "Voicemail group",
   announcement: "Announcement",
   paging: "Paging group",
 };
 
-type ListedKind = "ring_group" | "voicemail" | "announcement" | "paging";
+type ListedKind =
+  "ring_group" | "voicemail" | "voicemail_group" | "announcement" | "paging";
 
 /** What the empty-target error calls each listed kind's target. */
 const LISTED_NOUN: Record<ListedKind, string> = {
   ring_group: "ring group",
   voicemail: "voicemail box",
+  voicemail_group: "voicemail group",
   announcement: "announcement",
   paging: "paging group",
 };
@@ -1274,6 +1279,7 @@ function InboundDrawer({
   const [ringGroups, setRingGroups] = useState<RingGroup[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [pagingGroups, setPagingGroups] = useState<PagingGroup[]>([]);
+  const [voicemailGroups, setVoicemailGroups] = useState<VoicemailGroup[]>([]);
   useEffect(() => {
     const controller = new AbortController();
     // The pickers stay empty when a list fails; saving still works.
@@ -1288,6 +1294,9 @@ function InboundDrawer({
       .catch(() => undefined);
     listPagingGroups(controller.signal)
       .then(setPagingGroups)
+      .catch(() => undefined);
+    listVoicemailGroups(controller.signal)
+      .then(setVoicemailGroups)
       .catch(() => undefined);
     listTimeConditions(controller.signal)
       .then(setTimeConds)
@@ -1420,6 +1429,7 @@ function InboundDrawer({
               { value: "time_condition", label: "Time condition" },
               { value: "ring_group", label: "Ring group" },
               { value: "voicemail", label: "Voicemail" },
+              { value: "voicemail_group", label: "Voicemail group" },
               { value: "announcement", label: "Announcement" },
               { value: "paging", label: "Paging group" },
             ]}
@@ -1499,6 +1509,7 @@ function InboundDrawer({
                     announcements,
                     pagingGroups,
                     menus,
+                    voicemailGroups,
                   },
                   d.destination,
                 ) ?? []

@@ -108,6 +108,47 @@ box in the configured voice and plays it), and **Revert to default** (drops the
 box's own audio). The slot reads **Default (no voice set)** while no
 text-to-speech key is configured; callers then hear no greeting before the tone.
 
+## Voicemail groups
+
+A voicemail group shares one dial number between several mailboxes. A message
+left for the group is copied to **every member's box**, so each member hears
+it, deletes it and gets the message-waiting lamp on their own.
+
+- **Leaving a message.** Dial the group's number, or send a call there from an
+  IVR menu, a queue exit, a time-condition branch or an inbound route (the
+  destination kind **Voicemail group**, target the group number). The caller
+  hears "Please leave a message for _name_ after the tone", the tone, then
+  records. `#` ends the take, `*` records it again, and a take under a second
+  is discarded.
+- **Broadcasting.** A member dials `*63` and the group number (`*63700`) from
+  their own extension, hears "After the tone, record your message for the
+  group", records, and hears "Your message has been sent". Nothing rings. A
+  caller who is not a member gets **403 Forbidden**; an unknown or disabled
+  group gets 404. Any caller may still leave a message by dialling the number.
+- **Copy on delivery.** One WAV is stored and each member box gets its own row
+  that points at it, so a long message costs one object, not one per member.
+  Deleting one member's copy keeps the audio while another member still has a
+  row for it; the last delete removes it. The message header names the caller
+  (for a broadcast, the member's extension).
+- **Members** need a voicemail box. A member whose extension is deleted drops
+  out of the group. A box removed after the group was loaded is skipped; the
+  others keep their copy.
+- **Limits.** At most 200 members and 100 groups. A message is 180 seconds by
+  default; set **Longest message** up to 600 seconds per group.
+- **A disabled group** takes no message (callers are refused with 404).
+- **Dial space.** The number cannot equal an extension, ring group, IVR menu,
+  conference room, queue or park slot, and none of them may later take it. A
+  group an IVR menu, queue, time condition or inbound route sends calls to can
+  be neither deleted nor renumbered until they are changed.
+
+Manage groups under **Media, Voicemail groups** (administrators write, viewers
+read). The feature code `*63` is a default code with the action
+`voicemail_broadcast`; existing installs get it on upgrade when `*63` is free.
+The prompts (`vmgroup.leave`, `vmgroup.broadcast`, `vmgroup.sent`) are in the
+English and Dutch tables and are spoken in the configured voicemail language.
+The metric `hello_voicemail_group_deliveries_total{result}` counts messages
+(`delivered`, `failed`, `refused`, `discarded`).
+
 ## Languages
 
 The prompts live in one catalogue (`internal/voiceprompt`): a key and a
@@ -166,3 +207,7 @@ hears the greeting again; a caller checking messages hears the PIN prompt again.
 | `PUT /api/v1/extensions/{id}/voicemail/greeting`           | operator | a greeting from an announcement or text                             |
 | `POST /api/v1/extensions/{id}/voicemail/greeting/preview`  | operator | the default spoken greeting, as WAV                                 |
 | `DELETE /api/v1/extensions/{id}/voicemail/greeting/{slot}` | operator | revert a slot to the default                                        |
+| `GET /api/v1/voicemail-groups`                             | viewer   | the voicemail groups with their members                             |
+| `POST /api/v1/voicemail-groups`                            | admin    | create a group (number, name, members, `maxSeconds`, `enabled`)     |
+| `PUT /api/v1/voicemail-groups/{id}`                        | admin    | replace a group, member list included                               |
+| `DELETE /api/v1/voicemail-groups/{id}`                     | admin    | delete a group (refused while something sends calls to it)          |

@@ -33,39 +33,42 @@ type builder struct {
 	annByName    map[string]string
 	annByID      map[int64]string
 	pagingByCode map[string]string
-	confByNumber map[string]string
-	ivrByName    map[string]string
-	queueByName  map[string]string
-	tcByName     map[string]string
-	mohByID      map[int64]string
-	schedByID    map[int64]string
-	mcByID       map[int64]string
+	// vmGroupByNumber maps a voicemail group's number to its node id.
+	vmGroupByNumber map[string]string
+	confByNumber    map[string]string
+	ivrByName       map[string]string
+	queueByName     map[string]string
+	tcByName        map[string]string
+	mohByID         map[int64]string
+	schedByID       map[int64]string
+	mcByID          map[int64]string
 }
 
 // Build draws the configuration. The result is deterministic: nodes and
 // edges are sorted by id.
 func Build(in Input, opt Options) (Graph, error) {
 	b := &builder{
-		g:            Graph{ConfigRevision: in.Revision, Nodes: []Node{}, Edges: []Edge{}, Warnings: []Warning{}},
-		cat:          buildCatalogue(),
-		nodes:        map[string]bool{},
-		kinds:        map[string]string{},
-		edges:        map[string]bool{},
-		ends:         map[string]bool{},
-		entries:      map[string]bool{},
-		groupByName:  map[string]string{},
-		extByNumber:  map[string]string{},
-		exts:         map[string]store.Extension{},
-		annByName:    map[string]string{},
-		annByID:      map[int64]string{},
-		pagingByCode: map[string]string{},
-		confByNumber: map[string]string{},
-		ivrByName:    map[string]string{},
-		queueByName:  map[string]string{},
-		tcByName:     map[string]string{},
-		mohByID:      map[int64]string{},
-		schedByID:    map[int64]string{},
-		mcByID:       map[int64]string{},
+		g:               Graph{ConfigRevision: in.Revision, Nodes: []Node{}, Edges: []Edge{}, Warnings: []Warning{}},
+		cat:             buildCatalogue(),
+		nodes:           map[string]bool{},
+		kinds:           map[string]string{},
+		edges:           map[string]bool{},
+		ends:            map[string]bool{},
+		entries:         map[string]bool{},
+		groupByName:     map[string]string{},
+		extByNumber:     map[string]string{},
+		exts:            map[string]store.Extension{},
+		annByName:       map[string]string{},
+		annByID:         map[int64]string{},
+		pagingByCode:    map[string]string{},
+		vmGroupByNumber: map[string]string{},
+		confByNumber:    map[string]string{},
+		ivrByName:       map[string]string{},
+		queueByName:     map[string]string{},
+		tcByName:        map[string]string{},
+		mohByID:         map[int64]string{},
+		schedByID:       map[int64]string{},
+		mcByID:          map[int64]string{},
 	}
 	b.addObjects(in)
 	b.addRoutes(in)
@@ -274,6 +277,15 @@ func (b *builder) addObjects(in Input) {
 	for _, g := range in.PickupGroups {
 		b.node(nid(KindPickupGroup, g.ID), KindPickupGroup, g.Name, map[string]any{"members": len(g.Members)}, g)
 	}
+	for _, g := range in.VoicemailGroups {
+		id := nid(KindVMGroup, g.ID)
+		b.vmGroupByNumber[g.Number] = id
+		b.entries[id] = true // dialled by its number
+		b.ends[id] = true    // the message is left in the members' boxes
+		b.node(id, KindVMGroup, g.Name, map[string]any{
+			"number": g.Number, "enabled": g.Enabled, "members": len(g.Members), "maxSeconds": g.MaxSeconds,
+		}, g)
+	}
 }
 
 func noAnswerEnd(e store.Extension) string {
@@ -346,6 +358,8 @@ func (b *builder) resolve(owner, kind, target string) Ref {
 			b.warn(owner, WarnVoicemailDisable, fmt.Sprintf("voicemail is off for extension %s", target))
 		}
 		return Ref{id, "voicemail"}
+	case "voicemail_group":
+		return lookup(b.vmGroupByNumber, "call", "voicemail group")
 	case "ring_group":
 		return lookup(b.groupByName, "ring", "ring group")
 	case "announcement":
@@ -421,7 +435,7 @@ func (b *builder) addRoutes(in Input) {
 			b.node(id, KindInternalDID, "DID "+r.DID+" as extension", map[string]any{"did": r.DID}, nil)
 			b.ends[id] = true
 			b.edge(src, Ref{id, "call"}, owner, false, nil)
-		case "conference", "external", "sip_uri", "ring_group", "voicemail", "announcement", "paging", "ivr", "queue", "time_condition":
+		case "conference", "external", "sip_uri", "ring_group", "voicemail", "voicemail_group", "announcement", "paging", "ivr", "queue", "time_condition":
 			b.dest(src, owner, r.DestinationKind, r.Destination, nil)
 		}
 	}
@@ -525,6 +539,12 @@ func (b *builder) addGroups(in Input) {
 	}
 	for _, g := range in.PickupGroups {
 		id := nid(KindPickupGroup, g.ID)
+		for _, m := range g.Members {
+			b.member(m.ExtensionID, id, "members", id, "members", nil)
+		}
+	}
+	for _, g := range in.VoicemailGroups {
+		id := nid(KindVMGroup, g.ID)
 		for _, m := range g.Members {
 			b.member(m.ExtensionID, id, "members", id, "members", nil)
 		}

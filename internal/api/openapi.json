@@ -6019,6 +6019,174 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/voicemail-groups": {
+      "get": {
+        "operationId": "listVoicemailGroups",
+        "summary": "List voicemail groups",
+        "description": "Lists the voicemail groups: a dial number and member extensions. A message left for a group, or broadcast by a member with *63 plus the group number, is copied into every member's box.",
+        "tags": ["voicemail"],
+        "responses": {
+          "200": {
+            "description": "Voicemail groups",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailGroupList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createVoicemailGroup",
+        "summary": "Create a voicemail group",
+        "description": "Creates a voicemail group of 1-200 extensions that each have a voicemail box. The number joins the dial space and must not equal an extension, ring group, IVR menu, conference room, queue or park slot. Validation failures list each failing field in error.fields.",
+        "tags": ["voicemail"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoicemailGroupInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/voicemail-groups/{id}": {
+      "put": {
+        "operationId": "putVoicemailGroup",
+        "summary": "Replace a voicemail group",
+        "description": "Replaces a voicemail group as a whole, member list included. A group that an IVR menu, time condition, queue or inbound route sends calls to cannot be renumbered.",
+        "tags": ["voicemail"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoicemailGroupInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      },
+      "delete": {
+        "operationId": "deleteVoicemailGroup",
+        "summary": "Delete a voicemail group",
+        "description": "Deletes a voicemail group. Messages already delivered stay in the member boxes. A group that an IVR menu, time condition, queue or inbound route sends calls to is refused with 409.",
+        "tags": ["voicemail"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/paging-groups": {
       "get": {
         "operationId": "listPagingGroups",
@@ -6617,7 +6785,7 @@
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
-        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, ivr, queue_login, queue_logout, queue_pause, queue_unpause (the argument of queue_pause is the pause reason), call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed, time_condition (the argument is the time condition's name), tc_override (the argument is toggle, open, closed or auto). Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, ivr, queue_login, queue_logout, queue_pause, queue_unpause (the argument of queue_pause is the pause reason), voicemail_broadcast (*63 plus a voicemail group number: a member records a message for every member's box), call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed, time_condition (the argument is the time condition's name), tc_override (the argument is toggle, open, closed or auto). Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -16333,6 +16501,94 @@
           }
         }
       },
+      "VoicemailGroup": {
+        "type": "object",
+        "required": ["id", "number", "name", "enabled", "maxSeconds", "members", "createdAt", "updatedAt"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "number": {
+            "type": "string",
+            "description": "The dial number of the group."
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "maxSeconds": {
+            "type": "integer",
+            "description": "The longest message, in seconds."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PagingExtension"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "VoicemailGroupInput": {
+        "type": "object",
+        "required": ["number", "name", "members"],
+        "additionalProperties": false,
+        "properties": {
+          "number": {
+            "type": "string",
+            "pattern": "^[0-9]{2,16}$",
+            "description": "Unique dial number, 2-16 digits. A member dials *63 plus this number to broadcast a message."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Unique display name, spoken in the prompt that asks for the message."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "A disabled group takes no message. Default true."
+          },
+          "maxSeconds": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 600,
+            "description": "The longest message, in seconds. Default 180."
+          },
+          "members": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Extension ids, 1-200. Each must have a voicemail box."
+          }
+        }
+      },
+      "VoicemailGroupList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VoicemailGroup"
+            }
+          }
+        }
+      },
       "PagingGroup": {
         "type": "object",
         "required": [
@@ -17249,7 +17505,8 @@
               "queue_login",
               "queue_logout",
               "queue_pause",
-              "queue_unpause"
+              "queue_unpause",
+              "voicemail_broadcast"
             ]
           },
           "argument": {
@@ -17313,7 +17570,8 @@
                     "queue_login",
                     "queue_logout",
                     "queue_pause",
-                    "queue_unpause"
+                    "queue_unpause",
+                    "voicemail_broadcast"
                   ]
                 },
                 "argument": {
@@ -19884,6 +20142,7 @@
               "queue",
               "ring_group",
               "voicemail",
+              "voicemail_group",
               "announcement",
               "paging"
             ]
@@ -19988,6 +20247,7 @@
               "queue",
               "ring_group",
               "voicemail",
+              "voicemail_group",
               "announcement",
               "paging"
             ],
@@ -20094,6 +20354,7 @@
               "queue",
               "ring_group",
               "voicemail",
+              "voicemail_group",
               "announcement",
               "paging"
             ],
@@ -22985,6 +23246,7 @@
               "extension",
               "ring_group",
               "voicemail",
+              "voicemail_group",
               "announcement",
               "paging",
               "ivr",
@@ -22992,7 +23254,7 @@
               "time_condition",
               "queue"
             ],
-            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; an announcement (played, then hang up); a paging group; another IVR menu; a call queue; a time condition; or an external number routed through the outbound routes."
+            "description": "Where the call goes: hangup; an extension; a ring group; a voicemail box; a voicemail group (the message is copied to every member's box, target is the group number); an announcement (played, then hang up); a paging group; another IVR menu; a call queue; a time condition; or an external number routed through the outbound routes."
           },
           "target": {
             "type": "string",
@@ -23529,6 +23791,7 @@
               "extension",
               "ring_group",
               "voicemail",
+              "voicemail_group",
               "announcement",
               "paging",
               "ivr",

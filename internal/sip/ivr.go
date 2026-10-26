@@ -352,6 +352,8 @@ func (c *call) ivrLeave(ctx context.Context, snap *snapshot.Snapshot, m snapshot
 		return "", true
 	case snapshot.IVRVoicemail:
 		return c.ivrVoicemailExit(ctx, snap, d.Target, "ivr")
+	case snapshot.IVRVoicemailGroup:
+		return c.ivrVoicemailGroupExit(ctx, snap, d.Target)
 	case snapshot.IVRExtension, snapshot.IVRRingGroup, snapshot.IVRExternal:
 		res := c.ivrDial(ctx, snap, m, d)
 		return res.menu, res.kind == ivrConnected || res.kind == ivrFinished

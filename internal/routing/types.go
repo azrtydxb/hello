@@ -116,7 +116,7 @@ type InboundRoute struct {
 	HeaderRegex     string
 	Schedule        *Schedule
 	CallerID        Transform
-	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "announcement" | "paging"
+	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "conference" | "queue" | "time_condition" | "ring_group" | "voicemail" | "voicemail_group" | "announcement" | "paging"
 	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr", the room number for "conference", the queue name for "queue"
 	Enabled         bool
 	// MOHClassID is the music on hold class of calls the route delivers
@@ -148,8 +148,8 @@ type Config struct {
 	Conferences map[string]string
 	// Named is the set of "<kind>:<target>" keys an inbound route of the
 	// unified kinds (NamedKinds) may name: "ring_group:<name>",
-	// "voicemail:<extension number>", "announcement:<name>" and
-	// "paging:<code>".
+	// "voicemail:<extension number>", "voicemail_group:<number>",
+	// "announcement:<name>" and "paging:<code>".
 	Named map[string]bool
 	// ResolvedIPs maps a trunk ID to the IPs its destination hostnames
 	// resolved to, for source validation. hello-sip fills it off the call

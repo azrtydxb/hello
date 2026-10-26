@@ -152,6 +152,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     label: "Media",
     items: [
       { label: "Voicemail", path: "/voicemail", phase: 4, icon: "voicemail" },
+      {
+        label: "Voicemail groups",
+        path: "/voicemail/groups",
+        phase: 5,
+        icon: "users-round",
+      },
       { label: "Recordings", path: "/recordings", phase: 5, icon: "mic" },
       {
         label: "Announcements",

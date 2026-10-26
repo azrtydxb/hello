@@ -205,6 +205,8 @@ type Snapshot struct {
 	ivrByName, ivrByNumber map[string]IVRMenu
 	// queueByName and queueByNumber are the call queues (migration 00040).
 	queueByName, queueByNumber map[string]Queue
+	// vmGroups are the voicemail groups by number (migration 00045).
+	vmGroups map[string]VoicemailGroup
 	// tcByName and tcByToggle are the time conditions (migration 00038).
 	tcByName, tcByToggle map[string]TimeCondition
 	// parkLots are the enabled park lots in slot order; pickups the pickup
@@ -605,6 +607,10 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	vmgs, err := loadVoicemailGroups(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	tcs, err := loadTimeConditions(ctx, db)
 	if err != nil {
 		return nil, err
@@ -623,7 +629,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	}
 	return New(rev, domain, devices).WithExtensions(bare...).WithQueues(queues).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs).WithVoicemailGroups(vmgs), nil
 }
 
 // loadMOHClasses reads the music on hold classes with their playlists

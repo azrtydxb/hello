@@ -63,6 +63,9 @@ func (f *flowFake) ListParkLots(context.Context) ([]store.ParkLot, error) { retu
 func (f *flowFake) ListPickupGroups(context.Context) ([]store.PickupGroup, error) {
 	return f.pickups, nil
 }
+func (f *flowFake) ListVoicemailGroups(context.Context) ([]store.VoicemailGroup, error) {
+	return nil, nil
+}
 func (f *flowFake) ListTimeConditions(context.Context) ([]store.TimeCondition, error) {
 	return f.tcs, nil
 }

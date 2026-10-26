@@ -99,7 +99,8 @@ func loadDialItems(ctx context.Context, tx *sql.Tx) ([]dialItem, map[string]stri
 	q := `SELECT number, 'extension ' || number FROM extensions
 		UNION ALL SELECT name, 'ring group ' || name FROM ring_groups
 		UNION ALL SELECT number, 'IVR menu ' || name FROM ivr_menus WHERE number <> ''
-		UNION ALL SELECT number, 'conference room ' || name FROM conference_rooms`
+		UNION ALL SELECT number, 'conference room ' || name FROM conference_rooms
+		UNION ALL SELECT number, 'voicemail group ' || name FROM voicemail_groups`
 	if hasQueues {
 		q += ` UNION ALL SELECT number, 'queue ' || name FROM queues WHERE number <> ''`
 	}
@@ -189,6 +190,8 @@ const (
 	numIVRMenu    = "IVR menu"
 	numConference = "conference room"
 	numQueue      = "queue"
+	// numVoicemailGroup is a voicemail group's number (migration 00045).
+	numVoicemailGroup = "voicemail group"
 )
 
 // checkDialNumber refuses number (field names it in the error) when another
@@ -209,6 +212,7 @@ func checkDialNumber(ctx context.Context, tx *sql.Tx, field, number, own string)
 			UNION ALL SELECT 'IVR menu', 'the number of IVR menu ' || name, number FROM ivr_menus
 			UNION ALL SELECT 'conference room', 'the number of conference room ' || name, number FROM conference_rooms
 			UNION ALL SELECT 'queue', 'the number of queue ' || name, number FROM queues
+			UNION ALL SELECT 'voicemail group', 'the number of voicemail group ' || name, number FROM voicemail_groups
 		) t WHERE n = $1 AND kind <> $2 LIMIT 1`, number, own).Scan(&what)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
