@@ -13,6 +13,7 @@ import (
 	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/snapshot"
+	"github.com/azrtydxb/hello/internal/timecond"
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 )
@@ -517,6 +518,10 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 			return
 		}
 		c.startQueue(tx, snap, q)
+	case dec.Kind == routing.KindInbound && dec.DestKind != "":
+		// The unified destinations (migration 00041) share the dispatcher
+		// time conditions use.
+		c.applyTCDest(tx, snap, timecond.Dest{Kind: dec.DestKind, Target: dec.DestTarget})
 	case dec.Kind == routing.KindInbound && dec.TimeCondition != "":
 		c.routeTimeCondition(tx, snap, dec.TimeCondition)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":

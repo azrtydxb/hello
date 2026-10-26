@@ -163,7 +163,19 @@ func TestCompileValidation(t *testing.T) {
 			fe(I("schedule.timeZone"), `unknown time zone "Nowhere/City"`)}},
 		{"inbound caller-ID transform", in(func(r *InboundRoute) { r.CallerID = Transform{Regex: "^(0)", Template: "${x}"} }), []FieldError{
 			fe(I("callerIdTransform.template"), "references group ${x}, which the regex does not define")}},
-		{"destination kind", in(func(r *InboundRoute) { r.DestinationKind = "voicemail" }), []FieldError{fe(I("destinationKind"), `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri" or "time_condition"`)}},
+		{"destination kind", in(func(r *InboundRoute) { r.DestinationKind = "park" }), []FieldError{fe(I("destinationKind"), `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "announcement" or "paging"`)}},
+		{"ring group destination must exist", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "ring_group", "sales" }), []FieldError{fe(I("destination"), `ring group "sales" does not exist`)}},
+		{"voicemail destination must exist", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "voicemail", "101" }), []FieldError{fe(I("destination"), `voicemail box of extension "101" does not exist`)}},
+		{"announcement destination must exist", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "announcement", "closed" }), []FieldError{fe(I("destination"), `announcement "closed" does not exist`)}},
+		{"paging destination must exist", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "paging", "*88" }), []FieldError{fe(I("destination"), `paging group "*88" does not exist`)}},
+		{"named destinations accepted", func(c *Config) {
+			c.Named = map[string]bool{"ring_group:sales": true, "voicemail:101": true, "announcement:closed": true, "paging:*88": true}
+			c.Inbound = append(c.Inbound,
+				InboundRoute{ID: 500, Position: 500, Name: "n1", DIDKind: "exact", DID: "90", DestinationKind: "ring_group", Destination: "sales", Enabled: true},
+				InboundRoute{ID: 510, Position: 510, Name: "n2", DIDKind: "exact", DID: "91", DestinationKind: "voicemail", Destination: "101", Enabled: true},
+				InboundRoute{ID: 520, Position: 520, Name: "n3", DIDKind: "exact", DID: "92", DestinationKind: "announcement", Destination: "closed", Enabled: true},
+				InboundRoute{ID: 530, Position: 530, Name: "n4", DIDKind: "exact", DID: "93", DestinationKind: "paging", Destination: "*88", Enabled: true})
+		}, nil},
 		{"extension destination must exist", in(func(r *InboundRoute) { r.Destination = "999" }), []FieldError{fe(I("destination"), `extension "999" does not exist`)}},
 		{"external destination must be a number", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "external", "05 01" }), []FieldError{
 			fe(I("destination"), "must be a number (+, digits, * and #)")}},
