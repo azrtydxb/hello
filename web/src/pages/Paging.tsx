@@ -36,7 +36,8 @@ import {
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { FormAlert } from "./callflow/ui";
 import { Can } from "../role";
-import { listGroups, type Group } from "../api/phonebook";
+import { listMulticastChannels, type CatalogChannel } from "../api/phonebook";
+import { MulticastChannels } from "./paging/MulticastChannels";
 
 const FORM_ID = "paging-form";
 const CODE_PATTERN = /^\*[0-9]{2,4}$/;
@@ -52,7 +53,8 @@ export function Paging() {
   const [extensions, setExtensions] = useState<Extension[]>([]);
   const [extReady, setExtReady] = useState(false);
   const [extError, setExtError] = useState<string | null>(null);
-  const [phoneGroups, setPhoneGroups] = useState<Group[]>([]);
+  const [channels, setChannels] = useState<CatalogChannel[]>([]);
+  const [channelError, setChannelError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<PagingGroup | null>(null);
   const [editing, setEditing] = useState<
     { kind: "new" } | { kind: "edit"; group: PagingGroup } | null
@@ -84,13 +86,16 @@ export function Paging() {
     return () => controller.abort();
   }, []);
 
-  // The multicast channels a paging group may also page. A failure leaves
-  // the picker empty: a group without a channel still works.
+  // The multicast channel catalog: managed below the paging groups, and the
+  // channels a paging group may also page. A failure leaves the picker
+  // empty: a group without a channel still works.
   useEffect(() => {
     const controller = new AbortController();
-    listGroups(controller.signal)
-      .then(setPhoneGroups)
-      .catch(() => undefined);
+    listMulticastChannels(controller.signal)
+      .then(setChannels)
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) setChannelError(errorMessage(err));
+      });
     return () => controller.abort();
   }, []);
 
@@ -172,6 +177,12 @@ export function Paging() {
             ))}
           </ul>
         )}
+        <MulticastChannels
+          channels={channels}
+          error={channelError}
+          onChange={setChannels}
+          onToast={(m) => toast.show(m)}
+        />
       </div>
 
       {editing && (
@@ -180,7 +191,7 @@ export function Paging() {
           group={editing.kind === "edit" ? editing.group : null}
           extensions={extensions}
           extReady={extReady}
-          phoneGroups={phoneGroups}
+          channels={channels}
           onClose={() => setEditing(null)}
           onSaved={(saved, created) => {
             replaceItems((items) =>
@@ -245,8 +256,7 @@ function GroupCard({
       </div>
       {g.multicastChannel && (
         <div className="cf-card__sub">
-          Also multicast to {g.multicastChannel.groupName} ·{" "}
-          {g.multicastChannel.label} (
+          Also multicast to {g.multicastChannel.label} (
           <span className="cf-mono">
             {g.multicastChannel.address}:{g.multicastChannel.port}
           </span>
@@ -448,14 +458,14 @@ function PagingDrawer({
   group,
   extensions,
   extReady,
-  phoneGroups,
+  channels,
   onClose,
   onSaved,
 }: {
   group: PagingGroup | null;
   extensions: Extension[];
   extReady: boolean;
-  phoneGroups: Group[];
+  channels: CatalogChannel[];
   onClose: () => void;
   onSaved: (g: PagingGroup, created: boolean) => void;
 }) {
@@ -641,21 +651,24 @@ function PagingDrawer({
         <Select
           id="paging-multicast"
           label="Also page a multicast channel"
-          hint="The page's audio is also sent to the channel's address, which the phone group listens on. LAN only. G.711 channels that listen."
+          hint="The page's audio is also sent to the channel's address, which phones listen on. LAN only. Enabled G.711 paging channels from Multicast channels below."
           value={
             d.multicastChannelId === null ? "" : String(d.multicastChannelId)
           }
           error={errors.multicastChannelId}
           options={[
             { value: "", label: "None" },
-            ...phoneGroups.flatMap((pg) =>
-              (pg.multicast ?? [])
-                .filter((c) => c.role !== "send" && c.codec !== "G722")
-                .map((c) => ({
-                  value: String(c.id),
-                  label: `${pg.name} · ${c.label} (${c.address}:${String(c.port)}, ${c.codec})`,
-                })),
-            ),
+            ...channels
+              .filter(
+                (c) =>
+                  c.kind === "paging" &&
+                  c.codec !== "G722" &&
+                  (c.enabled || String(c.id) === String(d.multicastChannelId)),
+              )
+              .map((c) => ({
+                value: String(c.id),
+                label: `${c.label} (${c.address}:${String(c.port)}, ${c.codec})`,
+              })),
           ]}
           onChange={(e) =>
             set(

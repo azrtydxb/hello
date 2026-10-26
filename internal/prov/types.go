@@ -100,12 +100,15 @@ type RenderData struct {
 	Prov     ProvInfo
 	Firmware *FirmwareInfo // nil when no firmware is pinned for the model
 	Book     *BookInfo     // nil when the phone has no address book to fetch
-	// Multicast is the multicast paging of the phone's group, nil when the
-	// phone has no group or the group no channel. PTT is the group's
-	// push-to-talk, nil unless it is on and the phone supports it
-	// (SupportsPTT).
+	// Multicast is the multicast paging the phone listens to (its group's
+	// catalog channels, or every enabled paging channel when the group names
+	// none or the phone has no group); nil when there is none. PTT is the
+	// phone's push-to-talk, nil unless the phone supports it (SupportsPTT).
+	// Paging is how the phone takes a page and an intercom call; never nil
+	// once the store has built the data.
 	Multicast *MulticastInfo
 	PTT       *PTTInfo
+	Paging    *PagingOptions
 	Time      TimeInfo
 	// Codes are the PBX's star codes (feature_codes), for phones whose own
 	// DND and forward keys dial them; a code the PBX does not define is
@@ -128,8 +131,11 @@ type Phone struct {
 	Label         string
 	AdminPassword string // the phone's web UI password (spec S-20); masked in previews
 	// PTTCapable is set for a phone with the PTT and group paging feature
-	// set (SupportsPTT): the Grandstream WP816, WP826 and WP836.
+	// set (SupportsPTT): a Grandstream WP. WP is its family (WPFamily: WP8x6,
+	// WP856, WP8xx or WP820), "" for another phone. Render fills both from
+	// Vendor and Model.
 	PTTCapable bool
+	WP         string
 	// CWInverted is set for the Grandstream WP856, whose published template
 	// reads P26063 the other way round (1 = off, 2 = on). Render fills it
 	// from Vendor and Model.

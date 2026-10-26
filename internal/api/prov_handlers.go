@@ -281,6 +281,7 @@ func (s *server) updatePhone(w http.ResponseWriter, r *http.Request) {
 		DeviceID    json.RawMessage `json:"deviceId"`
 		TemplateID  json.RawMessage `json:"templateId"`
 		GroupID     json.RawMessage `json:"groupId"`
+		PTTChannel  json.RawMessage `json:"pttChannelId"`
 		BLF         *[]string       `json:"blf"`
 		Enabled     *bool           `json:"enabled"`
 	}
@@ -309,6 +310,16 @@ func (s *server) updatePhone(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		c.GroupID = &grp
+	}
+	if in.PTTChannel != nil {
+		var ch *int64
+		if string(in.PTTChannel) != "null" {
+			ch = new(int64)
+			if err := json.Unmarshal(in.PTTChannel, ch); err != nil || *ch <= 0 {
+				f.add("pttChannelId", "must be a multicast channel id or null")
+			}
+		}
+		c.PTTChannelID = &ch
 	}
 	switch {
 	case string(in.DeviceID) == "null":
