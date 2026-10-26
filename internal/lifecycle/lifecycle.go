@@ -108,6 +108,9 @@ type Machine struct {
 	// evalMu serialises evaluations, effects included (log, metrics,
 	// OnChange, publish), so they apply in the order the states were set.
 	evalMu sync.Mutex
+	// left is set (under evalMu) once the node has left the cluster; no
+	// publish may follow, or it would resurrect the record leave removed.
+	left bool
 
 	mu        sync.Mutex
 	state     cluster.State
@@ -319,7 +322,7 @@ func (m *Machine) member() cluster.Member {
 }
 
 func (m *Machine) publish(ctx context.Context) {
-	if m.o.Publisher == nil {
+	if m.o.Publisher == nil || m.left {
 		return
 	}
 	pctx, cancel := context.WithTimeout(ctx, m.o.CheckTimeout)
@@ -330,6 +333,12 @@ func (m *Machine) publish(ctx context.Context) {
 }
 
 func (m *Machine) leave() {
+	// Wait out an evaluation in flight (a SIGTERM drain publishes from its
+	// own goroutine) and bar later ones: a DRAINING publish landing after
+	// the tombstone would list the exited node DRAINING instead of OFFLINE.
+	m.evalMu.Lock()
+	defer m.evalMu.Unlock()
+	m.left = true
 	if m.o.Publisher == nil {
 		return
 	}
