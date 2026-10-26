@@ -240,6 +240,8 @@ type Server struct {
 	// mohCache holds decoded music on hold announcements (guarded by mohMu).
 	mohMu    sync.Mutex
 	mohCache map[string]mohAudioEntry
+	// mohLoading are the fetches in flight (guarded by mohMu).
+	mohLoading map[string]*mohLoad
 
 	// Presence (S-10) and feature-code (S-11) state. subs holds the live
 	// dialog subscriptions by Call-ID, byExt the per-extension index used

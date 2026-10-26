@@ -877,14 +877,16 @@ func (r *Relay) LegPort(name string) int {
 // own announcement stream: a fresh SSRC with its own sequence and
 // timestamp space, so the bridged stream's rewrite state is untouched.
 // The stream is encoded in the leg's negotiated codec (G.722 and Opus legs
-// get the 8 kHz audio resampled up). It returns ctx.Err() when ctx is
+// get the 8 kHz audio resampled up; use PlayPCMTo for audio that is already
+// wideband). It returns ctx.Err() when ctx is
 // cancelled mid-way.
 func (r *Relay) PlayTo(ctx context.Context, legName string, pcm []byte) error {
 	return r.PlayPCMTo(ctx, legName, pcm, sampleRateHz)
 }
 
-// PlayPCMTo is PlayTo for PCM at an explicit sample rate (WAV assets are 8
-// or 16 kHz).
+// PlayPCMTo is PlayTo for PCM at an explicit sample rate (WAV assets are
+// stored at 8 kHz up to 48 kHz); it is resampled to the leg's codec rate,
+// 8 kHz for G.711, 16 kHz for G.722, 48 kHz for Opus.
 func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate int) error {
 	l := r.findLeg(legName)
 	if l == nil {
@@ -894,14 +896,14 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 		pcm = pcm[:len(pcm)-1]
 	}
 	codec := l.speaks()
-	if want := codec.SampleRate(); want != rate {
+	if want := codec.PlaybackRate(); want != rate {
 		out, err := Resample(pcm, rate, want)
 		if err != nil {
 			return fmt.Errorf("media: announcement resample: %w", err)
 		}
 		pcm = out
 	}
-	enc, err := NewEncoder(codec)
+	enc, err := NewPlaybackEncoder(codec)
 	if err != nil {
 		return err
 	}
@@ -913,7 +915,7 @@ func (r *Relay) PlayPCMTo(ctx context.Context, legName string, pcm []byte, rate 
 	seq := binary.BigEndian.Uint16(b[0:2])
 	ts := binary.BigEndian.Uint32(b[2:6])
 	ssrc := binary.BigEndian.Uint32(b[6:10])
-	frame := 2 * codec.FrameSamples()
+	frame := 2 * codec.PlaybackFrameSamples()
 	ticker := time.NewTicker(frameDur)
 	defer ticker.Stop()
 	for off := 0; off < len(pcm); off += frame {
