@@ -223,6 +223,7 @@ type ua struct {
 	onRequest func(*msg)
 	log       []string
 	closed    bool
+	options   map[string]int // OPTIONS answered, by source address (the dispatcher's probes)
 }
 
 func newUA(t *testing.T, name, host string, port int) *ua {
@@ -231,7 +232,7 @@ func newUA(t *testing.T, name, host string, port int) *ua {
 	if err != nil {
 		t.Fatalf("%s: listen: %v", name, err)
 	}
-	u := &ua{t: t, name: name, conn: conn, host: host, port: conn.LocalAddr().(*net.UDPAddr).Port, pending: map[string]chan *msg{}}
+	u := &ua{t: t, name: name, conn: conn, host: host, port: conn.LocalAddr().(*net.UDPAddr).Port, pending: map[string]chan *msg{}, options: map[string]int{}}
 	go u.read()
 	t.Cleanup(u.close)
 	return u
@@ -289,6 +290,9 @@ func (u *ua) read() {
 			continue
 		}
 		if m.method() == "OPTIONS" {
+			u.mu.Lock()
+			u.options[src.IP.String()]++
+			u.mu.Unlock()
 			u.reply(m, 200, "OK", "", nil, nil)
 			continue
 		}
@@ -407,4 +411,11 @@ func (u *ua) transact(dst string, req *msg, branch string, timeout time.Duration
 		}
 		interval = min(interval*2, 4*time.Second)
 	}
+}
+
+// optionsFrom is how many OPTIONS this endpoint has answered from ip.
+func (u *ua) optionsFrom(ip string) int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.options[ip]
 }

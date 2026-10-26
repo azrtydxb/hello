@@ -404,6 +404,8 @@ func TestKamailioHA(t *testing.T) {
 		}
 	})
 
+	// The Hello node exists before Kamailio does, so its first probes are answered.
+	l.hello = newHello(t, l.runnerIP, l.stubPort)
 	l.apply(t)
 	l.waitPodsReady(t, 2, 3*time.Minute)
 	first := l.waitVIP(t, time.Minute)
@@ -416,10 +418,16 @@ func TestKamailioHA(t *testing.T) {
 
 	l.vipAddr = hp(l.vip, 30508)
 	l.oldAddr = hp(l.nodeIPs[l.nodes[0]], 30508)
-	l.hello = newHello(t, l.runnerIP, l.stubPort)
 	l.vipPhone = newPhone(t, l.runnerIP, "alice")
 	l.oldPhone = newPhone(t, l.runnerIP, "carol")
 	waitVIPAnswers(t, l.vipAddr, 30*time.Second)
+	// Each Kamailio marks the Hello node (this test) down until a probe of its
+	// own is answered: wait for one from each, or the first REGISTER gets a 503.
+	for _, n := range l.nodes {
+		ip := l.nodeIPs[n]
+		waitFor(t, 60*time.Second, "the dispatcher on "+n+" probed the Hello node", func() bool { return l.hello.optionsFrom(ip) > 0 })
+	}
+	time.Sleep(time.Second)
 
 	t.Run("vip flows", func(t *testing.T) { l.flows(t, l.vipPhone, l.vipAddr, l.vip, "VIP") })
 	t.Run("legacy node address flows", func(t *testing.T) {
@@ -463,7 +471,7 @@ func (l *lab) flows(t *testing.T, p *phone, edgeAddr, edgeHost, what string) {
 	} else {
 		t.Logf("BYE from the phone through the %s: %s", what, dur)
 	}
-	waitFor(t, "Hello saw the BYE", func() bool { return l.hello.ended(d.callID) })
+	waitFor(t, 10*time.Second, "Hello saw the BYE", func() bool { return l.hello.ended(d.callID) })
 
 	// Hello to the phone, by its registration's Path, and Hello hangs up.
 	hdlg, err := l.hello.callPhone(p.user)
@@ -475,17 +483,17 @@ func (l *lab) flows(t *testing.T, p *phone, edgeAddr, edgeHost, what string) {
 	} else {
 		t.Logf("BYE from Hello through the %s: %s", what, dur)
 	}
-	waitFor(t, "the phone saw the BYE", func() bool { return p.ended(hdlg.callID) })
+	waitFor(t, 10*time.Second, "the phone saw the BYE", func() bool { return p.ended(hdlg.callID) })
 }
 
-func waitFor(t *testing.T, what string, f func() bool) {
+func waitFor(t *testing.T, d time.Duration, what string, f func() bool) {
 	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+	for deadline := time.Now().Add(d); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
 		if f() {
 			return
 		}
 	}
-	t.Fatalf("not within 10s: %s", what)
+	t.Fatalf("not within %s: %s", d, what)
 }
 
 // failover drops the active instance (crash: freezes its node, so nothing is
@@ -569,13 +577,13 @@ func (l *lab) failover(t *testing.T, crash bool) {
 	} else {
 		t.Logf("phone's BYE %s after the move", dur)
 	}
-	waitFor(t, "Hello saw the phone's BYE", func() bool { return l.hello.ended(c2.callID) })
+	waitFor(t, 10*time.Second, "Hello saw the phone's BYE", func() bool { return l.hello.ended(c2.callID) })
 	if dur, err := l.hello.hangup(h3, byeBound); err != nil {
 		t.Fatalf("BYE from Hello after the failover: %v", err)
 	} else {
 		t.Logf("Hello's BYE %s after the move", dur)
 	}
-	waitFor(t, "the phone saw Hello's BYE", func() bool { return p.ended(c3.callID) })
+	waitFor(t, 10*time.Second, "the phone saw Hello's BYE", func() bool { return p.ended(c3.callID) })
 
 	// The takeover re-INVITE sent during the outage completed once it was over.
 	select {
