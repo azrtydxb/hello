@@ -51,10 +51,15 @@ export interface Group {
   includeCompany: boolean;
   /** The named books assigned to the group, in delivery order. */
   bookIds: Id[];
-  /** Multicast paging channels the group's phones listen on and send to. */
+  /**
+   * Catalog paging channels the group's phones listen on and send to; empty
+   * means every enabled paging channel of the catalog.
+   */
   multicast?: MulticastChannel[];
-  /** Push-to-talk settings (Grandstream WP8x6 phones only). */
+  /** Push-to-talk and group paging settings (Grandstream WP phones only). */
   ptt?: Ptt;
+  /** How the group's phones take a page and an intercom call. */
+  pagingOptions?: PagingOptions;
   phoneCount: number;
   createdAt: string;
   updatedAt: string;
@@ -62,21 +67,42 @@ export interface Group {
 
 export type MulticastCodec = "PCMU" | "PCMA" | "G722";
 export type MulticastRole = "listen" | "send" | "both";
+/** paging: phones listen, paging groups send; ptt: Grandstream WP PTT. */
+export type ChannelKind = "paging" | "ptt";
 
-/** A multicast paging channel as written; the list replaces the group's. */
-export interface MulticastInput {
+/** A channel of the multicast catalog (Paging > Multicast channels). */
+export interface CatalogChannelInput {
   label: string;
-  /** IPv4 multicast address outside 224.0.0.0/24. */
+  /** IPv4 multicast outside 224.0.0.0/24. */
+  address: string;
+  port: number;
+  codec: MulticastCodec;
+  /** Priority or channel number, 1 (highest) to 25. */
+  priority: number;
+  kind: ChannelKind;
+  enabled: boolean;
+}
+
+export interface CatalogChannel extends CatalogChannelInput {
+  id: Id;
+}
+
+/** A group's link to a catalog paging channel; the list replaces the group's. */
+export interface MulticastInput {
+  channelId: Id;
+  role: MulticastRole;
+}
+
+/** A catalog channel as a group uses it. */
+export interface MulticastChannel {
+  id: Id;
+  label: string;
   address: string;
   port: number;
   codec: MulticastCodec;
   role: MulticastRole;
-  /** 1 (highest) to 25. */
   priority: number;
-}
-
-export interface MulticastChannel extends MulticastInput {
-  id: Id;
+  enabled: boolean;
 }
 
 export interface PttChannel {
@@ -86,16 +112,61 @@ export interface PttChannel {
   subscribe: boolean;
 }
 
-/** Push-to-talk of a phone group: one multicast address, channels 1 to 25. */
+/** Channels 1 to 25 are push-to-talk, 26 to 50 group paging. */
+export const MAX_PTT_CHANNEL = 25;
+export const MIN_GROUP_CHANNEL = 26;
+export const MAX_GROUP_CHANNEL = 50;
+
+/**
+ * Push-to-talk and group paging of a phone group: one multicast address,
+ * channels 1 to 25 (PTT) and 26 to 50 (group paging).
+ */
 export interface Ptt {
   enabled: boolean;
-  /** host:port, default 224.0.1.116:5001. */
-  address: string;
-  codec: "PCMU" | "G722";
+  /** The catalog PTT channel; null uses the catalog's first PTT channel. */
+  channelId: Id | null;
+  /** The effective host:port (read-only), default 224.0.1.116:5001. */
+  address?: string;
+  /** The effective codec (read-only). */
+  codec?: "PCMU" | "G722";
+  /** 1, 2, 24 or 25. */
   defaultChannel: number;
+  /** 1 to 25. */
+  priorityChannel: number;
+  /** 1 to 25. */
+  emergencyChannel: number;
   acceptWhileBusy: boolean;
+  groupPaging: boolean;
+  /** 26, 27, 49 or 50. */
+  defaultGroup: number;
+  /** 26 to 50. */
+  priorityGroup: number;
+  /** 26 to 50. */
+  emergencyGroup: number;
   channels: PttChannel[];
 }
+
+/** How a group's phones take a page and an intercom call. */
+export interface PagingOptions {
+  /** Pages play in Do Not Disturb (Grandstream WP). */
+  allowInDnd: boolean;
+  /** 0 off; otherwise a page of this priority or higher interrupts a call (0 to 10). */
+  barge: number;
+  /** A higher-priority page interrupts a lower one. */
+  priorityActive: boolean;
+  /** Paging timeout in seconds, 0 for none (0 to 3600; WP8x6). */
+  timeout: number;
+  /** An intercom call cuts into a call; off by default. */
+  intercomBarge: boolean;
+}
+
+export const defaultPagingOptions = (): PagingOptions => ({
+  allowInDnd: false,
+  barge: 0,
+  priorityActive: true,
+  timeout: 0,
+  intercomBarge: false,
+});
 
 export interface GroupInput {
   name: string;
@@ -318,16 +389,56 @@ export const setGroupBooks = (groupId: Id, bookIds: Id[]) =>
     body: { bookIds },
   });
 
-/** PUT /api/v1/phone-groups/{id}/multicast: replaces the group's multicast paging channels. */
-export const setGroupMulticast = (groupId: Id, channels: MulticastInput[]) =>
+export const listMulticastChannels = async (signal?: AbortSignal) => {
+  const path = "/api/v1/multicast-channels";
+  return listItems<CatalogChannel>(
+    await request<unknown>("GET", path, { signal }),
+    path,
+  );
+};
+
+export const createMulticastChannel = (input: CatalogChannelInput) =>
+  request<CatalogChannel>("POST", "/api/v1/multicast-channels", {
+    body: input,
+  });
+
+export const updateMulticastChannel = (id: Id, input: CatalogChannelInput) =>
+  request<CatalogChannel>("PUT", `/api/v1/multicast-channels/${seg(id)}`, {
+    body: input,
+  });
+
+export const deleteMulticastChannel = (id: Id) =>
+  request<void>("DELETE", `/api/v1/multicast-channels/${seg(id)}`);
+
+/**
+ * PUT /api/v1/phone-groups/{id}/multicast: replaces the group's catalog
+ * channels and, when given, its paging options.
+ */
+export const setGroupMulticast = (
+  groupId: Id,
+  channels: MulticastInput[],
+  options?: PagingOptions,
+) =>
   request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/multicast`, {
-    body: { channels },
+    body: options ? { channels, options } : { channels },
   });
 
 /** PUT /api/v1/phone-groups/{id}/ptt: replaces the group's push-to-talk settings. */
 export const setGroupPtt = (groupId: Id, ptt: Ptt) =>
   request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/ptt`, {
-    body: ptt,
+    body: {
+      enabled: ptt.enabled,
+      channelId: ptt.channelId,
+      defaultChannel: ptt.defaultChannel,
+      priorityChannel: ptt.priorityChannel,
+      emergencyChannel: ptt.emergencyChannel,
+      acceptWhileBusy: ptt.acceptWhileBusy,
+      groupPaging: ptt.groupPaging,
+      defaultGroup: ptt.defaultGroup,
+      priorityGroup: ptt.priorityGroup,
+      emergencyGroup: ptt.emergencyGroup,
+      channels: ptt.channels,
+    },
   });
 
 // --- display -------------------------------------------------------------------------

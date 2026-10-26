@@ -132,7 +132,7 @@ const (
 	PagingEmergency = "emergency"
 )
 
-// ParkLot is a range of park slots (migration 00031, spec S-6): a parked call
+// ParkLot is a range of park slots (migration 00032, spec S-6): a parked call
 // holds one slot number, retrieved by dialling the retrieve code and the
 // number (or the number itself). ReturnSecs is how long it waits before it
 // rings the parker again; VoicemailSecs how long it then rings before it goes
@@ -160,7 +160,7 @@ func (l ParkLot) Has(slot string) bool {
 	return err == nil && strconv.Itoa(n) == slot && n >= l.Start && n <= l.End
 }
 
-// PickupGroup is a call pickup group (migration 00031, spec S-50): a member
+// PickupGroup is a call pickup group (migration 00032, spec S-50): a member
 // may answer a call ringing any other member. Members are extension numbers.
 type PickupGroup struct {
 	ID      int64
@@ -196,7 +196,7 @@ type Snapshot struct {
 	pages  map[string]PagingGroup
 	anns   map[string]string
 	// parkLots are the enabled park lots in slot order; pickups the pickup
-	// groups (migration 00031).
+	// groups (migration 00032).
 	parkLots []ParkLot
 	pickups  []PickupGroup
 	// mohs maps a music on hold class ID to its playlist; mohDefault is the
@@ -719,7 +719,7 @@ ORDER BY g.id, e.number`)
 // caller extension numbers, so a page never touches the database.
 func loadPagingGroups(ctx context.Context, db Querier) ([]PagingGroup, error) {
 	rows, err := db.Query(ctx, `SELECT g.id, g.name, g.code, g.priority, g.enabled, c.address, c.port, c.codec
-FROM paging_groups g LEFT JOIN multicast_channels c ON c.id = g.multicast_channel_id ORDER BY g.id`)
+FROM paging_groups g LEFT JOIN multicast_channels c ON c.id = g.multicast_channel_id AND c.enabled AND c.kind = 'paging' ORDER BY g.id`)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot: paging groups: %w", err)
 	}
