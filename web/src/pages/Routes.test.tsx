@@ -432,6 +432,135 @@ describe("Routes", () => {
     });
   });
 
+  it.each([
+    {
+      kind: "ring_group",
+      option: "Ring group",
+      label: "Ring group",
+      choose: "sales",
+      listLabel: "Ring group",
+    },
+    {
+      kind: "voicemail",
+      option: "Voicemail",
+      label: "Voicemail box of",
+      choose: "102",
+      listLabel: "Voicemail",
+    },
+    {
+      kind: "announcement",
+      option: "Announcement",
+      label: "Announcement",
+      choose: "welcome",
+      listLabel: "Announcement",
+    },
+    {
+      kind: "paging",
+      option: "Paging group",
+      label: "Paging group",
+      choose: "*88",
+      listLabel: "Paging group",
+    },
+  ])(
+    "offers $kind as an inbound destination and sends the chosen target",
+    async ({ kind, option, label, choose, listLabel }) => {
+      const calls = mockApi({
+        ...ME,
+        "GET /api/v1/trunks": () => json({ items: TRUNKS }),
+        "GET /api/v1/routes/outbound": () => json({ items: [] }),
+        "GET /api/v1/routes/inbound": () => json({ items: [] }),
+        "GET /api/v1/extensions": () =>
+          json({
+            items: [
+              { id: 1, number: "101", name: "Ann" },
+              { id: 2, number: "102", name: "Bob" },
+            ],
+          }),
+        "GET /api/v1/ring-groups": () =>
+          json({ items: [{ id: 1, name: "sales" }] }),
+        "GET /api/v1/announcements": () =>
+          json({ items: [{ id: 1, name: "welcome" }] }),
+        "GET /api/v1/paging-groups": () =>
+          json({ items: [{ id: 1, name: "Floor", code: "*88" }] }),
+        "POST /api/v1/routes/inbound": () =>
+          json(
+            {
+              ...inbound(9, 1, "Dest"),
+              destinationKind: kind,
+              destination: choose,
+            },
+            201,
+          ),
+      });
+      renderApp("/routes?tab=inbound");
+      fireEvent.click(
+        (await screen.findAllByRole("button", { name: "New route" }))[0]!,
+      );
+      await screen.findByRole("option", { name: "carrier-backup" });
+      fireEvent.change(screen.getByLabelText("Name"), {
+        target: { value: "Dest" },
+      });
+      fireEvent.change(screen.getByLabelText("DID"), {
+        target: { value: "97142000101" },
+      });
+      // Leaving the target empty is refused with a kind-specific message.
+      fireEvent.change(screen.getByLabelText("Send to"), {
+        target: { value: kind },
+      });
+      expect(
+        screen.getByRole("option", { name: option, selected: true }),
+      ).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Create route" }));
+      expect(await screen.findByText(/^Choose a /)).toBeVisible();
+      expect(calls.some((c) => c.method === "POST")).toBe(false);
+
+      // The target list loads from the matching endpoint.
+      await waitFor(() =>
+        expect(
+          within(screen.getByLabelText(label)).getAllByRole("option").length,
+        ).toBeGreaterThan(1),
+      );
+      fireEvent.change(screen.getByLabelText(label), {
+        target: { value: choose },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Create route" }));
+      expect(await screen.findByText("Route Dest created.")).toBeVisible();
+      expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({
+        destinationKind: kind,
+        destination: choose,
+      });
+      // The list names the kind, not the raw value.
+      expect(
+        within(
+          screen.getByRole("rowheader", { name: "Dest" }).closest("tr")!,
+        ).getByText(listLabel),
+      ).toBeVisible();
+    },
+  );
+
+  it("clears the target when the destination kind changes", async () => {
+    mockApi({
+      ...ME,
+      "GET /api/v1/trunks": () => json({ items: TRUNKS }),
+      "GET /api/v1/routes/outbound": () => json({ items: [] }),
+      "GET /api/v1/routes/inbound": () => json({ items: [] }),
+      "GET /api/v1/ring-groups": () =>
+        json({ items: [{ id: 1, name: "sales" }] }),
+    });
+    renderApp("/routes?tab=inbound");
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "New route" }))[0]!,
+    );
+    await screen.findByRole("option", { name: "carrier-backup" });
+    fireEvent.change(screen.getByLabelText("Extension number"), {
+      target: { value: "101" },
+    });
+    fireEvent.change(screen.getByLabelText("Send to"), {
+      target: { value: "ring_group" },
+    });
+    expect(screen.getByLabelText("Ring group")).toHaveValue("");
+  });
+
   it("shows the design's columns: match, rewrite, trunk chain, schedule, emergency", async () => {
     mockApi({
       ...ME,
