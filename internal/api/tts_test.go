@@ -408,6 +408,20 @@ func TestGenerateParkAnnouncement(t *testing.T) {
 	if res := c.must(http.StatusOK, "POST", path, map[string]any{"force": true}).json(t); res["generated"] != float64(11) {
 		t.Fatalf("forced = %v", res)
 	}
+	// An unknown field is a 400; a provider failure is a 502 that leaves the
+	// stored clips as they were.
+	c.must(http.StatusBadRequest, "POST", path, map[string]any{"slot": "701"})
+	before := string(objs.objs["ann:ann/park.slot.wav"])
+	fake.mu.Lock()
+	fake.err = errors.New("provider down")
+	fake.mu.Unlock()
+	c.must(http.StatusBadGateway, "POST", path, map[string]any{"force": true})
+	if string(objs.objs["ann:ann/park.slot.wav"]) != before {
+		t.Fatal("a failed generation changed the stored slot clip")
+	}
+	fake.mu.Lock()
+	fake.err = nil
+	fake.mu.Unlock()
 	vw, _ := e.asRole("vic", auth.RoleViewer)
 	vw.must(http.StatusForbidden, "POST", path, nil)
 }
