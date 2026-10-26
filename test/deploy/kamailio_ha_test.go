@@ -15,13 +15,6 @@ import (
 // takes both down, a PodDisruptionBudget, and the grants the deployer needs
 // to apply them. They need no cluster.
 
-// kwEdgeLabels are the labels of the kamailio pods.
-var kwEdgeLabels = map[string]string{
-	"app.kubernetes.io/name":      "hello",
-	"app.kubernetes.io/instance":  "hello",
-	"app.kubernetes.io/component": "edge",
-}
-
 // TestKwKamailioPair fails if the kamailio Deployment is not a pair that
 // can be rolled one instance at a time: two replicas, RollingUpdate with
 // maxSurge 0 and maxUnavailable 1 (hostNetwork ports forbid a surge pod,
