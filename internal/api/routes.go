@@ -115,6 +115,11 @@ func (s *server) routes() []route {
 		{"PUT", "/api/v1/paging-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putPagingGroup},
 		{"DELETE", "/api/v1/paging-groups/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deletePagingGroup},
 		{"POST", "/api/v1/paging-groups/{id}/test", auth.ScopeAdmin, auth.RoleAdmin, false, s.testPagingGroup},
+		{"GET", "/api/v1/multicast-channels", auth.ScopeRead, auth.RoleViewer, false, s.listMulticastChannels},
+		{"POST", "/api/v1/multicast-channels", auth.ScopeAdmin, auth.RoleAdmin, false, s.createMulticastChannel},
+		{"GET", "/api/v1/multicast-channels/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getMulticastChannel},
+		{"PUT", "/api/v1/multicast-channels/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.putMulticastChannel},
+		{"DELETE", "/api/v1/multicast-channels/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteMulticastChannel},
 		{"GET", "/api/v1/feature-codes", auth.ScopeRead, auth.RoleViewer, false, s.listFeatureCodes},
 		{"PUT", "/api/v1/feature-codes", auth.ScopeWrite, auth.RoleOperator, false, s.putFeatureCodes},
 

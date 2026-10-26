@@ -6,15 +6,19 @@ import {
   deleteGroup,
   listBooks,
   listGroups,
+  listMulticastChannels,
   setGroupBooks,
   setGroupMulticast,
   setGroupPtt,
   updateGroup,
   type Book,
+  type CatalogChannel,
   type Group,
   type MulticastChannel,
   type MulticastInput,
+  type PagingOptions,
   type Ptt,
+  defaultPagingOptions,
 } from "../api/phonebook";
 import { listPhones, pushGroup, type Phone } from "../api/prov";
 import {
@@ -41,6 +45,7 @@ import { Can } from "../role";
 import {
   emptyPtt,
   MulticastEditor,
+  PagingOptionsEditor,
   PttEditor,
   type PathErrors,
 } from "./phonebooks/GroupPaging";
@@ -55,22 +60,46 @@ type State =
       groups: Group[];
       books: Book[];
       phones: Phone[];
+      catalog: CatalogChannel[];
     };
 
 const sameId = (a: Id, b: Id) => String(a) === String(b);
 
-/** A group's channels as they are written back: without the id. */
+/** A group's channels as they are written back: catalog id and role. */
 function channelInputs(
   channels: MulticastChannel[] | undefined,
 ): MulticastInput[] {
-  return (channels ?? []).map((c) => ({
-    label: c.label,
-    address: c.address,
-    port: c.port,
-    codec: c.codec,
-    role: c.role,
-    priority: c.priority,
-  }));
+  return (channels ?? []).map((c) => ({ channelId: c.id, role: c.role }));
+}
+
+/** A group's PTT as it is written back: without the read-only address. */
+function pttInput(ptt: Ptt | undefined): Ptt {
+  const p = ptt ?? emptyPtt();
+  return {
+    enabled: p.enabled,
+    channelId: p.channelId ?? null,
+    defaultChannel: p.defaultChannel,
+    priorityChannel: p.priorityChannel ?? 24,
+    emergencyChannel: p.emergencyChannel ?? 25,
+    acceptWhileBusy: p.acceptWhileBusy,
+    groupPaging: p.groupPaging ?? false,
+    defaultGroup: p.defaultGroup ?? 26,
+    priorityGroup: p.priorityGroup ?? 49,
+    emergencyGroup: p.emergencyGroup ?? 50,
+    channels: p.channels,
+  };
+}
+
+/** A group's paging options in a fixed key order, for comparison. */
+function optionsInput(o: PagingOptions | undefined): PagingOptions {
+  const d = { ...defaultPagingOptions(), ...o };
+  return {
+    allowInDnd: d.allowInDnd,
+    barge: d.barge,
+    priorityActive: d.priorityActive,
+    timeout: d.timeout,
+    intercomBarge: d.intercomBarge,
+  };
 }
 
 /** The API's field errors by path. */
@@ -93,9 +122,13 @@ export function PhoneGroups() {
       listBooks(controller.signal),
       // Member phones are shown for context; the groups work without them.
       listPhones(controller.signal).catch(() => [] as Phone[]),
+      // The multicast catalog feeds the channel pickers.
+      listMulticastChannels(controller.signal).catch(
+        () => [] as CatalogChannel[],
+      ),
     ])
-      .then(([groups, books, phones]) =>
-        setState({ status: "ready", groups, books, phones }),
+      .then(([groups, books, phones, catalog]) =>
+        setState({ status: "ready", groups, books, phones, catalog }),
       )
       .catch((err: unknown) => {
         if (!controller.signal.aborted) {
@@ -165,6 +198,20 @@ export function PhoneGroups() {
             )}
         </span>
       ),
+    },
+    {
+      key: "ptt",
+      label: "Push-to-talk",
+      render: (g) =>
+        g.ptt?.enabled || g.ptt?.groupPaging ? (
+          <span>
+            {g.ptt.enabled ? `On · channel ${g.ptt.defaultChannel}` : "Off"}
+            {g.ptt.groupPaging ? ` · group ${g.ptt.defaultGroup}` : ""} ·{" "}
+            <span className="cf-mono">{g.ptt.address ?? ""}</span>
+          </span>
+        ) : (
+          <span className="prov-muted">Off</span>
+        ),
     },
     {
       key: "phones",
@@ -264,6 +311,7 @@ export function PhoneGroups() {
           group={editing === "new" ? null : editing}
           books={ready.books}
           phones={ready.phones}
+          catalog={ready.catalog}
           onClose={() => setEditing(null)}
           onSaved={(saved, created) => {
             replaceGroups((gs) =>
@@ -320,12 +368,14 @@ function GroupModal({
   group,
   books,
   phones,
+  catalog,
   onClose,
   onSaved,
 }: {
   group: Group | null;
   books: Book[];
   phones: Phone[];
+  catalog: CatalogChannel[];
   onClose: () => void;
   onSaved: (group: Group, created: boolean) => void;
 }) {
@@ -342,7 +392,10 @@ function GroupModal({
   const [channels, setChannels] = useState<MulticastInput[]>(
     channelInputs(group?.multicast),
   );
-  const [ptt, setPtt] = useState<Ptt>(group?.ptt ?? emptyPtt());
+  const [ptt, setPtt] = useState<Ptt>(pttInput(group?.ptt));
+  const [options, setOptions] = useState<PagingOptions>(
+    optionsInput(group?.pagingOptions),
+  );
   const [mcErrors, setMcErrors] = useState<PathErrors>({});
   const [pttErrors, setPttErrors] = useState<PathErrors>({});
   const [errors, setErrors] = useState<ErrorMap>({});
@@ -393,19 +446,23 @@ function GroupModal({
       // The group exists now: a failure below leaves it saved, so the modal
       // stays open on the fields that were refused.
       const before = channelInputs(saved.multicast);
-      if (JSON.stringify(before) !== JSON.stringify(channels)) {
+      if (
+        JSON.stringify(before) !== JSON.stringify(channels) ||
+        JSON.stringify(optionsInput(saved.pagingOptions)) !==
+          JSON.stringify(options)
+      ) {
         try {
-          saved = await setGroupMulticast(saved.id, channels);
+          saved = await setGroupMulticast(saved.id, channels, options);
         } catch (err) {
           setMcErrors(pathErrors(err));
           setFormError(
-            `The group was saved, but its multicast channels were not: ${errorMessage(err)}`,
+            `The group was saved, but its multicast channels or paging options were not: ${errorMessage(err)}`,
           );
           setBusy(false);
           return;
         }
       }
-      if (JSON.stringify(saved.ptt ?? emptyPtt()) !== JSON.stringify(ptt)) {
+      if (JSON.stringify(pttInput(saved.ptt)) !== JSON.stringify(ptt)) {
         try {
           saved = await setGroupPtt(saved.id, ptt);
         } catch (err) {
@@ -572,11 +629,22 @@ function GroupModal({
         </fieldset>
 
         <MulticastEditor
-          channels={channels}
+          links={channels}
+          catalog={catalog}
           errors={mcErrors}
           onChange={setChannels}
         />
-        <PttEditor ptt={ptt} errors={pttErrors} onChange={setPtt} />
+        <PagingOptionsEditor
+          options={options}
+          errors={mcErrors}
+          onChange={setOptions}
+        />
+        <PttEditor
+          ptt={ptt}
+          catalog={catalog}
+          errors={pttErrors}
+          onChange={setPtt}
+        />
 
         {group && (
           <div className="prov-stack">

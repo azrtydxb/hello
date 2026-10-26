@@ -548,7 +548,7 @@ func loadAnnouncements(ctx context.Context, db Querier) (map[string]string, erro
 // caller extension numbers, so a page never touches the database.
 func loadPagingGroups(ctx context.Context, db Querier) ([]PagingGroup, error) {
 	rows, err := db.Query(ctx, `SELECT g.id, g.name, g.code, g.priority, g.enabled, c.address, c.port, c.codec
-FROM paging_groups g LEFT JOIN multicast_channels c ON c.id = g.multicast_channel_id ORDER BY g.id`)
+FROM paging_groups g LEFT JOIN multicast_channels c ON c.id = g.multicast_channel_id AND c.enabled AND c.kind = 'paging' ORDER BY g.id`)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot: paging groups: %w", err)
 	}
