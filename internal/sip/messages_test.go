@@ -803,3 +803,42 @@ func TestMessageHelpers(t *testing.T) {
 		t.Error("fromUser")
 	}
 }
+
+// TestMessageEdgeRefusalIsRetried fails if a MESSAGE the edge proxy of the
+// phone's node refuses (it does not know the sending node as a peer, as after
+// it briefly lost its peer set) is failed for good, or if, once the peer is
+// known again, the message is not delivered exactly once.
+func TestMessageEdgeRefusalIsRetried(t *testing.T) {
+	fastMessages(t)
+	q := newFakeMsgs("100", "200")
+	fs := newFakeState()
+	pr1, pr2 := newFakePresence(), newFakePresence()
+	node := func(id string, pr *fakePresence, opts ...pbxOpt) *testPBX {
+		return startPBX(t, msgDevices(), append([]pbxOpt{withSharedState(fs), withNodeID(id),
+			func(_ *Config, d *Deps) { d.Presence = pr }}, opts...)...)
+	}
+	// n1 holds the phone and has no messaging; n2 delivers. n1's peer set
+	// lacks n2.
+	n1 := node("n1", pr1)
+	n2 := node("n2", pr2, withMessages(q))
+	b := newPhone(t, n1, "b1", "pb")
+	b.register(t)
+	a := newPhone(t, n2, "a1", "pa")
+	if res := a.sendMessage("200", "text/plain", "hello"); res.StatusCode != 202 && res.StatusCode != 200 {
+		t.Fatalf("MESSAGE = %d", res.StatusCode)
+	}
+	eventually(t, "the refused message is tried again", func() bool {
+		q.mu.Lock()
+		defer q.mu.Unlock()
+		return len(q.rows) == 1 && q.rows[0].attempts >= 2
+	})
+	if st := q.statusOf("200"); st[0] == "failed" {
+		t.Fatalf("an edge refusal failed the message for good: %v", st)
+	}
+	noReq(t, b.messages, 100*time.Millisecond, "delivery before n1 trusts n2")
+
+	pr1.add(n2.addr) // n1 knows its peer again
+	waitReq(t, b.messages, "MESSAGE once n1 trusts n2")
+	eventually(t, "row delivered", func() bool { return slices.Equal(q.statusOf("200"), []string{"delivered"}) })
+	noReq(t, b.messages, 300*time.Millisecond, "a second copy of the message")
+}

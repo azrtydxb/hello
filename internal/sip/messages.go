@@ -740,6 +740,9 @@ func (s *Server) messageToContact(ctx context.Context, snap *snapshot.Snapshot, 
 		return 0
 	}
 	s.m.response(res.StatusCode)
+	if edgeRefused(res) {
+		return edgeRefusedCode
+	}
 	if res.StatusCode == sip.StatusUnauthorized || res.StatusCode == sip.StatusProxyAuthRequired {
 		hdr, authHdr := "WWW-Authenticate", "Authorization"
 		if res.StatusCode == sip.StatusProxyAuthRequired {
@@ -757,8 +760,23 @@ func (s *Server) messageToContact(ctx context.Context, snap *snapshot.Snapshot, 
 			return 0
 		}
 		s.m.response(res.StatusCode)
+		if edgeRefused(res) {
+			return edgeRefusedCode
+		}
 	}
 	return res.StatusCode
+}
+
+// edgeRefusedCode is what messageToContact reports when the edge proxy of
+// the node the phone registered on refused the MESSAGE: it never reached the
+// phone, so it is not a permanent failure and delivering it again cannot
+// duplicate it.
+const edgeRefusedCode = sip.StatusServiceUnavailable
+
+// edgeRefused reports whether res is an edge proxy's refusal (see
+// edgeRefusedHeader) rather than the phone's own answer.
+func edgeRefused(res *sip.Response) bool {
+	return res.StatusCode == sip.StatusForbidden && res.GetHeader(edgeRefusedHeader) != nil
 }
 
 // fromUser is the user part a recipient sees: the sender's extension or
