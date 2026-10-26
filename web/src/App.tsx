@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode } from "react";
+import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import {
   Navigate,
   NavLink,
@@ -17,6 +17,7 @@ import {
   Sidebar,
   SidebarNav,
   SidebarNavGroup,
+  Spinner,
   ThemeProvider,
   ThemeToggle,
   Topbar,
@@ -68,6 +69,7 @@ import { ProvFirmware } from "./pages/ProvFirmware";
 import { ProvSettings } from "./pages/ProvSettings";
 import { ProvTemplates } from "./pages/ProvTemplates";
 import { Placeholder } from "./pages/Placeholder";
+import { FlowCanvases } from "./pages/FlowCanvases";
 import { Users } from "./pages/Users";
 import { EmailSettings } from "./pages/EmailSettings";
 import { MyForwarding } from "./pages/myphone/MyForwarding";
@@ -102,6 +104,7 @@ import { useControlPlane } from "./useControlPlane";
 
 /** Pages that have content; any other nav item renders a placeholder. */
 const PAGES: Readonly<Record<string, ComponentType>> = {
+  "/flow": FlowCanvases,
   "/extensions": Extensions,
   "/devices": Devices,
   "/phones": Phones,
@@ -151,6 +154,9 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations": IntegrationsOverview,
   "/integrations/api-access": IntegrationsApiAccess,
 };
+
+/** The canvas pulls in the graph library, so it loads on first use. */
+const FlowCanvasPage = lazy(() => import("./pages/flow/FlowCanvasPage"));
 
 /** A load that never answers, for what a self-service user may not read. */
 const idleStatus = () => new Promise<never>(() => undefined);
@@ -340,6 +346,14 @@ export function App() {
             <Route
               path="/dial-plans"
               element={<Navigate to="/routes" replace />}
+            />
+            <Route
+              path="/flow/:canvasId"
+              element={
+                <Suspense fallback={<Spinner label="Loading the canvas…" />}>
+                  <FlowCanvasPage />
+                </Suspense>
+              }
             />
             <Route path="/history/:id" element={<CallDetail />} />
             <Route path="/ai/assistant/:id" element={<AIAssistant />} />

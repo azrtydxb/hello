@@ -621,6 +621,53 @@ Feature and paging codes start with `*` and cannot equal a plain number;
 they keep the `dialGuard` prefix rules. Time conditions have no number of
 their own.
 
+## Flow canvas P2: the read-only canvas (2026-10-26)
+
+Built per `.procoder/specs/flow-canvas.md` (P2). Choices the spec left open:
+
+- Migration `00042_flow_canvas.sql` adds `flow_canvases` and `flow_canvas_nodes`
+  only (`config_batches` belongs to P3). The `node_id` CHECK is a shape check
+  (`<kind>:<id>`), not the kind list: the API validates the kind against the
+  catalogue, so a new node type (P1, P7) needs no migration.
+- Canvases and layout are not configuration: no `configChange`, no revision
+  bump, no notify. Each write is audited in its own transaction (`flow_canvas`
+  `create|update|delete|layout`). `layout_version` moves on every layout save;
+  a save made against an older one is `409 layout_stale` and saves nothing.
+- Layout of an object that no longer exists is dropped on `GET .../{id}` and
+  pruned on every layout save, by checking each node id against the graph
+  built from the live tables (devices and phones included).
+- `PATCH` takes `viewport` but not `null`: the viewport is replaced, never
+  cleared. The UI offers "Save view" (an explicit button) rather than saving on
+  every pan, which would fill the audit trail.
+- The UI filters the full graph (`scope=all`) by the canvas's positions instead
+  of the spec's `scope=canvas:<id>`: the "not on this canvas" list needs the
+  whole graph anyway, and one read keeps a single source of truth. "Import
+  flow" does use the server's `scope=closure:<id>`. No change to
+  `getFlowGraph`, so P1's work on it does not conflict.
+- Edges to an off-canvas node are drawn as one stub per edge end, up to 150;
+  past that the page says how many are left out. Clicking a stub adds the node
+  (operators) or opens its panel (viewers).
+- One generic node component draws every kind from the catalogue. A port an
+  edge uses that the catalogue does not list (an IVR key) is added, typed like
+  the node's first port of that direction. Handle ids are `in:<port>` and
+  `out:<port>` because an input and an output may share a name.
+- Port colours are `--flow-port-<type>`, mapped to Azrty tokens where one
+  exists (call, voicemail, member, prompt, device) and to the spec's hex
+  elsewhere (carrier, schedule, hold music), lifted on the dark theme.
+- Dagre runs in a Web Worker from 150 nodes and cancels through an
+  `AbortSignal`; below that, and where `Worker` does not exist (tests), it runs
+  on the calling thread. New nodes are placed to the right of what is on the
+  canvas.
+- Keyboard: nodes are focusable; arrow keys move focus to the nearest node in
+  that direction (stubs included); Enter or Space opens the panel (or adds a
+  stub); Alt+arrow nudges a node by 20 px (operators); Escape closes the panel
+  and returns focus to the node. React Flow's own arrow-key moving is off.
+- The panel is view-only in P2: the object's summary fields, its connections
+  (followable), its warnings and a link to the page that edits it. The nav item
+  is "Call flows" at the top of the Call flow group; the canvas route is
+  lazy-loaded.
+- Exact dependency pins: `@xyflow/react` 12.12.0, `@dagrejs/dagre` 3.1.3.
+
 ## Flow canvas P1: unified destinations and guards (2026-10-26)
 
 Migration 00041 widens `inbound_routes.destination_kind` with `ring_group`,
@@ -631,6 +678,7 @@ numeric ring group keeps working). Down converts `ring_group` routes back to
 earlier destination migrations do.
 
 Why only these kinds. Decision 3 asks for every kind on every output, but:
+
 - a call that has already started (a ring group fallback, an IVR key, a queue
   exit, a time condition branch) cannot be handed to a paging group or a
   conference room: the runtime pages and joins only from the INVITE
@@ -646,7 +694,7 @@ Why only these kinds. Decision 3 asks for every kind on every output, but:
   transfer to a slot);
 - extension forwards stay extension / numeric ring group / external number,
   because that is what `sip.forward` resolves.
-The catalogue lists exactly what is stored.
+  The catalogue lists exactly what is stored.
 
 Runtime. Inbound routes of the new kinds are carried out by the destination
 dispatcher time conditions already use (`applyTCDest`), so there is one place
@@ -677,6 +725,14 @@ so the integration job is required green before merge.
 The form pages (Routes) do not offer the new inbound kinds yet; they render
 them through the existing fallback. The API and MCP do.
 
+## Ring group voicemail failure box (2026-10-26)
+
+A ring group whose failure kind is `voicemail` now sets `vmExt` to the failure
+target before starting the voicemail application, the same way the IVR and time
+condition paths do. Before, `mailboxExt` fell back to the dialled string (the
+group number), so the message went to the wrong box or to none. Covered by
+`TestRingGroupVoicemailFailureBox`, which fails without the fix.
+
 ## Routes form: new inbound destination kinds (2026-10-26)
 
 The inbound route drawer offers `ring_group`, `voicemail`, `announcement` and
@@ -688,6 +744,52 @@ of"), paging by code. A stored value the list no longer has stays selectable as
 is not a target of another. An empty target is refused with a kind-specific
 message. `conference` is also in the API enum and still has no chooser; not part
 of this change.
+
+## Prefer Opus over G.722 (2026-10-26) — decided: Opus first everywhere
+
+Opus is almost never used: provisioned phones list G.722 before Opus, and
+Hello-terminated media (MOH, IVR, voicemail) picks Opus only as a last resort.
+
+- Opus first everywhere: provisioning (Opus models) and Hello's own audio; paging stays G.722
+- Opus first for Hello's own audio only; provisioning order unchanged
+- Keep G.722 first (no change)
+
+## Build every unbuilt item from the 2026-10-26 audit (2026-10-26) — decided: build and track all
+
+An audit found specced work never built. The user: "you need to build, and
+track all items and partials you discovered". The tracker is
+`.procoder/tracking/unbuilt.md`; every row ends in a merged PR or an explicit
+hardware/external-account wait.
+
+Competitor gaps, all chosen (multi-select, every option picked):
+
+- Backup and restore, follow-me, blocklist, queue callback
+- 2FA, dial-by-name, voicemail groups, fax
+- Boss/secretary, multi-language prompts, codec in call history, phone LDAP
+  directory (this reverses the earlier "No LDAP" decision for phones)
+
+Voicemail language — decided: keep English default, add Dutch as a per-box option.
+
+- Dutch default
+- Keep English default (chosen)
+- English only
+
+Kamailio HA: option A vs B to be discussed before choosing; the user agreed
+phones may be re-pointed to the new address via check-sync and `.101`
+retired afterwards. VIP address chosen after the A/B discussion.
+
+## Kamailio HA option and VIP (2026-10-26) — decided: Option A, VIP 192.168.10.109
+
+After discussing A against B the user chose A ("A, choose any that is free"):
+two hostNetwork Kamailio (master-11, master-12) behind a VRRP VIP
+(keepalived or kube-vip, ARP mode). The VIP is 192.168.10.109: outside
+Cilium LB-IPAM's .120-.159, not a node (.101-.108, .245-.246), no ARP reply
+on 2026-10-26. 192.168.10.100 answers with master-12's MAC, so a VIP
+mechanism may already run for the API server; check it before adding one.
+Phones are re-pointed to the VIP via check-sync and .101 is retired after.
+
+- A: VRRP VIP, two hostNetwork Kamailio (chosen)
+- B: Cilium LB-IPAM LoadBalancer with L2 announcement
 
 ## Messaging inbox core (2026-10-26)
 
