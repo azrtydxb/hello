@@ -228,7 +228,7 @@ func TestBootstrap(t *testing.T) {
 		t.Fatalf("bootstrap: created %v, %v", empty.created, err)
 	}
 	user, hash, _ := strings.Cut(empty.created[0], " ")
-	if user != "admin" || !CheckPassword(hash, "pw-Secret-123") {
+	if user != "admin" || !CheckUserPassword(hash, "pw-Secret-123") {
 		t.Fatalf("created %q with a hash that does not match the password", user)
 	}
 	if strings.Contains(buf.String(), "pw-Secret-123") || !strings.Contains(buf.String(), "bootstrap admin user created") {

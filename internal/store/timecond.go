@@ -1,6 +1,6 @@
 package store
 
-// Time conditions (migration 00027): schedules (weekly open hours in a time
+// Time conditions (migration 00034): schedules (weekly open hours in a time
 // zone), calendars (holidays and exceptions) and the time conditions that
 // route a call by them. Every mutation runs through configChange, so it is
 // audited, bumps the configuration revision and notifies hello-sip. The
@@ -603,14 +603,20 @@ func (s *Store) GetTimeCondition(ctx context.Context, id int64) (TimeCondition, 
 	return ts[0], nil
 }
 
-// TimeConditionNameExists reports whether a time condition has that name,
-// for the settings that name one (ring group failover, feature codes).
-func (s *Store) TimeConditionNameExists(ctx context.Context, name string) (bool, error) {
+// requireTimeConditionTx refuses a reference to a time condition that does
+// not exist, for the settings that name one (ring group failover, feature
+// codes). It runs in the configuration change's transaction, under the
+// configuration lock, so a time condition cannot be deleted between the
+// check and the write that names it.
+func requireTimeConditionTx(ctx context.Context, tx *sql.Tx, path, name string) error {
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM time_conditions WHERE name = $1`, name).Scan(&n); err != nil {
-		return false, err
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM time_conditions WHERE name = $1`, name).Scan(&n); err != nil {
+		return err
 	}
-	return n > 0, nil
+	if n == 0 {
+		return fieldError(path, fmt.Sprintf("time condition %q does not exist", name))
+	}
+	return nil
 }
 
 type tcDest struct {

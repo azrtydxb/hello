@@ -128,9 +128,9 @@ func TestRecordingAudioAndDelete(t *testing.T) {
 	ctx := context.Background()
 	c := e.login()
 	object := "rec/1760000000-call-abc.wav"
-	if err := objs.PutRecording(ctx, object, strings.NewReader(string(wav)), int64(len(wav))); err != nil {
-		t.Fatal(err)
-	}
+	retrySlowDown(t, func() error {
+		return objs.PutRecording(ctx, object, strings.NewReader(string(wav)), int64(len(wav)))
+	})
 	seedRecording(t, e, "corr-abc", object, 5100)
 
 	// The audio route streams the recording bucket's object, inline.
@@ -401,9 +401,9 @@ func TestRecordingPartiesAndDownload(t *testing.T) {
 	e := newPBXEnv(t, objs)
 	ctx := context.Background()
 	c := e.login()
-	if err := objs.PutRecording(ctx, "rec/1.wav", strings.NewReader(string(wav)), int64(len(wav))); err != nil {
-		t.Fatal(err)
-	}
+	retrySlowDown(t, func() error {
+		return objs.PutRecording(ctx, "rec/1.wav", strings.NewReader(string(wav)), int64(len(wav)))
+	})
 	seedRecording(t, e, "corr-a", "rec/1.wav", 5000)
 	seedRecording(t, e, "corr-b", "rec/2.wav", 7000)
 	seedCDR(t, e, "corr-a", "101", "102")
@@ -525,9 +525,9 @@ func TestObjectStoreFailures(t *testing.T) {
 		VALUES ($1, 'box/x/1760000000-call-abc.wav', '102', 1000) RETURNING id`, box["id"]).Scan(&msgID); err != nil {
 		t.Fatal(err)
 	}
-	if err := objs.PutRecording(ctx, "rec/1760000000-call-abc.wav", bytes.NewReader(wav), int64(len(wav))); err != nil {
-		t.Fatal(err)
-	}
+	retrySlowDown(t, func() error {
+		return objs.PutRecording(ctx, "rec/1760000000-call-abc.wav", bytes.NewReader(wav), int64(len(wav)))
+	})
 	seedRecording(t, e, "corr-abc", "rec/1760000000-call-abc.wav", 1000)
 
 	c.header.Set("Range", "bytes=4-7")

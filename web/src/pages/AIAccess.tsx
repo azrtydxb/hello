@@ -14,6 +14,7 @@ import {
   fetchRole,
   getAISettings,
   grantableScopes,
+  INTEGRATION_SCOPES,
   listGrants,
   listServiceAccounts,
   listSkills,
@@ -383,10 +384,16 @@ function ShownOnce({
 
 // --- service accounts ----------------------------------------------------------------
 
-function ServiceAccounts({
+export function ServiceAccounts({
   showToast,
+  title = "Service accounts",
+  description = "For unattended agents (client credentials). Secrets are shown once.",
+  emptyText = "Create one for an agent that runs without a person.",
 }: {
   showToast: (message: string) => void;
+  title?: string;
+  description?: string;
+  emptyText?: string;
 }) {
   const [state, reload] = useLoad(listServiceAccounts);
   const [creating, setCreating] = useState(false);
@@ -423,11 +430,9 @@ function ServiceAccounts({
       <div className="pf-cardhead">
         <div>
           <h2 className="pf-h3" id="service-accounts">
-            Service accounts
+            {title}
           </h2>
-          <p className="pf-head__desc">
-            For unattended agents (client credentials). Secrets are shown once.
-          </p>
+          <p className="pf-head__desc">{description}</p>
         </div>
         <Button
           variant="secondary"
@@ -449,7 +454,7 @@ function ServiceAccounts({
             <EmptyState
               icon="bot"
               title="No service accounts"
-              description="Create one for an agent that runs without a person."
+              description={emptyText}
             />
           ) : (
             <ul className="pf-tokens" aria-labelledby="service-accounts">
@@ -473,6 +478,15 @@ function ServiceAccounts({
                         <span className="pf-mono">{a.id}</span>
                       </div>
                       <ScopeBadges scopes={a.scopes} />
+                      {a.scopes.some((s) => INTEGRATION_SCOPES.includes(s)) && (
+                        <div className="pf-tokens__when">
+                          {!a.extensionScope
+                            ? "Acts for every extension"
+                            : a.extensionScope.length === 0
+                              ? "Acts for no extension"
+                              : `Limited to extension${a.extensionScope.length === 1 ? "" : "s"} ${a.extensionScope.join(", ")}`}
+                        </div>
+                      )}
                       {live.map((s) => (
                         <div key={String(s.id)} className="pf-tokens__when">
                           Secret #{s.id} created{" "}
@@ -573,19 +587,30 @@ function NewServiceAccountModal({
   const [description, setDescription] = useState("");
   const [role, setRole] = useState<Role>("viewer");
   const [scopes, setScopes] = useState<Set<Scope>>(new Set(["read"]));
-  const [errors, setErrors] = useState<{ name?: string; scopes?: string }>({});
+  const [extensions, setExtensions] = useState("");
+  const [errors, setErrors] = useState<{
+    name?: string;
+    scopes?: string;
+    extensions?: string;
+  }>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const allowed = grantableScopes(role);
+  const integration = [...scopes].some((s) => INTEGRATION_SCOPES.includes(s));
 
   async function submit() {
     const chosen = [...scopes].filter((s) => allowed.includes(s));
+    const limit = parseExtensionList(extensions);
     const found = {
       name: name.trim() === "" ? "Enter a name." : undefined,
       scopes: chosen.length === 0 ? "Choose at least one scope." : undefined,
+      extensions:
+        integration && limit === "invalid"
+          ? "Use extension numbers of 2 to 10 digits, separated by commas."
+          : undefined,
     };
     setErrors(found);
-    if (found.name || found.scopes) return;
+    if (found.name || found.scopes || found.extensions) return;
     setBusy(true);
     setFormError(null);
     try {
@@ -595,6 +620,9 @@ function NewServiceAccountModal({
           description: description.trim() || undefined,
           role,
           scopes: chosen,
+          ...(integration && limit !== "invalid" && limit !== null
+            ? { extensionScope: limit }
+            : {}),
         }),
       );
     } catch (err) {
@@ -665,9 +693,35 @@ function NewServiceAccountModal({
           onChange={setScopes}
           error={errors.scopes}
         />
+        {integration && (
+          <Input
+            label="Extensions it may act for"
+            id="new-sa-extensions"
+            mono
+            placeholder="all extensions"
+            value={extensions}
+            error={errors.extensions}
+            hint="Comma-separated extension numbers for calls and events. Leave empty for every extension."
+            onChange={(e) => setExtensions(e.target.value)}
+          />
+        )}
       </form>
     </Modal>
   );
+}
+
+/**
+ * Parses the extension limit field: null is no limit (empty), "invalid" is a
+ * value that is not a comma-separated list of extension numbers.
+ */
+export function parseExtensionList(v: string): string[] | null | "invalid" {
+  const parts = v
+    .split(/[,\s]+/)
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+  if (parts.length === 0) return null;
+  if (!parts.every((s) => /^[0-9]{2,10}$/.test(s))) return "invalid";
+  return [...new Set(parts)];
 }
 
 // --- personal API tokens ---------------------------------------------------------------
@@ -679,7 +733,7 @@ const EXPIRY: readonly { value: string; label: string; days: number }[] = [
   { value: "never", label: "Never", days: 0 },
 ];
 
-function Tokens({
+export function Tokens({
   role,
   showToast,
 }: {

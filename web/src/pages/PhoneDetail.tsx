@@ -53,6 +53,7 @@ import {
   vendorModel,
 } from "./phones/ui";
 import { PushLine, RebootDialog } from "./phones/push";
+import { hasPttKey, PttOverride } from "./phones/PttOverride";
 import "./phones/inventory.css";
 import { Can } from "../role";
 
@@ -285,6 +286,18 @@ export function PhoneDetail() {
                 { label: "Updated", value: formatTime(phone.updatedAt) },
               ]}
             />
+
+            {hasPttKey(phone) && (
+              <PttOverride
+                phone={phone}
+                onSaved={(p) => {
+                  setState({ status: "ready", phone: p });
+                  toast.show(
+                    "PTT channel saved. Resync the phone to apply it.",
+                  );
+                }}
+              />
+            )}
 
             <div className="prov-stack">
               <h2 className="inv-section-title">Redirect</h2>

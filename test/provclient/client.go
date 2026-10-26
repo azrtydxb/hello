@@ -22,6 +22,9 @@ type Model struct {
 	Firmware string // the version its User-Agent reports
 	OUI      string // a real OUI of the vendor, for test MACs
 	Common   string // the model's common file name
+	// NoBLF marks a model Hello provisions no BLF keys for (the Grandstream
+	// WP models); the API refuses keys for it.
+	NoBLF bool
 }
 
 // Models are the representative phones of spec S-18.
@@ -29,9 +32,19 @@ var Models = []Model{
 	{Vendor: "yealink", Model: "T54W", Firmware: "96.86.0.70", OUI: "805ec0", Common: "y000000000096.cfg"},
 	{Vendor: "poly", Model: "VVX 450", Firmware: "6.4.6.2195", OUI: "0004f2", Common: "000000000000.cfg"},
 	{Vendor: "grandstream", Model: "GRP2614", Firmware: "1.0.9.69", OUI: "c074ad", Common: "cfggrp2614.xml"},
+	// The Grandstream WP models fetch like the GRP, from their own config
+	// templates (WP8x6 1.0.3.39, WP810/822/825 1.0.11.83).
+	{Vendor: "grandstream", Model: "WP822", Firmware: "1.0.11.83", OUI: "c074ad", Common: "cfgwp822.xml", NoBLF: true},
+	{Vendor: "grandstream", Model: "WP836", Firmware: "1.0.3.39", OUI: "c074ad", Common: "cfgwp836.xml", NoBLF: true},
 	{Vendor: "snom", Model: "D785", Firmware: "10.1.159.12", OUI: "000413", Common: "snomD785.htm"},
 	{Vendor: "fanvil", Model: "X5U", Firmware: "2.12.1.4", OUI: "0c383e", Common: "F0V0X5U00000.cfg"},
 }
+
+// WP836 is the Grandstream WP836 Wi-Fi handset (firmware 1.0.1.80), the
+// model whose Park softkey sends a REFER to the park code (P60069) and
+// retrieves with P2336. It is not one of Models: the WP template variant has
+// its own acceptance tests.
+var WP836 = Model{Vendor: "grandstream", Model: "WP836", Firmware: "1.0.1.80", OUI: "c074ad", Common: "cfgwp836.xml"}
 
 // UserAgent is what the phone with MAC mac (12 lowercase hex digits)
 // sends: Yealink, Grandstream and Fanvil include the MAC, Poly and Snom do

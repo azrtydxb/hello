@@ -71,11 +71,13 @@ type conf struct {
 
 // urlKey is, per vendor, the names of settings that carry a URL, path,
 // server, file name or scheme code. Any value holding "://" is flagged too.
+// Snom's "server" is anchored at a word start so webserver_admin_password,
+// a password, is not taken for a server setting.
 var urlKey = map[Vendor]*regexp.Regexp{
 	Yealink:     regexp.MustCompile(`(?i)url|server|path|ntp|firmware|voice_mail`),
 	Poly:        regexp.MustCompile(`(?i)servername|servertype|bootsrv|url|path|\.address$|sntp|callback|_files$|_directory$|customcacert`),
 	Grandstream: regexp.MustCompile(`^P(47|30|33|145|192|193|194|212|232|233|234|235|237|238|330|331|6767|8433)$`),
-	Snom:        regexp.MustCompile(`(?i)server|url|firmware|ntp|host|mailbox|custom|status|directory|update_policy|prov_polling`),
+	Snom:        regexp.MustCompile(`(?i)(^|_)server|url|firmware|ntp|host|mailbox|custom|status|directory|update_policy|prov_polling`),
 	Fanvil:      regexp.MustCompile(`(?i)server|url|file name|protocol|image|sntp|register addr|mwi|upgrade|flash`),
 }
 
@@ -550,11 +552,21 @@ func gsPagingButton(m *emu, c conf) {
 		}
 		return
 	}
-	if c.take("P22556") != "1" {
+	// P22556 (the PTT/Paging switch) is a WP8x6 key, P82317 (the side key)
+	// a WP8x6 and WP856 key; the WP810/822/825 templates have neither.
+	fam := WPFamily(m.vendor, m.p.model)
+	if fam == WP8x6 && c.take("P22556") != "1" {
 		m.t.Errorf("Grandstream: PTT/Paging (P22556) is %q on a %s: the side key says not configured", c.kv["P22556"], m.p.model)
 	}
-	if c.take("P82317") != "0" {
+	if (fam == WP8x6 || fam == WP856) && c.take("P82317") != "0" {
 		m.t.Errorf("Grandstream: side key P82317 = %q, want 0 (PTT/Paging)", c.kv["P82317"])
+	}
+	if fam == WP8xx {
+		for _, k := range []string{"P22556", "P82317"} {
+			if _, set := c.kv[k]; set {
+				m.t.Errorf("Grandstream: %s is not in the WP810/822/825 template and the %s gets it", k, m.p.model)
+			}
+		}
 	}
 	if c.take("P22177") != "1" {
 		m.t.Errorf("Grandstream: PTT (P22177) is off on a %s whose group has PTT channels", m.p.model)
@@ -784,7 +796,9 @@ func newEmu(t *testing.T, c emuCase, pinned bool) *emu {
 		}, []string{"both"})
 		p.multicast.PagingKey = SupportsPTT(c.vendor, c.model)
 		if SupportsPTT(c.vendor, c.model) {
-			p.ptt = NewPTTInfo("224.0.1.116:5001", "PCMU", 1, false, []PTTChannel{{Channel: 1, Label: "All", Transmit: 1, Subscribe: 1}})
+			p.ptt = NewPTTInfo(PTTSettings{Enabled: true, Address: "224.0.1.116:5001", Codec: "PCMU", DefaultChannel: 1,
+				PriorityChannel: 24, EmergencyChannel: 25, DefaultGroup: 26, PriorityGroup: 49, EmergencyGroup: 50,
+				Channels: []PTTChannel{{Channel: 1, Label: "All", Transmit: 1, Subscribe: 1}}})
 		}
 	}
 	m := &emu{t: t, e: e, p: p, vendor: c.vendor, host: e.s.public.Host, pinned: pinned, ca: caDER,

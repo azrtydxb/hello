@@ -31,6 +31,7 @@ var (
 	// accepts '*' plus 2-4 digits, or '##'.
 	featureCodeRe = regexp.MustCompile(`^(\*[0-9]{2,4}|##)$`)
 	// forwardRe is a forwarding target: an extension or external number.
+	pinRe     = regexp.MustCompile(`^[0-9]{4,10}$`)
 	forwardRe = regexp.MustCompile(`^(\+?[0-9*#]{2,32})?$`)
 	emailRe   = regexp.MustCompile(`^[^@\s]{1,64}@[^@\s]{1,255}\.[A-Za-z]{2,}$`)
 )
@@ -40,8 +41,9 @@ var (
 var (
 	strategies = []string{"ring-all", "sequential", "round-robin", "longest-idle", "weighted"}
 	fcActions  = []string{"forward_always", "forward_busy", "forward_no_answer", "dnd_on", "dnd_off",
-		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom",
-		"call_waiting_on", "call_waiting_off", "ivr", "time_condition", "tc_override"}
+		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr",
+		"call_waiting_on", "call_waiting_off",
+		"park", "park_retrieve", "pickup_group", "pickup_directed", "time_condition", "tc_override"}
 )
 
 // voicemailLimits bound greeting uploads.
@@ -69,8 +71,8 @@ type voicemailBoxView struct {
 	EmailDelivery bool `json:"emailDelivery"`
 }
 
-func (s *server) boxView(b store.VoicemailBox) voicemailBoxView {
-	return voicemailBoxView{VoicemailBox: b, EmailDelivery: s.EmailDelivery}
+func (s *server) boxView(ctx context.Context, b store.VoicemailBox) voicemailBoxView {
+	return voicemailBoxView{VoicemailBox: b, EmailDelivery: s.emailDelivery(ctx)}
 }
 
 func (s *server) getVoicemailBox(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +85,7 @@ func (s *server) getVoicemailBox(w http.ResponseWriter, r *http.Request) {
 		s.configError(w, "voicemail box", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.boxView(b))
+	writeJSON(w, http.StatusOK, s.boxView(r.Context(), b))
 }
 
 // putVoicemailBox is PUT /api/v1/extensions/{id}/voicemail: JSON with
@@ -94,6 +96,13 @@ func (s *server) putVoicemailBox(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.saveVoicemailBox(w, r, id, false)
+}
+
+// saveVoicemailBox applies a box update to extension id. In self mode (the
+// extension's own user) the box PIN is "pin", digits only, and the box email
+// address is not settable; an administrator sets "password" and "email".
+func (s *server) saveVoicemailBox(w http.ResponseWriter, r *http.Request, id int64, self bool) {
 	var (
 		change   store.VoicemailBoxChange
 		greeting []byte
@@ -104,9 +113,19 @@ func (s *server) putVoicemailBox(w http.ResponseWriter, r *http.Request) {
 		// Streamed (MultipartReader, no spooling to memory or disk) and the
 		// body is bounded first, so an oversized upload cannot exhaust it.
 		r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
-		if err := readVoicemailUpload(r, &change, &greeting, &unreach); err != nil {
+		if err := readVoicemailUpload(r, &change, &greeting, &unreach, self); err != nil {
 			badRequest(w, err.Error())
 			return
+		}
+	case self:
+		var in struct {
+			PIN *string `json:"pin"`
+		}
+		if !decode(w, r, &in) {
+			return
+		}
+		if in.PIN != nil && *in.PIN != "" {
+			change.Password = in.PIN
 		}
 	default:
 		var in struct {
@@ -122,7 +141,11 @@ func (s *server) putVoicemailBox(w http.ResponseWriter, r *http.Request) {
 		change.Email = in.Email
 	}
 	var f fieldErrs
-	if change.Password != nil && (len(*change.Password) < 4 || len(*change.Password) > 72) {
+	if self {
+		if change.Password != nil && !pinRe.MatchString(*change.Password) {
+			f.add("pin", "must be 4-10 digits")
+		}
+	} else if change.Password != nil && (len(*change.Password) < 4 || len(*change.Password) > 72) {
 		f.add("password", "must be 4-72 characters")
 	}
 	if change.Email != nil && *change.Email != "" && !emailRe.MatchString(*change.Email) {
@@ -184,7 +207,13 @@ func (s *server) putVoicemailBox(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, s.boxView(b))
+	if self {
+		// The owner's view carries neither the administrator's notification
+		// address nor storage keys.
+		writeJSON(w, http.StatusOK, selfBox(store.Extension{ID: id}, b, true))
+		return
+	}
+	writeJSON(w, http.StatusOK, s.boxView(r.Context(), b))
 }
 
 // isWAV checks the RIFF/WAVE container header; the caller decides about the
@@ -195,7 +224,7 @@ func isWAV(b []byte) bool {
 
 // readVoicemailUpload walks a multipart body and fills in the box change and
 // the greeting uploads. Every field is bounded; unknown parts are skipped.
-func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, greeting, unreach *[]byte) error {
+func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, greeting, unreach *[]byte, self bool) error {
 	mr, err := r.MultipartReader()
 	if err != nil {
 		return errors.New("invalid multipart body")
@@ -208,7 +237,13 @@ func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, gree
 		if err != nil {
 			return errors.New("invalid multipart body")
 		}
-		switch name := part.FormName(); name {
+		name := part.FormName()
+		if self && (name == "password" || name == "email") || !self && name == "pin" {
+			name = "" // the other mode's field is ignored
+		} else if self && name == "pin" {
+			name = "password"
+		}
+		switch name {
 		case "password":
 			b, err := io.ReadAll(io.LimitReader(part, 73))
 			if err != nil {
@@ -237,11 +272,12 @@ func readVoicemailUpload(r *http.Request, change *store.VoicemailBoxChange, gree
 			if !isWAV(data) {
 				return fmt.Errorf("%s must be a PCM WAV file", name)
 			}
-			// Playback assumes 8 kHz 16-bit mono: other rates are resampled,
-			// other layouts refused with the reason.
+			// Stored as 16-bit mono at the file's own rate (up to 48 kHz;
+			// playback resamples per call): stereo is down-mixed, other
+			// layouts that are not PCM refused with the reason.
 			norm, err := media.NormalizeWAV(data)
 			if err != nil {
-				return fmt.Errorf("%s: %s; upload a 16-bit mono PCM WAV file", name, strings.TrimPrefix(err.Error(), "media: "))
+				return fmt.Errorf("%s: %s; %s", name, strings.TrimPrefix(err.Error(), "media: "), wavAdvice)
 			}
 			data = norm
 			if name == "greeting" {
@@ -295,6 +331,11 @@ func (s *server) markMessageHeard(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.setHeard(w, r, id)
+}
+
+// setHeard reads the optional {"heard": bool} body and applies it.
+func (s *server) setHeard(w http.ResponseWriter, r *http.Request, id int64) {
 	heard := true
 	if r.ContentLength != 0 {
 		var in struct {
@@ -322,6 +363,10 @@ func (s *server) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.removeMessage(w, r, id)
+}
+
+func (s *server) removeMessage(w http.ResponseWriter, r *http.Request, id int64) {
 	object, err := s.Store.DeleteVoicemailMessage(r.Context(), actor(r).String(), id)
 	if err != nil {
 		s.configError(w, "voicemail message", err)
@@ -343,6 +388,12 @@ func (s *server) messageAudio(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.playMessage(w, r, id, "")
+}
+
+// playMessage streams message id's audio; a non-empty download makes the
+// browser save it under that name.
+func (s *server) playMessage(w http.ResponseWriter, r *http.Request, id int64, download string) {
 	m, err := s.Store.GetVoicemailMessage(r.Context(), id)
 	if err != nil {
 		s.configError(w, "voicemail message", err)
@@ -352,7 +403,7 @@ func (s *server) messageAudio(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "object storage is unavailable; try again shortly")
 		return
 	}
-	s.serveAudio(w, r, VoicemailBucket, m.Object, "", "voicemail: message audio")
+	s.serveAudio(w, r, VoicemailBucket, m.Object, download, "voicemail: message audio")
 }
 
 // serveAudio streams an object of bucket to the browser: its type (WAV when
@@ -417,6 +468,8 @@ type ringGroupBody struct {
 	FailureKind   *string              `json:"failureKind"`
 	FailureTarget *string              `json:"failureTarget"`
 	Members       *[]ringGroupMemberIn `json:"members"`
+	MOHClassID    nullable[int64]      `json:"mohClassId"`
+	MOHRingback   *bool                `json:"mohRingback"`
 }
 
 type ringGroupMemberIn struct {
@@ -454,6 +507,12 @@ func (b ringGroupBody) toInput(base store.RingGroupInput) (store.RingGroupInput,
 	}
 	if b.FailureTarget != nil {
 		base.FailureTarget = *b.FailureTarget
+	}
+	if b.MOHClassID.Set {
+		base.MOHClassID = b.MOHClassID.Value
+	}
+	if b.MOHRingback != nil {
+		base.MOHRingback = *b.MOHRingback
 	}
 	if b.Members != nil {
 		base.Members = make([]store.RingGroupMember, 0, len(*b.Members))
@@ -563,14 +622,10 @@ func (s *server) createRingGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, _ := b.toInput(defaultsRingGroup())
-	f := validateRingGroup(&in)
-	if len(f) == 0 && in.FailureKind == "ivr" {
-		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
-	}
-	if len(f) == 0 && in.FailureKind == "time_condition" {
-		s.requireTimeCondition(r.Context(), &f, "failureTarget", in.FailureTarget)
-	}
-	if len(f) > 0 {
+	// The store checks that an IVR or time condition failure destination
+	// exists, inside the change's transaction (one deleted meanwhile cannot
+	// slip through).
+	if f := validateRingGroup(&in); len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
@@ -604,16 +659,13 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 		Name: current.Name, Strategy: current.Strategy, Hunt: current.Hunt,
 		RingTimeout: current.RingTimeout, MemberDelay: current.MemberDelay, IgnoreDND: current.IgnoreDND,
 		FailureKind: current.FailureKind, FailureTarget: current.FailureTarget, Members: current.Members,
+		MOHClassID: current.MOHClassID, MOHRingback: current.MOHRingback,
 	}
 	in, _ := b.toInput(base)
-	f := validateRingGroup(&in)
-	if len(f) == 0 && in.FailureKind == "ivr" {
-		s.requireIVRMenu(r.Context(), &f, "failureTarget", in.FailureTarget)
-	}
-	if len(f) == 0 && in.FailureKind == "time_condition" {
-		s.requireTimeCondition(r.Context(), &f, "failureTarget", in.FailureTarget)
-	}
-	if len(f) > 0 {
+	// The store checks that an IVR or time condition failure destination
+	// exists, inside the change's transaction (one deleted meanwhile cannot
+	// slip through).
+	if f := validateRingGroup(&in); len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
@@ -672,12 +724,8 @@ func (s *server) putFeatureCodes(w http.ResponseWriter, r *http.Request) {
 			f.add(p+".code", "must be a distinct code")
 		}
 		seen[c.Code] = true
-		if c.Action == "ivr" {
-			s.requireIVRMenu(r.Context(), &f, p+".argument", c.Argument)
-		}
-		if c.Action == "time_condition" {
-			s.requireTimeCondition(r.Context(), &f, p+".argument", c.Argument)
-		}
+		// An "ivr" or "time_condition" argument must name a menu or a time
+		// condition: the store checks it inside the change's transaction.
 		if c.Action == "tc_override" && !slices.Contains([]string{"toggle", "open", "closed", "auto"}, c.Argument) {
 			f.add(p+".argument", `must be "toggle", "open", "closed" or "auto"`)
 		}

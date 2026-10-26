@@ -52,15 +52,25 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "username and password are required")
 		return
 	}
-	id, hash, err := s.Store.UserByName(r.Context(), in.Username)
+	l, err := s.Store.UserForLogin(r.Context(), in.Username)
+	id := l.ID
 	switch {
 	case err == nil:
-		if !auth.CheckPassword(hash, in.Password) {
+		// A disabled user gets the same answer as a wrong password.
+		if !auth.CheckUserPassword(l.Hash, in.Password) || !l.Enabled {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "invalid username or password")
 			return
 		}
+		if auth.NeedsRehash(l.Hash) {
+			// Upgrade a legacy bcrypt hash now that the password is known.
+			if nh, herr := auth.HashUserPassword(in.Password); herr == nil {
+				if uerr := s.Store.UpgradePasswordHash(r.Context(), id, l.Hash, nh); uerr != nil {
+					s.Log.Warn("login: upgrade password hash", "error", uerr)
+				}
+			}
+		}
 	case errors.Is(err, store.ErrNotFound):
-		auth.SpendPasswordCheck(in.Password)
+		auth.SpendUserPasswordCheck(in.Password)
 		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid username or password")
 		return
 	default:
@@ -111,9 +121,103 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// meExtension is an extension as the caller's own profile lists it.
+type meExtension struct {
+	ID     int64  `json:"id"`
+	Number string `json:"number"`
+	Name   string `json:"name"`
+}
+
+// meView is the authenticated user's profile.
+type meView struct {
+	Username           string                    `json:"username"`
+	Role               string                    `json:"role"`
+	DisplayName        string                    `json:"displayName"`
+	Email              string                    `json:"email"`
+	AuthMethod         string                    `json:"authMethod"`
+	MustChangePassword bool                      `json:"mustChangePassword"`
+	Extensions         []meExtension             `json:"extensions"`
+	VoicemailEmail     store.VoicemailEmailPrefs `json:"voicemailEmail"`
+	// EmailDelivery is whether the system can send email at all.
+	EmailDelivery bool `json:"emailDelivery"`
+}
+
 func (s *server) me(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
-	writeJSON(w, http.StatusOK, map[string]string{"username": a.Username, "role": string(a.Role)})
+	v := meView{Username: a.Username, Role: string(a.Role), AuthMethod: "local", MustChangePassword: a.MustChangePassword,
+		Extensions: []meExtension{}, VoicemailEmail: store.VoicemailEmailPrefs{After: "none"}}
+	if a.UserID > 0 && a.Kind != auth.KindService {
+		u, err := s.Store.GetUser(r.Context(), a.UserID)
+		if err != nil {
+			s.storeError(w, "user", err)
+			return
+		}
+		v.DisplayName, v.Email, v.AuthMethod, v.VoicemailEmail = u.DisplayName, u.Email, u.AuthMethod, u.VoicemailEmail
+		exts, err := s.Store.UserExtensions(r.Context(), a.UserID)
+		if err != nil {
+			s.internal(w, "me: extensions", err)
+			return
+		}
+		for _, e := range exts {
+			v.Extensions = append(v.Extensions, meExtension{ID: e.ID, Number: e.Number, Name: e.Name})
+		}
+		v.EmailDelivery = s.emailDelivery(r.Context())
+	}
+	writeJSON(w, http.StatusOK, v)
+}
+
+// changePassword is POST /api/v1/auth/password: the caller sets a new
+// password after proving the current one. Only a browser session may do it
+// (a token that leaked must not be able to take the account over), and it
+// ends the user's other sessions.
+func (s *server) changePassword(w http.ResponseWriter, r *http.Request) {
+	a := actor(r)
+	if a.Kind != auth.KindSession || a.UserID <= 0 {
+		writeError(w, http.StatusForbidden, "session_required", "the password is changed from a signed-in browser session")
+		return
+	}
+	var in struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	var f fieldErrs
+	if err := auth.ValidatePassword(in.NewPassword); err != nil {
+		f.add("newPassword", "%s", strings.TrimPrefix(err.Error(), auth.ErrPasswordPolicy.Error()+": "))
+	}
+	if in.NewPassword == in.CurrentPassword {
+		f.add("newPassword", "must differ from the current password")
+	}
+	if len(f) > 0 {
+		writeFields(w, f)
+		return
+	}
+	hash, err := s.Store.UserPasswordHash(r.Context(), a.UserID)
+	if err != nil {
+		s.storeError(w, "user", err)
+		return
+	}
+	if !auth.CheckUserPassword(hash, in.CurrentPassword) {
+		f.add("currentPassword", "is incorrect")
+		writeFields(w, f)
+		return
+	}
+	nh, err := auth.HashUserPassword(in.NewPassword)
+	if err != nil {
+		s.internal(w, "change password: hash", err)
+		return
+	}
+	keep := []byte{}
+	if c, cerr := r.Cookie(auth.SessionCookie); cerr == nil {
+		keep = auth.HashToken(c.Value)
+	}
+	if err := s.Store.ChangeOwnPassword(r.Context(), a.UserID, nh, keep); err != nil {
+		s.storeError(w, "user", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Tokens.
@@ -289,13 +393,16 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		AllowIntercom    *bool   `json:"allowIntercom"`
 		DirectoryHidden  *bool   `json:"directoryHidden"`
 		CallWaiting      *bool   `json:"callWaiting"`
+		// MOHClassID is null to clear (use the global default).
+		MOHClassID nullable[int64] `json:"mohClassId"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	if in.Number == nil && in.Name == nil && in.ExternalNumber == nil && in.DND == nil &&
 		in.ForwardAlways == nil && in.ForwardBusy == nil && in.ForwardNoAnswer == nil &&
-		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.AllowIntercom == nil && in.DirectoryHidden == nil && in.CallWaiting == nil {
+		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.AllowIntercom == nil && in.DirectoryHidden == nil && in.CallWaiting == nil &&
+		!in.MOHClassID.Set {
 		badRequest(w, "a field to change is required")
 		return
 	}
@@ -320,6 +427,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		DND: in.DND, ForwardAlways: in.ForwardAlways, ForwardBusy: in.ForwardBusy,
 		ForwardNoAnswer: in.ForwardNoAnswer, VoicemailEnabled: in.VoicemailEnabled,
 		RecordDefault: in.RecordDefault, AllowIntercom: in.AllowIntercom, DirectoryHidden: in.DirectoryHidden, CallWaiting: in.CallWaiting,
+		MOHClassID: in.MOHClassID.Value, ClearMOHClass: in.MOHClassID.Set && in.MOHClassID.Value == nil,
 	}, s.check())
 	if err != nil {
 		s.configError(w, "extension", err)

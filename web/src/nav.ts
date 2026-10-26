@@ -31,6 +31,46 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
+    label: "My phone",
+    items: [
+      {
+        label: "Address book",
+        path: "/me/contacts",
+        phase: 5,
+        icon: "contact",
+        minRole: "user",
+      },
+      {
+        label: "Voicemail",
+        path: "/me/voicemail",
+        phase: 5,
+        icon: "voicemail",
+        minRole: "user",
+      },
+      {
+        label: "Call forwarding",
+        path: "/me/forwarding",
+        phase: 5,
+        icon: "phone-forwarded",
+        minRole: "user",
+      },
+      {
+        label: "Call history",
+        path: "/me/history",
+        phase: 5,
+        icon: "history",
+        minRole: "user",
+      },
+      {
+        label: "Profile",
+        path: "/me/profile",
+        phase: 5,
+        icon: "circle-user",
+        minRole: "user",
+      },
+    ],
+  },
+  {
     label: "Directory",
     items: [
       {
@@ -41,8 +81,15 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       },
       { label: "Devices", path: "/devices", phase: 1, icon: "smartphone" },
       { label: "Phones", path: "/phones", phase: 5, icon: "phone" },
+      {
+        label: "Onboarding",
+        path: "/onboarding",
+        phase: 5,
+        icon: "user-plus",
+        // Adopting creates phones, a write; viewers do not see it.
+        minRole: "operator",
+      },
       { label: "Phonebooks", path: "/phonebooks", phase: 5, icon: "book-user" },
-      { label: "My contacts", path: "/me/contacts", phase: 5, icon: "contact" },
       {
         label: "Registrations",
         path: "/registrations",
@@ -78,6 +125,12 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         phase: 5,
         icon: "clock",
       },
+      {
+        label: "Park and pickup",
+        path: "/park",
+        phase: 5,
+        icon: "square-parking",
+      },
     ],
   },
   {
@@ -91,6 +144,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         phase: 5,
         icon: "megaphone",
       },
+      { label: "Music on hold", path: "/moh", phase: 5, icon: "music" },
     ],
   },
   {
@@ -127,6 +181,25 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     ],
   },
   {
+    label: "Integrations",
+    items: [
+      {
+        label: "Overview",
+        path: "/integrations",
+        phase: 5,
+        icon: "plug",
+        minRole: "admin",
+      },
+      {
+        label: "API access",
+        path: "/integrations/api-access",
+        phase: 5,
+        icon: "key-round",
+        minRole: "admin",
+      },
+    ],
+  },
+  {
     label: "Platform",
     items: [
       { label: "Cluster", path: "/cluster", phase: 3, icon: "server" },
@@ -145,6 +218,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         // The page holds the provider key (admin-only routes).
         minRole: "admin",
       },
+      {
+        label: "Email",
+        path: "/settings/email",
+        phase: 5,
+        icon: "mail",
+        minRole: "admin",
+      },
       { label: "AI access", path: "/ai", phase: 5, icon: "bot" },
       {
         label: "Users",
@@ -157,21 +237,31 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   },
 ];
 
+/** The sidebar group of the extension self-service pages. */
+export const MY_PHONE_GROUP = "My phone";
+
 /**
  * The groups and items `role` may see; empty groups are dropped. The AI
  * group shows in full only while AI is enabled; while it is off, only its
- * status page stays, so the reason can be read.
+ * status page stays, so the reason can be read. A user (the self-service
+ * role) sees only My phone. Everyone else sees My phone only when they have
+ * an extension of their own.
  */
 export function navGroupsFor(
   role: string | undefined,
   aiEnabled = false,
+  hasExtensions = false,
 ): NavGroup[] {
+  if (role === "user") {
+    return NAV_GROUPS.filter((g) => g.label === MY_PHONE_GROUP);
+  }
   return NAV_GROUPS.map((g) => ({
     ...g,
     items: g.items.filter(
       (i) =>
         atLeast(role, i.minRole ?? "viewer") &&
-        (g.label !== "AI" || aiEnabled || i.path === "/ai/status"),
+        (g.label !== "AI" || aiEnabled || i.path === "/ai/status") &&
+        (g.label !== MY_PHONE_GROUP || hasExtensions),
     ),
   })).filter((g) => g.items.length > 0);
 }
@@ -198,4 +288,26 @@ export function pageTitle(pathname: string): string | null {
     (i) => i.path !== "/" && pathname.startsWith(i.path + "/"),
   ).sort((a, b) => b.path.length - a.path.length)[0];
   return parent ? parent.label : null;
+}
+
+/**
+ * The label of the group holding the nav item for `pathname` (the longest
+ * matching path), or null. Call detail belongs to Call history.
+ */
+export function activeGroupLabel(
+  groups: readonly NavGroup[],
+  pathname: string,
+): string | null {
+  const path = /^\/history\/[^/]+$/.test(pathname) ? "/history" : pathname;
+  let best: { label: string; len: number } | null = null;
+  for (const g of groups) {
+    for (const i of g.items) {
+      const hit =
+        i.path === path || (i.path !== "/" && path.startsWith(i.path + "/"));
+      if (hit && (!best || i.path.length > best.len)) {
+        best = { label: g.label, len: i.path.length };
+      }
+    }
+  }
+  return best ? best.label : null;
 }

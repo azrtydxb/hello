@@ -63,8 +63,19 @@ A call is also ended after 32 menu entries.
 - A feature code with the action `ivr`; the argument names the menu.
 - A key, silence or wrong-key exit of another menu.
 
-A menu that something names cannot be deleted or renamed. A menu's
-announcements cannot be deleted while it plays them.
+A menu that something names cannot be deleted or renamed. What a menu names
+cannot be removed from under it: an extension (also as a voicemail box), ring
+group, paging group or announcement that a key or an exit points at cannot be
+deleted or renumbered (409, listing the menus), and a menu's own greeting and
+prompts cannot be deleted while it plays them. An extension or ring group
+cannot take a menu's number: the menu answers that number first. The names a
+ring group failover or a feature code give are checked in the same
+transaction as the change, under the configuration lock.
+
+Paging from a menu lets anyone who reaches it page the group, so a menu with
+a paging destination (a key, the silence or the wrong-key exit) needs the
+admin role and scope to create or replace, like the paging groups (403
+otherwise). Operators manage every other menu.
 
 ## Call flow
 
@@ -91,8 +102,10 @@ correlation id and caller, the CDR trace repeats them, and
 An IVR call is a call like voicemail: it counts as an active call (so a drain
 waits for it or hands it off), and it replicates as a one-dialog call. A
 survivor that takes it over restarts the menu from its greeting. See
-[ha.md](ha.md). A menu a survivor restarted can play prompts, take
-voicemail and route to announcements and menus, but it cannot ring new legs.
+[ha.md](ha.md). A menu a survivor restarted can also dial out (extension, ring group,
+external number), take voicemail and route to announcements and menus. A
+paging destination is not available there; the menu's invalid-choice exit
+applies instead. See [ha.md](ha.md).
 
 ## Requirements
 

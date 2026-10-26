@@ -162,6 +162,7 @@ func (c *call) ringGroup(req *sip.Request, tx sip.ServerTransaction, snap *snaps
 	c.groupName, c.groupStrategy = g.Name, g.Strategy
 	c.groupFn = func() { c.groupFail(snap, g) }
 	c.mu.Unlock()
+	c.noteMOHGroup(g)
 	// Bindings per member, fetched here on the request goroutine (bounded).
 	var bindings []livestate.Binding
 	var order []groupMember

@@ -10,7 +10,8 @@ on:
   pull_request:
   # Three tiers: the unit job goes on every pull request and push; the
   # integration tier — the database-backed suites, the race detector and the
-  # HA soak — runs on the nightly cron, a manual dispatch and v* tags; the
+  # HA soak — runs on the nightly cron, a manual dispatch, v* tags and any
+  # pull request that changes database-touching paths (db-changes); the
   # full tier (kind-upgrade, lab) stays off the pull request path. Publish
   # stays on push to main and v* tags; bench stays dispatch-only.
   schedule:
@@ -37,8 +38,8 @@ env:
 jobs:
   go:
     # Unit tier: hermetic tests only, on the PR and push-to-main path. The
-    # database-backed suites run in the `integration` job (nightly and v*
-    # tags), so this job needs no service containers and stays inside the
+    # database-backed suites run in the `integration` job (nightly, v* tags and
+    # database-touching pull requests), so this job needs no service containers and stays inside the
     # five-minute PR budget. Tests that need a database, Valkey or MinIO skip
     # when their HELLO_TEST_* variable is unset; `integration` sets them and
     # runs the same `go test ./...`.
@@ -90,16 +91,48 @@ jobs:
             /root/.cache/go-build
           key: go-${{ runner.arch }}-golang1.27-${{ hashFiles('go.sum') }}-${{ github.sha }}
 
+  db-changes:
+    # Whether a pull request touches code the database-backed tests cover:
+    # migrations, the store and API, the integration suite, and every package
+    # with a HELLO_TEST_DATABASE_URL test. Only pull requests are filtered;
+    # the other events run the integration job unconditionally.
+    if: github.event_name == 'pull_request'
+    runs-on: arc-azrtydxb
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      db: ${{ steps.filter.outputs.db }}
+    steps:
+      - id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            db:
+              - 'migrations/**'
+              - 'internal/store/**'
+              - 'internal/api/**'
+              - 'internal/ai/**'
+              - 'internal/cdr/**'
+              - 'internal/snapshot/**'
+              - 'test/integration/**'
+              - 'go.mod'
+              - '.github/workflows/ci.yaml'
+
   integration:
     # Integration tier: the database-backed suites (PostgreSQL, Valkey, MinIO)
-    # plus the race detector and the HA soak. Off the PR and push-to-main
-    # path — the nightly cron, a manual dispatch, and v* tags (the full tier)
-    # run it. The unit job skips these tests, so this job is what actually
-    # proves the database code works.
+    # plus the race detector and the HA soak. Runs on the nightly cron, a
+    # manual dispatch, v* tags (the full tier) and any pull request that
+    # changes database-touching paths (see db-changes). The unit job skips
+    # these tests, so this job is what actually proves the database code works.
+    needs: db-changes
     if: >-
-      github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
-      startsWith(github.ref, 'refs/tags/v')
+      !cancelled() && (
+        github.event_name == 'schedule' ||
+        github.event_name == 'workflow_dispatch' ||
+        startsWith(github.ref, 'refs/tags/v') ||
+        (github.event_name == 'pull_request' && needs.db-changes.outputs.db == 'true'))
     runs-on: arc-azrtydxb
     timeout-minutes: 40
     container:
@@ -132,6 +165,17 @@ jobs:
         env:
           MINIO_ROOT_USER: hello
           MINIO_ROOT_PASSWORD: hello-voicemail-secret
+          # Headroom, not a feature: by default MinIO derives its
+          # concurrent-request ceiling from the pod's memory and answers 503
+          # SlowDown ("reduce your request rate") once requests queue past a
+          # 10 s deadline, which a busy shared runner node reaches during the
+          # firmware and recording tests. A generous ceiling and deadline
+          # make it queue instead, and the scanner and console stay quiet.
+          MINIO_API_REQUESTS_MAX: "1024"
+          MINIO_API_REQUESTS_DEADLINE: 120s
+          MINIO_SCANNER_SPEED: slowest
+          MINIO_BROWSER: "off"
+          MINIO_PROMETHEUS_AUTH_TYPE: public
         options: >-
           --health-cmd "curl -f http://localhost:9000/minio/health/live"
           --health-interval 5s --health-timeout 5s --health-retries 12
@@ -188,6 +232,16 @@ jobs:
       - run: go test -timeout 30m ./...
       - name: go test -race
         run: go test -race -timeout 30m ./...
+      # A MinIO SlowDown cannot be diagnosed from the test output alone: keep
+      # the drive and request metrics of the failed run in the log.
+      - name: MinIO diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          curl -fsS "http://$HELLO_TEST_MINIO_ENDPOINT/minio/v2/metrics/node" \
+            | grep -E '^minio_node_(drive|io|process_(resident|cpu))' | head -60 || true
+          curl -fsS "http://$HELLO_TEST_MINIO_ENDPOINT/minio/v2/metrics/cluster" \
+            | grep -E '^minio_(s3_requests_(rejected|errors|waiting)|node_drive_(offline|free))' | head -40 || true
       # The in-call HA races (a WaitGroup grown during shutdown, a transfer
       # writing the caller dialog under the original call) surfaced only
       # intermittently in one pass: soak the takeover matrix a few times.
@@ -690,7 +744,7 @@ jobs:
       # pulls base images through Kuvryn Ant's Docker Hub mirror. BuildKit
       # pushes with the credentials of the docker login below.
       - id: builder
-        uses: azrtydxb/.github/actions/setup-builder@d021f2ca9fa3d6682085a7d069b7c8b1dc7b9b80 # main
+        uses: azrtydxb/.github/actions/setup-builder@a6fb8e66bd50b411a1f20b826567ef320aec469b # main
       # Reads the build cache kind-upgrade writes on main (same cache names,
       # same arch); publish itself never writes it.
       - id: ant

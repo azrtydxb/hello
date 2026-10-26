@@ -98,7 +98,7 @@ schedule and the holidays. Set it:
 - in the console (the segmented toggle on the time condition);
 - through `PUT /api/v1/time-conditions/{id}/override` with `{"override":"closed"}`;
 - from a phone with the feature code **`*28<n>`**, where `<n>` is the time
-  condition's *toggle number* (1-4 digits, set on the time condition). `*28`
+  condition's _toggle number_ (1-4 digits, set on the time condition). `*28`
   is the default `tc_override` code (argument `toggle`); the argument can also
   be `open`, `closed` or `auto` for a code that always sets that state (add such
   a code under Feature codes with the action `tc_override`, for example `*29`
@@ -138,4 +138,4 @@ this has not been tried on real hardware yet.
   to the next call.
 - A paging destination cannot take a call that is already ringing, so as a
   ring group failover (through a time condition) it rejects the call.
-- Migrations `00027_time_conditions.sql` and `00028_time_condition_codes.sql` are additive, so a rolling upgrade works.
+- Migrations `00034_time_conditions.sql` and `00035_time_condition_codes.sql` are additive, so a rolling upgrade works.

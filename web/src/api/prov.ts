@@ -69,6 +69,11 @@ export interface Phone {
   templateId: Id | null;
   /** The phone group, which decides its address books; null for none. */
   groupId?: Id | null;
+  /**
+   * The phone's own PTT channel (catalog, kind ptt); null uses its group's.
+   * Grandstream WP phones only.
+   */
+  pttChannelId?: Id | null;
   /** BLF keys: extension numbers, in key order. */
   blf: string[];
   enabled: boolean;
@@ -115,6 +120,7 @@ export type PhonePatch = Partial<
   Omit<PhoneInput, "mac" | "groupId"> & {
     templateId: Id | null;
     groupId: Id | null;
+    pttChannelId: Id | null;
   }
 >;
 
@@ -396,9 +402,20 @@ export const TEMPLATE_VARIABLES: readonly { name: string; doc: string }[] = [
   { name: ".Server.Port", doc: "registrar port" },
   { name: ".Server.Transport", doc: "always udp" },
   { name: ".Server.Expiry", doc: "registration expiry, seconds" },
-  { name: ".BLF", doc: "list of {Number, Label, URI}" },
+  {
+    name: ".BLF",
+    doc: "list of {Number, Label, URI} placed on the model's keys: Slot (vendor key number), Module (Yealink expansion), Page, Section, PageStart (Fanvil), Pickup",
+  },
+  {
+    name: ".Codes",
+    doc: "PBX star codes: DNDOn, DNDOff, ForwardOn/Off, ForwardBusyOn/Off, ForwardNoAnswerOn/Off, PickupDirected (empty when not defined)",
+  },
   { name: ".Prov.URL", doc: "the phone's own URL (masked in previews)" },
   { name: ".Prov.CAURL", doc: "plain-HTTP CA certificate URL" },
+  {
+    name: ".Prov.CACertBase64",
+    doc: "the CA certificate as base64 text, without the PEM lines",
+  },
   { name: ".Prov.ResyncSeconds", doc: "re-check interval" },
   { name: ".Firmware", doc: "{URL, Version}, or nil when none is pinned" },
   { name: ".Time.Zone", doc: "time zone" },
@@ -617,3 +634,15 @@ export interface ProvSettings {
 
 export const getProvSettings = (signal?: AbortSignal) =>
   request<ProvSettings>("GET", "/api/v1/prov/settings", { signal });
+
+/**
+ * Whether Hello can provision BLF keys for the phone. A Grandstream WP
+ * (WP8xx, WP856) has no BLF key type in its provisioning template, so the
+ * API refuses keys for it; the phone form hides the editor.
+ */
+export function supportsBlf(vendor: string, model: string): boolean {
+  return !(
+    vendor === "grandstream" &&
+    /^WP(8[1-3]6|856|8(10|2[0258]))/i.test(model.replace(/[\s_-]/g, ""))
+  );
+}

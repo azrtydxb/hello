@@ -31,6 +31,10 @@ type Config struct {
 	CAURL         string
 	FirmwareURL   string
 	AdminPassword string
+	// ParkCode and ParkRetrieveCode are the codes the Park and Retrieve
+	// softkeys use (Grandstream WP8x6: P60069 and P2336); "" when unset.
+	ParkCode         string
+	ParkRetrieveCode string
 }
 
 // caCommentRE finds the CA URL the XML formats carry in a comment, where
@@ -220,6 +224,7 @@ func ParseGrandstream(b []byte, mac string) (Config, error) {
 		}
 	}
 	c := Config{
+		ParkCode: p["P60069"], ParkRetrieveCode: p["P2336"],
 		User: p["P35"], AuthUser: p["P36"], Password: p["P34"], DisplayName: p["P3"],
 		ProvURL: gsURL(p["P212"], p["P237"], "/"), CAURL: caFromComment(b), FirmwareURL: gsURL(p["P6767"], p["P192"], ""), AdminPassword: p["P2"],
 	}
@@ -262,6 +267,8 @@ func ParseSnom(b []byte) (Config, error) {
 	return c, nil
 }
 
+var fanvilKeyRE = regexp.MustCompile(`^Fkey\d+ (Type|Value)$`)
+
 // ParseFanvil reads a Fanvil "<<VOIP CONFIG FILE>>" text config.
 func ParseFanvil(b []byte) (Config, error) {
 	s := string(b)
@@ -286,12 +293,34 @@ func ParseFanvil(b []byte) (Config, error) {
 	c := Config{
 		Server: kv["SIP1 Register Addr"], User: kv["SIP1 Phone Number"], AuthUser: kv["SIP1 Register User"],
 		Password: kv["SIP1 Register Pswd"], DisplayName: kv["SIP1 Display Name"], ProvURL: provURL,
-		CAURL: kv["CACertURL"], FirmwareURL: kv["Auto Image Url"], AdminPassword: kv["admin AdminPswd"],
+		CAURL: kv["CACertURL"], FirmwareURL: kv["Auto Image Url"], AdminPassword: kv["Account1 Password"],
 	}
 	c.Port, _ = strconv.Atoi(kv["SIP1 Register Port"])
-	for _, v := range numbered(kv, `^Fkey(\d+) Value$`, func(n int) bool { return kv["Fkey"+strconv.Itoa(n)+" Type"] == "1" }) {
-		num, _, _ := strings.Cut(v, "@")
-		c.BLF = append(c.BLF, num)
+	// DSS keys sit in pages ("--Dsskey Config2--:"), each numbering its
+	// keys from 1, so a key is its page and number. Account1 is the web
+	// admin (--MMI Account--).
+	var page string
+	types := map[string]string{}
+	for line := range strings.SplitSeq(s, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.HasPrefix(line, "--") {
+			page, _, _ = strings.Cut(line, ":")
+			continue
+		}
+		k, v, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		switch {
+		case fanvilKeyRE.MatchString(k) && strings.HasSuffix(k, " Type"):
+			types[page+"|"+strings.TrimSuffix(k, " Type")] = v
+		case fanvilKeyRE.MatchString(k) && strings.HasSuffix(k, " Value"):
+			if types[page+"|"+strings.TrimSuffix(k, " Value")] == "1" {
+				num, _, _ := strings.Cut(v, "@")
+				c.BLF = append(c.BLF, num)
+			}
+		}
 	}
 	return c, nil
 }

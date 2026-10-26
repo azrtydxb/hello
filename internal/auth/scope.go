@@ -17,6 +17,17 @@ const (
 	ScopeWrite   Scope = "write"
 	ScopeAdmin   Scope = "admin"
 	ScopeSecrets Scope = "secrets"
+	// The integration scopes are orthogonal to the hierarchy: held only when
+	// present, and a handler additionally limits them to the extensions the
+	// credential may act for (spec integrations I-31).
+	//
+	// ScopeCalls originates and hangs up the holder's own calls and reads
+	// the state of the calls it started.
+	ScopeCalls Scope = "calls"
+	// ScopeEvents reads the call-event stream and the event history.
+	ScopeEvents Scope = "events"
+	// ScopeRecordings mints and revokes recording links.
+	ScopeRecordings Scope = "recordings"
 	// ScopeSession is carried only by a browser session: consent approval
 	// and denial need it, so no token can grant itself scopes.
 	ScopeSession Scope = "session"
@@ -24,7 +35,7 @@ const (
 
 // AllScopes is every scope a user's credential can be granted. It leaves out
 // ScopeSession.
-var AllScopes = Scopes{ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets}
+var AllScopes = Scopes{ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings}
 
 // Scopes is the set of scopes a credential carries.
 type Scopes []Scope
@@ -36,7 +47,7 @@ func (ss Scopes) Has(s Scope) bool {
 		return slices.Contains(ss, ScopeRead) || ss.Has(ScopeWrite)
 	case ScopeWrite:
 		return slices.Contains(ss, ScopeWrite) || ss.Has(ScopeAdmin)
-	case ScopeAdmin, ScopeSecrets, ScopeSession:
+	case ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeSession:
 		return slices.Contains(ss, s)
 	}
 	return false
@@ -58,7 +69,7 @@ func ParseScopes(v string) (Scopes, error) {
 	for _, f := range strings.Fields(v) {
 		s := Scope(f)
 		switch s {
-		case ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeSession:
+		case ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeSession:
 		default:
 			return nil, fmt.Errorf("unknown scope %q", f)
 		}
@@ -74,6 +85,10 @@ type Role string
 
 // The roles, from least to most privileged.
 const (
+	// RoleUser is an extension self-service account: it reaches only the
+	// /me routes, and there only the data of its linked extensions. It ranks
+	// below viewer, so no route that asks viewer or more admits it.
+	RoleUser     Role = "user"
 	RoleViewer   Role = "viewer"
 	RoleOperator Role = "operator"
 	RoleAdmin    Role = "admin"
@@ -81,12 +96,14 @@ const (
 
 func (r Role) rank() int {
 	switch r {
-	case RoleViewer:
+	case RoleUser:
 		return 1
-	case RoleOperator:
+	case RoleViewer:
 		return 2
-	case RoleAdmin:
+	case RoleOperator:
 		return 3
+	case RoleAdmin:
+		return 4
 	}
 	return 0
 }
@@ -108,10 +125,12 @@ func ParseRole(v string) (Role, error) {
 // GrantableScopes is the most a user or service account of role r may hold.
 func GrantableScopes(r Role) Scopes {
 	switch r {
-	case RoleViewer:
-		return Scopes{ScopeRead}
-	case RoleOperator:
+	case RoleUser:
 		return Scopes{ScopeRead, ScopeWrite}
+	case RoleViewer:
+		return Scopes{ScopeRead, ScopeEvents}
+	case RoleOperator:
+		return Scopes{ScopeRead, ScopeWrite, ScopeCalls, ScopeEvents, ScopeRecordings}
 	case RoleAdmin:
 		return slices.Clone(AllScopes)
 	}

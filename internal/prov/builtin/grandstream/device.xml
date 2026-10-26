@@ -43,10 +43,29 @@
     <P91>1</P91>
     <P186>1</P186>
 {{- end}}
+{{- /* Emergency numbers from Hello's emergency routes (CALL-47): P8385 on the WP8x6, P25675 on the WP856; the WP8xx template has none. Call park and retrieve codes (CALL-16): P60069 and P2336 on the WP8x6 and WP856. */}}
+{{- if .Emergency}}
+{{- if eq .Phone.Family "8x6"}}
+    <P8385>{{xml .Emergency}}</P8385>
+{{- else if eq .Phone.Family "856"}}
+    <P25675>{{xml .Emergency}}</P25675>
+{{- end}}
+{{- end}}
+{{- if or (eq .Phone.Family "8x6") (eq .Phone.Family "856")}}
+{{- if .Line.ParkCode}}
+    <P60069>{{xml .Line.ParkCode}}</P60069>
+{{- end}}
+{{- if .Line.ParkRetrieveCode}}
+    <P2336>{{xml .Line.ParkRetrieveCode}}</P2336>
+{{- end}}
+{{- end}}
+{{- /* BLF keys (CALL-43): the P323 block is defined by none of the WP templates (WP8x6, WP856, WP8xx), so it is written only to a Grandstream phone that is not a WP (Phone.Family empty). prov.SupportsBLF refuses BLF keys on a WP in the API. */}}
+{{- if not .Phone.Family}}
 {{- range $i, $k := .BLF}}
     <P{{add 323 (mul $i 3)}}>1</P{{add 323 (mul $i 3)}}>
     <P{{add 324 (mul $i 3)}}>0</P{{add 324 (mul $i 3)}}>
     <P{{add 325 (mul $i 3)}}>{{xml $k.Number}}</P{{add 325 (mul $i 3)}}>
+{{- end}}
 {{- end}}
     <!-- Paging and intercom (Kuvryn Hello phonebooks-ptt spec P-12, P-13): answer by itself, on
          the speaker after a short beep, when Hello sends Call-Info answer-after=0. The WP8xx
@@ -55,12 +74,21 @@
          and the 1.0.11.75 release notes list a warning tone upon auto answer, but Grandstream no
          longer publishes a WP8xx config template and neither document gives the P-value: P298 is
          the GXP/GRP template's value for it and is still to be confirmed on a WP822 (verify). The
-         plain "Auto Answer" option (P90) is deliberately not set: it would answer every call. -->
+         plain "Auto Answer" option (P90) is deliberately not set: it would answer every call.
+         The WP856 template has no P298: its P90 = 2 is "Enable Intercom/Paging" (CALL-24). -->
+{{- if eq .Phone.Family "856"}}
+    <P90>2</P90>
+{{- else}}
     <P298>1</P298>
-{{- /* Paging button and multicast paging (phone-feature-parity S-30, phonebooks-ptt P-15). Keys from Grandstream's own config templates wp8x6_config_1.0.3.39 and wp810_822_825_config_1.0.11.83 (config-template_09302026) and the WP8x6 Administration Guide "PTT/Paging": P22208 multicast paging on, P1568 codec (0 PCMU, 8 PCMA, 9 G.722), P1569 and up listening address and label pairs (ten slots); the WP8x6 only: P22556 PTT/Paging, P82317 side key (0 PTT/Paging), P22177 PTT, P22183 PTT/group paging address, P22184 default channel, P22179 accept while busy, P22180 codec, channels 1 to 25 at P82001 + 5 (n-1): available, transmit, subscribe, join, name. P26072 (WP8x6) plays the warning beep before an auto answer and P26071 (WP8x6) does not mute on answer. All unverified on a phone (verify). */}}
-{{- if .Phone.PTTCapable}}
+{{- end}}
+{{- /* Paging button, multicast paging, PTT and group paging (phone-feature-parity S-30, phonebooks-ptt P-15). Keys from Grandstream's own config templates (Grandstream config-template-10212026.zip): wp8x6_config_1.0.3.39 (WP816/826/836), wp856_config_1.0.3.16, wp810_822_825_config_1.0.11.83 (WP810/822/825), wp820_config_1.0.7.90, and the WP8x6 Administration Guide "PTT/Paging". Every Grandstream: P22208 multicast paging on, P1568 codec (0 PCMU, 8 PCMA, 9 G.722), P1569 and up listening address and label pairs (ten slots), P1566 paging barge (0 off, 1-10), P1567 paging priority active, P26019 barge by Call-Info/Alert-Info (intercom barging, default off). WP8x6 and WP8xx: P8381 page in DND. WP8x6: P22532 multicast call timeout (s), P22556 PTT/Paging switch. WP8x6 and WP856: P82317 side key (0 PTT/Paging), P26072 beep before an auto answer, P26071 do not mute on answer. PTT (WP8x6, WP856, WP8xx, WP820): P22177 PTT, P22183 PTT/group paging address, P22184 default, P22185 priority, P22186 emergency channel, P22179 accept while busy, P22180 codec; group paging: P22194 on, P22199 default, P22200 priority, P22201 emergency group, P22196 accept while busy, P22197 codec. Channel slots: WP8x6, WP856 and WP8xx at P82001 + 5 (n-1) for channels 1 to 50 (available, transmit, subscribe, join, name); the WP820 as digit strings P22187-P22192 (PTT) and P22203-P22207 (group), with its own codec numbers (0 G.711, 1 G.722). The WP8xx template has no PTT keys although its handset has PTT (WP8xx User Guide, "PTT (Push-to-talk) functionality"): the WP8x6 keys are written to it unverified. A WP always gets PTT (its PTT key otherwise reads "not configured"): channel 1 on the catalog's PTT channel unless its group says otherwise. All unverified on a phone (verify). */}}
+{{- $wp := .Phone.WP}}
+{{- if or (eq $wp "WP8x6") (eq $wp "WP856") (eq $wp "WP820")}}
     <P26072>1</P26072>
     <P26071>0</P26071>
+{{- end}}
+{{- with .Paging}}
+    <P26019>{{.IntercomBarge}}</P26019>
 {{- end}}
 {{- with .Multicast}}
     <P22208>1</P22208>
@@ -69,16 +97,43 @@
     <P{{.Param}}>{{xml .HostPort}}</P{{.Param}}>
     <P{{add .Param 1}}>{{xml .Label}}</P{{add .Param 1}}>
 {{- end}}
+{{- with $.Paging}}
+    <P1566>{{.Barge}}</P1566>
+    <P1567>{{.PriorityActive}}</P1567>
+{{- if or (eq $wp "WP8x6") (eq $wp "WP8xx")}}
+    <P8381>{{.AllowInDND}}</P8381>
 {{- end}}
-{{- if or .PTT (and .Multicast .Multicast.PagingKey)}}
+{{- if eq $wp "WP8x6"}}
+    <P22532>{{.Timeout}}</P22532>
+{{- end}}
+{{- end}}
+{{- end}}
+{{- if or (and .PTT (or .PTT.Enabled .PTT.GroupPaging)) (and .Multicast .Multicast.PagingKey)}}
+{{- if eq $wp "WP8x6"}}
     <P22556>1</P22556>
+{{- end}}
+{{- if or (eq $wp "WP8x6") (eq $wp "WP856")}}
     <P82317>0</P82317>
 {{- end}}
+{{- end}}
 {{- with .PTT}}
-    <P22177>1</P22177>
+{{- if or .Enabled .GroupPaging}}
     <P22183>{{xml .Address}}</P22183>
+{{- end}}
+{{- if .Enabled}}
+    <P22177>1</P22177>
     <P22184>{{.DefaultChannel}}</P22184>
+    <P22185>{{.PriorityChannel}}</P22185>
+    <P22186>{{.EmergencyChannel}}</P22186>
     <P22179>{{.AcceptBusy}}</P22179>
+{{- if eq $wp "WP820"}}
+    <P22180>{{.CodecWP820}}</P22180>
+    <P22187>{{.ChannelMasks.Available}}</P22187>
+    <P22188>{{.ChannelMasks.Available}}</P22188>
+    <P22189>{{.ChannelMasks.Transmit}}</P22189>
+    <P22190>{{.ChannelMasks.Subscribe}}</P22190>
+    <P22192>{{xml .ChannelMasks.Labels}}</P22192>
+{{- else}}
     <P22180>{{.CodecGS}}</P22180>
 {{- range .Channels}}
     <P{{.Base}}>{{.Available}}</P{{.Base}}>
@@ -88,23 +143,61 @@
     <P{{add .Base 4}}>{{xml .Label}}</P{{add .Base 4}}>
 {{- end}}
 {{- end}}
+{{- else}}
+    <P22177>0</P22177>
+{{- end}}
+{{- if .GroupPaging}}
+    <P22194>1</P22194>
+    <P22199>{{.DefaultGroup}}</P22199>
+    <P22200>{{.PriorityGroup}}</P22200>
+    <P22201>{{.EmergencyGroup}}</P22201>
+    <P22196>{{.AcceptBusy}}</P22196>
+{{- if eq $wp "WP820"}}
+    <P22197>{{.CodecWP820}}</P22197>
+    <P22203>{{.GroupMasks.Available}}</P22203>
+    <P22204>{{.GroupMasks.Available}}</P22204>
+    <P22205>{{.GroupMasks.Transmit}}</P22205>
+    <P22206>{{.GroupMasks.Subscribe}}</P22206>
+    <P22207>{{xml .GroupMasks.Labels}}</P22207>
+{{- else}}
+    <P22197>{{.CodecGS}}</P22197>
+{{- range .Groups}}
+    <P{{.Base}}>{{.Available}}</P{{.Base}}>
+    <P{{add .Base 1}}>{{.Transmit}}</P{{add .Base 1}}>
+    <P{{add .Base 2}}>{{.Subscribe}}</P{{add .Base 2}}>
+    <P{{add .Base 3}}>{{.Available}}</P{{add .Base 3}}>
+    <P{{add .Base 4}}>{{xml .Label}}</P{{add .Base 4}}>
+{{- end}}
+{{- end}}
+{{- else}}
+    <P22194>0</P22194>
+{{- end}}
+{{- end}}
     <P2>{{xml .Phone.AdminPassword}}</P2>
     <P212>{{urlvia .Prov.URL}}</P212>
-{{- with .Prov.CACertPEM}}
-    <P8433>{{xml .}}</P8433>
+{{- /* P8433 (PRV-04) is defined only in the WP8x6 template; the WP856 and WP8xx templates load CAs through the web UI. */}}
+{{- if and .Prov.CACertPEM (ne .Phone.Family "856") (ne .Phone.Family "8xx")}}
+    <P8433>{{xml .Prov.CACertPEM}}</P8433>
 {{- end}}
     <P237>{{xml (noscheme .Prov.URL)}}</P237>
     <P145>0</P145>
+{{- /* Automatic upgrade (PRV-06): P194 on the WP8x6 and WP8xx, P22296 on the WP856. */}}
+{{- if eq .Phone.Family "856"}}
+    <P22296>1</P22296>
+{{- else}}
     <P194>1</P194>
+{{- end}}
     <P193>{{div .Prov.ResyncSeconds 60}}</P193>
-{{- /* Check-sync (spec S-5): P95030 = 0 so a plain check-sync re-provisions without a reboot (WP8x6 fw 1.0.3.20 and later) [R8x6 section 1]; P4428 = 1 authenticates the NOTIFY, which hello-sip answers from the device's HA1. */}}
+{{- /* Check-sync (spec S-5): P95030 = 0 so a plain check-sync re-provisions without a reboot (WP8x6 fw 1.0.3.20 and later) [R8x6 section 1]; P4428 = 0 authenticates the NOTIFY (ACC-16: the WP8x6 and WP856 templates say "Enable SIP NOTIFY Authentication. 0 - Yes, 1 - No" and the WP8xx one "Disable SIP NOTIFY Authentication. 0 - No, 1 - Yes"; 0 challenges in all three), which hello-sip answers from the device's HA1. */}}
     <P95030>0</P95030>
-    <P4428>1</P4428>
+    <P4428>0</P4428>
 {{- with .Book}}
     <P330>3</P330>
     <P331>{{xml .HostPath}}</P331>
     <P332>{{.RefreshMinutes}}</P332>
+{{- if ne $.Phone.Family "856"}}
     <P333>1</P333>
+{{- end}}
 {{- end}}
     <P30>{{xml .Time.NTP}}</P30>
 {{- with .Time.TZ.POSIX}}

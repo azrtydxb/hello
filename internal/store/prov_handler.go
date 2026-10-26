@@ -208,6 +208,7 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	d.Phone.MACUpper = strings.ToUpper(d.Phone.MAC)
 	d.Phone.PTTCapable = prov.SupportsPTT(d.Phone.Vendor, d.Phone.Model)
 	d.Codecs = prov.NewCodecInfo(d.Phone.Vendor, d.Phone.Model)
+	d.Phone.WP = prov.WPFamily(d.Phone.Vendor, d.Phone.Model)
 	token, err := s.openToken(phoneID, tokenEnc)
 	if err != nil {
 		return d, prov.Template{}, err
@@ -219,8 +220,20 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 		return d, prov.Template{}, prov.ErrSealed
 	}
 	d.Line.AuthName, d.Line.Domain = d.Line.Username, s.prov.Domain
-	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(min(code), '') FROM feature_codes WHERE action = 'voicemail' AND argument = ''`).
-		Scan(&d.Line.VoicemailCode); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT
+		COALESCE(min(code) FILTER (WHERE action = 'voicemail' AND argument = ''), ''),
+		COALESCE(min(code) FILTER (WHERE action = 'park'), ''),
+		COALESCE(min(code) FILTER (WHERE action = 'park_retrieve'), ''),
+		COALESCE(min(code) FILTER (WHERE action = 'pickup_group'), ''),
+		COALESCE(min(code) FILTER (WHERE action = 'pickup_directed'), '')
+		FROM feature_codes`).
+		Scan(&d.Line.VoicemailCode, &d.Line.ParkCode, &d.Line.ParkRetrieveCode, &d.Line.PickupGroupCode, &d.Line.PickupDirectedCode); err != nil {
+		return d, prov.Template{}, err
+	}
+	if d.Emergency, err = s.emergencyNumbers(ctx); err != nil {
+		return d, prov.Template{}, err
+	}
+	if d.Codes, err = s.featureCodes(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
 	host, port := splitHostPort(s.prov.SIPServer)
@@ -230,7 +243,7 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Book, err = s.bookInfo(ctx, phoneID, token); err != nil {
 		return d, prov.Template{}, err
 	}
-	if d.Multicast, d.PTT, err = s.multicastInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
+	if d.Multicast, d.PTT, d.Paging, err = s.multicastInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
 		return d, prov.Template{}, err
 	}
 	if d.BLF, err = s.blfKeys(ctx, blfJSON); err != nil {
@@ -259,6 +272,27 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	return d, t, nil
 }
 
+// emergencyNumbers lists the numbers of the enabled emergency-flagged
+// outbound routes that match by prefix and are plain dial strings, comma
+// separated: the phone dials these without the usual dial-plan delay. A
+// regex route has no fixed number to hand the phone and is skipped.
+func (s *Store) emergencyNumbers(ctx context.Context) (string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT match FROM outbound_routes WHERE emergency AND enabled AND match_kind = 'prefix' ORDER BY position, id`)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	var nums []string
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return "", err
+		}
+		nums = prov.AddEmergencyNumber(nums, m)
+	}
+	return strings.Join(nums, ","), rows.Err()
+}
+
 // nullStr scans a nullable text column into s ("" for NULL).
 func nullStr(s *string) any { return &nullString{s} }
 
@@ -271,6 +305,30 @@ func (n *nullString) Scan(v any) error {
 	}
 	*n.s = ns.String
 	return nil
+}
+
+// featureCodes reads the star codes a phone's own DND, forward and pickup
+// keys dial (Snom, Fanvil and Yealink's BLF pickup).
+func (s *Store) featureCodes(ctx context.Context) (prov.FeatureCodes, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT code, action, argument FROM feature_codes
+		WHERE action IN ('dnd_on', 'dnd_off', 'forward_always', 'forward_busy', 'forward_no_answer', 'pickup_directed')`)
+	if err != nil {
+		return prov.FeatureCodes{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	var all []prov.FeatureCodeRow
+	for rows.Next() {
+		var r prov.FeatureCodeRow
+		if err := rows.Scan(&r.Code, &r.Action, &r.Argument); err != nil {
+			return prov.FeatureCodes{}, err
+		}
+		all = append(all, r)
+	}
+	if err := rows.Err(); err != nil {
+		return prov.FeatureCodes{}, err
+	}
+	return prov.NewFeatureCodes(all), nil
 }
 
 func (s *Store) blfKeys(ctx context.Context, raw []byte) ([]prov.BLFKey, error) {

@@ -15,6 +15,7 @@ import (
 	"github.com/azrtydxb/hello/internal/ai"
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
@@ -38,11 +39,23 @@ type Store interface {
 	ConfigRevision(ctx context.Context) (int64, error)
 	Audit(ctx context.Context, actor, action, resource, resourceID string) error
 
-	UserByName(ctx context.Context, username string) (int64, string, error)
+	UserForLogin(ctx context.Context, username string) (store.Login, error)
+	UpgradePasswordHash(ctx context.Context, id int64, oldHash, newHash string) error
+	UserPasswordHash(ctx context.Context, id int64) (string, error)
+	ChangeOwnPassword(ctx context.Context, id int64, newHash string, keep []byte) error
+	UpdateProfile(ctx context.Context, actor string, id int64, c store.ProfileChange) (store.User, error)
 	CreateSession(ctx context.Context, userID int64, hash []byte, expires time.Time) error
 	DeleteSession(ctx context.Context, hash []byte) error
 
 	ListUsers(ctx context.Context) ([]store.User, error)
+	GetUser(ctx context.Context, id int64) (store.User, error)
+	CreateAccount(ctx context.Context, actor string, in store.NewAccount) (store.User, error)
+	UpdateAccount(ctx context.Context, actor string, id int64, c store.AccountChange) (store.User, error)
+	DeleteUser(ctx context.Context, actor string, id int64) error
+	UserExtensions(ctx context.Context, userID int64) ([]store.Extension, error)
+	UserExtension(ctx context.Context, userID, id int64) (store.Extension, error)
+	UserVoicemailMessage(ctx context.Context, userID, id int64) (store.VoicemailMessage, error)
+	UserCDRs(ctx context.Context, userID, before int64, limit int) ([]store.CDR, string, error)
 	SetUserRole(ctx context.Context, actor string, id int64, role auth.Role) (store.User, error)
 	SetUserExtension(ctx context.Context, actor string, id int64, extension *int64) (store.User, error)
 
@@ -81,7 +94,6 @@ type Store interface {
 	CreateIVRMenu(ctx context.Context, actor string, in store.IVRMenuInput, check store.Check) (store.IVRMenu, error)
 	UpdateIVRMenu(ctx context.Context, actor string, id int64, in store.IVRMenuInput, check store.Check) (store.IVRMenu, error)
 	DeleteIVRMenu(ctx context.Context, actor string, id int64, check store.Check) error
-	IVRMenuNameExists(ctx context.Context, name string) (bool, error)
 	ListSchedules(ctx context.Context) ([]store.Schedule, error)
 	GetSchedule(ctx context.Context, id int64) (store.Schedule, error)
 	CreateSchedule(ctx context.Context, actor string, in store.ScheduleInput, check store.Check) (store.Schedule, error)
@@ -100,7 +112,22 @@ type Store interface {
 	DeleteTimeCondition(ctx context.Context, actor string, id int64, check store.Check) error
 	SetTimeConditionOverride(ctx context.Context, actor string, id int64, mode string) (store.TimeCondition, error)
 	EvaluateTimeCondition(ctx context.Context, id int64, at time.Time, ignoreOverride bool) (store.TimeConditionEvaluation, error)
-	TimeConditionNameExists(ctx context.Context, name string) (bool, error)
+	ListParkLots(ctx context.Context) ([]store.ParkLot, error)
+	GetParkLot(ctx context.Context, id int64) (store.ParkLot, error)
+	CreateParkLot(ctx context.Context, actor string, in store.ParkLotInput, check store.Check) (store.ParkLot, error)
+	UpdateParkLot(ctx context.Context, actor string, id int64, in store.ParkLotInput, check store.Check) (store.ParkLot, error)
+	DeleteParkLot(ctx context.Context, actor string, id int64, check store.Check) error
+
+	ListPickupGroups(ctx context.Context) ([]store.PickupGroup, error)
+	GetPickupGroup(ctx context.Context, id int64) (store.PickupGroup, error)
+	CreatePickupGroup(ctx context.Context, actor string, in store.PickupGroupInput, check store.Check) (store.PickupGroup, error)
+	UpdatePickupGroup(ctx context.Context, actor string, id int64, in store.PickupGroupInput, check store.Check) (store.PickupGroup, error)
+	DeletePickupGroup(ctx context.Context, actor string, id int64, check store.Check) error
+	ListMulticastChannels(ctx context.Context) ([]phonebook.Channel, error)
+	GetMulticastChannel(ctx context.Context, id int64) (phonebook.Channel, error)
+	CreateMulticastChannel(ctx context.Context, actor string, in phonebook.ChannelInput) (phonebook.Channel, error)
+	UpdateMulticastChannel(ctx context.Context, actor string, id int64, in phonebook.ChannelInput) (phonebook.Channel, error)
+	DeleteMulticastChannel(ctx context.Context, actor string, id int64) error
 
 	ListFeatureCodes(ctx context.Context) ([]store.FeatureCode, error)
 	PutFeatureCodes(ctx context.Context, actor string, codes []store.FeatureCode, check store.Check) error
@@ -135,6 +162,12 @@ type Store interface {
 	PutTTSSettings(ctx context.Context, actor string, c store.TTSChange) (store.TTSSettings, error)
 	ClearTTSKey(ctx context.Context, actor string) (store.TTSSettings, error)
 	TTSKey(ctx context.Context) (string, error)
+
+	ListMOHClasses(ctx context.Context) ([]store.MOHClass, error)
+	GetMOHClass(ctx context.Context, id int64) (store.MOHClass, error)
+	CreateMOHClass(ctx context.Context, actor string, in store.MOHClassInput) (store.MOHClass, error)
+	UpdateMOHClass(ctx context.Context, actor string, id int64, in store.MOHClassInput) (store.MOHClass, error)
+	DeleteMOHClass(ctx context.Context, actor string, id int64) error
 
 	ListTrunks(ctx context.Context) ([]store.Trunk, error)
 	GetTrunk(ctx context.Context, id int64) (store.Trunk, error)
@@ -189,6 +222,8 @@ type Config struct {
 	// 503. PageTestWait bounds the wait for the result (0 means 20 s).
 	PageTests    PageTester
 	PageTestWait time.Duration
+	// Parked is the live view of the occupied park slots; nil answers 503.
+	Parked ParkedLive
 	// Objects is the voicemail audio store; nil makes the audio routes and
 	// greeting uploads answer 503 instead of touching MinIO.
 	Objects Objects
@@ -204,6 +239,10 @@ type Config struct {
 	// DefaultTimeZone is the zone a new schedule gets when the request names
 	// none: the phones time zone setting (HELLO_PROV_TIMEZONE).
 	DefaultTimeZone string
+	// SMTPEnv is the deployment's SMTP_* settings, used while no settings
+	// are saved in the console; SMTPDeliver replaces the SMTP send in tests.
+	SMTPEnv     mailer.Settings
+	SMTPDeliver func(ctx context.Context, s mailer.Settings, to string, msg []byte) error
 	// ProvStore is the phone provisioning persistence; nil answers 503 on
 	// the provisioning routes. Prov wires the rest of them.
 	ProvStore ProvStore
@@ -258,7 +297,7 @@ func Handler(c Config) http.Handler {
 	for _, rt := range s.routes() {
 		h := s.aiGuard(rt.Pattern, rt.H)
 		if !rt.Public {
-			h = authed(auth.Require(rt.Role, rt.Scope)(h))
+			h = authed(auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, h)))
 		}
 		mux.Handle(rt.Method+" "+rt.Pattern, h)
 	}
@@ -266,6 +305,22 @@ func Handler(c Config) http.Handler {
 	// cookie's SameSite=Strict does not cover same-site sibling origins.
 	// Clients without Sec-Fetch-Site/Origin headers (curl, SDKs) pass.
 	return wrapForTest(http.NewCrossOriginProtection().Handler(mux))
+}
+
+// passwordGate refuses every route but the few a user needs to choose their
+// new password while an admin-set one is still in force.
+func passwordGate(pattern string, next http.Handler) http.Handler {
+	switch pattern {
+	case "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/password":
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if actor(r).MustChangePassword {
+			writeError(w, http.StatusForbidden, "password_change_required", "choose a new password first")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // wrapForTest is the identity; the package tests replace it from TestMain

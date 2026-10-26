@@ -13,11 +13,38 @@ export interface VersionInfo {
   configRevision: number;
 }
 
+/** What happens to a voicemail message once it was emailed. */
+export type VoicemailEmailAfter = "none" | "mark_read" | "delete";
+
+/** A user's voicemail-to-email options. */
+export interface VoicemailEmailPrefs {
+  notify: boolean;
+  attach: boolean;
+  after: VoicemailEmailAfter;
+}
+
+/** An extension as the signed-in user's profile lists it. */
+export interface MeExtension {
+  id: Id;
+  number: string;
+  name: string;
+}
+
 /** GET /api/v1/auth/me */
 export interface Me {
   username: string;
   /** The caller's role (spec S-23); read fresh on every request. */
-  role: "viewer" | "operator" | "admin";
+  role: "user" | "viewer" | "operator" | "admin";
+  displayName?: string;
+  email?: string;
+  authMethod?: string;
+  /** An administrator set the password: nothing else works until it is changed. */
+  mustChangePassword?: boolean;
+  /** The extensions the user manages. */
+  extensions?: MeExtension[];
+  voicemailEmail?: VoicemailEmailPrefs;
+  /** Whether the system can send email at all. */
+  emailDelivery?: boolean;
 }
 
 /** An API token as listed; the token itself is never returned. */
@@ -68,6 +95,8 @@ export interface Extension {
   callWaiting?: boolean;
   /** The extension's voicemail box, when it has one. */
   voicemailBoxId?: Id | null;
+  /** Music on hold class callers hear while this extension holds them; null = the default. */
+  mohClassId?: Id | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -336,6 +365,10 @@ export interface InboundRouteFields {
     | "time_condition";
   destination: string;
   enabled: boolean;
+  /** Music on hold class of the calls this route delivers; null = the default. */
+  mohClassId?: Id | null;
+  /** Play the class to the caller instead of ringback while the destination rings. */
+  mohRingback?: boolean;
 }
 
 /** An inbound route as stored, with its match-order position. */
@@ -675,6 +708,8 @@ export const updateExtension = (
     directoryHidden?: boolean;
     allowIntercom?: boolean;
     callWaiting?: boolean;
+    /** null clears the pick (the global default plays). */
+    mohClassId?: Id | null;
   },
 ) =>
   request<Extension>("PATCH", `/api/v1/extensions/${id(extensionId)}`, {
@@ -925,7 +960,7 @@ export interface VoicemailMessage {
   caller: string;
   durationMs: number;
   heard: boolean;
-  /** pending | sent | failed, when the server reports it. */
+  /** pending | queued | sent | failed | skipped, when the server reports it. */
   emailStatus?: string;
   createdAt: string;
 }
@@ -1031,12 +1066,7 @@ export const RING_STRATEGY_LABEL: Record<RingStrategy, string> = {
 
 /** Where a call goes when every member missed it. */
 export type FailureKind =
-  | "none"
-  | "voicemail"
-  | "external"
-  | "announcement"
-  | "ivr"
-  | "time_condition";
+  "none" | "voicemail" | "external" | "announcement" | "ivr" | "time_condition";
 
 export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   none: "Hang up",
@@ -1077,6 +1107,10 @@ export interface RingGroupFields {
   /** Voicemail box (extension number) or external number; "" for none. */
   failureTarget: string;
   members: RingGroupMember[];
+  /** Music on hold class of calls to the group; null = the default. */
+  mohClassId?: Id | null;
+  /** Play the class to the caller instead of ringback while the group rings. */
+  mohRingback?: boolean;
 }
 
 /** A ring group as returned. */
@@ -1126,7 +1160,7 @@ export interface PagingGroupFields {
   members: Id[];
   /** Extension ids allowed to page; empty means any internal extension. */
   callers: Id[];
-  /** A phone group's multicast channel to page as well; omit for none. */
+  /** A catalog paging channel to page as well; omit for none. */
   multicastChannelId?: Id | null;
 }
 
@@ -1143,12 +1177,11 @@ export interface PagingGroup {
   /** The multicast channel the page also goes to. */
   multicastChannel?: {
     id: Id;
-    groupId: Id;
-    groupName: string;
     label: string;
     address: string;
     port: number;
     codec: string;
+    enabled: boolean;
   } | null;
   createdAt: string;
   updatedAt: string;
@@ -1268,6 +1301,28 @@ export interface IvrMenu extends IvrMenuFields {
   updatedAt: string;
 }
 
+// --- call park and call pickup -------------------------------------------------
+
+/** The writable fields of a park lot (PUT replaces the whole lot). */
+export interface ParkLotFields {
+  name: string;
+  /** The first and last slot number; at most 100 slots. */
+  slotStart: number;
+  slotEnd: number;
+  /** Seconds before an unretrieved call rings its parker again. */
+  returnSecs: number;
+  /** Seconds the parker then rings before the call goes to voicemail. */
+  voicemailSecs: number;
+  enabled: boolean;
+}
+
+/** A park lot as returned. */
+export interface ParkLot extends ParkLotFields {
+  id: Id;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const listIvrMenus = (signal?: AbortSignal) =>
   list<IvrMenu>("/api/v1/ivr-menus", signal);
 
@@ -1279,6 +1334,69 @@ export const putIvrMenu = (menuId: Id, input: IvrMenuFields) =>
 
 export const deleteIvrMenu = (menuId: Id) =>
   request<void>("DELETE", `/api/v1/ivr-menus/${id(menuId)}`);
+
+export const listParkLots = (signal?: AbortSignal) =>
+  list<ParkLot>("/api/v1/park-lots", signal);
+
+export const createParkLot = (input: ParkLotFields) =>
+  request<ParkLot>("POST", "/api/v1/park-lots", { body: input });
+
+export const putParkLot = (lotId: Id, input: ParkLotFields) =>
+  request<ParkLot>("PUT", `/api/v1/park-lots/${id(lotId)}`, { body: input });
+
+export const deleteParkLot = (lotId: Id) =>
+  request<void>("DELETE", `/api/v1/park-lots/${id(lotId)}`);
+
+/** One call parked right now (GET /api/v1/parked-calls). */
+export interface ParkedCall {
+  slot: string;
+  lot: string;
+  node: string;
+  callId: string;
+  correlationId: string;
+  /** The extension that parked the call. */
+  parkedBy: string;
+  /** The parked party's number and name. */
+  caller: string;
+  callerName: string;
+  parkedAt: string;
+  /** When the call rings its parker again. */
+  returnAt: string;
+  phase: "parked" | "returning";
+}
+
+export const listParkedCalls = (signal?: AbortSignal) =>
+  list<ParkedCall>("/api/v1/parked-calls", signal);
+
+/** The writable fields of a pickup group (PUT replaces the whole group). */
+export interface PickupGroupFields {
+  name: string;
+  /** Extension ids. */
+  members: Id[];
+}
+
+/** A pickup group as returned. */
+export interface PickupGroup {
+  id: Id;
+  name: string;
+  members: PagingExtension[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listPickupGroups = (signal?: AbortSignal) =>
+  list<PickupGroup>("/api/v1/pickup-groups", signal);
+
+export const createPickupGroup = (input: PickupGroupFields) =>
+  request<PickupGroup>("POST", "/api/v1/pickup-groups", { body: input });
+
+export const putPickupGroup = (groupId: Id, input: PickupGroupFields) =>
+  request<PickupGroup>("PUT", `/api/v1/pickup-groups/${id(groupId)}`, {
+    body: input,
+  });
+
+export const deletePickupGroup = (groupId: Id) =>
+  request<void>("DELETE", `/api/v1/pickup-groups/${id(groupId)}`);
 
 // --- feature codes and presence -------------------------------------------------
 
@@ -1306,13 +1424,17 @@ export const FEATURE_CODE_ACTIONS = [
   "voicemail",
   "blind_transfer",
   "attended_transfer",
-  "ivr",
-  "time_condition",
-  "tc_override",
   "announcement",
   "intercom",
+  "ivr",
   "call_waiting_on",
   "call_waiting_off",
+  "park",
+  "park_retrieve",
+  "pickup_group",
+  "pickup_directed",
+  "time_condition",
+  "tc_override",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
@@ -1330,9 +1452,13 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   attended_transfer: "Attended transfer",
   announcement: "Play announcement",
   intercom: "Intercom (auto-answer)",
+  ivr: "IVR menu",
   call_waiting_on: "Call waiting on",
   call_waiting_off: "Call waiting off",
-  ivr: "Run an IVR menu",
+  park: "Park the call",
+  park_retrieve: "Retrieve a parked call",
+  pickup_group: "Pick up a call in your group",
+  pickup_directed: "Pick up an extension's call",
   time_condition: "Route to a time condition",
   tc_override: "Day/night toggle (code plus toggle number)",
 };
@@ -1437,7 +1563,7 @@ export const listAnnouncements = (signal?: AbortSignal) =>
   list<Announcement>("/api/v1/announcements", signal);
 
 /** The largest announcement WAV the server accepts (spec S-5). */
-export const MAX_ANNOUNCEMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_ANNOUNCEMENT_BYTES = 64 * 1024 * 1024;
 
 /**
  * POST /api/v1/announcements: multipart with `name` and `file` (WAV) parts.
@@ -1458,6 +1584,55 @@ export function uploadAnnouncement(
 /** DELETE /api/v1/announcements/{id}. */
 export const deleteAnnouncement = (announcementId: Id) =>
   request<void>("DELETE", `/api/v1/announcements/${id(announcementId)}`);
+
+// --- music on hold ------------------------------------------------------------
+
+export type MOHMode = "loop" | "shuffle";
+
+/** One announcement in a class's playlist. */
+export interface MOHTrack {
+  announcementId: Id;
+  name: string;
+}
+
+/** The writable fields of a music on hold class (PUT replaces the class). */
+export interface MOHClassFields {
+  name: string;
+  mode: MOHMode;
+  /** The global default: what plays when no extension, group or route picks. */
+  isDefault: boolean;
+  /** Announcement ids in play order; empty plays the built-in tone. */
+  announcementIds: Id[];
+}
+
+/** A music on hold class as returned. */
+export interface MOHClass {
+  id: Id;
+  name: string;
+  mode: MOHMode;
+  isDefault: boolean;
+  tracks: MOHTrack[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /api/v1/moh-classes. */
+export const listMOHClasses = (signal?: AbortSignal) =>
+  list<MOHClass>("/api/v1/moh-classes", signal);
+
+/** POST /api/v1/moh-classes. */
+export const createMOHClass = (input: MOHClassFields) =>
+  request<MOHClass>("POST", "/api/v1/moh-classes", { body: input });
+
+/** PUT /api/v1/moh-classes/{id}. */
+export const putMOHClass = (classId: Id, input: MOHClassFields) =>
+  request<MOHClass>("PUT", `/api/v1/moh-classes/${id(classId)}`, {
+    body: input,
+  });
+
+/** DELETE /api/v1/moh-classes/{id}. */
+export const deleteMOHClass = (classId: Id) =>
+  request<void>("DELETE", `/api/v1/moh-classes/${id(classId)}`);
 
 /** A human-readable message for any thrown value. */
 export function errorMessage(err: unknown): string {

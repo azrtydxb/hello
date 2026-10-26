@@ -403,8 +403,8 @@ func (s *Store) PruneSessions(ctx context.Context) (int64, error) {
 func (s *Store) SessionActor(ctx context.Context, hash []byte) (auth.Actor, error) {
 	var a auth.Actor
 	err := s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.token_hash = $1 AND s.expires_at > now()`, hash).Scan(&a.UserID, &a.Username, &a.Role)
+		SELECT u.id, u.username, u.role, u.must_change_password FROM sessions s JOIN users u ON u.id = s.user_id
+		WHERE s.token_hash = $1 AND s.expires_at > now() AND u.enabled`, hash).Scan(&a.UserID, &a.Username, &a.Role, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
 	}
@@ -414,7 +414,8 @@ func (s *Store) SessionActor(ctx context.Context, hash []byte) (auth.Actor, erro
 // UserActor implements auth.Lookup for the in-product agent.
 func (s *Store) UserActor(ctx context.Context, id int64) (auth.Actor, error) {
 	a := auth.Actor{UserID: id}
-	err := s.db.QueryRowContext(ctx, `SELECT username, role FROM users WHERE id = $1`, id).Scan(&a.Username, &a.Role)
+	err := s.db.QueryRowContext(ctx, `SELECT username, role, must_change_password FROM users WHERE id = $1 AND enabled`, id).
+		Scan(&a.Username, &a.Role, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
 	}
@@ -432,22 +433,24 @@ func (s *Store) UserActor(ctx context.Context, id int64) (auth.Actor, error) {
 const tokenActorSQL = `
 WITH pat AS (
 	UPDATE api_tokens t SET last_used_at = now() FROM users u
-	WHERE t.token_hash = $1 AND u.id = t.user_id AND t.revoked_at IS NULL
+	WHERE t.token_hash = $1 AND u.id = t.user_id AND u.enabled AND t.revoked_at IS NULL
 	  AND (t.expires_at IS NULL OR t.expires_at > now())
 	RETURNING t.id, u.id AS uid, u.username, u.role, t.kind, to_json(t.scopes)::text AS scopes,
-		''::text AS client_id, '[]'::text AS resources, ''::text AS service
+		''::text AS client_id, '[]'::text AS resources, ''::text AS service, NULL::text AS extension_scope, u.must_change_password AS must_change
 ), oat AS (
 	SELECT 0::bigint AS id, coalesce(u.id, 0) AS uid, coalesce(u.username, '') AS username,
 		coalesce(u.role, c.role) AS role, CASE WHEN c.kind = 'service' THEN 'service' ELSE 'oauth' END AS kind,
 		to_json(o.scopes)::text AS scopes, o.client_id, to_json(o.resources)::text AS resources,
-		CASE WHEN c.kind = 'service' THEN c.name ELSE '' END AS service
+		CASE WHEN c.kind = 'service' THEN c.name ELSE '' END AS service,
+		CASE WHEN c.kind = 'service' THEN to_json(c.extension_scope)::text END AS extension_scope,
+		coalesce(u.must_change_password, false) AS must_change
 	FROM oauth_tokens o
 	JOIN oauth_clients c ON c.client_id = o.client_id
 	LEFT JOIN users u ON u.id = o.user_id
 	LEFT JOIN oauth_grants g ON g.id = o.grant_id
 	WHERE o.hash = $1 AND o.kind = 'access' AND o.revoked_at IS NULL AND o.expires_at > now()
 	  AND (o.grant_id IS NULL OR g.revoked_at IS NULL)
-	  AND (c.kind <> 'service' OR c.enabled)
+	  AND (c.kind <> 'service' OR c.enabled) AND (o.user_id IS NULL OR u.enabled)
 ), touch AS (
 	UPDATE oauth_grants g SET last_used_at = now() FROM oauth_tokens o
 	WHERE o.hash = $1 AND o.kind = 'access' AND g.id = o.grant_id
@@ -460,9 +463,10 @@ func (s *Store) TokenActor(ctx context.Context, hash []byte) (auth.Actor, error)
 		a                 auth.Actor
 		kind              string
 		scopes, resources sql.NullString
+		extScope          sql.NullString
 	)
 	err := s.db.QueryRowContext(ctx, tokenActorSQL, hash).Scan(&a.TokenID, &a.UserID, &a.Username, &a.Role,
-		&kind, &scopes, &a.ClientID, &resources, &a.ServiceName)
+		&kind, &scopes, &a.ClientID, &resources, &a.ServiceName, &extScope, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
 	}
@@ -485,6 +489,11 @@ func (s *Store) TokenActor(ctx context.Context, hash []byte) (auth.Actor, error)
 	}
 	if resources.Valid {
 		if err := json.Unmarshal([]byte(resources.String), &a.Audience); err != nil {
+			return a, err
+		}
+	}
+	if extScope.Valid && extScope.String != "null" {
+		if err := json.Unmarshal([]byte(extScope.String), &a.ExtensionScope); err != nil {
 			return a, err
 		}
 	}

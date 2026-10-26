@@ -46,9 +46,9 @@ func ivrPBX(t *testing.T, greetSeconds int, menus ...snapshot.IVRMenu) (*testPBX
 	return pbx, objs
 }
 
-// countRTP points the phone's media at a fresh port and counts the
+// countPhoneRTP points the phone's media at a fresh port and counts the
 // datagrams the PBX sends there (set before the phone dials).
-func countRTP(t *testing.T, p *phone) *atomic.Int64 {
+func countPhoneRTP(t *testing.T, p *phone) *atomic.Int64 {
 	t.Helper()
 	conn := rtpSocket(t, p)
 	var n atomic.Int64
@@ -119,6 +119,9 @@ func TestIVRDigitToExtension(t *testing.T) {
 		}
 		return false
 	})
+	eventually(t, "the menu connected the call", func() bool {
+		return pbx.metric(t, "hello_ivr_total", map[string]string{"event": "connected"}) == 1
+	})
 	if err := r.dcs.Bye(t.Context()); err != nil {
 		t.Fatalf("caller BYE: %v", err)
 	}
@@ -141,7 +144,7 @@ func TestIVRBargeIn(t *testing.T) {
 	pbx, _ := ivrPBX(t, 5, ivrMenu("main", "800", map[string]snapshot.IVRDest{"1": ext("300")}))
 	a, _, c := registerABC(t, pbx)
 	c.setCallee(answerAfter(nil))
-	frames := countRTP(t, a)
+	frames := countPhoneRTP(t, a)
 	r := waitCall(t, dial(t.Context(), a, "800"))
 	if r.err != nil {
 		t.Fatal(r.err)
@@ -350,7 +353,7 @@ func TestIVRCallerHangsUpInMenu(t *testing.T) {
 	}
 	rec := lastCDRFor(t, pbx, "800")
 	if rec.TerminationSide != cdr.SideCaller {
-		t.Fatalf("side %q", rec.TerminationSide)
+		t.Fatalf("side %q status %d trace:\n%s", rec.TerminationSide, rec.FinalStatus, traceText(rec.Trace))
 	}
 	eventually(t, "no live calls", func() bool { return len(liveCalls(t, pbx)) == 0 })
 }
@@ -512,6 +515,9 @@ func TestIVRInboundRoute(t *testing.T) {
 	var seq = dcs.InviteRequest.CSeq().SeqNo + 10
 	sendDigits(t, from, dcs, "1", &seq)
 	waitReq(t, callee.invites, "INVITE to the option's extension")
+	eventually(t, "the menu connected the call", func() bool {
+		return pbx.metric(t, "hello_ivr_total", map[string]string{"event": "connected"}) == 1
+	})
 	hangup(t, dcs)
 	cd := pbx.nextCDR(t)
 	if cd.Direction != "inbound" || cd.Route != "Main DID" || cd.RewrittenDestination != "100" {

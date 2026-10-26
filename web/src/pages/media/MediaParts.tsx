@@ -151,7 +151,8 @@ export function WavDrop({
         <span className="media-drop__lead">Drop a WAV file</span> or browse
       </label>
       <span id={hintId} className="media-drop__hint">
-        8 kHz mono PCM plays without conversion
+        WAV, PCM or float, mono or stereo (stereo is mixed to mono); stored at
+        up to 48 kHz
       </span>
       {file && <span className="media-drop__file">{file.name}</span>}
       <input
@@ -179,6 +180,6 @@ export function WavDrop({
 export function checkWav(file: File | null, maxBytes: number): string | null {
   if (!file) return "Choose a WAV file.";
   if (file.size === 0) return "The file is empty.";
-  if (file.size > maxBytes) return "The file is larger than 10 MB.";
+  if (file.size > maxBytes) return "The file is larger than 64 MB.";
   return null;
 }

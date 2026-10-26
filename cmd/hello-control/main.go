@@ -132,7 +132,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_PROV_ADDR: %w", err)
 	}
-	go runMailer(ctx, cfg, st, objs, log)
+	go runMailer(ctx, envSMTP(cfg), st, objs, log)
 
 	// External AI access (spec ai-external-access): the OAuth
 	// authorization server and /mcp, only with HELLO_PUBLIC_URL.
@@ -164,10 +164,12 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Cluster:         vk,
 		Valkey:          vk,
 		PageTests:       vk,
+		Parked:          vk,
 		Objects:         objs,
 		Diagnostics:     vk,
 		AuthFailLimit:   cfg.AuthFailLimit,
 		EmailDelivery:   cfg.SmtpHost != "",
+		SMTPEnv:         envSMTP(cfg),
 		DefaultTimeZone: cfg.Prov.Timezone,
 		ProvStore:       st,
 		Phonebooks:      st,
@@ -304,42 +306,68 @@ func ensureBuckets(ctx context.Context, objs *api.MinioObjects, log *slog.Logger
 	}
 }
 
-// runMailer starts the voicemail email queue worker. Without SMTP_HOST the
-// worker is disabled: it logs and returns (spec S-8).
-func runMailer(ctx context.Context, cfg config.Control, st *store.Store, objs *api.MinioObjects, log *slog.Logger) {
+// envSMTP is the SMTP_* environment as mailer settings: used while no
+// settings are saved in the console. It keeps the transport behaviour
+// deployments had before the console settings: STARTTLS when the server
+// offers it (implicit TLS on port 465), clear text otherwise.
+func envSMTP(cfg config.Control) mailer.Settings {
 	if cfg.SmtpHost == "" {
-		log.Info("voicemail email delivery disabled (SMTP not configured)")
-		return
+		return mailer.Settings{}
 	}
+	sec := mailer.SecurityOpportunistic
+	if cfg.SmtpPort == 465 {
+		sec = mailer.SecurityTLS
+	}
+	return mailer.Settings{Host: cfg.SmtpHost, Port: cfg.SmtpPort, Security: sec,
+		Username: cfg.SmtpUser, Password: cfg.SmtpPass, From: cfg.SmtpFrom}
+}
+
+// runMailer starts the voicemail email worker. It runs on every node; the
+// database queue hands each notification to one of them, and the SMTP
+// settings are read on every pass, so saving them in the console takes
+// effect without a restart. Nothing on the SIP path waits for it.
+func runMailer(ctx context.Context, env mailer.Settings, st *store.Store, objs *api.MinioObjects, log *slog.Logger) {
 	mailer.New(mailer.Config{
-		From:    cfg.SmtpFrom,
 		Queue:   queue{st},
 		Objects: objs,
-		Sender:  mailer.NewSMTPSender(cfg.SmtpHost, cfg.SmtpPort, cfg.SmtpUser, cfg.SmtpPass),
-		Log:     log,
+		Settings: func(ctx context.Context) (mailer.Settings, bool, error) {
+			s, source, err := api.EffectiveSMTP(ctx, st, env)
+			if err != nil || source == api.SMTPNone {
+				return mailer.Settings{}, false, err
+			}
+			if verr := s.Validate(); verr != nil {
+				return mailer.Settings{}, false, nil // unusable settings: wait for a fix
+			}
+			return s, true, nil
+		},
+		Log: log,
 	}).Run(ctx)
 }
 
-// queue adapts the store's email jobs to the mailer's queue.
+// queue adapts the store's email queue to the mailer's.
 type queue struct{ st *store.Store }
 
-func (q queue) PendingEmails(ctx context.Context, limit int) ([]mailer.Job, error) {
-	js, err := q.st.PendingEmails(ctx, limit)
+func (q queue) FanOut(ctx context.Context, limit int) (int, error) {
+	return q.st.FanOutEmails(ctx, limit)
+}
+
+func (q queue) Claim(ctx context.Context, limit int, stale time.Duration) ([]mailer.Job, error) {
+	js, err := q.st.ClaimEmails(ctx, limit, stale)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]mailer.Job, len(js))
 	for i, j := range js {
 		out[i] = mailer.Job{
-			MessageID: j.MessageID, To: j.To, Caller: j.Caller,
-			DurationMs: j.DurationMs, CreatedAt: j.CreatedAt, Object: j.Object,
+			ID: j.ID, MessageID: j.MessageID, To: j.To, Caller: j.Caller, DurationMs: j.DurationMs,
+			CreatedAt: j.CreatedAt, Object: j.Object, Attach: j.Attach, Attempts: j.Attempts, Queued: j.QueuedSince,
 		}
 	}
 	return out, nil
 }
 
-func (q queue) MarkEmail(ctx context.Context, id int64, status string) error {
-	return q.st.MarkEmail(ctx, id, status)
+func (q queue) Finish(ctx context.Context, id int64, r mailer.Result) (string, error) {
+	return q.st.FinishEmail(ctx, id, store.EmailResult{Err: r.Err, Final: r.Final, RetryAt: r.RetryAt})
 }
 
 // bootstrap creates the first admin, retrying until the database is

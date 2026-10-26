@@ -116,7 +116,8 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 	switch event {
 	case eventDialog:
 		ext = req.Recipient.User
-		if !snap.HasExtension(ext) {
+		_, isSlot := snap.ParkLotOf(ext)
+		if !snap.HasExtension(ext) && !isSlot {
 			// A key on a day/night toggle code (*28<n>) is a BLF too.
 			if _, ok := tcToggleCode(snap, ext); !ok {
 				s.respond(tx, req, sip.StatusNotFound, "Not Found")
@@ -169,7 +170,10 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 		if e, ok := snap.Extension(ext); ok && e.DND {
 			init = StateDND
 		}
-		if t, ok := tcToggleCode(snap, ext); ok {
+		if _, slot := snap.ParkLotOf(ext); slot {
+			// A park slot's lamp shows occupancy (spec S-6).
+			init = slotState(s.slotOccupied(ext))
+		} else if t, ok := tcToggleCode(snap, ext); ok {
 			init = tcLampState(t)
 		}
 		go s.sendStateNotify(sub, init, int(exp/time.Second), "")

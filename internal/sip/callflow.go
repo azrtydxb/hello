@@ -221,6 +221,7 @@ func (c *call) forward(req *sip.Request, tx sip.ServerTransaction, snap *snapsho
 	})
 	c.trace = append(c.trace, dec.Trace...)
 	c.route, c.rewritten = dec.Route, dec.Number
+	c.noteMOHRoute(dec)
 	switch {
 	case dec.Kind == routing.KindOutbound:
 		c.direction = cdr.DirectionOutbound
@@ -251,8 +252,11 @@ func (c *call) forward(req *sip.Request, tx sip.ServerTransaction, snap *snapsho
 func (c *call) exhausted(busyAll bool) exhaustion {
 	s := c.s
 	c.mu.Lock()
-	st, groupFn := c.stages, c.groupFn
+	st, groupFn, picked := c.stages, c.groupFn, c.pickedUp
 	c.mu.Unlock()
+	if picked {
+		return exhRetry // a picker owns the call now; setup serves it next
+	}
 	if st == nil {
 		// A group call has no forwarding stages: its failure destination
 		// applies when the ring timeout or the last member gives up.

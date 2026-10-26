@@ -77,6 +77,25 @@ func (c *call) voicemailOwnBox(string) {
 	c.startVoicemail(vmRetrieve, "")
 }
 
+// voicemailTarget points the call at extension ext's voicemail box, for the
+// voicemail feature code dialled with an extension (*97<ext>, which is also
+// what a phone's transfer-to-voicemail key dials). It reports false when ext
+// is no extension of this PBX or its box cannot take a message here.
+func (c *call) voicemailTarget(ext string) bool {
+	snap := c.s.deps.Snapshots.Current()
+	if snap == nil {
+		return false
+	}
+	e, ok := snap.Extension(ext)
+	if !ok || !c.voicemailConfigured(e) {
+		return false
+	}
+	c.mu.Lock()
+	c.dialled = ext
+	c.mu.Unlock()
+	return true
+}
+
 // startVoicemail answers the caller through the media anchor and runs the
 // application in the media goroutine. reason is why the call is here
 // ("no-answer", "busy", "dnd", "unreachable" or "" for *97). The box id
@@ -150,6 +169,7 @@ func (s *Server) voicemailAnchor(offer []byte) *media.Anchor {
 // the voicemail media must not queue behind that.
 func (c *call) answerSelf(body []byte) bool {
 	s := c.s
+	c.stopRingMOH() // voicemail and announcements replace the waiting music
 	c.mu.Lock()
 	tx := c.invTx
 	c.mu.Unlock()
@@ -230,7 +250,11 @@ func (c *call) voicemailFlow(mode int, reason string, sess media.Session) {
 	done := c.hungUp || c.ended
 	c.mu.Unlock()
 	if !done {
-		c.hangup(cdr.SideCallee)
+		side := cdr.SideCallee
+		if c.isLinked() {
+			side = cdr.SideSystem // a parked call's party is on either side of the dialog
+		}
+		c.hangup(side)
 	}
 }
 

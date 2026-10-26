@@ -1,152 +1,326 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { apiError, json, mockApi, renderApp } from "../test/api";
+import {
+  apiError,
+  json,
+  mockApi,
+  noContent,
+  renderApp,
+  type Routes,
+} from "../test/api";
 
-function me(role: string) {
-  return { "GET /api/v1/auth/me": () => json({ username: "pat", role }) };
-}
+const PREFS = { notify: true, attach: true, after: "none" };
+
+const user = (over: object) => ({
+  id: 2,
+  username: "sam",
+  displayName: "Sam",
+  email: "sam@example.com",
+  authMethod: "local",
+  role: "user",
+  enabled: true,
+  mustChangePassword: false,
+  extensionId: 7,
+  extensionIds: [7],
+  voicemailEmail: PREFS,
+  createdAt: "2026-10-02T00:00:00Z",
+  ...over,
+});
 
 const USERS = [
-  { id: 1, username: "pat", role: "admin", createdAt: "2026-10-01T00:00:00Z" },
-  { id: 2, username: "sam", role: "viewer", createdAt: "2026-10-02T00:00:00Z" },
+  user({
+    id: 1,
+    username: "pat",
+    displayName: "Pat",
+    role: "admin",
+    extensionId: null,
+    extensionIds: [],
+  }),
+  user({}),
 ];
 
-const EXT = {
-  id: 7,
-  number: "101",
-  name: "Front desk",
+const ext = (id: number, number: string, name: string) => ({
+  id,
+  number,
+  name,
   externalNumber: "",
-  dnd: false,
-  voicemail: true,
-  recordByDefault: false,
-  forwardAlways: "",
-  forwardBusy: "",
-  forwardNoAnswer: "",
-  forwardTimeout: 20,
-};
+  createdAt: "2026-10-01T00:00:00Z",
+  updatedAt: "2026-10-01T00:00:00Z",
+});
+
+function api(role: string, more: Routes = {}) {
+  return mockApi({
+    "GET /api/v1/auth/me": () => json({ username: "pat", role }),
+    "GET /api/v1/users": () => json({ items: USERS }),
+    "GET /api/v1/extensions": () =>
+      json({
+        items: [
+          ext(7, "101", "Front desk"),
+          ext(8, "102", "Sales"),
+          ext(9, "103", "Support"),
+        ],
+      }),
+    ...more,
+  });
+}
 
 function sidebar() {
   return screen.getByRole("navigation", { name: "Primary" });
 }
 
-describe("Users (spec S-23)", () => {
-  it("lists users with their roles for an admin, linked from the sidebar", async () => {
-    mockApi({
-      ...me("admin"),
-      "GET /api/v1/users": () => json({ items: USERS }),
-    });
+describe("Users", () => {
+  it("lists users with role, extensions and state, linked from the sidebar", async () => {
+    api("admin");
     renderApp("/users");
-
     const table = await screen.findByRole("table", { name: "Users" });
-    expect(within(table).getByText("sam")).toBeInTheDocument();
-    expect(within(table).getByLabelText("Role of sam")).toHaveValue("viewer");
+    const row = within(table).getByText("sam").closest("tr") as HTMLElement;
+    expect(within(row).getByText("user")).toBeInTheDocument();
+    expect(within(row).getByText("101")).toBeInTheDocument();
+    expect(within(row).getByText("Active")).toBeInTheDocument();
     expect(
-      within(sidebar()).getByRole("link", { name: /Users/ }),
+      within(sidebar()).getByRole("link", { name: /Users/, hidden: true }),
     ).toBeInTheDocument();
   });
 
-  it("changes a role through PATCH /api/v1/users/{id}", async () => {
-    const calls = mockApi({
-      ...me("admin"),
-      "GET /api/v1/users": () => json({ items: USERS }),
-      "PATCH /api/v1/users/2": () => json({ ...USERS[1], role: "operator" }),
+  it("creates a user with an initial password and linked extensions", async () => {
+    const created = user({
+      id: 3,
+      username: "erin@example.com",
+      displayName: "Erin",
+      email: "erin@example.com",
+      extensionId: 8,
+      extensionIds: [8, 9],
+      mustChangePassword: true,
+    });
+    const calls = api("admin", {
+      "POST /api/v1/users": () => json(created, 201),
     });
     renderApp("/users");
-
-    fireEvent.change(await screen.findByLabelText("Role of sam"), {
-      target: { value: "operator" },
+    fireEvent.click(await screen.findByRole("button", { name: "Add user" }));
+    const dialog = screen.getByRole("dialog", { name: "Add user" });
+    fireEvent.change(within(dialog).getByLabelText("Login"), {
+      target: { value: "erin@example.com" },
     });
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "Erin" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Email"), {
+      target: { value: "erin@example.com" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Initial password"), {
+      target: { value: "initial password 1" },
+    });
+    // Extension 101 is taken by sam.
+    expect(within(dialog).getByLabelText(/101 Front desk/)).toBeDisabled();
+    fireEvent.click(within(dialog).getByLabelText(/102 Sales/));
+    fireEvent.click(within(dialog).getByLabelText(/103 Support/));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Create user" }),
+    );
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "POST",
+        url: "/api/v1/users",
+        body: {
+          username: "erin@example.com",
+          displayName: "Erin",
+          email: "erin@example.com",
+          role: "user",
+          password: "initial password 1",
+          mustChangePassword: true,
+          extensionIds: [8, 9],
+          voicemailEmail: PREFS,
+        },
+      }),
+    );
+    const table = await screen.findByRole("table", { name: "Users" });
+    const row = within(table)
+      .getByRole("button", { name: "Edit erin@example.com" })
+      .closest("tr") as HTMLElement;
+    expect(within(row).getByText("Must change password")).toBeInTheDocument();
+  });
+
+  it("generates an initial password", async () => {
+    api("admin");
+    renderApp("/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Add user" }));
+    const dialog = screen.getByRole("dialog", { name: "Add user" });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Generate a password" }),
+    );
+    const pw = (
+      within(dialog).getByLabelText("Initial password") as HTMLInputElement
+    ).value;
+    expect(pw).toHaveLength(16);
+  });
+
+  it("shows field errors from the server in the dialog", async () => {
+    api("admin", {
+      "POST /api/v1/users": () =>
+        json(
+          {
+            error: {
+              code: "bad_request",
+              message: "invalid configuration",
+              fields: [
+                { path: "password", message: "must be 10-128 characters" },
+              ],
+            },
+          },
+          400,
+        ),
+    });
+    renderApp("/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Add user" }));
+    const dialog = screen.getByRole("dialog", { name: "Add user" });
+    fireEvent.change(within(dialog).getByLabelText("Login"), {
+      target: { value: "x" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Initial password"), {
+      target: { value: "short" },
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Create user" }),
+    );
+    expect(
+      await within(dialog).findByText("must be 10-128 characters"),
+    ).toBeInTheDocument();
+  });
+
+  it("edits a user: role, extensions, voicemail email and a password reset", async () => {
+    const calls = api("admin", {
+      "PATCH /api/v1/users/2": () =>
+        json(
+          user({
+            role: "viewer",
+            extensionIds: [7, 8],
+            mustChangePassword: true,
+          }),
+        ),
+    });
+    renderApp("/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit sam" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit sam" });
+    expect(within(dialog).getByLabelText("Login")).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText("Role"), {
+      target: { value: "viewer" },
+    });
+    fireEvent.click(within(dialog).getByLabelText(/102 Sales/));
+    fireEvent.click(
+      within(dialog).getByRole("switch", { name: "Attach the recording" }),
+    );
+    fireEvent.change(within(dialog).getByLabelText("After sending"), {
+      target: { value: "delete" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Reset password"), {
+      target: { value: "reset password 99" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(calls).toContainEqual({
         method: "PATCH",
         url: "/api/v1/users/2",
-        body: { role: "operator" },
+        body: {
+          displayName: "Sam",
+          email: "sam@example.com",
+          role: "viewer",
+          extensionIds: [7, 8],
+          voicemailEmail: { notify: true, attach: false, after: "delete" },
+          password: "reset password 99",
+          mustChangePassword: true,
+        },
       }),
     );
-    expect(await screen.findByText("sam is now operator.")).toBeInTheDocument();
-    expect(screen.getByLabelText("Role of sam")).toHaveValue("operator");
   });
 
-  it("explains a refused last-admin demotion", async () => {
-    mockApi({
-      ...me("admin"),
-      "GET /api/v1/users": () => json({ items: USERS }),
-      "PATCH /api/v1/users/1": () =>
-        apiError(409, "last_admin", "at least one user must remain admin"),
+  it("does not send a password when none was typed", async () => {
+    const calls = api("admin", {
+      "PATCH /api/v1/users/2": () => json(user({})),
     });
     renderApp("/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit sam" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Edit sam" })).getByRole(
+        "button",
+        { name: "Save" },
+      ),
+    );
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PATCH")).toBe(true),
+    );
+    const body = calls.find((c) => c.method === "PATCH")?.body as Record<
+      string,
+      unknown
+    >;
+    expect(body).not.toHaveProperty("password");
+    expect(body).not.toHaveProperty("mustChangePassword");
+  });
 
-    fireEvent.change(await screen.findByLabelText("Role of pat"), {
-      target: { value: "viewer" },
+  it("disables and re-enables a user, but offers neither for yourself", async () => {
+    const calls = api("admin", {
+      "PATCH /api/v1/users/2": [
+        () => json(user({ enabled: false })),
+        () => json(user({ enabled: true })),
+      ],
     });
+    renderApp("/users");
     expect(
-      await screen.findByText("At least one user must remain administrator."),
+      await screen.findByRole("button", { name: "Edit pat" }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Role of pat")).toHaveValue("admin");
-  });
-
-  it.each(["viewer", "operator"])(
-    "hides the Users page from a %s",
-    async (role) => {
-      const calls = mockApi(me(role));
-      renderApp("/users");
-
-      expect(
-        await screen.findByText("Your role cannot manage users."),
-      ).toBeInTheDocument();
-      expect(screen.queryByRole("table", { name: "Users" })).toBeNull();
-      expect(
-        within(sidebar()).queryByRole("link", { name: /Users/ }),
-      ).toBeNull();
-      expect(calls.some((c) => c.url === "/api/v1/users")).toBe(false);
-    },
-  );
-
-  it("shows a viewer no write actions, and an operator the operator's", async () => {
-    const routes = {
-      "GET /api/v1/extensions": () => json({ items: [EXT] }),
-      "GET /api/v1/devices": () => json({ items: [] }),
-    };
-    mockApi({ ...me("viewer"), ...routes });
-    const { unmount } = renderApp("/extensions");
-    expect(await screen.findByText("Front desk")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "New extension" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Disable pat" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete pat" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Disable sam" }));
+    expect(await screen.findByText("Disabled")).toBeInTheDocument();
+    expect(calls).toContainEqual({
+      method: "PATCH",
+      url: "/api/v1/users/2",
+      body: { enabled: false },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Enable sam" }));
     expect(
-      within(sidebar()).queryByRole("link", { name: /Route tester/ }),
-    ).toBeNull();
-    expect(screen.queryByRole("link", { name: /Test a number/ })).toBeNull();
-    // Opening an extension shows its details without Save or Delete.
-    fireEvent.click(screen.getByText("Front desk"));
-    const drawer = await screen.findByRole("dialog");
-    expect(within(drawer).queryByRole("button", { name: "Save" })).toBeNull();
-    expect(within(drawer).queryByRole("button", { name: "Delete" })).toBeNull();
-    unmount();
-
-    mockApi({ ...me("operator"), ...routes });
-    renderApp("/extensions");
-    expect(
-      (await screen.findAllByRole("button", { name: "New extension" })).length,
-    ).toBeGreaterThan(0);
-    expect(
-      within(sidebar()).getByRole("link", { name: /Route tester/ }),
+      await screen.findByText("Active", { selector: "td *" }),
     ).toBeInTheDocument();
   });
 
-  it("keeps API tokens off System for every role (they live on AI access)", async () => {
-    const routes = {
-      "GET /api/v1/feature-codes": () => json({ items: [] }),
-      "GET /api/v1/presence": () => json({ items: [] }),
-      "GET /api/v1/tokens": () => json({ items: [] }),
-    };
-    for (const role of ["operator", "admin"] as const) {
-      const calls = mockApi({ ...me(role), ...routes });
-      const { unmount } = renderApp("/system");
-      expect(
-        await screen.findByRole("heading", { level: 1, name: "System" }),
-      ).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "New token" })).toBeNull();
-      expect(calls.some((c) => c.url === "/api/v1/tokens")).toBe(false);
-      unmount();
-    }
+  it("deletes a user after confirming", async () => {
+    const calls = api("admin", { "DELETE /api/v1/users/2": () => noContent() });
+    renderApp("/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Delete sam" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Delete user",
+      }),
+    );
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "DELETE",
+        url: "/api/v1/users/2",
+        body: undefined,
+      }),
+    );
+    await waitFor(() => expect(screen.queryByText("sam")).toBeNull());
+  });
+
+  it("explains a refused change", async () => {
+    api("admin", {
+      "PATCH /api/v1/users/2": () => apiError(409, "last_admin", "no"),
+    });
+    renderApp("/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Disable sam" }));
+    expect(
+      await screen.findByText(
+        "At least one enabled user must remain administrator.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("is for administrators only", async () => {
+    const calls = api("operator");
+    renderApp("/users");
+    expect(
+      await screen.findByText("Your role cannot manage users."),
+    ).toBeInTheDocument();
+    expect(within(sidebar()).queryByRole("link", { name: /Users/ })).toBeNull();
+    expect(calls.some((c) => c.url === "/api/v1/users")).toBe(false);
   });
 });

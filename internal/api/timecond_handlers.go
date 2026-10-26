@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -405,18 +404,6 @@ func timeConditionInput(b timeConditionBody) (store.TimeConditionInput, fieldErr
 		validateTCDest(&f, "holiday", *in.Holiday)
 	}
 	return in, f
-}
-
-// requireTimeCondition adds a field error when no time condition has that name.
-func (s *server) requireTimeCondition(ctx context.Context, f *fieldErrs, path, name string) {
-	ok, err := s.Store.TimeConditionNameExists(ctx, name)
-	switch {
-	case err != nil:
-		s.Log.Warn("time condition lookup", "error", err)
-		f.add(path, "could not check the time condition")
-	case !ok:
-		f.add(path, "time condition %q does not exist", name)
-	}
 }
 
 func (s *server) listTimeConditions(w http.ResponseWriter, r *http.Request) {

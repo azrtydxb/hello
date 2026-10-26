@@ -4,8 +4,20 @@ import { json, ME, mockApi, renderApp } from "../test/api";
 
 const CREATED = "2026-10-25T10:00:00Z";
 const EXTENSIONS = [
-  { id: 1, number: "100", name: "Reception", createdAt: CREATED, updatedAt: CREATED },
-  { id: 2, number: "200", name: "Kitchen", createdAt: CREATED, updatedAt: CREATED },
+  {
+    id: 1,
+    number: "100",
+    name: "Reception",
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 2,
+    number: "200",
+    name: "Kitchen",
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
 ];
 const SCHEDULE = {
   id: 3,
@@ -105,7 +117,8 @@ describe("TimeConditions", () => {
 
   it("creates a time condition with a holiday destination", async () => {
     const calls = setup({
-      "POST /api/v1/time-conditions": () => json({ ...TC, id: 8, name: "side" }, 201),
+      "POST /api/v1/time-conditions": () =>
+        json({ ...TC, id: 8, name: "side" }, 201),
     });
     renderApp("/time-conditions");
     const [create] = await screen.findAllByRole("button", {
@@ -113,27 +126,35 @@ describe("TimeConditions", () => {
     });
     await waitFor(() => expect(create).toBeEnabled());
     fireEvent.click(create!);
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "side" } });
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "side" },
+    });
     const schedule = screen.getByLabelText("Schedule");
     await waitFor(() =>
       expect(schedule.querySelectorAll("option").length).toBe(2),
     );
     fireEvent.change(schedule, { target: { value: "3" } });
-    fireEvent.change(screen.getByLabelText("Toggle number"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Toggle number"), {
+      target: { value: "2" },
+    });
     fireEvent.change(screen.getByLabelText("When open"), {
       target: { value: "ring_group" },
     });
     fireEvent.change(screen.getByLabelText("Ring group"), {
       target: { value: "sales" },
     });
-    fireEvent.click(screen.getByLabelText("A different destination on holidays"));
+    fireEvent.click(
+      screen.getByLabelText(/^A different destination on holidays/),
+    );
     fireEvent.change(screen.getByLabelText("On a holiday"), {
       target: { value: "announcement" },
     });
     fireEvent.change(screen.getByLabelText("Announcement"), {
       target: { value: "closed-msg" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Create time condition" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Create time condition" }),
+    );
     await waitFor(() =>
       expect(calls).toContainEqual(
         expect.objectContaining({
@@ -164,7 +185,12 @@ describe("TimeConditions", () => {
             why: "no open hours on Sunday",
             forced: false,
             destination: TC.closed,
-            verdict: { open: false, holiday: false, reason: "no open hours on Sunday", local: "Sun 2026-06-07 10:00 Europe/Brussels" },
+            verdict: {
+              open: false,
+              holiday: false,
+              reason: "no open hours on Sunday",
+              local: "Sun 2026-06-07 10:00 Europe/Brussels",
+            },
           },
           resolution: { steps: [], destination: TC.closed },
         }),
@@ -178,14 +204,23 @@ describe("TimeConditions", () => {
             why: "no open hours on Sunday",
             forced: false,
             destination: TC.closed,
-            verdict: { open: false, holiday: false, reason: "no open hours on Sunday", local: "Sun 2026-06-07 10:00 Europe/Brussels" },
+            verdict: {
+              open: false,
+              holiday: false,
+              reason: "no open hours on Sunday",
+              local: "Sun 2026-06-07 10:00 Europe/Brussels",
+            },
           },
           resolution: { steps: [], destination: TC.closed },
         }),
     });
     renderApp("/time-conditions");
-    fireEvent.click(await screen.findByRole("button", { name: "What would main do" }));
-    expect(await screen.findByText(/no open hours on Sunday/)).toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "What would main do" }),
+    );
+    expect(
+      await screen.findByText(/no open hours on Sunday/),
+    ).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("At (schedule's time zone)"), {
       target: { value: "2026-06-07T10:00" },
     });
@@ -199,14 +234,19 @@ describe("TimeConditions", () => {
 
   it("creates a schedule in the default time zone with two ranges on a day", async () => {
     const calls = setup({
-      "POST /api/v1/schedules": () => json({ ...SCHEDULE, id: 9, name: "late" }, 201),
+      "POST /api/v1/schedules": () =>
+        json({ ...SCHEDULE, id: 9, name: "late" }, 201),
     });
     renderApp("/time-conditions");
     fireEvent.click(await screen.findByRole("tab", { name: "Schedules" }));
-    const [create] = await screen.findAllByRole("button", { name: "New schedule" });
+    const [create] = await screen.findAllByRole("button", {
+      name: "New schedule",
+    });
     await waitFor(() => expect(create).toBeEnabled());
     fireEvent.click(create!);
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "late" } });
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "late" },
+    });
     await waitFor(() =>
       expect(screen.getByLabelText("Time zone")).toHaveValue("Europe/Brussels"),
     );
@@ -245,28 +285,63 @@ describe("TimeConditions", () => {
       "POST /api/v1/calendars/4/import": [
         () =>
           json(
-            { error: { code: "invalid", message: "invalid", fields: [{ path: "lines[2]", message: "must start with a date" }] } },
+            {
+              error: {
+                code: "invalid",
+                message: "invalid",
+                fields: [
+                  { path: "lines[2]", message: "must start with a date" },
+                ],
+              },
+            },
             400,
           ),
-        () => json({ imported: 1, calendar: { ...CALENDAR, entries: [...CALENDAR.entries, { ...CALENDAR.entries[0], id: 2, label: "New year", start: "01-01", end: "01-01", yearly: true }] } }),
+        () =>
+          json({
+            imported: 1,
+            calendar: {
+              ...CALENDAR,
+              entries: [
+                ...CALENDAR.entries,
+                {
+                  ...CALENDAR.entries[0],
+                  id: 2,
+                  label: "New year",
+                  start: "01-01",
+                  end: "01-01",
+                  yearly: true,
+                },
+              ],
+            },
+          }),
       ],
     });
     renderApp("/time-conditions");
     fireEvent.click(await screen.findByRole("tab", { name: "Calendars" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Edit calendar holidays" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit calendar holidays" }),
+    );
     const box = await screen.findByLabelText("Dates to import");
     fireEvent.change(box, { target: { value: "oops" } });
     fireEvent.click(screen.getByRole("button", { name: "Import dates" }));
-    expect(await screen.findByText(/lines\[2\]: must start with a date/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/lines\[2\]: must start with a date/),
+    ).toBeInTheDocument();
     fireEvent.change(box, { target: { value: "01-01 New year" } });
     fireEvent.click(screen.getByRole("button", { name: "Import dates" }));
     await waitFor(() =>
-      expect(calls.filter((c) => c.url === "/api/v1/calendars/4/import")).toHaveLength(2),
+      expect(
+        calls.filter((c) => c.url === "/api/v1/calendars/4/import"),
+      ).toHaveLength(2),
     );
-    expect(calls.filter((c) => c.url === "/api/v1/calendars/4/import")[1]!.body).toEqual({
+    expect(
+      calls.filter((c) => c.url === "/api/v1/calendars/4/import")[1]!.body,
+    ).toEqual({
       text: "01-01 New year",
       replace: false,
     });
-    await waitFor(() => expect(screen.getByLabelText("Label 2")).toHaveValue("New year"));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Label 2")).toHaveValue("New year"),
+    );
   });
 });

@@ -1,4 +1,4 @@
-// IVR / auto-attendant (migration 00018). A menu answers the call through
+// IVR / auto-attendant (migration 00033). A menu answers the call through
 // the media relay, plays its greeting (an announcement) with barge-in,
 // collects DTMF digits (RFC 4733 through the relay, SIP INFO through the
 // dialog) and sends the call to the destination of the chosen option. The
@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/snapshot"
@@ -43,12 +44,12 @@ type ivrState struct {
 	active atomic.Bool
 
 	mu    sync.Mutex
-	cache map[string][]byte // announcement name -> PCM
-	done  sync.Once         // closes the call's setupDone
+	cache map[string]ivrAudio // announcement name -> PCM
+	done  sync.Once           // closes the call's setupDone
 }
 
 func newIVRState() *ivrState {
-	st := &ivrState{digits: make(chan byte, 32), cache: map[string][]byte{}}
+	st := &ivrState{digits: make(chan byte, 32), cache: map[string]ivrAudio{}}
 	st.active.Store(true)
 	return st
 }
@@ -152,23 +153,12 @@ func (c *call) ivrAnswer(m snapshot.IVRMenu) bool {
 	s := c.s
 	off, err := media.ParseAudioSDP(c.inv.Body())
 	if err != nil {
-		c.ivrReject(nil, sip.StatusNotAcceptableHere, "IVR needs a G.711 SDP offer", ResultFailed)
+		c.ivrReject(nil, sip.StatusNotAcceptableHere, "IVR needs an audio SDP offer", ResultFailed)
 		return false
 	}
-	// The menu plays and reads 8 kHz audio: answer with the G.711 codecs the
-	// caller offered, even when it also offered wideband ones.
-	g711 := off
-	g711.Codecs = nil
-	for _, cd := range off.Codecs {
-		if cd.PT == 0 || cd.PT == 8 {
-			g711.Codecs = append(g711.Codecs, cd)
-		}
-	}
-	if len(g711.Codecs) == 0 {
-		c.ivrReject(nil, sip.StatusNotAcceptableHere, "IVR needs a G.711 SDP offer", ResultFailed)
-		return false
-	}
-	body := c.anchoredAnswerA(g711, g711)
+	// No callee: the anchor answers with the best codec it shares with the
+	// caller, as an announcement destination does.
+	body := c.anchoredAnswerA(off, media.AudioSDP{})
 	c.mu.Lock()
 	cancelled := c.isCancelled
 	aborted := closed(c.aborted)
@@ -200,6 +190,12 @@ func (c *call) ivrAnswer(m snapshot.IVRMenu) bool {
 	res.AppendHeader(sip.NewHeader("Allow", allow))
 	s.m.response(sip.StatusOK)
 	if err := c.dss.WriteResponse(res); err != nil {
+		if c.dss.LoadState() == sip.DialogStateEnded {
+			// The caller's BYE overtook its ACK: handleBye has accepted it
+			// and ends the call as the caller's hangup.
+			c.addTrace("Caller hung up before acknowledging the answer")
+			return false
+		}
 		c.mu.Lock()
 		cancelled = c.isCancelled
 		c.connected = false
@@ -293,6 +289,35 @@ func (c *call) ivrRun(ctx context.Context, first snapshot.IVRMenu) {
 		case ex.auto:
 			c.ivrHangup() // the exit destination could not take the call
 			return
+		case c.takeIVRUnrecoverable() && !ex.auto:
+			// The destination needs what a takeover could not recover: the
+			// menu's invalid-choice exit takes the call instead of a replay.
+			c.addTrace("IVR: using the menu's invalid-choice exit")
+			fx := ivrExit{dest: cur.Invalid, why: "destination not recoverable after a takeover", auto: true}
+			if cur.Invalid.Kind == snapshot.IVRMenuKind {
+				nm, ok := snap.IVRMenu(cur.Invalid.Target)
+				if !ok || !nm.Enabled {
+					c.ivrHangup()
+					return
+				}
+				autoSeen[cur.Name] = true
+				cur = nm
+				continue
+			}
+			next, done := c.ivrLeave(ctx, snap, cur, fx)
+			if !done && next == "" {
+				c.ivrHangup()
+				return
+			}
+			if done {
+				return
+			}
+			nm, ok := snap.IVRMenu(next)
+			if !ok || !nm.Enabled {
+				c.ivrHangup()
+				return
+			}
+			cur = nm
 		default:
 			replay = true // the chosen destination failed: the menu says so and repeats
 			c.ivrFlush()
@@ -342,6 +367,15 @@ func (c *call) ivrHangup() {
 func (c *call) ivrLog(msg, menu string, kv ...any) {
 	args := append([]any{"component", "sip", "menu", menu, "correlation_id", c.id, "call_id", c.callID, "caller", c.callerNum}, kv...)
 	c.s.log.Info(msg, args...)
+}
+
+// takeIVRUnrecoverable reads and clears the unrecoverable-destination flag.
+func (c *call) takeIVRUnrecoverable() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v := c.ivrUnrecoverable
+	c.ivrUnrecoverable = false
+	return v
 }
 
 func (c *call) ivrFlush() {
@@ -547,17 +581,23 @@ func ivrClassify(snap *snapshot.Snapshot, m snapshot.IVRMenu, digits string, ter
 
 // --- prompts ---------------------------------------------------------------
 
-// ivrPrompt fetches an announcement as PCM; nil when it is unavailable (the
+// ivrAudio is a decoded prompt: PCM at the WAV's own rate (8 or 16 kHz).
+type ivrAudio struct {
+	pcm  []byte
+	rate int
+}
+
+// ivrPrompt fetches an announcement as PCM; empty when it is unavailable (the
 // step is skipped with a trace, like every announcement).
-func (c *call) ivrPrompt(ctx context.Context, snap *snapshot.Snapshot, name string) []byte {
+func (c *call) ivrPrompt(ctx context.Context, snap *snapshot.Snapshot, name string) ivrAudio {
 	c.mu.Lock()
 	st := c.ivr
 	c.mu.Unlock()
 	st.mu.Lock()
-	pcm, ok := st.cache[name]
+	a, ok := st.cache[name]
 	st.mu.Unlock()
 	if ok {
-		return pcm
+		return a
 	}
 	obj, found := snap.Announcement(name)
 	objs := c.s.deps.Objects
@@ -575,24 +615,24 @@ func (c *call) ivrPrompt(ctx context.Context, snap *snapshot.Snapshot, name stri
 			c.s.log.Warn("ivr prompt unavailable", "announcement", name, "error", err)
 			break
 		}
-		if pcm, _, err = media.DecodeWAV(raw); err != nil {
-			pcm = nil
+		if a.pcm, a.rate, err = media.DecodeWAV(raw); err != nil {
+			a = ivrAudio{}
 			c.addTrace(fmt.Sprintf("IVR prompt %q is not a WAV: skipped", name))
 		}
 	}
 	if ctx.Err() == nil {
 		st.mu.Lock()
-		st.cache[name] = pcm
+		st.cache[name] = a
 		st.mu.Unlock()
 	}
-	return pcm
+	return a
 }
 
 // ivrPlay plays one announcement to the caller. With barge-in a key press
 // stops it and is returned. alive is false once the call has ended.
 func (c *call) ivrPlay(ctx context.Context, snap *snapshot.Snapshot, name string, barge bool) (digit byte, hit, alive bool) {
-	pcm := c.ivrPrompt(ctx, snap, name)
-	if len(pcm) == 0 {
+	a := c.ivrPrompt(ctx, snap, name)
+	if len(a.pcm) == 0 {
 		return 0, false, ctx.Err() == nil
 	}
 	relay := c.anchorRelay()
@@ -608,7 +648,8 @@ func (c *call) ivrPlay(ctx context.Context, snap *snapshot.Snapshot, name string
 	var playErr error
 	go func() {
 		defer close(done)
-		playErr = relay.PlayTo(pctx, legCaller, pcm)
+		// The relay resamples to the caller's codec rate.
+		playErr = relay.PlayPCMTo(pctx, legCaller, a.pcm, a.rate)
 	}()
 	var keys <-chan byte
 	if barge {
@@ -646,14 +687,27 @@ type relaySession struct {
 	relay *media.Relay
 }
 
+// callerCodec is the codec the relay speaks on the caller leg: the first
+// supported one it negotiated, G.711 µ-law when none was set.
+func callerCodec(r *media.Relay) media.Codec {
+	for _, c := range r.Codecs(legCaller) {
+		if c.Supported() {
+			return c
+		}
+	}
+	c, _ := media.StaticCodec(0)
+	return c
+}
+
+// SampleRate is the caller leg's codec rate: 16 kHz for a wideband caller,
+// so a message is recorded and played back without losing the band.
+func (r *relaySession) SampleRate() int { return callerCodec(r.relay).SampleRate() }
+
 func (r *relaySession) Play(ctx context.Context, pcm []byte) error {
-	return r.relay.PlayTo(ctx, legCaller, pcm)
+	return r.relay.PlayPCMTo(ctx, legCaller, pcm, r.SampleRate())
 }
 
 func (r *relaySession) Close() error { return nil }
-
-// SampleRate is 8000: the menu runs on G.711.
-func (r *relaySession) SampleRate() int { return 8000 }
 
 // setVMTap installs the caller's-RTP tap of a voicemail recording and returns
 // the call's IVR session.
@@ -669,29 +723,35 @@ func (c *call) setVMTap(f func(leg string, pkt *media.RTPPacket)) *ivrState {
 // padded, so the length tracks the time recorded like the voicemail
 // session's.
 func (r *relaySession) Record(ctx context.Context, maxDur time.Duration, dtmf chan<- byte) ([]byte, error) {
+	codec := callerCodec(r.relay)
+	rate := codec.SampleRate()
+	decoder, err := media.NewDecoder(codec)
+	if err != nil {
+		return nil, fmt.Errorf("voicemail recording: %w", err)
+	}
+	defer decoder.Close()
 	var (
 		mu  sync.Mutex
 		pcm []byte
 	)
 	tap := func(leg string, pkt *media.RTPPacket) {
-		if leg != legCaller {
-			return
-		}
-		var dec []byte
-		switch pkt.PayloadType {
-		case 0:
-			dec = media.DecodePCMU(pkt.Payload)
-		case 8:
-			dec = media.DecodePCMA(pkt.Payload)
-		default:
+		if leg != legCaller || pkt.PayloadType != codec.PT {
 			return
 		}
 		mu.Lock()
-		if len(pcm) < 2*8000*int(maxDur/time.Second+1) {
-			pcm = append(pcm, dec...)
+		defer mu.Unlock()
+		if decoder != nil && len(pcm) < 2*rate*int(maxDur/time.Second+1) {
+			pcm = append(pcm, decoder.Decode(pkt.Payload)...)
 		}
-		mu.Unlock()
 	}
+	defer func() {
+		// Runs after the tap is uninstalled (deferred later, so run
+		// earlier) and before the decoder closes: a tap call still in
+		// flight then sees no decoder.
+		mu.Lock()
+		decoder = nil
+		mu.Unlock()
+	}()
 	st := r.c.setVMTap(tap)
 	defer r.c.setVMTap(nil)
 	start := time.Now()
@@ -701,7 +761,7 @@ func (r *relaySession) Record(ctx context.Context, maxDur time.Duration, dtmf ch
 		mu.Lock()
 		out := append([]byte(nil), pcm...)
 		mu.Unlock()
-		if want := int(time.Since(start).Seconds() * 16000); len(out) < want {
+		if want := int(time.Since(start).Seconds() * float64(2*rate)); len(out) < want {
 			out = append(out, make([]byte, (want-len(out))&^1)...)
 		}
 		return out, err
@@ -763,9 +823,11 @@ type ivrResult struct {
 // ivrDial rings the destination (extension, ring group or external number)
 // and bridges the caller to whoever answers.
 func (c *call) ivrDial(ctx context.Context, snap *snapshot.Snapshot, m snapshot.IVRMenu, d snapshot.IVRDest) ivrResult {
-	if c.inv == nil {
-		// A call a survivor took over has no INVITE to build legs from.
-		c.addTrace("IVR: dialling out is not possible after a takeover")
+	if len(c.offerSDP()) == 0 {
+		// Nothing to offer the new leg: the takeover state lacked the
+		// caller's SDP. The menu falls back to its exit destination.
+		c.addTrace("IVR: the caller's media offer is not recoverable: dialling out is not possible")
+		c.setIVRUnrecoverable()
 		return ivrResult{kind: ivrFailed}
 	}
 	c.s.m.IVRTotal.WithLabelValues("dial").Inc()
@@ -789,10 +851,15 @@ func (c *call) ivrDial(ctx context.Context, snap *snapshot.Snapshot, m snapshot.
 	}
 	if res.kind == ivrFailed && ctx.Err() == nil {
 		c.addTrace("IVR: " + orDefault(res.why, "the destination did not answer"))
+		c.ivrLog("ivr dial failed", m.Name, "kind", d.Kind, "target", d.Target, "reason", orDefault(res.why, "no answer"))
 		c.s.m.IVRTotal.WithLabelValues("dial_failed").Inc()
 	}
 	return res
 }
+
+// ivrLaunch starts a fork's INVITE; tests replace it to script a fork's
+// outcome.
+var ivrLaunch = func(l *leg) { go l.run() }
 
 // ivrFork is one leg to try.
 type ivrFork struct {
@@ -831,7 +898,7 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 		c.mu.Lock()
 		l := f.mk(stage)
 		c.mu.Unlock()
-		go l.run()
+		ivrLaunch(l)
 		return l
 	}
 	var (
@@ -869,7 +936,7 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 				}
 				c.mu.Unlock()
 				if l != nil {
-					go l.run()
+					ivrLaunch(l)
 				}
 			}))
 		}
@@ -911,8 +978,12 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 				}
 			}
 		case <-memberT:
-			if cur != nil {
-				c.abandon(cur)
+			memberT = nil
+			if cur != nil && !c.abandon(cur) {
+				// The member answered just as its turn ended: it has won,
+				// and its answer is on the way. Moving on would leave that
+				// answered dialog up with nobody on it.
+				continue
 			}
 			if legFailed() {
 				giveUp()
@@ -936,6 +1007,12 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 	dcs := w.session()
 	bres := dcs.InviteResponse
 	w.ack(nil, "")
+	if hom := c.homed(); hom != nil && !c.ivrHomeCallee(hom, w) {
+		w.bye()
+		c.addTrace("IVR: the new leg could not be taken into the recovered call")
+		c.setIVRUnrecoverable()
+		return ivrResult{kind: ivrFailed}
+	}
 	if relay := c.anchorRelay(); relay != nil && bres != nil && len(bres.Body()) > 0 {
 		if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
 			relay.SetTarget(legCallee, udpAddr(ans.Address, ans.Port))
@@ -1173,8 +1250,11 @@ func (c *call) ivrExternal(ctx context.Context, snap *snapshot.Snapshot, number,
 
 // ivrPage hands the call to a paging group.
 func (c *call) ivrPage(ctx context.Context, snap *snapshot.Snapshot, code string) bool {
-	if c.inv == nil {
+	if c.homed() != nil {
+		// A page's member dialogs are not part of the replicated state, so a
+		// survivor could not hang them up: it uses the menu's exit instead.
 		c.addTrace("IVR: paging is not possible after a takeover")
+		c.setIVRUnrecoverable()
 		return false
 	}
 	return c.ivrPageGroup(ctx, snap, code)
@@ -1200,6 +1280,9 @@ func (c *call) ivrResume(menu string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.mu.Lock()
 	c.ivr, c.ivrCancel = st, cancel
+	// A taken-over call has no setup of its own: the menu's legs report here.
+	c.events = make(chan legEvent, 16)
+	c.setupDone = make(chan struct{})
 	c.mu.Unlock()
 	relay.OnDTMF(func(leg string, digit byte) { c.relayDTMF(leg, digit) })
 	relay.OnPacket(c.recTap)
@@ -1208,4 +1291,77 @@ func (c *call) ivrResume(menu string) {
 		defer contain(c.s.log, "ivr flow after takeover")
 		c.ivrRun(ctx, m)
 	}()
+}
+
+// offerSDP is the caller's SDP offer: the INVITE's, or on a call a survivor
+// took over the one replicated with the caller's dialog.
+func (c *call) offerSDP() []byte {
+	if c.inv != nil {
+		return c.inv.Body()
+	}
+	if hom := c.homed(); hom != nil && hom.legs[0] != nil {
+		hom.legs[0].mu.Lock()
+		defer hom.legs[0].mu.Unlock()
+		return []byte(hom.legs[0].remoteSDP)
+	}
+	return nil
+}
+
+// isCallerContact reports whether b is the phone the call came from, which
+// is never rung for its own call. A call a survivor took over has no caller
+// device name, so the caller's replicated contact stands in for it.
+func (c *call) isCallerContact(b livestate.Binding) bool {
+	hom := c.homed()
+	if hom == nil || hom.legs[0] == nil {
+		return false
+	}
+	hom.legs[0].mu.Lock()
+	target := trimAngle(hom.legs[0].remoteTarget)
+	hom.legs[0].mu.Unlock()
+	return target != "" && trimAngle(b.ContactURI) == target
+}
+
+// setIVRUnrecoverable notes that the destination just tried needs something
+// a takeover could not bring back; ivrRun then applies the menu's exit.
+func (c *call) setIVRUnrecoverable() {
+	c.mu.Lock()
+	c.ivrUnrecoverable = true
+	c.mu.Unlock()
+}
+
+// ivrHomeCallee makes the leg that answered a menu's dial-out the callee
+// dialog of a call a survivor took over, so the call is an ordinary taken
+// over two-leg call from here on: its hang-ups, re-INVITEs and replication
+// use the replicated dialog forms. It reports false when the dialog cannot
+// be described.
+func (c *call) ivrHomeCallee(hom *homedCall, w *leg) bool {
+	dcs := w.session()
+	relay := c.anchorRelay()
+	if dcs == nil || dcs.InviteRequest == nil || dcs.InviteResponse == nil || relay == nil {
+		return false
+	}
+	off, err := media.ParseAudioSDP(c.offerSDP())
+	if err != nil {
+		return false
+	}
+	s := c.s
+	req, res := dcs.InviteRequest, dcs.InviteResponse
+	c.mu.Lock()
+	host := c.anchorHost
+	c.mu.Unlock()
+	l := haLegFrom(livestate.DialogLeg{
+		CallID: w.callID, LocalTag: tagParam(req.From()), RemoteTag: tagParam(res.To()),
+		LocalCSeq: s.nextCSeq(w.callID, req.CSeq().SeqNo, dcs.CSEQ()), RemoteCSeq: req.CSeq().SeqNo,
+		RouteSet:      reversed(headerValues(res, "Record-Route")),
+		LocalIdentity: uriString(*req.From().Address.Clone()), RemoteIdentity: uriString(*req.To().Address.Clone()),
+		RemoteTarget: uriString(w.target()), Endpoint: w.binding.AOR, Source: res.Source(),
+		SDP: relaySDPDir(host, relay, legCallee, off, "sendrecv"), RemoteSDP: string(res.Body()),
+	}, false)
+	if l == nil {
+		return false
+	}
+	c.mu.Lock()
+	hom.legs[1] = l
+	c.mu.Unlock()
+	return true
 }

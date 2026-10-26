@@ -240,6 +240,7 @@ func (c *call) startAnchor(snap *snapshot.Snapshot, reason AnchorReason) {
 	offered := off.Filter(nil)
 	relay.SetCodecs(legCaller, offered.Codecs, offered.DTMFPayloadType)
 	relay.SetTarget(legCaller, udpAddr(off.Address, off.Port))
+	allowSignalSource(relay, legCaller, c.inv.Source())
 	portB, err := relay.AddLeg(legCallee)
 	if err != nil {
 		relay.Close()
@@ -651,6 +652,20 @@ func (c *call) toggleRecording() {
 	c.startRecordingFlow("dtmf")
 }
 
+// setRecording is the phone's Record key (SIP INFO "Record: on" / "Record:
+// off"): it runs the *1 toggle only when the recording is not already in the
+// requested state, so a repeated "on" or an "off" with nothing recording
+// changes nothing.
+func (c *call) setRecording(on bool) {
+	c.mu.Lock()
+	rec := c.rec
+	c.mu.Unlock()
+	if active := rec != nil && rec.isActive(); active == on {
+		return
+	}
+	c.toggleRecording()
+}
+
 // playRecordingNotice plays the recording-notice announcement to both
 // parties when the announcement set has it (contract 5). A missing WAV is
 // skipped (spec failure mode).
@@ -769,15 +784,10 @@ func (c *call) relayDTMF(leg string, digit byte) {
 	if c.ivrDigit(leg, digit) {
 		return // the IVR menu is collecting the caller's digits
 	}
-	buf := c.s.bufferFor(c)
-	all := buf.push([]byte{digit})
-	if digit == '*' {
-		return // the 1 follows
-	}
-	if len(all) >= 2 && all[len(all)-2] == '*' && digit == '1' {
-		buf.take()
-		c.toggleRecording()
-	}
+	// RFC 2833 digits feed the same feature-code collection as INFO ones
+	// (the *1 recording toggle included), so a code dialled mid-call acts
+	// on an anchored call too.
+	c.s.dispatchDigit(c, leg == legCaller, digit)
 }
 
 // handleAnchoredInDialog terminates a re-INVITE/UPDATE on an anchored
@@ -797,8 +807,17 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	}
 	dir := media.SDPDirection(body)
 	c.setHADirs(fromCaller, dir)
+	// An inactive hold stays inactive toward the holder, but the held peer
+	// is offered sendonly so it can hear the music (S-33).
+	peerDir := dir
+	if dir == "inactive" {
+		peerDir = "sendonly"
+		c.setHAPeerDir(fromCaller, peerDir)
+	}
 	c.haRefresh() // the hold's directions are in the snapshot before the change replicates
-	c.setHeld(dir == "sendonly" || dir == "inactive")
+	held := dir == "sendonly" || dir == "inactive"
+	c.setHeld(held)
+	c.holdMOH(fromCaller, held)
 	// The answer to the offer's side: our SDP with the mirrored direction,
 	// on the codec the call is running.
 	off = c.midCallOffer(off)
@@ -810,7 +829,6 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	s.send(tx, res)
 	// The peer gets our SDP in the same direction (a held side hears
 	// silence because the held side stopped sending).
-	peerDir := dir
 	peer := off.Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir)
 	c.mu.Lock()
 	w := c.winner
@@ -1033,4 +1051,30 @@ func (c *call) byeCallerRaw() {
 		return
 	}
 	c.s.m.response(res.StatusCode)
+}
+
+// allowSignalSource tells the relay which address a leg's signalling came
+// from. A phone behind NAT names a private address in its SDP, while its
+// media arrives from the public address its signalling came from; the relay
+// accepts a leg's media only from the SDP address or one vouched for here.
+func allowSignalSource(relay *media.Relay, leg, source string) {
+	host, _ := splitHostPort(source)
+	if ip := net.ParseIP(host); ip != nil {
+		relay.AllowSource(leg, ip)
+	}
+}
+
+// handOverLeg points a relay leg at a phone that takes it over from another
+// one. The earlier phone's vouched address is replaced by the new phone's
+// signalling source before the target moves, so neither the old phone nor a
+// stranger can claim the leg, and a phone behind NAT (whose SDP names a
+// private address) still has its media accepted.
+func handOverLeg(relay *media.Relay, leg string, target *net.UDPAddr, source string) {
+	host, _ := splitHostPort(source)
+	if ip := net.ParseIP(host); ip != nil {
+		relay.ResetSources(leg, ip)
+	} else {
+		relay.ResetSources(leg)
+	}
+	relay.SetTarget(leg, target)
 }

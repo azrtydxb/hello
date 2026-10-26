@@ -9,9 +9,10 @@ import (
 // TestMWISubscriptionProvisioned fails if a vendor template that has a known
 // MWI subscribe setting does not write it (spec S-1): Grandstream P99 = 1
 // with P33 defaulting to *97, Yealink account.1.subscribe_mwi, Poly
-// msg.mwi.1.subscribe. Snom (user_mailbox) and Fanvil (SIP1 MWI Num) carry
-// the voicemail number, *97 unless the line sets one; neither has a
-// documented subscribe flag (unverified on hardware).
+// msg.mwi.1.subscribe, Fanvil SIP1 Subscribe (the line's "Subscribe For
+// Voice Message"). Snom (user_mailbox) and Fanvil (SIP1 MWI Num) carry the
+// voicemail number, *97 unless the line sets one; Snom documents no subscribe
+// flag (unverified on hardware).
 func TestMWISubscriptionProvisioned(t *testing.T) {
 	d := renderSample(false)
 	d.Line.VoicemailCode = ""
@@ -23,6 +24,7 @@ func TestMWISubscriptionProvisioned(t *testing.T) {
 		{Grandstream, "cfg" + d.Phone.MAC + ".xml", []string{"<P99>1</P99>", "<P33>*97</P33>"}},
 		{Yealink, d.Phone.MAC + ".cfg", []string{"account.1.subscribe_mwi = 1"}},
 		{Poly, d.Phone.MAC + "-hello.cfg", []string{`msg.mwi.1.subscribe="` + d.Line.Username + `"`}},
+		{Fanvil, d.Phone.MAC + ".cfg", []string{"SIP1 Subscribe     :1", "SIP1 Sub Expire    :3600"}},
 	} {
 		out, err := Render(context.Background(), builtinFor(t, tc.v), tc.file, d)
 		if err != nil {

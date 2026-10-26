@@ -18,18 +18,33 @@ import {
 } from "./api";
 import { Alert, Button, Spinner } from "./design/azrty/components";
 import type { Role } from "./role";
+import { ForcedPasswordChange } from "./pages/ChangePassword";
 
 /** The session as the UI knows it. */
 export type AuthState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "signedOut" }
-  | { status: "signedIn"; username: string; role: Role };
+  | {
+      status: "signedIn";
+      username: string;
+      role: Role;
+      /** The profile as GET /auth/me returned it. */
+      me: Me;
+      /** The user has to choose a new password before anything else. */
+      mustChangePassword: boolean;
+    };
 
 /** The auth state for a GET /auth/me answer (null: signed out). */
 function fromMe(me: Me | null): AuthState {
   return me
-    ? { status: "signedIn", username: me.username, role: me.role ?? "viewer" }
+    ? {
+        status: "signedIn",
+        username: me.username,
+        role: me.role ?? "viewer",
+        me,
+        mustChangePassword: me.mustChangePassword === true,
+      }
     : { status: "signedOut" };
 }
 
@@ -136,5 +151,6 @@ export function RequireAuth({ children }: { children: ReactNode }) {
       <Navigate to={loginPath(location.pathname + location.search)} replace />
     );
   }
+  if (state.mustChangePassword) return <ForcedPasswordChange />;
   return <>{children}</>;
 }

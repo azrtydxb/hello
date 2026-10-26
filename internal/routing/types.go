@@ -115,6 +115,11 @@ type InboundRoute struct {
 	DestinationKind string // "extension" | "external" | "sip_uri" | "internal" | "ivr" | "time_condition"
 	Destination     string // empty for "internal" (the DID names the target); the menu name for "ivr"
 	Enabled         bool
+	// MOHClassID is the music on hold class of calls the route delivers
+	// (0 = the global default); MOHRingback plays it to the caller instead
+	// of ringback while the destination rings (migration 00021).
+	MOHClassID  int64
+	MOHRingback bool
 }
 
 // Config is the routing input loaded from PostgreSQL.
@@ -194,9 +199,13 @@ type Decision struct {
 	Candidates    []Candidate // outbound, already filtered by usability
 	FailoverCodes []int
 	Emergency     bool
-	RejectCode    int
-	Reason        string // one-line explanation when Kind is KindReject
-	Trace         Trace
+	// MOHClassID and MOHRingback carry the matched inbound route's music on
+	// hold settings (0/false when no inbound route matched).
+	MOHClassID  int64
+	MOHRingback bool
+	RejectCode  int
+	Reason      string // one-line explanation when Kind is KindReject
+	Trace       Trace
 }
 
 // Step is one line of a routing trace.

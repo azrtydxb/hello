@@ -1,17 +1,19 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
 
+	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// IVR / auto-attendant menus (migration 00018). Reads are open to a viewer;
-// changes need the write scope, like ring groups.
+// IVR / auto-attendant menus (migration 00033). Reads are open to a viewer;
+// changes need the write scope, like ring groups. A menu that pages (a paging
+// destination) needs the admin role and scope, like the paging groups
+// themselves: it lets anyone who reaches the menu page the group.
 
 var ivrNumberRe = regexp.MustCompile(`^([0-9]{2,16})?$`)
 
@@ -157,16 +159,24 @@ func validateIVRMenu(in *store.IVRMenuInput) fieldErrs {
 	return f
 }
 
-// requireIVRMenu adds a field error when no menu has that name.
-func (s *server) requireIVRMenu(ctx context.Context, f *fieldErrs, path, name string) {
-	ok, err := s.Store.IVRMenuNameExists(ctx, name)
-	switch {
-	case err != nil:
-		s.Log.Warn("ivr menu lookup", "error", err)
-		f.add(path, "could not check the IVR menu")
-	case !ok:
-		f.add(path, "IVR menu %q does not exist", name)
+// pagingAllowed answers 403 and reports false when the menu has a paging
+// destination and the actor may not manage paging.
+func pagingAllowed(w http.ResponseWriter, r *http.Request, in store.IVRMenuInput) bool {
+	pages := in.Timeout.Kind == store.IVRPaging || in.Invalid.Kind == store.IVRPaging ||
+		slices.ContainsFunc(in.Options, func(o store.IVROption) bool { return o.Kind == store.IVRPaging })
+	if !pages {
+		return true
 	}
+	a := actor(r)
+	if !a.Role.AtLeast(auth.RoleAdmin) {
+		writeError(w, http.StatusForbidden, "forbidden_role", "a paging destination needs the admin role")
+		return false
+	}
+	if !a.Scopes.Has(auth.ScopeAdmin) {
+		writeError(w, http.StatusForbidden, "insufficient_scope", "a paging destination needs the admin scope")
+		return false
+	}
+	return true
 }
 
 func (s *server) listIVRMenus(w http.ResponseWriter, r *http.Request) {
@@ -205,6 +215,9 @@ func (s *server) createIVRMenu(w http.ResponseWriter, r *http.Request) {
 		writeFields(w, f)
 		return
 	}
+	if !pagingAllowed(w, r, in) {
+		return
+	}
 	m, err := s.Store.CreateIVRMenu(r.Context(), actor(r).String(), in, s.check())
 	if err != nil {
 		s.configError(w, "ivr menu", err)
@@ -230,6 +243,9 @@ func (s *server) putIVRMenu(w http.ResponseWriter, r *http.Request) {
 	in := b.toInput()
 	if f := validateIVRMenu(&in); len(f) > 0 {
 		writeFields(w, f)
+		return
+	}
+	if !pagingAllowed(w, r, in) {
 		return
 	}
 	m, err := s.Store.UpdateIVRMenu(r.Context(), actor(r).String(), id, in, s.check())

@@ -600,6 +600,10 @@ func legName(caller bool) string {
 // record) and the call replicates from here on.
 func (s *Server) takeOverCall(st livestate.DialogState, from string) {
 	defer contain(s.log, "takeover")
+	if st.State == haPhasePark {
+		s.takeOverPark(st, from)
+		return
+	}
 	if st.Legs[1].CallID == "" {
 		s.takeOverSolo(st, from)
 		return
@@ -708,6 +712,11 @@ func (s *Server) haHome(c *call, st livestate.DialogState, from string, restored
 	c.haSettleClaim(c.replicate())
 	go c.haLoop()
 	switch st.State {
+	case "hold":
+		// The call was held when its owner died: it stays held, and the
+		// music resumes for the party that was hearing it (S-33).
+		c.setHeld(true)
+		c.resumeMOH(st.StateDetail)
 	case haPhaseRecording:
 		c.noteHAState(haPhaseRecording, "")
 		c.mu.Lock()
@@ -715,6 +724,12 @@ func (s *Server) haHome(c *call, st livestate.DialogState, from string, restored
 		c.mu.Unlock()
 		if rec != nil && rec.start("takeover") {
 			c.addTrace("Recording continues after the takeover")
+		}
+		if strings.HasPrefix(st.StateDetail, haMOHDetailPrefix) {
+			// Held while recording: the recording pauses again and the
+			// held party's music resumes.
+			c.setHeld(true)
+			c.resumeMOH(st.StateDetail)
 		}
 	case haPhaseAnnouncement:
 		// The detail carries the announcement's object: it replays from
@@ -820,11 +835,18 @@ func (c *call) haInDialog(hom *homedCall, req *sip.Request, tx sip.ServerTransac
 	var ans, peer []byte
 	if err == nil {
 		dir := media.SDPDirection(req.Body())
-		c.setHeld(dir == "sendonly" || dir == "inactive")
+		held := dir == "sendonly" || dir == "inactive"
+		c.setHeld(held)
 		c.setHADirs(fromCaller, dir)
+		peerDir := dir
+		if dir == "inactive" {
+			peerDir = "sendonly" // the held peer hears the music
+			c.setHAPeerDir(fromCaller, peerDir)
+		}
 		off = c.midCallOffer(off)
 		ans = off.Build(c.anchorHost, c.legPortFor(fromCaller), mirrorDirection(dir))
-		peer = off.Build(c.anchorHost, c.legPortFor(!fromCaller), dir)
+		peer = off.Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir)
+		c.holdMOH(fromCaller, held)
 	}
 	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", ans)
 	if err == nil {

@@ -12,4 +12,6 @@ var errOpusRace = errors.New("media: opus is not built into race-detector builds
 
 func newOpusEncoder(int) (opusEncoder, error) { return nil, errOpusRace }
 
+func newOpusMusicEncoder(int) (opusEncoder, error) { return nil, errOpusRace }
+
 func newOpusDecoder(int) (opusDecoder, error) { return nil, errOpusRace }

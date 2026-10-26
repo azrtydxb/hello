@@ -31,6 +31,7 @@ export const browser = {
 };
 
 const ROLE_NAME: Record<Role, string> = {
+  user: "User",
   viewer: "Viewer",
   operator: "Operator",
   admin: "Administrator",
@@ -62,11 +63,12 @@ export function Consent() {
     ])
       .then(([request, role]) => {
         const grantable = request.grantableScopes;
-        // Every requested, grantable scope starts checked except secrets.
+        // Every requested, grantable scope starts checked except secrets and
+        // calls (placing calls can cost money, so it is a deliberate tick).
         setChecked(
           new Set(
             request.scopes.filter(
-              (s) => s !== "secrets" && grantable.includes(s),
+              (s) => s !== "secrets" && s !== "calls" && grantable.includes(s),
             ),
           ),
         );
