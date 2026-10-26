@@ -2,6 +2,7 @@ package sip
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"slices"
 	"strings"
@@ -802,4 +803,129 @@ func TestMessageHelpers(t *testing.T) {
 	if fromUser(MessageJob{SenderKind: "system"}) != "hello" || fromUser(MessageJob{SenderKind: MsgSenderExt, Sender: "100"}) != "100" {
 		t.Error("fromUser")
 	}
+}
+
+// fakeGateway is the inbox's gateway: it takes the texts to the numbers in
+// its set and records what it was offered.
+type fakeGateway struct {
+	mu     sync.Mutex
+	ours   map[string]bool
+	err    error
+	offers []TrunkText
+}
+
+func (g *fakeGateway) InboundFromTrunk(_ context.Context, in TrunkText) (bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.offers = append(g.offers, in)
+	if g.err != nil {
+		return false, g.err
+	}
+	return g.ours[in.To], nil
+}
+
+func (g *fakeGateway) seen() []TrunkText {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]TrunkText(nil), g.offers...)
+}
+
+// TestTrunkTextGateway fails if a text to one of the inbox's numbers is also
+// delivered to an extension or stored in the text queue, if a number that is
+// not the inbox's stops going to its extension, if a gateway failure is
+// answered as success (the carrier must retry), if the gateway is offered a
+// text from a trunk with messaging off or a typing indication, or if two
+// deliveries of one MESSAGE do not carry the same event key.
+func TestTrunkTextGateway(t *testing.T) {
+	fastMessages(t)
+	rig := func(t *testing.T, gw *fakeGateway, messaging bool) (*fakeMsgs, *phone, *phone) {
+		t.Helper()
+		q := newFakeMsgs("100", "200")
+		r := &fakeRouter{extensions: map[string]bool{"100": true, "200": true}, sources: map[netip.Addr]int64{},
+			trunks: []routing.Trunk{{ID: 7, Name: "carrier-in", Mode: "ip", Enabled: true, Messaging: messaging}}}
+		r.decide = func(c routing.Call, _ routing.TrunkUsability) routing.Decision {
+			var d routing.Decision
+			if c.Number != "+97140000100" {
+				d.Kind, d.RejectCode, d.Reason = routing.KindReject, 404, "No inbound route matched"
+				return d
+			}
+			d.Kind, d.Extension, d.Route = routing.KindInbound, "100", "Main DID"
+			return d
+		}
+		pbx := startPBX(t, msgDevices(), trunkCfg(newFakeTrunkState()), withRouter(r, nil), withMessages(q),
+			func(_ *Config, d *Deps) { d.Conversations = gw })
+		a := newPhone(t, pbx, "a1", "pa")
+		a.register(t)
+		carrier := newPhone(t, pbx, "carrier", "")
+		ap, _ := netip.ParseAddrPort(carrier.addr)
+		r.setSource(ap.Addr(), 7)
+		return q, a, carrier
+	}
+
+	t.Run("the inbox's number", func(t *testing.T) {
+		gw := &fakeGateway{ours: map[string]bool{"+97150000200": true}}
+		q, a, carrier := rig(t, gw, true)
+		if res := carrier.do(carrierMessage(carrier, "+97150000200", "+971555000111", "hello inbox")); res.StatusCode != 202 {
+			t.Fatalf("a text to the inbox's number = %d, want 202", res.StatusCode)
+		}
+		noReq(t, a.messages, 200*time.Millisecond, "a text the inbox took")
+		if q.rowCount() != 0 {
+			t.Fatal("a text the inbox took was also queued for an extension")
+		}
+		offers := gw.seen()
+		if len(offers) != 1 || offers[0].TrunkID != 7 || offers[0].To != "+97150000200" || offers[0].From != "+971555000111" ||
+			string(offers[0].Body) != "hello inbox" || offers[0].EventKey == "" {
+			t.Fatalf("offers = %+v", offers)
+		}
+	})
+
+	t.Run("an ordinary DID is unchanged", func(t *testing.T) {
+		gw := &fakeGateway{ours: map[string]bool{"+97150000200": true}}
+		_, a, carrier := rig(t, gw, true)
+		if res := carrier.do(carrierMessage(carrier, "+97140000100", "+971555000111", "your parcel is ready")); res.StatusCode != 202 {
+			t.Fatalf("a text to an extension's DID = %d, want 202", res.StatusCode)
+		}
+		m := waitReq(t, a.messages, "the text at the extension's phone")
+		if bodyOf(m) != "your parcel is ready" {
+			t.Fatalf("the phone got %q", bodyOf(m))
+		}
+		if len(gw.seen()) != 1 {
+			t.Fatalf("the gateway was offered %d texts, want 1", len(gw.seen()))
+		}
+		if res := carrier.do(carrierMessage(carrier, "+97149999999", "+971555000111", "hi")); res.StatusCode != 404 {
+			t.Fatalf("a text to no number = %d, want 404", res.StatusCode)
+		}
+	})
+
+	t.Run("a gateway failure is a failure", func(t *testing.T) {
+		gw := &fakeGateway{ours: map[string]bool{"+97150000200": true}, err: errors.New("database is down")}
+		q, a, carrier := rig(t, gw, true)
+		res := carrier.do(carrierMessage(carrier, "+97150000200", "+971555000111", "hello"))
+		if res.StatusCode != 503 {
+			t.Fatalf("a text the gateway could not store = %d, want 503 so the carrier retries", res.StatusCode)
+		}
+		noReq(t, a.messages, 200*time.Millisecond, "a text the gateway failed")
+		if q.rowCount() != 0 {
+			t.Fatal("a failed text was queued")
+		}
+	})
+
+	t.Run("not offered", func(t *testing.T) {
+		gw := &fakeGateway{ours: map[string]bool{"+97150000200": true}}
+		_, _, carrier := rig(t, gw, false)
+		if res := carrier.do(carrierMessage(carrier, "+97150000200", "+971555000111", "hi")); res.StatusCode != 403 {
+			t.Fatalf("a text through a trunk with messaging off = %d, want 403", res.StatusCode)
+		}
+		if len(gw.seen()) != 0 {
+			t.Fatal("the gateway was offered a text from a trunk with messaging off")
+		}
+		gw2 := &fakeGateway{ours: map[string]bool{"+97150000200": true}}
+		_, _, carrier2 := rig(t, gw2, true)
+		typing := carrier2.messageReq("+97150000200", "", "application/im-iscomposing+xml", "<isComposing/>")
+		typing.From().Address = sip.Uri{Scheme: "sip", User: "+971555000111", Host: "carrier.example"}
+		carrier2.do(typing)
+		if len(gw2.seen()) != 0 {
+			t.Fatal("the gateway was offered a typing indication")
+		}
+	})
 }

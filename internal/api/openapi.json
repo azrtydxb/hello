@@ -8509,7 +8509,8 @@
                         "secrets",
                         "calls",
                         "events",
-                        "recordings"
+                        "recordings",
+                        "messages"
                       ]
                     }
                   }
@@ -12036,6 +12037,2255 @@
         }
       }
     },
+    "/api/v1/messaging/channels": {
+      "get": {
+        "operationId": "listMessagingChannels",
+        "summary": "List messaging channels",
+        "description": "Lists the messaging channels: where customer texts come from and go to.",
+        "tags": ["messaging"],
+        "responses": {
+          "200": {
+            "description": "The channels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingChannelList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      },
+      "post": {
+        "operationId": "createMessagingChannel",
+        "summary": "Add a messaging channel",
+        "description": "Adds a channel that reads customer texts from a SIP trunk with SMS over SIP turned on and sends replies through it. Add its numbers next. Admin only.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingChannelInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingChannel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/messaging/channels/{id}": {
+      "get": {
+        "operationId": "getMessagingChannel",
+        "summary": "One messaging channel",
+        "description": "Returns one messaging channel by id.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingChannel"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingChannel",
+        "summary": "Replace a messaging channel's settings",
+        "description": "Changes a channel's name, its switch and its trunk; its kind and provider stay. Turning it off stops new texts and replies, and the numbers keep their history.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingChannelInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingChannel"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      },
+      "delete": {
+        "operationId": "deleteMessagingChannel",
+        "summary": "Delete a messaging channel",
+        "description": "Deletes a channel and its numbers. A channel that has conversations is refused with 409: retention or an erase request removes them first.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/messaging/channels/{id}/test": {
+      "post": {
+        "operationId": "testMessagingChannel",
+        "summary": "Check that a channel can work",
+        "description": "Checks that the channel is on, that its trunk exists, is enabled and has SMS over SIP turned on, and that the channel has an enabled number. It sends nothing.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The checks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingChannelTest"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/messaging/addresses": {
+      "get": {
+        "operationId": "listMessagingAddresses",
+        "summary": "List messaging numbers",
+        "description": "Lists the numbers customers text, of one channel or of every channel.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "name": "channelId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Only the numbers of this channel."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The numbers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAddressList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      },
+      "post": {
+        "operationId": "createMessagingAddress",
+        "summary": "Add a messaging number",
+        "description": "Adds a number customers text to a channel. A text a trunk delivers to this number becomes a conversation in the inbox instead of going to an extension.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingAddressInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The number",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAddress"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/messaging/addresses/{id}": {
+      "get": {
+        "operationId": "getMessagingAddress",
+        "summary": "One messaging number",
+        "description": "Returns one messaging number by id.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The number",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAddress"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingAddress",
+        "summary": "Replace a messaging number's settings",
+        "description": "Changes a number's label, its switch and its opt-out and help wording; its channel and number stay. Texts to a number that is off take the normal extension route again.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingAddressInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The number",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingAddress"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      },
+      "delete": {
+        "operationId": "deleteMessagingAddress",
+        "summary": "Delete a messaging number",
+        "description": "Deletes a number. One that has conversations is refused with 409: retention or an erase request removes them first.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/messaging/settings": {
+      "get": {
+        "operationId": "getMessagingSettings",
+        "summary": "Get the inbox settings",
+        "description": "Returns how long finished conversations are kept, when a resolved one reopens and whether agents are emailed. Admin only.",
+        "tags": ["messaging"],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      },
+      "put": {
+        "operationId": "updateMessagingSettings",
+        "summary": "Change the inbox settings",
+        "description": "Changes the given settings and keeps the rest. Retention applies at the next maintenance run; open conversations are never purged by age.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingSettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/messaging/optouts": {
+      "get": {
+        "operationId": "listMessagingOptOuts",
+        "summary": "List opted-out customers",
+        "description": "Lists the customers who opted out of a number, newest first, up to 500. Hello detects the opt-out words itself, whatever the carrier does.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "name": "addressId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Only opt-outs of this number."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "description": "Only numbers ending with these digits."
+          },
+          {
+            "name": "all",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "With true, also the customers who opted back in."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The opt-outs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingOptOutList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      },
+      "post": {
+        "operationId": "recordMessagingOptOut",
+        "summary": "Record an opt-out by hand",
+        "description": "Records that a customer opted out of a number, for one who asked by another way. It is audited with who did it, never the number.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingOptOutInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The opt-out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingOptOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/messaging/optouts/{id}/reconsent": {
+      "post": {
+        "operationId": "reconsentMessagingOptOut",
+        "summary": "Record a customer's consent again",
+        "description": "Clears an opt-out because the customer consented again by another way. The note says how and is audited. An agent cannot do this; only a customer text of START or this does.",
+        "tags": ["messaging"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingReconsentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The opt-out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingOptOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/inbox/erase": {
+      "post": {
+        "operationId": "eraseMessagingPeer",
+        "summary": "Erase a customer's conversations",
+        "description": "Deletes every conversation, message and note with a phone number, on every channel, in one transaction, and keeps only a hash of the number on the opt-out list so the customer is not texted again. The carrier keeps its own logs and database backups keep the rows until they expire. The audit row holds counts only.",
+        "tags": ["messaging"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MessagingEraseInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What was deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagingEraseReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "messaging configuration and opt-outs concern customer data: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations": {
+      "get": {
+        "operationId": "listMyInboxConversations",
+        "summary": "List your inbox conversations",
+        "description": "Lists the conversations assigned to you and those you replied to of the messaging inbox, most recently active first, one page at a time. Customer text is private and never exposed to an agent or to MCP.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "name": "view",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["all", "mine", "unassigned"]
+            },
+            "description": "Which conversations: mine (assigned to the caller), unassigned (nobody has taken them) or all."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["open", "pending", "snoozed", "resolved", "spam", "any"]
+            },
+            "description": "Only conversations in this state; without it the active ones (open, pending, snoozed); any means every state."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "description": "Search the number, the name and the message text."
+          },
+          {
+            "name": "channelId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Only conversations of this channel."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Page cursor: the next value of the previous page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "How many to return, 1-100; 50 when omitted."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of conversations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}": {
+      "get": {
+        "operationId": "getMyInboxConversation",
+        "summary": "One inbox conversation",
+        "description": "Returns one conversation. A supervisor opening one that is not theirs leaves an audit row, once an hour per conversation; the row names who, never the content.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/messages": {
+      "get": {
+        "operationId": "listMyInboxMessages",
+        "summary": "List a conversation's messages",
+        "description": "Lists the messages, internal notes and system lines of a conversation, newest first, one page at a time.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Page cursor: the next value of the previous page, for older messages."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "How many to return, 1-100; 50 when omitted."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      },
+      "post": {
+        "operationId": "sendMyInboxMessage",
+        "summary": "Reply to the customer",
+        "description": "Sends a reply to the customer through the conversation's channel. A long text is split into several. Replying to an unassigned conversation takes it and replying to a resolved one reopens it. A customer who opted out cannot be texted (422). Sending the same clientMsgId again returns the first message with 200 and sends nothing.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxSendInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The message sent earlier with this clientMsgId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The message, sending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/notes": {
+      "post": {
+        "operationId": "addMyInboxNote",
+        "summary": "Add an internal note",
+        "description": "Adds a note that agents and supervisors see and the customer never does.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxNoteInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The note",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/claim": {
+      "post": {
+        "operationId": "claimMyInboxConversation",
+        "summary": "Take an unassigned conversation",
+        "description": "Assigns an unassigned conversation to the caller. If two agents claim at once exactly one wins and the other gets 409.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/assign": {
+      "post": {
+        "operationId": "assignMyInboxConversation",
+        "summary": "Hand a conversation to someone",
+        "description": "Assigns a conversation to a user, or returns it to the pool with userId 0 (supervisors only). You can only hand over a conversation assigned to you.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxAssignInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/status": {
+      "post": {
+        "operationId": "setMyInboxStatus",
+        "summary": "Change a conversation's state",
+        "description": "Sets a conversation open, pending, snoozed until a time, resolved or spam. Reopening one while the customer has another open conversation on the same number is refused with 409.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxStatusInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/tags": {
+      "post": {
+        "operationId": "setMyInboxTags",
+        "summary": "Set a conversation's tags",
+        "description": "Replaces a conversation's tags.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxTagsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/conversations/{id}/read": {
+      "post": {
+        "operationId": "readMyInboxConversation",
+        "summary": "Mark a conversation read",
+        "description": "Records that the caller has read the conversation up to its last message, which clears its unread count for them.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Marked read"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/bulk": {
+      "post": {
+        "operationId": "bulkInboxConversations",
+        "summary": "Change many conversations at once",
+        "description": "Resolves, reopens or assigns up to 200 conversations. Each is its own change; one the action does not fit counts as failed. The audit row holds counts only.",
+        "tags": ["inbox"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxBulkInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "What was done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxBulkResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/inbox/stats": {
+      "get": {
+        "operationId": "getInboxStats",
+        "summary": "Inbox counts",
+        "description": "Counts the conversations by state, the unassigned pool and how long the longest-waiting one has waited. It carries no customer text.",
+        "tags": ["inbox"],
+        "responses": {
+          "200": {
+            "description": "The counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxStats"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/inbox/conversations": {
+      "get": {
+        "operationId": "listInboxConversations",
+        "summary": "List inbox conversations",
+        "description": "Lists every conversation of the messaging inbox, most recently active first, one page at a time. Customer text is private and never exposed to an agent or to MCP.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "name": "view",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["all", "mine", "unassigned"]
+            },
+            "description": "Which conversations: mine (assigned to the caller), unassigned (nobody has taken them) or all."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["open", "pending", "snoozed", "resolved", "spam", "any"]
+            },
+            "description": "Only conversations in this state; without it the active ones (open, pending, snoozed); any means every state."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "description": "Search the number, the name and the message text."
+          },
+          {
+            "name": "channelId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Only conversations of this channel."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Page cursor: the next value of the previous page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "How many to return, 1-100; 50 when omitted."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of conversations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversationPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}": {
+      "get": {
+        "operationId": "getInboxConversation",
+        "summary": "One inbox conversation",
+        "description": "Returns one conversation. A supervisor opening one that is not theirs leaves an audit row, once an hour per conversation; the row names who, never the content.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/messages": {
+      "get": {
+        "operationId": "listInboxMessages",
+        "summary": "List a conversation's messages",
+        "description": "Lists the messages, internal notes and system lines of a conversation, newest first, one page at a time.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Page cursor: the next value of the previous page, for older messages."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "description": "How many to return, 1-100; 50 when omitted."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessagePage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      },
+      "post": {
+        "operationId": "sendInboxMessage",
+        "summary": "Reply to the customer",
+        "description": "Sends a reply to the customer through the conversation's channel. A long text is split into several. Replying to an unassigned conversation takes it and replying to a resolved one reopens it. A customer who opted out cannot be texted (422). Sending the same clientMsgId again returns the first message with 200 and sends nothing.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxSendInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The message sent earlier with this clientMsgId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The message, sending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/notes": {
+      "post": {
+        "operationId": "addInboxNote",
+        "summary": "Add an internal note",
+        "description": "Adds a note that agents and supervisors see and the customer never does.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxNoteInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The note",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxMessage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/claim": {
+      "post": {
+        "operationId": "claimInboxConversation",
+        "summary": "Take an unassigned conversation",
+        "description": "Assigns an unassigned conversation to the caller. If two agents claim at once exactly one wins and the other gets 409.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/assign": {
+      "post": {
+        "operationId": "assignInboxConversation",
+        "summary": "Hand a conversation to someone",
+        "description": "Assigns a conversation to a user, or returns it to the pool with userId 0 (supervisors only). A supervisor may assign any active conversation.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxAssignInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/status": {
+      "post": {
+        "operationId": "setInboxStatus",
+        "summary": "Change a conversation's state",
+        "description": "Sets a conversation open, pending, snoozed until a time, resolved or spam. Reopening one while the customer has another open conversation on the same number is refused with 409.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxStatusInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/tags": {
+      "post": {
+        "operationId": "setInboxTags",
+        "summary": "Set a conversation's tags",
+        "description": "Replaces a conversation's tags.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InboxTagsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/inbox/conversations/{id}/read": {
+      "post": {
+        "operationId": "readInboxConversation",
+        "summary": "Mark a conversation read",
+        "description": "Records that the caller has read the conversation up to its last message, which clears its unread count for them.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Marked read"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/status": {
+      "get": {
+        "operationId": "getMyInboxStatus",
+        "summary": "Is the inbox in use",
+        "description": "Says whether any channel has a number, so the inbox is worth showing, and how many conversations of the caller have unread customer text.",
+        "tags": ["inbox"],
+        "responses": {
+          "200": {
+            "description": "The status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/agents": {
+      "get": {
+        "operationId": "listMyInboxAgents",
+        "summary": "List the users conversations can go to",
+        "description": "Lists the enabled users who can take conversations, for the assign choice.",
+        "tags": ["inbox"],
+        "responses": {
+          "200": {
+            "description": "The users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxAgentList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "customer message content is private: it is not exposed to an agent"
+        }
+      }
+    },
+    "/api/v1/me/inbox/stream": {
+      "get": {
+        "operationId": "streamMyInbox",
+        "summary": "Live inbox events",
+        "description": "Opens a server-sent event stream of the caller's inbox. The events are conversation.new, conversation.assigned, conversation.updated, message.in, message.sent and message.status, each carrying only the conversation and message ids. Reconnect with Last-Event-ID to resume without missing one; events are kept 7 days. A keepalive comment arrives every 15 seconds.",
+        "tags": ["inbox"],
+        "parameters": [
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "The id of the last event the client saw; the stream resumes after it, and starts at the newest without it."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The event stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "messages",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "a live event stream"
+        }
+      }
+    },
     "/api/v1/phone-groups": {
       "get": {
         "operationId": "listPhoneGroups",
@@ -13971,6 +16221,16 @@
       },
       "Upstream": {
         "description": "Object storage (MinIO) answered with an error; try again shortly (code upstream)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unprocessable": {
+        "description": "The request is valid but cannot be done in the current state",
         "content": {
           "application/json": {
             "schema": {
@@ -17634,7 +19894,8 @@
                 "secrets",
                 "calls",
                 "events",
-                "recordings"
+                "recordings",
+                "messages"
               ]
             }
           },
@@ -17691,7 +19952,8 @@
                 "secrets",
                 "calls",
                 "events",
-                "recordings"
+                "recordings",
+                "messages"
               ]
             }
           },
@@ -17748,7 +20010,8 @@
                 "secrets",
                 "calls",
                 "events",
-                "recordings"
+                "recordings",
+                "messages"
               ]
             }
           },
@@ -20398,7 +22661,8 @@
                     "secrets",
                     "calls",
                     "events",
-                    "recordings"
+                    "recordings",
+                    "messages"
                   ]
                 },
                 "description": {
@@ -20465,7 +22729,8 @@
                 "secrets",
                 "calls",
                 "events",
-                "recordings"
+                "recordings",
+                "messages"
               ]
             }
           },
@@ -20491,7 +22756,8 @@
                 "secrets",
                 "calls",
                 "events",
-                "recordings"
+                "recordings",
+                "messages"
               ]
             }
           }
@@ -20547,7 +22813,8 @@
                 "secrets",
                 "calls",
                 "events",
-                "recordings"
+                "recordings",
+                "messages"
               ]
             }
           },
@@ -20655,7 +22922,8 @@
                 "secrets",
                 "calls",
                 "events",
-                "recordings"
+                "recordings",
+                "messages"
               ]
             }
           },
@@ -20719,7 +22987,8 @@
                 "secrets",
                 "calls",
                 "events",
-                "recordings"
+                "recordings",
+                "messages"
               ]
             }
           },
@@ -20762,7 +23031,8 @@
                 "secrets",
                 "calls",
                 "events",
-                "recordings"
+                "recordings",
+                "messages"
               ]
             }
           },
@@ -24014,6 +26284,882 @@
               "type": "string"
             },
             "description": "Limit the login to these queues."
+          }
+        }
+      },
+      "MessagingChannel": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "provider",
+          "name",
+          "enabled",
+          "trunkId",
+          "trunkName",
+          "hasCredentials",
+          "status",
+          "statusDetail",
+          "lastEventAt",
+          "addresses",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["sms", "whatsapp", "webchat"],
+            "description": "What the channel carries; only sms exists yet."
+          },
+          "provider": {
+            "type": "string",
+            "description": "How texts reach Hello; sip_trunk is a SIP trunk that carries SMS as SIP MESSAGE."
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "trunkId": {
+            "type": ["integer", "null"],
+            "format": "int64",
+            "description": "The SIP trunk of a sip_trunk channel; null when it was deleted."
+          },
+          "trunkName": {
+            "type": "string"
+          },
+          "hasCredentials": {
+            "type": "boolean",
+            "description": "Whether provider credentials are stored; they are never returned."
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ok", "degraded", "credentials_invalid"]
+          },
+          "statusDetail": {
+            "type": "string"
+          },
+          "lastEventAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "addresses": {
+            "type": "integer",
+            "description": "How many numbers the channel has."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingChannelInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "The kind of channel; only sms exists yet.",
+            "enum": ["sms"]
+          },
+          "provider": {
+            "type": "string",
+            "description": "How texts reach Hello; only sip_trunk exists yet.",
+            "enum": ["sip_trunk"]
+          },
+          "name": {
+            "type": "string",
+            "description": "The channel's name, unique among channels.",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the channel takes and sends texts; true when created without it."
+          },
+          "trunkId": {
+            "type": "integer",
+            "description": "The SIP trunk the channel reads texts from and sends through; the trunk needs SMS over SIP turned on.",
+            "format": "int64"
+          }
+        }
+      },
+      "MessagingChannelTest": {
+        "type": "object",
+        "required": ["ok", "checks"],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "description": "Whether every check passed."
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "ok", "detail"],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "MessagingAddress": {
+        "type": "object",
+        "required": [
+          "id",
+          "channelId",
+          "channelName",
+          "address",
+          "label",
+          "routeKind",
+          "enabled",
+          "optOutKeywords",
+          "helpText",
+          "optOutText",
+          "conversations",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channelId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channelName": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string",
+            "description": "The number customers text, as it was typed."
+          },
+          "label": {
+            "type": "string"
+          },
+          "routeKind": {
+            "type": "string",
+            "enum": ["inbox"],
+            "description": "Where a new conversation goes; inbox is the pool every operator sees."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "optOutKeywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The words that, as the whole text, opt the customer out."
+          },
+          "helpText": {
+            "type": "string",
+            "description": "What Hello answers to HELP; empty is no answer."
+          },
+          "optOutText": {
+            "type": "string",
+            "description": "What Hello answers when a customer opts out; empty is the default sentence."
+          },
+          "conversations": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingAddressInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "channelId": {
+            "type": "integer",
+            "description": "The channel the number belongs to; required when creating, and not changed afterwards.",
+            "format": "int64"
+          },
+          "address": {
+            "type": "string",
+            "description": "The number customers text, at least 4 digits, optionally starting with +; required when creating, and not changed afterwards."
+          },
+          "label": {
+            "type": "string",
+            "description": "A name for the number, at most 100 characters.",
+            "maxLength": 100
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether texts to the number go to the inbox; true when created without it."
+          },
+          "optOutKeywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "description": "The words that, as the whole text, opt the customer out; empty keeps the default set (stop, stopall, unsubscribe, cancel, end, quit)."
+          },
+          "helpText": {
+            "type": "string",
+            "description": "What Hello answers to HELP, at most 480 bytes; empty is no answer.",
+            "maxLength": 480
+          },
+          "optOutText": {
+            "type": "string",
+            "description": "What Hello answers when a customer opts out, at most 480 bytes; empty is the default sentence.",
+            "maxLength": 480
+          }
+        }
+      },
+      "MessagingSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "retentionSmsDays": {
+            "type": "integer",
+            "description": "How long a resolved text conversation is kept after it was resolved.",
+            "minimum": 1,
+            "maximum": 3650
+          },
+          "retentionChatDays": {
+            "type": "integer",
+            "description": "How long a resolved chat conversation is kept after it was resolved.",
+            "minimum": 1,
+            "maximum": 3650
+          },
+          "reopenDays": {
+            "type": "integer",
+            "description": "A new text on a conversation resolved less than this many days ago reopens it; 0 starts a new one.",
+            "minimum": 0,
+            "maximum": 365
+          },
+          "emailNotify": {
+            "type": "boolean",
+            "description": "Whether an agent with no inbox open is emailed when a customer text waits; the email never carries the text."
+          }
+        }
+      },
+      "MessagingOptOut": {
+        "type": "object",
+        "required": [
+          "id",
+          "addressId",
+          "address",
+          "channel",
+          "peer",
+          "state",
+          "source",
+          "note",
+          "at"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "addressId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "address": {
+            "type": "string",
+            "description": "Our number the customer opted out of."
+          },
+          "channel": {
+            "type": "string"
+          },
+          "peer": {
+            "type": "string",
+            "description": "The customer's number; empty once they were erased."
+          },
+          "state": {
+            "type": "string",
+            "enum": ["out", "in"]
+          },
+          "source": {
+            "type": "string",
+            "enum": ["keyword", "provider", "admin", "customer"]
+          },
+          "note": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MessagingOptOutInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["addressId", "peer"],
+        "properties": {
+          "addressId": {
+            "type": "integer",
+            "description": "Our number the customer opts out of.",
+            "format": "int64"
+          },
+          "peer": {
+            "type": "string",
+            "description": "The customer's phone number."
+          },
+          "note": {
+            "type": "string",
+            "description": "Why it was recorded by hand, at most 200 bytes.",
+            "maxLength": 200
+          }
+        }
+      },
+      "MessagingReconsentInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["note"],
+        "properties": {
+          "note": {
+            "type": "string",
+            "description": "How the customer gave their consent again, at most 200 bytes; it is audited.",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        }
+      },
+      "MessagingEraseInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["peer"],
+        "properties": {
+          "peer": {
+            "type": "string",
+            "description": "The customer's phone number; every conversation with it, on every channel, is deleted."
+          }
+        }
+      },
+      "MessagingEraseReport": {
+        "type": "object",
+        "required": ["conversations", "messages", "optOutsKept", "providers"],
+        "properties": {
+          "conversations": {
+            "type": "integer"
+          },
+          "messages": {
+            "type": "integer"
+          },
+          "optOutsKept": {
+            "type": "integer",
+            "description": "Opt-outs reduced to a hash, so the customer is not texted again."
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["provider", "redacted", "detail"],
+              "properties": {
+                "provider": {
+                  "type": "string"
+                },
+                "redacted": {
+                  "type": "boolean"
+                },
+                "detail": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "InboxConversation": {
+        "type": "object",
+        "required": [
+          "id",
+          "channelId",
+          "channelKind",
+          "channelName",
+          "addressId",
+          "address",
+          "peer",
+          "peerKind",
+          "peerName",
+          "peerNameSource",
+          "status",
+          "snoozedUntil",
+          "assigneeUserId",
+          "assigneeName",
+          "priority",
+          "tags",
+          "preview",
+          "unread",
+          "optedOut",
+          "lastMessageAt",
+          "lastInboundAt",
+          "firstResponseAt",
+          "resolvedAt",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channelId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "channelKind": {
+            "type": "string"
+          },
+          "channelName": {
+            "type": "string"
+          },
+          "addressId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "address": {
+            "type": "string",
+            "description": "Our number the customer texted."
+          },
+          "peer": {
+            "type": "string",
+            "description": "The customer's number."
+          },
+          "peerKind": {
+            "type": "string",
+            "enum": ["phone", "visitor"]
+          },
+          "peerName": {
+            "type": "string",
+            "description": "A name from a shared source, never from a personal address book."
+          },
+          "peerNameSource": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["open", "pending", "snoozed", "resolved", "spam"]
+          },
+          "snoozedUntil": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "assigneeUserId": {
+            "type": ["integer", "null"],
+            "format": "int64"
+          },
+          "assigneeName": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["low", "normal", "high"]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "preview": {
+            "type": "string",
+            "description": "The start of the last message."
+          },
+          "unread": {
+            "type": "integer",
+            "description": "Customer messages the caller has not read."
+          },
+          "optedOut": {
+            "type": "boolean",
+            "description": "Whether the customer opted out: nobody can text them."
+          },
+          "lastMessageAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastInboundAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "firstResponseAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "resolvedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InboxConversationPage": {
+        "type": "object",
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxConversation"
+            }
+          },
+          "next": {
+            "type": "string",
+            "description": "Pass as cursor for the next page; empty on the last."
+          }
+        }
+      },
+      "InboxMessage": {
+        "type": "object",
+        "required": [
+          "id",
+          "conversationId",
+          "direction",
+          "kind",
+          "senderKind",
+          "senderUserId",
+          "senderName",
+          "body",
+          "status",
+          "errorCode",
+          "clientMsgId",
+          "createdAt",
+          "sentAt",
+          "deliveredAt",
+          "readAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "conversationId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["in", "out"]
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["message", "note", "system"],
+            "description": "A note is internal and never sent; a system line records what happened (assigned, resolved, opted out)."
+          },
+          "senderKind": {
+            "type": "string",
+            "enum": ["customer", "user", "ai", "system"]
+          },
+          "senderUserId": {
+            "type": ["integer", "null"],
+            "format": "int64"
+          },
+          "senderName": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "sending",
+              "sent",
+              "delivered",
+              "read",
+              "failed",
+              "unknown"
+            ],
+            "description": "For a reply: sending until the trunk accepts it (sent, never delivered on this path), failed when it refuses, unknown when the outcome was lost."
+          },
+          "errorCode": {
+            "type": "string"
+          },
+          "clientMsgId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sentAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "readAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          }
+        }
+      },
+      "InboxMessagePage": {
+        "type": "object",
+        "required": ["items", "next"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InboxMessage"
+            },
+            "description": "Newest first."
+          },
+          "next": {
+            "type": "string",
+            "description": "Pass as cursor for older messages; empty on the last page."
+          }
+        }
+      },
+      "InboxSendInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["body"],
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "The text to send, 1-2000 bytes; a long one is split into several texts.",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "clientMsgId": {
+            "type": "string",
+            "description": "A value the client makes up for this send; sending it again with the same value returns the first message and sends nothing more.",
+            "maxLength": 64
+          }
+        }
+      },
+      "InboxNoteInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["body"],
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "The note, 1-4000 bytes; only agents and supervisors see it.",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
+      },
+      "InboxAssignInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["userId"],
+        "properties": {
+          "userId": {
+            "type": "integer",
+            "description": "The user to hand the conversation to; 0 returns it to the pool (supervisors only).",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "InboxStatusInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "The new state.",
+            "enum": ["open", "pending", "snoozed", "resolved", "spam"]
+          },
+          "snoozedUntil": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When a snoozed conversation comes back, within 30 days; required for snoozed and not allowed otherwise."
+          }
+        }
+      },
+      "InboxTagsInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tags"],
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "description": "All the conversation's tags, at most 10 of at most 32 characters; they replace the current ones."
+          }
+        }
+      },
+      "InboxBulkInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ids", "action"],
+        "properties": {
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "minItems": 1,
+            "maxItems": 200,
+            "description": "The conversations to change, 1-200."
+          },
+          "action": {
+            "type": "string",
+            "description": "What to do to each.",
+            "enum": ["resolve", "reopen", "assign"]
+          },
+          "userId": {
+            "type": "integer",
+            "description": "For assign: the user to hand them to; 0 returns them to the pool.",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "InboxBulkResult": {
+        "type": "object",
+        "required": ["done", "failed"],
+        "properties": {
+          "done": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer",
+            "description": "Conversations the action did not fit, such as resolving one that is resolved already."
+          }
+        }
+      },
+      "InboxStats": {
+        "type": "object",
+        "required": [
+          "open",
+          "pending",
+          "snoozed",
+          "unassigned",
+          "resolvedToday",
+          "oldestUnassignedSeconds"
+        ],
+        "properties": {
+          "open": {
+            "type": "integer"
+          },
+          "pending": {
+            "type": "integer"
+          },
+          "snoozed": {
+            "type": "integer"
+          },
+          "unassigned": {
+            "type": "integer",
+            "description": "Active conversations nobody has taken."
+          },
+          "resolvedToday": {
+            "type": "integer"
+          },
+          "oldestUnassignedSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long the longest-waiting unassigned conversation has waited; 0 when none waits."
+          }
+        }
+      },
+      "InboxStatus": {
+        "type": "object",
+        "required": ["enabled", "unread", "unassigned"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether any enabled channel has an enabled number; the inbox is shown only then."
+          },
+          "unread": {
+            "type": "integer",
+            "description": "The caller's conversations with customer messages they have not read."
+          },
+          "unassigned": {
+            "type": "integer",
+            "description": "Active conversations nobody has taken; counted for supervisors only."
+          }
+        }
+      },
+      "InboxAgentList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "username", "displayName"],
+              "properties": {
+                "id": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "username": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "MessagingChannelList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagingChannel"
+            }
+          }
+        }
+      },
+      "MessagingAddressList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagingAddress"
+            }
+          }
+        }
+      },
+      "MessagingOptOutList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessagingOptOut"
+            }
           }
         }
       }

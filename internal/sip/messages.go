@@ -68,6 +68,7 @@ const (
 	MsgTargetExternal  = "external"
 	MsgSenderExt       = "extension"
 	MsgSenderExternal  = "external"
+	MsgSenderSystem    = "system"
 
 	MsgResultDelivered     = "delivered"
 	MsgResultNotRegistered = "not_registered"
@@ -115,6 +116,32 @@ type MessageJob struct {
 	TrunkID       int64
 	Attempts      int
 	CreatedAt     time.Time
+}
+
+// TrunkText is a text a trunk delivered, as the inbox gateway sees it.
+type TrunkText struct {
+	TrunkID     int64
+	To          string // the number the carrier dialled
+	From        string // the sender's number
+	FromName    string
+	ContentType string
+	Body        []byte
+	// EventKey is unique per delivery: the carrier retrying the same
+	// MESSAGE, to this node or another, gives the same key.
+	EventKey string
+}
+
+// ConversationGateway lets the messaging inbox take a trunk's text before
+// the extension route does (spec messaging-channels M-4). It runs on the
+// MESSAGE path only, which may use PostgreSQL.
+type ConversationGateway interface {
+	// InboundFromTrunk reports handled=true when the dialled number is one
+	// of the inbox's addresses: the text was stored (or is a duplicate of
+	// one that was) and must not be delivered to an extension. handled=false
+	// means the number is not the inbox's and the existing delivery runs
+	// unchanged. An error means the text was not stored: the carrier is
+	// answered with a failure and retries.
+	InboundFromTrunk(ctx context.Context, in TrunkText) (handled bool, err error)
 }
 
 // MessageSent is what the queue stored.
@@ -374,6 +401,24 @@ func (s *Server) inboundTrunkMessage(req *sip.Request, tx sip.ServerTransaction,
 		s.log.Info("trunk MESSAGE refused: sender is not a usable external number", "trunk", t.Name)
 		s.respond(tx, req, sip.StatusForbidden, "Forbidden")
 		return
+	}
+	if s.deps.Conversations != nil && !strings.HasPrefix(strings.ToLower(ct), "application/im-iscomposing") {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		handled, err := s.deps.Conversations.InboundFromTrunk(ctx, TrunkText{
+			TrunkID: t.ID, To: req.Recipient.User, From: from, FromName: strings.TrimSpace(req.From().DisplayName),
+			ContentType: ct, Body: body,
+			EventKey: fmt.Sprintf("%d|%s|%d|%s|%s", t.ID, req.CallID().Value(), req.CSeq().SeqNo, from, req.Recipient.User),
+		})
+		cancel()
+		switch {
+		case err != nil:
+			s.messageSendFailed(req, tx, err, count)
+			return
+		case handled:
+			count(msgAccepted)
+			s.respond(tx, req, sip.StatusAccepted, "Accepted")
+			return
+		}
 	}
 	dec := s.decide(snap.Routing(), routing.Call{
 		FromTrunk: t.ID, Number: req.Recipient.User, CallerID: from,
@@ -833,7 +878,16 @@ func (s *Server) sendExternal(ctx context.Context, snap *snapshot.Snapshot, j Me
 			if _, bad := rs.Misconfigured[t.ID]; bad {
 				continue
 			}
-			attempts = append(attempts, attempt{t, orderedDestinations(t), j.Recipient, t.DefaultCallerID})
+			// A reply from the inbox names its channel's trunk and goes out
+			// from the number the customer texted.
+			if j.TrunkID > 0 && t.ID != j.TrunkID {
+				continue
+			}
+			callerD := t.DefaultCallerID
+			if j.SenderKind == MsgSenderSystem && validSenderNumber(j.Sender) {
+				callerD = j.Sender
+			}
+			attempts = append(attempts, attempt{t, orderedDestinations(t), j.Recipient, callerD})
 		}
 	}
 	if len(attempts) == 0 {

@@ -283,6 +283,9 @@ type Config struct {
 	// Messages is the SIP MESSAGE persistence; nil answers 503 on the
 	// message routes.
 	Messages MessageStore
+	// Inbox is the messaging inbox persistence (spec messaging-channels);
+	// nil answers 503 on the inbox and messaging routes.
+	Inbox InboxStore
 	// AI is the OAuth authorization server (spec ai-external-access); nil
 	// without HELLO_PUBLIC_URL, when the consent, grant and service-account
 	// routes answer 404 and bearer tokens get no audience check.

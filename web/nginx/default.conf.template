@@ -45,6 +45,29 @@ server {
         proxy_send_timeout 600s;
     }
 
+    # The inbox's live feed (docs/messaging.md, "Inbox"): GET
+    # /api/v1/me/inbox/stream is a server-sent event stream that must reach
+    # the browser as it is written, and stay open for hours: no buffering, no
+    # caching, no compression, X-Accel-Buffering for an ingress controller in
+    # front, and a read timeout far above hello-control's 15 s keepalive, so
+    # an idle stream is never cut.
+    location = /api/v1/me/inbox/stream {
+        set $hello_control ${HELLO_CONTROL_UPSTREAM};
+        proxy_pass $hello_control;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $hello_forwarded_proto;
+        proxy_buffering off;
+        proxy_cache off;
+        gzip off;
+        add_header X-Accel-Buffering "no" always;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+
     location /api/ {
         set $hello_control ${HELLO_CONTROL_UPSTREAM};
         proxy_pass $hello_control;

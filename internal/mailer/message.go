@@ -121,3 +121,22 @@ func BuildTest(from, to string, now time.Time) ([]byte, error) {
 	buf.WriteString("This is a test email from your Hello PBX. Voicemail notifications will be sent the same way.\r\n")
 	return buf.Bytes(), nil
 }
+
+// BuildNotice renders a short plain-text notification email. subject and
+// body are the caller's own words (never customer text): a line break in
+// the subject or an address is refused so nothing can inject a header.
+func BuildNotice(from, to, subject, body string, now time.Time) ([]byte, error) {
+	if from == "" {
+		return nil, errors.New("mailer: no From address configured")
+	}
+	if strings.ContainsAny(from+to+subject, "\r\n") {
+		return nil, errors.New("mailer: header contains a line break")
+	}
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\n",
+		from, to, mime.QEncoding.Encode("utf-8", subject), now.Format(time.RFC1123Z))
+	buf.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+	buf.WriteString(strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", "\n"), "\n", "\r\n"))
+	buf.WriteString("\r\n")
+	return buf.Bytes(), nil
+}

@@ -15,6 +15,10 @@ func TestRoutesTable(t *testing.T) {
 	roleOf := map[auth.Scope]auth.Role{
 		auth.ScopeRead: auth.RoleViewer, auth.ScopeSession: auth.RoleViewer,
 		auth.ScopeWrite: auth.RoleOperator, auth.ScopeAdmin: auth.RoleAdmin, auth.ScopeSecrets: auth.RoleAdmin,
+		// The inbox: a supervisor (operator) reaches every conversation; the
+		// agents' own /me/inbox routes ask the user role like the other
+		// self-service routes, and the handlers refuse a viewer.
+		auth.ScopeMessages: auth.RoleOperator,
 	}
 	secrets := map[string]bool{
 		"POST /api/v1/devices/{id}/rotate-secret":        true,

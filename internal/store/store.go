@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/auth"
+	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -78,6 +79,8 @@ type Store struct {
 	db   *sql.DB
 	box  *secret.Box
 	prov ProvSettings
+	// msgEvents receives the inbox's events; nil drops them.
+	msgEvents messaging.EventSink
 }
 
 // New wraps db.

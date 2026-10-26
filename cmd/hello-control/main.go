@@ -21,6 +21,7 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/mailer"
+	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/migrate"
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/prov/redirect"
@@ -133,6 +134,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		return fmt.Errorf("HELLO_PROV_ADDR: %w", err)
 	}
 	go runMailer(ctx, envSMTP(cfg), st, objs, log)
+	go runInboxMaintenance(ctx, st, vk, cfg.NodeID, messaging.NewMetrics(metrics.Registry), log)
+	go runInboxNotifier(ctx, envSMTP(cfg), st, log)
 
 	// External AI access (spec ai-external-access): the OAuth
 	// authorization server and /mcp, only with HELLO_PUBLIC_URL.
@@ -177,6 +180,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Conferences:     st,
 		ConferenceLive:  vk,
 		Messages:        st,
+		Inbox:           st,
 		Dialing:         cfg.Dial,
 		PromptLanguage:  cfg.VoicePromptLanguage,
 		Prov:            provAPI(cfg, settings, deployment, objs, log),

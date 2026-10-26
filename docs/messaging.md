@@ -3,6 +3,10 @@
 Hello carries RFC 3428 text messages between phones, to groups, to every phone
 and, per trunk, to and from the outside world (SMS over SIP).
 
+Customers who text one of your numbers are answered from the messaging inbox
+instead: see [inbox.md](inbox.md). A number added to a channel there takes its
+texts out of the extension route below; every other number is unchanged.
+
 ## Routing
 
 - A phone sends `MESSAGE sip:<target>@<domain>` through Kamailio, which routes

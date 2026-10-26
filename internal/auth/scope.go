@@ -28,6 +28,10 @@ const (
 	ScopeEvents Scope = "events"
 	// ScopeRecordings mints and revokes recording links.
 	ScopeRecordings Scope = "recordings"
+	// ScopeMessages reads and answers the customer conversations of the
+	// messaging inbox (spec messaging-channels M-32). Handler-level
+	// ownership still applies: a user sees their own assignments only.
+	ScopeMessages Scope = "messages"
 	// ScopeSession is carried only by a browser session: consent approval
 	// and denial need it, so no token can grant itself scopes.
 	ScopeSession Scope = "session"
@@ -35,7 +39,7 @@ const (
 
 // AllScopes is every scope a user's credential can be granted. It leaves out
 // ScopeSession.
-var AllScopes = Scopes{ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings}
+var AllScopes = Scopes{ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeMessages}
 
 // Scopes is the set of scopes a credential carries.
 type Scopes []Scope
@@ -47,7 +51,7 @@ func (ss Scopes) Has(s Scope) bool {
 		return slices.Contains(ss, ScopeRead) || ss.Has(ScopeWrite)
 	case ScopeWrite:
 		return slices.Contains(ss, ScopeWrite) || ss.Has(ScopeAdmin)
-	case ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeSession:
+	case ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeMessages, ScopeSession:
 		return slices.Contains(ss, s)
 	}
 	return false
@@ -69,7 +73,7 @@ func ParseScopes(v string) (Scopes, error) {
 	for _, f := range strings.Fields(v) {
 		s := Scope(f)
 		switch s {
-		case ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeSession:
+		case ScopeRead, ScopeWrite, ScopeAdmin, ScopeSecrets, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeMessages, ScopeSession:
 		default:
 			return nil, fmt.Errorf("unknown scope %q", f)
 		}
@@ -126,11 +130,11 @@ func ParseRole(v string) (Role, error) {
 func GrantableScopes(r Role) Scopes {
 	switch r {
 	case RoleUser:
-		return Scopes{ScopeRead, ScopeWrite}
+		return Scopes{ScopeRead, ScopeWrite, ScopeMessages}
 	case RoleViewer:
 		return Scopes{ScopeRead, ScopeEvents}
 	case RoleOperator:
-		return Scopes{ScopeRead, ScopeWrite, ScopeCalls, ScopeEvents, ScopeRecordings}
+		return Scopes{ScopeRead, ScopeWrite, ScopeCalls, ScopeEvents, ScopeRecordings, ScopeMessages}
 	case RoleAdmin:
 		return slices.Clone(AllScopes)
 	}

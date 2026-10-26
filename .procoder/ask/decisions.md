@@ -688,3 +688,51 @@ of"), paging by code. A stored value the list no longer has stays selectable as
 is not a target of another. An empty target is refused with a kind-specific
 message. `conference` is also in the API enum and still has no chooser; not part
 of this change.
+
+## Messaging inbox core (2026-10-26)
+
+Delivery item 1 of `.procoder/specs/messaging-channels.md`, built LAN-only on the
+SIP text messaging of PR #165. Migration 00043 `messaging_core`; scope `messages`
+(granted to the user, operator and admin roles, never to viewer).
+
+What is in: channels (provider `sip_trunk` only) and numbers, the conversation
+model, the idempotent ingest (event ledger, one open conversation per number and
+customer under a partial unique index), Hello's own opt-out engine with the HMAC
+residue, retention and erase, supervisor-view audit, the `EventSink` (no-op),
+`/api/v1/messaging/*`, `/api/v1/inbox/*` and `/api/v1/me/inbox/*`, the SSE
+stream, browser and email notification, the Inbox, Channels, Opt-outs and
+Settings pages. Assignment is by hand and by claim; the only route kind is
+`inbox` (the shared pool).
+
+How it ties into #165:
+
+- `inboundTrunkMessage` offers a text to `sip.ConversationGateway.InboundFromTrunk`
+  before the extension route. The gateway (hello-sip, over the control store)
+  returns handled only for an enabled number of an enabled `sip_trunk` channel on
+  that trunk; every other number takes the old path unchanged. A store failure
+  answers 503 so the carrier retries. The event key is trunk, Call-ID, CSeq,
+  sender and dialled number.
+- A reply is queued in the existing `messages` table in the same transaction as
+  the conversation message (`messages.conversation_message_id`, added here), sent
+  by the trunk of its channel from the number the customer texted. `FinishMessage`
+  and `MaintainMessages` move the message to `sent` or `failed`; with no queue row
+  left after five minutes it becomes `unknown`. A reply is never `delivered`:
+  there are no receipts on this path.
+- A reply is split at 700 bytes (the store's `MaxMessageBytes`, one UDP packet),
+  not the spec's 1000, so no part is refused for its size.
+
+Deviations from the spec text, on purpose:
+
+- The live stream wakes by polling `conversation_events` once a second per open
+  stream, not by Valkey pub/sub; the table is the source of truth either way and
+  Valkey is not needed. Event writers take an advisory lock so ids commit in
+  order and a resume by `Last-Event-ID` cannot skip one.
+- An address is matched by its lookup key, or by its last nine digits when the
+  keys differ, so a carrier that dials the number without its `+` still finds it.
+- Not in this item (later items): media tables, canned responses, typing,
+  first-contact sending, queue and user routing, the provider interface and
+  Twilio, desk-phone delivery, the chat widget, AI, export, reports.
+
+The inbox navigation stays hidden until an enabled channel has an enabled number
+(`GET /api/v1/me/inbox/status`). Message text is excluded from MCP; only
+`getInboxStats` is a tool.
