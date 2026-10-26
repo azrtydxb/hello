@@ -1,4 +1,4 @@
-// Ring tags and tag rules client (migration 00042): the tags a call rings
+// Ring tags and tag rules client (migration 00043): the tags a call rings
 // with, and the ordered rules that choose one.
 
 import { list, request } from "../api";

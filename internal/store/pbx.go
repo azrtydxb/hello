@@ -485,7 +485,7 @@ type RingGroup struct {
 	MOHClassID  *int64 `json:"mohClassId"`
 	MOHRingback bool   `json:"mohRingback"`
 	// RingTag overrides the ringgroup ring tag for calls through the group
-	// (empty: ringgroup; migration 00042).
+	// (empty: ringgroup; migration 00043).
 	RingTag   string            `json:"ringTag"`
 	Members   []RingGroupMember `json:"members"`
 	CreatedAt time.Time         `json:"createdAt"`

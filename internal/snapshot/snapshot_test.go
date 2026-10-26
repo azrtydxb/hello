@@ -365,7 +365,7 @@ func TestExtensionByBox(t *testing.T) {
 }
 
 // TestRingTagLoad fails if the ring tags, their Bellcore slots, the ordered
-// rules and a ring group's own tag (migration 00042) do not reach the
+// rules and a ring group's own tag (migration 00043) do not reach the
 // snapshot, or if the seven built-in tags are not seeded.
 func TestRingTagLoad(t *testing.T) {
 	cfg := scratch(t)
