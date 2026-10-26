@@ -17,6 +17,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/store"
 	"github.com/valkey-io/valkey-go"
 )
 
@@ -808,5 +809,37 @@ func TestExtensionCallFeatures(t *testing.T) {
 	got = c.must(http.StatusOK, "GET", path, nil).json(t)
 	if got["dnd"] != true || got["voicemailEnabled"] != false || got["forwardBusy"] != "" {
 		t.Fatalf("get = %v", got)
+	}
+}
+
+// TestValidateRingGroupFailover fails if a ring group's fallback to an
+// extension or another ring group is refused when well formed, accepted when
+// not, or allowed to name the group itself.
+func TestValidateRingGroupFailover(t *testing.T) {
+	base := func(kind, target string) *store.RingGroupInput {
+		return &store.RingGroupInput{
+			Name: "sales", Strategy: "ring-all", RingTimeout: 30, FailureKind: kind, FailureTarget: target,
+			Members: []store.RingGroupMember{{ExtensionID: 1, Position: 1, Weight: 1}},
+		}
+	}
+	for _, tc := range []struct {
+		name         string
+		kind, target string
+		bad          bool
+	}{
+		{"extension", "extension", "300", false},
+		{"extension not a number", "extension", "desk", true},
+		{"extension empty", "extension", "", true},
+		{"group", "ring_group", "support", false},
+		{"group itself", "ring_group", "sales", true},
+		{"group bad name", "ring_group", "a b", true},
+		{"group empty", "ring_group", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := validateRingGroup(base(tc.kind, tc.target))
+			if (len(f) > 0) != tc.bad {
+				t.Fatalf("errors = %v, want bad=%v", f, tc.bad)
+			}
+		})
 	}
 }
