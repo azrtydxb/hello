@@ -215,6 +215,34 @@ func drainEnv(t *testing.T) (*env, *client, *cluster.Store, valkey.Client) {
 	return e, e.login(), members, vc
 }
 
+// keepReady re-publishes the nodes as READY until the test ends. A member
+// record lives cluster.TTL (4 s); on a loaded -race runner a slow login or a
+// long test body outlives that, the nodes read OFFLINE and the drain guard
+// answers a different 409 than the one under test.
+func keepReady(t *testing.T, members *cluster.Store, ids ...string) {
+	t.Helper()
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tick := time.NewTicker(500 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tick.C:
+				now := time.Now().UTC()
+				for _, id := range ids {
+					_ = members.Publish(context.Background(), cluster.Member{ID: id, Kind: cluster.KindSIP, State: cluster.Ready, StartedAt: now, Heartbeat: now})
+				}
+			}
+		}
+	}()
+	// Registered after drainEnv's vc.Close cleanup, so it runs first.
+	t.Cleanup(func() { close(stop); <-done })
+}
+
 // TestDrainGuardRequests fails if a SIP node with a pending drain request
 // (still published READY: it acts at its next heartbeat) counts as READY,
 // letting a second unforced drain empty the SIP tier, or if two concurrent
@@ -222,6 +250,7 @@ func drainEnv(t *testing.T) (*env, *client, *cluster.Store, valkey.Client) {
 func TestDrainGuardRequests(t *testing.T) {
 	e, c, members, _ := drainEnv(t)
 	ctx := context.Background()
+	keepReady(t, members, "hello-sip-1", "hello-sip-2")
 	c.must(http.StatusNoContent, "POST", "/api/v1/cluster/nodes/hello-sip-1/drain", nil)
 	r := c.must(http.StatusConflict, "POST", "/api/v1/cluster/nodes/hello-sip-2/drain", nil)
 	if !strings.Contains(string(r.body), "would leave no READY SIP node") {
