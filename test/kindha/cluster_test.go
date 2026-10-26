@@ -308,16 +308,49 @@ func (l *labEnv) patchDeployment(t *testing.T, d map[string]any) {
 	setEnv(vip, "vip_interface", "eth0")
 }
 
+// waitAPI waits until the kind API server answers readyz: a loaded runner can
+// still be settling etcd when the test starts.
+func (l *labEnv) waitAPI(t *testing.T) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Minute)
+	for {
+		out, err := l.tryKubectl("get", "--raw=/readyz")
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the API server is not ready after 3m: %v\n%s", err, out)
+		}
+		time.Sleep(3 * time.Second)
+	}
+}
+
+// retry runs a kubectl command up to three times: the API server of a small
+// kind cluster on a busy runner can time out a request.
+func (l *labEnv) retry(t *testing.T, args ...string) {
+	t.Helper()
+	var out string
+	var err error
+	for i := 0; i < 3; i++ {
+		if out, err = l.tryKubectl(args...); err == nil {
+			return
+		}
+		time.Sleep(5 * time.Second)
+	}
+	t.Fatalf("kubectl %s: %v\n%s", strings.Join(args, " "), err, out)
+}
+
 func (l *labEnv) apply(t *testing.T) {
 	t.Helper()
+	l.waitAPI(t)
 	if _, err := l.tryKubectl("get", "namespace", l.namespace); err != nil {
-		l.kubectl(t, "create", "namespace", l.namespace)
+		l.retry(t, "create", "namespace", l.namespace)
 	}
 	f := filepath.Join(t.TempDir(), "edge.yaml")
 	if err := os.WriteFile(f, l.manifests(t), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l.kubectl(t, "apply", "-f", f)
+	l.retry(t, "apply", "-f", f)
 	l.kubectl(t, "-n", l.namespace, "rollout", "status", "deployment/kamailio", "--timeout=300s")
 }
 
@@ -332,8 +365,11 @@ func (l *labEnv) diagnostics(t *testing.T) {
 		t.Logf("kubectl %s:\n%s", strings.Join(args, " "), out)
 	}
 	for _, n := range l.nodes {
-		pods, _ := l.tryKubectl("-n", l.namespace, "get", "pods", "-l", "app.kubernetes.io/component=edge",
+		pods, err := l.tryKubectl("-n", l.namespace, "get", "pods", "-l", "app.kubernetes.io/component=edge",
 			"--field-selector", "spec.nodeName="+n, "-o", "jsonpath={.items[*].metadata.name}")
+		if err != nil {
+			pods = ""
+		}
 		for _, p := range strings.Fields(pods) {
 			for _, c := range []string{"kamailio", "vip"} {
 				out, _ := l.tryKubectl("-n", l.namespace, "logs", p, "-c", c, "--tail=80")

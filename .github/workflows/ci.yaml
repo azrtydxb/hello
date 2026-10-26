@@ -823,6 +823,11 @@ jobs:
           tags: hello.local/kamailio:ha
           cache-from: ${{ steps.ant-cache-ha.outputs.cache-from }}
           cache-to: ${{ steps.ant-cache-ha.outputs.cache-to }}
+      # Compile the test before the cluster exists, so the compiler does not
+      # compete with etcd for the runner's CPU while the cluster settles.
+      - name: Compile the failover test
+        if: steps.changed.outputs.run == 'true'
+        run: go test -c -o "$RUNNER_TEMP/kindha.test" ./test/kindha/
       - name: Create the kind cluster
         if: steps.changed.outputs.run == 'true'
         run: |
@@ -860,7 +865,7 @@ jobs:
           export KINDHA_VIP="$vip"
           export KINDHA_IMAGE=hello.local/kamailio:ha
           export KINDHA_CONTEXT=kind-kamailio-ha
-          go test -count=1 -timeout 30m -v ./test/kindha/
+          "$RUNNER_TEMP/kindha.test" -test.count=1 -test.timeout 30m -test.v
       - name: Cluster state on failure
         if: failure() && steps.changed.outputs.run == 'true'
         run: |
