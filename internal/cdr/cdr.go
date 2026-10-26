@@ -26,11 +26,12 @@ const (
 	DirectionOutbound = "outbound"
 )
 
-// Call kinds (migration 00013).
+// Call kinds (migration 00013; conference, 00034).
 const (
-	KindCall     = "call"
-	KindPage     = "page"
-	KindIntercom = "intercom"
+	KindCall       = "call"
+	KindPage       = "page"
+	KindIntercom   = "intercom"
+	KindConference = "conference"
 )
 
 // Termination sides.
@@ -75,7 +76,7 @@ type Record struct {
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
 	PageLegs []PageLeg
-	// QueueLegs is what the call did in a call queue (migration 00036): one
+	// QueueLegs is what the call did in a call queue (migration 00037): one
 	// row per event, in order; empty for a call that never queued.
 	QueueLegs []QueueLeg
 }

@@ -1,6 +1,6 @@
 package store
 
-// ACD call queues (migration 00036). The configuration lives here; what
+// ACD call queues (migration 00037). The configuration lives here; what
 // changes while calls wait (callers, agent login, pause) lives in Valkey
 // (internal/queue). Every mutation runs through configChange, so it is
 // audited, bumps the configuration revision and notifies hello-sip.
@@ -27,7 +27,7 @@ const (
 // timeout, full and no-agents destinations.
 const IVRQueueDest = "queue"
 
-// Queue feature-code actions (migration 00036).
+// Queue feature-code actions (migration 00037).
 const (
 	ActionQueueLogin   = "queue_login"
 	ActionQueueLogout  = "queue_logout"
@@ -223,11 +223,12 @@ func checkQueue(ctx context.Context, tx *sql.Tx, id int64, in QueueInput) error 
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM extensions WHERE number = $1)
 			+ (SELECT count(*) FROM ring_groups WHERE name = $1)
-			+ (SELECT count(*) FROM ivr_menus WHERE number = $1)`, in.Number).Scan(&n); err != nil {
+			+ (SELECT count(*) FROM ivr_menus WHERE number = $1)
+			+ (SELECT count(*) FROM conference_rooms WHERE number = $1)`, in.Number).Scan(&n); err != nil {
 			return err
 		}
 		if n > 0 {
-			return fieldError("number", "is already an extension number, a ring group name or an IVR menu number")
+			return fieldError("number", "is already an extension number, a ring group name, an IVR menu number or a conference room number")
 		}
 		if err := checkNotSlot(ctx, tx, "number", in.Number); err != nil {
 			return err

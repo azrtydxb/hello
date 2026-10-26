@@ -158,7 +158,7 @@ log-in/pause buttons for operators.
 
 ## Migration
 
-Migration `00036_call_queues.sql` adds `queues`, `queue_members` and
+Migration `00037_call_queues.sql` adds `queues`, `queue_members` and
 `cdr_queue_legs`, widens the destination kind checks of inbound routes, ring
 groups and IVR menus with `queue`, and the feature-code actions with the four
 agent actions. It is additive, so a rolling upgrade works.

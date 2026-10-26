@@ -45,6 +45,7 @@ const (
 	haPhaseTransferring  = "transferring"
 	haPhaseAnnouncement  = "announcement"
 	haPhaseVoicemail     = "voicemail"
+	haPhaseConference    = "conference"
 	haPhaseIVR           = "ivr"
 	haIVRDetailPrefix    = "ivr:"
 	haRecordDetailPrefix = "announcement:"
@@ -207,7 +208,7 @@ func (c *call) haSoloRefresh(sdp string) {
 // restart: the voicemail application, or an announcement destination's
 // playback. Anything else is a solo call about to end on its own.
 func haSoloPhase(phase string) bool {
-	return phase == haPhaseVoicemail || phase == haPhaseAnnouncement || phase == haPhaseIVR || phase == haPhaseQueue
+	return phase == haPhaseVoicemail || phase == haPhaseAnnouncement || phase == haPhaseIVR || phase == haPhaseQueue || phase == haPhaseConference
 }
 
 // noteSentCSeq records a CSeq this node sent on a dialog outside sipgo's
@@ -258,15 +259,31 @@ func (c *call) haState() (livestate.DialogState, bool) {
 	detail, phase, solo, vm := c.haDetail, c.haPhase, c.haSolo, c.vmSession
 	legs := c.haLegs
 	contact := contactURI(c.s)
+	confLocal := c.conf != nil && !c.confPeer
+	var viaRoom string
+	switch {
+	case c.confFwd != nil:
+		viaRoom = c.confFwd.room
+	case c.confRehomed && c.confRoom != nil:
+		viaRoom = c.confRoom.number
+	}
 	c.mu.Unlock()
 	if yielded || legs[0].callID == "" {
 		return livestate.DialogState{}, false
+	}
+	if viaRoom != "" {
+		// A call that reaches its room through another node (or whose
+		// owner died and whose far end moved here) is recovered like a
+		// participant answered by this node: only the caller's dialog is
+		// replicated, and a taker rejoins the room from there.
+		solo, phase, detail = true, haPhaseConference, confHADetail+viaRoom
 	}
 	if solo {
 		// A one-legged call answered by Hello: recoverable while its
 		// application runs (the taker restarts it from the beginning).
 		if !haSoloPhase(phase) || (phase == haPhaseVoicemail && vm == nil) ||
-			((phase == haPhaseAnnouncement || phase == haPhaseIVR || phase == haPhaseQueue) && relay == nil) {
+			((phase == haPhaseAnnouncement || phase == haPhaseIVR || phase == haPhaseQueue) && relay == nil) ||
+			(phase == haPhaseConference && !confLocal && viaRoom == "") {
 			return livestate.DialogState{}, false
 		}
 	} else if !anchored || relay == nil || legs[1].callID == "" {
@@ -291,7 +308,7 @@ func (c *call) haState() (livestate.DialogState, bool) {
 		AnsweredAt:  c.maxClockStart(),
 	}
 	c.haContinuity(&st)
-	if relay != nil {
+	if relay != nil && viaRoom == "" {
 		st.RelayPorts = [2]int{relay.LegPort(legCaller), relay.LegPort(legCallee)}
 	}
 	if !solo {
@@ -327,7 +344,9 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 	solo := hom.legs[1] == nil
 	// A voicemail call's media is its anchor session, not a relay.
 	voicemail := solo && phase == haPhaseVoicemail
-	if yielded || (relay == nil && !voicemail) || (solo && !haSoloPhase(phase)) {
+	// A conference participant's media is its mixer socket, not a relay.
+	conference := solo && phase == haPhaseConference
+	if yielded || (relay == nil && !voicemail && !conference) || (solo && !haSoloPhase(phase)) {
 		return livestate.DialogState{}, false
 	}
 	off, ok := haOffer(hom.legs[0], hom.legs[1])

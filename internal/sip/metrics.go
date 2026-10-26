@@ -68,7 +68,7 @@ type Metrics struct {
 	// IVRTotal counts IVR menu events: entered, option, direct_dial,
 	// timeout, invalid, dial, dial_failed, connected and exit_<kind>.
 	IVRTotal *prometheus.CounterVec // event
-	// Call queues (migration 00036). QueueWaiting is the callers waiting in
+	// Call queues (migration 00037). QueueWaiting is the callers waiting in
 	// queues this node holds (sum it across nodes); QueueWait is the time
 	// callers waited by outcome (answered, abandoned, timeout, full,
 	// no_agents, breakout); QueueAgents the agents by state, published by
@@ -88,6 +88,9 @@ type Metrics struct {
 	DialogReplicated *prometheus.CounterVec // result
 	DialogTakeovers  prometheus.Counter
 	ZombieCalls      prometheus.Counter
+
+	// Conf is the server conference series (spec S-34).
+	Conf *confMetrics
 }
 
 // Transfer kinds for hello_transfers_total.
@@ -254,6 +257,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.TimeConditionTotal,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
+	m.Conf = newConfMetrics(reg)
 	return m
 }
 

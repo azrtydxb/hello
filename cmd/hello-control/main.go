@@ -174,6 +174,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		DefaultTimeZone: cfg.Prov.Timezone,
 		ProvStore:       st,
 		Phonebooks:      st,
+		Conferences:     st,
+		ConferenceLive:  vk,
 		Dialing:         cfg.Dial,
 		Prov:            provAPI(cfg, settings, deployment, objs, log),
 		SIPDomain:       cfg.SIPDomain,

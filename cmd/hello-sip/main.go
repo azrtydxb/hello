@@ -172,6 +172,7 @@ func run(args []string) error {
 		Voicemails:    voicemails{st: controlStore}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
 		HAState: live, Membership: members, PageTests: live, Queues: queue.NewValkey(vk), Park: live,
+		Conferences: live, ConferenceAudit: controlStore,
 	})
 	if err != nil {
 		return err

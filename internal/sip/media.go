@@ -474,6 +474,7 @@ func (c *call) closeMedia() {
 	relay, rec := c.relay, c.rec
 	c.anchored = false
 	c.mu.Unlock()
+	c.confLeave()
 	if rec != nil {
 		if r, by := rec.stop(); r != nil {
 			c.storeRecording(r, by)

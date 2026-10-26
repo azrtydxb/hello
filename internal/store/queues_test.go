@@ -44,6 +44,32 @@ func TestQueueNumberNotParkSlot(t *testing.T) {
 	}
 }
 
+// TestQueueNumberNotConferenceRoom: a queue number and a conference room
+// number are both dialled as a plain number, so neither may take the other's
+// value. It fails if a queue can be created on a room's number or a room on a
+// queue's number.
+func TestQueueNumberNotConferenceRoom(t *testing.T) {
+	s := scratchStore(t)
+	ctx := context.Background()
+	var ve *ValidationError
+	if _, err := s.CreateConference(ctx, "t", ConferenceInput{Name: "board", Number: "860", MaxParticipants: 10,
+		EntryExit: ConferenceSoundTone, Enabled: true}, PINChange{}, PINChange{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.CreateQueue(ctx, "t", queueInput("support", "860"), nil)
+	if !errors.As(err, &ve) || ve.Fields[0].Path != "number" || !strings.Contains(ve.Fields[0].Message, "conference room") {
+		t.Fatalf("queue on room 860: %v, want a number error naming the conference room", err)
+	}
+	if _, err := s.CreateQueue(ctx, "t", queueInput("support", "870"), nil); err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.CreateConference(ctx, "t", ConferenceInput{Name: "sales", Number: "870", MaxParticipants: 10,
+		EntryExit: ConferenceSoundTone, Enabled: true}, PINChange{}, PINChange{}, nil)
+	if !errors.As(err, &ve) || ve.Fields[0].Path != "number" || !strings.Contains(ve.Fields[0].Message, "queue") {
+		t.Fatalf("room on queue 870: %v, want a number error naming the queue", err)
+	}
+}
+
 // TestQueueTimeConditionCrossReferences: a time condition may send its
 // callers to a queue and a queue may fail over to a time condition, and
 // neither can then be deleted while the other names it. It fails if the

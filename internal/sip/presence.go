@@ -117,7 +117,8 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 	case eventDialog:
 		ext = req.Recipient.User
 		_, isSlot := snap.ParkLotOf(ext)
-		if !snap.HasExtension(ext) && !isSlot {
+		_, room := snap.Conference(ext)
+		if !snap.HasExtension(ext) && !isSlot && !room {
 			// An agent's login or pause lamp (*45101) or a key on a day/night
 			// toggle code (*28<n>) is a BLF too.
 			_, _, isAgent := queueBLFTarget(snap, ext)
@@ -172,6 +173,9 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 		init := StateIdle
 		if e, ok := snap.Extension(ext); ok && e.DND {
 			init = StateDND
+		}
+		if _, room := snap.Conference(ext); room && s.confOccupied(ext) {
+			init = StateOnCall // a conference key's lamp is lit while the room has people in it
 		}
 		if _, slot := snap.ParkLotOf(ext); slot {
 			// A park slot's lamp shows occupancy (spec S-6).
