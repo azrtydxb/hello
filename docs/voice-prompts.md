@@ -91,6 +91,7 @@ leave the stored audio untouched. Every successful generation is audited
 | `POST /api/v1/tts/settings/test`                 | admin    | check the key                         |
 | `GET /api/v1/tts/voices`                         | operator | ElevenLabs models and voices          |
 | `POST /api/v1/announcements/generate`            | operator | new announcement from text            |
+| `POST /api/v1/park-lots/announcement/generate`   | operator | spoken park slot clips                |
 | `PATCH /api/v1/announcements/{id}`               | operator | save text without generating          |
 | `POST /api/v1/announcements/{id}/generate`       | operator | generate or regenerate                |
 | `PUT /api/v1/extensions/{id}/voicemail/greeting` | operator | greeting from an announcement or text |

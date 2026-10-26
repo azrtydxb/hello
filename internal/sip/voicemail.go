@@ -27,7 +27,7 @@ type VoicemailBox struct {
 	GreetingObject    string
 	UnreachableObject string
 	// BusyObject is the custom greeting for a busy extension and NameObject
-	// the owner's recorded name (migration 00032). An empty one means the
+	// the owner's recorded name (migration 00034). An empty one means the
 	// default spoken prompt.
 	BusyObject string
 	NameObject string
@@ -139,6 +139,9 @@ func (c *call) mailboxExt(mode int) string {
 		}
 		return c.callerNum
 	}
+	if c.vmExt != "" {
+		return c.vmExt // an IVR menu handed the call to this box
+	}
 	return c.dialled
 }
 
@@ -185,6 +188,9 @@ func (c *call) mailboxExtLocked(mode int) string {
 			return c.vmTarget
 		}
 		return c.callerNum
+	}
+	if c.vmExt != "" {
+		return c.vmExt // an IVR menu handed the call to this box
 	}
 	return c.dialled
 }
@@ -308,7 +314,11 @@ func (c *call) voicemailFlow(mode int, reason string, sess media.Session) {
 	done := c.hungUp || c.ended
 	c.mu.Unlock()
 	if !done {
-		c.hangup(cdr.SideCallee)
+		side := cdr.SideCallee
+		if c.isLinked() {
+			side = cdr.SideSystem // a parked call's party is on either side of the dialog
+		}
+		c.hangup(side)
 	}
 }
 

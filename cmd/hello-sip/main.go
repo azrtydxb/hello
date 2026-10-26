@@ -175,7 +175,7 @@ func run(args []string) error {
 		Voicemails:    voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings,
 		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),
-		HAState: live, Membership: members, PageTests: live,
+		HAState: live, Membership: members, PageTests: live, Park: live,
 	})
 	if err != nil {
 		return err

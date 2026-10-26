@@ -18,7 +18,8 @@ them automatically, [docs/trunks.md](docs/trunks.md) for trunks,
 [docs/voice-prompts.md](docs/voice-prompts.md) for generating announcements and
 voicemail greetings from text, [docs/voicemail.md](docs/voicemail.md) for the spoken voicemail and `*97` menus, [docs/ai-access.md](docs/ai-access.md) for connecting AI agents over MCP and
 [docs/ai-agent.md](docs/ai-agent.md) for the in-product AI agent (assistant,
-findings and proposals). To run Hello on Kubernetes (Helm chart, SIP
+findings and proposals). For the IVR / auto-attendant see
+[docs/ivr.md](docs/ivr.md). To run Hello on Kubernetes (Helm chart, SIP
 networking, highly available state, rolling upgrades) see
 [docs/kubernetes.md](docs/kubernetes.md).
 

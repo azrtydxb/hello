@@ -737,11 +737,20 @@ func (p *phone) onBye(req *sip.Request, tx sip.ServerTransaction) {
 func answerAfter(ch <-chan struct{}) calleeFn {
 	return func(p *phone, req *sip.Request, tx sip.ServerTransaction, dss *sipgo.DialogServerSession) {
 		if ch != nil {
+			// The CANCEL itself is reported (a test may read its Reason);
+			// the INVITE stands in when the dialog ended otherwise.
+			cancelReq := make(chan *sip.Request, 1)
+			tx.OnCancel(func(r *sip.Request) { cancelReq <- r })
 			_ = dss.Respond(180, "Ringing", nil)
 			select {
 			case <-ch:
 			case <-dss.Context().Done():
-				push(p.cancels, req)
+				got := req
+				select {
+				case got = <-cancelReq:
+				case <-time.After(time.Second):
+				}
+				push(p.cancels, got)
 				return
 			}
 		}
@@ -879,7 +888,12 @@ func (p *phone) register(t *testing.T) {
 
 // call dials ext through the PBX (outbound-proxy style Route header) and
 // waits for the final answer; on 2xx it ACKs.
-func (p *phone) call(ctx context.Context, ext string) (dcs *sipgo.DialogClientSession, err error) {
+func (p *phone) call(ctx context.Context, ext string) (*sipgo.DialogClientSession, error) {
+	return p.callReq(ctx, p.inviteReq(ext))
+}
+
+// callReq is call with a prepared INVITE (extra headers, for example).
+func (p *phone) callReq(ctx context.Context, req *sip.Request) (dcs *sipgo.DialogClientSession, err error) {
 	// sipgo v1.6.0's WaitAnswer CANCELs on ctx cancellation and
 	// dereferences the CANCEL's response even when its transaction ended
 	// without one (the PBX was stopped): a nil dereference in this test
@@ -889,7 +903,6 @@ func (p *phone) call(ctx context.Context, ext string) (dcs *sipgo.DialogClientSe
 			err = fmt.Errorf("phone %s: sipgo panicked cancelling the INVITE: %v", p.user, r)
 		}
 	}()
-	req := p.inviteReq(ext)
 	dcs, err = p.dua.WriteInvite(ctx, req)
 	if err != nil {
 		return nil, err

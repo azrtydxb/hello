@@ -356,7 +356,7 @@ export interface InboundRouteFields {
   schedule: Schedule | null;
   callerIdTransform: Transform;
   /** "internal" looks the DID up in the extension namespace. */
-  destinationKind: "extension" | "internal" | "external" | "sip_uri";
+  destinationKind: "extension" | "internal" | "external" | "sip_uri" | "ivr";
   destination: string;
   enabled: boolean;
   /** Music on hold class of the calls this route delivers; null = the default. */
@@ -1069,12 +1069,15 @@ export const RING_STRATEGY_LABEL: Record<RingStrategy, string> = {
 };
 
 /** Where a call goes when every member missed it. */
-export type FailureKind = "none" | "voicemail" | "external";
+export type FailureKind =
+  "none" | "voicemail" | "external" | "announcement" | "ivr";
 
 export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   none: "Hang up",
   voicemail: "A member's voicemail box",
   external: "An external number",
+  announcement: "An announcement",
+  ivr: "An IVR menu",
 };
 
 /** One member of a ring group; `position` is 1-based ring order. */
@@ -1227,6 +1230,175 @@ export const testPagingGroup = (groupId: Id, extension?: string) =>
 export const deletePagingGroup = (groupId: Id) =>
   request<void>("DELETE", `/api/v1/paging-groups/${id(groupId)}`);
 
+// --- IVR menus -------------------------------------------------------------------
+
+/** Where an IVR option, timeout or invalid choice sends the call. */
+export const IVR_DESTINATION_KINDS = [
+  "hangup",
+  "extension",
+  "ring_group",
+  "voicemail",
+  "announcement",
+  "paging",
+  "ivr",
+  "external",
+] as const;
+
+export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
+
+export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
+  hangup: "Hang up",
+  extension: "Extension",
+  ring_group: "Ring group",
+  voicemail: "Voicemail box",
+  announcement: "Announcement, then hang up",
+  paging: "Paging group",
+  ivr: "Another IVR menu",
+  external: "External number",
+};
+
+/**
+ * A destination. The target is an extension number (extension, voicemail), a
+ * name (ring_group, announcement, ivr), a page code (paging) or a number
+ * (external); empty for hangup.
+ */
+export interface IvrDestination {
+  kind: IvrDestinationKind;
+  target: string;
+}
+
+/** One key of a menu and where it leads. */
+export interface IvrOption extends IvrDestination {
+  /** 0-9, * or #; each once per menu. */
+  digit: string;
+}
+
+/** The writable fields of an IVR menu (PUT replaces the whole menu). */
+export interface IvrMenuFields {
+  name: string;
+  /** Dials the menu directly; "" when it is only a destination. */
+  number: string;
+  enabled: boolean;
+  greetingId: Id;
+  /** null replays the greeting. */
+  invalidPromptId: Id | null;
+  timeoutPromptId: Id | null;
+  digitTimeout: number;
+  interDigitTimeout: number;
+  maxRetries: number;
+  allowDirectDial: boolean;
+  timeout: IvrDestination;
+  invalid: IvrDestination;
+  options: IvrOption[];
+}
+
+/** An IVR menu as returned; the prompt names are read-only. */
+export interface IvrMenu extends IvrMenuFields {
+  id: Id;
+  greetingName: string;
+  invalidPromptName: string;
+  timeoutPromptName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// --- call park and call pickup -------------------------------------------------
+
+/** The writable fields of a park lot (PUT replaces the whole lot). */
+export interface ParkLotFields {
+  name: string;
+  /** The first and last slot number; at most 100 slots. */
+  slotStart: number;
+  slotEnd: number;
+  /** Seconds before an unretrieved call rings its parker again. */
+  returnSecs: number;
+  /** Seconds the parker then rings before the call goes to voicemail. */
+  voicemailSecs: number;
+  enabled: boolean;
+}
+
+/** A park lot as returned. */
+export interface ParkLot extends ParkLotFields {
+  id: Id;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listIvrMenus = (signal?: AbortSignal) =>
+  list<IvrMenu>("/api/v1/ivr-menus", signal);
+
+export const createIvrMenu = (input: IvrMenuFields) =>
+  request<IvrMenu>("POST", "/api/v1/ivr-menus", { body: input });
+
+export const putIvrMenu = (menuId: Id, input: IvrMenuFields) =>
+  request<IvrMenu>("PUT", `/api/v1/ivr-menus/${id(menuId)}`, { body: input });
+
+export const deleteIvrMenu = (menuId: Id) =>
+  request<void>("DELETE", `/api/v1/ivr-menus/${id(menuId)}`);
+
+export const listParkLots = (signal?: AbortSignal) =>
+  list<ParkLot>("/api/v1/park-lots", signal);
+
+export const createParkLot = (input: ParkLotFields) =>
+  request<ParkLot>("POST", "/api/v1/park-lots", { body: input });
+
+export const putParkLot = (lotId: Id, input: ParkLotFields) =>
+  request<ParkLot>("PUT", `/api/v1/park-lots/${id(lotId)}`, { body: input });
+
+export const deleteParkLot = (lotId: Id) =>
+  request<void>("DELETE", `/api/v1/park-lots/${id(lotId)}`);
+
+/** One call parked right now (GET /api/v1/parked-calls). */
+export interface ParkedCall {
+  slot: string;
+  lot: string;
+  node: string;
+  callId: string;
+  correlationId: string;
+  /** The extension that parked the call. */
+  parkedBy: string;
+  /** The parked party's number and name. */
+  caller: string;
+  callerName: string;
+  parkedAt: string;
+  /** When the call rings its parker again. */
+  returnAt: string;
+  phase: "parked" | "returning";
+}
+
+export const listParkedCalls = (signal?: AbortSignal) =>
+  list<ParkedCall>("/api/v1/parked-calls", signal);
+
+/** The writable fields of a pickup group (PUT replaces the whole group). */
+export interface PickupGroupFields {
+  name: string;
+  /** Extension ids. */
+  members: Id[];
+}
+
+/** A pickup group as returned. */
+export interface PickupGroup {
+  id: Id;
+  name: string;
+  members: PagingExtension[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listPickupGroups = (signal?: AbortSignal) =>
+  list<PickupGroup>("/api/v1/pickup-groups", signal);
+
+export const createPickupGroup = (input: PickupGroupFields) =>
+  request<PickupGroup>("POST", "/api/v1/pickup-groups", { body: input });
+
+export const putPickupGroup = (groupId: Id, input: PickupGroupFields) =>
+  request<PickupGroup>("PUT", `/api/v1/pickup-groups/${id(groupId)}`, {
+    body: input,
+  });
+
+export const deletePickupGroup = (groupId: Id) =>
+  request<void>("DELETE", `/api/v1/pickup-groups/${id(groupId)}`);
+
 // --- feature codes and presence -------------------------------------------------
 
 /** A DTMF feature code (GET/PUT /api/v1/feature-codes). */
@@ -1255,8 +1427,13 @@ export const FEATURE_CODE_ACTIONS = [
   "attended_transfer",
   "announcement",
   "intercom",
+  "ivr",
   "call_waiting_on",
   "call_waiting_off",
+  "park",
+  "park_retrieve",
+  "pickup_group",
+  "pickup_directed",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
@@ -1274,8 +1451,13 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   attended_transfer: "Attended transfer",
   announcement: "Play announcement",
   intercom: "Intercom (auto-answer)",
+  ivr: "IVR menu",
   call_waiting_on: "Call waiting on",
   call_waiting_off: "Call waiting off",
+  park: "Park the call",
+  park_retrieve: "Retrieve a parked call",
+  pickup_group: "Pick up a call in your group",
+  pickup_directed: "Pick up an extension's call",
 };
 
 /** GET /api/v1/feature-codes. */

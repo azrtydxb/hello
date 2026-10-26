@@ -513,3 +513,24 @@ The user can change any of them; none is hard to undo.
 ## Drain-test flake: one fix, not two (2026-10-26)
 
 - #179 and #180 both fixed the same OFFLINE-mid-test drain flake in `internal/api/cluster_test.go`. #180 (`pinMembers`: PEXPIRE the fake member records) merged first, so #179 keeps main's file and drops its `keepReady` re-publisher. Re-publishing READY every 500 ms could also overwrite the state a drain test is asserting on.
+
+## IVR menu numbers join the park-slot dial space (2026-10-26)
+
+IVR (#142) merged after park/pickup (#161), whose migration took 00032, so
+the IVR migration is renumbered to 00033. An IVR menu number and a park slot
+are both dialled as a plain number, so they must not collide: the dial-space
+guard (`loadDialItems`) now counts IVR menu numbers among the names a park
+slot may not equal, and creating or renumbering a menu runs `checkNotSlot`.
+Both directions are covered by `TestIVRNumberNotParkSlot`. The IVR test
+helper `countRTP` became `countPhoneRTP`, because park's tests brought their
+own `countRTP` with a different signature.
+
+## Voicemail voice after IVR and park (2026-10-26)
+
+Main took 00032 (park/pickup) and 00033 (IVR) first, so the additive
+voicemail-voice migration moves to the next free number. IVR added
+`call.vmExt`, the box an IVR menu hands a caller to; this branch had already
+folded the "which box" logic into `mailboxExt`, so `vmExt` now lives there
+(leave mode only) instead of in `boxDetails` and `sendMWI`, which take the
+extension explicitly. The IVR voicemail exit passes its extension to
+`boxDetails`.
