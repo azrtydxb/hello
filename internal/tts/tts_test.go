@@ -53,10 +53,10 @@ func TestSynthesize(t *testing.T) {
 		t.Errorf("request = %v", got)
 	}
 	pcm, rate, err := media.DecodeWAV(wav)
-	if err != nil || rate != 8000 {
+	if err != nil || rate != 24000 { // the MP3's own rate is kept, not squashed to 8 kHz
 		t.Fatalf("rate=%d err=%v", rate, err)
 	}
-	if n := len(pcm) / 2; n < 3900 || n > 5200 { // 0.5 s at 8 kHz plus MP3 frame padding
+	if n := len(pcm) / 2; n < 3900*3 || n > 5200*3 { // 0.5 s at 24 kHz plus MP3 frame padding
 		t.Errorf("%d samples, want about 4000", n)
 	}
 }
@@ -125,7 +125,7 @@ func TestPCMToWAV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, rate, _ := media.DecodeWAV(w); rate != 8000 {
+	if _, rate, _ := media.DecodeWAV(w); rate != 24000 {
 		t.Errorf("rate %d", rate)
 	}
 }

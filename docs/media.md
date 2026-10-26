@@ -49,9 +49,10 @@ answered with that.
 paging, IVR) is a session with its own sample rate: 16 kHz when the caller
 offered G.722 (it is answered with G.722), 8 kHz G.711 otherwise; an
 Opus-only caller is answered with Opus. Prompts and recordings are WAV files
-at 8 or 16 kHz; the rate a file has is resampled to the session's, so
-existing 8 kHz assets keep working and voicemail left over a G.722 call is
-stored at 16 kHz.
+at any rate from 8 to 48 kHz; the rate a file has is resampled to the session's,
+so existing 8 kHz assets keep working and voicemail left over a G.722 call is
+stored at 16 kHz. Sessions (voicemail, IVR) run at 16 kHz on Opus; announcements,
+the recording notice and music on hold are played to Opus legs at 48 kHz.
 
 **Recording** decodes G.711, G.722 and Opus to PCM and mixes the two
 directions into one WAV at the higher of their sample rates; any other
@@ -128,8 +129,11 @@ phone that ignores early media hears nothing until the answer, which is why
 the setting is off by default.
 
 Tracks are announcements (WAV, uploaded on the Announcements page). They are
-decoded once per 30 seconds and encoded through the leg's negotiated G.711
-law; WAVs at a multiple of 8 kHz are averaged down to 8 kHz. Hello is the only
+decoded once per 30 seconds (and shared by every held call) and encoded in the leg's
+negotiated codec at that codec's rate: 8 kHz for G.711, 16 kHz for G.722, 48 kHz
+for Opus. A track is stored at the rate it was uploaded at (see below), so a
+48 kHz song is not squashed to phone quality first; it is low-pass filtered once
+per rate when a call needs a lower one. Hello is the only
 source of hold music: no built-in phone template writes a music on hold
 setting (Grandstream P2350 stays empty), which `TestPhonesOriginNoMusicOnHold`
 enforces.
@@ -183,3 +187,25 @@ Anchoring triggers are unchanged: NAT detection, `*1` or per-extension
 `record_default`, an announcement destination or pre-transfer prompt,
 voicemail, or `HELLO_MEDIA_FORCE_ANCHOR=true`. On kw the force switch stays
 off; see deploy/kuvryn-sync/kw/resources.yaml for the live env.
+
+## Announcement audio
+
+Uploaded announcements (and TTS output) are stored as 16-bit mono PCM WAV at
+the sample rate of the upload, up to 48 kHz; faster files (96 kHz) are reduced
+to 48 kHz. 48 kHz is Opus's native rate, so a song reaches an Opus call
+without a resample, while an 8 kHz prompt stays 8 kHz (upsampling at upload
+would only grow the file). Accepted: uncompressed PCM at 8, 16, 24 or 32 bit
+and 32/64-bit float, mono or multi-channel (channels are averaged to mono),
+including the WAVE_FORMAT_EXTENSIBLE wrapper. Compressed WAVs (ADPCM, A-law,
+mu-law, MP3) are refused with a message. The upload limit is 64 MiB, enough for
+a five minute 48 kHz stereo song (about 55 MB); the stored copy is mono, about
+29 MB. Voicemail greetings keep their 5 MiB limit.
+
+At play time the audio is resampled to the session or leg rate with a
+Kaiser-windowed sinc low-pass (about 80 dB stop band, cut-off just below the
+target Nyquist frequency), so treble above the target rate is removed rather
+than aliased. Music on hold caches the decoded track and each resampled
+copy, shared by all held calls, with a 96 MiB bound on the decoded cache;
+a class loads its tracks one at a time as they come up. hello-control buffers
+an upload in memory (about 1.5x its size at the peak), so its memory limit
+should allow for it (the chart default is 512Mi).

@@ -2,11 +2,13 @@ package media
 
 import "fmt"
 
-// WAVToRate decodes a WAV file (16-bit mono PCM at any sample rate; 8 kHz
-// and 16 kHz are what Hello stores) into PCM at the given session rate,
-// resampling when the file's rate differs. Existing 8 kHz prompts therefore
-// play unchanged on a G.711 session and are interpolated up on a G.722
-// session, and 16 kHz prompts and recordings are reduced for G.711.
+// WAVToRate decodes a WAV file (PCM or float, any channel count, any sample
+// rate; Hello stores uploads as 16-bit mono at their own rate up to 48 kHz)
+// into 16-bit mono PCM at the given session rate, resampling when the file's
+// rate differs: 8 kHz for G.711, 16 kHz for G.722, 48 kHz for Opus. Existing
+// 8 kHz prompts therefore play unchanged on a G.711 session and are
+// interpolated up on a wideband one, and a 48 kHz asset is filtered down
+// once for a narrower session instead of being squashed at upload time.
 func WAVToRate(wav []byte, rate int) ([]byte, error) {
 	pcm, have, err := DecodeWAV(wav)
 	if err != nil {

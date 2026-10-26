@@ -8,7 +8,7 @@ running**, and nothing generates audio except an explicit click.
 Audio is generated through [OpenRouter](https://openrouter.ai), which offers
 ElevenLabs models (for example `elevenlabs/eleven-multilingual-v2`), using
 `github.com/azrtydxb/go-ai-sdk`. Hello asks for MP3, decodes it, converts it to
-8 kHz 16-bit mono and stores it as a WAV, the one format the call plane plays.
+16-bit mono at the speech model's own sample rate (up to 48 kHz) and stores it as a WAV; playback resamples to each call.
 
 ## Set the key (once)
 
@@ -56,9 +56,10 @@ greeting has a source:
 
 ## Audio format
 
-Playback assumes 8 kHz 16-bit mono PCM. Uploaded WAVs at another sample rate
-are converted to 8 kHz when they are uploaded; WAVs that are not 16-bit mono
-PCM are refused with the reason.
+Uploads are stored as 16-bit mono PCM at their own sample rate (up to 48 kHz);
+stereo is mixed to mono and 8, 24, 32-bit and float WAVs are converted.
+Playback resamples to each call's rate. Compressed WAVs are refused with the
+reason.
 
 ## Errors
 
