@@ -31,9 +31,10 @@ func (stubStore) TokenActor(context.Context, []byte) (auth.Actor, error) {
 // publicOps are the operations reachable without credentials, with the
 // status an empty request gets.
 var publicOps = map[string]int{
-	"GET /api/v1/version":      http.StatusOK,
-	"GET /api/v1/openapi.json": http.StatusOK,
-	"POST /api/v1/auth/login":  http.StatusBadRequest,
+	"GET /api/v1/version":         http.StatusOK,
+	"GET /api/v1/openapi.json":    http.StatusOK,
+	"POST /api/v1/auth/login":     http.StatusBadRequest,
+	"POST /api/v1/auth/login/2fa": http.StatusBadRequest,
 }
 
 // documentedOps lists "METHOD /path" for every operation in openapi.json.

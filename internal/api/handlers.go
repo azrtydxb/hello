@@ -77,13 +77,24 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "login: look up user", err)
 		return
 	}
+	if l.TOTPEnabled {
+		// The password is right, but no session exists until the second
+		// factor passes (spec pbx-gaps S-11).
+		s.startMFA(w, r, id)
+		return
+	}
+	s.startSession(w, r, id, in.Username)
+}
+
+// startSession creates a session for user id and sets its cookie.
+func (s *server) startSession(w http.ResponseWriter, r *http.Request, id int64, username string) {
 	plain, tokenHash := auth.NewToken()
 	expires := time.Now().Add(s.SessionTTL)
 	if err := s.Store.CreateSession(r.Context(), id, tokenHash, expires); err != nil {
 		s.internal(w, "login: create session", err)
 		return
 	}
-	if err := s.Store.Audit(r.Context(), "user:"+in.Username, "login", "user", strconv.FormatInt(id, 10)); err != nil {
+	if err := s.Store.Audit(r.Context(), "user:"+username, "login", "user", strconv.FormatInt(id, 10)); err != nil {
 		s.Log.Warn("login: audit", "error", err)
 	}
 	// Secure follows the request scheme (Shared contracts), so the lab works
@@ -130,14 +141,20 @@ type meExtension struct {
 
 // meView is the authenticated user's profile.
 type meView struct {
-	Username           string                    `json:"username"`
-	Role               string                    `json:"role"`
-	DisplayName        string                    `json:"displayName"`
-	Email              string                    `json:"email"`
-	AuthMethod         string                    `json:"authMethod"`
-	MustChangePassword bool                      `json:"mustChangePassword"`
-	Extensions         []meExtension             `json:"extensions"`
-	VoicemailEmail     store.VoicemailEmailPrefs `json:"voicemailEmail"`
+	Username           string `json:"username"`
+	Role               string `json:"role"`
+	DisplayName        string `json:"displayName"`
+	Email              string `json:"email"`
+	AuthMethod         string `json:"authMethod"`
+	MustChangePassword bool   `json:"mustChangePassword"`
+	// MustEnrollMFA is set while 2FA is required of the user and not yet
+	// enrolled; the console then shows only the enrolment.
+	MustEnrollMFA bool `json:"mustEnrollMfa"`
+	// TwoFactor is the caller's own 2FA state; nil for a credential that
+	// is not a user or when 2FA is unavailable.
+	TwoFactor      *twoFactorView            `json:"twoFactor,omitempty"`
+	Extensions     []meExtension             `json:"extensions"`
+	VoicemailEmail store.VoicemailEmailPrefs `json:"voicemailEmail"`
 	// EmailDelivery is whether the system can send email at all.
 	EmailDelivery bool `json:"emailDelivery"`
 }
@@ -145,7 +162,7 @@ type meView struct {
 func (s *server) me(w http.ResponseWriter, r *http.Request) {
 	a := actor(r)
 	v := meView{Username: a.Username, Role: string(a.Role), AuthMethod: "local", MustChangePassword: a.MustChangePassword,
-		Extensions: []meExtension{}, VoicemailEmail: store.VoicemailEmailPrefs{After: "none"}}
+		MustEnrollMFA: a.MustEnrollMFA, Extensions: []meExtension{}, VoicemailEmail: store.VoicemailEmailPrefs{After: "none"}}
 	if a.UserID > 0 && a.Kind != auth.KindService {
 		u, err := s.Store.GetUser(r.Context(), a.UserID)
 		if err != nil {
@@ -162,6 +179,14 @@ func (s *server) me(w http.ResponseWriter, r *http.Request) {
 			v.Extensions = append(v.Extensions, meExtension{ID: e.ID, Number: e.Number, Name: e.Name})
 		}
 		v.EmailDelivery = s.emailDelivery(r.Context())
+		if s.TwoFactor != nil {
+			st, err := s.TwoFactor.TwoFactorStatus(r.Context(), a.UserID)
+			if err != nil {
+				s.internal(w, "me: 2fa status", err)
+				return
+			}
+			v.TwoFactor = &twoFactorView{Enabled: st.Enabled, Pending: st.Pending, Required: st.Required, RecoveryCodesLeft: st.RecoveryLeft}
+		}
 	}
 	writeJSON(w, http.StatusOK, v)
 }
