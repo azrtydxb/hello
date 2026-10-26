@@ -1,6 +1,6 @@
 ---
 name: hello-flow-graph
-description: Read and verify the call flow of a Kuvryn Hello PBX through its MCP server with the flow graph - every trunk, route, ring group, IVR, queue, announcement, paging group and feature code as nodes and edges - to explain where a call ends up, find dangling references and orphaned objects, and prove that a configuration change did what was intended. Use when someone asks "what happens when this number is called", "what uses this object", "is anything broken in my call flow", or after any change to routing, IVR, queues or hours.
+description: Read and verify the call flow of a Kuvryn Hello PBX through its MCP server with the flow graph - every trunk, route, ring group, IVR, queue, announcement, paging group and feature code as nodes and edges, plus the shared layout canvases of the Call flows page - to explain where a call ends up, find dangling references and orphaned objects, and prove that a configuration change did what was intended. Use when someone asks "what happens when this number is called", "what uses this object", "is anything broken in my call flow", or after any change to routing, IVR, queues or hours.
 license: Apache-2.0
 metadata:
   hello-version: "v1"
@@ -32,6 +32,26 @@ Every edge names its owner: the one field of one object that stores it. So
 the update tool of the skill that covers it (`hello-routing` for routes and
 ring groups, `hello-ivr-and-hours` for menus and time conditions,
 `hello-call-handling` for queues, conferences and paging).
+
+## Canvases: where the nodes sit
+
+A canvas is a named, shared layout for the Call flows page of the console: it
+stores only where nodes sit (and the pan and zoom), never the configuration
+they draw. Saving a layout is not a configuration change: the revision does
+not move and hello-sip is not notified. Use canvases to tidy a picture for
+people; never to change a call flow.
+
+- `listFlowCanvases` and `getFlowCanvas` (returns the position of every node
+  and a `layoutVersion`).
+- `createFlowCanvas` with `{ "name": "Head office", "description": "..." }`,
+  `updateFlowCanvas` (rename, description, `viewport` of `x`, `y`, `zoom`) and
+  `deleteFlowCanvas` (the configuration it drew is untouched; ask first, other
+  users share the canvas).
+- `putFlowLayout` sets the position of the listed nodes and drops the listed
+  ones: `{ "layoutVersion": 7, "nodes": [ { "node": "inboundRoute:3", "x": 120,
+"y": 80 } ], "remove": [] }`. Send the `layoutVersion` you read with the
+  canvas; a 409 `layout_stale` means somebody else saved first and nothing was
+  stored, so read the canvas again and merge your moves node by node.
 
 ## Workflows
 
