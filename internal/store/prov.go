@@ -410,7 +410,8 @@ func (s *Store) createPhone(ctx context.Context, tx *sql.Tx, actor string, in Ph
 // override template that does not exist, naming the field.
 func checkPhoneRefs(ctx context.Context, tx *sql.Tx, blf []string, templateID *int64) error {
 	if len(blf) > 0 {
-		rows, err := tx.QueryContext(ctx, `SELECT number FROM extensions WHERE number = ANY($1)`, blf)
+		rows, err := tx.QueryContext(ctx, `SELECT number FROM extensions WHERE number = ANY($1)
+			UNION SELECT number FROM conference_rooms WHERE number = ANY($1)`, blf)
 		if err != nil {
 			return err
 		}
@@ -429,7 +430,7 @@ func checkPhoneRefs(ctx context.Context, tx *sql.Tx, blf []string, templateID *i
 		}
 		for i, n := range blf {
 			if !known[n] {
-				return fieldError(fmt.Sprintf("blf[%d]", i), "no extension has number "+strconv.Quote(n))
+				return fieldError(fmt.Sprintf("blf[%d]", i), "no extension or conference room has number "+strconv.Quote(n))
 			}
 		}
 	}

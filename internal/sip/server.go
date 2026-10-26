@@ -167,6 +167,15 @@ type Deps struct {
 	// PageTests is the queue of paging-group test requests from the admin
 	// API; nil disables them.
 	PageTests PageTests
+	// Conferences is the shared conference state (room ownership, live state,
+	// control commands); nil keeps every room on this node alone.
+	Conferences Conferences
+	// ConferenceAudit records conference control actions in the audit log;
+	// nil records none.
+	ConferenceAudit ConferenceAudit
+	// ConferenceHold supplies the audio of a participant waiting for a
+	// leader (music on hold plugs in here); nil plays the built-in wait tone.
+	ConferenceHold ConferenceHold
 	// Park is the shared call-park store (Valkey); nil disables call park,
 	// retrieve and cross-node pickup. A parked party hears music on hold.
 	Park ParkState
@@ -268,6 +277,11 @@ type Server struct {
 	// pageMu): a group has one active page.
 	pages  map[int64]*call
 	pageMu sync.Mutex
+	// conf holds the conference rooms this node mixes (spec S-34).
+	conf *confHub
+	// confLamp is the last state told to each conference key's subscribers.
+	confLampMu sync.Mutex
+	confLamp   map[string]string
 }
 
 // SetMediaAnchor wires the voicemail media anchor; without it voicemail
@@ -372,6 +386,8 @@ func New(cfg Config, deps Deps) (*Server, error) {
 		lastEnd:   map[string]time.Time{},
 		digits:    map[*call]*digitBuffer{},
 		pages:     map[int64]*call{},
+		conf:      newConfHub(),
+		confLamp:  map[string]string{},
 		haOffline: map[string]*haOfflineNode{}, haLastActive: map[string]int{}, haIncSeen: map[string]haIncWatch{},
 	}
 	setDefault(&cfg.HADialogHeartbeat, 5*time.Second)
@@ -459,6 +475,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	if s.deps.PageTests != nil {
 		s.bg.Go(func() { s.pageTestLoop(rctx) })
 	}
+	s.bg.Go(func() { s.confLoop(rctx) })
 	if s.deps.Park != nil {
 		s.bg.Go(func() { s.parkLoop(rctx) })
 	}
@@ -782,6 +799,9 @@ func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why 
 // SnapshotChanged removes the bindings of devices that are no longer in the
 // snapshot (deleted or disabled). Use it as the watcher's OnReload.
 func (s *Server) SnapshotChanged(old, cur *snapshot.Snapshot) {
+	if cur != nil {
+		s.confRefresh(cur)
+	}
 	if old == nil || cur == nil {
 		return
 	}
@@ -883,7 +903,9 @@ func (s *Server) ConnectedCalls() int {
 	n := 0
 	for _, c := range calls {
 		c.mu.Lock()
-		if c.connected && !c.ended {
+		// A participant the owner mixes for another node is that node's to
+		// recover; its owner's death does not lose it.
+		if c.connected && !c.ended && !c.confPeer {
 			n++
 		}
 		c.mu.Unlock()

@@ -148,6 +148,12 @@ API: `GET/POST /api/v1/moh-classes`, `GET/PUT/DELETE /api/v1/moh-classes/{id}`;
 `mohClassId` on extensions, ring groups and inbound routes, and `mohRingback`
 on the last two. Migration `00021_music_on_hold`.
 
+The one exception is a [conference room](conference.md): it decodes every
+participant to a common 8 kHz mixing rate, mixes, and encodes each
+participant's mix in that participant's own codec (G.711, G.722 and Opus; the
+wideband ones are converted to and from 8 kHz). Each participant uses one RTP
+port from the range below.
+
 ## Metrics
 
 `hello_rtp_sessions`, `hello_rtp_packets_total{direction}`,

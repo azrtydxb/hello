@@ -445,6 +445,26 @@ Spec: `.procoder/specs/flow-canvas.md`. The user answered all five:
 
 Decision: accepted by the user (2026-10-25), all of the above. Migration numbers 00017-00023 belong to other in-flight branches (tts, ivr, codecs, time-conditions, moh, park-pickup, queues); the flow canvas uses 00024 and up.
 
+## Server conference rooms (2026-10-25)
+
+`hello-pbx-spec.md` §3 listed "large-scale conferencing" as a non-goal, and the phone-feature-parity spec (S-34) kept server rooms out of scope in its earlier table rows.
+
+Question: should Hello now build server conference rooms (audio mixing on the PBX, with a number, PINs and a live control UI), reversing that non-goal?
+
+Decision: the user answered "yes" (2026-10-25). Conference rooms are in scope and the §3 non-goal is amended accordingly. Rooms are audio only, mixed on one SIP node per room (ownership in Valkey, see `docs/conference.md`).
+
+In the same answer the user also said they want these features, which other agents specify separately and which this entry does not scope or change:
+
+- SMS, WhatsApp and live chat
+- video
+- browser calling (WebRTC)
+- mobile apps
+- Microsoft Teams integration
+
+The §3 non-goal list still names WebRTC and the rest until those specs land; only the conferencing non-goal changed here.
+
+Video follows rooms: the user wants conference video, and video recording later (clients spec). The room keeps its state per participant and its media behind a codec interface so a video track can be added beside the audio.
+
 ## 2026-10-25: Clients and video (browser softphone, mobile apps, video, Teams)
 
 The user decided to add four things: a WebRTC softphone in the web UI, iOS and Android apps with push for incoming calls, video calls, and Microsoft Teams integration. This reverses the WebRTC non-goal in `hello-pbx-spec.md` §3. Spec: `.procoder/specs/clients-webrtc-mobile-video.md` (draft; its five open questions are for the user). Hard ordering from the user: TLS and SRTP (`phone-feature-parity.md` S-13 to S-16) come before any WebRTC phase.
@@ -524,3 +544,20 @@ slot may not equal, and creating or renumbering a menu runs `checkNotSlot`.
 Both directions are covered by `TestIVRNumberNotParkSlot`. The IVR test
 helper `countRTP` became `countPhoneRTP`, because park's tests brought their
 own `countRTP` with a different signature.
+
+## Conference room numbers join the dial space (2026-10-26)
+
+Conference rooms (#172) merged after park/pickup (00032) and IVR (00033), so
+its migration is renumbered to 00034 and its CHECK changes
+(`inbound_routes.destination_kind`, `cdrs.kind`) now go through
+`pg_temp.hello_check_values`, adding/removing only `conference` so the other
+features' values survive in both directions. A room number is dialled like an
+extension, so it joins the shared dial space: a room may not take a park slot
+or an IVR menu number, and an IVR menu, a park lot, an extension (created or
+renumbered) or a ring group (created or renamed) may not take a room number.
+`TestConferenceNumberDialSpace` covers each direction. Main's music-on-hold
+now hands out `media.Track`s, so the conference hold loop reads
+`PCMAt(media.MixRate)` per track. In the B2BUA INVITE path the room-number
+check runs before IVR, park-slot and Replaces handling (the guards keep these
+disjoint, so the order only matters for speed); for in-dialog INFO DTMF the
+conference consumers run before the IVR one for the same reason.

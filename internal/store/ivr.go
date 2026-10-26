@@ -36,7 +36,7 @@ const (
 	IVRPaging       = "paging"
 	IVRMenuDest     = "ivr"
 	IVRExternal     = "external"
-	// IVRTimeCondition names a time condition (migration 00034), which picks
+	// IVRTimeCondition names a time condition (migration 00035), which picks
 	// one of its own destinations when the call arrives.
 	IVRTimeCondition = "time_condition"
 )
@@ -250,11 +250,12 @@ func checkIVRMenu(ctx context.Context, tx *sql.Tx, id int64, in IVRMenuInput) er
 	if in.Number != "" {
 		var n int
 		if err := tx.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM extensions WHERE number = $1)
-			+ (SELECT count(*) FROM ring_groups WHERE name = $1)`, in.Number).Scan(&n); err != nil {
+			+ (SELECT count(*) FROM ring_groups WHERE name = $1)
+			+ (SELECT count(*) FROM conference_rooms WHERE number = $1)`, in.Number).Scan(&n); err != nil {
 			return err
 		}
 		if n > 0 {
-			return fieldError("number", "is already an extension number or a ring group name")
+			return fieldError("number", "is already an extension number, a ring group name or a conference room number")
 		}
 		if err := checkNotSlot(ctx, tx, "number", in.Number); err != nil {
 			return err

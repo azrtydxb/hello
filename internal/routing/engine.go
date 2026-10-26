@@ -27,7 +27,10 @@ type Table struct {
 	extensions map[string]string
 	ivrMenus   map[string]bool
 	timeConds  map[string]bool
-	resolved   map[int64][]netip.Addr
+	// conferences is the set of conference room numbers (spec S-34): an
+	// inbound route may target one.
+	conferences map[string]bool
+	resolved    map[int64][]netip.Addr
 	// dial holds the compiled internal dialing patterns of every trunk
 	// whose policy mode is "patterns" (compileDialing in inbound.go).
 	dial map[int64][]dialPattern
@@ -70,6 +73,10 @@ func Compile(cfg Config) (*Table, []FieldError) {
 	}
 	if t.extensions == nil {
 		t.extensions = map[string]string{}
+	}
+	t.conferences = make(map[string]bool, len(cfg.Conferences))
+	for num := range cfg.Conferences {
+		t.conferences[num] = true
 	}
 	t.compileTrunks(cfg.Trunks, &errs)
 	t.compileOutbound(cfg.Outbound, &errs)
@@ -315,12 +322,16 @@ func (t *Table) checkInboundDestination(errs *[]FieldError, p string, r InboundR
 		if !validNumber(r.Destination) {
 			addErr(errs, p+".destination", "must be a number (+, digits, * and #)")
 		}
+	case "conference":
+		if !t.conferences[r.Destination] {
+			addErr(errs, p+".destination", fmt.Sprintf("conference room %s does not exist", quote(r.Destination)))
+		}
 	case "sip_uri":
 		if !validSIPURI(r.Destination) {
 			addErr(errs, p+".destination", "must be a sip: or sips: URI without whitespace")
 		}
 	default:
-		addErr(errs, p+".destinationKind", `must be "extension", "external", "internal", "ivr", "sip_uri" or "time_condition"`)
+		addErr(errs, p+".destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "sip_uri" or "time_condition"`)
 	}
 }
 
