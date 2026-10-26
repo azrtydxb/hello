@@ -64,7 +64,7 @@ line per leg (`leg`, `media_mode`, `codec`, `clock_rate`, `payload_type`,
 `ptime`, `reason`) and the call
 detail record keeps the codec each leg ended on, as `name/clock rate`:
 `callerCodec` and `calleeCodec` in `GET /api/v1/cdrs` and `/api/v1/cdrs/{id}`
-(`caller_codec` and `callee_codec` columns, migration 00043; the CSV export
+(`caller_codec` and `callee_codec` columns, migration 00045; the CSV export
 ends with the same two), shown as the Codec column of Call history and the
 two codec rows of a call's detail. A re-INVITE that switches the codec
 replaces it, so the record names the last codec of the call. A leg with no

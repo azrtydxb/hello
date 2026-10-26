@@ -791,9 +791,51 @@ Phones are re-pointed to the VIP via check-sync and .101 is retired after.
 - A: VRRP VIP, two hostNetwork Kamailio (chosen)
 - B: Cilium LB-IPAM LoadBalancer with L2 announcement
 
+## Ring group fallback to an extension or another group (2026-10-26)
+
+Decision 3's deviation (a ring group's fallback cannot ring an extension or
+another group) is lifted: the ring state machine can open a new ring stage.
+
+- Failure kinds `extension` (a number) and `ring_group` (a name), migration
+  `00043` (additive, through `pg_temp.hello_check_values`; numbered after
+  the flow canvas migration `00042` merged first). I found while
+  writing it that `00041` never widened `ring_groups.failure_kind`, although
+  the spec said so; the spec is corrected.
+- Run time (`groupFailover`, `internal/sip/groups.go`). `openFailoverStage`
+  abandons and cancels the earlier stage's legs, bumps `stageSeq`, resets
+  `setupClosed` and gives the call a fresh `setupDone` (as an IVR menu does), so
+  late events of the old legs never reach the new setup. The failover then
+  runs the target's own ring and waits in a nested `setup` or `setupHunt`; the
+  setup loop that handed over returns when it is done, so ring-all and hunt
+  groups both work as origin and as target without a second state machine.
+  `ringGroup` follows the existing convention that a nil `tx` means the call has
+  begun.
+- Extension target: its features apply from the new stage on. DND or nothing
+  registered go to its voicemail box when it has one (else 603 or 480); an
+  unanswered ring follows its no-answer forward or voicemail (`c.stages`
+  carries the target). The box is the target's: `vmExt` is set, and
+  `exhausted` sets it when the stage came from a group failover (the dialled
+  string is the group number). Forward-always of the target is not followed, as
+  with a forward stage.
+- Group target: its strategy, members and failure destination apply; a group
+  with no member to ring falls through to its own fallback at once.
+- Loops: the groups rung are kept in `gfChain` and the extensions in the
+  forward chain (`callStages.visited`); a repeat, a group naming itself or a
+  chain longer than `groupFailMaxDepth` (= `queueMaxDepth`, 8) ends the call
+  with 408 "forward loop" and the existing `loop` metric. The IVR path
+  (`ivrRingGroup`) applies the same fallbacks to the menu's caller with its
+  `visited` chain.
+- API and store: the target must be well formed and exist, a group cannot name
+  itself, and the store refuses deleting, renaming or renumbering the group or
+  extension another group falls back to (`refuseIfGroupFailsTo`), like the IVR
+  references. The flow catalogue offers both from the group's `noAnswer` port.
+- Not done: `exhausted` after a forward stage still uses the dialled
+  extension's box for voicemail (the same class of bug as the group one); it
+  is reported, not changed here.
+
 ## Negotiated codec per leg in the CDR (2026-10-26)
 
-`cdrs` gets `caller_codec` and `callee_codec` (migration 00043, nullable text,
+`cdrs` gets `caller_codec` and `callee_codec` (migration 00045, nullable text,
 `name/clock rate` such as `PCMU/8000`, `G722/8000`, `opus/48000`), fed by the
 same `logCodec` bookkeeping as the `call codec` log line, so the two never
 disagree. Choices: the value is the last codec the leg settled on (a re-INVITE

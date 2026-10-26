@@ -877,13 +877,14 @@ func (c *call) storeRecording(rec *media.Recorder, by string) {
 	}
 	if s.deps.Recordings != nil {
 		rctx, rcancel := context.WithTimeout(context.Background(), s.cfg.StateTimeout)
-		_, err := s.deps.Recordings.InsertRecording(rctx, c.id, obj, by, durMs)
+		recID, err := s.deps.Recordings.InsertRecording(rctx, c.id, obj, by, durMs)
 		rcancel()
 		if err != nil {
 			c.addTrace("Recording metadata store failed")
 			s.log.Warn("recording row failed", "error", err)
 			return
 		}
+		s.recordingEvents(c, recID, durMs)
 	}
 	if m := s.deps.Media; m != nil {
 		n := s.vmBytes.Add(int64(len(audio)))

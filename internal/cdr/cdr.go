@@ -10,7 +10,9 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/routing"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -73,7 +75,7 @@ type Record struct {
 	RTPJitterMs *float64
 	// CallerCodec and CalleeCodec are the audio codec each leg ended on, as
 	// "name/clock rate" ("PCMU/8000", "opus/48000"); empty (NULL) for a leg
-	// that had no media negotiated (migration 00043).
+	// that had no media negotiated (migration 00045).
 	CallerCodec string
 	CalleeCodec string
 	// Kind is call (default), page or intercom.
@@ -84,6 +86,10 @@ type Record struct {
 	// QueueLegs is what the call did in a call queue (migration 00040): one
 	// row per event, in order; empty for a call that never queued.
 	QueueLegs []QueueLeg
+	// Events are the call.completed events of the call, one per extension it
+	// involved. They are not stored: the Writer publishes them, carrying the
+	// new row's id, once the record is in the table.
+	Events []events.Event
 }
 
 // Queue leg events.
@@ -115,6 +121,17 @@ type PageLeg struct {
 	Result    string `json:"result"`
 }
 
+// EventSink receives events; *events.Emitter satisfies it.
+type EventSink interface {
+	Emit(events.Event)
+}
+
+// rowQuerier is the optional part of a pgx pool the Writer uses to read the
+// id of the row it inserted (only for the call.completed events).
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // Execer is the subset of a pgx pool or connection the writer needs.
 type Execer interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
@@ -126,6 +143,9 @@ type Writer struct {
 	log     *slog.Logger
 	dropped prometheus.Counter
 	queue   chan Record
+	// Events, when set, receives each record's call.completed events after
+	// the record is stored. Set it before Run.
+	Events EventSink
 
 	// MaxBackoff caps the retry delay; InitialBackoff is the first delay.
 	InitialBackoff time.Duration
@@ -284,7 +304,30 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
 		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, string(lj), string(qj),
 		nullString(r.CallerCodec), nullString(r.CalleeCodec))
-	return err
+	if err != nil {
+		return err
+	}
+	w.publish(wctx, r)
+	return nil
+}
+
+// publish emits the record's call.completed events with the stored row's
+// id. A lookup that fails still emits them (cdrId 0): the event matters more
+// than the id, and the call id finds the row.
+func (w *Writer) publish(ctx context.Context, r Record) {
+	if w.Events == nil || len(r.Events) == 0 {
+		return
+	}
+	var id int64
+	if q, ok := w.db.(rowQuerier); ok {
+		if err := q.QueryRow(ctx, `SELECT id FROM cdrs WHERE correlation_id = $1`, r.CorrelationID).Scan(&id); err != nil {
+			w.log.Debug("cdr id lookup for events failed", "correlation_id", r.CorrelationID, "error", err)
+		}
+	}
+	for _, e := range r.Events {
+		e.Data.CDRID = id
+		w.Events.Emit(e)
+	}
 }
 
 func nullString(s string) any {
