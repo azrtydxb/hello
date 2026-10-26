@@ -261,7 +261,7 @@ func (c *call) startRingMOH(classID int64) bool {
 	if r == nil || len(c.inv.Body()) == 0 {
 		return false
 	}
-	body := c.anchoredAnswerA(parsedOffer(c), media.AudioSDP{})
+	body := c.anchoredAnswerAs("waiting music", parsedOffer(c), media.AudioSDP{})
 	if len(body) == 0 {
 		return false
 	}
