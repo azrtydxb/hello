@@ -631,6 +631,7 @@ numeric ring group keeps working). Down converts `ring_group` routes back to
 earlier destination migrations do.
 
 Why only these kinds. Decision 3 asks for every kind on every output, but:
+
 - a call that has already started (a ring group fallback, an IVR key, a queue
   exit, a time condition branch) cannot be handed to a paging group or a
   conference room: the runtime pages and joins only from the INVITE
@@ -646,7 +647,7 @@ Why only these kinds. Decision 3 asks for every kind on every output, but:
   transfer to a slot);
 - extension forwards stay extension / numeric ring group / external number,
   because that is what `sip.forward` resolves.
-The catalogue lists exactly what is stored.
+  The catalogue lists exactly what is stored.
 
 Runtime. Inbound routes of the new kinds are carried out by the destination
 dispatcher time conditions already use (`applyTCDest`), so there is one place
@@ -676,6 +677,14 @@ so the integration job is required green before merge.
 
 The form pages (Routes) do not offer the new inbound kinds yet; they render
 them through the existing fallback. The API and MCP do.
+
+## Ring group voicemail failure box (2026-10-26)
+
+A ring group whose failure kind is `voicemail` now sets `vmExt` to the failure
+target before starting the voicemail application, the same way the IVR and time
+condition paths do. Before, `mailboxExt` fell back to the dialled string (the
+group number), so the message went to the wrong box or to none. Covered by
+`TestRingGroupVoicemailFailureBox`, which fails without the fix.
 
 ## Routes form: new inbound destination kinds (2026-10-26)
 
