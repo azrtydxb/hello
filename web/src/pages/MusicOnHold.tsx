@@ -495,9 +495,9 @@ function ClassDrawer({
             </Button>
           </div>
           <p className="cf-form__note">
-            Upload tracks on the Announcements page first. Each call hears
-            them at its own quality: 8 kHz on G.711, 16 kHz on G.722 and 48 kHz
-            on Opus, from the rate they were uploaded at.
+            Upload tracks on the Announcements page first. Each call hears them
+            at its own quality: 8 kHz on G.711, 16 kHz on G.722 and 48 kHz on
+            Opus, from the rate they were uploaded at.
           </p>
         </fieldset>
         <FormAlert message={formError} unmatched={unmatched} />

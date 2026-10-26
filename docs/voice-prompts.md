@@ -84,18 +84,18 @@ leave the stored audio untouched. Every successful generation is audited
 
 ## API
 
-| Route                                            | Role     | Purpose                               |
-| ------------------------------------------------ | -------- | ------------------------------------- |
-| `GET/PUT /api/v1/tts/settings`                   | admin    | settings; `apiKey` is write-only      |
-| `DELETE /api/v1/tts/settings/key`                | admin    | remove the key                        |
-| `POST /api/v1/tts/settings/test`                 | admin    | check the key                         |
-| `GET /api/v1/tts/voices`                         | operator | ElevenLabs models and voices          |
-| `POST /api/v1/announcements/generate`            | operator | new announcement from text            |
-| `POST /api/v1/park-lots/announcement/generate`   | operator | spoken park slot clips                |
-| `PATCH /api/v1/announcements/{id}`               | operator | save text without generating          |
-| `POST /api/v1/announcements/{id}/generate`       | operator | generate or regenerate                |
-| `PUT /api/v1/extensions/{id}/voicemail/greeting` | operator | greeting from an announcement or text |
-| `POST /api/v1/extensions/{id}/voicemail/greeting/preview` | operator | the default spoken greeting, as WAV |
-| `DELETE /api/v1/extensions/{id}/voicemail/greeting/{slot}` | operator | revert a slot to the default |
+| Route                                                      | Role     | Purpose                               |
+| ---------------------------------------------------------- | -------- | ------------------------------------- |
+| `GET/PUT /api/v1/tts/settings`                             | admin    | settings; `apiKey` is write-only      |
+| `DELETE /api/v1/tts/settings/key`                          | admin    | remove the key                        |
+| `POST /api/v1/tts/settings/test`                           | admin    | check the key                         |
+| `GET /api/v1/tts/voices`                                   | operator | ElevenLabs models and voices          |
+| `POST /api/v1/announcements/generate`                      | operator | new announcement from text            |
+| `POST /api/v1/park-lots/announcement/generate`             | operator | spoken park slot clips                |
+| `PATCH /api/v1/announcements/{id}`                         | operator | save text without generating          |
+| `POST /api/v1/announcements/{id}/generate`                 | operator | generate or regenerate                |
+| `PUT /api/v1/extensions/{id}/voicemail/greeting`           | operator | greeting from an announcement or text |
+| `POST /api/v1/extensions/{id}/voicemail/greeting/preview`  | operator | the default spoken greeting, as WAV   |
+| `DELETE /api/v1/extensions/{id}/voicemail/greeting/{slot}` | operator | revert a slot to the default          |
 
 The routes that hold the key or spend credits are left out of the MCP tools.

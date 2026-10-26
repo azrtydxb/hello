@@ -45,11 +45,11 @@ messages kept per extension (100).
 
 ## API
 
-| Route | Role |
-| --- | --- |
-| `POST /api/v1/messages` | operator: send to an extension, group, `broadcast` (needs `confirm`) or external number |
-| `GET /api/v1/messages`, `/conversations` | admin: history and search |
-| `GET/POST /api/v1/me/messages`, `/conversations` | any user linked to an extension: own extension only |
+| Route                                            | Role                                                                                    |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `POST /api/v1/messages`                          | operator: send to an extension, group, `broadcast` (needs `confirm`) or external number |
+| `GET /api/v1/messages`, `/conversations`         | admin: history and search                                                               |
+| `GET/POST /api/v1/me/messages`, `/conversations` | any user linked to an extension: own extension only                                     |
 
 `sendMessage` is an MCP tool and, for the in-product assistant, a proposal
 action a person applies. Message text is not exposed to the assistant's read

@@ -970,16 +970,33 @@ func (s *Store) loadRouting(ctx context.Context, q querier) (RoutingSnapshot, er
 	if err != nil {
 		return snap, err
 	}
-	defer func() { _ = crows.Close() }()
 	cfg.Conferences = map[string]string{}
 	for crows.Next() {
 		var n, name string
 		if err := crows.Scan(&n, &name); err != nil {
+			_ = crows.Close()
 			return snap, err
 		}
 		cfg.Conferences[n] = name
 	}
-	return snap, crows.Err()
+	_ = crows.Close()
+	if err := crows.Err(); err != nil {
+		return snap, err
+	}
+	trows, err := q.QueryContext(ctx, `SELECT name FROM time_conditions`)
+	if err != nil {
+		return snap, err
+	}
+	defer func() { _ = trows.Close() }()
+	cfg.TimeConditions = map[string]bool{}
+	for trows.Next() {
+		var n string
+		if err := trows.Scan(&n); err != nil {
+			return snap, err
+		}
+		cfg.TimeConditions[n] = true
+	}
+	return snap, trows.Err()
 }
 
 // routingTrunks converts the stored trunks to the engine's type. A trunk

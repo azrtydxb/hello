@@ -24,7 +24,7 @@ type messageQueue struct {
 var _ sip.MessageQueue = messageQueue{}
 
 func (q messageQueue) Watch(ctx context.Context, wake func()) {
-	listen(ctx, q.cfg, q.log, store.MessageChannel, "message", wake)
+	listen(ctx, q.cfg, q.log, listenMessage, "message", wake)
 }
 
 func (q messageQueue) Send(ctx context.Context, in sip.MessageSend) (sip.MessageSent, error) {

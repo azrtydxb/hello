@@ -151,7 +151,8 @@ export function WavDrop({
         <span className="media-drop__lead">Drop a WAV file</span> or browse
       </label>
       <span id={hintId} className="media-drop__hint">
-        WAV, PCM or float, mono or stereo (stereo is mixed to mono); stored at up to 48 kHz
+        WAV, PCM or float, mono or stereo (stereo is mixed to mono); stored at
+        up to 48 kHz
       </span>
       {file && <span className="media-drop__file">{file.name}</span>}
       <input

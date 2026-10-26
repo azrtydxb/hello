@@ -225,6 +225,13 @@ type call struct {
 	vmExt       string
 	vmTap       func(leg string, pkt *media.RTPPacket)
 	bridgedExt  string
+
+	// Time conditions (timecond.go): tcVisited lists the conditions the call
+	// passed, so a loop through ring group failover or an IVR menu is caught;
+	// vmPre is an announcement played before the voicemail greeting. Guarded
+	// by mu.
+	tcVisited []string
+	vmPre     string
 	// ivrUnrecoverable is set when a dial-out cannot be done after a takeover.
 	ivrUnrecoverable bool
 }
@@ -482,6 +489,8 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 			return
 		}
 		c.startIVR(tx, snap, m)
+	case dec.Kind == routing.KindInbound && dec.TimeCondition != "":
+		c.routeTimeCondition(tx, snap, dec.TimeCondition)
 	case dec.Kind == routing.KindInbound && dec.SIPURI != "":
 		c.considerAnchor(snap, EndpointInfo{}) // external URI: caller-side triggers only
 		c.ringURI(req, tx, dec)

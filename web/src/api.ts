@@ -360,7 +360,13 @@ export interface InboundRouteFields {
   schedule: Schedule | null;
   callerIdTransform: Transform;
   /** "internal" looks the DID up in the extension namespace. */
-  destinationKind: "extension" | "internal" | "external" | "sip_uri" | "ivr";
+  destinationKind:
+    | "extension"
+    | "internal"
+    | "external"
+    | "sip_uri"
+    | "ivr"
+    | "time_condition";
   destination: string;
   enabled: boolean;
   /** Music on hold class of the calls this route delivers; null = the default. */
@@ -1075,7 +1081,7 @@ export const RING_STRATEGY_LABEL: Record<RingStrategy, string> = {
 
 /** Where a call goes when every member missed it. */
 export type FailureKind =
-  "none" | "voicemail" | "external" | "announcement" | "ivr";
+  "none" | "voicemail" | "external" | "announcement" | "ivr" | "time_condition";
 
 export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   none: "Hang up",
@@ -1083,6 +1089,7 @@ export const FAILURE_KIND_LABEL: Record<FailureKind, string> = {
   external: "An external number",
   announcement: "An announcement",
   ivr: "An IVR menu",
+  time_condition: "A time condition",
 };
 
 /** One member of a ring group; `position` is 1-based ring order. */
@@ -1347,6 +1354,7 @@ export const IVR_DESTINATION_KINDS = [
   "paging",
   "ivr",
   "external",
+  "time_condition",
 ] as const;
 
 export type IvrDestinationKind = (typeof IVR_DESTINATION_KINDS)[number];
@@ -1360,6 +1368,7 @@ export const IVR_DESTINATION_LABEL: Record<IvrDestinationKind, string> = {
   paging: "Paging group",
   ivr: "Another IVR menu",
   external: "External number",
+  time_condition: "Time condition",
 };
 
 /**
@@ -1539,6 +1548,8 @@ export const FEATURE_CODE_ACTIONS = [
   "park_retrieve",
   "pickup_group",
   "pickup_directed",
+  "time_condition",
+  "tc_override",
 ] as const;
 
 /** One of FEATURE_CODE_ACTIONS: what dialling a feature code performs. */
@@ -1563,6 +1574,8 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   park_retrieve: "Retrieve a parked call",
   pickup_group: "Pick up a call in your group",
   pickup_directed: "Pick up an extension's call",
+  time_condition: "Route to a time condition",
+  tc_override: "Day/night toggle (code plus toggle number)",
 };
 
 /** GET /api/v1/feature-codes. */

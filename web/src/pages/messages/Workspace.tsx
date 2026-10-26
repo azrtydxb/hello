@@ -82,13 +82,16 @@ function toLabel(m: Message): string {
     case "broadcast":
       return "everyone";
     default:
-      return m.recipientKind === "external" ? m.recipient : `ext ${m.recipient}`;
+      return m.recipientKind === "external"
+        ? m.recipient
+        : `ext ${m.recipient}`;
   }
 }
 
 function deliveryText(m: Message): string {
   if (m.recipients <= 1) {
-    if (m.status === "delivered") return `Delivered ${formatTime(m.deliveredAt)}`;
+    if (m.status === "delivered")
+      return `Delivered ${formatTime(m.deliveredAt)}`;
     if (m.status === "failed") return m.detail || "Not delivered";
     return m.detail
       ? `Waiting: ${m.detail}`
@@ -296,24 +299,25 @@ export function ComposeDialog({
             mono
           />
         )}
-        {self ? null : options.length > 0 || kind === "extension" ? (
-          kind !== "broadcast" &&
-          kind !== "external" && (
-            <Select
-              label="Recipient"
-              value={target}
-              options={[{ value: "", label: "Choose…" }, ...options]}
-              onChange={(e) => setTarget(e.target.value)}
-            />
-          )
-        ) : (
-          kind !== "broadcast" &&
-          kind !== "external" && (
-            <Alert tone="info" title="Nothing to choose from">
-              There is no {kind === "ring_group" ? "ring" : "paging"} group yet.
-            </Alert>
-          )
-        )}
+        {self
+          ? null
+          : options.length > 0 || kind === "extension"
+            ? kind !== "broadcast" &&
+              kind !== "external" && (
+                <Select
+                  label="Recipient"
+                  value={target}
+                  options={[{ value: "", label: "Choose…" }, ...options]}
+                  onChange={(e) => setTarget(e.target.value)}
+                />
+              )
+            : kind !== "broadcast" &&
+              kind !== "external" && (
+                <Alert tone="info" title="Nothing to choose from">
+                  There is no {kind === "ring_group" ? "ring" : "paging"} group
+                  yet.
+                </Alert>
+              )}
         {!self && kind === "external" && (
           <Input
             label="Phone number"
@@ -439,10 +443,11 @@ export function Workspace({
     if (!canRead || selected === null) return;
     const controller = new AbortController();
     api
-      .list({ conversation: selected, status: applied.status, q: applied.q }, controller.signal)
-      .then((p) =>
-        setThread({ status: "ready", items: p.items, next: p.next }),
+      .list(
+        { conversation: selected, status: applied.status, q: applied.q },
+        controller.signal,
       )
+      .then((p) => setThread({ status: "ready", items: p.items, next: p.next }))
       .catch((err: unknown) => {
         if (!controller.signal.aborted) {
           setThread({ status: "error", message: errorMessage(err) });
@@ -533,7 +538,9 @@ export function Workspace({
             <div className="msg-panel__head">
               <strong>{heading}</strong>
             </div>
-            {conv.status === "loading" && <Spinner label="Loading conversations…" />}
+            {conv.status === "loading" && (
+              <Spinner label="Loading conversations…" />
+            )}
             {conv.status === "error" && (
               <Alert tone="bad" title="Could not load conversations">
                 {conv.message}
@@ -586,7 +593,9 @@ export function Workspace({
                 description="Its messages and whether they were delivered show here."
               />
             )}
-            {thread.status === "loading" && <Spinner label="Loading messages…" />}
+            {thread.status === "loading" && (
+              <Spinner label="Loading messages…" />
+            )}
             {thread.status === "error" && (
               <Alert tone="bad" title="Could not load the messages">
                 {thread.message}
@@ -619,7 +628,9 @@ export function Workspace({
           onSent={(n) => {
             setComposing(false);
             toast.show(
-              n === 1 ? "Message queued for 1 recipient." : `Message queued for ${n} recipients.`,
+              n === 1
+                ? "Message queued for 1 recipient."
+                : `Message queued for ${n} recipients.`,
             );
             setReload((r) => r + 1);
           }}

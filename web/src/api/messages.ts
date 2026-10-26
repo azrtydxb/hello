@@ -5,19 +5,12 @@ import { request } from "../api";
 
 /** What a send is addressed to. */
 export type TargetKind =
-  | "extension"
-  | "ring_group"
-  | "paging_group"
-  | "broadcast"
-  | "external";
+  "extension" | "ring_group" | "paging_group" | "broadcast" | "external";
 
 export type MessageStatus = "pending" | "delivered" | "failed";
 
 export type MessageScope =
-  | "direct"
-  | "ring_group"
-  | "paging_group"
-  | "broadcast";
+  "direct" | "ring_group" | "paging_group" | "broadcast";
 
 /** POST /messages and POST /me/messages body. */
 export interface MessageSend {

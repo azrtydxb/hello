@@ -1,12 +1,6 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import {
-  apiError,
-  json,
-  mockApi,
-  renderApp,
-  type Routes,
-} from "../test/api";
+import { apiError, json, mockApi, renderApp, type Routes } from "../test/api";
 
 const STAMP = "2026-10-01T10:00:00Z";
 
@@ -103,7 +97,9 @@ describe("MyMessages", () => {
     fireEvent.change(within(dialog).getByLabelText("Message"), {
       target: { value: "On my way" },
     });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Send message" }));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Send message" }),
+    );
     await screen.findByText("Message queued for 1 recipient.");
     const post = calls.find((c) => c.method === "POST");
     expect(post?.url).toBe("/api/v1/me/messages");

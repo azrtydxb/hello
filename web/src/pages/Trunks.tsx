@@ -103,10 +103,26 @@ interface TrunkDraft {
 
 /** The codecs a trunk may be offered, in the order they are stored. */
 const TRUNK_CODECS: { name: string; label: string; hint: string }[] = [
-  { name: "PCMU", label: "PCMU (G.711 u-law)", hint: "Narrowband; every carrier." },
-  { name: "PCMA", label: "PCMA (G.711 A-law)", hint: "Narrowband; every carrier." },
-  { name: "G722", label: "G.722", hint: "HD voice; only if the carrier supports it." },
-  { name: "opus", label: "Opus", hint: "HD voice; rarely offered by carriers." },
+  {
+    name: "PCMU",
+    label: "PCMU (G.711 u-law)",
+    hint: "Narrowband; every carrier.",
+  },
+  {
+    name: "PCMA",
+    label: "PCMA (G.711 A-law)",
+    hint: "Narrowband; every carrier.",
+  },
+  {
+    name: "G722",
+    label: "G.722",
+    hint: "HD voice; only if the carrier supports it.",
+  },
+  {
+    name: "opus",
+    label: "Opus",
+    hint: "HD voice; rarely offered by carriers.",
+  },
 ];
 
 const DEFAULT_TRUNK_CODECS = ["PCMU", "PCMA"];
@@ -943,10 +959,9 @@ function TrunkDrawer({
         <fieldset className="cf-form__section">
           <legend className="az-eyebrow">Codecs</legend>
           <p className="cf-form__note">
-            The audio codecs offered to this trunk, in the caller's order.
-            Most carriers accept G.711 only, so G.722 and Opus are off until
-            you allow them. Phones are always offered everything they
-            support.
+            The audio codecs offered to this trunk, in the caller's order. Most
+            carriers accept G.711 only, so G.722 and Opus are off until you
+            allow them. Phones are always offered everything they support.
           </p>
           <div className="cf-field-group">
             {TRUNK_CODECS.map((c) => (

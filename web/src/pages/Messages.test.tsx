@@ -1,12 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import {
-  apiError,
-  json,
-  mockApi,
-  renderApp,
-  type Routes,
-} from "../test/api";
+import { apiError, json, mockApi, renderApp, type Routes } from "../test/api";
 
 const STAMP = "2026-10-01T10:00:00Z";
 
@@ -76,9 +70,11 @@ const EXTENSIONS = {
 function api(role: string, more: Routes = {}) {
   return mockApi({
     "GET /api/v1/auth/me": () => json({ username: "u", role }),
-    "GET /api/v1/messages/conversations": () => json({ items: [direct, drill] }),
+    "GET /api/v1/messages/conversations": () =>
+      json({ items: [direct, drill] }),
     "GET /api/v1/extensions": () => json(EXTENSIONS),
-    "GET /api/v1/ring-groups": () => json({ items: [{ id: 1, name: "sales" }] }),
+    "GET /api/v1/ring-groups": () =>
+      json({ items: [{ id: 1, name: "sales" }] }),
     "GET /api/v1/paging-groups": () => json({ items: [] }),
     ...more,
   });
@@ -241,7 +237,9 @@ describe("Messages", () => {
     fireEvent.change(within(again).getByLabelText("Message"), {
       target: { value: "Your order shipped" },
     });
-    fireEvent.click(within(again).getByRole("button", { name: "Send message" }));
+    fireEvent.click(
+      within(again).getByRole("button", { name: "Send message" }),
+    );
     await waitFor(() =>
       expect(calls.filter((c) => c.method === "POST")).toHaveLength(2),
     );
@@ -272,7 +270,9 @@ describe("Messages", () => {
     fireEvent.change(within(dialog).getByLabelText("Message"), {
       target: { value: "x" },
     });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Send message" }));
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Send message" }),
+    );
     expect(
       await within(dialog).findByText(
         "no enabled trunk has messaging turned on",
@@ -366,11 +366,15 @@ describe("Messages", () => {
       within(confirm).getByRole("button", { name: "Delete history" }),
     );
     await waitFor(() =>
-      expect(calls.find((c) => c.url === "/api/v1/messages/purge")).toBeTruthy(),
+      expect(
+        calls.find((c) => c.url === "/api/v1/messages/purge"),
+      ).toBeTruthy(),
     );
-    expect(calls.find((c) => c.url === "/api/v1/messages/purge")?.body).toEqual({
-      olderThanDays: 7,
-    });
+    expect(calls.find((c) => c.url === "/api/v1/messages/purge")?.body).toEqual(
+      {
+        olderThanDays: 7,
+      },
+    );
   });
 
   it("refuses settings out of range before sending them", async () => {

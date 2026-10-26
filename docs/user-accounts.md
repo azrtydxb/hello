@@ -9,12 +9,12 @@ made (`HELLO_BOOTSTRAP_ADMIN_PASSWORD` creates `admin` as before).
 
 ## Roles
 
-| Role       | What it reaches                                                                                                                          |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Role       | What it reaches                                                                                                                         |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `user`     | Only the `/api/v1/me/...` routes and `auth/me`, `auth/logout`, `auth/password`: the user's own extensions and nothing else (see below). |
-| `viewer`   | Every read operation.                                                                                                                    |
-| `operator` | Also every write operation.                                                                                                              |
-| `admin`    | Also users, credentials, connected apps and secrets.                                                                                     |
+| `viewer`   | Every read operation.                                                                                                                   |
+| `operator` | Also every write operation.                                                                                                             |
+| `admin`    | Also users, credentials, connected apps and secrets.                                                                                    |
 
 `user` ranks below `viewer`: every route that asks for viewer or more refuses
 it with `403 forbidden_role`. A user token or OAuth grant can hold `read` and

@@ -1162,12 +1162,12 @@ defaults avoid every code Hello already uses, and in particular the paging
 groups, which take codes of the same `*` plus 2 to 4 digits shape (the
 phonebooks-ptt default is `*8<n>`; a site may use `*60`):
 
-| Action            | Default | What it does                                                                      |
-| ----------------- | ------- | --------------------------------------------------------------------------------- |
-| `park`            | `*74`   | During a call: parks it in the first free slot; `*74701` parks in slot 701        |
-| `park_retrieve`   | `*75`   | `*75701` retrieves the call parked in slot 701                                    |
-| `pickup_group`    | `*40`   | Answers the oldest call ringing anyone in your pickup scope                       |
-| `pickup_directed` | `*41`   | `*41200` answers the call ringing extension 200, if it is in your pickup scope    |
+| Action            | Default | What it does                                                                   |
+| ----------------- | ------- | ------------------------------------------------------------------------------ |
+| `park`            | `*74`   | During a call: parks it in the first free slot; `*74701` parks in slot 701     |
+| `park_retrieve`   | `*75`   | `*75701` retrieves the call parked in slot 701                                 |
+| `pickup_group`    | `*40`   | Answers the oldest call ringing anyone in your pickup scope                    |
+| `pickup_directed` | `*41`   | `*41200` answers the call ringing extension 200, if it is in your pickup scope |
 
 The specification's own defaults for pickup (`*60`, `*61<ext>`) collide with a
 paging group on `*60`, so Hello uses `*40` and `*41<ext>` instead. Hello

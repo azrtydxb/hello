@@ -88,7 +88,9 @@ export function greetingStatus(
   slot: GreetingSlot,
 ): "Custom" | "Default (AI voice)" | "Default (no voice set)" {
   if (isCustomGreeting(box, slot)) return "Custom";
-  return box.aiVoice === false ? "Default (no voice set)" : "Default (AI voice)";
+  return box.aiVoice === false
+    ? "Default (no voice set)"
+    : "Default (AI voice)";
 }
 
 /**

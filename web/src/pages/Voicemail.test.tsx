@@ -453,7 +453,9 @@ describe("Voicemail", () => {
       within(within(dialog).getByRole("group", { name }));
     expect(slot("Greeting").getByText("Custom")).toBeVisible();
     expect(slot("Busy greeting").getByText("Custom")).toBeVisible();
-    expect(slot("Unreachable greeting").getByText("Default (AI voice)")).toBeVisible();
+    expect(
+      slot("Unreachable greeting").getByText("Default (AI voice)"),
+    ).toBeVisible();
     expect(slot("Recorded name").getByText("Default (AI voice)")).toBeVisible();
   });
 

@@ -18,11 +18,11 @@ hears, in order:
 
 The default greetings, in English:
 
-| Situation              | Spoken                                                                  |
-| ---------------------- | ----------------------------------------------------------------------- |
-| No answer, DND, other  | "Jan Peeters is not available. Please leave a message after the tone."  |
-| Busy                   | "Jan Peeters is busy at the moment. Please leave a message after the tone." |
-| Unreachable            | "Jan Peeters cannot be reached at the moment. Please leave a message after the tone." |
+| Situation             | Spoken                                                                                |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| No answer, DND, other | "Jan Peeters is not available. Please leave a message after the tone."                |
+| Busy                  | "Jan Peeters is busy at the moment. Please leave a message after the tone."           |
+| Unreachable           | "Jan Peeters cannot be reached at the moment. Please leave a message after the tone." |
 
 The name is the extension's display name; an extension without one is read as
 "extension 2, 0, 1". If the box has a **recorded name**, that recording plays
@@ -55,27 +55,27 @@ unknown caller". When it arrived is worded in the system time zone: "today at
 
 ### Key layout
 
-| Where                  | Key | Does                                                         |
-| ---------------------- | --- | ------------------------------------------------------------ |
-| After a message        | `1` | replay it                                                    |
-|                        | `2` | next message (the message is kept as saved)                  |
-|                        | `3` or `7` | delete it                                             |
-|                        | `9` | save it                                                      |
-|                        | `*` | previous message                                             |
-|                        | `#` | skip it, leaving it as it was                                |
-|                        | `0` | mailbox options                                              |
-| Main menu              | `1` | hear new messages                                            |
-|                        | `2` | hear saved messages                                          |
-|                        | `0` | mailbox options                                              |
-| Mailbox options        | `1` | record your unavailable greeting                             |
-|                        | `2` | record your busy greeting                                    |
-|                        | `3` | record your name                                             |
-|                        | `4` | change your PIN                                              |
-|                        | `5` | go back to the default (spoken) greetings                    |
-|                        | `*` | back                                                         |
-| After recording        | `1` | keep it                                                      |
-|                        | `2` | re-record                                                    |
-|                        | `3` | cancel                                                       |
+| Where           | Key        | Does                                        |
+| --------------- | ---------- | ------------------------------------------- |
+| After a message | `1`        | replay it                                   |
+|                 | `2`        | next message (the message is kept as saved) |
+|                 | `3` or `7` | delete it                                   |
+|                 | `9`        | save it                                     |
+|                 | `*`        | previous message                            |
+|                 | `#`        | skip it, leaving it as it was               |
+|                 | `0`        | mailbox options                             |
+| Main menu       | `1`        | hear new messages                           |
+|                 | `2`        | hear saved messages                         |
+|                 | `0`        | mailbox options                             |
+| Mailbox options | `1`        | record your unavailable greeting            |
+|                 | `2`        | record your busy greeting                   |
+|                 | `3`        | record your name                            |
+|                 | `4`        | change your PIN                             |
+|                 | `5`        | go back to the default (spoken) greetings   |
+|                 | `*`        | back                                        |
+| After recording | `1`        | keep it                                     |
+|                 | `2`        | re-record                                   |
+|                 | `3`        | cancel                                      |
 
 Any key interrupts a prompt, so you can press a key as soon as you know it.
 The full menu is spoken after the first message; later messages get a short
@@ -125,11 +125,11 @@ Spoken audio is generated through OpenRouter with the model and voice saved in
 the TTS settings, and **cached in the voicemail bucket** (`hello-voicemail`,
 MinIO), so the whole cluster shares it:
 
-| Object key                                | Holds                                                         |
-| ----------------------------------------- | ------------------------------------------------------------- |
-| `tts/hd/<sha256>.wav`                     | one spoken sentence, 16-bit mono WAV at the voice's own rate (up to 48 kHz), resampled per call, so G.722 and Opus callers hear it in HD |
-| `box/<box id>/<slot>-<unix ns>.wav`       | a box's own greeting, busy greeting, unreachable greeting or name (`<slot>` is `greeting`, `busy`, `unreachable` or `name`) |
-| `box/<box id>/<unix>-<call id>.wav`       | a message                                                     |
+| Object key                          | Holds                                                                                                                                    |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `tts/hd/<sha256>.wav`               | one spoken sentence, 16-bit mono WAV at the voice's own rate (up to 48 kHz), resampled per call, so G.722 and Opus callers hear it in HD |
+| `box/<box id>/<slot>-<unix ns>.wav` | a box's own greeting, busy greeting, unreachable greeting or name (`<slot>` is `greeting`, `busy`, `unreachable` or `name`)              |
+| `box/<box id>/<unix>-<call id>.wav` | a message                                                                                                                                |
 
 `<sha256>` is the hex SHA-256 of the model, a NUL byte, the voice, a NUL byte
 and the text. A different voice or model is a different key, so a change never
@@ -160,9 +160,9 @@ hears the greeting again; a caller checking messages hears the PIN prompt again.
 
 ## API
 
-| Route                                                        | Role     | Purpose                                          |
-| ------------------------------------------------------------ | -------- | ------------------------------------------------ |
-| `PUT /api/v1/extensions/{id}/voicemail`                      | operator | PIN, email, and uploads (`greeting`, `busy`, `unreachable`, `name`) |
-| `PUT /api/v1/extensions/{id}/voicemail/greeting`             | operator | a greeting from an announcement or text          |
-| `POST /api/v1/extensions/{id}/voicemail/greeting/preview`    | operator | the default spoken greeting, as WAV              |
-| `DELETE /api/v1/extensions/{id}/voicemail/greeting/{slot}`   | operator | revert a slot to the default                     |
+| Route                                                      | Role     | Purpose                                                             |
+| ---------------------------------------------------------- | -------- | ------------------------------------------------------------------- |
+| `PUT /api/v1/extensions/{id}/voicemail`                    | operator | PIN, email, and uploads (`greeting`, `busy`, `unreachable`, `name`) |
+| `PUT /api/v1/extensions/{id}/voicemail/greeting`           | operator | a greeting from an announcement or text                             |
+| `POST /api/v1/extensions/{id}/voicemail/greeting/preview`  | operator | the default spoken greeting, as WAV                                 |
+| `DELETE /api/v1/extensions/{id}/voicemail/greeting/{slot}` | operator | revert a slot to the default                                        |

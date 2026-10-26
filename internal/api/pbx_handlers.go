@@ -43,7 +43,7 @@ var (
 	fcActions  = []string{"forward_always", "forward_busy", "forward_no_answer", "dnd_on", "dnd_off",
 		"voicemail", "blind_transfer", "attended_transfer", "announcement", "intercom", "ivr",
 		"call_waiting_on", "call_waiting_off",
-		"park", "park_retrieve", "pickup_group", "pickup_directed"}
+		"park", "park_retrieve", "pickup_group", "pickup_directed", "time_condition", "tc_override"}
 )
 
 // voicemailLimits bound greeting uploads.
@@ -592,8 +592,12 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 		if !usernameRe.MatchString(in.FailureTarget) {
 			f.add("failureTarget", "must be the name of an IVR menu")
 		}
+	case "time_condition":
+		if !usernameRe.MatchString(in.FailureTarget) {
+			f.add("failureTarget", "must be the name of a time condition")
+		}
 	default:
-		f.add("failureKind", `must be "none", "voicemail", "external", "announcement" or "ivr"`)
+		f.add("failureKind", `must be "none", "voicemail", "external", "announcement", "ivr" or "time_condition"`)
 	}
 	if len(in.Members) == 0 || len(in.Members) > 50 {
 		f.add("members", "must have 1-50 members")
@@ -641,8 +645,9 @@ func (s *server) createRingGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in, _ := b.toInput(defaultsRingGroup())
-	// The store checks that an IVR failure destination exists, inside the
-	// change's transaction (a menu deleted meanwhile cannot slip through).
+	// The store checks that an IVR or time condition failure destination
+	// exists, inside the change's transaction (one deleted meanwhile cannot
+	// slip through).
 	if f := validateRingGroup(&in); len(f) > 0 {
 		writeFields(w, f)
 		return
@@ -680,8 +685,9 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 		MOHClassID: current.MOHClassID, MOHRingback: current.MOHRingback,
 	}
 	in, _ := b.toInput(base)
-	// The store checks that an IVR failure destination exists, inside the
-	// change's transaction (a menu deleted meanwhile cannot slip through).
+	// The store checks that an IVR or time condition failure destination
+	// exists, inside the change's transaction (one deleted meanwhile cannot
+	// slip through).
 	if f := validateRingGroup(&in); len(f) > 0 {
 		writeFields(w, f)
 		return
@@ -741,8 +747,11 @@ func (s *server) putFeatureCodes(w http.ResponseWriter, r *http.Request) {
 			f.add(p+".code", "must be a distinct code")
 		}
 		seen[c.Code] = true
-		// An "ivr" argument must name a menu: the store checks it inside
-		// the change's transaction.
+		// An "ivr" or "time_condition" argument must name a menu or a time
+		// condition: the store checks it inside the change's transaction.
+		if c.Action == "tc_override" && !slices.Contains([]string{"toggle", "open", "closed", "auto"}, c.Argument) {
+			f.add(p+".argument", `must be "toggle", "open", "closed" or "auto"`)
+		}
 	}
 	if len(f) > 0 {
 		writeFields(w, f)

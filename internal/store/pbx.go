@@ -671,9 +671,8 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 
 // checkRingGroupIVR checks a ring group's IVR interplay inside the change's
 // transaction: a new name must not be an IVR menu's or a conference room's
-// number, and an IVR
-// failure destination must name an existing menu. cur is the stored name ("" on
-// create).
+// number, and an IVR or time condition failure destination must name an
+// existing one. cur is the stored name ("" on create).
 func checkRingGroupIVR(ctx context.Context, tx *sql.Tx, cur string, in RingGroupInput) error {
 	if in.Name != cur {
 		if err := refuseIVRNumber(ctx, tx, "name", in.Name); err != nil {
@@ -683,8 +682,11 @@ func checkRingGroupIVR(ctx context.Context, tx *sql.Tx, cur string, in RingGroup
 			return err
 		}
 	}
-	if in.FailureKind == "ivr" {
+	switch in.FailureKind {
+	case "ivr":
 		return requireIVRMenuTx(ctx, tx, "failureTarget", in.FailureTarget)
+	case "time_condition":
+		return requireTimeConditionTx(ctx, tx, "failureTarget", in.FailureTarget)
 	}
 	return nil
 }
@@ -771,10 +773,15 @@ func (s *Store) PutFeatureCodes(ctx context.Context, actor string, codes []Featu
 			return "", err
 		}
 		for i, c := range codes {
-			if c.Action == "ivr" {
-				if err := requireIVRMenuTx(ctx, tx, fmt.Sprintf("items[%d].argument", i), c.Argument); err != nil {
-					return "", err
-				}
+			var err error
+			switch c.Action {
+			case "ivr":
+				err = requireIVRMenuTx(ctx, tx, fmt.Sprintf("items[%d].argument", i), c.Argument)
+			case "time_condition":
+				err = requireTimeConditionTx(ctx, tx, fmt.Sprintf("items[%d].argument", i), c.Argument)
+			}
+			if err != nil {
+				return "", err
 			}
 		}
 		err := dialGuard(ctx, tx, "items", func() error {
@@ -812,6 +819,7 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*93", Action: "forward_no_answer", Argument: "clear"},
 		{Code: "*97", Action: "voicemail"},
 		{Code: "*80", Action: "intercom"},
+		{Code: "*28", Action: "tc_override", Argument: "toggle"},
 		{Code: "*70", Action: "call_waiting_off"},
 		{Code: "*71", Action: "call_waiting_on"},
 		{Code: "*74", Action: "park"},

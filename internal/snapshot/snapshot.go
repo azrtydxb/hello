@@ -202,6 +202,8 @@ type Snapshot struct {
 	confs map[string]Conference
 	// ivrByName and ivrByNumber are the IVR menus (migration 00033).
 	ivrByName, ivrByNumber map[string]IVRMenu
+	// tcByName and tcByToggle are the time conditions (migration 00038).
+	tcByName, tcByToggle map[string]TimeCondition
 	// parkLots are the enabled park lots in slot order; pickups the pickup
 	// groups (migration 00032).
 	parkLots []ParkLot
@@ -596,6 +598,10 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	tcs, err := loadTimeConditions(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	lots, err := loadParkLots(ctx, db)
 	if err != nil {
 		return nil, err
@@ -610,7 +616,7 @@ func Load(ctx context.Context, db Querier, domain string) (*Snapshot, error) {
 	}
 	return New(rev, domain, devices).WithExtensions(bare...).
 		WithExtensionData(exts).WithRingGroups(groups, members).WithFeatureCodes(codes).
-		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs), nil
+		WithPagingGroups(pages).WithAnnouncements(anns).WithIVRMenus(ivrs).WithParkLots(lots).WithPickupGroups(pickups).WithMOHClasses(mohs).WithTimeConditions(tcs), nil
 }
 
 // loadMOHClasses reads the music on hold classes with their playlists
