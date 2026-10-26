@@ -115,6 +115,12 @@ type Store interface {
 	DeleteTimeCondition(ctx context.Context, actor string, id int64, check store.Check) error
 	SetTimeConditionOverride(ctx context.Context, actor string, id int64, mode string) (store.TimeCondition, error)
 	EvaluateTimeCondition(ctx context.Context, id int64, at time.Time, ignoreOverride bool) (store.TimeConditionEvaluation, error)
+	ListFlowCanvases(ctx context.Context) ([]store.FlowCanvas, error)
+	GetFlowCanvas(ctx context.Context, id int64) (store.FlowCanvas, []store.FlowCanvasNode, error)
+	CreateFlowCanvas(ctx context.Context, actor, name, description string) (store.FlowCanvas, error)
+	UpdateFlowCanvas(ctx context.Context, actor string, id int64, c store.FlowCanvasChange) (store.FlowCanvas, error)
+	DeleteFlowCanvas(ctx context.Context, actor string, id int64) error
+	PutFlowLayout(ctx context.Context, actor string, id int64, w store.FlowLayoutWrite) (store.FlowCanvas, []store.FlowCanvasNode, error)
 	ListParkLots(ctx context.Context) ([]store.ParkLot, error)
 	GetParkLot(ctx context.Context, id int64) (store.ParkLot, error)
 	CreateParkLot(ctx context.Context, actor string, in store.ParkLotInput, check store.Check) (store.ParkLot, error)
@@ -250,6 +256,9 @@ type Config struct {
 	// rooms' live state and control queue (spec S-34); nil answers 503.
 	Conferences    ConferenceStore
 	ConferenceLive ConferenceLive
+	// Events is the call-event pipeline (stream, history, tickets); nil
+	// answers 503 on the event routes.
+	Events EventService
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
 	// Objects is the voicemail audio store; nil makes the audio routes and
@@ -343,7 +352,13 @@ func Handler(c Config) http.Handler {
 	for _, rt := range s.routes() {
 		h := s.aiGuard(rt.Pattern, rt.H)
 		if !rt.Public {
-			h = authed(auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, h)))
+			guarded := auth.Require(rt.Role, rt.Scope)(passwordGate(rt.Pattern, h))
+			h = authed(guarded)
+			if rt.Pattern == "/api/v1/events/stream" {
+				// A client that cannot send an Authorization header
+				// redeems a single-use ticket instead.
+				h = s.withEventTicket(h, guarded)
+			}
 		}
 		mux.Handle(rt.Method+" "+rt.Pattern, h)
 	}

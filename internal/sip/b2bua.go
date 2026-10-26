@@ -67,7 +67,11 @@ type call struct {
 	connected   bool
 	ended       bool
 	hungUp      bool
-	stageSeq    int // the current forwarding stage; legs carry the stage they belong to
+	// gfDepth counts ring group failovers and gfChain the groups rung, so a
+	// failover chain that returns on itself is cut (groups.go).
+	gfDepth  int
+	gfChain  []string
+	stageSeq int // the current forwarding stage; legs carry the stage they belong to
 	// invTx is the caller INVITE's server transaction, kept so a
 	// callee-less answer (voicemail) can respond without sipgo's dialog
 	// ACK-wait; vmTag is the To tag that answer carries.
@@ -250,6 +254,12 @@ type call struct {
 	vmPre     string
 	// ivrUnrecoverable is set when a dial-out cannot be done after a takeover.
 	ivrUnrecoverable bool
+
+	// Call events (events.go), guarded by mu: the extensions that rang, the
+	// one that answered and the subjects of the finished call.
+	ringedExts  []string
+	answeredExt string
+	evSubjects  []string
 }
 
 // callStages is the forwarding/DND context of the extension a call is
@@ -640,6 +650,9 @@ func (c *call) setup(pending int) {
 			switch ev.kind {
 			case evRinging:
 				c.ringing()
+				if ev.leg != nil {
+					c.noteRinging(ev.leg.binding.Extension)
+				}
 			case evAnswered:
 				c.answer(ev.leg)
 				return
@@ -854,6 +867,7 @@ func (c *call) answer(w *leg) {
 	}
 	c.addTrace("Call established")
 	c.publish()
+	c.noteAnswered(w.binding.Extension)
 	// record_default recordings start when the call is answered (spec
 	// S-4); the flow re-anchors when needed, but an anchored-for-recording
 	// call is already set up.
@@ -1260,6 +1274,7 @@ func (c *call) record(status int, side, reason, result string) {
 	c.mu.Lock()
 	r.QueueLegs = append([]cdr.QueueLeg(nil), c.qLegs...)
 	c.mu.Unlock()
+	r.Events = c.endEvents(result, reason, end, answer, r.DurationMs, r.BillableMs)
 	c.s.m.Calls.WithLabelValues(result).Inc()
 	if c.groupName != "" {
 		c.s.m.GroupCalls.WithLabelValues(c.groupName, c.groupStrategy, result).Inc()

@@ -209,6 +209,12 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/flow/catalogue", auth.ScopeRead, auth.RoleViewer, false, s.getFlowCatalogue},
 		{"GET", "/api/v1/flow/graph", auth.ScopeRead, auth.RoleViewer, false, s.getFlowGraph},
 		{"GET", "/api/v1/flow/revision", auth.ScopeRead, auth.RoleViewer, false, s.getFlowRevision},
+		{"GET", "/api/v1/flow/canvases", auth.ScopeRead, auth.RoleViewer, false, s.listFlowCanvases},
+		{"POST", "/api/v1/flow/canvases", auth.ScopeWrite, auth.RoleOperator, false, s.createFlowCanvas},
+		{"GET", "/api/v1/flow/canvases/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getFlowCanvas},
+		{"PATCH", "/api/v1/flow/canvases/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.updateFlowCanvas},
+		{"DELETE", "/api/v1/flow/canvases/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteFlowCanvas},
+		{"PUT", "/api/v1/flow/canvases/{id}/layout", auth.ScopeWrite, auth.RoleOperator, false, s.putFlowLayout},
 
 		{"POST", "/api/v1/routing/test", auth.ScopeWrite, auth.RoleOperator, false, s.routingTest},
 
@@ -342,6 +348,9 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/service-accounts/{id}/secrets/{secretId}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteClientSecret},
 		{"GET", "/api/v1/skills", auth.ScopeRead, auth.RoleViewer, false, s.listSkills},
 		{"GET", "/api/v1/skills/{name}/download", auth.ScopeRead, auth.RoleViewer, false, s.downloadSkill},
+		{"GET", "/api/v1/events", auth.ScopeEvents, auth.RoleUser, false, s.listEvents},
+		{"GET", "/api/v1/events/stream", auth.ScopeEvents, auth.RoleUser, false, s.eventStream},
+		{"POST", "/api/v1/events/tickets", auth.ScopeEvents, auth.RoleUser, false, s.createEventTicket},
 		{"GET", "/api/v1/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.listUsers},
 		{"POST", "/api/v1/users", auth.ScopeAdmin, auth.RoleAdmin, false, s.createUser},
 		{"GET", "/api/v1/users/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.getUser},
