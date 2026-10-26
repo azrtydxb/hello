@@ -561,3 +561,11 @@ now hands out `media.Track`s, so the conference hold loop reads
 check runs before IVR, park-slot and Replaces handling (the guards keep these
 disjoint, so the order only matters for speed); for in-dialog INFO DTMF the
 conference consumers run before the IVR one for the same reason.
+
+## Feature key sync migration renumbered (2026-10-26)
+
+Main took 00031 (multicast catalog), 00032 (park/pickup) and 00033 (IVR)
+before feature key sync (#158) merged, so its additive
+`extensions.no_answer_rings` migration moves to the next free number; the
+migrate rollback tests' re-apply counts and the "migration 000NN" comments
+follow it.

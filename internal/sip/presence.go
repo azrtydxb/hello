@@ -8,6 +8,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/livestate"
@@ -39,13 +40,17 @@ type subscription struct {
 	expires   time.Time
 	lastState string
 	lastMWI   string // message-summary: the body last sent, to skip repeats
+	// as-feature-event: the state last sent, and the lock that keeps one
+	// subscription's NOTIFYs ordered.
+	feat     *featState
+	notifyMu *sync.Mutex
 }
 
 // Subscription event packages Hello serves.
 const (
 	eventDialog         = "dialog"
 	eventMessageSummary = "message-summary"
-	allowEvents         = "dialog, message-summary"
+	allowEvents         = "dialog, message-summary, as-feature-event"
 
 	// MWI subscriptions renew at the phone's pace but are clamped to this
 	// range (spec S-1).
@@ -112,7 +117,10 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 	if ev := req.GetHeader("Event"); ev != nil {
 		event = strings.ToLower(strings.TrimSpace(strings.SplitN(ev.Value(), ";", 2)[0]))
 	}
-	var ext string
+	var (
+		ext     string
+		changes []featChange
+	)
 	switch event {
 	case eventDialog:
 		ext = req.Recipient.User
@@ -130,6 +138,17 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 			s.respond(tx, req, sip.StatusForbidden, "Forbidden")
 			return
 		}
+	case eventFeature:
+		var ok bool
+		if ext, ok = ownFeatureExtension(snap, dev, req.Recipient.User); !ok {
+			s.respond(tx, req, sip.StatusForbidden, "Forbidden")
+			return
+		}
+		if exp := s.subscribeExpires(req); exp != 0 {
+			if changes, ok = s.featureChanges(req, tx, snap, dev, ext); !ok {
+				return
+			}
+		}
 	default:
 		s.respond(tx, req, 489, "Bad Event", sip.NewHeader("Allow-Events", allowEvents))
 		return
@@ -138,9 +157,20 @@ func (s *Server) handleSubscribe(req *sip.Request, tx sip.ServerTransaction) {
 	if exp > 0 && event == eventMessageSummary {
 		exp = min(max(exp, mwiMinExpires), mwiMaxExpires)
 	}
+	if exp > 0 && event == eventFeature {
+		exp = min(max(exp, featureMinExpires), featureMaxExpires)
+	}
+	if exp < 0 {
+		s.respond(tx, req, sip.StatusBadRequest, "Bad Request")
+		return
+	}
 	if exp == 0 { // an unsubscribe
 		s.dropSub(req.CallID().Value(), true)
 		s.respond(tx, req, sip.StatusOK, "OK", sip.NewHeader("Expires", "0"))
+		return
+	}
+	if event == eventFeature {
+		s.handleFeatureSubscribe(req, tx, snap, ext, changes, exp)
 		return
 	}
 	sub, fresh := s.upsertSub(req, event, ext, exp)
@@ -248,27 +278,58 @@ func (s *Server) upsertSub(req *sip.Request, event, ext string, exp time.Duratio
 	defer s.subsMu.Unlock()
 	if isInDialog(req) {
 		sub, ok := s.subs[id]
-		if !ok {
+		if ok {
+			sub.expires = time.Now().Add(exp)
+			return sub, false
+		}
+		if event != eventFeature {
 			return nil, false
 		}
-		sub.expires = time.Now().Add(exp)
-		return sub, false
+		// A refresh of a feature subscription this node never held (it was
+		// accepted by the other node before a failover, or before a
+		// restart): the request carries the whole dialog, so adopt it. The
+		// CSeq of our NOTIFYs restarts above anything the other node sent.
+		sub = s.newSub(req, event, ext, exp)
+		sub.localTag = tagOfTo(req)
+		sub.cseq = uint32(time.Now().Unix() & 0x7fffffff) //nolint:gosec // masked to 31 bits
+		s.addSub(sub)
+		return sub, true
 	}
+	sub := s.newSub(req, event, ext, exp)
+	sub.localTag = sip.GenerateTagN(8)
+	s.addSub(sub)
+	return sub, true
+}
+
+// newSub builds the subscription req opens or refreshes.
+func (s *Server) newSub(req *sip.Request, event, ext string, exp time.Duration) *subscription {
 	target := req.From().Address
 	if ct := req.Contact(); ct != nil {
 		target = ct.Address
 	}
 	sub := &subscription{
-		callID: id, event: event, device: req.From().Address.User, extension: ext,
-		localTag: sip.GenerateTagN(8), remoteTag: tagOf(req.From()),
-		target: *target.Clone(), expires: time.Now().Add(exp),
+		callID: req.CallID().Value(), event: event, device: req.From().Address.User, extension: ext,
+		remoteTag: tagOf(req.From()), target: *target.Clone(), expires: time.Now().Add(exp),
 	}
-	s.subs[id] = sub
-	if s.byExt[ext] == nil {
-		s.byExt[ext] = map[string]bool{}
+	if event == eventFeature {
+		sub.notifyMu = &sync.Mutex{}
 	}
-	s.byExt[ext][id] = true
-	return sub, true
+	return sub
+}
+
+// addSub indexes sub; the caller holds subsMu.
+func (s *Server) addSub(sub *subscription) {
+	s.subs[sub.callID] = sub
+	if s.byExt[sub.extension] == nil {
+		s.byExt[sub.extension] = map[string]bool{}
+	}
+	s.byExt[sub.extension][sub.callID] = true
+}
+
+// tagOfTo reads the To tag of an in-dialog request.
+func tagOfTo(req *sip.Request) string {
+	v, _ := req.To().Params.Get("tag")
+	return v
 }
 
 // dropSub forgets a subscription; when notify it sends the final
@@ -282,9 +343,12 @@ func (s *Server) dropSub(id string, notify bool) {
 	}
 	s.subsMu.Unlock()
 	if ok && notify {
-		if sub.event == eventMessageSummary {
+		switch sub.event {
+		case eventMessageSummary:
 			s.goBG(func() { s.sendMWINotify(sub, 0, "deactivated", MWITerminate) })
-		} else {
+		case eventFeature:
+			s.goBG(func() { s.sendFeatureTerminate(sub, "deactivated") })
+		default:
 			go s.sendStateNotify(sub, StateIdle, 0, "deactivated")
 		}
 	}
@@ -313,7 +377,7 @@ func (s *Server) notifyExtension(ext, state string) {
 	s.subsMu.Lock()
 	var targets []*subscription
 	for id := range s.byExt[ext] {
-		if sub, ok := s.subs[id]; ok && sub.event != eventMessageSummary {
+		if sub, ok := s.subs[id]; ok && sub.event == eventDialog {
 			sub.lastState = state
 			cp := *sub
 			targets = append(targets, &cp)
@@ -417,8 +481,12 @@ func (s *Server) subExpireLoop(ctx context.Context) {
 		if len(expired) > 0 {
 			s.m.PresenceSubscriptions.Set(float64(s.subCount()))
 			for _, sub := range expired {
-				if sub.event == eventMessageSummary {
+				switch sub.event {
+				case eventMessageSummary:
 					s.goBG(func() { s.sendMWINotify(sub, 0, "timeout", MWITerminate) })
+					continue
+				case eventFeature:
+					s.goBG(func() { s.sendFeatureTerminate(sub, "timeout") })
 					continue
 				}
 				//nolint:gosec // detached on purpose: the fan-out must not

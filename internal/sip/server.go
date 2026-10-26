@@ -806,6 +806,7 @@ func (s *Server) SnapshotChanged(old, cur *snapshot.Snapshot) {
 		return
 	}
 	s.tcSnapshotChanged(old, cur)
+	s.notifyFeatureChanges(cur)
 	var gone []string
 	for _, u := range old.Usernames() {
 		if _, ok := cur.DeviceByUsername(u); !ok {
