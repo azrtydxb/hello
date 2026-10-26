@@ -1,0 +1,229 @@
+{
+  "configRevision": 6,
+  "nodes": [
+    {
+      "id": "anyTrunk:any",
+      "kind": "anyTrunk",
+      "label": "Any trunk",
+      "summary": {}
+    },
+    {
+      "id": "extension:10",
+      "kind": "extension",
+      "label": "101 E101",
+      "summary": {
+        "dnd": false,
+        "name": "E101",
+        "noAnswerEnd": "voicemail",
+        "number": "101",
+        "voicemail": true
+      },
+      "version": "d49b70d62eb16a78"
+    },
+    {
+      "id": "extension:11",
+      "kind": "extension",
+      "label": "102 E102",
+      "summary": {
+        "dnd": false,
+        "name": "E102",
+        "noAnswerEnd": "hangup",
+        "number": "102",
+        "voicemail": false
+      },
+      "version": "21e59f4f16932074"
+    },
+    {
+      "id": "extension:12",
+      "kind": "extension",
+      "label": "103 E103",
+      "summary": {
+        "dnd": false,
+        "name": "E103",
+        "noAnswerEnd": "hangup",
+        "number": "103",
+        "voicemail": false
+      },
+      "version": "3a8fb6421eb08325"
+    },
+    {
+      "id": "inboundRoute:1",
+      "kind": "inboundRoute",
+      "label": "legacy",
+      "summary": {
+        "did": "1",
+        "didKind": "exact",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "1d48683f84719e36"
+    },
+    {
+      "id": "inboundRoute:2",
+      "kind": "inboundRoute",
+      "label": "direct",
+      "summary": {
+        "did": "2",
+        "didKind": "exact",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "5092aacee2c88db9"
+    },
+    {
+      "id": "ringGroup:1",
+      "kind": "ringGroup",
+      "label": "200",
+      "summary": {
+        "members": 1,
+        "ringTimeout": 0,
+        "strategy": "ring-all"
+      },
+      "version": "35bb46076e8284c9"
+    },
+    {
+      "id": "ringGroup:2",
+      "kind": "ringGroup",
+      "label": "sales",
+      "summary": {
+        "members": 1,
+        "ringTimeout": 0,
+        "strategy": "ring-all"
+      },
+      "version": "7d10734e47e26e62"
+    }
+  ],
+  "edges": [
+    {
+      "id": "anyTrunk:any.inbound-\u003einboundRoute:1.trunk",
+      "source": {
+        "node": "anyTrunk:any",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:1",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "trunkId"
+      }
+    },
+    {
+      "id": "anyTrunk:any.inbound-\u003einboundRoute:2.trunk",
+      "source": {
+        "node": "anyTrunk:any",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:2",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:2",
+        "field": "trunkId"
+      }
+    },
+    {
+      "id": "extension:10.member-\u003eringGroup:1.members",
+      "source": {
+        "node": "extension:10",
+        "port": "member"
+      },
+      "target": {
+        "node": "ringGroup:1",
+        "port": "members"
+      },
+      "owner": {
+        "node": "ringGroup:1",
+        "field": "members"
+      },
+      "data": {
+        "delay": 0,
+        "position": 1,
+        "weight": 1
+      }
+    },
+    {
+      "id": "extension:10.member-\u003eringGroup:2.members",
+      "source": {
+        "node": "extension:10",
+        "port": "member"
+      },
+      "target": {
+        "node": "ringGroup:2",
+        "port": "members"
+      },
+      "owner": {
+        "node": "ringGroup:2",
+        "field": "members"
+      },
+      "data": {
+        "delay": 0,
+        "position": 1,
+        "weight": 1
+      }
+    },
+    {
+      "id": "extension:11.forwardAlways-\u003eringGroup:1.ring",
+      "source": {
+        "node": "extension:11",
+        "port": "forwardAlways"
+      },
+      "target": {
+        "node": "ringGroup:1",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "extension:11",
+        "field": "forwardAlways"
+      }
+    },
+    {
+      "id": "extension:12.forwardAlways-\u003eringGroup:2.ring",
+      "source": {
+        "node": "extension:12",
+        "port": "forwardAlways"
+      },
+      "target": {
+        "node": "ringGroup:2",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "extension:12",
+        "field": "forwardAlways"
+      }
+    },
+    {
+      "id": "inboundRoute:1.destination-\u003eringGroup:1.ring",
+      "source": {
+        "node": "inboundRoute:1",
+        "port": "destination"
+      },
+      "target": {
+        "node": "ringGroup:1",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "inboundRoute:2.destination-\u003eringGroup:2.ring",
+      "source": {
+        "node": "inboundRoute:2",
+        "port": "destination"
+      },
+      "target": {
+        "node": "ringGroup:2",
+        "port": "ring"
+      },
+      "owner": {
+        "node": "inboundRoute:2",
+        "field": "destinationKind+destination"
+      }
+    }
+  ],
+  "warnings": []
+}

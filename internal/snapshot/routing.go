@@ -234,6 +234,26 @@ func loadRouting(ctx context.Context, db Querier, box *secret.Box, log *slog.Log
 	if err := rows.Err(); err != nil {
 		return cfg, nil, fmt.Errorf("snapshot: queues: %w", err)
 	}
+	rows, err = db.Query(ctx, `SELECT 'ring_group', name FROM ring_groups
+		UNION ALL SELECT 'announcement', name FROM announcements
+		UNION ALL SELECT 'paging', code FROM paging_groups
+		UNION ALL SELECT 'voicemail', e.number FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id`)
+	if err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: named destinations: %w", err)
+	}
+	cfg.Named = map[string]bool{}
+	for rows.Next() {
+		var kind, target string
+		if err := rows.Scan(&kind, &target); err != nil {
+			rows.Close()
+			return cfg, nil, fmt.Errorf("snapshot: scan named destination: %w", err)
+		}
+		cfg.Named[kind+":"+target] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return cfg, nil, fmt.Errorf("snapshot: named destinations: %w", err)
+	}
 	rows, err = db.Query(ctx, `SELECT name FROM time_conditions`)
 	if err != nil {
 		return cfg, nil, fmt.Errorf("snapshot: time conditions: %w", err)

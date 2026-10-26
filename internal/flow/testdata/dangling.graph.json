@@ -1,0 +1,212 @@
+{
+  "configRevision": 5,
+  "nodes": [
+    {
+      "id": "anyTrunk:any",
+      "kind": "anyTrunk",
+      "label": "Any trunk",
+      "summary": {}
+    },
+    {
+      "id": "extension:10",
+      "kind": "extension",
+      "label": "101 E101",
+      "summary": {
+        "dnd": false,
+        "name": "E101",
+        "noAnswerEnd": "hangup",
+        "number": "101",
+        "voicemail": false
+      },
+      "version": "c00ff2eea44d7dab"
+    },
+    {
+      "id": "featureCode:*60",
+      "kind": "featureCode",
+      "label": "*60",
+      "summary": {
+        "action": "ivr",
+        "code": "*60"
+      },
+      "version": "edb129f753403206"
+    },
+    {
+      "id": "inboundRoute:1",
+      "kind": "inboundRoute",
+      "label": "lost",
+      "summary": {
+        "did": "1",
+        "didKind": "exact",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "12a92a26141744d4"
+    },
+    {
+      "id": "inboundRoute:2",
+      "kind": "inboundRoute",
+      "label": "to-vm",
+      "summary": {
+        "did": "2",
+        "didKind": "exact",
+        "enabled": true,
+        "position": 0
+      },
+      "version": "6f63c20a78eebb5b"
+    },
+    {
+      "id": "missing:gone",
+      "kind": "missing",
+      "label": "gone",
+      "summary": {
+        "target": "gone"
+      }
+    },
+    {
+      "id": "missing:nope",
+      "kind": "missing",
+      "label": "nope",
+      "summary": {
+        "target": "nope"
+      }
+    },
+    {
+      "id": "missing:nowhere",
+      "kind": "missing",
+      "label": "nowhere",
+      "summary": {
+        "target": "nowhere"
+      }
+    },
+    {
+      "id": "ringGroup:1",
+      "kind": "ringGroup",
+      "label": "empty",
+      "summary": {
+        "members": 0,
+        "ringTimeout": 0,
+        "strategy": "ring-all"
+      },
+      "version": "e0d1a58d642f7276"
+    }
+  ],
+  "edges": [
+    {
+      "id": "anyTrunk:any.inbound-\u003einboundRoute:2.trunk",
+      "source": {
+        "node": "anyTrunk:any",
+        "port": "inbound"
+      },
+      "target": {
+        "node": "inboundRoute:2",
+        "port": "trunk"
+      },
+      "owner": {
+        "node": "inboundRoute:2",
+        "field": "trunkId"
+      }
+    },
+    {
+      "id": "featureCode:*60.target-\u003emissing:nowhere.call",
+      "source": {
+        "node": "featureCode:*60",
+        "port": "target"
+      },
+      "target": {
+        "node": "missing:nowhere",
+        "port": "call"
+      },
+      "owner": {
+        "node": "featureCode:*60",
+        "field": "argument"
+      }
+    },
+    {
+      "id": "inboundRoute:1.destination-\u003emissing:nope.call",
+      "source": {
+        "node": "inboundRoute:1",
+        "port": "destination"
+      },
+      "target": {
+        "node": "missing:nope",
+        "port": "call"
+      },
+      "owner": {
+        "node": "inboundRoute:1",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "inboundRoute:2.destination-\u003eextension:10.voicemail",
+      "source": {
+        "node": "inboundRoute:2",
+        "port": "destination"
+      },
+      "target": {
+        "node": "extension:10",
+        "port": "voicemail"
+      },
+      "owner": {
+        "node": "inboundRoute:2",
+        "field": "destinationKind+destination"
+      }
+    },
+    {
+      "id": "ringGroup:1.noAnswer-\u003emissing:gone.call",
+      "source": {
+        "node": "ringGroup:1",
+        "port": "noAnswer"
+      },
+      "target": {
+        "node": "missing:gone",
+        "port": "call"
+      },
+      "owner": {
+        "node": "ringGroup:1",
+        "field": "failureKind+failureTarget"
+      }
+    }
+  ],
+  "warnings": [
+    {
+      "node": "featureCode:*60",
+      "code": "dangling_reference",
+      "message": "IVR menu \"nowhere\" does not exist"
+    },
+    {
+      "node": "inboundRoute:1",
+      "code": "dangling_reference",
+      "message": "announcement \"nope\" does not exist"
+    },
+    {
+      "node": "inboundRoute:1",
+      "code": "dangling_reference",
+      "message": "trunk 9 does not exist"
+    },
+    {
+      "node": "inboundRoute:1",
+      "code": "unreachable",
+      "message": "no trunk leads to this route"
+    },
+    {
+      "node": "inboundRoute:2",
+      "code": "voicemail_disabled_target",
+      "message": "voicemail is off for extension 101"
+    },
+    {
+      "node": "ringGroup:1",
+      "code": "dangling_reference",
+      "message": "queue \"gone\" does not exist"
+    },
+    {
+      "node": "ringGroup:1",
+      "code": "empty_group",
+      "message": "the ring group has no members"
+    },
+    {
+      "node": "ringGroup:1",
+      "code": "unreachable",
+      "message": "nothing sends calls here: no route, forward, menu key, branch or feature code leads to it, and its name is not a number that can be dialled"
+    }
+  ]
+}
