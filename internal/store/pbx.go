@@ -634,6 +634,9 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 			if err := refuseIfIVRPoints(ctx, tx, "ring group "+cur+", which cannot be renamed while it is named by", cur, IVRRingGroup); err != nil {
 				return id, err
 			}
+			if err := refuseIfGroupFailsTo(ctx, tx, "ring group "+cur+", which cannot be renamed while it is the fallback of", cur, "ring_group"); err != nil {
+				return id, err
+			}
 		}
 		if err := checkRingGroupIVR(ctx, tx, cur, in); err != nil {
 			return id, err
@@ -674,10 +677,57 @@ func checkRingGroupIVR(ctx context.Context, tx *sql.Tx, cur string, in RingGroup
 		}
 	}
 	switch in.FailureKind {
+	case "extension":
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM extensions WHERE number = $1`, in.FailureTarget).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			return fieldError("failureTarget", fmt.Sprintf("extension %q does not exist", in.FailureTarget))
+		}
+	case "ring_group":
+		if in.FailureTarget == in.Name {
+			return fieldError("failureTarget", "a ring group cannot fail over to itself")
+		}
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM ring_groups WHERE name = $1`, in.FailureTarget).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			return fieldError("failureTarget", fmt.Sprintf("ring group %q does not exist", in.FailureTarget))
+		}
 	case "ivr":
 		return requireIVRMenuTx(ctx, tx, "failureTarget", in.FailureTarget)
 	case "time_condition":
 		return requireTimeConditionTx(ctx, tx, "failureTarget", in.FailureTarget)
+	}
+	return nil
+}
+
+// refuseIfGroupFailsTo returns an *InUseError naming the ring groups whose
+// failure destination is target of kind ("extension" or "ring_group"):
+// a fallback names its target by number or name, so neither can change
+// or go while a group falls back to it.
+func refuseIfGroupFailsTo(ctx context.Context, tx *sql.Tx, what, target, kind string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT name FROM ring_groups WHERE failure_kind = $1 AND failure_target = $2 ORDER BY name`,
+		kind, target)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	var refs []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return err
+		}
+		refs = append(refs, "ring group "+n)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(refs) > 0 {
+		return inUseBy(what, refs)
 	}
 	return nil
 }
@@ -690,6 +740,9 @@ func (s *Store) DeleteRingGroup(ctx context.Context, actor string, id int64, che
 			return id, err
 		}
 		if err := refuseIfIVRPoints(ctx, tx, "ring group "+name, name, IVRRingGroup); err != nil {
+			return id, err
+		}
+		if err := refuseIfGroupFailsTo(ctx, tx, "ring group "+name, name, "ring_group"); err != nil {
 			return id, err
 		}
 		res, err := tx.ExecContext(ctx, `DELETE FROM ring_groups WHERE id = $1`, id)

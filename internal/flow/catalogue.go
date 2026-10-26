@@ -173,10 +173,10 @@ func buildCatalogue() Catalogue {
 	// or an external number.
 	forward := []Target{tExt, tGroup.note("Ring group names must be numeric to be dialled from a forward"), tExternal}
 	// Ring-group fallback stores none|voicemail|external|announcement|ivr|
-	// queue|time_condition. A call whose group already rang cannot be given
-	// a new ring stage (to an extension or another group) or handed to a
-	// paging group or a conference room.
-	groupNoAnswer := []Target{tVoicemail, tIVR, tQueue, tAnn, tTC, tExternal}
+	// queue|time_condition|extension|ring_group. An extension or another
+	// group gets a new ring stage. A call whose group already rang cannot be
+	// handed to a paging group or a conference room.
+	groupNoAnswer := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tTC, tExternal}
 	// IVR keys and exits, time condition branches and queue exits store the
 	// same set: hangup, extension, ring group, voicemail, announcement,
 	// paging, IVR, queue, time condition and external number.

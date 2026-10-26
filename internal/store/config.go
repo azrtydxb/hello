@@ -140,6 +140,9 @@ func (s *Store) UpdateExtension(ctx context.Context, actor string, id int64, c E
 				IVRExtension, IVRVoicemail); err != nil {
 				return id, err
 			}
+			if err := refuseIfGroupFailsTo(ctx, tx, "extension "+number+", which cannot be renumbered while it is the fallback of", number, "extension"); err != nil {
+				return id, err
+			}
 			if err := checkDialNumber(ctx, tx, "number", *c.Number, numExtension); err != nil {
 				return id, err
 			}
@@ -177,6 +180,9 @@ func (s *Store) DeleteExtension(ctx context.Context, actor string, id int64, che
 			return id, inUse("extension "+number, routes)
 		}
 		if err := refuseIfIVRPoints(ctx, tx, "extension "+number, number, IVRExtension, IVRVoicemail); err != nil {
+			return id, err
+		}
+		if err := refuseIfGroupFailsTo(ctx, tx, "extension "+number, number, "extension"); err != nil {
 			return id, err
 		}
 		if err := boundPhone(ctx, tx, `d.extension_id = $1`, id); err != nil {
