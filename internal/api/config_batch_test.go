@@ -16,6 +16,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/configbatch"
+	"github.com/azrtydxb/hello/internal/flow"
 )
 
 // btOp builds one operation of a batch request.
@@ -617,5 +618,32 @@ func TestBatchableHandlersNoExternalEffects(t *testing.T) {
 	}
 	if checked != len(configbatch.Ops) {
 		t.Errorf("checked %d of %d batchable operations", checked, len(configbatch.Ops))
+	}
+}
+
+// TestFlowWarningEnum fails if the FlowWarning code enum in openapi.json
+// differs from the warning codes the graph builder can raise: a batch and the
+// graph answer with them, and a code missing from the enum fails response
+// validation.
+func TestFlowWarningEnum(t *testing.T) {
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Enum []string `json:"enum"`
+				} `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(openAPI, &doc); err != nil {
+		t.Fatal(err)
+	}
+	got := slices.Clone(doc.Components.Schemas["FlowWarning"].Properties["code"].Enum)
+	want := []string{flow.WarnDangling, flow.WarnEmptyGroup, flow.WarnVoicemailDisable, flow.WarnUnreachable, flow.WarnLoop,
+		flow.WarnShadowedRoute, flow.WarnNoGreeting}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("FlowWarning.code enum = %v, want %v", got, want)
 	}
 }

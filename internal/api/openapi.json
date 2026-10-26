@@ -18006,7 +18006,11 @@
             "enum": [
               "dangling_reference",
               "empty_group",
-              "voicemail_disabled_target"
+              "voicemail_disabled_target",
+              "unreachable",
+              "loop",
+              "shadowed_route",
+              "no_greeting"
             ]
           },
           "message": {
