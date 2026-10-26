@@ -54,6 +54,7 @@ func TestSessionSampleRatePerCodec(t *testing.T) {
 		{"pcma", BuildAudioSDP("127.0.0.1", 9, 8, 101, 8000), 8000, 8},
 		{"g722", wideOffer(9), 16000, 9},
 		{"g722 preferred over g711", []byte("v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio 9 RTP/AVP 0 8 9\r\n"), 16000, 9},
+		{"opus preferred over g722 and g711", []byte("v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio 9 RTP/AVP 9 96 0\r\na=rtpmap:96 opus/48000/2\r\n"), 16000, 96},
 		{"opus only", []byte("v=0\r\nc=IN IP4 127.0.0.1\r\nm=audio 9 RTP/AVP 96\r\na=rtpmap:96 opus/48000/2\r\n"), 16000, 96},
 	} {
 		t.Run(c.name, func(t *testing.T) {

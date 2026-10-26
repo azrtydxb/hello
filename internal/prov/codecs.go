@@ -6,9 +6,9 @@ import (
 )
 
 // CodecInfo is the audio codec plan a built-in template renders: HD voice
-// order G.722 first, then Opus where the model has it, then PCMU and PCMA.
+// order Opus first where the model has it, then G.722, PCMU and PCMA.
 // Every other codec (G.729, G.726, G.723, iLBC and so on) is left out:
-// Hello offers phones G.722, Opus, PCMU and PCMA only, and the relay passes
+// Hello offers phones Opus, G.722, PCMU and PCMA only, and the relay passes
 // what two phones agree on between them.
 type CodecInfo struct {
 	// Opus is set when the phone model supports Opus, so the template
