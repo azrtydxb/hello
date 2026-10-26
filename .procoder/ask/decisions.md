@@ -631,6 +631,7 @@ numeric ring group keeps working). Down converts `ring_group` routes back to
 earlier destination migrations do.
 
 Why only these kinds. Decision 3 asks for every kind on every output, but:
+
 - a call that has already started (a ring group fallback, an IVR key, a queue
   exit, a time condition branch) cannot be handed to a paging group or a
   conference room: the runtime pages and joins only from the INVITE
@@ -646,7 +647,7 @@ Why only these kinds. Decision 3 asks for every kind on every output, but:
   transfer to a slot);
 - extension forwards stay extension / numeric ring group / external number,
   because that is what `sip.forward` resolves.
-The catalogue lists exactly what is stored.
+  The catalogue lists exactly what is stored.
 
 Runtime. Inbound routes of the new kinds are carried out by the destination
 dispatcher time conditions already use (`applyTCDest`), so there is one place
@@ -684,6 +685,18 @@ target before starting the voicemail application, the same way the IVR and time
 condition paths do. Before, `mailboxExt` fell back to the dialled string (the
 group number), so the message went to the wrong box or to none. Covered by
 `TestRingGroupVoicemailFailureBox`, which fails without the fix.
+
+## Routes form: new inbound destination kinds (2026-10-26)
+
+The inbound route drawer offers `ring_group`, `voicemail`, `announcement` and
+`paging` (migration 00041, API and MCP already had them). Each target is chosen
+from a list, reusing `targetOptions` from the IVR destination picker: ring group
+and announcement by name, voicemail by extension number (labelled "Voicemail box
+of"), paging by code. A stored value the list no longer has stays selectable as
+"(not found)". Choosing a kind clears the target, since a name valid for one kind
+is not a target of another. An empty target is refused with a kind-specific
+message. `conference` is also in the API enum and still has no chooser; not part
+of this change.
 
 ## Ring group fallback to an extension or another group (2026-10-26)
 

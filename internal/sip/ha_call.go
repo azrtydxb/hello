@@ -420,14 +420,18 @@ func (c *call) replicate() bool {
 	if written {
 		return false // handed off: the record is the taker's to write
 	}
-	st, ok := c.haState()
-	if !ok {
-		return false
-	}
+	// The state is built under the write lock: built before it, a slow
+	// writer (a heartbeat) could land a stale snapshot over a newer one
+	// (the announcement or voicemail phase just noted), and a taker would
+	// then restart nothing.
 	c.haWriteMu.Lock()
 	defer c.haWriteMu.Unlock()
 	if c.haDeleted {
 		return false // the call ended: its record is gone for good
+	}
+	st, ok := c.haState()
+	if !ok {
+		return false
 	}
 	c.mu.Lock()
 	written = c.haHandoff && c.haHandoffWritten
