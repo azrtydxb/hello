@@ -21,6 +21,7 @@ type testDecision struct {
 	Kind       routing.Kind `json:"kind"`
 	Extension  string       `json:"extension"`
 	SIPURI     string       `json:"sipUri"`
+	Conference string       `json:"conference,omitempty"`
 	Number     string       `json:"number"`
 	CallerID   string       `json:"callerId"`
 	Route      string       `json:"route"`
@@ -130,7 +131,7 @@ func (s *server) routingTest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := testDecision{
-		Kind: d.Kind, Extension: d.Extension, SIPURI: d.SIPURI, Number: d.Number, CallerID: d.CallerID,
+		Kind: d.Kind, Extension: d.Extension, SIPURI: d.SIPURI, Conference: d.Conference, Number: d.Number, CallerID: d.CallerID,
 		Route: d.Route, Trunks: []string{}, Emergency: d.Emergency, RejectCode: d.RejectCode, Reason: d.Reason,
 	}
 	for _, c := range d.Candidates {

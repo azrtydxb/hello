@@ -82,6 +82,7 @@ func newEnvConfig(t *testing.T, cfg Config, box *secret.Box) *env {
 	}
 	cfg.Store, cfg.SIPDomain, cfg.SessionTTL = st, testDomain, sessionTTL
 	cfg.Phonebooks = st
+	cfg.Conferences = st
 	if box != nil {
 		cfg.ProvStore = st
 	}
