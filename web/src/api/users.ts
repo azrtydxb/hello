@@ -25,6 +25,10 @@ export interface User {
   /** Every extension the user manages, the primary first. */
   extensionIds: Id[];
   voicemailEmail: VoicemailEmailPrefs;
+  /** The user has active two-factor authentication. */
+  totpEnabled?: boolean;
+  /** An administrator requires two-factor authentication of the user. */
+  totpRequired?: boolean;
   createdAt: string;
 }
 
@@ -52,6 +56,8 @@ export interface UserChange {
   mustChangePassword?: boolean;
   extensionIds?: Id[];
   voicemailEmail?: Partial<VoicemailEmailPrefs>;
+  /** Require two-factor authentication of the user. */
+  totpRequired?: boolean;
 }
 
 /** GET /api/v1/users (admin). */
