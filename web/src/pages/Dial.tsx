@@ -78,7 +78,7 @@ export function Dial() {
   const canNameAny = useCan("operator");
   const linked = state.status === "signedIn" ? (state.me.extensions ?? []) : [];
   const fromLink = params.get("n");
-  const [raw, setRaw] = useState(fromLink ?? "");
+  const [raw, setRaw] = useState(dialable(fromLink ?? "") || (fromLink ?? ""));
   const [extension, setExtension] = useState(linked[0]?.number ?? "");
   const [status, setStatus] = useState<OriginateStatus | null>(null);
   const [error, setError] = useState<string | null>(null);

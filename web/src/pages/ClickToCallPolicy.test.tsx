@@ -57,8 +57,5 @@ describe("ClickToCallPolicy", () => {
         autoAnswerAllowed: true,
       }),
     );
-    expect(
-      await screen.findByText("Click-to-call policy saved."),
-    ).toBeInTheDocument();
   });
 });

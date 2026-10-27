@@ -140,6 +140,7 @@ var NonFlowResources = map[string]string{
 	"phonebooks":                    "directory data shown on phones, not call routing",
 	"phonebooks/{id}/entries":       "directory data shown on phones, not call routing",
 	"me/contacts":                   "a user's personal contacts, not call routing",
+	"calls/originate":               "click-to-call requests (a call placed on demand, not call routing)",
 	"ai/sessions":                   "assistant conversations, not call routing",
 	"flow/canvases":                 "named views of the canvas that store only node positions, not call routing",
 }
