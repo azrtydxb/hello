@@ -371,9 +371,22 @@ func TestMessageStoreAndForward(t *testing.T) {
 func TestMessageDeliveredOnce(t *testing.T) {
 	fastMessages(t)
 	q := newFakeMsgs("100", "200")
-	fs := newFakeState()
-	n1 := startPBX(t, msgDevices(), withMessages(q), withSharedState(fs), withNodeID("n1"))
-	n2 := startPBX(t, msgDevices(), withMessages(q), withSharedState(fs), withNodeID("n2"))
+	fs, pr := newFakeState(), newFakePresence()
+	// The nodes announce themselves, as in a cluster: the phone registers on
+	// n1, so a message n2 claims reaches it through n1's edge proxy, which
+	// relays only for a known peer node and otherwise answers 403 (a
+	// permanent failure). Without presence n2 was a stranger to n1 and the
+	// messages it won the claim for failed, so the phone got fewer than
+	// were sent, or none when n2 claimed the whole batch.
+	node := func(id string) []pbxOpt {
+		return []pbxOpt{withMessages(q), withSharedState(fs), withNodeID(id),
+			func(_ *Config, d *Deps) { d.Presence = pr }}
+	}
+	n1 := startPBX(t, msgDevices(), node("n1")...)
+	n2 := startPBX(t, msgDevices(), node("n2")...)
+	eventually(t, "the nodes know each other", func() bool {
+		return n1.srv.isPeer(n2.addr) && n2.srv.isPeer(n1.addr)
+	})
 	a := newPhone(t, n1, "a1", "pa")
 	const count = 12
 	for i := 0; i < count; i++ {
