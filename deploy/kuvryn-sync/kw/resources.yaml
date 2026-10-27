@@ -375,6 +375,11 @@ data:
     modparam("xhttp_prom", "prom_gauge", "name=dispatcher_destination_active; label=uri")
     modparam("xhttp_prom", "prom_counter", "name=dispatcher_transitions_total; label=uri:state")
     modparam("xhttp_prom", "prom_counter", "name=pike_blocked_total")
+    # Requests per receiving socket (phones, phones_tcp, hello, phones_legacy,
+    # phones_legacy_tcp, hello_legacy): once the legacy sockets (LEGACY_IP) see no
+    # traffic for longer than a registration lasts, every phone has moved to the
+    # VIP and the legacy address can be retired.
+    modparam("xhttp_prom", "prom_counter", "name=edge_requests_total; label=socket")
 
     # rtimer: refresh the dispatcher set gauges every 5s.
     modparam("rtimer", "timer", "name=dsmetrics;interval=5;mode=1;")
@@ -391,6 +396,7 @@ data:
     	}
 
     	route(EDGE_SIDE);
+    	prom_counter_inc("edge_requests_total", "1", "$Rn");
 
     	if ($Rn == "hello" || $Rn == "hello_legacy") {
     		# Received on the Hello-facing socket (5070). On kw that socket is on
@@ -959,7 +965,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: d2394b5e326b5cd279823cb20ed387b9388821edcaee0612389e506fdc776b7d
+        hello.watteel.com/kamailio-config-sha256: 80ee5e49e7bfa7cde6ce71e70de4e0d090057b28659f72770f8d9cf5ef426386
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's
@@ -1978,9 +1984,13 @@ spec:
             - name: HELLO_PROV_PUBLIC_URL
               value: https://prov.hello.kw.watteel.lab
             - name: HELLO_PROV_SIP_SERVER
-              # Where provisioned phones register: Kamailio on master-11's
-              # address, as KAMAILIO_PUBLIC_HOST/PORT advertise it.
-              value: 192.168.10.101:30508
+              # Where provisioned phones register: Kamailio's VIP, as
+              # KAMAILIO_PUBLIC_HOST/PORT advertise it. A phone moves to it
+              # at its next fetch (Resync on the Phones page, or its
+              # periodic re-check); until then it keeps working through
+              # 192.168.10.101, which Kamailio still serves
+              # (KAMAILIO_LEGACY_IP). docs/ha.md, "Moving phones to the VIP".
+              value: 192.168.10.109:30508
             - name: HELLO_PROV_TRUSTED_PROXIES
               # kw's pod CIDR: ingress-nginx's X-Forwarded-Proto/-For are
               # believed from there only (HTTPS check, per-IP limits).
