@@ -334,7 +334,9 @@ jobs:
     # images from the same source.
     # Integration tier: the compose lab is far too slow for the PR path, so it
     # runs only on the nightly schedule and on manual dispatch.
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    # The go job is skipped on dispatch, which would skip lab with it; a
+    # skipped go counts as satisfied, a failed one still blocks.
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (needs.go.result == 'success' || needs.go.result == 'skipped') }}
     needs: [go]
     runs-on: arc-azrtydxb
     timeout-minutes: 60
