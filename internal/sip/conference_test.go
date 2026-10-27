@@ -568,12 +568,10 @@ func TestConferenceControls(t *testing.T) {
 	f.queue("sip-test", livestate.ConfCommand{ID: "3", Room: "800", Action: "end", Actor: "user:admin"})
 	waitReq(t, a.byes, "BYE when the room is ended")
 	eventually(t, "room gone", func() bool { return pbx.srv.conf.get("800") == nil })
-	if _, ok := f.state("800"); ok {
-		t.Fatal("the emptied room's state was not removed")
-	}
-	if f.ownerNow("800") != "" {
-		t.Fatal("the emptied room kept its ownership lease")
-	}
+	// The room leaves the hub before its teardown deletes the shared state
+	// and lease: wait for that, not for the hub alone.
+	eventually(t, "the emptied room's state is removed", func() bool { _, ok := f.state("800"); return !ok })
+	eventually(t, "the emptied room's lease is released", func() bool { return f.ownerNow("800") == "" })
 }
 
 // TestConferenceWaitForLeader fails if a participant is mixed in before a
