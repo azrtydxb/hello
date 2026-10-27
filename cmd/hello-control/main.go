@@ -167,7 +167,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Metrics: events.NewServiceMetrics(metrics.Registry),
 	}
 	go evSvc.Run(ctx)
-	if err := startSyslog(ctx, cfg.Syslog, st, vk, log); err != nil {
+	if err := startSyslog(ctx, cfg.Syslog, st, vk, metrics.Registry, log); err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_SYSLOG_*: %w", err)
 	}

@@ -13,18 +13,19 @@ import (
 	"github.com/azrtydxb/hello/internal/config"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/syslogsink"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // startSyslog binds the listeners now, so a bad address fails startup, and
 // starts receiving once Valkey is connected; lines that arrive earlier wait
 // in the socket buffer or are lost, as UDP syslog allows.
-func startSyslog(ctx context.Context, cfg config.Syslog, phones syslogsink.Phones, vk *api.LazyValkey, log *slog.Logger) error {
+func startSyslog(ctx context.Context, cfg config.Syslog, phones syslogsink.Phones, vk *api.LazyValkey, reg prometheus.Registerer, log *slog.Logger) error {
 	if !cfg.Enabled() {
 		return nil
 	}
 	sc := syslogsink.Config{
 		UDPAddr: cfg.UDPAddr, TLSAddr: cfg.TLSAddr, RatePerSec: float64(cfg.Rate), Burst: cfg.Burst,
-		Phones: phones, Log: log.With("component", "syslog"),
+		Phones: phones, Metrics: syslogsink.NewMetrics(reg), Log: log.With("component", "syslog"),
 	}
 	if cfg.TLSAddr != "" {
 		cert, err := tls.LoadX509KeyPair(cfg.TLSCert, cfg.TLSKey)

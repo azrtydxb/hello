@@ -33,6 +33,7 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { SyslogTable } from "./phones/syslog";
 import { usePolling } from "../usePolling";
 import {
   DeletePhoneDialog,
@@ -605,23 +606,6 @@ function FetchLog({ phoneId }: { phoneId: Phone["id"] }) {
   );
 }
 
-const SEVERITY = [
-  "emerg",
-  "alert",
-  "crit",
-  "error",
-  "warning",
-  "notice",
-  "info",
-  "debug",
-];
-
-function severityTone(n: number): "bad" | "warn" | "neutral" {
-  if (n >= 0 && n <= 3) return "bad";
-  if (n === 4) return "warn";
-  return "neutral";
-}
-
 /** The lines the phone sent to Hello's syslog sink (S-27), newest first. */
 function SyslogLog({ phoneId }: { phoneId: Phone["id"] }) {
   const [state, setState] = useState<
@@ -656,25 +640,12 @@ function SyslogLog({ phoneId }: { phoneId: Phone["id"] }) {
       </Alert>
     );
   }
-  const columns: TableColumn<SyslogLine>[] = [
-    { key: "at", label: "Time", render: (l) => formatTime(l.at) },
-    {
-      key: "severity",
-      label: "Level",
-      render: (l) => (
-        <Badge tone={severityTone(l.severity)}>
-          {SEVERITY[l.severity] ?? "—"}
-        </Badge>
-      ),
-    },
-    { key: "message", label: "Message", mono: true },
-  ];
   return (
     <div className="prov-stack">
       {state.lines.length === 0 ? (
         <p className="prov-muted">
-          No syslog lines yet. Turn syslog on for the phone's group, then
-          resync the phone.
+          No syslog lines yet. Turn syslog on for the phone's group, then resync
+          the phone.
         </p>
       ) : (
         <>
@@ -682,12 +653,7 @@ function SyslogLog({ phoneId }: { phoneId: Phone["id"] }) {
             The newest {state.lines.length} lines, kept for {state.hours} h.
             Secrets are redacted.
           </p>
-          <Table
-            caption="Syslog"
-            columns={columns}
-            rows={state.lines}
-            rowKey={(l, i) => `${l.at}-${i}`}
-          />
+          <SyslogTable caption="Syslog" lines={state.lines} />
         </>
       )}
     </div>

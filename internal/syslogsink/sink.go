@@ -54,6 +54,8 @@ type Config struct {
 	Lines    Lines
 	Phones   Phones
 	Log      *slog.Logger
+	// Metrics counts lines; nil counts nothing.
+	Metrics *Metrics
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
 }
@@ -286,13 +288,18 @@ func (s *Sink) Handle(ctx context.Context, src netip.Addr, raw string) {
 	if !ok {
 		return
 	}
+	s.count(func(m *Metrics) { m.Received.Inc() })
 	phoneID, known := s.owner(ctx, src, now)
+	if !known {
+		s.count(func(m *Metrics) { m.Unmatched.Inc() })
+	}
 	key := "ip:" + src.String()
 	if known {
 		key = "phone:" + strconv.FormatInt(phoneID, 10)
 	}
 	allowed, dropped := s.allow(key, now)
 	if !allowed {
+		s.count(func(m *Metrics) { m.Dropped.Inc() })
 		return
 	}
 	put := func(l livestate.SyslogLine) error {
@@ -310,6 +317,12 @@ func (s *Sink) Handle(ctx context.Context, src netip.Addr, raw string) {
 	}
 	if err := put(line); err != nil {
 		s.cfg.Log.Warn("syslog store", "error", err)
+	}
+}
+
+func (s *Sink) count(f func(*Metrics)) {
+	if s.cfg.Metrics != nil {
+		f(s.cfg.Metrics)
 	}
 }
 

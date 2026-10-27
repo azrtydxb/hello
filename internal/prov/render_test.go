@@ -367,3 +367,59 @@ func TestBootBodiesHandOff(t *testing.T) {
 		}
 	}
 }
+
+// TestSyslogVendors fails if a vendor that documents syslog keys does not get
+// the sink (with the port and level mapped) for a group that turned it on, or
+// is not told explicitly to log nowhere otherwise.
+func TestSyslogVendors(t *testing.T) {
+	cases := []struct {
+		v       Vendor
+		model   string
+		file    string
+		on, off []string
+	}{
+		{Yealink, "T54W", ".cfg",
+			[]string{"static.syslog.mode = 1", "static.syslog.server = syslog.hello.example", "static.syslog.server_port = 5514", "static.syslog.level = 4"},
+			[]string{"static.syslog.mode = 0"}},
+		{Poly, "VVX 450", "-hello.cfg",
+			[]string{`device.syslog.serverName="syslog.hello.example"`, `device.syslog.renderLevel="4"`},
+			[]string{`device.syslog.serverName=""`}},
+		{Snom, "D785", "",
+			[]string{"<syslog_server perm=\"R\">syslog.hello.example:5514</syslog_server>"},
+			[]string{"<syslog_server perm=\"R\"></syslog_server>"}},
+	}
+	for _, c := range cases {
+		t.Run(string(c.v), func(t *testing.T) {
+			d := SampleData(true)
+			d.Phone.Vendor, d.Phone.Model = c.v, c.model
+			d.Syslog = NewSyslogInfo("syslog.hello.example:5514", "warning")
+			file := d.Phone.MAC + c.file
+			if c.v == Snom {
+				file = d.Phone.MACUpper
+			}
+			render := func() string {
+				out, err := Render(context.Background(), builtinFor(t, c.v), file, d)
+				if err != nil {
+					t.Fatalf("%s: %v", c.file, err)
+				}
+				return string(out)
+			}
+			on := render()
+			for _, w := range c.on {
+				if !strings.Contains(on, w) {
+					t.Errorf("syslog on lacks %q", w)
+				}
+			}
+			d.Syslog = nil
+			off := render()
+			for _, w := range c.off {
+				if !strings.Contains(off, w) {
+					t.Errorf("syslog off lacks %q", w)
+				}
+			}
+			if strings.Contains(off, "syslog.hello.example") {
+				t.Error("syslog off still names the sink")
+			}
+		})
+	}
+}

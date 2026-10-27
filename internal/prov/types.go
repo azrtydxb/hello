@@ -8,6 +8,7 @@
 package prov
 
 import (
+	"net"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -125,11 +126,41 @@ type RenderData struct {
 	Emergency string
 }
 
-// SyslogInfo is a phone's syslog setting: the sink's host and the level as
-// the Grandstream P208 value (1 debug, 2 info, 3 warning, 4 error).
+// SyslogInfo is a phone's syslog setting. Host is the sink's bare host and
+// Port its UDP port (514 when the configured address names none); Address
+// is host or host:port as configured, for settings that take one string.
+// Level is the Grandstream P208 value (1 debug, 2 info, 3 warning, 4 error),
+// YealinkLevel static.syslog.level (0 to 6) and PolyLevel
+// device.syslog.renderLevel; vendors' scales are mapped in NewSyslogInfo.
 type SyslogInfo struct {
-	Host  string
-	Level int
+	Host, Address string
+	Port          int
+	Level         int
+	YealinkLevel  int
+	PolyLevel     int
+}
+
+// NewSyslogInfo builds the setting from the sink address (host or
+// host:port) and a level name (debug, info, warning or error).
+func NewSyslogInfo(address, level string) *SyslogInfo {
+	host, port := address, 514
+	if h, p, err := net.SplitHostPort(address); err == nil {
+		if n, err := strconv.Atoi(p); err == nil && n > 0 && n < 65536 {
+			host, port = h, n
+		}
+	}
+	i := &SyslogInfo{Host: host, Address: address, Port: port}
+	switch level {
+	case "debug":
+		i.Level, i.YealinkLevel, i.PolyLevel = 1, 6, 0
+	case "warning":
+		i.Level, i.YealinkLevel, i.PolyLevel = 3, 4, 4
+	case "error":
+		i.Level, i.YealinkLevel, i.PolyLevel = 4, 3, 5
+	default:
+		i.Level, i.YealinkLevel, i.PolyLevel = 2, 6, 1
+	}
+	return i
 }
 
 // Phone is the phone itself, as templates and resolution see it.

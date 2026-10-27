@@ -134,6 +134,41 @@ describe("Phone detail", () => {
     expect(screen.getByText(/kept for 24 h/)).toBeInTheDocument();
   });
 
+  it("filters the syslog by severity", async () => {
+    const line = (severity: number, message: string) => ({
+      at: "2026-10-02T10:05:00Z",
+      source: "192.0.2.10",
+      severity,
+      message,
+    });
+    api(phone(), {
+      "GET /api/v1/phones/5/syslog?limit=200": () =>
+        json({
+          items: [
+            line(3, "boom"),
+            line(4, "careful"),
+            line(6, "chatty"),
+            line(7, "noisy"),
+            line(-1, "[hello] 4 lines dropped"),
+          ],
+          cap: 10000,
+          retentionSeconds: 86400,
+        }),
+    });
+    renderApp("/phones/5");
+    await screen.findByRole("table", { name: "Fetch log" });
+    fireEvent.click(screen.getByRole("tab", { name: "Syslog" }));
+    await screen.findByText("noisy");
+    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "4" } });
+    expect(screen.getByText("boom")).toBeInTheDocument();
+    expect(screen.getByText("careful")).toBeInTheDocument();
+    expect(screen.queryByText("chatty")).toBeNull();
+    expect(screen.queryByText("noisy")).toBeNull();
+    expect(screen.getByText(/lines dropped/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "3" } });
+    expect(screen.queryByText("careful")).toBeNull();
+  });
+
   it("explains an empty syslog", async () => {
     api(phone(), {
       "GET /api/v1/phones/5/syslog?limit=200": () =>

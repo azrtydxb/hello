@@ -386,13 +386,13 @@ that both do G.722 talk wideband and anything else falls back to G.711 (see
 account Hello provisions); another account of a multi-account model takes
 the same keys with its own number:
 
-| Vendor      | Keys                                                                                                                                                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0`                |
-| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...) |
-| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                              |
-| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                    |
-| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                    |
+| Vendor      | Keys                                                                                                                                                                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0` |
+| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...)                     |
+| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                                                  |
+| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                                        |
+| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                                        |
 
 Opus is listed only for models known to support it (`internal/prov/codecs.go`);
 an unknown model gets G.722, PCMU and PCMA. The keys are from the vendors'
@@ -1273,10 +1273,15 @@ without a visit. It is off until the server and a phone group turn it on.
    it no phone configuration mentions syslog.
 2. **Phone group.** In Phone groups, turn on "Send phone logs to Hello (syslog)" and pick a level
    (debug, info, warning, error). The Grandstream template writes P207 (the server) and P208 (the
-   level 1 to 4). A group with syslog off writes P207 empty and P208 0, so turning it off reaches
+   level 1 to 4). The Yealink (`static.syslog.*`), Poly (`device.syslog.*`) and snom
+   (`syslog_server`) templates write the sink and level too; those keys come from the vendors'
+   guides and are not confirmed on a phone (verify). Poly takes no port, so the sink must listen
+   on UDP 514 for Poly phones; Fanvil has no documented keys and is left out. A group with syslog off writes P207 empty and P208 0, so turning it off reaches
    phones that had it on. Resync the phones afterwards.
-3. **Read it.** Phone detail has a Syslog tab with the newest lines, newest first
-   (`GET /api/v1/phones/{id}/syslog`).
+3. **Read it.** Phone detail has a Syslog tab with the newest lines, newest first, with a level
+   filter (`GET /api/v1/phones/{id}/syslog`). Phones, Unknown syslog lists the senders no phone owns.
+   Prometheus counts `hello_syslog_lines_received_total`, `hello_syslog_lines_dropped_total` (rate
+   cap) and `hello_syslog_lines_unmatched_total`.
 
 What Hello keeps: the last 10000 lines per phone, for 24 hours after the newest line, in Valkey.
 Every line is redacted before it is stored: Authorization header values, `password=`, `secret=`,

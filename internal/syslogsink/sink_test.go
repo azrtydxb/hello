@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 type fakeLines struct {
@@ -232,4 +234,24 @@ func TestTLSListener(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("lines sent over TLS were not stored")
+}
+
+// TestSyslogMetrics fails if received, dropped (rate cap) and unmatched lines
+// are not counted separately.
+func TestSyslogMetrics(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+	phone := netip.MustParseAddr("10.0.0.7")
+	s := New(Config{Lines: newFakeLines(), Phones: fakePhones{phone: 1}, RatePerSec: 1, Burst: 2, Metrics: m, Now: func() time.Time { return t0 }})
+	ctx := context.Background()
+	for range 5 {
+		s.Handle(ctx, phone, "x") // 2 stored, 3 dropped
+	}
+	s.Handle(ctx, netip.MustParseAddr("192.0.2.1"), "y") // unmatched
+	s.Handle(ctx, phone, "  ")                           // empty: not counted
+	for c, want := range map[prometheus.Counter]float64{m.Received: 6, m.Dropped: 3, m.Unmatched: 1} {
+		if got := testutil.ToFloat64(c); got != want {
+			t.Errorf("counter = %v, want %v", got, want)
+		}
+	}
 }

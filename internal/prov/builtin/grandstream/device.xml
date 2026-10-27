@@ -87,9 +87,9 @@
 {{- if eq .Phone.Family "856"}}
     <P6760>2</P6760>
 {{- end}}
-{{- /* Syslog (phone-feature-parity S-27): P207 = Syslog Server, P208 = Syslog Level (0 None, 1 Debug, 2 Info, 3 Warning, 4 Error) [R8x6 TPL]; the same keys on the other Grandstream families. Off by default and written explicitly off so turning a group's syslog off reaches phones that had it on. The server is Hello's sink, UDP 514. */}}
+{{- /* Syslog (phone-feature-parity S-27): P207 = Syslog Server, P208 = Syslog Level (0 None, 1 Debug, 2 Info, 3 Warning, 4 Error) [R8x6 TPL]; the same keys on the other Grandstream families. Off by default and written explicitly off so turning a group's syslog off reaches phones that had it on. The server is Hello's sink, UDP; a host:port is written as configured (UNVERIFIED on hardware, verify). */}}
 {{- if .Syslog}}
-    <P207>{{xml .Syslog.Host}}</P207>
+    <P207>{{xml .Syslog.Address}}</P207>
     <P208>{{.Syslog.Level}}</P208>
 {{- else}}
     <P207></P207>

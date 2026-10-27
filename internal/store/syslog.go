@@ -9,7 +9,6 @@ import (
 	"errors"
 	"net/netip"
 
-	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/prov"
 )
 
@@ -57,11 +56,5 @@ func (s *Store) syslogInfo(ctx context.Context, phoneID int64) (*prov.SyslogInfo
 	if !enabled {
 		return nil, nil
 	}
-	n := 0
-	for i, l := range phonebook.SyslogLevels {
-		if l == level {
-			n = i + 1
-		}
-	}
-	return &prov.SyslogInfo{Host: s.prov.SyslogHost, Level: n}, nil
+	return prov.NewSyslogInfo(s.prov.SyslogHost, level), nil
 }

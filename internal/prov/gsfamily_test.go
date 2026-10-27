@@ -152,7 +152,7 @@ func TestGrandstreamGenericKeepsBLF(t *testing.T) {
 func TestGrandstreamSyslog(t *testing.T) {
 	for _, model := range []string{"WP826", "WP856", "WP822", "GRP2614"} {
 		d := gsFamilyData(model)
-		d.Syslog = &SyslogInfo{Host: "syslog.hello.example", Level: 3}
+		d.Syslog = NewSyslogInfo("syslog.hello.example", "warning")
 		on, err := Render(context.Background(), builtinFor(t, Grandstream), "cfg"+d.Phone.MAC+".xml", d)
 		if err != nil {
 			t.Fatal(err)

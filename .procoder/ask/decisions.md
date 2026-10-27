@@ -859,4 +859,8 @@ another group) is lifted: the ring state machine can open a new ring stage.
   Local to keep the phone address; works only on a node with a hello-control pod. Not deployed.
 - **API/UI.** `GET /api/v1/phones/{id}/syslog`, `GET /api/v1/syslog/unknown`; Syslog tab on
   PhoneDetail, toggle and level in the phone group editor. No UI for unknown sources.
-- **Not done.** Prometheus metrics for the sink; the severity filter in the tab.
+- **Follow-ups (built).** Counters received/dropped/unmatched; a minimum-level filter on the tab (a
+  line without a priority always shows); Phones > Unknown syslog page; Yealink, Poly and snom keys
+  (all marked verify; Poly has no port so it needs UDP 514; the level scales are mapped from the guides:
+  Yealink debug and info 6, warning 4, error 3; Poly 0, 1, 4, 5). Fanvil has no documented syslog keys, so
+  none. Migration number: origin/main's highest is 00045, so 00046 stays.

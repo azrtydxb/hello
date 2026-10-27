@@ -374,6 +374,10 @@ func emuPoly(m *emu) {
 		}
 		m.hostOnly("device.sntp.serverName", d.take("device.sntp.serverName"))
 		m.hostOnly("tcpIpApp.sntp.address", d.take("tcpIpApp.sntp.address"))
+		// Syslog is off for a phone whose group has none: the sink is cleared.
+		if v := d.take("device.syslog.serverName"); v != "" {
+			m.t.Errorf("Poly: device.syslog.serverName = %q, want empty while syslog is off", v)
+		}
 		m.polyZone(d)
 		// Static: the phone ignores every DHCP option for the boot server
 		// (Poly configuration example BootServer-Static.cfg).
@@ -641,6 +645,9 @@ func emuSnom(m *emu) {
 		m.t.Errorf("Snom: the settings move setting_server from %q to %q", ss, got)
 	}
 	m.hostOnly("ntp_server", c.take("ntp_server"))
+	if v := c.take("syslog_server"); v != "" {
+		m.t.Errorf("Snom: syslog_server = %q, want empty while syslog is off", v)
+	}
 	m.zoneValue("timezone", c.opt("timezone"), `^[A-Z]{3}[+-][0-9]+$`)
 	if v := c.take("user_host"); strings.Contains(v, "://") || strings.Contains(v, "/") {
 		m.t.Errorf("Snom: user_host = %q must be host[:port]", v)
