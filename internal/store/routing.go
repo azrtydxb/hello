@@ -54,10 +54,13 @@ type Trunk struct {
 	Destinations    []routing.Destination `json:"destinations"`
 	InternalDialing Dialing               `json:"internalDialing"`
 	// Codecs is the audio codec allow-list offered to the trunk, in order.
-	Codecs    []string  `json:"codecs"`
-	Messaging bool      `json:"messaging"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Codecs    []string `json:"codecs"`
+	Messaging bool     `json:"messaging"`
+	// SessionTimers is the trunk's RFC 4028 setting: "default" (follow
+	// Hello's own), "on" or "off".
+	SessionTimers string    `json:"sessionTimers"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 // TrunkInput is the writable part of a trunk, without its password.
@@ -77,6 +80,7 @@ type TrunkInput struct {
 	InternalDialing Dialing
 	Codecs          []string
 	Messaging       bool
+	SessionTimers   string
 }
 
 // Input returns t's writable fields.
@@ -89,6 +93,7 @@ func (t Trunk) Input() TrunkInput {
 		InternalDialing: Dialing{Mode: t.InternalDialing.Mode, Patterns: slices.Clone(t.InternalDialing.Patterns)},
 		Codecs:          slices.Clone(t.Codecs),
 		Messaging:       t.Messaging,
+		SessionTimers:   t.SessionTimers,
 	}
 }
 
@@ -101,13 +106,13 @@ type PasswordChange struct {
 
 const trunkCols = `id, name, mode, username, password_enc IS NOT NULL, realm, from_domain, register_expires,
 	options_interval, to_json(source_cidrs::text[]), max_calls, default_caller_id, enabled, to_json(internal_dialing),
-	to_json(codecs), messaging, created_at, updated_at`
+	to_json(codecs), messaging, session_timers, created_at, updated_at`
 
 func scanTrunk(r interface{ Scan(...any) error }) (Trunk, error) {
 	var t Trunk
 	var cidrs, dialing, codecs []byte
 	if err := r.Scan(&t.ID, &t.Name, &t.Mode, &t.Username, &t.HasPassword, &t.Realm, &t.FromDomain, &t.RegisterExpires,
-		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&t.OptionsInterval, &cidrs, &t.MaxCalls, &t.DefaultCallerID, &t.Enabled, &dialing, &codecs, &t.Messaging, &t.SessionTimers, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return t, err
 	}
 	if err := json.Unmarshal(codecs, &t.Codecs); err != nil || len(t.Codecs) == 0 {
@@ -224,6 +229,15 @@ func (s *Store) setPassword(ctx context.Context, tx *sql.Tx, id int64, password 
 	return err
 }
 
+// sessionTimersArg is the value stored for a trunk's session-timer setting:
+// an unset one is "default".
+func sessionTimersArg(v string) string {
+	if v == "" {
+		return routing.SessionTimersDefault
+	}
+	return v
+}
+
 func writeDestinations(ctx context.Context, tx *sql.Tx, id int64, ds []routing.Destination) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM trunk_destinations WHERE trunk_id = $1`, id); err != nil {
 		return err
@@ -244,11 +258,11 @@ func (s *Store) CreateTrunk(ctx context.Context, actor string, in TrunkInput, pa
 	err := s.configChange(ctx, actor, "create", "trunk", check, func(tx *sql.Tx) (int64, error) {
 		var id int64
 		if err := tx.QueryRowContext(ctx, `INSERT INTO trunks (name, mode, username, realm, from_domain, register_expires,
-				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb, $13::jsonb, $14) RETURNING id`,
+				options_interval, source_cidrs, max_calls, default_caller_id, enabled, internal_dialing, codecs, messaging, session_timers)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::cidr[], $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15) RETURNING id`,
 			in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires, in.OptionsInterval,
 			nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled, dialingArg(in.InternalDialing),
-			codecsArg(in.Codecs), in.Messaging).Scan(&id); err != nil {
+			codecsArg(in.Codecs), in.Messaging, sessionTimersArg(in.SessionTimers)).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := s.setPassword(ctx, tx, id, password); err != nil {
@@ -287,10 +301,10 @@ func (s *Store) UpdateTrunk(ctx context.Context, actor string, id int64, pw Pass
 		if _, err := tx.ExecContext(ctx, `UPDATE trunks SET name = $2, mode = $3, username = $4, realm = $5,
 				from_domain = $6, register_expires = $7, options_interval = $8, source_cidrs = $9::cidr[],
 				max_calls = $10, default_caller_id = $11, enabled = $12, internal_dialing = $13::jsonb,
-				codecs = $14::jsonb, messaging = $15, updated_at = now()
+				codecs = $14::jsonb, messaging = $15, session_timers = $16, updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Mode, in.Username, in.Realm, in.FromDomain, in.RegisterExpires,
 			in.OptionsInterval, nonNil(in.SourceCIDRs), in.MaxCalls, in.DefaultCallerID, in.Enabled,
-			dialingArg(in.InternalDialing), codecsArg(in.Codecs), in.Messaging); err != nil {
+			dialingArg(in.InternalDialing), codecsArg(in.Codecs), in.Messaging, sessionTimersArg(in.SessionTimers)); err != nil {
 			return id, err
 		}
 		if pw.Set {
@@ -1049,7 +1063,7 @@ func routingTrunks(s *Store, trunks []Trunk, sealed map[int64][]byte, snap Routi
 			OptionsInterval: time.Duration(t.OptionsInterval) * time.Second,
 			MaxCalls:        t.MaxCalls, DefaultCallerID: t.DefaultCallerID, Enabled: t.Enabled, Destinations: t.Destinations,
 			InternalDialing: t.InternalDialing.dialing(),
-			Codecs:          slices.Clone(t.Codecs), Messaging: t.Messaging,
+			Codecs:          slices.Clone(t.Codecs), Messaging: t.Messaging, SessionTimers: t.SessionTimers,
 		}
 		if errs := routing.CompileDialing(rt.InternalDialing); len(errs) > 0 {
 			snap.Misconfigured[t.ID] = true

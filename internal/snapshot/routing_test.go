@@ -52,8 +52,8 @@ func seedRouting(t *testing.T, conn *pgx.Conn, box *secret.Box) (good, bad int64
 	}
 	must(conn.QueryRow(ctx, "INSERT INTO extensions (number, name, external_number) VALUES ('100', 'Desk', '+97140000100') RETURNING id").Scan(&ext))
 	must(conn.QueryRow(ctx, `INSERT INTO trunks (name, mode, username, realm, from_domain, register_expires, options_interval,
-		source_cidrs, max_calls, default_caller_id) VALUES ('carrier-primary', 'registration', 'acct', 'carrier.test', 'from.test',
-		600, 15, '{192.0.2.0/24}', 2, '+97140000000') RETURNING id`).Scan(&good))
+		source_cidrs, max_calls, default_caller_id, session_timers) VALUES ('carrier-primary', 'registration', 'acct', 'carrier.test', 'from.test',
+		600, 15, '{192.0.2.0/24}', 2, '+97140000000', 'on') RETURNING id`).Scan(&good))
 	must(conn.QueryRow(ctx, `INSERT INTO trunks (name, mode) VALUES ('carrier-broken', 'ip') RETURNING id`).Scan(&bad))
 	pw, err := box.Seal("s3cret-trunk-pass", "trunk:"+itoa(good))
 	must(err)
@@ -114,6 +114,11 @@ func TestLoadRouting(t *testing.T) {
 		tr.MaxCalls != 2 || len(tr.SourceCIDRs) != 1 || tr.SourceCIDRs[0] != netip.MustParsePrefix("192.0.2.0/24") ||
 		len(tr.Destinations) != 2 || tr.Destinations[0].Host != "carrier.test" || tr.FromDomain != "from.test" {
 		t.Fatalf("trunk = %+v", tr)
+	}
+	// The session-timers setting reaches the node's trunk: set on one, the
+	// default on the other.
+	if tr.SessionTimers != "on" || c.Trunks[1].SessionTimers != "default" {
+		t.Fatalf("session timers = %q and %q, want on and default", tr.SessionTimers, c.Trunks[1].SessionTimers)
 	}
 	o := c.Outbound[0]
 	if o.Name != "UAE Mobile" || len(o.Trunks) != 1 || o.Trunks[0] != good || o.Number.Template != "+9715${1}" ||

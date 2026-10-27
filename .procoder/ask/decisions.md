@@ -832,3 +832,49 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - Not done: `exhausted` after a forward stage still uses the dialled
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
+
+## Session timers on moved dialogs and trunk legs (S-9, follow-up 9b)
+
+- Parked call: the call keeps one dialog, its party's (`link.selfSide`). Its
+  timer used to re-arm for ever while the call was linked, so nothing was
+  refreshed. Now only the party's dialog is refreshed, or must refresh when
+  the phone took the refresher role; the released parker's timer just ends.
+  A refresh from the party goes through `sessionIn` from `linkedReinvite`, so
+  a phone that refreshes keeps its call, and the SDP last given to the party
+  is recorded for a re-INVITE refresh.
+- Retrieve and pickup: the retriever's and the picker's dialog is answered by
+  `answerSelf` through the raw transaction (no sipgo dialog). It gets a timer
+  only when the call is linked (a voicemail or an announcement gets none),
+  Hello as refresher at its own interval, and refreshes are built from the
+  INVITE and `vmTag` (`sendRawCallerRefresh`), with a CSeq past anything sent
+  on the dialog (`nextCSeq`, also used by `byeCallerRaw` so its BYE follows a
+  refresh). The picked-up caller's 200 carries the negotiation, and the
+  dead-media watch starts for it, since the call had no answer before.
+- Returned call (parker rung again): the call that rang the parker owns the
+  parker's dialog and negotiates its timer from the parker's answer; the
+  held party stays on the original call.
+- Dead media for a linked pair: watched on the call that holds the relay, not
+  while either party signalled hold (`linkHeld`, set on both calls of the
+  pair), with the silence clock restarting after a retrieve.
+- Blind transfer, attended transfer: the call that carries the caller on takes
+  over the caller dialog's negotiated timer (copied, new timer) and negotiates
+  the target's leg from its answer; the attended bridge copies each dialog's
+  timer from the call it came from. The SDPs the hand-over re-INVITEs sent are
+  recorded for refreshes. A transfer into a queue is not changed: queue and
+  IVR calls have no session timers today (their dialog requests do not pass
+  `sessionIn`), so carrying one over could end a call whose phone refreshes.
+- Trunk setting: `trunks.session_timers` is `default`, `on` or `off`
+  (migration 00047, TEXT with a CHECK, `default` for every existing trunk, so
+  nothing changes on upgrade). `on` requests Session-Expires on legs to the
+  trunk and gives a call from it Hello's interval when the carrier sent none;
+  `off` does neither; `default` follows `HELLO_SIP_SESSION_TIMERS_TRUNKS`,
+  false by default, so an existing install behaves as before. A global
+  `HELLO_SIP_SESSION_EXPIRES_SECONDS=0` wins over every trunk. A carrier that
+  sends Session-Expires itself is honoured on a trunk set to default (as in
+  9) and ignored on one set to off.
+- A trunk refresh answered 401, 407, 403 or 488 proves the far end is alive,
+  so it does not end the call (some carriers do not take an in-dialog
+  re-INVITE with credentials or a re-offered SDP); no answer, 408, 481 and the
+  other failures still do.
+- Not changed: after an HA takeover every leg is Hello-refreshed with UPDATE,
+  as before; a parked call a survivor took over is not given timers here.

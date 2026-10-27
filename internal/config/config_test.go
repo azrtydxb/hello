@@ -479,3 +479,20 @@ func TestLoadVoicemailVoice(t *testing.T) {
 		t.Fatalf("control language = %q %v", ctl.VoicePromptLanguage, err)
 	}
 }
+
+// TestLoadSessionTimersTrunks fails if HELLO_SIP_SESSION_TIMERS_TRUNKS is not
+// off by default, does not read true, or accepts junk.
+func TestLoadSessionTimersTrunks(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil || c.SessionTimersTrunks {
+		t.Fatalf("default = %v, %v; want off", c.SessionTimersTrunks, err)
+	}
+	c, err = LoadSIP(env(map[string]string{"HELLO_SIP_SESSION_TIMERS_TRUNKS": "true"}))
+	if err != nil || !c.SessionTimersTrunks {
+		t.Fatalf("true = %v, %v", c.SessionTimersTrunks, err)
+	}
+	if _, err := LoadSIP(env(map[string]string{"HELLO_SIP_SESSION_TIMERS_TRUNKS": "yes"})); err == nil ||
+		!strings.Contains(err.Error(), "HELLO_SIP_SESSION_TIMERS_TRUNKS") {
+		t.Fatalf("junk accepted: %v", err)
+	}
+}

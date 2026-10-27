@@ -11,9 +11,18 @@
 // one interval instead of at MaxCallDuration.
 //
 // Hello is the refresher on every leg whose phone does not take the role, so
-// a phone without RFC 4028 support is covered too. Legs to trunks and to URI
-// targets get no request from Hello; an inbound trunk call is covered only
-// when the carrier sends Session-Expires itself.
+// a phone without RFC 4028 support is covered too. A leg to a URI target gets
+// no request from Hello. A trunk's own setting decides its calls (trunkTimers):
+// "on" requests Session-Expires on the legs to it and applies Hello's interval
+// to a call from it even when the carrier sent none, "off" does neither, and
+// "default" follows Config.SessionTimersTrunks; a trunk call left unforced is
+// covered only when the carrier sends Session-Expires itself.
+//
+// A parked, retrieved, picked-up, returned or transferred call moves to other
+// dialogs: the party a parked call keeps stays on its timer, the retriever,
+// the picker, the parker a returned call rings, and the parties of a
+// transferred or bridged call each get one of their own (see the link helpers
+// below).
 //
 // Dead media: an anchored, bridged call that carried no RTP in either
 // direction for Config.MediaDeadAfter is ended unless it is on hold.
@@ -30,6 +39,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/prov"
+	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/emiago/sipgo/sip"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -73,6 +83,10 @@ type sessionState struct {
 
 	// addr is each dialog's media address as its SDP last named it.
 	addr [2]string
+
+	// bridge is the SDP an attended transfer's bridge last sent on each
+	// dialog of the call it re-pointed, for the bridged call's refreshes.
+	bridge [2][]byte
 
 	mediaTimer *time.Timer
 	mediaTouch time.Time // the last moment media was not expected (hold, start)
@@ -170,6 +184,53 @@ func (s *Server) sessionTooSmall(req *sip.Request, tx sip.ServerTransaction) boo
 	return true
 }
 
+// timerPolicy is how a trunk's setting reads for a dialog with it.
+type timerPolicy int
+
+const (
+	timersPassive timerPolicy = iota // timers only when the far end asks for them
+	timersForced                     // Hello requests and applies its interval
+	timersOff                        // no timer at all
+)
+
+// trunkTimers resolves a trunk's session-timers setting against Hello's own:
+// a global interval of 0 turns timers off everywhere, "on" and "off" are the
+// trunk's own word, and "default" (or an unset value) is
+// Config.SessionTimersTrunks.
+func (s *Server) trunkTimers(t *routing.Trunk) timerPolicy {
+	if s.cfg.SessionExpires <= 0 {
+		return timersOff
+	}
+	switch t.SessionTimers {
+	case routing.SessionTimersOn:
+		return timersForced
+	case routing.SessionTimersOff:
+		return timersOff
+	}
+	if s.cfg.SessionTimersTrunks {
+		return timersForced
+	}
+	return timersPassive
+}
+
+// callerLeg negotiates the caller's dialog of this call: a phone's call and
+// a call from a trunk forced on get Hello's interval when the caller named
+// none, a call from a trunk set off gets no timer, and any other trunk call
+// gets one only when the carrier sent Session-Expires.
+func (c *call) callerLeg() *sessLeg {
+	s := c.s
+	if t := c.inTrunk; t != nil {
+		switch s.trunkTimers(t) {
+		case timersOff:
+			return nil
+		case timersForced:
+			return s.callerSession(c.inv, true)
+		}
+		return s.callerSession(c.inv, false)
+	}
+	return s.callerSession(c.inv, c.callerDevice != "")
+}
+
 // callerSession negotiates the caller's dialog, where Hello is the UAS. A
 // Session-Expires the caller sent is honoured, with the refresher it names
 // (uac: the caller refreshes) or else Hello. Without one, a call from a phone
@@ -212,11 +273,14 @@ func callerSessionHeaders(inv *sip.Request, st *sessLeg) []sip.Header {
 }
 
 // wantsSessionTimer reports whether the INVITE to this fork asks for session
-// timers: only legs to a phone binding, of a vendor whose phones implement
-// RFC 4028 (prov.SupportsSessionTimers).
+// timers: legs to a phone binding of a vendor whose phones implement RFC 4028
+// (prov.SupportsSessionTimers), and legs to a trunk whose setting forces them.
 func (l *leg) wantsSessionTimer() bool {
-	if l == nil || l.trunk != nil || l.uri != nil || l.pl != nil || l.c.s.cfg.SessionExpires <= 0 {
+	if l == nil || l.uri != nil || l.pl != nil || l.c.s.cfg.SessionExpires <= 0 {
 		return false
+	}
+	if l.trunk != nil {
+		return l.c.s.trunkTimers(l.trunk) == timersForced
 	}
 	v, model, _ := prov.ParseUserAgent(l.binding.UserAgent, "")
 	return prov.SupportsSessionTimers(v, model)
@@ -270,7 +334,7 @@ func (c *call) sessionAnswer(w *leg, bres *sip.Response, callerBody []byte) []si
 		}
 	}
 	s := c.s
-	c.ses.leg[sessCaller] = s.callerSession(c.inv, c.callerDevice != "")
+	c.ses.leg[sessCaller] = c.callerLeg()
 	c.ses.leg[sessCallee] = s.calleeSession(w, bres)
 	return callerSessionHeaders(c.inv, c.ses.leg[sessCaller])
 }
@@ -398,10 +462,17 @@ func (c *call) sessionTick(idx int) {
 		return
 	}
 	if c.isLinked() {
-		// A parked or linked call's dialogs belong to another call's
-		// dialogs now; try again after another half interval.
-		c.sessionRearm(idx, st.firstDelay())
-		return
+		// A parked or linked call keeps one dialog, its own party's; the
+		// other was released with the parker (or belongs to the peer call)
+		// and its timer ends here. The party's dialog goes on as before.
+		party, ok := c.linkedPartyIdx()
+		if !ok {
+			c.sessionRearm(idx, st.firstDelay())
+			return
+		}
+		if idx != party {
+			return
+		}
 	}
 	if !local {
 		c.sessionTeardown("refresh_missing", idx, "no session refresh arrived before the session expired")
@@ -446,6 +517,14 @@ func (c *call) sessionRefresh(idx int) {
 		switch {
 		case err != nil || res == nil:
 			c.sessionTeardown("refresh_failed", idx, fmt.Sprintf("session refresh got no answer: %v", err))
+			return
+		case c.carrierAlive(idx, res.StatusCode):
+			// The carrier answered, so the call is alive; it just does not
+			// take the refresh. Try again after another interval.
+			c.ses.mu.Lock()
+			next := st.firstDelay()
+			c.ses.mu.Unlock()
+			c.sessionRearm(idx, next)
 			return
 		case res.IsSuccess():
 			c.ses.mu.Lock()
@@ -502,6 +581,9 @@ func (c *call) sendRefresh(idx int, method sip.RequestMethod, interval time.Dura
 	defer cancel()
 	if hom := c.homed(); hom != nil {
 		return c.sendHomedRefresh(ctx, hom.leg(idx == sessCallee), method, interval, sdp)
+	}
+	if idx == sessCaller && c.isRawCaller() {
+		return c.sendRawCallerRefresh(ctx, method, interval, sdp)
 	}
 	if idx == sessCallee {
 		w := c.winnerSession()
@@ -628,12 +710,20 @@ func (c *call) sessionIn(idx int, req *sip.Request, tx sip.ServerTransaction) (o
 
 // mediaWatched reports whether the call is one whose silence means a dead
 // call: connected, bridged between two phones or trunks, on this node's
-// relay, and not held, parked or in the middle of an announcement.
+// relay, and not held, parked or in the middle of an announcement. A
+// retrieved, picked-up or returned pair is watched on the call that holds the
+// relay (its peer has none), and not while either party holds.
 func (c *call) mediaWatched() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.connected && !c.ended && !c.hungUp && c.anchored && c.relay != nil && !c.held &&
-		c.link == nil && c.park == nil && c.page == nil && c.ivr == nil && c.conf == nil && !c.haSolo
+	if !c.connected || c.ended || c.hungUp || !c.anchored || c.relay == nil || c.held ||
+		c.park != nil || c.page != nil || c.ivr != nil || c.conf != nil || c.haSolo {
+		return false
+	}
+	if c.link != nil {
+		return c.link.relayOwner == c && !c.linkHeld
+	}
+	return true
 }
 
 // mediaTouched marks now as a moment media was not expected, so the silence

@@ -61,7 +61,10 @@ type Config struct {
 	// supplies the defaults.
 	SessionExpires time.Duration
 	SessionMinSE   time.Duration
-	MediaDeadAfter time.Duration
+	// SessionTimersTrunks is what a trunk whose session-timers setting is
+	// "default" does: true requests and keeps a session timer on its calls.
+	SessionTimersTrunks bool
+	MediaDeadAfter      time.Duration
 	// SessionRefreshTimeout bounds one session refresh transaction (8s).
 	SessionRefreshTimeout time.Duration
 	// Server paging (spec P-12): PageMaxDuration ends a page (120s),

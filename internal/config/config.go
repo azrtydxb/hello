@@ -313,6 +313,12 @@ type SIP struct {
 	// interval it accepts from a peer (422 below it).
 	SessionExpires time.Duration
 	SessionMinSE   time.Duration
+	// SessionTimersTrunks (HELLO_SIP_SESSION_TIMERS_TRUNKS, default false) is
+	// what a trunk whose session-timers setting is "default" does: false
+	// leaves its calls without a session timer unless the carrier asks for
+	// one, true requests and keeps one. A trunk set to "on" or "off" ignores
+	// it; SessionExpires 0 turns session timers off for every trunk.
+	SessionTimersTrunks bool
 	// MediaDeadAfter (HELLO_MEDIA_DEAD_SECONDS, default 60; 0 turns it off)
 	// ends an anchored call that carried no RTP in either direction for this
 	// long, unless it is on hold.
@@ -762,6 +768,7 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.SessionExpires = time.Duration(r.seconds("HELLO_SIP_SESSION_EXPIRES_SECONDS", 1800)) * time.Second
 	c.SessionMinSE = time.Duration(r.seconds("HELLO_SIP_SESSION_MIN_SE_SECONDS", 90)) * time.Second
 	c.MediaDeadAfter = time.Duration(r.seconds("HELLO_MEDIA_DEAD_SECONDS", 60)) * time.Second
+	c.SessionTimersTrunks = r.boolean("HELLO_SIP_SESSION_TIMERS_TRUNKS")
 	if c.SessionExpires > 0 && c.SessionMinSE > c.SessionExpires {
 		r.fail("HELLO_SIP_SESSION_MIN_SE_SECONDS", errors.New("must not exceed HELLO_SIP_SESSION_EXPIRES_SECONDS"))
 	}

@@ -105,10 +105,17 @@ ringing a dead address.
   (`refresh missing`). A refresh from a phone restarts that leg's timer; a
   bodiless UPDATE that only refreshes is answered by Hello, not relayed.
   Tune with `HELLO_SIP_SESSION_EXPIRES_SECONDS` (`0` turns the feature off)
-  and `HELLO_SIP_SESSION_MIN_SE_SECONDS`. Legs to trunks get no request, and a
-  parked, picked-up or transferred call is not refreshed on the dialogs it
-  moved to; `HELLO_SIP_MAX_CALL_DURATION` is still the backstop. After a node
-  takeover every leg restarts as Hello-refreshed with UPDATE.
+  and `HELLO_SIP_SESSION_MIN_SE_SECONDS`. A parked, picked-up or transferred
+  call keeps its timers on the dialogs it moved to: the party left on a
+  parked call is refreshed (or must refresh) as before, and the phone that
+  retrieves or picks the call up, the parker a returned call rings, and the
+  target of a transfer each get a timer of their own. Legs to trunks follow
+  the trunk's session-timers setting: `on` requests `Session-Expires` on its
+  calls and keeps a timer on calls from it, `off` never does, and `default`
+  follows `HELLO_SIP_SESSION_TIMERS_TRUNKS` (false unless set); an inbound
+  trunk call is covered by `on` even when the carrier sent no
+  `Session-Expires`. `HELLO_SIP_MAX_CALL_DURATION` is still the backstop.
+  After a node takeover every leg restarts as Hello-refreshed with UPDATE.
 - **Dead media.** An anchored call with no RTP either way for
   `HELLO_MEDIA_DEAD_SECONDS` (60) is ended unless it is on hold
   ([media.md](media.md#roaming-and-dead-media)).

@@ -255,6 +255,11 @@ func (c *call) answerSelf(body []byte) bool {
 	c.answerTime = time.Now()
 	c.vmTag = tag
 	c.mu.Unlock()
+	// A retriever's or a picker's dialog gets a session timer (S-9); a
+	// voicemail or an announcement does not.
+	for _, h := range c.sessionSelf(body) {
+		res.AppendHeader(h)
+	}
 	if h := s.answerHook.Load(); h != nil {
 		(*h)()
 	}
@@ -274,6 +279,7 @@ func (c *call) answerSelf(body []byte) bool {
 		c.maxTimer = time.AfterFunc(s.cfg.MaxCallDuration, c.expire)
 	}
 	c.mu.Unlock()
+	c.sessionArm()
 	return true
 }
 
