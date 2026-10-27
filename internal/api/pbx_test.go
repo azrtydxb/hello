@@ -231,6 +231,14 @@ func isNoBucket(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "bucket does not exist")
 }
 
+// isShortBody reports whether the store saw fewer body bytes than the
+// Content-Length (S3 IncompleteBody): an overloaded MinIO that timed out
+// reading the upload. Fixture bodies are rebuilt per attempt, so it is
+// safe to resend.
+func isShortBody(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "did not provide the number of bytes specified")
+}
+
 // lastMinio is the store the fixtures last started, for re-ensuring buckets.
 var lastMinio atomic.Pointer[MinioObjects]
 
@@ -248,7 +256,8 @@ func retrySlowDown(t *testing.T, op func() error) {
 			return
 		}
 		missing := isNoBucket(err)
-		if (!isSlowDown(err) && !missing) || time.Now().After(deadline) {
+		short := isShortBody(err)
+		if (!isSlowDown(err) && !missing && !short) || time.Now().After(deadline) {
 			t.Fatal(err)
 		}
 		if missing {
