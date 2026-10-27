@@ -9,7 +9,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 9   | Session timers, CRLF keep-alive, dead-media teardown, roaming relearn (S-9)   | wip (parity-session-timers) |
 | 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | wip (ring-tags)             |
 | 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | wip (#226)                  |
-| 12  | Tone library (S-43)                                                           | wip (#PR)                  |
+| 12  | Tone library (S-43)                                                           | wip (#238)                 |
 | 13  | Door station extension kind, Door group (S-45, S-46)                          | todo (after 10)             |
 | 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)             |
 | 15  | Setting overrides and WP extras (S-12)                                        | todo                        |
