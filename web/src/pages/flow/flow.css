@@ -472,3 +472,7 @@
   justify-content: center;
   pointer-events: none;
 }
+
+.flow-empty .az-empty__action {
+  pointer-events: auto;
+}
