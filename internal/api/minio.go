@@ -23,6 +23,7 @@ const (
 	VoicemailBucket     = "hello-voicemail"
 	RecordingsBucket    = "hello-recordings"
 	AnnouncementsBucket = "hello-announcements"
+	RingtonesBucket     = "hello-ringtones" // the tone library (S-43)
 )
 
 // AudioObject is an opened object, ready to stream: Body seeks, so the
@@ -58,6 +59,10 @@ type Objects interface {
 	PutAnnouncement(ctx context.Context, object string, r io.Reader, size int64) error
 	// RemoveAnnouncement deletes announcement audio.
 	RemoveAnnouncement(ctx context.Context, object string) error
+	// PutRingtone uploads r (size known) as a tone of the library.
+	PutRingtone(ctx context.Context, object string, r io.Reader, size int64) error
+	// RemoveRingtone deletes a tone's audio; an absent object is not an error.
+	RemoveRingtone(ctx context.Context, object string) error
 	// EnsureMediaBuckets creates hello-recordings and hello-announcements when
 	// they are missing.
 	EnsureMediaBuckets(ctx context.Context) error
@@ -162,8 +167,41 @@ func (m *MinioObjects) RemoveAnnouncement(ctx context.Context, object string) er
 	return nil
 }
 
+// PutRingtone implements Objects.
+func (m *MinioObjects) PutRingtone(ctx context.Context, object string, r io.Reader, size int64) error {
+	if err := m.ensure(ctx, RingtonesBucket); err != nil {
+		return err
+	}
+	if _, err := m.cli.PutObject(ctx, RingtonesBucket, object, r, size, minio.PutObjectOptions{ContentType: "audio/wav"}); err != nil {
+		return fmt.Errorf("api: put ringtone %s: %w", object, err)
+	}
+	return nil
+}
+
+// RemoveRingtone implements Objects.
+func (m *MinioObjects) RemoveRingtone(ctx context.Context, object string) error {
+	if err := m.cli.RemoveObject(ctx, RingtonesBucket, object, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("api: remove ringtone %s: %w", object, err)
+	}
+	return nil
+}
+
+// OpenRingtone implements prov.Opener: the tone, seekable for Range. The
+// Stat surfaces a missing object or an outage here.
+func (m *MinioObjects) OpenRingtone(ctx context.Context, key string) (io.ReadSeekCloser, error) {
+	obj, err := m.cli.GetObject(ctx, RingtonesBucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("api: open ringtone %s: %w", key, err)
+	}
+	if _, err := obj.Stat(); err != nil {
+		_ = obj.Close()
+		return nil, fmt.Errorf("api: open ringtone %s: %w", key, err)
+	}
+	return obj, nil
+}
+
 func (m *MinioObjects) EnsureMediaBuckets(ctx context.Context) error {
-	for _, bucket := range []string{RecordingsBucket, AnnouncementsBucket} {
+	for _, bucket := range []string{RecordingsBucket, AnnouncementsBucket, RingtonesBucket} {
 		if err := m.ensure(ctx, bucket); err != nil {
 			return err
 		}

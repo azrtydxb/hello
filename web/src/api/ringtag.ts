@@ -122,6 +122,8 @@ export interface RingVendor {
   /** The most tags the vendor's phones map to a tone. */
   slots: number;
   tones: RingTone[];
+  /** Whether a tone of the library (custom:<name>) can be chosen. */
+  customTones: boolean;
 }
 
 /** A tone choice for a tag on a vendor's phones. */
@@ -166,3 +168,35 @@ export const putRingMapGroup = (
       body: { entries },
     },
   );
+
+// --- tone library (migration 00048) ----------------------------------------
+
+/** A custom tone: an uploaded WAV the ring map can choose as custom:<name>. */
+export interface Ringtone {
+  id: number;
+  name: string;
+  sizeBytes: number;
+  sha256: string;
+  sampleRate: 8000 | 16000;
+  durationMs: number;
+  createdAt: string;
+  /** How many ring map choices name the tone. */
+  usedBy: number;
+}
+
+/** The ring map's tone id for a library tone. */
+export const customToneId = (name: string) => `custom:${name}`;
+
+export const listRingtones = (signal?: AbortSignal) =>
+  list<Ringtone>("/api/v1/ringtones", signal);
+
+/** Uploads a WAV (PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB). */
+export function uploadRingtone(name: string, file: File): Promise<Ringtone> {
+  const form = new FormData();
+  form.set("name", name);
+  form.set("file", file, file.name);
+  return request<Ringtone>("POST", "/api/v1/ringtones", { rawBody: form });
+}
+
+export const deleteRingtone = (id: number) =>
+  request<void>("DELETE", `/api/v1/ringtones/${id}`);

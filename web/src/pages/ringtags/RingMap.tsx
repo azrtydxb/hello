@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { errorMessage, fieldErrors, type FieldError } from "../../api";
 import {
+  customToneId,
   getRingMap,
   listRingTags,
+  listRingtones,
   putRingMap,
   putRingMapGroup,
   type RingMapChoices,
@@ -88,6 +90,7 @@ function MapEditor({
   onSaved: (c: RingMapChoices) => void;
 }) {
   const groups = useQuietList(listGroups);
+  const library = useQuietList(listRingtones);
   const canWrite = useCan("operator");
   const [scope, setScope] = useState(GLOBAL);
   // The draft of the scope being edited: cell key to tone, "" for default.
@@ -109,7 +112,8 @@ function MapEditor({
   const globals = useMemo(() => toDraft(view.global), [view.global]);
 
   const toneLabel = (v: RingVendor, id: string | undefined) =>
-    v.tones.find((t) => t.id === id)?.label ?? id ?? "";
+    v.tones.find((t) => t.id === id)?.label ??
+    (id?.startsWith("custom:") ? `Custom: ${id.slice(7)}` : (id ?? ""));
   // What a cell plays when left unchosen: the global choice (in a group), else
   // the vendor's default for the tag.
   const inherited = (v: RingVendor, tag: string) =>
@@ -249,6 +253,10 @@ function MapEditor({
                             value: tn.id,
                             label: tn.label,
                           })),
+                          ...(v.customTones ? library : []).map((tn) => ({
+                            value: customToneId(tn.name),
+                            label: `Custom: ${tn.name}`,
+                          })),
                         ]}
                         onChange={(e) => {
                           setDraft({ ...draft, [key]: e.target.value });
@@ -270,6 +278,8 @@ function MapEditor({
             {v.slots > 0
               ? `the first ${v.slots} tags in the list are written to the phone.`
               : "no tone is written to the phone."}
+            {v.customTones &&
+              " One custom tone is delivered to each phone: the first custom choice in tag order; a later tag with another custom tone plays its default."}
             {v.vendor === "grandstream" &&
               " A WP8x6 maps the five Bellcore slots; other Grandstream models may have no ring map key."}
           </li>
@@ -282,6 +292,11 @@ function MapEditor({
           </li>
         )}
       </ul>
+      <p className="cf-card__sub">
+        Custom tones are added on the Tones tab. Poly, Fanvil and Grandstream
+        phones keep to their built-in ringers until their custom tone keys are
+        confirmed on a phone.
+      </p>
       <FormAlert message={formError} unmatched={unmatched} />
       <Can>
         <div>

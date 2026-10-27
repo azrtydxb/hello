@@ -50,11 +50,12 @@ const (
 	KindBoot      FileKind = "boot"      // /p/boot/<file>
 	KindUpload    FileKind = "upload"    // a discarded PUT
 	KindPhonebook FileKind = "phonebook" // /p/<token>/pb/<n>.xml and Poly's <mac>-directory.xml
+	KindRingtone  FileKind = "ringtone"  // /p/<token>/ring/<name>.wav (S-43)
 	KindOther     FileKind = "other"     // anything not recognised
 )
 
 // FileKinds lists every file kind.
-var FileKinds = []FileKind{KindCommon, KindDevice, KindMaster, KindFirmware, KindCA, KindBoot, KindUpload, KindPhonebook, KindOther}
+var FileKinds = []FileKind{KindCommon, KindDevice, KindMaster, KindFirmware, KindCA, KindBoot, KindUpload, KindPhonebook, KindRingtone, KindOther}
 
 // Result is the outcome recorded on a fetch (spec S-14).
 type Result string

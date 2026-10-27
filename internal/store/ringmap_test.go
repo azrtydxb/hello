@@ -3,7 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/azrtydxb/hello/internal/prov"
 )
@@ -122,3 +124,74 @@ func TestRingMapRenderInputs(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// TestRingtoneStore fails if a custom tone does not reach the render data of
+// a Yealink phone (the file in Ring.Custom and the rule's tone), if a tone
+// the ring map uses can be deleted, if a deleted tone leaves a phone
+// referencing it, if the tone's name can be taken twice, or if a tone is
+// looked up by name wrongly for the provisioning handler.
+func TestRingtoneStore(t *testing.T) {
+	st, _, ext := provStore(t)
+	ctx := context.Background()
+	c, err := st.CreatePhone(ctx, "test", PhoneInput{MAC: "805ec0000010", Vendor: prov.Yealink, Model: "T54W",
+		ExtensionID: ext, Enabled: true, Realm: "hello.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	tone, err := st.CreateRingtone(ctx, "test", "chime", prov.ToneInfo{SampleRate: 8000, Duration: time.Second}, 16044, sum)
+	if err != nil || tone.Name != "chime" || tone.DurationMS != 1000 || tone.UsedBy != 0 {
+		t.Fatalf("create = %+v, %v", tone, err)
+	}
+	var inUse *InUseError
+	if _, err := st.CreateRingtone(ctx, "test", "chime", prov.ToneInfo{SampleRate: 8000, Duration: time.Second}, 1, sum); !errors.As(err, &inUse) {
+		t.Fatalf("a taken name = %v, want a conflict", err)
+	}
+	got, err := st.RingtoneByName(ctx, "chime")
+	if err != nil || got.ObjectKey != "chime/"+sum+".wav" || got.SHA256 != sum {
+		t.Fatalf("by name = %+v, %v", got, err)
+	}
+	if _, err := st.RingtoneByName(ctx, "ghost"); !errors.Is(err, prov.ErrNotFound) {
+		t.Fatalf("unknown name = %v, want ErrNotFound", err)
+	}
+
+	for name, e := range map[string]RingMapEntry{
+		"missing": {Tag: "doorbell", Vendor: "yealink", Tone: "custom:ghost"},
+		"poly":    {Tag: "doorbell", Vendor: "poly", Tone: "custom:chime"},
+	} {
+		var v *ValidationError
+		if _, err := st.ReplaceRingMap(ctx, "test", nil, []RingMapEntry{e}); !errors.As(err, &v) {
+			t.Errorf("%s: err = %v, want a validation error", name, err)
+		}
+	}
+	m, err := st.ReplaceRingMap(ctx, "test", nil, []RingMapEntry{{Tag: "doorbell", Vendor: "yealink", Tone: "custom:chime"}})
+	if err != nil || len(m.Global) != 1 || m.Global[0].Tone != "custom:chime" {
+		t.Fatalf("map = %+v, %v", m, err)
+	}
+	d, _, err := st.RenderInputs(ctx, c.Phone.ID)
+	if err != nil && !errors.Is(err, prov.ErrNoTemplate) {
+		t.Fatal(err)
+	}
+	if d.Ring.Custom != "chime" {
+		t.Fatalf("Ring.Custom = %q, want chime", d.Ring.Custom)
+	}
+	if i := slices.IndexFunc(d.Ring.Rules, func(r prov.RingRule) bool { return r.Tag == "doorbell" }); i < 0 || d.Ring.Rules[i].Tone != "chime.wav" {
+		t.Fatalf("rules = %+v", d.Ring.Rules)
+	}
+
+	if _, err := st.DeleteRingtone(ctx, "test", tone.ID); !errors.As(err, &inUse) {
+		t.Fatalf("deleting a tone in use = %v, want a conflict", err)
+	}
+	if l, _ := st.ListRingtones(ctx); len(l) != 1 || l[0].UsedBy != 1 {
+		t.Fatalf("list = %+v", l)
+	}
+	if _, err := st.ReplaceRingMap(ctx, "test", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if key, err := st.DeleteRingtone(ctx, "test", tone.ID); err != nil || key != got.ObjectKey {
+		t.Fatalf("delete = %q, %v", key, err)
+	}
+	if _, err := st.DeleteRingtone(ctx, "test", tone.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second delete = %v, want not found", err)
+	}
+}

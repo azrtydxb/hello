@@ -14315,7 +14315,7 @@
       "put": {
         "operationId": "putRingMap",
         "summary": "Replace the global ring map",
-        "description": "Replaces the global choices as a whole. A change reaches the affected phones through the automatic resync (check-sync). The tone must be in the vendor's ringer list (silent only where the vendor has it).",
+        "description": "Replaces the global choices as a whole. A change reaches the affected phones through the automatic resync (check-sync). The tone must be in the vendor's ringer list (silent only where the vendor has it), or custom:<name> of a tone in the library on a vendor whose customTones is true.",
         "tags": ["ring-tags"],
         "requestBody": {
           "required": true,
@@ -14406,6 +14406,141 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ringtones": {
+      "get": {
+        "operationId": "listRingtones",
+        "summary": "List the tone library",
+        "description": "Lists the uploaded custom tones the ring map can choose, with how many ring map choices use each.",
+        "tags": ["ring-tags"],
+        "responses": {
+          "200": {
+            "description": "Tones ordered by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingtoneList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "post": {
+        "operationId": "createRingtone",
+        "summary": "Upload a custom tone",
+        "description": "Adds a WAV file to the tone library (bucket hello-ringtones). A phone downloads it under its token at /p/<token>/ring/<name>.wav. The bytes are checked: PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB, otherwise 400. A name the library has is 409. Hello provisions a custom tone to Yealink and Snom phones; the other vendors keep their built-in ringer.",
+        "tags": ["ring-tags"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "file"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+                    "description": "The tone's unique name; the ring map names it as custom:<name>."
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "WAV bytes: PCM, 8 or 16 kHz, mono, 16-bit, at most 30 s and 512 KiB."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ringtone"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "502": {
+            "description": "Object storage failed; try again shortly"
+          },
+          "503": {
+            "description": "Object storage is unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": {
+          "exclude": "multipart file upload"
+        }
+      }
+    },
+    "/api/v1/ringtones/{id}": {
+      "delete": {
+        "operationId": "deleteRingtone",
+        "summary": "Delete a custom tone",
+        "description": "Removes a tone and its audio. A tone a ring map choice uses is 409 and names the choice; change the choice first.",
+        "tags": ["ring-tags"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -25115,6 +25250,32 @@
           }
         }
       },
+      "Ringtone": {
+        "type": "object",
+        "required": ["id", "name", "sizeBytes", "sha256", "sampleRate", "durationMs", "createdAt", "usedBy"],
+        "properties": {
+          "id": {"type": "integer", "format": "int64"},
+          "name": {"type": "string"},
+          "sizeBytes": {"type": "integer"},
+          "sha256": {"type": "string", "description": "Hex SHA-256 of the WAV; the ETag a phone gets."},
+          "sampleRate": {"type": "integer", "enum": [8000, 16000]},
+          "durationMs": {"type": "integer"},
+          "createdAt": {"type": "string", "format": "date-time"},
+          "usedBy": {"type": "integer", "description": "How many ring map choices name the tone."}
+        }
+      },
+      "RingtoneList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ringtone"
+            }
+          }
+        }
+      },
       "RingMapView": {
         "type": "object",
         "required": ["vendors", "defaults", "global", "groups"],
@@ -25123,8 +25284,12 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["vendor", "label", "slots", "tones"],
+              "required": ["vendor", "label", "slots", "tones", "customTones"],
               "properties": {
+                "customTones": {
+                  "type": "boolean",
+                  "description": "Whether a tone of the library can be chosen for the vendor (Yealink and Snom): the tone id is custom:<name>."
+                },
                 "vendor": {
                   "type": "string"
                 },
