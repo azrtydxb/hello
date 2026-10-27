@@ -28,6 +28,8 @@ type fakeConf struct {
 	states map[string]livestate.ConfRoomState
 	cmds   map[string][]livestate.ConfCommand
 	down   bool
+	// beforeDelete, when set, runs at the start of DeleteConfState (outside mu).
+	beforeDelete func()
 }
 
 type confLease struct {
@@ -99,6 +101,12 @@ func (f *fakeConf) PutConfState(_ context.Context, st livestate.ConfRoomState) e
 }
 
 func (f *fakeConf) DeleteConfState(_ context.Context, number string) error {
+	f.mu.Lock()
+	hook := f.beforeDelete
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.states, number)
@@ -893,4 +901,54 @@ func TestConferenceHaltOnStop(t *testing.T) {
 		after, _, _ := room.mix.Stats()
 		return after == before
 	})
+}
+
+// TestConferenceJoinDuringTeardown fails if a caller who joins a room number
+// while the emptied room of that number is still tearing down gets a room
+// whose shared state and ownership lease the old room's teardown then
+// deletes (the new room would run with no state and no lease).
+func TestConferenceJoinDuringTeardown(t *testing.T) {
+	f := newFakeConf()
+	pbx := startPBX(t, confDevices(), withRooms(room800()), withConferences(f, nil))
+	s := pbx.srv
+	old, ok := s.confReserve(room800())
+	if !ok {
+		t.Fatal("no seat")
+	}
+	inDelete, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	f.mu.Lock()
+	f.beforeDelete = func() {
+		once.Do(func() { close(inDelete) })
+		<-release
+	}
+	f.mu.Unlock()
+	torn := make(chan struct{})
+	go func() { s.confRelease(old); close(torn) }()
+	<-inDelete // the old room has left the hub and is deleting its state
+	joined := make(chan *confRoom, 1)
+	go func() {
+		r, _ := s.confReserve(room800())
+		// The new room publishes its state and takes the lease.
+		_ = f.PutConfState(t.Context(), livestate.ConfRoomState{Room: "800", Node: "sip-test"})
+		_, _ = f.AcquireLease(t.Context(), livestate.ConfOwnerKey("800"), "sip-test", time.Minute)
+		joined <- r
+	}()
+	select {
+	case <-joined:
+		// Without the fix the join does not wait for the teardown; let it
+		// finish so the damage shows.
+		close(release)
+		<-torn
+	case <-time.After(300 * time.Millisecond):
+		close(release) // the join waits for the teardown, as it must
+		<-torn
+		<-joined
+	}
+	if _, ok := f.state("800"); !ok {
+		t.Fatal("the new room's state was deleted by the old room's teardown")
+	}
+	if f.ownerNow("800") != "sip-test" {
+		t.Fatal("the new room's ownership lease was released by the old room's teardown")
+	}
 }
