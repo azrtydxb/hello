@@ -12,7 +12,7 @@ type VoicemailGroupMember struct {
 	BoxID     int64
 }
 
-// VoicemailGroup is a voicemail group (migration 00045): a dial number and
+// VoicemailGroup is a voicemail group (migration 00046): a dial number and
 // member boxes. MaxSeconds is the longest message, in seconds.
 type VoicemailGroup struct {
 	ID         int64

@@ -205,7 +205,7 @@ type Snapshot struct {
 	ivrByName, ivrByNumber map[string]IVRMenu
 	// queueByName and queueByNumber are the call queues (migration 00040).
 	queueByName, queueByNumber map[string]Queue
-	// vmGroups are the voicemail groups by number (migration 00045).
+	// vmGroups are the voicemail groups by number (migration 00046).
 	vmGroups map[string]VoicemailGroup
 	// tcByName and tcByToggle are the time conditions (migration 00038).
 	tcByName, tcByToggle map[string]TimeCondition

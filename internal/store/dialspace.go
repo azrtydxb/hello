@@ -190,7 +190,7 @@ const (
 	numIVRMenu    = "IVR menu"
 	numConference = "conference room"
 	numQueue      = "queue"
-	// numVoicemailGroup is a voicemail group's number (migration 00045).
+	// numVoicemailGroup is a voicemail group's number (migration 00046).
 	numVoicemailGroup = "voicemail group"
 )
 
