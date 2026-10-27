@@ -19,6 +19,7 @@ import (
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/config"
+	"github.com/azrtydxb/hello/internal/events"
 	"github.com/azrtydxb/hello/internal/lifecycle"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
@@ -123,6 +124,12 @@ func run(args []string) error {
 	}
 	defer pool.Close()
 	cdrs := cdr.NewWriter(pool, cdr.NewDroppedCounter(metrics.Registry), log.With("component", "cdr"))
+	// Call events (spec integrations I-34, I-35): a bounded queue appended to
+	// the Valkey stream hello:events from a goroutine; the call path never
+	// waits on it. The CDR writer publishes call.completed after the record
+	// is stored.
+	emitter := events.NewEmitter(events.ValkeyAppender{C: vk}, events.NewEmitterMetrics(metrics.Registry), log.With("component", "events"))
+	cdrs.Events = emitter
 
 	// The voicemail store, the feature-code settings sink and the voicemail
 	// audio store (Phase 4, S-8 and S-11). The writer pool is small: the SIP
@@ -169,7 +176,7 @@ func run(args []string) error {
 	}, sip.Deps{
 		Snapshots: watcher, State: live, Trunks: live,
 		Throttle: sip.ValkeyThrottle{Client: vk, Window: cfg.AuthFailWindow},
-		CDRs:     cdrs, Metrics: sipMetrics, Log: log.With("component", "sip"),
+		CDRs:     cdrs, Events: emitter, Metrics: sipMetrics, Log: log.With("component", "sip"),
 		Presence:      sip.ValkeyPresence{Client: vk},
 		MailboxEvents: mailboxEvents{cfg: cfg.Database, log: log.With("component", "mailbox")},
 		Pushes:        pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
@@ -270,6 +277,12 @@ func run(args []string) error {
 	go func() { watcher.RunResolver(bg); close(resolveDone) }()
 	cdrDone := make(chan struct{})
 	go func() { cdrs.Run(bg, 5*time.Second); close(cdrDone) }()
+	// Started after the CDR writer is running and stopped after it, so the
+	// last call.completed events of a flushed CDR still go out.
+	eventsCtx, stopEvents := context.WithCancel(context.Background())
+	defer stopEvents()
+	eventsDone := make(chan struct{})
+	go func() { emitter.Run(eventsCtx); close(eventsDone) }()
 	sipCtx, stopSIP := context.WithCancel(context.Background())
 	defer stopSIP()
 	// A SIP listener that dies on its own takes the node down: readiness
@@ -310,6 +323,8 @@ func run(args []string) error {
 	<-watchDone
 	<-resolveDone
 	<-cdrDone
+	stopEvents()
+	<-eventsDone
 	log.Info("stopped", "error", err, "active_calls_dropped", srv.ActiveCalls())
 	return err
 }

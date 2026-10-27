@@ -67,7 +67,7 @@
       "post": {
         "operationId": "login",
         "summary": "Start a session; sets the hello_session cookie",
-        "description": "Starts a browser session for a username and password and sets the hello_session cookie. Used by the console; API clients use bearer tokens instead.",
+        "description": "Starts a browser session for a username and password and sets the hello_session cookie. Used by the console; API clients use bearer tokens instead. For a user with two-factor authentication the password alone starts no session: the answer is 202 with an mfaToken, and login/2fa completes the login.",
         "tags": ["auth"],
         "requestBody": {
           "required": true,
@@ -80,6 +80,26 @@
           }
         },
         "responses": {
+          "202": {
+            "description": "The password is right and a second factor is needed; no session exists yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginMFARequired"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The user has 2FA and it is not available; the login is refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "204": {
             "description": "Logged in",
             "headers": {
@@ -107,6 +127,527 @@
         "security": [],
         "x-hello-mcp": {
           "exclude": "starts a browser session"
+        }
+      }
+    },
+    "/api/v1/auth/login/2fa": {
+      "post": {
+        "operationId": "login2fa",
+        "summary": "Finish a login with a second factor",
+        "description": "Second step of a login for a user with two-factor authentication. Takes the mfaToken the login answered 202 with (valid 5 minutes, single use) and a 6-digit authenticator code or a recovery code, and then sets the hello_session cookie as the login does. An unknown or expired challenge, a wrong or replayed code and an exhausted limit (5 wrong codes per challenge, 10 per user per 10 minutes) all answer the same 401.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Login2FARequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Logged in",
+            "headers": {
+              "Set-Cookie": {
+                "description": "hello_session=<value>; Path=/; HttpOnly; SameSite=Strict; Secure when the request is HTTPS",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Two-factor authentication is not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-hello-mcp": {
+          "exclude": "starts a browser session"
+        }
+      }
+    },
+    "/api/v1/me/2fa": {
+      "get": {
+        "operationId": "getMyTwoFactor",
+        "summary": "My two-factor state",
+        "description": "Whether two-factor authentication is active, pending confirmation or required of the caller, and how many recovery codes are left. Browser session only.",
+        "tags": ["me"],
+        "responses": {
+          "200": {
+            "description": "State",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorState"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/me/2fa/setup": {
+      "post": {
+        "operationId": "setupMyTwoFactor",
+        "summary": "Start two-factor enrolment",
+        "description": "Creates a new inactive TOTP secret (replacing an unconfirmed one) and returns it with the otpauth:// URI, once. The console draws the QR code from the URI in the browser. 2FA stays off until enable is called with a valid code. 409 already_enrolled while it is active.",
+        "tags": ["me"],
+        "responses": {
+          "200": {
+            "description": "The secret and URI",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorSetup"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "2FA is already active (already_enrolled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/me/2fa/enable": {
+      "post": {
+        "operationId": "enableMyTwoFactor",
+        "summary": "Confirm two-factor enrolment",
+        "description": "Activates the secret from setup when the code is valid, and returns ten single-use recovery codes, once.",
+        "tags": ["me"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwoFactorCode"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recovery codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodes"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "description": "No setup in progress (no_setup) or already active (already_enrolled)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The code is wrong (invalid_code) or the session is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/me/2fa/disable": {
+      "post": {
+        "operationId": "disableMyTwoFactor",
+        "summary": "Turn off my two-factor authentication",
+        "description": "Needs the current password and a valid code or recovery code. Refused with 409 two_factor_required while the account or its role requires 2FA.",
+        "tags": ["me"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwoFactorDisable"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Turned off"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "description": "2FA is required of this account (two_factor_required) or is not active",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Wrong password or code (invalid_code) or the session is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/me/2fa/recovery-codes": {
+      "post": {
+        "operationId": "regenerateMyRecoveryCodes",
+        "summary": "Replace my recovery codes",
+        "description": "Needs a valid code or recovery code. The old recovery codes stop working; the ten new ones are returned once.",
+        "tags": ["me"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwoFactorCode"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recovery codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodes"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "The code is wrong (invalid_code) or the session is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "session",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/auth/2fa-policy": {
+      "get": {
+        "operationId": "getTwoFactorPolicy",
+        "summary": "Read the two-factor policy",
+        "description": "The roles whose users must use two-factor authentication. Empty by default.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorPolicy"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      },
+      "put": {
+        "operationId": "putTwoFactorPolicy",
+        "summary": "Set the two-factor policy",
+        "description": "Replaces the roles that must use two-factor authentication. Admin only, audited. A user of such a role who has not enrolled can use nothing but the enrolment after signing in. Naming admin answers 409 two_factor_required unless the caller has active 2FA.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwoFactorPolicy"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorPolicy"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "description": "The caller has no active 2FA (two_factor_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "two-factor authentication is managed in the console only"
+        }
+      }
+    },
+    "/api/v1/users/{id}/2fa": {
+      "delete": {
+        "operationId": "resetUserTwoFactor",
+        "summary": "Reset a user's two-factor authentication",
+        "description": "Admin only, audited. Clears the secret and recovery codes and ends the user's sessions. The only admin with 2FA cannot be reset here (409 last_enrolled_admin); the break-glass form is the hello-control user 2fa-reset command.",
+        "tags": ["users"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Reset"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The only enrolled admin (last_enrolled_admin)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "user and role management stays in the console"
         }
       }
     },
@@ -14404,6 +14945,221 @@
         "x-hello-role": "operator",
         "x-hello-mcp": true
       }
+    },
+    "/api/v1/events": {
+      "get": {
+        "operationId": "listEvents",
+        "summary": "Call event history",
+        "description": "Lists stored call events (kept for HELLO_EVENT_RETENTION_DAYS, 7 by default) in cursor order. A user, or a service account with an extensionScope, sees only events about its own extensions; the viewer, operator and admin roles see all. Page with nextCursor.",
+        "tags": ["events"],
+        "parameters": [
+          {
+            "name": "types",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated event types; a pattern ending in .* (call.*) matches a prefix."
+          },
+          {
+            "name": "extension",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about this extension."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            },
+            "description": "asc (default) returns events after the cursor, oldest first; desc returns events before it, newest first."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Return events after this cursor (order asc)."
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Return events before this cursor (order desc)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "description": "Page size, 1 to 1000 (default 100)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "events",
+        "x-hello-role": "user",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/events/stream": {
+      "get": {
+        "operationId": "streamEvents",
+        "summary": "Live call events (server-sent events)",
+        "description": "Opens a text/event-stream of call events. Each event has id: (its cursor), event: (its type) and data: (the Event as JSON); a comment keeps the connection alive every 15 seconds. Reconnect with the Last-Event-ID header to receive what was missed (events are replayed from the stored history); a client that falls behind is disconnected and resumes the same way. Authenticate with a bearer token, the session cookie, or ?ticket= from POST /events/tickets. At most 5 streams per credential and 200 per pod. A user, or a service account with an extensionScope, receives only events about its own extensions.",
+        "tags": ["events"],
+        "parameters": [
+          {
+            "name": "types",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated event types; a pattern ending in .* (call.*) matches a prefix."
+          },
+          {
+            "name": "extension",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{2,10}$"
+            },
+            "description": "Only events about this extension."
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Resume after this cursor."
+          },
+          {
+            "name": "lastEventId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Resume after this cursor, for clients that cannot set the header."
+          },
+          {
+            "name": "ticket",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "A single-use ticket from POST /events/tickets, for clients that cannot send an Authorization header."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The event stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyStreams"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "events",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "a long-lived stream does not fit a tool call; the history operation lists events"
+        }
+      }
+    },
+    "/api/v1/events/tickets": {
+      "post": {
+        "operationId": "createEventTicket",
+        "summary": "Mint an event stream ticket",
+        "description": "Returns a single-use ticket, valid for 30 seconds, that authenticates one GET /events/stream as the caller with ?ticket=. For browsers' EventSource of another origin and other clients that cannot send an Authorization header.",
+        "tags": ["events"],
+        "responses": {
+          "201": {
+            "description": "The ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventTicket"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "events",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "mints a credential-like ticket for a stream; not for an AI agent"
+        }
+      }
     }
   },
   "components": {
@@ -14570,6 +15326,23 @@
       },
       "Upstream": {
         "description": "Object storage (MinIO) answered with an error; try again shortly (code upstream)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "TooManyStreams": {
+        "description": "Too many open event streams for this credential or pod; see Retry-After",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "integer"
+            }
+          }
+        },
         "content": {
           "application/json": {
             "schema": {
@@ -17740,6 +18513,12 @@
                   "self_disable",
                   "self_delete",
                   "password_change_required",
+                  "two_factor_enrolment_required",
+                  "two_factor_required",
+                  "last_enrolled_admin",
+                  "invalid_code",
+                  "no_setup",
+                  "already_enrolled",
                   "session_required",
                   "not_configured",
                   "smtp_failed",
@@ -17787,6 +18566,132 @@
           }
         }
       },
+      "Login2FARequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mfaToken", "code"],
+        "properties": {
+          "mfaToken": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The challenge token the login answered 202 with."
+          },
+          "code": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "A 6-digit authenticator code or a recovery code."
+          }
+        }
+      },
+      "LoginMFARequired": {
+        "type": "object",
+        "required": ["mfa", "mfaToken"],
+        "properties": {
+          "mfa": {
+            "type": "string",
+            "enum": ["required"]
+          },
+          "mfaToken": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "Single-use challenge, valid 5 minutes; give it to login/2fa."
+          }
+        }
+      },
+      "TwoFactorState": {
+        "type": "object",
+        "required": ["enabled", "pending", "required", "recoveryCodesLeft"],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "pending": {
+            "type": "boolean",
+            "description": "A secret was issued and not yet confirmed."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "The account or its role requires 2FA."
+          },
+          "recoveryCodesLeft": {
+            "type": "integer",
+            "description": "Fewer than 3 left is a reason to replace them."
+          }
+        }
+      },
+      "TwoFactorSetup": {
+        "type": "object",
+        "required": ["secret", "otpauthUri"],
+        "properties": {
+          "secret": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "Base32 secret, shown once."
+          },
+          "otpauthUri": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "otpauth://totp URI for an authenticator app or a QR code."
+          }
+        }
+      },
+      "TwoFactorCode": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "A 6-digit authenticator code (a recovery code where the operation allows it)."
+          }
+        }
+      },
+      "TwoFactorDisable": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["password", "code"],
+        "properties": {
+          "password": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The caller's current password."
+          },
+          "code": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "A 6-digit authenticator code or a recovery code."
+          }
+        }
+      },
+      "RecoveryCodes": {
+        "type": "object",
+        "required": ["recoveryCodes"],
+        "properties": {
+          "recoveryCodes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "x-hello-secret": true
+            },
+            "description": "Ten single-use codes, shown once."
+          }
+        }
+      },
+      "TwoFactorPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["require2faRoles"],
+        "properties": {
+          "require2faRoles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Role"
+            },
+            "description": "Roles whose users must use 2FA."
+          }
+        }
+      },
       "Me": {
         "type": "object",
         "required": [
@@ -17798,7 +18703,8 @@
           "mustChangePassword",
           "extensions",
           "voicemailEmail",
-          "emailDelivery"
+          "emailDelivery",
+          "mustEnrollMfa"
         ],
         "properties": {
           "username": {
@@ -17837,6 +18743,13 @@
           "emailDelivery": {
             "type": "boolean",
             "description": "Whether the system can send email at all."
+          },
+          "mustEnrollMfa": {
+            "type": "boolean",
+            "description": "True while 2FA is required of the user and not enrolled; every operation but the 2FA enrolment, this one and logout answers 403 two_factor_enrolment_required."
+          },
+          "twoFactor": {
+            "$ref": "#/components/schemas/TwoFactorState"
           }
         }
       },
@@ -17894,6 +18807,8 @@
           "extensionId",
           "extensionIds",
           "voicemailEmail",
+          "totpEnabled",
+          "totpRequired",
           "createdAt"
         ],
         "properties": {
@@ -17940,6 +18855,14 @@
           },
           "voicemailEmail": {
             "$ref": "#/components/schemas/VoicemailEmailPrefs"
+          },
+          "totpEnabled": {
+            "type": "boolean",
+            "description": "The user has active two-factor authentication."
+          },
+          "totpRequired": {
+            "type": "boolean",
+            "description": "An administrator requires 2FA of this user."
           },
           "createdAt": {
             "type": "string",
@@ -18100,6 +19023,10 @@
           },
           "voicemailEmail": {
             "$ref": "#/components/schemas/VoicemailEmailPrefsUpdate"
+          },
+          "totpRequired": {
+            "type": "boolean",
+            "description": "Require two-factor authentication of this user. Setting it on an admin answers 409 two_factor_required unless the caller has active 2FA."
           }
         },
         "description": "At least one field."
@@ -25077,6 +26004,186 @@
               "type": "string"
             },
             "description": "Limit the login to these queues."
+          }
+        }
+      },
+      "EventParty": {
+        "type": "object",
+        "description": "One end of a call.",
+        "properties": {
+          "number": {
+            "type": "string",
+            "description": "The number as presented."
+          },
+          "name": {
+            "type": "string",
+            "description": "The display name, when known."
+          },
+          "extension": {
+            "type": "string",
+            "description": "The extension number when this end is an extension."
+          }
+        }
+      },
+      "EventData": {
+        "type": "object",
+        "description": "The payload of a call event. Fields that do not apply to the event type are omitted. Recording audio, SIP bodies and DTMF are never in an event.",
+        "required": ["callId", "from", "to"],
+        "properties": {
+          "callId": {
+            "type": "string",
+            "description": "The call's correlation id, the same on every event of the call and on its CDR."
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["internal", "inbound", "outbound"]
+          },
+          "extension": {
+            "type": "string",
+            "description": "The extension the event is about (the subject). A call between two extensions, or one that rings a group, yields one event per extension."
+          },
+          "from": {
+            "$ref": "#/components/schemas/EventParty"
+          },
+          "to": {
+            "$ref": "#/components/schemas/EventParty"
+          },
+          "trunk": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "answeredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "durationMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "billableMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "disposition": {
+            "type": "string",
+            "description": "How the call ended: answered, no_answer, busy, cancelled, unavailable or failed.",
+            "enum": [
+              "answered",
+              "no_answer",
+              "busy",
+              "cancelled",
+              "unavailable",
+              "failed"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why a call.missed event was raised.",
+            "enum": ["no_answer", "busy", "dnd", "cancelled", "unreachable"]
+          },
+          "originateId": {
+            "type": "string",
+            "description": "The click-to-call request that placed the call, when one did."
+          },
+          "cdrId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The call detail record (call.completed)."
+          },
+          "recordingId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The stored recording (call.recording.ready)."
+          }
+        }
+      },
+      "Event": {
+        "type": "object",
+        "description": "A call event. Delivery is at least once: the id identifies an event and receivers dedupe on it.",
+        "required": ["apiVersion", "id", "type", "createdAt", "data"],
+        "properties": {
+          "apiVersion": {
+            "type": "string",
+            "description": "Envelope version; changes are additive.",
+            "example": "1"
+          },
+          "id": {
+            "type": "string",
+            "description": "Unique and stable across redelivery."
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "call.ringing",
+              "call.answered",
+              "call.ended",
+              "call.missed",
+              "call.recording.ready",
+              "call.completed"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/EventData"
+          }
+        }
+      },
+      "EventEntry": {
+        "description": "An event with its cursor.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Event"
+          },
+          {
+            "type": "object",
+            "required": ["cursor"],
+            "properties": {
+              "cursor": {
+                "type": "string",
+                "description": "Orders events and resumes a stream (Last-Event-ID, after, before). Opaque to clients apart from that."
+              }
+            }
+          }
+        ]
+      },
+      "EventPage": {
+        "type": "object",
+        "required": ["items", "nextCursor"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventEntry"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "description": "The cursor to pass as after (order asc) or before (order desc) for the next page; empty when there is no more."
+          }
+        }
+      },
+      "EventTicket": {
+        "type": "object",
+        "required": ["ticket", "expiresAt"],
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "description": "Pass as ?ticket= on GET /events/stream. Single use, valid 30 seconds, shown once.",
+            "x-hello-secret": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       }
