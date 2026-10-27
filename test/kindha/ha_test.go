@@ -500,7 +500,7 @@ func waitFor(t *testing.T, d time.Duration, what string, f func() bool) {
 	t.Fatalf("not within %s: %s", d, what)
 }
 
-// failover drops the active instance (crash: freezes its node, so nothing is
+// failover drops the active instance (crash: kills its node, so nothing is
 // released; otherwise deletes its pod, so kube-vip hands the VIP over) with
 // calls up, and requires what the spec's acceptance criteria say.
 func (l *lab) failover(t *testing.T, crash bool) {
@@ -545,8 +545,10 @@ func (l *lab) failover(t *testing.T, crash bool) {
 
 	t0 := time.Now()
 	if crash {
-		run(t, "docker", "pause", victim)
-		t.Cleanup(func() { _, _ = tryRun("docker", "unpause", victim) })
+		// A power-off: the node container is killed, its network namespace goes
+		// with it (a paused one would still answer ARP for the VIP).
+		run(t, "docker", "kill", victim)
+		t.Cleanup(func() { _, _ = tryRun("docker", "start", victim) })
 	} else {
 		l.kubectl(t, "-n", l.namespace, "delete", "pod", victimPod, "--wait=false")
 	}
@@ -645,7 +647,22 @@ func (l *lab) failover(t *testing.T, crash bool) {
 	// phone is on a legacy socket of that survivor only if it is the first
 	// node; the VIP is what this scenario is about.
 	if crash {
-		run(t, "docker", "unpause", victim)
+		run(t, "docker", "start", victim)
+		if ip := strings.TrimSpace(run(t, "docker", "inspect", "-f", `{{(index .NetworkSettings.Networks "kind").IPAddress}}`, victim)); ip != l.nodeIPs[victim] {
+			t.Fatalf("%s came back as %s, was %s: the lab's addresses moved", victim, ip, l.nodeIPs[victim])
+		}
+		// Its NAT rules went with the container.
+		deadline := time.Now().Add(2 * time.Minute)
+		for {
+			if _, err := tryRun("docker", "exec", victim, "iptables", "-t", "nat", "-I", "POSTROUTING", "1", "-s", l.vip+"/32", "-j", "RETURN"); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s did not come back", victim)
+			}
+			time.Sleep(3 * time.Second)
+		}
+		l.kubectl(t, "wait", "--for=condition=Ready", "node/"+victim, "--timeout=300s")
 	}
 	l.waitPodsReady(t, 2, 4*time.Minute)
 	l.waitStablePods(t, 2, 20*time.Second)
