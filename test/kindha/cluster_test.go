@@ -499,7 +499,7 @@ func (l *labEnv) apply(t *testing.T) {
 			l.retry(t, "label", "node", n, "hello.example.com/edge=true", "--overwrite")
 		}
 	}
-	l.retry(t, "apply", "-f", f)
+	l.retry(t, "-n", l.namespace, "apply", "-f", f)
 	l.rolloutStatus(t, l.deployment, 10*time.Minute)
 }
 
