@@ -36,8 +36,6 @@ var (
 	// ErrConversationState: the change does not fit the conversation's
 	// state (assigning a resolved one, claiming an assigned one).
 	ErrConversationState = errors.New("store: conversation state does not allow this")
-	// ErrNoSecretBox: the opt-out list needs HELLO_SECRET_KEY.
-	ErrNoSecretBox = errors.New("store: no secret box")
 )
 
 // optOutPurpose keys the opt-out hash: it is derived from HELLO_SECRET_KEY

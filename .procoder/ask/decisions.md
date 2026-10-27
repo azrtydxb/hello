@@ -836,7 +836,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
 ## Messaging inbox core (2026-10-26)
 
 Delivery item 1 of `.procoder/specs/messaging-channels.md`, built LAN-only on the
-SIP text messaging of PR #165. Migration 00045 `messaging_core`; scope `messages`
+SIP text messaging of PR #165. Migration 00046 `messaging_core`; scope `messages`
 (granted to the user, operator and admin roles, never to viewer).
 
 What is in: channels (provider `sip_trunk` only) and numbers, the conversation
