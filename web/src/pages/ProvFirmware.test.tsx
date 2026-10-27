@@ -195,4 +195,150 @@ describe("ProvFirmware", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("T54W-96.86.0.1.rom")).toBeInTheDocument();
   });
+
+  it("TestFirmwareMinimum: refuses a pin below the minimum without asking the server", async () => {
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/prov/firmware": () =>
+        json({ items: [{ ...FW_NEW, version: "96.70.0.1", pinned: false }] }),
+      "GET /api/v1/prov/firmware/minimums": () =>
+        json({
+          items: [
+            {
+              vendor: "yealink",
+              modelGlob: "T5*",
+              minVersion: "96.80.0.1",
+              recommended: "96.86.0.70",
+            },
+          ],
+        }),
+      "PUT /api/v1/prov/firmware/pins": () => noContent(),
+    });
+    renderApp("/phones/firmware");
+    await screen.findByLabelText("Yealink T5* minimum");
+    fireEvent.click(
+      await screen.findByRole("switch", {
+        name: "Pin 96.70.0.1 for Yealink T5*",
+      }),
+    );
+    expect(
+      await screen.findByText(/below the minimum 96\.80\.0\.1/),
+    ).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("saves edited minimums", async () => {
+    const rule = {
+      vendor: "grandstream",
+      modelGlob: "WP822*",
+      minVersion: "1.0.11.22",
+      recommended: "1.0.11.78",
+    };
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/prov/firmware": () => json({ items: [] }),
+      "GET /api/v1/prov/firmware/minimums": () => json({ items: [rule] }),
+      "PUT /api/v1/prov/firmware/minimums": () => noContent(),
+    });
+    renderApp("/phones/firmware");
+    fireEvent.change(
+      await screen.findByLabelText("Grandstream WP822* minimum"),
+      { target: { value: "1.0.11.30" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save minimums" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PUT")?.body).toEqual([
+        { ...rule, minVersion: "1.0.11.30" },
+      ]),
+    );
+  });
+
+  it("sets the upgrade hour of a pinned Grandstream firmware", async () => {
+    const gs = {
+      ...FW_OLD,
+      id: 9,
+      vendor: "grandstream",
+      modelGlob: "WP8?6*",
+      version: "1.0.3.39",
+      filename: "wp8x6fw.bin",
+      pinned: true,
+    };
+    const calls = mockApi({
+      ...ME,
+      "GET /api/v1/prov/firmware": () => json({ items: [gs] }),
+      "GET /api/v1/prov/firmware/minimums": () => json({ items: [] }),
+      "PUT /api/v1/prov/firmware/pins": () => noContent(),
+    });
+    renderApp("/phones/firmware");
+    fireEvent.change(
+      await screen.findByLabelText("Upgrade hour for 1.0.3.39"),
+      {
+        target: { value: "3" },
+      },
+    );
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "PUT")?.body).toEqual([
+        {
+          vendor: "grandstream",
+          modelGlob: "WP8?6*",
+          firmwareId: 9,
+          upgradeHour: 3,
+        },
+      ]),
+    );
+  });
+
+  it("shows the drift badge on Phones only when the firmware drifts", async () => {
+    const base = {
+      id: 5,
+      mac: "805ec0123456",
+      serial: "",
+      vendor: "yealink",
+      model: "T54W",
+      label: "",
+      deviceId: null,
+      extensionId: null,
+      extensionNumber: "",
+      templateId: null,
+      blf: [],
+      enabled: true,
+      tokenExposed: false,
+      uaMismatch: false,
+      bootArmed: false,
+      bootReclaimed: false,
+      redirectStatus: { state: "manual" },
+      firstFetchAt: null,
+      lastFetchAt: null,
+      lastFetchIp: null,
+      lastFetchUa: null,
+      lastFetchFile: null,
+      renderError: false,
+      createdAt: "2026-10-01T10:00:00Z",
+      updatedAt: "2026-10-01T10:00:00Z",
+      firmwarePinned: "96.86.0.70",
+      firmwareMinimum: "",
+    };
+    mockApi({
+      ...ME,
+      "GET /api/v1/phones": () =>
+        json({
+          items: [
+            { ...base, firmwareSeen: "96.85.0.1", firmwareDrift: true },
+            {
+              ...base,
+              id: 6,
+              mac: "805ec0123457",
+              firmwareSeen: "96.86.0.70",
+              firmwareDrift: false,
+            },
+          ],
+        }),
+      "GET /api/v1/extensions": () => json({ items: [] }),
+      "GET /api/v1/devices": () => json({ items: [] }),
+      "GET /api/v1/prov/templates": () => json({ items: [] }),
+    });
+    renderApp("/phones");
+    await screen.findByText("96.85.0.1");
+    expect(screen.getAllByText("Drift")).toHaveLength(1);
+  });
 });

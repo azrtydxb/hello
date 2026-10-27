@@ -350,39 +350,111 @@ func (s *Store) blfKeys(ctx context.Context, raw []byte) ([]prov.BLFKey, error) 
 	return keys, nil
 }
 
-// pinnedFirmware picks the pin matching the model: the more specific glob,
-// then the lower firmware id; nil when none matches.
-func (s *Store) pinnedFirmware(ctx context.Context, v prov.Vendor, model, base string) (*prov.FirmwareInfo, error) {
+// pinRow is one pin joined to its firmware file.
+type pinRow struct {
+	glob, file, version string
+	id                  int64
+	hour                *int
+}
+
+// loadPins returns the pins of a vendor with their files.
+func (s *Store) loadPins(ctx context.Context, v prov.Vendor) ([]pinRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT pn.model_glob, f.id, f.filename, f.version FROM prov_firmware_pins pn
+		SELECT pn.model_glob, f.id, f.filename, f.version, pn.upgrade_hour FROM prov_firmware_pins pn
 		JOIN prov_firmware f ON f.id = pn.firmware_id WHERE pn.vendor = $1`, v)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	var (
-		best     *prov.FirmwareInfo
-		bestSpec int
-		bestID   int64
-	)
+	var out []pinRow
 	for rows.Next() {
 		var (
-			glob, file, version string
-			id                  int64
+			r    pinRow
+			hour sql.NullInt64
 		)
-		if err := rows.Scan(&glob, &id, &file, &version); err != nil {
+		if err := rows.Scan(&r.glob, &r.id, &r.file, &r.version, &hour); err != nil {
 			return nil, err
 		}
-		if ok, _ := path.Match(glob, model); !ok {
+		if hour.Valid {
+			h := int(hour.Int64)
+			r.hour = &h
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// matchPin picks the pin matching the model: the more specific glob, then
+// the lower firmware id. A pin below the model's minimum version is skipped
+// (spec S-26), so it is never rendered; nil when none is left.
+func matchPin(pins []pinRow, minimums []prov.FirmwareMinimum, v prov.Vendor, model string) *pinRow {
+	floor := prov.MinimumFor(minimums, v, model)
+	var best *pinRow
+	bestSpec := 0
+	for i := range pins {
+		p := &pins[i]
+		if ok, _ := path.Match(p.glob, model); !ok {
 			continue
 		}
-		spec := globSpecificity(glob)
-		if best == nil || spec > bestSpec || (spec == bestSpec && id < bestID) {
-			dir := strings.TrimSuffix(base, "/") + "/fw"
-			best, bestSpec, bestID = &prov.FirmwareInfo{URL: base + "fw/" + file, Dir: dir, Via: prov.UpgradeVia(dir), Version: version}, spec, id
+		if floor != "" && prov.CompareVersions(p.version, floor) < 0 {
+			continue
+		}
+		spec := globSpecificity(p.glob)
+		if best == nil || spec > bestSpec || (spec == bestSpec && p.id < best.id) {
+			best, bestSpec = p, spec
 		}
 	}
-	return best, rows.Err()
+	return best
+}
+
+// pinnedFirmware is the firmware to render for the model, nil when none is
+// pinned or the pin is below the model minimum.
+func (s *Store) pinnedFirmware(ctx context.Context, v prov.Vendor, model, base string) (*prov.FirmwareInfo, error) {
+	pins, err := s.loadPins(ctx, v)
+	if err != nil {
+		return nil, err
+	}
+	minimums, err := s.ListFirmwareMinimums(ctx)
+	if err != nil {
+		return nil, err
+	}
+	p := matchPin(pins, minimums, v, model)
+	if p == nil {
+		return nil, nil
+	}
+	dir := strings.TrimSuffix(base, "/") + "/fw"
+	fw := &prov.FirmwareInfo{URL: base + "fw/" + p.file, Dir: dir, Via: prov.UpgradeVia(dir), Version: p.version}
+	if p.hour != nil {
+		fw.Window = &prov.UpgradeWindow{Hour: *p.hour}
+	}
+	return fw, nil
+}
+
+// withFirmwareState fills each phone's pinned version, minimum and drift
+// flag (spec S-26).
+func (s *Store) withFirmwareState(ctx context.Context, phones []Phone) error {
+	if len(phones) == 0 {
+		return nil
+	}
+	minimums, err := s.ListFirmwareMinimums(ctx)
+	if err != nil {
+		return err
+	}
+	pins := map[prov.Vendor][]pinRow{}
+	for i := range phones {
+		p := &phones[i]
+		if _, ok := pins[p.Vendor]; !ok {
+			if pins[p.Vendor], err = s.loadPins(ctx, p.Vendor); err != nil {
+				return err
+			}
+		}
+		if m := matchPin(pins[p.Vendor], minimums, p.Vendor, p.Model); m != nil {
+			p.FirmwarePinned = m.version
+		}
+		p.FirmwareMinimum = prov.MinimumFor(minimums, p.Vendor, p.Model)
+		p.FirmwareDrift = prov.FirmwareDrift(p.FirmwareSeen, p.FirmwarePinned, p.FirmwareMinimum)
+	}
+	return nil
 }
 
 // FirmwareByName implements prov.Store.

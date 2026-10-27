@@ -31,7 +31,7 @@ func TestMigrateProvisioningRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	tables := []string{"phones", "prov_templates", "prov_template_versions", "prov_firmware",
-		"prov_firmware_pins", "prov_redirect_accounts", "prov_redirect_jobs", "prov_fetches"}
+		"prov_firmware_pins", "prov_firmware_minimums", "prov_redirect_accounts", "prov_redirect_jobs", "prov_fetches"}
 	present := func() (n int) {
 		t.Helper()
 		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM information_schema.tables
@@ -84,7 +84,7 @@ func TestMigrateProvisioningRollback(t *testing.T) {
 	if n := present(); n != 0 {
 		t.Fatalf("after rollback: %d provisioning objects left", n)
 	}
-	if n, err := migrate.Up(ctx, db); err != nil || n != 33 { // 00006 to 00017, 00019 and 00026 to 00045
+	if n, err := migrate.Up(ctx, db); err != nil || n != 34 { // 00006 to 00017, 00019 and 00026 to 00046
 		t.Fatalf("re-apply = %d, %v; want 28, nil", n, err)
 	}
 	if n := present(); n != len(tables)+1 {

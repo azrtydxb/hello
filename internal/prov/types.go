@@ -261,7 +261,14 @@ type FirmwareInfo struct {
 	// Via is the Grandstream "upgrade via" value for the scheme Dir is
 	// served on, see UpgradeVia.
 	Via int
+	// Window is the upgrade window set on the pin, nil when the phone may
+	// upgrade whenever it checks.
+	Window *UpgradeWindow
 }
+
+// UpgradeWindow is the hour of the day (0 to 23, the phone's clock) a pinned
+// firmware is fetched in. Only Grandstream templates act on it.
+type UpgradeWindow struct{ Hour int }
 
 // UpgradeVia is the Grandstream "upgrade via" value (P6767) for a URL:
 // 2 for HTTPS, 1 for anything else (HTTP).

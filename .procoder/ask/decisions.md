@@ -832,3 +832,34 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - Not done: `exhausted` after a forward stage still uses the dialled
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
+
+## 2026-10-27 Phone feature parity item 19: firmware policy (S-26)
+
+- Already on main: `prov_firmware` and `prov_firmware_pins`, upload and pin API
+  and page, `firmware_seen` from the User-Agent shown as plain text, P238 = 0.
+- Minimum versions are a table (`prov_firmware_minimums`, migration 00046) with
+  an admin PUT/GET, not a constant, because the spec says per vendor and model
+  glob. Seeded: Grandstream `WP822*` min 1.0.11.22 (R822 RN). A rule's
+  recommended version holds the "WP defaults" of the spec: WP822 1.0.11.78
+  (lab build) and WP8x6 `WP8?6*` 1.0.3.39 (the newest 1.0.3.x template in the
+  spec; the lab pick among 1.0.3.29 to .39 is the admin's to change). It is
+  documentation only and is never rendered. WP8x6 has no floor in the spec, so
+  its min is empty.
+- Enforcement: a pin is refused (400, field error) when its version is below the
+  highest minimum of any rule whose glob matches the pin's glob or the reverse
+  (conservative, so `*` cannot smuggle a file under a floor). Rendering skips a
+  pin below the minimum of the phone's actual model, so lowering nothing is
+  needed when a floor is raised later.
+- Drift: computed server-side in `ListPhones` and `GetPhone`
+  (`firmwarePinned`, `firmwareMinimum`, `firmwareDrift`). Drift is seen != pin
+  (numeric compare, so 96.86.0.070 equals 96.86.0.70) or seen below the floor.
+  No version seen is not drift. Other phone readers (push, render) do not
+  carry the fields.
+- Upgrade window: an optional `upgrade_hour` on the pin. Grandstream WP8x6 and
+  WP8xx only: P194 = 2 with P285 = hour, and P238 = 1. P194 is the phone's
+  whole automatic upgrade (config too), so a window makes config resync daily
+  unless check-sync is sent; the window is therefore opt-in. P285 and P194 = 2
+  are the generic Grandstream keys and are not verified on a WP (hardware
+  check). The WP856 (P22296) and other vendors get no window until their keys
+  are known; the page offers the hour for Grandstream pins only.
+- TR-069 settings not touched.

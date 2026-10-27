@@ -159,6 +159,28 @@ function matches(p: Phone, filter: Filter, now: number): boolean {
   }
 }
 
+/** The firmware version a phone showed, with a drift badge when it differs from the pin or the minimum. */
+export function FirmwareVersion({ phone }: { phone: Phone }) {
+  const title = phone.firmwareDrift
+    ? [
+        phone.firmwarePinned && `Pinned ${phone.firmwarePinned}`,
+        phone.firmwareMinimum && `Minimum ${phone.firmwareMinimum}`,
+      ]
+        .filter(Boolean)
+        .join(", ")
+    : undefined;
+  return (
+    <span className="prov-flags">
+      <span className="prov-cell-sm">{phone.firmwareSeen || "—"}</span>
+      {phone.firmwareDrift && (
+        <span title={title}>
+          <Badge tone="warn">Drift</Badge>
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** A phone's flags as badges ("Armed" too while a boot hand-off is armed). */
 export function PhoneFlags({ phone }: { phone: Phone }) {
   const flags = flagsOf(phone);
@@ -340,9 +362,7 @@ export function Phones() {
     {
       key: "firmware",
       label: "Firmware",
-      render: (p) => (
-        <span className="prov-cell-sm">{p.firmwareSeen || "—"}</span>
-      ),
+      render: (p) => <FirmwareVersion phone={p} />,
     },
     {
       key: "redirect",

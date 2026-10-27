@@ -299,6 +299,26 @@ Upgrade and Provisioning) and are unconfirmed on a phone, so verify them.
 The phone also asks for `ring<N>.bin` and `ring<N>.ogg` in that directory;
 Hello answers those with an empty `404` (`not_found`, no block counted).
 
+Firmware policy (spec S-26). A _minimum version_ per vendor and model glob
+(`PUT /api/v1/prov/firmware/minimums`, the "Minimum versions" card on the
+Firmware page) is a floor: a pin below it is refused with `400`, and a stored
+pin that sits below the minimum of the phone's model is not rendered, so the
+phone gets no firmware setting. A pin's glob that can reach a floored model
+(`WP8*` reaches the WP822) is checked against that floor. The seeded rules
+are the WP822 floor 1.0.11.22 with the lab build 1.0.11.78 recommended, and
+the lab build 1.0.3.39 recommended for the WP8x6 (WP816, WP826, WP836 and
+WP856); the recommended version is documentation for the admin, never
+rendered, and Hello ships no vendor firmware. Phones and PhoneDetail show the
+firmware seen in the User-Agent with a "Drift" badge when it differs from the
+pin or is below the minimum (`firmwarePinned`, `firmwareMinimum` and
+`firmwareDrift` on the phone). A pin may carry an upgrade hour (0 to 23).
+On a Grandstream WP8x6 or WP8xx it renders P194 = 2 (daily) with the hour in
+P285, and P238 = 1 so a reboot does not upgrade outside the window; without
+an hour P194 = 1 and P238 = 0 as above. Configuration changes then reach the
+phone by check-sync or at that hour. P285 and the P194 = 2 value come from
+Grandstream's general Automatic Upgrade settings and are unconfirmed on a
+WP; the WP856 (P22296) and other vendors ignore the hour.
+
 Config server: P237 (Config Server Path) is likewise `host/p/<token>`, no
 scheme and no trailing slash, and P212 (Config Upgrade Via) is `2` for the
 HTTPS device path (`1` if Hello is ever served over HTTP). The SIP device

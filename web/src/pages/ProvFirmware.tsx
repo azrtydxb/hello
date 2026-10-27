@@ -1,14 +1,19 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { errorMessage } from "../api";
 import {
+  compareVersions,
   deleteFirmware,
   listFirmware,
+  listFirmwareMinimums,
   MAX_FIRMWARE_BYTES,
+  minimumForPin,
+  setFirmwareMinimums,
   setFirmwarePins,
   uploadFirmware,
   VENDORS,
   vendorLabel,
   type Firmware,
+  type FirmwareMinimum,
   type FirmwarePin,
   type Vendor,
 } from "../api/prov";
@@ -45,6 +50,22 @@ const sameTarget = (
   b: { vendor: string; modelGlob: string },
 ) => a.vendor === b.vendor && a.modelGlob === b.modelGlob;
 
+const HOUR_OPTIONS = [
+  { value: "", label: "Any time" },
+  ...Array.from({ length: 24 }, (_, h) => ({
+    value: String(h),
+    label: `${String(h).padStart(2, "0")}:00`,
+  })),
+];
+
+const toPins = (items: Firmware[]): FirmwarePin[] =>
+  items.map((x) => ({
+    vendor: x.vendor,
+    modelGlob: x.modelGlob,
+    firmwareId: x.id,
+    ...(x.upgradeHour != null ? { upgradeHour: x.upgradeHour } : {}),
+  }));
+
 const formatTime = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
@@ -56,6 +77,7 @@ export function ProvFirmware() {
   const [deleting, setDeleting] = useState<Firmware | null>(null);
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinBusy, setPinBusy] = useState(false);
+  const [minimums, setMinimums] = useState<FirmwareMinimum[]>([]);
   const toast = useToast();
   const { show } = toast;
 
@@ -71,6 +93,16 @@ export function ProvFirmware() {
     return () => controller.abort();
   }, []);
 
+  // The rules are advice for the page; the server enforces them, so a
+  // failed load only costs the early refusal.
+  useEffect(() => {
+    const controller = new AbortController();
+    listFirmwareMinimums(controller.signal)
+      .then(setMinimums)
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+
   const items = list.status === "ready" ? list.items : [];
 
   function onUploaded(f: Firmware) {
@@ -82,41 +114,70 @@ export function ProvFirmware() {
     show(`Firmware ${f.version} uploaded.`);
   }
 
-  async function onPin(f: Firmware, pin: boolean) {
-    // The server takes the complete set; one pin per vendor and model glob.
-    const others = items.filter((x) => x.pinned && !sameTarget(x, f));
-    const next = pin ? [...others, f] : others;
-    const pins: FirmwarePin[] = next.map((x) => ({
-      vendor: x.vendor,
-      modelGlob: x.modelGlob,
-      firmwareId: x.id,
-    }));
+  /** Sends the complete pin set; on success the list shows exactly it. */
+  async function savePins(next: Firmware[], done: string) {
     setPinError(null);
     setPinBusy(true);
     try {
-      await setFirmwarePins(pins);
-      const pinned = new Set(next.map((x) => String(x.id)));
+      await setFirmwarePins(toPins(next));
+      const byId = new Map(next.map((x) => [String(x.id), x]));
       setList((prev) =>
         prev.status === "ready"
           ? {
               status: "ready",
-              items: prev.items.map((x) => ({
-                ...x,
-                pinned: pinned.has(String(x.id)),
-              })),
+              items: prev.items.map((x) => {
+                const n = byId.get(String(x.id));
+                return {
+                  ...x,
+                  pinned: n !== undefined,
+                  upgradeHour: n?.upgradeHour ?? null,
+                };
+              }),
             }
           : prev,
       );
-      show(
-        pin
-          ? `Pinned ${f.version} for ${vendorLabel(f.vendor)} ${f.modelGlob}.`
-          : `Unpinned ${f.version}.`,
-      );
+      show(done);
     } catch (err) {
       setPinError(errorMessage(err));
     } finally {
       setPinBusy(false);
     }
+  }
+
+  async function onPin(f: Firmware, pin: boolean) {
+    // The server takes the complete set; one pin per vendor and model glob.
+    const others = items.filter((x) => x.pinned && !sameTarget(x, f));
+    if (pin) {
+      const floor = minimumForPin(minimums, String(f.vendor), f.modelGlob);
+      if (floor !== "" && compareVersions(f.version, floor) < 0) {
+        setPinError(
+          `Version ${f.version} is below the minimum ${floor} for ${vendorLabel(f.vendor)} ${f.modelGlob}.`,
+        );
+        return;
+      }
+    }
+    await savePins(
+      pin ? [...others, { ...f, upgradeHour: null }] : others,
+      pin
+        ? `Pinned ${f.version} for ${vendorLabel(f.vendor)} ${f.modelGlob}.`
+        : `Unpinned ${f.version}.`,
+    );
+  }
+
+  async function onHour(f: Firmware, hour: string) {
+    const next = items
+      .filter((x) => x.pinned)
+      .map((x) =>
+        x.id === f.id
+          ? { ...x, upgradeHour: hour === "" ? null : Number(hour) }
+          : x,
+      );
+    await savePins(
+      next,
+      hour === ""
+        ? `${f.version} upgrades at any time.`
+        : `${f.version} upgrades at ${hour.padStart(2, "0")}:00.`,
+    );
   }
 
   async function onDelete(f: Firmware) {
@@ -174,6 +235,30 @@ export function ProvFirmware() {
       ),
     },
     {
+      key: "upgradeHour",
+      label: "Upgrade window",
+      render: (f) =>
+        f.pinned && f.vendor === "grandstream" ? (
+          <Can
+            fallback={
+              f.upgradeHour == null
+                ? "Any time"
+                : `${String(f.upgradeHour).padStart(2, "0")}:00`
+            }
+          >
+            <Select
+              aria-label={`Upgrade hour for ${f.version}`}
+              options={HOUR_OPTIONS}
+              value={f.upgradeHour == null ? "" : String(f.upgradeHour)}
+              disabled={pinBusy}
+              onChange={(e) => void onHour(f, e.target.value)}
+            />
+          </Can>
+        ) : (
+          <span className="prov-muted">—</span>
+        ),
+    },
+    {
       key: "actions",
       label: <span className="visually-hidden">Actions</span>,
       align: "right",
@@ -226,6 +311,7 @@ export function ProvFirmware() {
           />
         )}
       </div>
+      <MinimumsCard rules={minimums} onSaved={setMinimums} />
       {deleting && (
         <ConfirmDialog
           title={`Delete ${deleting.filename}?`}
@@ -350,5 +436,80 @@ function UploadForm({ onUploaded }: { onUploaded: (f: Firmware) => void }) {
         </Can>
       </div>
     </form>
+  );
+}
+
+/** The minimum and recommended firmware versions per vendor and model glob. */
+function MinimumsCard({
+  rules,
+  onSaved,
+}: {
+  rules: FirmwareMinimum[];
+  onSaved: (rules: FirmwareMinimum[]) => void;
+}) {
+  const [edit, setEdit] = useState<FirmwareMinimum[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const rows = edit ?? rules;
+
+  const change = (i: number, patch: Partial<FirmwareMinimum>) =>
+    setEdit(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+
+  async function save() {
+    setError(null);
+    setBusy(true);
+    try {
+      await setFirmwareMinimums(rows);
+      onSaved(rows);
+      setEdit(null);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="prov-card" aria-labelledby="fw-min-title">
+      <h2 id="fw-min-title" className="prov-card__title">
+        Minimum versions
+      </h2>
+      <p className="prov-muted">
+        A firmware below the minimum cannot be pinned and is not given to
+        phones. The recommended version is the lab build to upload and pin;
+        Hello ships no vendor firmware.
+      </p>
+      {rows.length === 0 && <span className="prov-muted">No rules.</span>}
+      {rows.map((r, i) => (
+        <div className="prov-grid-2" key={`${r.vendor}/${r.modelGlob}`}>
+          <Input
+            id={`fw-min-${i}-min`}
+            label={`${vendorLabel(r.vendor)} ${r.modelGlob} minimum`}
+            mono
+            value={r.minVersion}
+            onChange={(e) => change(i, { minVersion: e.target.value })}
+          />
+          <Input
+            id={`fw-min-${i}-rec`}
+            label={`${vendorLabel(r.vendor)} ${r.modelGlob} recommended`}
+            mono
+            value={r.recommended}
+            onChange={(e) => change(i, { recommended: e.target.value })}
+          />
+        </div>
+      ))}
+      {error && (
+        <Alert tone="bad" title="Could not save the minimums">
+          {error}
+        </Alert>
+      )}
+      <Can>
+        <div className="prov-row">
+          <Button disabled={busy || edit === null} onClick={() => void save()}>
+            Save minimums
+          </Button>
+        </div>
+      </Can>
+    </section>
   );
 }

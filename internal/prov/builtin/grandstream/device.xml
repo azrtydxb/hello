@@ -225,9 +225,12 @@
 {{- end}}
     <P237>{{xml (noscheme .Prov.URL)}}</P237>
     <P145>0</P145>
-{{- /* Automatic upgrade (PRV-06): P194 on the WP8x6 and WP8xx, P22296 on the WP856. */}}
+{{- /* Automatic upgrade (PRV-06): P194 on the WP8x6 and WP8xx, P22296 on the WP856. A pin's upgrade window (spec S-26) makes P194 = 2, daily at the hour in P285 (config changes then reach the phone by check-sync or at that hour); the WP856 key for it is unverified, so the window is not rendered there. */}}
 {{- if eq .Phone.Family "856"}}
     <P22296>1</P22296>
+{{- else if and .Firmware .Firmware.Window}}
+    <P194>2</P194>
+    <P285>{{.Firmware.Window.Hour}}</P285>
 {{- else}}
     <P194>1</P194>
 {{- end}}
@@ -253,7 +256,8 @@
     <P192>{{xml (noscheme .Dir)}}</P192>
     <P232></P232>
     <P233></P233>
-    <P238>0</P238>
+{{- /* P238 "Firmware Upgrade and Provisioning": 0 checks at every boot, 1 only when the firmware pre/suffix changes, so with a window a reboot does not upgrade outside it. */}}
+    <P238>{{if and .Window (ne $.Phone.Family "856")}}1{{else}}0{{end}}</P238>
 {{- end}}
   </config>
 </gs_provision>
