@@ -30,9 +30,11 @@ type labEnv struct {
 	nodeIPs     map[string]string
 	namespace   string
 	kubectlArgs []string
+	source      string // "kw": the kw manifests; "chart": the Helm chart's pair
+	deployment  string // the Kamailio Deployment's name in that source
 }
 
-func loadLab(t *testing.T) *labEnv {
+func loadLab(t *testing.T, source string) *labEnv {
 	t.Helper()
 	if os.Getenv("HELLO_KINDHA") != "1" {
 		t.Skip("HELLO_KINDHA=1 not set: this test needs the kind cluster the kamailio-ha CI job creates")
@@ -52,7 +54,9 @@ func loadLab(t *testing.T) *labEnv {
 		stubPort:  15060,
 		nodeIPs:   map[string]string{},
 		namespace: "hello",
+		source:    source,
 	}
+	l.deployment = map[string]string{"kw": "kamailio", "chart": "hello-kamailio"}[source]
 	if len(l.nodes) != 2 {
 		t.Fatalf("KINDHA_NODES = %v, want two nodes", l.nodes)
 	}
@@ -257,16 +261,53 @@ func named(l []any, name string) map[string]any {
 	return nil
 }
 
-// manifests returns the kw edge objects patched for the lab.
+// chartResources renders the Helm chart's Kamailio pair (values-ha.yaml, the
+// VIP, the lab's node, NIC and API server) with helm template.
+func (l *labEnv) chartResources(t *testing.T) []map[string]any {
+	t.Helper()
+	_, file, _, _ := runtime.Caller(0)
+	chart := filepath.Join(filepath.Dir(file), "..", "..", "deploy", "helm", "hello")
+	out := run(t, "helm", "template", "hello", chart, "-n", l.namespace, "-f", filepath.Join(chart, "values-ha.yaml"),
+		"--set", "global.imageRegistry=hello.local",
+		"--set", "kamailio.image.tag=ha",
+		"--set", "kamailio.publicPort=30508", "--set", "kamailio.phonesPort=30508",
+		"--set", "kamailio.vip.address="+l.vip,
+		"--set", "kamailio.vip.interface=eth0",
+		"--set", "kamailio.vip.apiServerAddress="+l.nodeIPs[l.control],
+		"--set", "kamailio.vip.legacy=true")
+	dec := yaml.NewDecoder(strings.NewReader(out))
+	var docs []map[string]any
+	for {
+		var d map[string]any
+		if err := dec.Decode(&d); err != nil {
+			break
+		}
+		if len(d) > 0 {
+			docs = append(docs, d)
+		}
+	}
+	return docs
+}
+
+// manifests returns the edge objects of the source under test, patched for
+// the lab.
 func (l *labEnv) manifests(t *testing.T) []byte {
 	t.Helper()
 	keep := map[string]bool{
 		"ConfigMap/hello-kamailio": true, "ServiceAccount/kamailio-vip": true, "Role/kamailio-vip": true,
 		"RoleBinding/kamailio-vip": true, "PodDisruptionBudget/kamailio": true, "Deployment/kamailio": true,
 	}
+	docs := kwResources(t)
+	if l.source == "chart" {
+		keep = map[string]bool{
+			"ConfigMap/hello-kamailio": true, "ServiceAccount/hello-kamailio-vip": true, "Role/hello-kamailio-vip": true,
+			"RoleBinding/hello-kamailio-vip": true, "PodDisruptionBudget/hello-kamailio": true, "Deployment/hello-kamailio": true,
+		}
+		docs = l.chartResources(t)
+	}
 	var out bytes.Buffer
 	seen := 0
-	for _, d := range kwResources(t) {
+	for _, d := range docs {
 		key := fmt.Sprint(d["kind"], "/", asMap(d["metadata"])["name"])
 		if !keep[key] {
 			continue
@@ -280,6 +321,9 @@ func (l *labEnv) manifests(t *testing.T) []byte {
 			asMap(d["data"])["dispatcher.list"] = fmt.Sprintf("1 sip:hello-sip-1.%s.svc.cluster.local:%d 0 0 duid=hello-sip-1\n", l.namespace, l.stubPort)
 		case "Deployment/kamailio":
 			l.patchDeployment(t, d)
+		case "Deployment/hello-kamailio":
+			// The chart's own node selection (the edge label), image, VIP, NIC
+			// and API server are values; nothing to patch.
 		}
 		b, err := yaml.Marshal(d)
 		if err != nil {
@@ -289,7 +333,7 @@ func (l *labEnv) manifests(t *testing.T) []byte {
 		out.Write(b)
 	}
 	if seen != len(keep) {
-		t.Fatalf("found %d of the %d kw edge objects", seen, len(keep))
+		t.Fatalf("found %d of the %d edge objects of the %s", seen, len(keep), l.source)
 	}
 	fmt.Fprintf(&out, `---
 apiVersion: v1
@@ -355,6 +399,24 @@ func (l *labEnv) patchDeployment(t *testing.T, d map[string]any) {
 	vip := named(asList(spec["containers"]), "vip")
 	setEnv(vip, "address", l.vip)
 	setEnv(vip, "vip_interface", "eth0")
+}
+
+// reset removes what a previous source left (the namespace, so the pods and
+// kube-vip's release of the VIP go with it) and waits until no node holds the
+// VIP: the next source starts from nothing.
+func (l *labEnv) reset(t *testing.T) {
+	t.Helper()
+	l.waitAPI(t)
+	if _, err := l.tryKubectl("get", "namespace", l.namespace); err == nil {
+		l.kubectl(t, "delete", "namespace", l.namespace, "--wait=true", "--timeout=300s")
+	}
+	deadline := time.Now().Add(2 * time.Minute)
+	for len(l.holders()) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the VIP is still held by %v after the namespace was deleted", l.holders())
+		}
+		time.Sleep(time.Second)
+	}
 }
 
 // waitAPI waits until the kind API server answers readyz: a loaded runner can
@@ -431,8 +493,14 @@ func (l *labEnv) apply(t *testing.T) {
 	if err := os.WriteFile(f, l.manifests(t), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	l.retry(t, "apply", "-f", f)
-	l.rolloutStatus(t, "kamailio", 10*time.Minute)
+	if l.source == "chart" {
+		// values-ha.yaml selects the edge nodes by this label.
+		for _, n := range l.nodes {
+			l.retry(t, "label", "node", n, "hello.example.com/edge=true", "--overwrite")
+		}
+	}
+	l.retry(t, "-n", l.namespace, "apply", "-f", f)
+	l.rolloutStatus(t, l.deployment, 10*time.Minute)
 }
 
 // diagnostics prints what an operator would look at.

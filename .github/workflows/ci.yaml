@@ -751,6 +751,7 @@ jobs:
     # node), requires the VIP to move, BYE from either side and a takeover
     # re-INVITE to succeed through the survivor and a registered phone to be
     # called without re-registering, then restarts both instances one at a time.
+    # It runs twice: against the kw manifests and against the Helm chart's pair.
     # Full tier: on a pull request only when the change touches the edge (the
     # first step decides); always on main, the nightly cron and dispatch.
     # Starts after the unit jobs finish (whatever their result): a kind control
@@ -763,6 +764,7 @@ jobs:
     env:
       KIND_VERSION: v0.30.0
       KUBECTL_VERSION: v1.34.0
+      HELM_VERSION: v4.1.1
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -796,6 +798,12 @@ jobs:
           curl -fsSL "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${a}" -o "$HOME/bin/kind"
           curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${a}/kubectl" -o "$HOME/bin/kubectl"
           chmod +x "$HOME/bin/kind" "$HOME/bin/kubectl"
+          d=$(mktemp -d)
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz" -o "$d/helm.tgz"
+          curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${a}.tar.gz.sha256sum" -o "$d/helm.sha"
+          echo "$(cut -d' ' -f1 "$d/helm.sha")  $d/helm.tgz" | sha256sum -c -
+          tar -xzf "$d/helm.tgz" -C "$d" "linux-${a}/helm"
+          install "$d/linux-${a}/helm" "$HOME/bin/helm"
           echo "$HOME/bin" >> "$GITHUB_PATH"
       - if: steps.changed.outputs.run == 'true'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1

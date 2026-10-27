@@ -107,11 +107,50 @@ anti-affinity enforces it, since two would fight over UDP 5060 and TCP
 allow the ports above. The chart's pods keep cluster DNS
 (`ClusterFirstWithHostNet`) so they still resolve Services.
 
-If that node is lost, Kamailio is not rescheduled to another address by
-itself. Put `publicHost` on a virtual IP that moves between a few edge
-nodes (kube-vip, keepalived, a cloud load balancer with UDP) and label those
-nodes; Kamailio redundancy itself is a documented limitation, see
-[docs/ha.md](ha.md#kamailio-loss).
+If that node is lost, a single Kamailio is not rescheduled to another
+address by itself. Run two behind a virtual IP instead, see
+[Kamailio pair and a virtual IP](#kamailio-pair-and-a-virtual-ip).
+
+### Kamailio pair and a virtual IP
+
+Two Kamailio on two edge nodes, one virtual IP that follows a healthy one:
+phones keep one address through the loss of either node, a deploy or a
+reboot ([docs/ha.md](ha.md#kamailio-pair) says what a failure does and how it
+is proven). It needs `hostNetwork`, two nodes on one layer-2 network, and a
+free address on it, outside any load balancer pool. Label the nodes, then:
+
+```yaml
+kamailio:
+  replicas: 2
+  nodeSelector:
+    hello.example.com/edge: "true"
+  vip:
+    enabled: true
+    address: 192.168.10.109 # the VIP phones use; kamailio.publicHost follows it
+    interface: eth0 # the NIC that carries it on those nodes
+```
+
+- Each pod runs a kube-vip container (ARP mode, one election Lease in the
+  release's namespace) beside Kamailio. The chart creates its ServiceAccount
+  and a Role that can use Leases and nothing else; the token is mounted into
+  the kube-vip container alone. Whoever installs the chart needs to be allowed
+  to create that Role (Kubernetes lets only a subject that holds the rules
+  itself, or an admin, grant them).
+- Both pods run on different nodes (required hostname anti-affinity), roll one
+  at a time (`RollingUpdate`, `maxSurge: 0`, `maxUnavailable: 1`,
+  `kamailio.minReadySeconds`) and have a PodDisruptionBudget. A node drain
+  therefore waits for the other instance to be Ready.
+- The phones and Hello-facing sockets bind the VIP, so Via, Path and both
+  Record-Routes name it and survive an instance. Hello's
+  `sip.trustedProxies` must cover the VIP (it is an address of the node
+  network, which the HA layout already trusts).
+- `kamailio.vip.apiServerAddress` sets the address kube-vip's API name
+  `kubernetes` resolves to: `127.0.0.1` on control-plane nodes (as kube-vip's
+  own DaemonSet does, so it never depends on a VIP to take one), empty
+  elsewhere.
+- Phones that were provisioned with an instance's own address keep working
+  with `kamailio.vip.legacy: true` until they have moved
+  ([docs/provisioning.md](provisioning.md#moving-phones-to-a-new-kamailio-address)).
 
 ### NodePort or LoadBalancer
 
@@ -196,8 +235,10 @@ identical across nodes; it is one value for the StatefulSet.
   node: hello-sip allows one unavailable at a time, which leaves the other
   as the survivor the first hands its calls to; hello-control and hello-ui
   (when they have more than one replica) the same. A single hello-sip node
-  gets no budget, since it would block every drain forever. Kamailio is one
-  replica and has none for the same reason.
+  gets no budget, since it would block every drain forever. A single
+  Kamailio has none for the same reason; a Kamailio pair
+  (`kamailio.replicas: 2`) allows one unavailable, so a drain waits for the
+  other instance to be Ready.
 - Draining a Kubernetes node with `kubectl drain` evicts a hello-sip pod,
   which receives SIGTERM, drains (its calls move to another node) and exits
   inside `sip.terminationGracePeriodSeconds` (default 150 s, above
@@ -321,23 +362,26 @@ node has none, and its calls end during an upgrade.
    pods cannot run against.
 
 3. Upgrade Kamailio when its image or configuration changes (its config
-   checksum annotation rolls the pod when `kamailio.cfg` or the node list
-   changes). Kamailio is one replica with the `Recreate` strategy (under
+   checksum annotation rolls the pods when `kamailio.cfg` or the node list
+   changes). A Kamailio pair (`kamailio.replicas: 2`) rolls one instance at a
+   time (`RollingUpdate`, `maxSurge: 0`, `maxUnavailable: 1`): the other keeps
+   the VIP and the phones while the first restarts, so nothing is paused.
+   A single Kamailio is one replica with the `Recreate` strategy (under
    hostNetwork the new pod needs the old one's ports), so signalling pauses
    for the seconds it is down. Established calls keep their media
    (anchored RTP is carried by the hello-sip nodes); in-dialog requests
    made while it is down (a hangup, a hold) fail or retry, and a handoff
    in progress at that moment would fail too, which is why this step is not
    combined with step 2. Kamailio's Record-Route for the hello nodes carries
-   its own pod address, so on the pod network (hostNetwork off) a replaced
-   Kamailio has a new address, and requests that hello-sip originates inside
-   calls set up before the roll (a hangup by the far side, a re-INVITE) go to
-   the old one and are lost; the kind job shows this, and only a phone's own
-   hangup still works. With hostNetwork the address is the node's and survives
-   the roll, which is one more reason it is the recommended mode. The
-   wait-dispatcher init container makes the new
-   Kamailio wait (bounded) until the nodes' names resolve, instead of
-   crash-looping.
+   its own address: with a VIP that is the VIP, which survives the roll;
+   with a single Kamailio under hostNetwork it is the node's, which also
+   survives it; on the pod network (hostNetwork off) a replaced Kamailio has a
+   new address, and requests that hello-sip originates inside calls set up
+   before the roll (a hangup by the far side, a re-INVITE) go to the old one
+   and are lost; the kind job shows this, and only a phone's own hangup still
+   works. That is one more reason hostNetwork is the recommended mode. The
+   wait-dispatcher init container makes the new Kamailio wait (bounded) until
+   the nodes' names resolve, instead of crash-looping.
 4. Verify: the Cluster page shows every node READY on the new version, the
    calls that were active are still listed (a call that moved shows
    `ha: taken-over` in the live view and its CDR trace), and
@@ -374,12 +418,13 @@ expressed:
 | hello-sip nodes   | Deployments `hello-sip-1`, `hello-sip-2`, one headless Service each, `Recreate` | One StatefulSet, one headless Service, ordered `RollingUpdate` |
 | Staggered rollout | Rollout gate: a stopping node takes a Valkey token and waits for a READY peer   | Inherent: the next pod is not replaced until the last is ready |
 | Node identity     | Pod name of a Deployment; advertised Service name                               | Stable pod name; advertised pod DNS name                       |
-| Kamailio          | Pinned to master-11, ports 30508/9071                                           | `hostNetwork` option, `nodeSelector`, ports are values         |
+| Kamailio          | Two instances on master-11/12, VIP 192.168.10.109 (kube-vip), ports 30508/9071  | `replicas`, `vip` option, `nodeSelector`, ports are values     |
 | Secrets           | Five Sync-managed SOPS Secrets                                                  | One existing Secret by reference                               |
 | State services    | PostgreSQL, MinIO, two Valkeys, three Sentinels as Deployments                  | Optional bundled single instances, or external                 |
 
 `test/deploy` renders the chart and compares it with the kw manifests: every
 environment variable kw sets on hello-sip, hello-control and Kamailio must
 exist in the chart (the few kw-only tuning variables are listed in the test
-with their reasons), probes and ports must match, and the Kamailio
-configuration must equal `deploy/kamailio/kamailio.cfg`.
+with their reasons), probes and ports must match, the kube-vip container and
+its Role must equal kw's, and the Kamailio configuration must equal
+`deploy/kamailio/kamailio.cfg`.

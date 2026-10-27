@@ -30,12 +30,20 @@ sip:
 
 kamailio:
   hostNetwork: true
-  # The address of the node Kamailio is pinned to (or a VIP that moves with it).
-  publicHost: 192.168.10.101
+  # Two Kamailio on two edge nodes (label them hello.example.com/edge=true,
+  # nodes of one layer-2 network), one virtual IP that follows a healthy one:
+  # phones keep one address through the loss of either node. publicHost is the
+  # VIP, set below. docs/ha.md, "Kamailio pair".
+  replicas: 2
   publicPort: 5060
   phonesPort: 5060
   nodeSelector:
-    kubernetes.io/hostname: edge-1
+    hello.example.com/edge: "true"
+  vip:
+    enabled: true
+    # A free address of that network, outside any load balancer pool.
+    address: 192.168.10.109
+    interface: eth0
 
 ui:
   replicas: 2

@@ -114,7 +114,7 @@ spec:
             - name: HELLO_PROV_PUBLIC_URL
               value: {{ $prov.publicUrl | quote }}
             - name: HELLO_PROV_SIP_SERVER
-              value: {{ default (printf "%s:%v" (required "kamailio.publicHost is required" .Values.kamailio.publicHost) .Values.kamailio.publicPort) $prov.sipServer | quote }}
+              value: {{ default (printf "%s:%v" (include "hello.kamailioPublicHost" .) .Values.kamailio.publicPort) $prov.sipServer | quote }}
             {{- with $prov.trustedProxies }}
             - name: HELLO_PROV_TRUSTED_PROXIES
               value: {{ . | quote }}
