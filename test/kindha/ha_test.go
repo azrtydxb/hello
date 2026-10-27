@@ -26,8 +26,12 @@ const domain = "hello.kind"
 
 // vipFailoverBound is how long the VIP may take to answer from the surviving
 // instance after the active one is lost (the Lease is 5 s; the rest is the
-// Kamailio start and the neighbours' ARP caches).
-const vipFailoverBound = 25 * time.Second
+// Kamailio start and the neighbours' ARP caches). A deleted pod's kube-vip
+// may hold the Lease until its container is stopped (up to the pod's 30 s
+// grace) on a loaded runner, so the bound is generous; the logged times are
+// the measurement, and the acceptance bound that matters (a BYE within 5 s of
+// the VIP moving) is byeBound.
+const vipFailoverBound = 60 * time.Second
 
 // byeBound is the acceptance bound: a BYE ends a call within 5 s of the VIP
 // moving.
