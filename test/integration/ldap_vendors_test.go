@@ -86,7 +86,7 @@ func TestLDAPAsVendors(t *testing.T) {
 	}
 
 	cert, pool := ldapTestCert(t)
-	srv := ldapdir.New(ldapdir.Config{Base: base, Backend: st, TLS: &tls.Config{Certificates: []tls.Certificate{cert}}})
+	srv := ldapdir.New(ldapdir.Config{Base: base, Backend: st, Limiter: noLimit{}, TLS: &tls.Config{Certificates: []tls.Certificate{cert}}})
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -207,3 +207,10 @@ func ldapTestCert(t *testing.T) (tls.Certificate, *x509.CertPool) {
 	pool.AddCert(leaf)
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, pool
 }
+
+// noLimit never blocks: the vendors share one source address, and the last
+// step of each deliberately fails a bind.
+type noLimit struct{}
+
+func (noLimit) Blocked(context.Context, string) bool { return false }
+func (noLimit) Fail(context.Context, string)         {}

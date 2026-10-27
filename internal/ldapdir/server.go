@@ -394,7 +394,7 @@ func (ss *session) bind(m message) bool {
 	if c[2].ClassType != ber.ClassContext || c[2].Tag != bindAuthSimple {
 		return reply(ResultAuthMethodNotSupported, "only simple bind is supported")
 	}
-	name, pw := NormDN(str(c[1])), string(c[2].Data.Bytes())
+	name, pw := NormDN(str(c[1])), c[2].Data.String()
 	switch {
 	case name == "" && pw == "":
 		if !ss.s.cfg.Anon {
@@ -692,7 +692,7 @@ func fingerprint(req searchReq, phone int64, matches []*entry) string {
 	h := sha256.New()
 	var b bytes.Buffer
 	b.WriteString(req.base)
-	b.WriteByte(byte(req.scope))
+	b.WriteString(strconv.FormatInt(req.scope, 10))
 	b.Write(req.filterRaw)
 	b.WriteString(strconv.FormatInt(phone, 10))
 	b.WriteString(strconv.Itoa(len(matches)))

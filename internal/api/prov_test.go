@@ -51,6 +51,7 @@ func newProvEnvLog(t *testing.T, pc ProvConfig, log *slog.Logger) *provEnv {
 	pc.Settings = store.ProvSettings{
 		PublicURL: testPublicURL, SIPServer: "192.0.2.10:5060", Domain: testDomain, Expiry: time.Hour,
 		Resync: 24 * time.Hour, Timezone: "UTC", NTP: "pool.ntp.org", TokenGrace: 7 * 24 * time.Hour,
+		LDAPBase: pc.Settings.LDAPBase, LDAPPort: pc.Settings.LDAPPort,
 	}
 	e := newEnvConfig(t, Config{Prov: pc, Log: log}, box)
 	c := e.login()

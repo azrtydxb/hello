@@ -6,7 +6,6 @@ package ldapdir
 
 import (
 	"errors"
-	"fmt"
 
 	ber "github.com/go-asn1-ber/asn1-ber"
 )
@@ -153,7 +152,7 @@ func parseControl(p *ber.Packet) (control, error) {
 	if len(p.Children) < 1 || len(p.Children) > 3 {
 		return control{}, errProtocol
 	}
-	c := control{oid: string(p.Children[0].Data.Bytes())}
+	c := control{oid: p.Children[0].Data.String()}
 	for _, ch := range p.Children[1:] {
 		switch ch.Tag {
 		case ber.TagBoolean:
@@ -178,7 +177,7 @@ func intOf(p *ber.Packet) (int64, bool) {
 	return v, err == nil
 }
 
-func str(p *ber.Packet) string { return string(p.Data.Bytes()) }
+func str(p *ber.Packet) string { return p.Data.String() }
 
 func octets(v string, desc string) *ber.Packet {
 	return ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, v, desc)
@@ -229,21 +228,4 @@ func parsePaged(v []byte) (size int64, cookie []byte, err error) {
 		return 0, nil, errProtocol
 	}
 	return size, p.Children[1].Data.Bytes(), nil
-}
-
-func (m message) opName() string {
-	switch m.op.Tag {
-	case opBindRequest:
-		return "bind"
-	case opSearchRequest:
-		return "search"
-	case opUnbindRequest:
-		return "unbind"
-	case opExtRequest:
-		return "extended"
-	case opAbandonRequest:
-		return "abandon"
-	default:
-		return fmt.Sprintf("op%d", m.op.Tag)
-	}
 }

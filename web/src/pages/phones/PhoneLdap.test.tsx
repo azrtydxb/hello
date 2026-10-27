@@ -51,7 +51,8 @@ const ldap = (over: Record<string, unknown> = {}) => ({
 
 function api(state: Record<string, unknown>, extra = {}) {
   return mockApi({
-    "GET /api/v1/phones": () => json([phone]),
+    "GET /api/v1/auth/me": () => json({ username: "u", role: "admin" }),
+    "GET /api/v1/phones": () => json({ items: [phone] }),
     "GET /api/v1/phones/5": () => json(phone),
     "GET /api/v1/phones/5/fetches?limit=50": () =>
       json({ items: [], next: "" }),

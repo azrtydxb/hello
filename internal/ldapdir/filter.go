@@ -54,7 +54,7 @@ func parseFilterAt(p *ber.Packet, depth int, n *int) (*filter, error) {
 	if p.ClassType != ber.ClassContext {
 		return nil, errProtocol
 	}
-	f := &filter{kind: int(p.Tag)}
+	f := &filter{kind: int(p.Tag)} //nolint:gosec // G115: a context tag, small by construction
 	switch f.kind {
 	case filterAnd, filterOr:
 		if len(p.Children) == 0 && f.kind == filterOr {
