@@ -236,3 +236,24 @@ func normaliseCallerID(tr *Trace, ct *compiledTransform, cid string) string {
 	tr.Add(fmt.Sprintf("Caller ID rewrite %s -> %s", show(cid), out))
 	return out
 }
+
+// Pattern is a compiled dial-plan pattern (an exact number, an X pattern or a
+// Go regex) for packages outside routing that match numbers the same way,
+// such as the ring tag rules.
+type Pattern struct{ p dialPattern }
+
+// CompilePattern compiles one dial-plan pattern; a non-empty message says why
+// it is not valid.
+func CompilePattern(p string) (Pattern, string) {
+	re, msg := compileDialPattern(p)
+	if msg != "" {
+		return Pattern{}, msg
+	}
+	return Pattern{dialPattern{raw: p, re: re}}, ""
+}
+
+// Matches reports whether number matches the pattern, tried as given and with
+// a leading "+" toggled.
+func (p Pattern) Matches(number string) bool {
+	return p.p.re != nil && p.p.matches(number)
+}

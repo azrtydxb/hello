@@ -111,6 +111,15 @@ type Store interface {
 	UpdateCalendar(ctx context.Context, actor string, id int64, in store.CalendarInput, check store.Check) (store.Calendar, error)
 	ImportCalendarEntries(ctx context.Context, actor string, id int64, entries []timecond.Entry, replace bool, check store.Check) (store.Calendar, error)
 	DeleteCalendar(ctx context.Context, actor string, id int64, check store.Check) error
+	ListRingTags(ctx context.Context) ([]store.RingTag, error)
+	GetRingTag(ctx context.Context, name string) (store.RingTag, error)
+	CreateRingTag(ctx context.Context, actor string, in store.RingTagInput) (store.RingTag, error)
+	UpdateRingTag(ctx context.Context, actor, name string, in store.RingTagInput) (store.RingTag, error)
+	DeleteRingTag(ctx context.Context, actor, name string) error
+	ListRingRules(ctx context.Context) ([]store.RingRule, error)
+	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
+	GetRingMap(ctx context.Context) (store.RingMap, error)
+	ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []store.RingMapEntry) (store.RingMap, error)
 	ListTimeConditions(ctx context.Context) ([]store.TimeCondition, error)
 	GetTimeCondition(ctx context.Context, id int64) (store.TimeCondition, error)
 	CreateTimeCondition(ctx context.Context, actor string, in store.TimeConditionInput, check store.Check) (store.TimeCondition, error)

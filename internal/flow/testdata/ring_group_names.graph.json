@@ -79,7 +79,7 @@
         "ringTimeout": 0,
         "strategy": "ring-all"
       },
-      "version": "35bb46076e8284c9"
+      "version": "5731b8fcf27025fd"
     },
     {
       "id": "ringGroup:2",
@@ -90,7 +90,7 @@
         "ringTimeout": 0,
         "strategy": "ring-all"
       },
-      "version": "7d10734e47e26e62"
+      "version": "98f8233a107ae49b"
     }
   ],
   "edges": [

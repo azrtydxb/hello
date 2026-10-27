@@ -45,6 +45,7 @@ import { UNKNOWN } from "./callflow/format";
 import { FormAlert } from "./callflow/ui";
 import { Can } from "../role";
 import { MOHSelect } from "./media/MohSelect";
+import { RingTagSelect } from "./ringtags/RingTagSelect";
 
 const FORM_ID = "group-form";
 
@@ -377,6 +378,7 @@ interface GroupDraft {
   failureTarget: string;
   mohClassId: Id | null;
   mohRingback: boolean;
+  ringTag: string;
   members: MemberDraft[];
 }
 
@@ -392,6 +394,7 @@ function groupDraft(group: RingGroup | null): GroupDraft {
     failureTarget: group?.failureTarget ?? "",
     mohClassId: group?.mohClassId ?? null,
     mohRingback: group?.mohRingback ?? false,
+    ringTag: group?.ringTag ?? "",
     members: (group?.members ?? [])
       .slice()
       .sort((a, b) => a.position - b.position)
@@ -415,6 +418,7 @@ function groupBody(d: GroupDraft): RingGroupFields {
     failureTarget: d.failureKind === "none" ? "" : d.failureTarget.trim(),
     mohClassId: d.mohClassId,
     mohRingback: d.mohRingback,
+    ringTag: d.ringTag,
     members: d.members.map((m, i) => ({
       extensionId: m.extensionId,
       position: i + 1,
@@ -437,6 +441,7 @@ function groupKeys(d: GroupDraft): string[] {
     "failureTarget",
     "mohClassId",
     "mohRingback",
+    "ringTag",
     "members",
     ...d.members.flatMap((_, i) => [
       `members[${i}]`,
@@ -707,6 +712,15 @@ function RingGroupDrawer({
           labelPosition="end"
           checked={d.mohRingback}
           onChange={(e) => set("mohRingback", e.target.checked)}
+        />
+        <RingTagSelect
+          id={fid("ringTag")}
+          label="Ring tag"
+          hint="Chooses the ring tone on phones that map ring tags. Rules on the Ringing page can still override it."
+          emptyLabel="Default (ringgroup)"
+          value={d.ringTag}
+          error={errors.ringTag}
+          onChange={(v) => set("ringTag", v)}
         />
 
         <fieldset

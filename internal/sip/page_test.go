@@ -98,10 +98,15 @@ func expectAutoAnswer(t *testing.T, who string, req *sip.Request) {
 
 func expectNoAutoAnswer(t *testing.T, who string, req *sip.Request) {
 	t.Helper()
-	for _, h := range []string{"Call-Info", "Alert-Info", "Answer-After"} {
+	for _, h := range []string{"Call-Info", "Answer-After"} {
 		if v := req.GetHeader(h); v != nil {
 			t.Errorf("%s: carries %s: %s", who, h, v.Value())
 		}
+	}
+	// An ordinary call carries only the ring tag's Alert-Info (S-41), never
+	// an auto-answer one.
+	if v := req.GetHeader("Alert-Info"); v != nil && !strings.Contains(v.Value(), "info=hello-") {
+		t.Errorf("%s: carries Alert-Info: %s", who, v.Value())
 	}
 }
 
