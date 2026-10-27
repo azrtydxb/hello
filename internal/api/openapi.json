@@ -182,7 +182,8 @@
         },
         "security": [],
         "x-hello-mcp": {
-          "exclude": "starts a browser session"
+          "exclude": "starts a browser session",
+          "category": "session"
         }
       }
     },
@@ -226,7 +227,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -280,7 +282,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -354,7 +357,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -421,7 +425,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -485,7 +490,8 @@
         "x-hello-scope": "session",
         "x-hello-role": "user",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -529,7 +535,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       },
       "put": {
@@ -594,7 +601,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "two-factor authentication is managed in the console only"
+          "exclude": "two-factor authentication is managed in the console only",
+          "category": "credentials"
         }
       }
     },
@@ -649,7 +657,8 @@
         "x-hello-scope": "admin",
         "x-hello-role": "admin",
         "x-hello-mcp": {
-          "exclude": "user and role management stays in the console"
+          "exclude": "user and role management stays in the console",
+          "category": "credentials"
         }
       }
     },
