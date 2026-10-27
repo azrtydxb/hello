@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/azrtydxb/hello/internal/oauth"
 )
 
 // TestOriginateStore fails if a request does not round-trip, its state is not
@@ -63,5 +65,25 @@ func TestOriginateStore(t *testing.T) {
 	}
 	if got, _ := s.GetOriginateSettings(ctx); got.Destinations != "restricted" || len(got.CountryPrefixes) != 2 || !got.AutoAnswerAllowed {
 		t.Fatalf("policy = %+v", got)
+	}
+}
+
+// TestPreregisteredClientUpsert fails if the dialer client is not stored as
+// preregistered, not refreshed when the public URL changes, or if it
+// overwrites a client of another kind with the same id.
+func TestPreregisteredClientUpsert(t *testing.T) {
+	ctx := context.Background()
+	s := scratchStore(t)
+	c := oauth.Client{ID: "hello-dialer", Name: "Hello dialer", ClientURI: "https://a.example", RedirectURIs: []string{"https://a.example/integrations/dialer/callback"}}
+	if err := s.UpsertPreregisteredClient(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	c.RedirectURIs = []string{"https://b.example/integrations/dialer/callback"}
+	if err := s.UpsertPreregisteredClient(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Client(ctx, "hello-dialer")
+	if err != nil || got.Kind != oauth.ClientPreregistered || got.RedirectURIs[0] != "https://b.example/integrations/dialer/callback" {
+		t.Fatalf("client = %+v, %v", got, err)
 	}
 }

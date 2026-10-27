@@ -95,6 +95,62 @@ describe("Dial", () => {
     );
   });
 
+  it("follows the event stream and polls only if it drops", async () => {
+    const enc = new TextEncoder();
+    let ctl!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        ctl = c;
+      },
+    });
+    const calls = mockApi({
+      ...ALICE,
+      "POST /api/v1/calls/originate": () => json(status("queued"), 202),
+      "GET /api/v1/events/stream?types=call.originate.progress": () =>
+        new Response(body, {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+      "GET /api/v1/calls/originate/orig_1": () => json(status("connected")),
+    });
+    renderApp("/dial?n=0501234567");
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Call 0501234567/ }),
+    );
+    await screen.findByText("Getting a line…");
+    const event = {
+      apiVersion: "1",
+      id: "evt_1",
+      type: "call.originate.progress",
+      createdAt: "2026-10-27T10:00:02Z",
+      data: {
+        callId: "orig_1",
+        originateId: "orig_1",
+        state: "ringing_agent",
+        from: {},
+        to: {},
+      },
+    };
+    ctl.enqueue(
+      enc.encode(
+        `id: 1-0\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+      ),
+    );
+    expect(
+      await screen.findByText(/Your phone is ringing/),
+    ).toBeInTheDocument();
+    // The stream carries it: nothing polls the request except the one read
+    // on open.
+    await new Promise((r) => setTimeout(r, 1300));
+    expect(
+      calls.filter((c) => c.url === "/api/v1/calls/originate/orig_1").length,
+    ).toBeLessThanOrEqual(1);
+    ctl.close(); // the stream drops: polling takes over
+    expect(
+      await screen.findByText("Connected.", {}, { timeout: 4000 }),
+    ).toBeInTheDocument();
+  });
+
   it("says why a call failed", async () => {
     mockApi({
       ...ALICE,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { ApiError, errorMessage } from "../api";
+import { streamEvents } from "../api/events";
 import {
   cancelOriginate,
   dialable,
@@ -9,6 +10,7 @@ import {
   originateCall,
   originateFinished,
   type OriginateReason,
+  type OriginateState,
   type OriginateStatus,
 } from "../api/originate";
 import { useAuth } from "../auth";
@@ -89,13 +91,15 @@ export function Dial() {
   const noPhone = linked.length === 0 && !canNameAny;
   const running = status !== null && !originateFinished(status.state);
 
-  // Follow the call until it is over.
+  // Follow the call until it is over: from the event stream, and by polling
+  // only while the stream is not there (it dropped or was refused).
   const id = status?.originateId;
   const finished = status !== null && originateFinished(status.state);
   useEffect(() => {
     if (!id || finished) return;
     const ctl = new AbortController();
-    const timer = setInterval(() => {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const poll = () => {
       getOriginate(id, ctl.signal)
         .then((s) => {
           if (!ctl.signal.aborted) setStatus(s);
@@ -103,7 +107,30 @@ export function Dial() {
         .catch((err: unknown) => {
           if (!ctl.signal.aborted) setError(errorMessage(err));
         });
-    }, POLL_MS);
+    };
+    const startPolling = () => {
+      if (ctl.signal.aborted || timer !== undefined) return;
+      timer = setInterval(poll, POLL_MS);
+    };
+    streamEvents(
+      { types: ["call.originate.progress"] },
+      {
+        // One read now covers a state change that happened before the
+        // stream opened.
+        onOpen: poll,
+        onEvent: (e) => {
+          if (e.data.originateId !== id || !e.data.state) return;
+          const state = e.data.state as OriginateState;
+          const reason = e.data.reason as OriginateReason | undefined;
+          setStatus((prev) =>
+            prev && prev.originateId === id
+              ? { ...prev, state, reason, updatedAt: e.createdAt }
+              : prev,
+          );
+        },
+      },
+      ctl.signal,
+    ).then(startPolling, startPolling);
     return () => {
       ctl.abort();
       clearInterval(timer);

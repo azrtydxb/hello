@@ -910,16 +910,18 @@ forbidden_role` for another, `403 no_extension` with none); an operator or
 - **Policy routes** are `GET`/`PUT /api/v1/integrations/click-to-call` (admin),
   not under `/calls/originate`, which `{id}` would shadow. Settings live in the
   singleton `originate_settings`; the policy shown on Integrations > Overview.
-- **`/dial` polls** `GET /calls/originate/{id}` once a second instead of
-  holding an event-stream connection (the stream is limited to 5 per
-  credential and the page needs the state, which GET already answers); the
-  events still carry every state for other clients. The page is a nav item in
-  _My phone_ and a route for every role. `tel:` registration is the explicit
-  _Use Hello for phone links_ button.
-- **No `hello-dialer` OAuth client**: the spec registers one with P3 for the
-  dialer, but `/dial` runs in the console with the session cookie; nothing
-  uses a pre-registered client until P5 (extension) and P6 (HubSpot), which
-  register their own. Reported, not built.
+- **`/dial` follows the P1 event stream** (`call.originate.progress`, filtered
+  by `originateId`) and does one `GET /calls/originate/{id}` when the stream
+  opens, to cover a change that came before it. Only if the stream drops or is
+  refused does it poll once a second. The page is a nav item in _My phone_ and
+  a route for every role. `tel:` registration is the explicit _Use Hello for
+  phone links_ button.
+- **`hello-dialer` is registered** as a `preregistered` OAuth client
+  (`oauth.PreregisteredClients`, upserted by hello-control at start when
+  `HELLO_PUBLIC_URL` is set): a public PKCE client, Verified, redirect URI
+  `<public URL>/integrations/dialer/callback`. The console dialer itself uses
+  the session cookie; the client is there for the pop-up consent flow later
+  apps reuse.
 - **Setup timeout** is `HELLO`-independent: 30 s (`Config.OriginateRing`), not
   an environment variable; the request carries no override.
 - **Audit** rows: `originate` (the extension and the first four digits of the
