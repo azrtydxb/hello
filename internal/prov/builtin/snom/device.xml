@@ -13,6 +13,14 @@
 {{- /* Text messages (SIP MESSAGE, RFC 3428): Snom documents no key to switch instant messages on that we could cite, so none is written; the phone shows a MESSAGE it receives as it does by default. Unverified on hardware (lab item). */}}
 {{- /* HD voice: codec_priority_list of identity 1 in order of preference (Snom Service Hub, codec_priority_list; D3xx/D7xx/D8xx): Opus (D7xx and D8xx), G.722, PCMU, PCMA, then telephone-event for DTMF. Another identity of a multi-line model has the same setting with its own idx. Unverified on hardware (verify). */}}
     <codec_priority_list idx="1" perm="R">{{if .Codecs.Opus}}opus,{{end}}g722,pcmu,pcma,telephone-event</codec_priority_list>
+{{- /* Ring map (phone-feature-parity S-44): alert_internal_ring_text, alert_external_ring_text and alert_group_ring_text are the Alert-Info texts of the three classes (Hello sends alert-internal, alert-external and alert-group to a Snom) and alert_*_ring_sound the tone, Ringer1 to Ringer10 or Silent (Snom Service Hub); ring_sound is the line's own tone, Hello's internal tone. Other tags have no Snom class. Unverified on hardware (verify). */}}
+{{- range .Ring.Rules}}
+    <alert_{{.Class}}_ring_text perm="R">{{xml .Text}}</alert_{{.Class}}_ring_text>
+    <alert_{{.Class}}_ring_sound perm="R">{{xml .Tone}}</alert_{{.Class}}_ring_sound>
+{{- end}}
+{{- with .Ring.Default}}
+    <ring_sound idx="1" perm="R">{{xml .}}</ring_sound>
+{{- end}}
 {{- /* MWI (spec S-1): user_mailbox names the mailbox the phone ties MWI to and dials for voicemail (Snom Service Hub, user_mailbox, D-series); Snom documents no separate subscribe flag. Unverified on hardware (lab item 1). */}}
     <user_mailbox idx="1" perm="R">{{xml (or .Line.VoicemailCode "*97")}}</user_mailbox>
 {{- /* Call waiting (phone-feature-parity S-18): call_waiting per line is on (waiting tone), visual (no tone) or off; Hello writes on or off from the extension's flag. Key and values as in Snom's own settings reference and the Tancredi snom template. Unverified on hardware (verify, lab item 26). */}}

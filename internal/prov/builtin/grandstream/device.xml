@@ -49,6 +49,19 @@
 {{- /* Feature Key Synchronization (spec S-7): the phone's DND and call-forward keys follow Hello and Hello's follow the phone, over SUBSCRIBE/NOTIFY Event: as-feature-event. P2325 = Feature Key Synchronization, account 1 (account 2 is P2425, 3 is P2525); P198 = Special Feature, 102 = Broadsoft, which the Administration Guide says the feature needs ("When using this feature, Special Feature needs to be set to BroadSoft"). Both keys are in Grandstream's own config templates (config-template-10212026.zip) for the GXP11xx/14xx/16xx/21xx/22xx, GRP26xx, WP810/820/822/825/856/8x6 and DP75x with the same numbers on every model; the WP820 template documents P2325 as "0 Disable, 1 BroadSoft/Metaswitch". Verified against the vendor templates and guides, not on a phone (verify). */}}
     <P198>102</P198>
     <P2325>1</P2325>
+{{- /* Ring map (phone-feature-parity S-44). WP8x6: P95026 maps Bellcore-dr1 to dr5 to a ringtone each (WP8x6 release notes, firmware 1.0.1.85 and later; Hello sends Bellcore-drN in the Alert-Info); written as five comma-separated tones. WP810/820/822/825: the "Match Incoming Caller ID" rules from P1488 with the Alert-Info match type (WP8xx release notes), written as the match text at P1488 + 2 (n - 1) and its ringtone in the next P-value, ten rules; P104 is the account ringtone, Hello's internal tone. Tones: 0 system ring tone, 1 to 3 custom ring tones. The WP856 and GRP/GXP desk phones have no known key and get none. Layouts unverified on a phone (verify). */}}
+{{- if and (eq .Phone.Family "8x6") .Ring.Bellcore}}
+    <P95026>{{.Ring.Bellcore}}</P95026>
+{{- end}}
+{{- if eq .Phone.Family "8xx"}}
+{{- range .Ring.Rules}}
+    <P{{add 1488 (mul 2 (add .N -1))}}>{{xml .Text}}</P{{add 1488 (mul 2 (add .N -1))}}>
+    <P{{add 1489 (mul 2 (add .N -1))}}>{{.Tone}}</P{{add 1489 (mul 2 (add .N -1))}}>
+{{- end}}
+{{- with .Ring.Default}}
+    <P104>{{.}}</P104>
+{{- end}}
+{{- end}}
 {{- /* Local call features (spec S-7): P191 = Enable (Local) Call Features, default 1 on the WP8x6 and WP810/822/825 and 0 on the WP856. On, the phone acts on *72/*73/*90-*93 and its own DND and forward menus itself and Hello never sees them. Off, the phone dials the codes to Hello, whose feature codes are written below as the strings the DND and forward keys dial. Switching it off also hands the phone's other star codes (caller ID *67/*82, call waiting *70/*71) to Hello, which does not implement them. Keys per Grandstream's templates: WP8x6 (wp8x6_config_1.0.3.39) P2344/P2345 DND on/off, P26013/P26014 forward always on/off, P26009/P26010 busy, P26011/P26012 no answer (the _target fields P29092-P29094 stay empty so the user's key asks for the number); WP856 (wp856_config_1.0.3.16) only P2344/P2345; WP810/822/825 (wp810_822_825_config_1.0.11.83) only P191. Record key: the WP8x6 P26028/P26029 are the codes the Record key sends to turn recording on and off (P29066 = 0 key default: on), set to Hello's *1 toggle; the WP856 P6760 = 2 Record Mode "on UCM" hands recording to the server. Verified in the vendor templates, not on a phone (verify). */}}
     <P191>0</P191>
 {{- with .Codes.DNDOn}}

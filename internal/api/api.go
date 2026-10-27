@@ -118,6 +118,8 @@ type Store interface {
 	DeleteRingTag(ctx context.Context, actor, name string) error
 	ListRingRules(ctx context.Context) ([]store.RingRule, error)
 	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
+	GetRingMap(ctx context.Context) (store.RingMap, error)
+	ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []store.RingMapEntry) (store.RingMap, error)
 	ListTimeConditions(ctx context.Context) ([]store.TimeCondition, error)
 	GetTimeCondition(ctx context.Context, id int64) (store.TimeCondition, error)
 	CreateTimeCondition(ctx context.Context, actor string, in store.TimeConditionInput, check store.Check) (store.TimeCondition, error)

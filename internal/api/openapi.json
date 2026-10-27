@@ -14281,6 +14281,141 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/ring-map": {
+      "get": {
+        "operationId": "getRingMap",
+        "summary": "The ring map",
+        "description": "Returns the ring map that turns a ring tag into a tone on each vendor's phones: the vendors' built-in ringer lists, the default tone of every tag and vendor (the vendor's ringer for the tag's Bellcore slot), the global choices and the overrides of each phone group. A tag and vendor without a choice use the default, so nothing has to be configured.",
+        "tags": ["ring-tags"],
+        "responses": {
+          "200": {
+            "description": "The ring map",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingMapView"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putRingMap",
+        "summary": "Replace the global ring map",
+        "description": "Replaces the global choices as a whole. A change reaches the affected phones through the automatic resync (check-sync). The tone must be in the vendor's ringer list (silent only where the vendor has it).",
+        "tags": ["ring-tags"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RingMapInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The choices after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingMapChoices"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/ring-map/groups/{id}": {
+      "put": {
+        "operationId": "putRingMapGroup",
+        "summary": "Replace a phone group's ring map overrides",
+        "description": "Replaces the overrides of one phone group as a whole; an empty list removes them. An override wins over the global choice for the phones of the group.",
+        "tags": ["ring-tags"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "The phone group id.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RingMapInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The choices after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RingMapChoices"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/time-conditions": {
       "get": {
         "operationId": "listTimeConditions",
@@ -24923,6 +25058,136 @@
           "alertInfo": {
             "type": "string",
             "description": "The canonical Alert-Info value."
+          }
+        }
+      },
+      "RingMapEntry": {
+        "type": "object",
+        "required": ["tag", "vendor", "tone"],
+        "additionalProperties": false,
+        "properties": {
+          "tag": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,32}$",
+            "description": "The ring tag."
+          },
+          "vendor": {
+            "type": "string",
+            "enum": ["yealink", "poly", "grandstream", "snom", "fanvil"]
+          },
+          "tone": {
+            "type": "string",
+            "description": "The id of a ringer in the vendor's list, or silent."
+          }
+        }
+      },
+      "RingMapGroup": {
+        "type": "object",
+        "required": ["groupId", "entries"],
+        "properties": {
+          "groupId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapEntry"
+            }
+          }
+        }
+      },
+      "RingMapChoices": {
+        "type": "object",
+        "required": ["global", "groups"],
+        "properties": {
+          "global": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapEntry"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapGroup"
+            }
+          }
+        }
+      },
+      "RingMapView": {
+        "type": "object",
+        "required": ["vendors", "defaults", "global", "groups"],
+        "properties": {
+          "vendors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["vendor", "label", "slots", "tones"],
+              "properties": {
+                "vendor": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "slots": {
+                  "type": "integer",
+                  "description": "The most tags the vendor's phones map to a tone (a Grandstream WP8x6 maps the five Bellcore slots; a model with no known key none)."
+                },
+                "tones": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "label", "silent"],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "silent": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "defaults": {
+            "description": "The tone every tag and vendor plays without a choice.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapEntry"
+            }
+          },
+          "global": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapEntry"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapGroup"
+            }
+          }
+        }
+      },
+      "RingMapInput": {
+        "type": "object",
+        "required": ["entries"],
+        "additionalProperties": false,
+        "properties": {
+          "entries": {
+            "description": "The whole list of choices of the scope; a tag and vendor appear once.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RingMapEntry"
+            }
           }
         }
       },

@@ -386,13 +386,13 @@ that both do G.722 talk wideband and anything else falls back to G.711 (see
 account Hello provisions); another account of a multi-account model takes
 the same keys with its own number:
 
-| Vendor      | Keys                                                                                                                                                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0`                |
-| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...) |
-| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                              |
-| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                    |
-| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                    |
+| Vendor      | Keys                                                                                                                                                                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Yealink     | `account.N.codec.opus.enable` and `.priority = 1` (models without Opus: `g722` at 1), then `g722`, `pcmu`, `pcma` with the next priorities; `g729`, `g726_16` to `g726_40`, `g723_53`, `g723_63`, `ilbc_13_33kbps` set to `.enable = 0` |
+| Grandstream | Preferred Vocoder choices 1 to 6, `P57` to `P62`: 123 (Opus, models that have it), 9 (G.722), 0 (PCMU), 8 (PCMA), the last repeated. Accounts 2 and up have their own choice keys (P451 to P456, P551 to P556, ...)                     |
+| Snom        | `codec_priority_list idx="N"` = `opus,g722,pcmu,pcma,telephone-event` (no `opus` on models without it)                                                                                                                                  |
+| Fanvil      | `SIPN Voice Codec Map` = `opus,G722,G711U,G711A`                                                                                                                                                                                        |
+| Poly        | `voice.codecPref.Opus="1"`, `.G722="2"`, `.G711_Mu`, `.G711_A` next; the other codecs' `voice.codecPref.*` empty                                                                                                                        |
 
 Opus is listed only for models known to support it (`internal/prov/codecs.go`);
 an unknown model gets G.722, PCMU and PCMA. The keys are from the vendors'
@@ -1264,12 +1264,13 @@ do not log the call as missed.
 Hello tags every call to an internal phone (internal, external, ring group,
 page, door, alarm and your own tags) and sends the tag in an `Alert-Info` header
 of the form `<http://127.0.0.1/Bellcore-drN>;info=hello-<tag>`. Which tag a call
-gets, the rules and the header are in [ring-tags.md](ring-tags.md). The
-provisioned templates do not yet map a tag to a tone: until the ring map ships,
-set the phone's distinctive-ring rule by hand (match `hello-<tag>` in the
-Alert-Info text, or `Bellcore-drN` where the phone maps only the five Bellcore
-rings). Page and intercom calls keep the auto-answer `Alert-Info` described
-under paging and intercom above.
+gets, the rules and the header are in [ring-tags.md](ring-tags.md). The built-in
+templates map each tag to a tone through the ring map (Ringing page, tab Ring
+map): the vendor's distinctive-ring rules and the line's own ring tone are
+written into every phone's configuration, with an optional override per phone
+group, and a change is pushed to the affected phones by the automatic resync.
+Page and intercom calls keep the auto-answer `Alert-Info` described under
+paging and intercom above.
 
 ## Security model and its limits
 

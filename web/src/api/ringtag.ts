@@ -101,3 +101,68 @@ export function evaluateRingRules(q: RingQuery, signal?: AbortSignal) {
     { signal },
   );
 }
+
+// --- ring map (migration 00047) --------------------------------------------
+
+/** The vendors that have a ring map. */
+export type RingVendorId =
+  "yealink" | "poly" | "grandstream" | "snom" | "fanvil";
+
+export interface RingTone {
+  /** What the ring map stores. */
+  id: string;
+  label: string;
+  /** No ring, visual only. */
+  silent: boolean;
+}
+
+export interface RingVendor {
+  vendor: RingVendorId;
+  label: string;
+  /** The most tags the vendor's phones map to a tone. */
+  slots: number;
+  tones: RingTone[];
+}
+
+/** A tone choice for a tag on a vendor's phones. */
+export interface RingMapEntry {
+  tag: string;
+  vendor: RingVendorId;
+  tone: string;
+}
+
+export interface RingMapGroup {
+  groupId: number;
+  entries: RingMapEntry[];
+}
+
+export interface RingMapView {
+  vendors: RingVendor[];
+  /** The tone every tag and vendor plays without a choice. */
+  defaults: RingMapEntry[];
+  global: RingMapEntry[];
+  groups: RingMapGroup[];
+}
+
+export interface RingMapChoices {
+  global: RingMapEntry[];
+  groups: RingMapGroup[];
+}
+
+export const getRingMap = (signal?: AbortSignal) =>
+  request<RingMapView>("GET", "/api/v1/ring-map", { signal });
+/** Replaces the global choices as a whole. */
+export const putRingMap = (entries: RingMapEntry[]) =>
+  request<RingMapChoices>("PUT", "/api/v1/ring-map", { body: { entries } });
+/** Replaces one phone group's overrides as a whole; [] removes them. */
+export const putRingMapGroup = (
+  groupId: number | string,
+  entries: RingMapEntry[],
+) =>
+  request<RingMapChoices>(
+    "PUT",
+    `/api/v1/ring-map/groups/${seg(String(groupId))}`,
+    {
+      body: { entries },
+    },
+  );

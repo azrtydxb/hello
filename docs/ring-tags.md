@@ -4,13 +4,12 @@ A ring tag names the kind of call that is ringing an internal phone: a colleague
 (`internal`), a customer on a trunk (`external`), a ring group, a page, a door,
 an alarm. Hello sends the tag to the phone in an `Alert-Info` header, and the
 phone maps it to a tone, so a door rings differently from a customer. They are
-managed under **Ring tags** in the console (tabs Tags, Rules and Test a call),
-through `/api/v1/ring-tags` and `/api/v1/ring-rules`, and through the matching
-MCP tools.
+managed under **Ringing** in the console (tabs Tags, Rules, Ring map and Test a
+call), through `/api/v1/ring-tags`, `/api/v1/ring-rules` and `/api/v1/ring-map`,
+and through the matching MCP tools.
 
-This page covers the tags, the rules and the header Hello sends. Which tone a
-phone plays for a tag is set on the phone; provisioning that map is a separate
-step that follows (see "What is not here yet").
+This page covers the tags, the rules, the header Hello sends and the ring map
+that tells each vendor's phones which tone to play for a tag.
 
 ## Tags
 
@@ -105,15 +104,44 @@ precedence. A leg to a trunk carries no `Alert-Info`.
 - The metric `hello_ring_tag_total{tag}` counts calls that rang an internal phone
   by tag.
 
-## What is not here yet
+## The ring map
 
-Hello sends the tag, but the phone has to be told which tone to play for it. The
-ring map (a tone per tag and per vendor, written into the phone's provisioned
-configuration) is the next step. Until then, set the distinctive-ring rules on
-the phone by hand: match the Alert-Info text `hello-<tag>` (or the
-`Bellcore-drN` URL) and pick a ringer. Kinds that come from features not yet in
-Hello (door stations, alarm calls, emergency callbacks) are recognised by the
-rules already, and take effect when those features arrive.
+The ring map says which tone a phone plays for each tag. Hello writes it into
+the provisioned configuration of every phone, so nothing is set on the phone by
+hand: for each tag the phone gets a rule that matches the tag's `Alert-Info`
+text (`hello-<tag>`; Snom's three named classes; the `Bellcore-drN` URL on a
+Grandstream WP8x6) and the tone to play.
+
+Open the **Ring map** tab on the Ringing page. The columns are the five
+vendors (Yealink, Poly, Grandstream, Snom, Fanvil) and the rows are the tags.
+Each cell is a list of that vendor's built-in ringers; **Default** is the
+ringer of the tag's Bellcore slot, so a new install rings distinctively without
+any choice. Poly and Snom also offer **Silent** (visual only).
+
+- **All phones** is the global map. Pick a **phone group** in _Applies to_ to
+  override it for the phones of that group; a cell left on _Same as all phones_
+  follows the global choice. Saving an empty group list removes the overrides.
+- The line's own ring tone (Yealink `account.1.ringtone.ring_type`, Snom
+  `ring_sound`, Fanvil `SIP1 Ring Type`, Grandstream WP8xx `P104`, Poly
+  `se.rt.default.ringer`) follows the **internal** tag's tone.
+- A change reaches the phones through the automatic resync: Hello notices that
+  a phone's configuration changed and sends it a check-sync, limited to the
+  push rate (see [provisioning.md](provisioning.md)).
+- A tag the map names cannot be deleted until the choice is removed.
+
+How many tags a phone can map is a limit of the phone: Yealink 10, Fanvil 10,
+Grandstream WP810/820/822/825 10, Poly 23, Snom 3 (internal, external and ring
+group only) and Grandstream WP8x6 5 (the Bellcore slots, so tags that share a
+slot ring the same; the page warns). Past the limit the first tags in the list
+(the built-in tags first, then custom tags by name) are written. A Grandstream
+WP856 and the GRP/GXP desk phones get no ring map until their key is confirmed
+on hardware. A tag whose name is the start of another tag's (`door`,
+`doorbell`) is written after it, so the phone's match cannot take the wrong one.
+
+Custom tones from the tone library and the Grandstream ring tone format are not
+produced yet; only the vendors' built-in ringers can be chosen. Every key and
+value is from the vendor's administrator guide and has not been checked on a
+phone yet; check one phone of each vendor before relying on it.
 
 ## API
 
@@ -126,6 +154,9 @@ rules already, and take effect when those features arrive.
 | `PUT /api/v1/ring-rules`                  | replace the ordered rules                         |
 | `GET /api/v1/ring-rules/evaluate`         | which tag a described call would get              |
 | `ringTag` on `/api/v1/ring-groups`        | a group's own tag; empty keeps `ringgroup`        |
+| `GET /api/v1/ring-map`                    | the ringer lists, the defaults and the choices    |
+| `PUT /api/v1/ring-map`                    | replace the global choices                        |
+| `PUT /api/v1/ring-map/groups/{id}`        | replace a phone group's overrides                 |
 
 Reads need the read scope and the viewer role; changes need the write scope and
 the operator role.

@@ -126,8 +126,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "users-round",
       },
       {
-        label: "Ring tags",
-        path: "/ring-tags",
+        label: "Ringing",
+        path: "/ringing",
         phase: 5,
         icon: "bell-electric",
       },
