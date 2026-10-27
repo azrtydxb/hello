@@ -163,3 +163,98 @@ func TestTrace(t *testing.T) {
 		}
 	})
 }
+
+func TestTraceExtensionBranches(t *testing.T) {
+	monday := at(t, "2026-10-26T10:00:00+01:00")
+	in := traceFixture("")
+	in.Extensions[0].ForwardBusy = "102"
+	steps, _ := Trace(in, TraceStart{Enter: &Ref{Node: "extension:10", Port: "ring"}}, TraceOptions{At: monday})
+	ring := steps[0]
+	if len(ring.Branches) != 2 {
+		t.Fatalf("branches %+v", ring.Branches)
+	}
+	busy, unreg := ring.Branches[0], ring.Branches[1]
+	if busy.Label != "If busy" || busy.Port != "forwardBusy" || pathOf(busy.Steps) != "extension:10:forwardBusy > extension:11:ring" {
+		t.Errorf("busy branch %s %s", busy.Label, pathOf(busy.Steps))
+	}
+	if unreg.Label != "If not registered" || pathOf(unreg.Steps) != "extension:10:voicemail > extension:10:voicemail" {
+		t.Errorf("unregistered branch %s", pathOf(unreg.Steps))
+	}
+	// Without a busy forward the busy branch goes to voicemail; without
+	// voicemail either, the caller hears busy.
+	in.Extensions[0].ForwardBusy = ""
+	steps, _ = Trace(in, TraceStart{Enter: &Ref{Node: "extension:10", Port: "ring"}}, TraceOptions{At: monday})
+	if got := pathOf(steps[0].Branches[0].Steps); got != "extension:10:voicemail > extension:10:voicemail" {
+		t.Errorf("busy to voicemail %s", got)
+	}
+	steps, _ = Trace(in, TraceStart{Enter: &Ref{Node: "extension:11", Port: "ring"}}, TraceOptions{At: monday})
+	if b := steps[0].Branches; !strings.Contains(b[0].Steps[0].Text, "hears busy") || !strings.Contains(b[1].Steps[0].Text, "temporarily unavailable") {
+		t.Errorf("no voicemail: %+v", b)
+	}
+}
+
+func TestFeatureCodeStart(t *testing.T) {
+	in := traceFixture("")
+	in.FeatureCodes = []store.FeatureCode{
+		{Code: "*97", Action: "voicemail"},
+		{Code: "*72", Action: "forward_always"},
+		{Code: "*60", Action: "ivr", Argument: "menu"},
+		{Code: "*61", Action: "time_condition"},
+		{Code: "*8", Action: "park_retrieve"},
+		{Code: "*2", Action: "blind_transfer"},
+	}
+	in.ParkLots = []store.ParkLot{{ID: 1, Name: "lot", SlotStart: 701, SlotEnd: 709, Enabled: true}}
+	monday := at(t, "2026-10-26T10:00:00+01:00")
+	trace := func(dialled string) ([]TraceStep, bool) {
+		s, ok := FeatureCodeStart(in, "102", dialled)
+		if !ok {
+			return nil, false
+		}
+		steps, err := Trace(in, s, TraceOptions{At: monday})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return steps, true
+	}
+	if _, ok := trace("5551"); ok {
+		t.Error("a plain number is not a feature code")
+	}
+	if s, _ := trace("*97101"); pathOf(s) != "extension:11: > extension:10:voicemail" {
+		t.Errorf("*97101 %s", pathOf(s))
+	}
+	if s, _ := trace("*97"); pathOf(s) != "extension:11:voicemail" {
+		t.Errorf("*97 %s", pathOf(s))
+	}
+	if s, _ := trace("*97999"); !strings.Contains(s[len(s)-1].Text, "404") {
+		t.Errorf("*97999 %+v", s)
+	}
+	if s, _ := trace("*60"); !strings.HasPrefix(pathOf(s), "featureCode:*60:target > ivr:1:") {
+		t.Errorf("*60 %s", pathOf(s))
+	}
+	if s, _ := trace("*61hours"); s[0].Node != "extension:11" || s[1].Node != "timeCondition:1" || s[1].At == "" {
+		t.Errorf("*61hours %+v", s)
+	}
+	if s, _ := trace("*61menu"); s[len(s)-1].Node != "missing:menu" {
+		t.Errorf("*61menu is no time condition: %+v", s)
+	}
+	if s, _ := trace("*7211"); !strings.Contains(s[0].Text, "11") || s[0].Node != "extension:11" {
+		t.Errorf("*7211 %+v", s)
+	}
+	if s, _ := trace("*72"); !strings.Contains(s[0].Text, "400") {
+		t.Errorf("*72 %+v", s)
+	}
+	if s, _ := trace("*8705"); s[0].Node != "parkLot:1" || !strings.Contains(s[0].Text, "slot 705") {
+		t.Errorf("*8705 %+v", s)
+	}
+	if s, _ := trace("705"); s[0].Node != "parkLot:1" {
+		t.Errorf("slot 705 %+v", s)
+	}
+	if s, _ := trace("*2"); !strings.Contains(s[0].Text, "403") {
+		t.Errorf("*2 %+v", s)
+	}
+	// The longest code wins: *97 is not read as *9 plus an argument.
+	in.FeatureCodes = append(in.FeatureCodes, store.FeatureCode{Code: "*9", Action: "dnd_on"})
+	if s, _ := trace("*97101"); !strings.Contains(s[0].Text, "voicemail") {
+		t.Errorf("longest code %+v", s)
+	}
+}

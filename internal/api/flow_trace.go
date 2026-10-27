@@ -144,6 +144,11 @@ func (s *server) startFromExtension(start *flow.TraceStart, res *traceResult, in
 		enter = ivrNode(in, n)
 	case queueNode(in, n) != "":
 		enter = queueNode(in, n)
+	case featureOrSlot(in, call.FromExtension, n, start):
+		res.Outcome = "internal"
+		res.RoutingTrace.Add("Dialled " + n + " is a feature code or a park slot: answered before routing")
+		start.Steps = append(callerSteps(caller, call), start.Steps...)
+		return true
 	case groupNode(in, n) != "":
 		enter, port = groupNode(in, n), "ring"
 	default:
@@ -353,4 +358,13 @@ func outboundSteps(in flow.Input, d routing.Decision) []flow.TraceStep {
 			Text: "The call leaves through trunk " + t.Name + " as " + d.Number})
 	}
 	return out
+}
+
+// featureOrSlot fills start for a dialled park slot or feature code.
+func featureOrSlot(in flow.Input, from, n string, start *flow.TraceStart) bool {
+	s, ok := flow.FeatureCodeStart(in, from, n)
+	if ok {
+		*start = s
+	}
+	return ok
 }

@@ -2,6 +2,7 @@ package flow
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -226,6 +227,7 @@ func (w *walker) extension(id, digits string, depth int, st *state) []TraceStep 
 		return []TraceStep{{Node: id, Text: "Extension " + lbl + " is on do not disturb and has no voicemail: the call is declined"}}
 	}
 	ring := TraceStep{Node: id, Port: "ring", Text: "Rings extension " + lbl}
+	ring.Branches = w.extensionBranches(id, digits, depth, st)
 	switch {
 	case e.ForwardNoAnswer != "":
 		ring.Port = "forwardNoAnswer"
@@ -237,6 +239,32 @@ func (w *walker) extension(id, digits string, depth int, st *state) []TraceStep 
 	}
 	ring.Text += "; if nobody answers the call ends"
 	return []TraceStep{ring}
+}
+
+// extensionBranches are the alternatives to ringing that the configuration
+// decides: the extension is busy, or no device is registered. Whether either
+// is the case is live state, so both are listed (spec S-18).
+func (w *walker) extensionBranches(id, digits string, depth int, st *state) []TraceBranch {
+	e := w.exts[id]
+	var out []TraceBranch
+	busy := TraceBranch{Port: "forwardBusy", Label: "If busy"}
+	switch {
+	case e.ForwardBusy != "":
+		busy.Steps = append([]TraceStep{{Node: id, Port: "forwardBusy", Text: "Busy: the call forwards to " + e.ForwardBusy}},
+			w.follow(Ref{id, "forwardBusy"}, digits, depth, st.clone())...)
+	case e.VoicemailEnabled:
+		busy.Steps = append([]TraceStep{{Node: id, Port: "voicemail", Text: "Busy, and no busy forward is set: the caller reaches the voicemail"}}, w.voicemail(id)...)
+	default:
+		busy.Steps = []TraceStep{{Node: id, Text: "Busy, with no busy forward and no voicemail: the caller hears busy"}}
+	}
+	out = append(out, busy)
+	unreg := TraceBranch{Port: "voicemail", Label: "If not registered"}
+	if e.VoicemailEnabled {
+		unreg.Steps = append([]TraceStep{{Node: id, Port: "voicemail", Text: "No device is registered: the caller reaches the voicemail"}}, w.voicemail(id)...)
+	} else {
+		unreg.Steps = []TraceStep{{Node: id, Text: "No device is registered and there is no voicemail: the call is answered temporarily unavailable"}}
+	}
+	return append(out, unreg)
 }
 
 func (w *walker) members(ms []int64) string {
@@ -427,4 +455,188 @@ func (w *walker) timeCondition(id, digits string, depth int, st *state) []TraceS
 		return steps
 	}
 	return append(steps, w.follow(Ref{last, port}, digits, depth, st)...)
+}
+
+// FeatureCodeStart starts a trace at what hello-sip does with a number dialled
+// from extension from that is a park slot or a feature code (the code, or the
+// code and its argument). ok is false when the number is neither. Only the
+// configuration is read: whether a call is parked in a slot is live state.
+func FeatureCodeStart(in Input, from, dialled string) (TraceStart, bool) {
+	caller := ""
+	for _, e := range in.Extensions {
+		if e.Number == from {
+			caller = nid(KindExtension, e.ID)
+		}
+	}
+	if caller == "" {
+		caller = KindDialPlan + ":internal"
+	}
+	step := func(node, port, text string) []TraceStep {
+		return []TraceStep{{Node: node, Port: port, Text: text}}
+	}
+	if n, err := strconv.Atoi(dialled); err == nil {
+		for _, l := range in.ParkLots {
+			if l.Enabled && n >= l.SlotStart && n <= l.SlotEnd {
+				return TraceStart{Steps: step(nid(KindParkLot, l.ID), "",
+					"Dialling slot "+dialled+" of park lot "+l.Name+" retrieves the call parked there, if there is one")}, true
+			}
+		}
+	}
+	codes := append([]store.FeatureCode{}, in.FeatureCodes...)
+	sort.SliceStable(codes, func(i, j int) bool { return len(codes[i].Code) > len(codes[j].Code) })
+	var fc store.FeatureCode
+	arg, found := "", false
+	for _, c := range codes {
+		if c.Code != "" && strings.HasPrefix(dialled, c.Code) {
+			fc, arg, found = c, strings.TrimPrefix(dialled, c.Code), true
+			break
+		}
+	}
+	if !found {
+		return TraceStart{}, false
+	}
+	fcNode := KindFeatureCode + ":" + fc.Code
+	head := fmt.Sprintf("Feature code %s (%s)", fc.Code, strings.ReplaceAll(fc.Action, "_", " "))
+	ext := func(number string) string {
+		for _, e := range in.Extensions {
+			if e.Number == number {
+				return nid(KindExtension, e.ID)
+			}
+		}
+		return ""
+	}
+	name := fc.Argument
+	if name == "" {
+		name = arg
+	}
+	// target is the node a code that names one hands the call to.
+	target := func(port string, find func(string) string, what string) (TraceStart, bool) {
+		node := find(name)
+		s := TraceStart{}
+		if fc.Argument != "" {
+			s.Steps = step(fcNode, "target", head+" goes to "+what+" "+name)
+		} else {
+			s.Steps = step(caller, "", head+" goes to "+what+" "+name)
+		}
+		if node == "" {
+			s.Steps = append(s.Steps, TraceStep{Node: KindMissing + ":" + name, Text: what + " " + name + " does not exist: the call is rejected (404)"})
+			return s, true
+		}
+		s.Enter = &Ref{Node: node, Port: port}
+		return s, true
+	}
+	switch fc.Action {
+	case "ivr":
+		return target("call", func(n string) string {
+			for _, m := range in.IVRMenus {
+				if m.Name == n {
+					return nid(KindIVR, m.ID)
+				}
+			}
+			return ""
+		}, "IVR menu")
+	case "time_condition":
+		return target("call", func(n string) string {
+			for _, tc := range in.TimeConditions {
+				if tc.Name == n {
+					return nid(KindTimeCond, tc.ID)
+				}
+			}
+			return ""
+		}, "time condition")
+	case "announcement":
+		return target("call", func(n string) string {
+			for _, a := range in.Announcements {
+				if a.Name == n {
+					return nid(KindAnnouncement, a.ID)
+				}
+			}
+			return ""
+		}, "announcement")
+	case "voicemail":
+		if arg == "" {
+			return TraceStart{Steps: step(caller, "voicemail", head+" opens the caller's own voicemail box to listen to messages")}, true
+		}
+		s := TraceStart{Steps: step(caller, "", head+" leaves a message in the voicemail box of extension "+arg)}
+		if n := ext(arg); n != "" {
+			s.Enter = &Ref{Node: n, Port: "voicemail"}
+		} else {
+			s.Steps = append(s.Steps, TraceStep{Node: KindMissing + ":" + arg, Text: "There is no voicemail box for extension " + arg + ": the call is rejected (404)"})
+		}
+		return s, true
+	case "intercom":
+		s := TraceStart{Steps: step(caller, "", head+" auto-answers the phone of extension "+arg)}
+		if n := ext(arg); n != "" {
+			s.Steps = append(s.Steps, TraceStep{Node: n, Port: "ring", Text: "Intercom to extension " + arg})
+		}
+		return s, true
+	case "queue_login", "queue_logout", "queue_pause", "queue_unpause":
+		what := strings.TrimPrefix(fc.Action, "queue_")
+		for _, q := range in.Queues {
+			if arg != "" && q.Number == arg {
+				return TraceStart{Steps: step(nid(KindQueue, q.ID), "", head+": the caller's extension is "+what+"d in queue "+q.Name)}, true
+			}
+		}
+		return TraceStart{Steps: step(caller, "", head+": the caller's extension is "+what+"d in the queue it names, or in every queue it is an agent of")}, true
+	case "tc_override":
+		for _, tc := range in.TimeConditions {
+			if tc.ToggleNumber != "" && tc.ToggleNumber == arg {
+				return TraceStart{Steps: step(nid(KindTimeCond, tc.ID), "", head+" changes the override of time condition "+tc.Name+" ("+overrideMode(fc.Argument)+"); no call is placed")}, true
+			}
+		}
+		return TraceStart{Steps: append(step(caller, "", head+" names no time condition (toggle number "+arg+")"), TraceStep{Node: caller, Text: "The call is rejected (404)"})}, true
+	case "park":
+		return TraceStart{Steps: step(caller, "", head+" works only inside a call: dialled as a call it is rejected (403)")}, true
+	case "park_retrieve":
+		if n, err := strconv.Atoi(arg); err == nil {
+			for _, l := range in.ParkLots {
+				if l.Enabled && n >= l.SlotStart && n <= l.SlotEnd {
+					return TraceStart{Steps: step(nid(KindParkLot, l.ID), "", head+" retrieves the call parked in slot "+arg+" of park lot "+l.Name+", if there is one")}, true
+				}
+			}
+		}
+		return TraceStart{Steps: step(caller, "", head+": slot "+strconv.Quote(arg)+" is in no park lot: the call is rejected (404)")}, true
+	case "pickup_group":
+		for _, g := range in.PickupGroups {
+			for _, m := range g.Members {
+				if nid(KindExtension, m.ExtensionID) == caller {
+					return TraceStart{Steps: step(nid(KindPickupGroup, g.ID), "", head+" picks up a ringing call of the other members of pickup group "+g.Name)}, true
+				}
+			}
+		}
+		return TraceStart{Steps: step(caller, "", head+" picks up a ringing call within the caller's ring groups (it is in no pickup group)")}, true
+	case "pickup_directed":
+		s := TraceStart{Steps: step(caller, "", head+" picks up the call ringing at extension "+arg)}
+		if n := ext(arg); n != "" {
+			s.Steps = append(s.Steps, TraceStep{Node: n, Text: "Takes over the call ringing at extension " + arg + ", if one is ringing"})
+		}
+		return s, true
+	case "blind_transfer", "attended_transfer":
+		return TraceStart{Steps: step(caller, "", head+" works only inside a call (during it, dial it to transfer): dialled as a call it is rejected (403)")}, true
+	}
+	// The settings codes: they change the caller's own extension and answer.
+	what := map[string]string{
+		"forward_always": "forward-always", "forward_busy": "forward-busy", "forward_no_answer": "forward-no-answer",
+		"dnd_on": "turns do not disturb on", "dnd_off": "turns do not disturb off",
+		"call_waiting_on": "turns call waiting on", "call_waiting_off": "turns call waiting off",
+	}[fc.Action]
+	text := head + " " + what + " for the caller's extension; the call is answered and ends"
+	if strings.HasPrefix(fc.Action, "forward_") {
+		switch {
+		case fc.Argument == "clear":
+			text = head + " clears the " + what + " number of the caller's extension; the call is answered and ends"
+		case arg == "":
+			text = head + " needs the number to forward to after the code: dialled without it the call is rejected (400)"
+		default:
+			text = head + " sets the " + what + " number of the caller's extension to " + arg + "; the call is answered and ends"
+		}
+	}
+	return TraceStart{Steps: step(caller, "", text)}, true
+}
+
+func overrideMode(arg string) string {
+	if arg == "" {
+		return "toggle"
+	}
+	return arg
 }

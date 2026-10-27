@@ -3511,7 +3511,7 @@
       "get": {
         "operationId": "traceFlow",
         "summary": "Trace the path a call would take through the call flow",
-        "description": "Answers what happens when `from` calls `number` at `at`: it decides the call against the saved configuration as `testRouting` does, then walks the flow graph from the matched route or extension through ring groups, IVR menus (the keys in `digits`), queues, time conditions (evaluated at `at`, override included), announcements and voicemail. Returns the ordered steps, each naming a graph node and the output port the call leaves through, so the canvas can highlight the path. Places no call and writes nothing.",
+        "description": "Answers what happens when `from` calls `number` at `at`: it decides the call against the saved configuration as `testRouting` does, then walks the flow graph from the matched route or extension through ring groups, IVR menus (the keys in `digits`), queues, time conditions (evaluated at `at`, override included), announcements and voicemail. A ringing extension lists \"If busy\" and \"If not registered\" as branches, since the configuration decides them but the live state is not read. From an extension it also traces park slots and feature codes (voicemail, IVR, announcement, time condition, intercom, queue, park, pickup and the settings codes). Returns the ordered steps, each naming a graph node and the output port the call leaves through, so the canvas can highlight the path. Places no call and writes nothing.",
         "tags": ["flow"],
         "parameters": [
           {

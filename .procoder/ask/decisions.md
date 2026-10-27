@@ -940,9 +940,23 @@ conflict`), and a batch that deleted a device or phone (which a batch cannot
   `Replaces` pickup are not traced.
 - **Extensions.** `forwardAlways`; do not disturb goes to voicemail when the box
   is on, else the call is declined (as `failoverExtension` does); otherwise it
-  rings and then the no-answer forward or voicemail. Whether a device is
-  registered is live state and is not read. Busy forwarding is not traced (it
-  needs live call state).
+  rings and then the no-answer forward or voicemail. Whether the extension is
+  busy or has a registered device is live state and is not read: the ring step
+  carries two branches instead, like IVR keys. "If busy" takes the busy
+  forward, else the voicemail, else the caller hears busy; "If not registered"
+  takes the voicemail, else the call is answered temporarily unavailable (the
+  rules of `callflow.go` and `failoverExtension`).
+- **Feature codes and park slots** dialled from an extension are traced after
+  the queue number check and before ring group names, the order of `b2bua.go`.
+  The longest matching code wins; what follows it is the argument. Codes that
+  name a target (IVR, announcement, time condition) go to it, from the feature
+  code node when the code row stores the name (the graph edge), else from the
+  caller. Voicemail (`*97` own box, `*97<ext>` leave a message), intercom,
+  queue login/logout/pause, time condition override, park retrieve, pickup and
+  the settings codes (forward, DND, call waiting) end in one step that says
+  what they do to the caller's own extension; park and the transfer codes
+  dialled as a call are rejected (403). Whether a call is parked in a slot is
+  live state and is not read.
 - **Ring groups and queues** follow the failure path (`noAnswer`; for a queue
   `timeout`, or `noAgents` when it has none): a member or agent who answers ends
   the call, so the trace shows what happens when nobody does. The step text
@@ -975,5 +989,7 @@ conflict`), and a batch that deleted a device or phone (which a batch cannot
   after `buildView`, so the page keeps one extra line of state and the P4
   editing code is untouched. Traced objects that are not on the canvas are
   counted in a note, not drawn.
+- **Still out** (live state only): whether a call sits in a park slot, whether
+  an agent is logged in.
 - **Not in this change** (their phases): `traceFlow` in `assistantTools` and the
   skill (P6).

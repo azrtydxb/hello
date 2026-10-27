@@ -195,6 +195,9 @@ func (f *traceFake) ListTrunks(context.Context) ([]store.Trunk, error) {
 func (f *traceFake) ListInboundRoutes(context.Context) ([]store.InboundRoute, error) {
 	return f.inbound, nil
 }
+func (f *traceFake) ListFeatureCodes(context.Context) ([]store.FeatureCode, error) {
+	return []store.FeatureCode{{Code: "*97", Action: "voicemail"}}, nil
+}
 func (f *traceFake) RoutingConfig(context.Context) (store.RoutingSnapshot, error) {
 	return store.RoutingSnapshot{Config: f.cfg}, nil
 }
@@ -267,6 +270,17 @@ func TestTrace(t *testing.T) {
 	code, tr = traceGet(t, f, "/api/v1/flow/trace?from=100&number=100")
 	if code != 200 || tr.Outcome != "internal" || tr.path() != "extension:1: > extension:1:ring > extension:1:voicemail" {
 		t.Errorf("internal: %d %s %+v", code, tr.path(), tr)
+	}
+
+	// A feature code dialled from an extension is traced before routing.
+	code, tr = traceGet(t, f, "/api/v1/flow/trace?from=100&number=*97100")
+	if code != 200 || tr.Outcome != "internal" || tr.path() != "extension:1: > extension:1: > extension:1:voicemail" {
+		t.Errorf("feature code: %d %s", code, tr.path())
+	}
+	// The ring step lists the busy and not-registered branches.
+	code, tr = traceGet(t, f, "/api/v1/flow/trace?from=100&number=100")
+	if ring := tr.Steps[1]; len(ring.Branches) != 2 || ring.Branches[0].Label != "If busy" {
+		t.Errorf("ring branches: %+v", tr.Steps)
 	}
 
 	for _, bad := range []string{"", "?from=abc&number=1", "?from=trunk:1", "?from=trunk:1&number=1&at=noon", "?from=trunk:1&number=1&digits=ab"} {
