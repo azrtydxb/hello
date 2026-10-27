@@ -253,7 +253,8 @@ func (s *Store) ImportBlocklist(ctx context.Context, actor string, rows []Blockl
 				RETURNING (xmax = 0)`,
 				in.Pattern, in.Match, in.Action, in.TrunkID, in.Reason, in.AnnouncementID, in.Enabled).Scan(&inserted)
 			if err != nil {
-				if f := blocklistFK(err); f != err {
+				var ve *ValidationError
+				if errors.As(blocklistFK(err), &ve) {
 					return "", fieldError(fmt.Sprintf("rows[%d]", i), "names a trunk or announcement that does not exist")
 				}
 				return "", err
