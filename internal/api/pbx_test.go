@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -145,6 +146,7 @@ func startMinio(t *testing.T) *MinioObjects {
 		// service container): wait for it and create the bucket, exactly as
 		// the throwaway-container path below does.
 		ensureSharedBuckets(t, o)
+		lastMinio.Store(o)
 		return o
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -190,6 +192,7 @@ func startMinio(t *testing.T) *MinioObjects {
 		t.Fatal(err)
 	}
 	waitBucket(t, o)
+	lastMinio.Store(o)
 	return o
 }
 
@@ -222,6 +225,15 @@ func isSlowDown(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "reduce your request rate")
 }
 
+// isNoBucket reports whether err is a write to a bucket the store does not
+// (yet) hold.
+func isNoBucket(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "bucket does not exist")
+}
+
+// lastMinio is the store the fixtures last started, for re-ensuring buckets.
+var lastMinio atomic.Pointer[MinioObjects]
+
 // retrySlowDown runs a test fixture write against the shared CI MinIO. The
 // client already retries SlowDown for about ten seconds; the service
 // container's drive can stay unwritable for longer than that under load, so
@@ -235,8 +247,17 @@ func retrySlowDown(t *testing.T, op func() error) {
 		if err == nil {
 			return
 		}
-		if !isSlowDown(err) || time.Now().After(deadline) {
+		missing := isNoBucket(err)
+		if !(isSlowDown(err) || missing) || time.Now().After(deadline) {
 			t.Fatal(err)
+		}
+		if missing {
+			// The buckets were ensured once per process, but a MinIO whose
+			// drive was unwritable at that moment can answer the check and
+			// still not hold the bucket when the write lands: ensure again.
+			if o := lastMinio.Load(); o != nil {
+				waitBucket(t, o)
+			}
 		}
 		time.Sleep(time.Second)
 	}

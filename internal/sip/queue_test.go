@@ -143,9 +143,11 @@ func TestQueueAbandon(t *testing.T) {
 		ws, _ := st.Waiting(t.Context(), "sales")
 		return len(ws) == 0 && pbx.metric(t, "hello_queue_waiting", map[string]string{"queue": "sales"}) == 0
 	})
-	if v := pbx.metric(t, "hello_queue_abandoned_total", map[string]string{"queue": "sales"}); v != 1 {
-		t.Fatalf("abandoned = %v", v)
-	}
+	// The entry leaves when the flow's context is cancelled, which end()
+	// does before it counts the abandonment: wait for the count.
+	eventually(t, "the abandonment is counted", func() bool {
+		return pbx.metric(t, "hello_queue_abandoned_total", map[string]string{"queue": "sales"}) == 1
+	})
 	rec := lastCDRFor(t, pbx, "600")
 	ev := queueLegEvents(rec)
 	if !slices.Contains(ev, cdr.QueueAbandon) || ev[0] != cdr.QueueEnter {

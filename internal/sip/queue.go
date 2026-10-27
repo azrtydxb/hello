@@ -369,13 +369,16 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 		c.qLeg(cdr.QueueWait, q.Name, ext, wait, "answered")
 		c.qLeg(cdr.QueueAnswered, q.Name, ext, wait, "")
 		s.m.QueueWait.WithLabelValues(q.Name, "answered").Observe(wait.Seconds())
-		s.m.QueueCalls.WithLabelValues(q.Name, "answered").Inc()
 		c.mu.Lock()
 		c.qAgent = ext
 		c.mu.Unlock()
-		c.queueLog("queue answered", q.Name, "agent", ext, "wait", wait.String())
 		c.addTrace(fmt.Sprintf("Queue %s: answered by %s after %s", q.Name, ext, wait.Round(time.Second)))
 		c.ivrConnect(w, ext)
+		// Counted once the caller is bridged: the CDR's destination and the
+		// agent's dialog are in place, so a hang-up seen after the count
+		// reaches the agent and the CDR names it.
+		s.m.QueueCalls.WithLabelValues(q.Name, "answered").Inc()
+		c.queueLog("queue answered", q.Name, "agent", ext, "wait", wait.String())
 		release() // the agent shows as busy now
 		return
 	}

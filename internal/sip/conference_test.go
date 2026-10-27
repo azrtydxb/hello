@@ -288,6 +288,25 @@ func speaks(talker, listener *confSeat) int {
 	return <-got
 }
 
+// speaksUntilHeard repeats speaks until the listener hears the talker: the
+// media path (a relay latching on the first packet, a forwarded leg reaching
+// the owner's mixer) opens at a time that depends on the machine's load, so
+// one fixed window cannot tell "not yet" from "never". It fails only if
+// nothing is heard within 15 s.
+func speaksUntilHeard(t *testing.T, what string, talker, listener *confSeat) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		got := speaks(talker, listener)
+		if got >= 3000 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s (peak %d)", what, got)
+		}
+	}
+}
+
 func waitState(t *testing.T, f *fakeConf, room string, what string, cond func(livestate.ConfRoomState) bool) livestate.ConfRoomState {
 	t.Helper()
 	var last livestate.ConfRoomState
@@ -674,12 +693,8 @@ func TestConferenceTwoNodes(t *testing.T) {
 	}
 	waitState(t, f, "800", "both in the one room", func(s livestate.ConfRoomState) bool { return len(s.Participants) == 2 && s.Node == "sip-a" })
 	remote.say(500, 0, 600*time.Millisecond) // the phone's steady stream (silence) opens the relay both ways
-	if got := speaks(local, remote); got < 3000 {
-		t.Fatalf("the forwarded participant did not hear the local one (peak %d)", got)
-	}
-	if got := speaks(remote, local); got < 3000 {
-		t.Fatalf("the local participant did not hear the forwarded one (peak %d)", got)
-	}
+	speaksUntilHeard(t, "the forwarded participant did not hear the local one", local, remote)
+	speaksUntilHeard(t, "the local participant did not hear the forwarded one", remote, local)
 	// DTMF through the forwarding node reaches the owner's participant.
 	remote.keys("*6")
 	waitState(t, f, "800", "forwarded participant muted over INFO", func(s livestate.ConfRoomState) bool {
@@ -712,9 +727,7 @@ func TestConferenceTwoNodes(t *testing.T) {
 		t.Fatalf("join after the owner died: %v", err)
 	}
 	time.Sleep(600 * time.Millisecond)
-	if got := speaks(third, remote); got < 3000 {
-		t.Fatalf("the re-homed participant does not hear the new one (peak %d)", got)
-	}
+	speaksUntilHeard(t, "the re-homed participant does not hear the new one", third, remote)
 	remote.leave()
 	third.leave()
 }

@@ -88,6 +88,7 @@ func TestQueueSurvivesNodeFailover(t *testing.T) {
 	rec := waitRecord(t, ha, "the bridged call replicates from the survivor", "sip-2", func(s livestate.DialogState) bool {
 		return s.State == "talking" && s.Legs[0].CallID == raFirst.CallID().Value() && s.Legs[1].LocalTag != ""
 	})
+	waitReq(t, b.acks, "the agent's leg is confirmed")
 	hangupHomed(t, a, taker, raFirst, rec.Legs[0])
 	waitReq(t, b.byes, "the caller's BYE reaches the agent")
 }
