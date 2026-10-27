@@ -55,6 +55,7 @@ func (f *acctFake) SessionActor(_ context.Context, h []byte) (auth.Actor, error)
 		if a.UserID > 0 {
 			if u, ok := f.users[a.UserID]; ok {
 				a.Role, a.MustChangePassword = u.Role, u.MustChangePassword
+				a.MustEnrollMFA = u.TOTPRequired && !u.TOTPEnabled
 				if !u.Enabled {
 					return auth.Actor{}, auth.ErrNoCredentials
 				}
@@ -115,7 +116,7 @@ func (f *acctFake) UserForLogin(_ context.Context, name string) (store.Login, er
 	defer f.mu.Unlock()
 	for id, u := range f.users {
 		if u.Username == name {
-			return store.Login{ID: id, Hash: f.hashes[id], Enabled: u.Enabled, Role: u.Role}, nil
+			return store.Login{ID: id, Hash: f.hashes[id], Enabled: u.Enabled, Role: u.Role, TOTPEnabled: u.TOTPEnabled}, nil
 		}
 	}
 	return store.Login{}, store.ErrNotFound
