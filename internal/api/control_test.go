@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +27,7 @@ import (
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/valkey-io/valkey-go"
 )
@@ -107,17 +109,62 @@ func scratchDatabase(t *testing.T, ctx context.Context, dsn string) string {
 	if _, err := admin.ExecContext(ctx, "CREATE DATABASE "+name); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if _, err := admin.ExecContext(context.Background(), "DROP DATABASE "+name+" WITH (FORCE)"); err != nil {
-			t.Errorf("drop scratch database %s: %v", name, err)
-		}
-	})
+	t.Cleanup(func() { dropScratchDatabase(t, admin, name) })
 	u, err := url.Parse(dsn)
 	if err != nil || u.Scheme == "" {
 		t.Fatalf("HELLO_TEST_DATABASE_URL must be a postgres:// URL")
 	}
 	u.Path = "/" + name
 	return u.String()
+}
+
+// dropScratchDatabase drops the scratch database. WITH (FORCE) terminates the
+// other sessions but waits only five seconds for their backends to exit, and
+// a server shared with the other packages' tests, under -race, can need
+// longer: the backend of a connection the test already closed is still on its
+// way out, and the drop fails with "being accessed by other users" (55006)
+// although nothing in the test holds a connection any more. A terminated
+// session is not a leak, so the drop is asked again, within a deadline, and a
+// failure that outlasts it names the sessions that remain.
+func dropScratchDatabase(t *testing.T, admin *sql.DB, name string) {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		_, err := admin.ExecContext(ctx, "DROP DATABASE "+name+" WITH (FORCE)")
+		if err == nil {
+			return
+		}
+		var pe *pgconn.PgError
+		if !errors.As(err, &pe) || pe.Code != "55006" || time.Now().After(deadline) {
+			t.Errorf("drop scratch database %s: %v; sessions left: %s", name, err, sessionsOf(ctx, admin, name))
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// sessionsOf describes the sessions connected to database name, for a failure
+// message.
+func sessionsOf(ctx context.Context, admin *sql.DB, name string) string {
+	rows, err := admin.QueryContext(ctx, `SELECT pid, coalesce(application_name, ''), coalesce(state, ''), coalesce(backend_type, ''), left(coalesce(query, ''), 80)
+		FROM pg_stat_activity WHERE datname = $1`, name)
+	if err != nil {
+		return "unknown (" + err.Error() + ")"
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var pid int
+		var app, state, typ, query string
+		if rows.Scan(&pid, &app, &state, &typ, &query) == nil {
+			out = append(out, fmt.Sprintf("pid %d %s app=%q state=%s query=%q", pid, typ, app, state, query))
+		}
+	}
+	if len(out) == 0 {
+		return "none"
+	}
+	return strings.Join(out, "; ")
 }
 
 // client is an HTTP client with an optional bearer token and a cookie jar.
