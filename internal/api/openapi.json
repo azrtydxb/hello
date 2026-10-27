@@ -20462,7 +20462,11 @@
                   "rate_limited",
                   "too_large",
                   "messaging_disabled",
-                  "no_messaging_trunk"
+                  "no_messaging_trunk",
+                  "opted_out",
+                  "not_agent",
+                  "conversation_state",
+                  "channel_unavailable"
                 ]
               },
               "message": {
