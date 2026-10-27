@@ -450,6 +450,9 @@ func (t *Table) fromTrunk(d *Decision, c Call, usable TrunkUsability) {
 	case "ring_group", "voicemail", "announcement", "paging":
 		d.Trace.Add("Destination: " + namedKindLabel[r.r.DestinationKind] + " " + show(r.r.Destination))
 		d.Kind, d.DestKind, d.DestTarget = KindInbound, r.r.DestinationKind, r.r.Destination
+	case "directory":
+		d.Trace.Add("Destination: dial-by-name directory")
+		d.Kind, d.DestKind = KindInbound, "directory"
 	case "sip_uri":
 		d.Trace.Add("Destination: SIP URI " + r.r.Destination)
 		d.Kind, d.SIPURI = KindInbound, r.r.Destination

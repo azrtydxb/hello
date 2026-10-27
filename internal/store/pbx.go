@@ -875,6 +875,7 @@ func DefaultFeatureCodes() []FeatureCode {
 		{Code: "*46", Action: ActionQueueLogout},
 		{Code: "*47", Action: ActionQueuePause, Argument: "break"},
 		{Code: "*48", Action: ActionQueueUnpause},
+		{Code: "*42", Action: ActionDirectory},
 	}
 }
 

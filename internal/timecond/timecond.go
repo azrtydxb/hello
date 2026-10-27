@@ -59,6 +59,8 @@ const (
 	KindExternal      = "external"
 	KindQueue         = "queue"
 	KindTimeCondition = "time_condition"
+	// KindDirectory is the dial-by-name directory; it has no target.
+	KindDirectory = "directory"
 )
 
 // MaxDepth bounds a chain of time conditions that name each other; the

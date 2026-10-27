@@ -23,6 +23,9 @@ const (
 	IVRQueue        = "queue"
 	// IVRTimeCondition names a time condition (migration 00034).
 	IVRTimeCondition = "time_condition"
+	// IVRDirectory is the dial-by-name directory (migration 00052); it has
+	// no target.
+	IVRDirectory = "directory"
 )
 
 // IVRDest is where a menu option, timeout or invalid choice sends the call.

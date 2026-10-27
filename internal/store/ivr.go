@@ -39,12 +39,16 @@ const (
 	// IVRTimeCondition names a time condition (migration 00038), which picks
 	// one of its own destinations when the call arrives.
 	IVRTimeCondition = "time_condition"
+	// IVRDirectory is the dial-by-name directory (migration 00052): the
+	// caller spells a name on the keypad and is connected to the extension.
+	// It names no object, so its target is empty.
+	IVRDirectory = "directory"
 )
 
 // IVRDestinationKinds lists the destination kinds, in the order the UI shows
 // them.
 var IVRDestinationKinds = []string{IVRHangup, IVRExtension, IVRRingGroup, IVRVoicemail, IVRAnnouncement,
-	IVRPaging, IVRMenuDest, IVRExternal, IVRQueueDest, IVRTimeCondition}
+	IVRPaging, IVRMenuDest, IVRExternal, IVRQueueDest, IVRTimeCondition, IVRDirectory}
 
 // IVRDestination is where an option, a timeout or an invalid choice sends
 // the call.
@@ -217,6 +221,10 @@ func checkIVRDestination(ctx context.Context, tx *sql.Tx, d ivrDest) error {
 	case IVRHangup:
 		if d.Target != "" {
 			return fieldError(d.path+".target", `must be empty when kind is "hangup"`)
+		}
+	case IVRDirectory:
+		if d.Target != "" {
+			return fieldError(d.path+".target", `must be empty when kind is "directory"`)
 		}
 	case IVRExtension:
 		return exists(`SELECT count(*) FROM extensions WHERE number = $1`, "extension")

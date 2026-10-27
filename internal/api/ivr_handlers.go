@@ -99,6 +99,8 @@ func validateIVRDestination(f *fieldErrs, path, kind, target string) {
 	switch kind {
 	case store.IVRHangup:
 		ok, want = target == "", `empty when kind is "hangup"`
+	case store.IVRDirectory:
+		ok, want = target == "", `empty when kind is "directory"`
 	case store.IVRExtension, store.IVRVoicemail:
 		ok, want = numberRe.MatchString(target), "an extension number (2-10 digits)"
 	case store.IVRRingGroup, store.IVRAnnouncement, store.IVRMenuDest, store.IVRTimeCondition:

@@ -1045,6 +1045,10 @@ func (s *Server) takeOverSolo(st livestate.DialogState, from string) {
 		c.queueResume(st.StateDetail)
 		return
 	}
+	if st.State == haPhaseDirectory {
+		c.directoryResume()
+		return
+	}
 	if st.State == haPhaseIVR {
 		c.ivrResume(strings.TrimPrefix(st.StateDetail, haIVRDetailPrefix))
 		return

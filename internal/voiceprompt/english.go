@@ -80,4 +80,12 @@ var english = map[Key]string{
 	GreetUnavailableTail: "is not available. Please leave a message after the tone.",
 	GreetBusyTail:        "is busy at the moment. Please leave a message after the tone.",
 	GreetUnreachableTail: "cannot be reached at the moment. Please leave a message after the tone.",
+
+	DirectoryEnter:      "Please enter the first three letters of the name on the keypad, then press the pound key.",
+	DirectoryConnecting: "Connecting you to",
+	DirectoryOne:        "For {name}, press {digit}.",
+	DirectoryChoose:     "More than one name matches.",
+	DirectoryMore:       "That matches too many names. Please enter more letters.",
+	DirectoryNone:       "Sorry, no name matches those letters.",
+	DirectoryTooLong:    "That is too many letters. Please enter fewer letters.",
 }
