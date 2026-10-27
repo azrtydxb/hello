@@ -51,8 +51,16 @@ func TestDSCPOutboundOnMarkedSocket(t *testing.T) {
 	paddr := peer.LocalAddr().(*net.UDPAddr)
 	for range 3 { // fresh remote each time is not needed: reuse must hold on repeats
 		req := sip.NewRequest(sip.OPTIONS, sip.Uri{Scheme: "sip", User: "x", Host: "127.0.0.1", Port: paddr.Port})
-		if err := p.srv.client.WriteRequest(req, p.srv.addViaFromListener); err != nil {
-			t.Fatal(err)
+		// Serving() can report ready a moment before the transport pool
+		// holds the listener; until then a write cannot find it.
+		var werr error
+		for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			if werr = p.srv.client.WriteRequest(req, p.srv.addViaFromListener); werr == nil || time.Now().After(deadline) {
+				break
+			}
+		}
+		if werr != nil {
+			t.Fatal(werr)
 		}
 		_ = peer.SetReadDeadline(time.Now().Add(5 * time.Second))
 		buf := make([]byte, 4096)
