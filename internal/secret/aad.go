@@ -8,3 +8,7 @@ import "fmt"
 func ConferencePINAAD(roomID int64, which string) string {
 	return fmt.Sprintf("conference:%d:%s", roomID, which)
 }
+
+// TOTPAAD is the additional data a user's TOTP secret is sealed under, so a
+// secret copied to another user's row does not open.
+func TOTPAAD(userID int64) string { return fmt.Sprintf("user:%d:totp", userID) }

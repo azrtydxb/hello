@@ -18,6 +18,7 @@ import {
 } from "../../design/azrty/components";
 import { mapFieldErrors } from "../../forms";
 import { PasswordForm } from "../ChangePassword";
+import { TwoFactorCard } from "../TwoFactor";
 
 /** The user's own name, email, voicemail-email options and password. */
 export function MyProfile() {
@@ -43,6 +44,7 @@ export function MyProfile() {
           <h2 className="vm-box__title">Password</h2>
           <PasswordForm onDone={() => toast.show("Password changed.")} />
         </div>
+        <TwoFactorCard onChange={() => void refresh()} />
       </div>
       {toast.node}
     </section>
