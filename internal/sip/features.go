@@ -42,6 +42,9 @@ const (
 	// call-waiting flag (migration 00026, spec S-18).
 	ActionCallWaitingOn  = "call_waiting_on"
 	ActionCallWaitingOff = "call_waiting_off"
+	// ActionBossDivert toggles the divert of the boss link of the extension
+	// that dialled it (pbx-gaps S-19, *64).
+	ActionBossDivert = "boss_divert"
 )
 
 // handleParkFeatureInvite serves the park, retrieve and pickup codes dialled
@@ -75,6 +78,9 @@ type ExtUpdate struct {
 	// NoAnswerRings is the no-answer ring count a phone's feature key set
 	// (as-feature-event ringCount); 0 means the system default.
 	NoAnswerRings *int
+	// BossDivert sets the divert of the boss link whose boss is Extension
+	// (the *64 code); nil leaves it alone.
+	BossDivert *bool
 }
 
 // SettingsSink takes extension-feature changes and applies them later: the
@@ -134,6 +140,9 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 		return true
 	case ActionIntercom:
 		c.handleIntercom(tx, arg)
+		return true
+	case ActionBossDivert:
+		c.handleBossDivert(tx)
 		return true
 	case ActionQueueLogin, ActionQueueLogout, ActionQueuePause, ActionQueueUnpause:
 		c.handleQueueCode(tx, fc, arg)
@@ -284,6 +293,8 @@ func (s *Server) handleInfo(req *sip.Request, tx sip.ServerTransaction) {
 				ref.c.confForwardDigit(d) // the owner's participant reads it
 			case ref.leg == nil && ref.c.ivrDigit(legCaller, d):
 				// A digit for the IVR menu the caller is in.
+			case ref.leg != nil && ref.c.screenDigit(d):
+				// A digit of the assistant answering the screening prompt.
 			default:
 				s.dispatchDigit(ref.c, ref.leg == nil, d)
 			}
@@ -403,7 +414,7 @@ func (s *Server) dispatchDigit(c *call, fromCaller bool, d byte) {
 	// A code whose action carries no argument fires immediately; otherwise
 	// keep collecting (the trailing digits are the argument).
 	switch fc.Action {
-	case ActionDNDOn, ActionDNDOff, ActionVoicemail:
+	case ActionDNDOn, ActionDNDOff, ActionVoicemail, ActionBossDivert:
 		buf.take()
 	case ActionForwardAlways, ActionForwardBusy, ActionForwardNoAnswer:
 		if fc.Argument == "clear" {
@@ -516,6 +527,12 @@ func (s *Server) applyInDialogCode(c *call, fromCaller bool, fc snapshot.Feature
 		return
 	case ActionParkRetrieve, ActionPickupGroup, ActionPickupDirected:
 		return // these are dialled as calls, not inside one
+	case ActionBossDivert:
+		// The current call is unaffected: the next one reads the new state.
+		if _, result, ok := s.applyBossDivert(snap, ext); ok {
+			c.addTrace("Boss divert " + result + " in call")
+		}
+		return
 	}
 	upd, ok := featureUpdate(fc, arg, ext)
 	if !ok || s.deps.Settings == nil || !s.deps.Settings.Apply(upd) {

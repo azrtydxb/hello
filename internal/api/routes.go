@@ -183,6 +183,8 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/multicast-channels/{id}", auth.ScopeAdmin, auth.RoleAdmin, false, s.deleteMulticastChannel},
 		{"GET", "/api/v1/feature-codes", auth.ScopeRead, auth.RoleViewer, false, s.listFeatureCodes},
 		{"PUT", "/api/v1/feature-codes", auth.ScopeWrite, auth.RoleOperator, false, s.putFeatureCodes},
+		{"GET", "/api/v1/boss-links", auth.ScopeRead, auth.RoleViewer, false, s.listBossLinks},
+		{"PUT", "/api/v1/boss-links", auth.ScopeWrite, auth.RoleOperator, false, s.putBossLinks},
 
 		{"GET", "/api/v1/presence", auth.ScopeRead, auth.RoleViewer, false, s.presence},
 

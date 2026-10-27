@@ -189,6 +189,8 @@ export interface Cdr {
   rewrittenDestination: string;
   route: string;
   trunk: string;
+  /** The assistant's extension when the call to a boss was answered by the assistant. */
+  answeredBy?: string;
   /** Call quality of an anchored call; null when not measured. */
   rtpPackets?: number | null;
   rtpLost?: number | null;
@@ -1759,6 +1761,7 @@ export const FEATURE_CODE_ACTIONS = [
   "queue_logout",
   "queue_pause",
   "queue_unpause",
+  "boss_divert",
   "call_waiting_on",
   "call_waiting_off",
   "park",
@@ -1789,6 +1792,7 @@ export const FEATURE_CODE_ACTION_LABELS: Record<FeatureCodeAction, string> = {
   queue_logout: "Queue agent logout",
   queue_pause: "Queue agent pause (argument: reason)",
   queue_unpause: "Queue agent unpause",
+  boss_divert: "Boss divert on or off (assistant only rings)",
   call_waiting_on: "Call waiting on",
   call_waiting_off: "Call waiting off",
   park: "Park the call",
@@ -1806,6 +1810,52 @@ export const listFeatureCodes = (signal?: AbortSignal) =>
 /** PUT /api/v1/feature-codes: the full list, replacing what is stored. */
 export const updateFeatureCodes = (codes: readonly FeatureCode[]) =>
   request<void>("PUT", "/api/v1/feature-codes", { body: { items: codes } });
+
+/** How a boss's call rings: both sets of phones, or the assistant's first. */
+export type BossRingMode = "both" | "assistant_first";
+
+/** One boss with their assistant (GET /api/v1/boss-links). */
+export interface BossLink {
+  id: Id;
+  bossExtensionId: Id;
+  bossNumber: string;
+  bossName: string;
+  assistantExtensionId: Id;
+  assistantNumber: string;
+  assistantName: string;
+  ringMode: BossRingMode;
+  /** The assistant who answers hears a prompt and presses 1 or 2. */
+  screening: boolean;
+  enabled: boolean;
+  /** Only the assistant rings; *64 on the boss's phone toggles it. */
+  divertOn: boolean;
+  /** The assistant's outbound calls present the boss's caller ID. */
+  outboundAsBoss: boolean;
+}
+
+/** The writable fields of a link. */
+export type BossLinkInput = Pick<
+  BossLink,
+  | "bossExtensionId"
+  | "assistantExtensionId"
+  | "ringMode"
+  | "screening"
+  | "enabled"
+  | "divertOn"
+  | "outboundAsBoss"
+>;
+
+export const listBossLinks = (signal?: AbortSignal) =>
+  list<BossLink>("/api/v1/boss-links", signal);
+
+/** PUT /api/v1/boss-links: the full list, replacing what is stored. */
+export const putBossLinks = async (links: readonly BossLinkInput[]) =>
+  items<BossLink>(
+    await request<unknown>("PUT", "/api/v1/boss-links", {
+      body: { items: links },
+    }),
+    "/api/v1/boss-links",
+  );
 
 /** livestate DeviceState (GET /api/v1/presence). */
 export interface DeviceState {

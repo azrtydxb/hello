@@ -7158,7 +7158,7 @@
       "put": {
         "operationId": "putFeatureCodes",
         "summary": "Replace the DTMF feature codes",
-        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, ivr, queue_login, queue_logout, queue_pause, queue_unpause (the argument of queue_pause is the pause reason), call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed, time_condition (the argument is the time condition's name), tc_override (the argument is toggle, open, closed or auto). Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
+        "description": "Replaces the whole feature-code configuration. The list is the complete configuration: every item is upserted and every code not in the list is removed. Codes are '*' plus 2-4 digits, or '##'; actions are forward_always, forward_busy, forward_no_answer, dnd_on, dnd_off, voicemail, blind_transfer, attended_transfer, announcement, intercom, ivr, queue_login, queue_logout, queue_pause, queue_unpause (the argument of queue_pause is the pause reason), call_waiting_on, call_waiting_off, park, park_retrieve, pickup_group, pickup_directed, time_condition (the argument is the time condition's name), tc_override (the argument is toggle, open, closed or auto), boss_divert (toggles the divert of the boss link of the extension that dialled it). Park and pickup codes take their argument after the code: park plus an optional slot, retrieve plus a slot, directed pickup plus an extension. No code may overlap another feature code or a paging group's code (one a prefix of the other); an overlap is refused with 400.",
         "tags": ["feature-codes"],
         "requestBody": {
           "required": true,
@@ -7189,6 +7189,84 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/boss-links": {
+      "get": {
+        "operationId": "listBossLinks",
+        "summary": "List boss and assistant links",
+        "description": "Lists the boss and assistant links. A boss has at most one assistant and an assistant may serve many bosses. Calls to the boss ring the boss's and the assistant's devices, the first to answer wins.",
+        "tags": ["boss-links"],
+        "responses": {
+          "200": {
+            "description": "Links ordered by the boss's number",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BossLinkList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putBossLinks",
+        "summary": "Replace the boss and assistant links",
+        "description": "Replaces the whole link list: every item is upserted by its boss and every link whose boss is not in the list is removed. A boss appears once, an assistant may appear in several links, and an assistant may present the caller ID of one boss only (outboundAsBoss). ringMode both rings the boss's and the assistant's devices together; assistant_first rings the assistant's devices for 10 seconds and then both. With screening on, the assistant who answers hears a prompt naming the boss and presses 1 to put the call through to the boss or 2 to send it to the boss's voicemail. divertOn silences the boss's own devices so that only the assistant rings; the *64 feature code toggles it from the boss's phone. The forwarding of the boss (always) wins over the link.",
+        "tags": ["boss-links"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BossLinksPut"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BossLinkList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -17989,6 +18067,89 @@
           }
         }
       },
+      "BossLink": {
+        "type": "object",
+        "required": [
+          "id",
+          "bossExtensionId",
+          "bossNumber",
+          "bossName",
+          "assistantExtensionId",
+          "assistantNumber",
+          "assistantName",
+          "ringMode",
+          "screening",
+          "enabled",
+          "divertOn",
+          "outboundAsBoss"
+        ],
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "bossExtensionId": { "type": "integer", "format": "int64" },
+          "bossNumber": { "type": "string" },
+          "bossName": { "type": "string" },
+          "assistantExtensionId": { "type": "integer", "format": "int64" },
+          "assistantNumber": { "type": "string" },
+          "assistantName": { "type": "string" },
+          "ringMode": { "type": "string", "enum": ["both", "assistant_first"] },
+          "screening": { "type": "boolean" },
+          "enabled": { "type": "boolean" },
+          "divertOn": { "type": "boolean" },
+          "outboundAsBoss": { "type": "boolean" }
+        }
+      },
+      "BossLinkList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BossLink"
+            }
+          }
+        }
+      },
+      "BossLinksPut": {
+        "type": "object",
+        "required": ["items"],
+        "additionalProperties": false,
+        "description": "The complete link list; links whose boss is absent from the list are removed.",
+        "properties": {
+          "items": {
+            "type": "array",
+            "maxItems": 500,
+            "description": "One link per boss: the boss and assistant extension ids, how the call rings and the options.",
+            "items": {
+              "type": "object",
+              "required": [
+                "bossExtensionId",
+                "assistantExtensionId",
+                "ringMode"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "bossExtensionId": { "type": "integer", "format": "int64" },
+                "assistantExtensionId": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "ringMode": {
+                  "type": "string",
+                  "enum": ["both", "assistant_first"]
+                },
+                "screening": { "type": "boolean" },
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Default true."
+                },
+                "divertOn": { "type": "boolean" },
+                "outboundAsBoss": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      },
       "FeatureCode": {
         "type": "object",
         "required": ["code", "action", "argument"],
@@ -18022,7 +18183,8 @@
               "queue_login",
               "queue_logout",
               "queue_pause",
-              "queue_unpause"
+              "queue_unpause",
+              "boss_divert"
             ]
           },
           "argument": {
@@ -18086,7 +18248,8 @@
                     "queue_login",
                     "queue_logout",
                     "queue_pause",
-                    "queue_unpause"
+                    "queue_unpause",
+                    "boss_divert"
                   ]
                 },
                 "argument": {
@@ -19934,6 +20097,10 @@
             "type": "string",
             "enum": ["call", "page", "intercom", "conference"],
             "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room."
+          },
+          "answeredBy": {
+            "type": "string",
+            "description": "The assistant's extension when the call to a boss was answered by the assistant (boss link); empty otherwise."
           }
         },
         "description": "Null times are omitted."

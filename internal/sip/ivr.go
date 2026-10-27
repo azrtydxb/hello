@@ -1051,6 +1051,7 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 	c.mu.Unlock()
 	st.active.Store(false)
 	c.ivrFinishSetup()
+	c.noteBossAnswer(w)
 	c.addTrace("IVR: caller connected to " + orDefault(ext, "the destination"))
 	c.s.m.IVRTotal.WithLabelValues("connected").Inc()
 	c.publish()
@@ -1089,7 +1090,10 @@ func (c *call) ivrRingExtension(ctx context.Context, snap *snapshot.Snapshot, ex
 		}
 		return ivrResult{kind: ivrFailed, why: "extension " + ext + " is " + reason}
 	}
-	if e.DND {
+	// A boss's call rings the assistant too (boss.go); screening is not
+	// offered to a menu's call, where the assistant answers as for any call.
+	assist, divert := c.ivrAssistant(snap, ext)
+	if e.DND && len(assist) == 0 {
 		c.addTrace(fmt.Sprintf("Extension %s is DND", ext))
 		if c.voicemailConfigured(e) {
 			return voicemail("dnd")
@@ -1099,6 +1103,12 @@ func (c *call) ivrRingExtension(ctx context.Context, snap *snapshot.Snapshot, ex
 	targets, err := c.extensionBindings(snap, ext)
 	if err != nil {
 		return ivrResult{kind: ivrFailed, why: "live state unavailable"}
+	}
+	if len(assist) > 0 {
+		if e.DND || divert {
+			targets = nil // the boss's own phones are silenced
+		}
+		targets = append(targets, assist...)
 	}
 	if len(targets) == 0 {
 		switch {

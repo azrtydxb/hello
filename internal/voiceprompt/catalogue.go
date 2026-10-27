@@ -100,6 +100,10 @@ const (
 	GreetUnavailableTail Key = "greet.unavailable.tail"
 	GreetBusyTail        Key = "greet.busy.tail"
 	GreetUnreachableTail Key = "greet.unreachable.tail"
+
+	// Boss and secretary: what the assistant hears when a screened call for
+	// the boss is answered ({who} is the boss).
+	BossScreen Key = "boss.screen"
 )
 
 // tables holds the language tables. Add a language here and in its own file.

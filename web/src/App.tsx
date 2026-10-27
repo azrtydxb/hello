@@ -91,6 +91,7 @@ import { Ivr } from "./pages/Ivr";
 import { Queues } from "./pages/Queues";
 import { Wallboard } from "./pages/Wallboard";
 import { TimeConditions } from "./pages/TimeConditions";
+import { BossAssistant } from "./pages/BossAssistant";
 import { ParkPickup } from "./pages/ParkPickup";
 import { RingGroups } from "./pages/RingGroups";
 import { System } from "./pages/System";
@@ -130,6 +131,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/wallboard": Wallboard,
   "/time-conditions": TimeConditions,
   "/park": ParkPickup,
+  "/boss": BossAssistant,
   "/recordings": Recordings,
   "/announcements": Announcements,
   "/moh": MusicOnHold,

@@ -79,4 +79,6 @@ var dutch = map[Key]string{
 	GreetUnavailableTail: "is niet beschikbaar. Laat een bericht achter na de toon.",
 	GreetBusyTail:        "is in gesprek. Laat een bericht achter na de toon.",
 	GreetUnreachableTail: "is momenteel niet bereikbaar. Laat een bericht achter na de toon.",
+
+	BossScreen: "Gesprek voor {who}. Druk 1 om de beller door te verbinden, of 2 om een bericht op te nemen.",
 }

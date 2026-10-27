@@ -219,6 +219,20 @@ func TestWriterPostgres(t *testing.T) {
 
 type argsDB struct{ args []any }
 
+// TestAnsweredByCDR fails if the assistant's extension is not the insert's
+// last argument (the answered_by column of migration 00050).
+func TestAnsweredByCDR(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	if err := w.write(context.Background(), Record{CorrelationID: "b", StartTime: now, EndTime: now, AnsweredBy: "300"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := db.args[len(db.args)-1]; got != "300" {
+		t.Fatalf("last insert argument = %#v, want the assistant's extension", got)
+	}
+}
+
 func (a *argsDB) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
 	a.args = args
 	return pgconn.NewCommandTag("INSERT 0 1"), nil
@@ -236,8 +250,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 27 {
-		t.Fatalf("insert takes %d arguments, want 27", len(db.args))
+	if len(db.args) != 28 {
+		t.Fatalf("insert takes %d arguments, want 28", len(db.args))
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
