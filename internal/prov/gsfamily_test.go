@@ -145,3 +145,28 @@ func TestGrandstreamGenericKeepsBLF(t *testing.T) {
 		t.Errorf("BLF block missing:\n%s", got)
 	}
 }
+
+// TestGrandstreamSyslog fails if a phone whose group turned syslog on is not
+// given the sink and level (P207, P208), or one whose group did not is not
+// told explicitly to log nowhere (so turning it off reaches the phone).
+func TestGrandstreamSyslog(t *testing.T) {
+	for _, model := range []string{"WP826", "WP856", "WP822", "GRP2614"} {
+		d := gsFamilyData(model)
+		d.Syslog = &SyslogInfo{Host: "syslog.hello.example", Level: 3}
+		on, err := Render(context.Background(), builtinFor(t, Grandstream), "cfg"+d.Phone.MAC+".xml", d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(on, []byte("<P207>syslog.hello.example</P207>")) || !bytes.Contains(on, []byte("<P208>3</P208>")) {
+			t.Errorf("%s: syslog on is not rendered", model)
+		}
+		d.Syslog = nil
+		off, err := Render(context.Background(), builtinFor(t, Grandstream), "cfg"+d.Phone.MAC+".xml", d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(off, []byte("<P207></P207>")) || !bytes.Contains(off, []byte("<P208>0</P208>")) || bytes.Contains(off, []byte("syslog.hello")) {
+			t.Errorf("%s: syslog off is not rendered as off", model)
+		}
+	}
+}

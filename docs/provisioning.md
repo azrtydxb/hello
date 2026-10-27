@@ -1259,6 +1259,39 @@ and a resume as `sendrecv`, as on any bridged call.
 `Reason: SIP;cause=200;text="Call completed elsewhere"` on the CANCEL, so they
 do not log the call as missed.
 
+## Phone syslog
+
+Hello can receive the log of its Grandstream phones, so a phone that misbehaves can be read
+without a visit. It is off until the server and a phone group turn it on.
+
+1. **Server.** Set `HELLO_SYSLOG_UDP_ADDR` (for example `:5514`) on hello-control to listen for
+   UDP syslog, and `HELLO_SYSLOG_TLS_ADDR` with `HELLO_SYSLOG_TLS_CERT` and
+   `HELLO_SYSLOG_TLS_KEY` (for example `:6514`) for syslog over TLS (RFC 5425, octet-counted or
+   newline-framed). Publish them as UDP 514 and TLS 6514 (the Helm chart's
+   `control.syslog` values, the `hello-syslog` Service on kw).
+   `HELLO_SYSLOG_HOST` is the address phones are told to send to (`host` or `host:port`). Without
+   it no phone configuration mentions syslog.
+2. **Phone group.** In Phone groups, turn on "Send phone logs to Hello (syslog)" and pick a level
+   (debug, info, warning, error). The Grandstream template writes P207 (the server) and P208 (the
+   level 1 to 4). A group with syslog off writes P207 empty and P208 0, so turning it off reaches
+   phones that had it on. Resync the phones afterwards.
+3. **Read it.** Phone detail has a Syslog tab with the newest lines, newest first
+   (`GET /api/v1/phones/{id}/syslog`).
+
+What Hello keeps: the last 10000 lines per phone, for 24 hours after the newest line, in Valkey.
+Every line is redacted before it is stored: Authorization header values, `password=`, `secret=`,
+`token=` and similar pairs, the token in a provisioning URL, long token-like runs and passwords
+in URLs. Lines are cut at 2048 bytes. Each phone is limited to `HELLO_SYSLOG_RATE` lines per
+second (default 20, burst `HELLO_SYSLOG_BURST`, default 200); lines over it are dropped and the
+next stored line says how many.
+
+A line is attributed to a phone by its source address, the address the phone last fetched its
+configuration from. A line from any other address, or from an address two phones share (NAT), is
+not dropped: it is kept under that address for 24 hours (the last 1000 lines of up to 200
+addresses), listed by `GET /api/v1/syslog/unknown`. Keep the phone's source address on the way in
+(Kubernetes `externalTrafficPolicy: Local`), or lines show up as unknown. Syslog over UDP is not
+authenticated: anyone who can reach the port can write lines, so keep it on the phone network.
+
 ## Security model and its limits
 
 What protects the phones' secrets:

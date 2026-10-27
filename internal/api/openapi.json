@@ -13199,6 +13199,78 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/phone-groups/{id}/syslog": {
+      "put": {
+        "operationId": "setPhoneGroupSyslog",
+        "summary": "Set a phone group's syslog setting",
+        "description": "Sets whether the group's phones send their log to Hello's syslog sink and at what level (debug, info, warning or error). Off by default. The template writes Grandstream P207 (server) and P208 (level); the server address is HELLO_SYSLOG_HOST, and nothing is written while that is unset. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [{"$ref": "#/components/parameters/id"}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PhoneGroupSyslog"}}}
+        },
+        "responses": {
+          "200": {"description": "The group", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PhoneGroup"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"},
+          "503": {"$ref": "#/components/responses/Unavailable"}
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/{id}/syslog": {
+      "get": {
+        "operationId": "listPhoneSyslog",
+        "summary": "The phone's syslog lines, newest first",
+        "description": "Lists the log lines the phone sent to Hello's syslog sink, newest first. Use it to troubleshoot a phone. Hello keeps the last 10000 lines per phone for 24 h; secrets are redacted before storage. 503 while live state (Valkey) is unavailable.",
+        "tags": ["phones"],
+        "parameters": [
+          {"$ref": "#/components/parameters/id"},
+          {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 200}, "description": "How many lines to return."}
+        ],
+        "responses": {
+          "200": {"description": "The lines", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SyslogLines"}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"},
+          "500": {"$ref": "#/components/responses/Internal"},
+          "503": {"$ref": "#/components/responses/Unavailable"}
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/syslog/unknown": {
+      "get": {
+        "operationId": "listUnknownSyslog",
+        "summary": "Syslog from addresses no phone owns",
+        "description": "Without ip, lists the source addresses that sent syslog lines no provisioned phone owns, newest first, as items. With ip, returns that address's lines, newest first. Hello keeps the last 1000 lines per address for 24 h. 503 while live state (Valkey) is unavailable.",
+        "tags": ["phones"],
+        "parameters": [
+          {"name": "ip", "in": "query", "required": false, "schema": {"type": "string"}, "description": "IPv4 or IPv6 address whose lines to return; omit to list the addresses."},
+          {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 200}, "description": "How many lines to return with ip."}
+        ],
+        "responses": {
+          "200": {"description": "The addresses (items of strings) or, with ip, the lines", "content": {"application/json": {"schema": {"oneOf": [{"$ref": "#/components/schemas/SyslogLines"}, {"type": "object", "required": ["items"], "properties": {"items": {"type": "array", "items": {"type": "string"}}}}]}}}},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "500": {"$ref": "#/components/responses/Internal"},
+          "503": {"$ref": "#/components/responses/Unavailable"}
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/phone-groups/{id}/ptt": {
       "put": {
         "operationId": "setPhoneGroupPTT",
@@ -23693,6 +23765,33 @@
           }
         }
       },
+      "PhoneGroupSyslog": {
+        "type": "object",
+        "required": ["enabled", "level"],
+        "properties": {
+          "enabled": {"type": "boolean", "description": "Whether the group's phones send their log to Hello's syslog sink."},
+          "level": {"type": "string", "enum": ["debug", "info", "warning", "error"], "description": "The level the phones log at."}
+        }
+      },
+      "SyslogLine": {
+        "type": "object",
+        "required": ["at", "source", "severity", "message"],
+        "properties": {
+          "at": {"type": "string", "format": "date-time", "description": "When Hello received the line."},
+          "source": {"type": "string", "description": "The sender's IP address."},
+          "severity": {"type": "integer", "description": "Syslog severity 0 (emergency) to 7 (debug); -1 when the line had no priority."},
+          "message": {"type": "string", "description": "The line after redaction, without its priority."}
+        }
+      },
+      "SyslogLines": {
+        "type": "object",
+        "required": ["items", "cap", "retentionSeconds"],
+        "properties": {
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/SyslogLine"}},
+          "cap": {"type": "integer", "description": "The most lines kept."},
+          "retentionSeconds": {"type": "integer", "format": "int64", "description": "How long lines outlive the newest one."}
+        }
+      },
       "PhoneGroupPTT": {
         "type": "object",
         "required": ["enabled", "defaultChannel"],
@@ -23822,6 +23921,9 @@
           },
           "ptt": {
             "$ref": "#/components/schemas/PhoneGroupPTT"
+          },
+          "syslog": {
+            "$ref": "#/components/schemas/PhoneGroupSyslog"
           },
           "pagingOptions": {
             "$ref": "#/components/schemas/PagingOptions"

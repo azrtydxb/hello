@@ -832,3 +832,31 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - Not done: `exhausted` after a forward stage still uses the dialled
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
+
+## Syslog sink (S-27, item 36) (2026-10-27)
+
+- **Where.** In hello-control (package `internal/syslogsink`), not a sidecar: it needs the phone table
+  and Valkey, both already there. Off unless `HELLO_SYSLOG_UDP_ADDR` or `HELLO_SYSLOG_TLS_ADDR` is set.
+  The pod binds 5514 and 6514 (non-root); Services map them to 514 and 6514.
+- **Storage.** Valkey lists in `internal/livestate/syslog.go` (it owns a test database; every Valkey
+  test database is taken): `hello:syslog:phone:<id>` capped 10000 with a 24 h TTL; unknown sources
+  under `hello:syslog:ip:<ip>` capped 1000, indexed in a sorted set bounded to 200 addresses whose
+  evicted lists are deleted in the same script.
+- **Attribution.** By source IP = `phones.last_fetch_ip`. An address two phones share is treated as
+  unknown rather than guessed. Syslog carries no reliable phone identity otherwise.
+- **Rate cap.** Token bucket per phone (per address for unknown), default 20/s burst 200; drops are
+  reported by one stored notice line instead of a counter key.
+- **Redaction.** There was no shared line redactor, so `syslogsink.Redact` combines the Authorization
+  header, credential key/value, provisioning-path and 52+ char token rules (same token shape as
+  `prov.RedactPath`), plus URL passwords. It runs before truncation and storage.
+- **Config.** Group setting in two columns on `phone_groups` (migration 00046), default off, level
+  default info; `PUT /api/v1/phone-groups/{id}/syslog` (admin). Template change is Grandstream only
+  (P207/P208, as the spec says [R8x6 TPL]); other vendors are not touched. Off is written explicitly
+  (P207 empty, P208 0) so disabling reaches phones. P208 mapping debug 1, info 2, warning 3, error 4
+  is read from the template and UNVERIFIED on hardware, as is a `host:port` in P207 (kw needs it: the
+  NodePort is 30514).
+- **kw manifest.** UDP only (no TLS cert on kw yet): `hello-syslog` NodePort 30514, traffic policy
+  Local to keep the phone address; works only on a node with a hello-control pod. Not deployed.
+- **API/UI.** `GET /api/v1/phones/{id}/syslog`, `GET /api/v1/syslog/unknown`; Syslog tab on
+  PhoneDetail, toggle and level in the phone group editor. No UI for unknown sources.
+- **Not done.** Prometheus metrics for the sink; the severity filter in the tab.

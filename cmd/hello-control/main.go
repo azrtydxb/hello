@@ -167,6 +167,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Metrics: events.NewServiceMetrics(metrics.Registry),
 	}
 	go evSvc.Run(ctx)
+	if err := startSyslog(ctx, cfg.Syslog, st, vk, log); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("HELLO_SYSLOG_*: %w", err)
+	}
 	apiCfg := api.Config{
 		Events:          evSvc,
 		AIAgent:         agent,
@@ -180,6 +184,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Parked:          vk,
 		Objects:         objs,
 		Diagnostics:     vk,
+		Syslog:          vk,
 		AuthFailLimit:   cfg.AuthFailLimit,
 		EmailDelivery:   cfg.SmtpHost != "",
 		SMTPEnv:         envSMTP(cfg),

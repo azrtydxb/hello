@@ -267,6 +267,38 @@ export async function listPhoneFetches(
   return { items: page, next: typeof next === "string" ? next : "" };
 }
 
+/** One syslog line a phone sent, after redaction. */
+export interface SyslogLine {
+  at: string;
+  source: string;
+  /** 0 (emergency) to 7 (debug); -1 when the line had no priority. */
+  severity: number;
+  message: string;
+}
+
+export interface SyslogPage {
+  items: SyslogLine[];
+  cap: number;
+  retentionSeconds: number;
+}
+
+/** GET /api/v1/phones/{id}/syslog?limit=, newest first. */
+export async function listPhoneSyslog(
+  phoneId: Id,
+  limit = 200,
+  signal?: AbortSignal,
+): Promise<SyslogPage> {
+  const path = `/api/v1/phones/${seg(phoneId)}/syslog?limit=${limit}`;
+  const body = await request<unknown>("GET", path, { signal });
+  const b = body as Record<string, unknown>;
+  return {
+    items: listItems<SyslogLine>(body, path),
+    cap: typeof b.cap === "number" ? b.cap : 0,
+    retentionSeconds:
+      typeof b.retentionSeconds === "number" ? b.retentionSeconds : 0,
+  };
+}
+
 /**
  * GET /api/v1/phones/{id}/preview?file=: the file exactly as the phone would
  * get it, with the SIP secret, admin password and token masked by the server.

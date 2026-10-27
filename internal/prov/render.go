@@ -520,6 +520,7 @@ func SampleData(full bool) RenderData {
 				{Channel: 26, Label: "Announcements", Transmit: 1, Subscribe: 1},
 			}})
 		d.Paging = DefaultPagingOptions()
+		d.Syslog = &SyslogInfo{Host: "syslog.hello.example", Level: 2}
 		for i := range 12 {
 			n := strconv.Itoa(1002 + i)
 			d.BLF = append(d.BLF, BLFKey{Number: n, Label: "User " + n, URI: "sip:" + n + "@hello.example"})

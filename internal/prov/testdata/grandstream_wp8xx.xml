@@ -27,6 +27,8 @@
     <P198>102</P198>
     <P2325>1</P2325>
     <P191>0</P191>
+    <P207>syslog.hello.example</P207>
+    <P208>2</P208>
     <!-- Paging and intercom (Kuvryn Hello phonebooks-ptt spec P-12, P-13): answer by itself, on
          the speaker after a short beep, when Hello sends Call-Info answer-after=0. The WP8xx
          Administration Guide names this setting "Account > Call Settings > Allow Auto Answer by

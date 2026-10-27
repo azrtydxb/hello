@@ -110,6 +110,9 @@ type RenderData struct {
 	PTT       *PTTInfo
 	Paging    *PagingOptions
 	Time      TimeInfo
+	// Syslog is where the phone sends its log (phone-feature-parity S-27);
+	// nil when its group has syslog off, which is the default.
+	Syslog *SyslogInfo
 	// Codes are the PBX's star codes (feature_codes), for phones whose own
 	// DND and forward keys dial them; a code the PBX does not define is
 	// empty.
@@ -120,6 +123,13 @@ type RenderData struct {
 	// Emergency is the comma-separated emergency numbers of Hello's
 	// emergency-flagged outbound routes (digits only), empty when none.
 	Emergency string
+}
+
+// SyslogInfo is a phone's syslog setting: the sink's host and the level as
+// the Grandstream P208 value (1 debug, 2 info, 3 warning, 4 error).
+type SyslogInfo struct {
+	Host  string
+	Level int
 }
 
 // Phone is the phone itself, as templates and resolution see it.

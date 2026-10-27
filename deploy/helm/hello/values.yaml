@@ -68,6 +68,18 @@ control:
       annotations:
         nginx.ingress.kubernetes.io/ssl-redirect: "false"
         nginx.ingress.kubernetes.io/enable-access-log: "false"
+  # Phone syslog sink (UDP :5514 in the pod, Service port 514). Off by
+  # default. host is what phones are told to send to (HELLO_SYSLOG_HOST, host
+  # or host:port); empty leaves syslog out of every phone configuration.
+  # Local traffic policy keeps the phone's address, which attributes a line to
+  # its phone.
+  syslog:
+    enabled: false
+    host: ""
+    service:
+      type: ClusterIP
+      nodePort: 0
+      externalTrafficPolicy: Local
   oauthDynamicClientRegistration: false
   # The API's Service. ClusterIP unless something outside the cluster
   # (a test harness, a load balancer) must reach the API directly.

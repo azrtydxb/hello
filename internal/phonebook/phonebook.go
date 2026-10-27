@@ -172,9 +172,36 @@ type Group struct {
 	Multicast     []MulticastChannel `json:"multicast"`
 	PagingOptions PagingOptions      `json:"pagingOptions"`
 	PTT           PTT                `json:"ptt"`
-	PhoneCount    int                `json:"phoneCount"`
-	CreatedAt     time.Time          `json:"createdAt"`
-	UpdatedAt     time.Time          `json:"updatedAt"`
+	// Syslog is whether the group's phones send their log to Hello's syslog
+	// sink (phone-feature-parity S-27).
+	Syslog     Syslog    `json:"syslog"`
+	PhoneCount int       `json:"phoneCount"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+// Syslog is a phone group's syslog setting: off by default, Level one of
+// SyslogLevels.
+type Syslog struct {
+	Enabled bool   `json:"enabled"`
+	Level   string `json:"level"`
+}
+
+// SyslogLevels are the levels a phone can log at, most verbose first; the
+// Grandstream P208 value of a level is its index plus one.
+var SyslogLevels = []string{"debug", "info", "warning", "error"}
+
+// DefaultSyslog is a new group's: off, at info level.
+func DefaultSyslog() Syslog { return Syslog{Level: "info"} }
+
+// ValidateSyslog checks a group's syslog setting.
+func ValidateSyslog(in Syslog) []FieldError {
+	for _, l := range SyslogLevels {
+		if in.Level == l {
+			return nil
+		}
+	}
+	return []FieldError{{"level", "must be debug, info, warning or error"}}
 }
 
 // ValidName reports whether s is a usable book or group name: 1 to max

@@ -415,3 +415,30 @@ func (l *LazyValkey) AvgHandle(ctx context.Context, name string) (time.Duration,
 	}
 	return q.AvgHandle(ctx, name)
 }
+
+// SyslogPhoneLines implements SyslogLive.
+func (l *LazyValkey) SyslogPhoneLines(ctx context.Context, phoneID int64, limit int) ([]livestate.SyslogLine, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.SyslogPhoneLines(ctx, phoneID, limit)
+}
+
+// SyslogUnknownLines implements SyslogLive.
+func (l *LazyValkey) SyslogUnknownLines(ctx context.Context, ip string, limit int) ([]livestate.SyslogLine, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.SyslogUnknownLines(ctx, ip, limit)
+}
+
+// SyslogUnknownSources implements SyslogLive.
+func (l *LazyValkey) SyslogUnknownSources(ctx context.Context) ([]string, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.live.SyslogUnknownSources(ctx)
+}

@@ -274,7 +274,9 @@ type Config struct {
 	// Diagnostics reads REGISTER attempts and the failed-auth throttle for
 	// the Diagnostics view; nil answers 503. AuthFailLimit is hello-sip's
 	// HELLO_SIP_AUTH_FAIL_LIMIT (0 means its default, 10).
-	Diagnostics   DiagnosticsLive
+	Diagnostics DiagnosticsLive
+	// Syslog reads the lines of the phone syslog sink; nil answers 503.
+	Syslog        SyslogLive
 	AuthFailLimit int
 	// EmailDelivery is whether voicemail-to-email can send (SMTP_HOST is
 	// set); the voicemail box responses carry it so the console can say
