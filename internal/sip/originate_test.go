@@ -147,17 +147,21 @@ func (p *phone) hangupAnswered(t *testing.T, callID string) {
 
 // byeUnacked sends the BYE of a phone that hangs up before the ACK of its 200
 // (click-to-call acknowledges it only when the destination answers); it
-// returns the response.
-func (p *phone) byeUnacked(inv *sip.Request) *sip.Response {
+// returns the response. The tags come from the PBX's own dialog: the phone's
+// sipgo objects are still being written by its goroutines.
+func (p *phone) byeUnacked(pbx *testPBX, callID string) *sip.Response {
 	p.t.Helper()
-	p.mu.Lock()
-	dss := p.servers[inv.CallID().Value()]
-	p.mu.Unlock()
-	req := sip.NewRequest(sip.BYE, *inv.Contact().Address.Clone())
-	req.AppendHeader(&sip.FromHeader{Address: *inv.To().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: tagOfTest(dss.InviteResponse.To())}}})
-	req.AppendHeader(&sip.ToHeader{Address: *inv.From().Address.Clone(), Params: sip.HeaderParams{{K: "tag", V: tagOfTest(inv.From())}}})
-	callID := sip.CallIDHeader(inv.CallID().Value())
-	req.AppendHeader(&callID)
+	ref, ok := pbx.srv.lookup(callID)
+	if !ok {
+		p.t.Fatalf("the PBX has no dialog %s", callID)
+	}
+	c := ref.c
+	remoteTag, localTag := tagParam(c.inv.From()), tagParam(c.dss.InviteRequest.To())
+	req := sip.NewRequest(sip.BYE, sip.Uri{Scheme: "sip", User: "200", Host: testDomain})
+	req.AppendHeader(&sip.FromHeader{Address: p.aorURI(), Params: sip.HeaderParams{{K: "tag", V: remoteTag}}})
+	req.AppendHeader(&sip.ToHeader{Address: sip.Uri{Scheme: "sip", User: "200", Host: testDomain}, Params: sip.HeaderParams{{K: "tag", V: localTag}}})
+	cid := sip.CallIDHeader(callID)
+	req.AppendHeader(&cid)
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: 2, MethodName: sip.BYE})
 	req.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
 	req.SetDestination(p.pbx)
@@ -346,7 +350,7 @@ func TestOriginatePhoneHangsUpWhileTargetRings(t *testing.T) {
 	inv := waitReq(t, e.a.invites, "leg A INVITE")
 	waitReq(t, e.b.invites, "destination INVITE")
 	e.orig.waitState(t, "o1", livestate.OriginateDialingTarget)
-	if res := e.a.byeUnacked(inv); res.StatusCode != 200 {
+	if res := e.a.byeUnacked(e.pbx, inv.CallID().Value()); res.StatusCode != 200 {
 		t.Fatalf("BYE before the destination answered = %d, want 200", res.StatusCode)
 	}
 	waitReq(t, e.b.cancels, "CANCEL of the destination")
