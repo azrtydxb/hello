@@ -187,6 +187,29 @@ func (l *labEnv) waitPodsReady(t *testing.T, want int, d time.Duration) {
 	t.Fatalf("%d kamailio pods Ready, want %d after %s", n, want, d)
 }
 
+// waitStablePods waits until want kamailio pods are Ready and stay so for
+// the whole of d (an instance that was frozen restarts its kube-vip container
+// once it finds it lost the Lease, and is briefly not Ready again).
+func (l *labEnv) waitStablePods(t *testing.T, want int, d time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Minute)
+	since := time.Time{}
+	for time.Now().Before(deadline) {
+		if n, err := l.readyPods(); err == nil && n == want {
+			if since.IsZero() {
+				since = time.Now()
+			}
+			if time.Since(since) >= d {
+				return
+			}
+		} else {
+			since = time.Time{}
+		}
+		time.Sleep(2 * time.Second)
+	}
+	t.Fatalf("%d kamailio pods were not Ready steadily for %s", want, d)
+}
+
 // waitVIPOn waits until exactly the given node (and no other) holds the VIP.
 func (l *labEnv) waitVIP(t *testing.T, d time.Duration, skip ...string) string {
 	t.Helper()

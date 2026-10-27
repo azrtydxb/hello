@@ -644,6 +644,7 @@ func (l *lab) failover(t *testing.T, crash bool) {
 		run(t, "docker", "unpause", victim)
 	}
 	l.waitPodsReady(t, 2, 4*time.Minute)
+	l.waitStablePods(t, 2, 20*time.Second)
 	// The returning instance does not take the VIP back from a healthy one.
 	time.Sleep(10 * time.Second)
 	if h := l.holders(); len(h) != 1 || h[0] != survivor {
