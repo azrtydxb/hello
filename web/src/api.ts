@@ -449,18 +449,22 @@ export class ApiError extends Error {
   readonly code: string;
   /** Per-field validation failures from a 400, if any. */
   readonly fields: FieldError[];
+  /** The whole error object, for answers that carry more than a message (a batch's conflicts). */
+  readonly details: Record<string, unknown>;
 
   constructor(
     status: number,
     code: string,
     message: string,
     fields: FieldError[] = [],
+    details: Record<string, unknown> = {},
   ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.fields = fields;
+    this.details = details;
   }
 }
 
@@ -524,9 +528,12 @@ function isFieldError(value: unknown): value is FieldError {
   return typeof v.path === "string" && typeof v.message === "string";
 }
 
-function envelope(
-  value: unknown,
-): { code: string; message: string; fields: FieldError[] } | null {
+function envelope(value: unknown): {
+  code: string;
+  message: string;
+  fields: FieldError[];
+  details: Record<string, unknown>;
+} | null {
   if (typeof value !== "object" || value === null) return null;
   const err = (value as Record<string, unknown>).error;
   if (typeof err !== "object" || err === null) return null;
@@ -536,6 +543,7 @@ function envelope(
     code: typeof code === "string" ? code : "",
     message,
     fields: Array.isArray(fields) ? fields.filter(isFieldError) : [],
+    details: err as Record<string, unknown>,
   };
 }
 
@@ -551,7 +559,13 @@ async function errorFrom(
     // Not JSON: fall through to the generic message.
   }
   if (parsed) {
-    return new ApiError(res.status, parsed.code, parsed.message, parsed.fields);
+    return new ApiError(
+      res.status,
+      parsed.code,
+      parsed.message,
+      parsed.fields,
+      parsed.details,
+    );
   }
   return new ApiError(
     res.status,

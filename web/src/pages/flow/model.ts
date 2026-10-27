@@ -14,6 +14,7 @@ import type {
   FlowWarning,
 } from "../../api/flow";
 import type { Pos } from "./layoutState";
+import { portIsEditable } from "./objects";
 
 export const NODE_WIDTH = 248;
 const HEADER_HEIGHT = 58;
@@ -41,6 +42,8 @@ export interface PortView {
   label: string;
   type: string;
   direction: "in" | "out";
+  /** The port can be wired on the canvas (editing, and the connection is stored). */
+  editable?: boolean;
 }
 
 /** The data of a drawn node. */
@@ -53,6 +56,10 @@ export interface FlowNodeData extends Record<string, unknown> {
   /** One line of the node's summary fields. */
   summary: string;
   pseudo: boolean;
+  /** What the draft does to the node. */
+  draft?: "new" | "changed";
+  /** Problems the last check of the draft found on this node. */
+  errors: string[];
 }
 
 /** The data of a stub: a node that is not on this canvas. */
@@ -221,6 +228,10 @@ export interface ViewInput {
   catalogue: FlowCatalogue | undefined;
   positions: Record<string, Pos>;
   selected?: string | null;
+  /** The user may edit: ports that can be wired are marked. */
+  edit?: boolean;
+  marks?: Record<string, "new" | "changed" | "deleted">;
+  errors?: Record<string, string[]>;
 }
 
 /** The label of an edge: its try order or position, when it has one. */
@@ -229,11 +240,20 @@ export function edgeLabel(e: FlowEdge): string | undefined {
   return typeof v === "number" ? `#${v}` : undefined;
 }
 
+function draftMark(
+  m: "new" | "changed" | "deleted" | undefined,
+): "new" | "changed" | undefined {
+  return m === "new" || m === "changed" ? m : undefined;
+}
+
 export function buildView({
   graph,
   catalogue,
   positions,
   selected,
+  edit,
+  marks,
+  errors,
 }: ViewInput): CanvasView {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const onCanvas = (id: string) => byId.has(id) && positions[id] !== undefined;
@@ -253,6 +273,10 @@ export function buildView({
       (e) => e.source.node === n.id || e.target.node === n.id,
     );
     const { inputs, outputs } = portsFor(type, n.id, own);
+    if (edit) {
+      for (const p of inputs) p.editable = true;
+      for (const p of outputs) p.editable = portIsEditable(n.kind, p.id);
+    }
     for (const p of outputs) typeOfPort.set(`${n.id}|${p.id}`, p.type);
     const h = nodeHeight(inputs.length, outputs.length);
     sizes.set(n.id, { w: NODE_WIDTH, h });
@@ -276,6 +300,8 @@ export function buildView({
         warnings: warnings.get(n.id) ?? [],
         summary: summaryLine(n),
         pseudo: Boolean(type?.pseudo),
+        draft: draftMark(marks?.[n.id]),
+        errors: errors?.[n.id] ?? [],
       },
     });
   }
