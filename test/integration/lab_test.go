@@ -364,7 +364,13 @@ func sdpDirectOrAnchored(want, got []byte) error {
 	if err != nil {
 		return fmt.Errorf("SDP %q is neither the expected %q nor audio SDP: %w", got, want, err)
 	}
-	if ans.Address != off.Address || ans.PayloadType != off.PayloadType {
+	// The anchor relays the codec the far side chose, so the payload type is
+	// the expected body's; the address stays the caller offer's.
+	exp, err := media.ParseAudioSDP(want)
+	if err != nil {
+		return err
+	}
+	if ans.Address != off.Address || ans.PayloadType != exp.PayloadType {
 		return fmt.Errorf("SDP %q is neither the expected %q nor the anchor's SDP for the offer", got, want)
 	}
 	return nil
