@@ -308,28 +308,29 @@ function CanvasView({
   );
   const [entry, setEntry] = useState("");
   const [importing, setImporting] = useState<AbortController | null>(null);
-  const importFlow = async () => {
-    if (!entry) return;
+  // Lay out what a graph holds that is not on the canvas yet, and place it.
+  const placeGraph = async (g: FlowGraph, ctl: AbortController) => {
+    const input = layoutInput(g.nodes, g.edges, catalogue, layout.positions);
+    if (input.nodes.length === 0) {
+      setNote("Everything in that flow is already on this canvas.");
+      return;
+    }
+    const placed = await computeLayout(input, ctl.signal);
+    dispatch({
+      type: "place",
+      nodes: placed.map((p) => ({ node: p.node, x: p.x, y: p.y })),
+    });
+    setNote(`Placed ${placed.length} nodes.`);
+    requestAnimationFrame(() => void rf.fitView({ duration: 200 }));
+  };
+  const runPlacement = async (
+    load: (ctl: AbortController) => Promise<void>,
+  ) => {
     const ctl = new AbortController();
     setImporting(ctl);
     setNote("");
     try {
-      const g =
-        entry === "all"
-          ? graph
-          : await getFlowGraph(`closure:${entry}`, ctl.signal);
-      const input = layoutInput(g.nodes, g.edges, catalogue, layout.positions);
-      if (input.nodes.length === 0) {
-        setNote("Everything in that flow is already on this canvas.");
-        return;
-      }
-      const placed = await computeLayout(input, ctl.signal);
-      dispatch({
-        type: "place",
-        nodes: placed.map((p) => ({ node: p.node, x: p.x, y: p.y })),
-      });
-      setNote(`Placed ${placed.length} nodes.`);
-      requestAnimationFrame(() => void rf.fitView({ duration: 200 }));
+      await load(ctl);
     } catch (err) {
       setNote(
         err instanceof Error && err.name === "AbortError"
@@ -340,6 +341,19 @@ function CanvasView({
       setImporting(null);
     }
   };
+  const importFlow = () =>
+    entry
+      ? runPlacement(async (ctl) =>
+          placeGraph(
+            entry === "all"
+              ? graph
+              : await getFlowGraph(`closure:${entry}`, ctl.signal),
+            ctl,
+          ),
+        )
+      : Promise.resolve();
+  // "Add all": everything not yet placed, laid out by the same auto-layout.
+  const addAll = () => runPlacement((ctl) => placeGraph(graph, ctl));
 
   // --- selection and the keyboard -------------------------------------------
   const selectedNode = selected
@@ -535,6 +549,7 @@ function CanvasView({
           nodes={view.offCanvas}
           catalogue={catalogue}
           onAdd={canEdit ? addFromList : undefined}
+          onAddAll={canEdit && !importing ? () => void addAll() : undefined}
           onSelect={setSelected}
         />
         <PortStylesContext.Provider value={styles}>
@@ -596,8 +611,21 @@ function CanvasView({
                   title="This canvas is empty"
                   description={
                     canEdit
-                      ? "Import a flow from a trunk, a number or a feature code, or add objects from the list."
+                      ? graph.nodes.length > 0
+                        ? "Add everything to see the whole PBX laid out, pick objects from the list on the left, or import a flow from a trunk, a number or a feature code."
+                        : "There is nothing configured yet to show."
                       : "Nothing has been placed on it yet."
+                  }
+                  action={
+                    canEdit && graph.nodes.length > 0 ? (
+                      <Button
+                        icon="workflow"
+                        disabled={importing !== null}
+                        onClick={() => void addAll()}
+                      >
+                        {`Add everything (${graph.nodes.length})`}
+                      </Button>
+                    ) : undefined
                   }
                 />
               </div>
