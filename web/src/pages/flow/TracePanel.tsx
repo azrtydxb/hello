@@ -234,7 +234,7 @@ export function TracePanel({
           <div className="flow-panel__section" aria-live="polite">
             <h3>
               {OUTCOME[trace.outcome] ?? trace.outcome}{" "}
-              <Badge tone={trace.outcome === "reject" ? "bad" : "ok"}>
+              <Badge tone={trace.outcome === "reject" ? "bad" : "good"}>
                 {trace.route ? `Route ${trace.route}` : trace.outcome}
               </Badge>
             </h3>
