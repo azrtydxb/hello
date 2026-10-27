@@ -367,3 +367,34 @@ describe("flow canvas page, a new canvas", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("flow canvas page, Arrange", () => {
+  it("re-lays out the placed nodes and saves them", async () => {
+    const calls = api("operator", {
+      "PUT /api/v1/flow/canvases/1/layout": () =>
+        json({ ...CANVAS, layoutVersion: 4 }),
+    });
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Arrange" }));
+    await screen.findByText(/Arranged 3 nodes/);
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PUT")).toBe(true),
+    );
+    const body = calls.find((c) => c.method === "PUT")?.body as {
+      nodes: { node: string; x: number; y: number }[];
+    };
+    expect(body.nodes.map((n) => n.node).sort()).toEqual(
+      CANVAS.nodes.map((n) => n.node).sort(),
+    );
+    // Dagre starts at the origin, not where the nodes were.
+    expect(Math.min(...body.nodes.map((n) => n.x))).toBe(0);
+  });
+
+  it("is not offered to a viewer", async () => {
+    api("viewer");
+    await open();
+    expect(
+      screen.queryByRole("button", { name: "Arrange" }),
+    ).not.toBeInTheDocument();
+  });
+});

@@ -352,6 +352,23 @@ function CanvasView({
           ),
         )
       : Promise.resolve();
+  // "Arrange": lay out the nodes already placed afresh, from the origin.
+  const arrange = () =>
+    runPlacement(async (ctl) => {
+      const placedNodes = graph.nodes.filter((n) => layout.positions[n.id]);
+      const input = layoutInput(placedNodes, graph.edges, catalogue, {});
+      if (input.nodes.length === 0) {
+        setNote("Nothing is placed on this canvas yet.");
+        return;
+      }
+      const placed = await computeLayout(input, ctl.signal);
+      dispatch({
+        type: "place",
+        nodes: placed.map((p) => ({ node: p.node, x: p.x, y: p.y })),
+      });
+      setNote(`Arranged ${placed.length} nodes.`);
+      requestAnimationFrame(() => void rf.fitView({ duration: 200 }));
+    });
   // "Add all": everything not yet placed, laid out by the same auto-layout.
   const addAll = () => runPlacement((ctl) => placeGraph(graph, ctl));
 
@@ -517,6 +534,15 @@ function CanvasView({
                     Import
                   </Button>
                 )}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon="workflow"
+                  disabled={empty || importing !== null}
+                  onClick={() => void arrange()}
+                >
+                  Arrange
+                </Button>
                 <Button
                   variant="secondary"
                   size="sm"
