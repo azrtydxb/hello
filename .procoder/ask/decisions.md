@@ -832,3 +832,23 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - Not done: `exhausted` after a forward stage still uses the dialled
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
+
+## DSCP marking, parity item 28 (S-21) (2026-10-27)
+
+Built to the spec: SIP socket DSCP 26, relay/anchor/fanout/party RTP sockets
+DSCP 46, `HELLO_DSCP_SIP` / `HELLO_DSCP_RTP` (0 to 63, validated), Grandstream
+P1558 / P1559 from the same two values.
+
+- RTP DSCP is a process-wide setting (`media.SetRTPDSCP`, default 46) read at
+  every bind, not a parameter of each constructor: one value per process, and
+  the six bind sites keep their signatures.
+- hello-control reads the same two env vars so phones are provisioned with the
+  values hello-sip marks with; set both services alike.
+- A refused mark (platform, sandbox) is logged once and never fails SIP or a
+  call. SIP requests the server originates reuse the marked listening socket
+  (sipgo pool), so the mark covers them; a socket sipgo opens for a new
+  remote on demand is not marked (not seen on the UDP path).
+- Only the Grandstream template carries DSCP keys; the spec names no other
+  vendor, so Yealink, Snom, Poly and Fanvil are untouched. Site overrides go
+  through S-12.
+- No migration, no API or UI change; TCP/TLS SIP is not served by hello-sip.

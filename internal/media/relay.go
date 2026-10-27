@@ -213,6 +213,7 @@ func (r *Relay) AddLeg(name string) (int, error) {
 			lastErr = err
 			continue
 		}
+		markRTP(c)
 		conn, port = c, p
 		break
 	}
