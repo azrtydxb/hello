@@ -864,14 +864,13 @@ another group) is lifted: the ring state machine can open a new ring stage.
   IVR calls have no session timers today (their dialog requests do not pass
   `sessionIn`), so carrying one over could end a call whose phone refreshes.
 - Trunk setting: `trunks.session_timers` is `default`, `on` or `off`
-  (migration 00047, TEXT with a CHECK, `default` for every existing trunk, so
+  (migration 00048, TEXT with a CHECK, `default` for every existing trunk, so
   nothing changes on upgrade). `on` requests Session-Expires on legs to the
   trunk and gives a call from it Hello's interval when the carrier sent none;
   `off` does neither; `default` follows `HELLO_SIP_SESSION_TIMERS_TRUNKS`,
   false by default, so an existing install behaves as before. A global
   `HELLO_SIP_SESSION_EXPIRES_SECONDS=0` wins over every trunk. A carrier that
-  sends Session-Expires itself is honoured on a trunk set to default (as in
-  9) and ignored on one set to off.
+  sends Session-Expires itself is honoured on a trunk set to default (as in 9) and ignored on one set to off.
 - A trunk refresh answered 401, 407, 403 or 488 proves the far end is alive,
   so it does not end the call (some carriers do not take an in-dialog
   re-INVITE with credentials or a re-offered SDP); no answer, 408, 481 and the
