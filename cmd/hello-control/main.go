@@ -43,7 +43,7 @@ const (
 	pruneEvery = time.Hour
 )
 
-const usage = "usage: hello-control serve | migrate up | migrate status | user add [--role viewer|operator|admin] <username> < password"
+const usage = "usage: hello-control serve | migrate up | migrate status | user add [--role viewer|operator|admin] <username> < password | user 2fa-reset <username>"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -88,6 +88,8 @@ func run(args []string) error {
 		return nil
 	case len(args) >= 2 && args[0] == "user" && args[1] == "add":
 		return userAdd(ctx, store.New(db), args[2:], os.Stdin, os.Stdout)
+	case len(args) == 3 && args[0] == "user" && args[1] == "2fa-reset":
+		return user2FAReset(ctx, store.New(db), args[2], os.Stdout)
 	}
 	return fmt.Errorf("%s", usage)
 }
@@ -207,6 +209,8 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		ProvStore:       st,
 		Phonebooks:      st,
 		Conferences:     st,
+		TwoFactor:       st,
+		TwoFALogins:     api.NewTwoFactorMetrics(metrics.Registry),
 		ConferenceLive:  vk,
 		Messages:        st,
 		Dialing:         cfg.Dial,
@@ -436,6 +440,9 @@ func pruneSessions(ctx context.Context, st *store.Store, log *slog.Logger) {
 			log.Warn("prune expired sessions", "error", err)
 		} else if n > 0 {
 			log.Info("pruned expired sessions", "count", n)
+		}
+		if err := st.PruneMFA(ctx); err != nil {
+			log.Warn("prune mfa challenges", "error", err)
 		}
 		select {
 		case <-ctx.Done():

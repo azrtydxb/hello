@@ -403,8 +403,11 @@ func (s *Store) PruneSessions(ctx context.Context) (int64, error) {
 func (s *Store) SessionActor(ctx context.Context, hash []byte) (auth.Actor, error) {
 	var a auth.Actor
 	err := s.db.QueryRowContext(ctx, `
-		SELECT u.id, u.username, u.role, u.must_change_password FROM sessions s JOIN users u ON u.id = s.user_id
-		WHERE s.token_hash = $1 AND s.expires_at > now() AND u.enabled`, hash).Scan(&a.UserID, &a.Username, &a.Role, &a.MustChangePassword)
+		SELECT u.id, u.username, u.role, u.must_change_password,
+			u.totp_enabled_at IS NULL AND (u.totp_required OR u.role = ANY(a.require_2fa_roles))
+		FROM sessions s JOIN users u ON u.id = s.user_id CROSS JOIN auth_settings a
+		WHERE s.token_hash = $1 AND s.expires_at > now() AND u.enabled`, hash).
+		Scan(&a.UserID, &a.Username, &a.Role, &a.MustChangePassword, &a.MustEnrollMFA)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
 	}
