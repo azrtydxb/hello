@@ -59,6 +59,9 @@ func compose(args ...string) *exec.Cmd {
 
 func TestMain(m *testing.M) {
 	code := m.Run()
+	if labStarted && code != 0 {
+		dumpLabLogs()
+	}
 	if labStarted && os.Getenv("HELLO_LAB_KEEP") != "1" {
 		if out, err := compose("down", "-v").CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "compose down: %v\n%s", err, out)
@@ -66,6 +69,37 @@ func TestMain(m *testing.M) {
 		}
 	}
 	os.Exit(code)
+}
+
+// dumpLabLogs writes every compose service's log, timestamped, to
+// HELLO_LAB_LOG_DIR (one file per service) before the lab is removed, so a
+// failed run can be traced afterwards. It does nothing unless the variable is
+// set; CI uploads the directory as an artifact.
+func dumpLabLogs() {
+	dir := os.Getenv("HELLO_LAB_LOG_DIR")
+	if dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		fmt.Fprintf(os.Stderr, "lab logs: %v\n", err)
+		return
+	}
+	// --profile "*" so one-shot and optional services are listed too.
+	out, err := compose("--profile", "*", "config", "--services").Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "lab logs: compose config: %v\n", err)
+		return
+	}
+	for _, svc := range strings.Fields(string(out)) {
+		logs, _ := compose("--profile", "*", "logs", "--no-color", "--timestamps", "--no-log-prefix", svc).CombinedOutput()
+		if err := os.WriteFile(filepath.Join(dir, svc+".log"), logs, 0o600); err != nil {
+			fmt.Fprintf(os.Stderr, "lab logs: %v\n", err)
+		}
+	}
+	all, _ := compose("--profile", "*", "logs", "--no-color", "--timestamps").CombinedOutput()
+	_ = os.WriteFile(filepath.Join(dir, "all.log"), all, 0o600)
+	ps, _ := compose("--profile", "*", "ps", "-a").CombinedOutput()
+	_ = os.WriteFile(filepath.Join(dir, "ps.txt"), ps, 0o600)
 }
 
 // labUp starts the lab once and skips the test unless HELLO_DOCKER=1.

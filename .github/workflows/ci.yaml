@@ -375,7 +375,18 @@ jobs:
           # honest, matched addressing, and the direct-media pass-through
           # assertions stay about SIP signalling, not about Docker NAT.
           HELLO_LAB_CONTACT_HOST: 10.89.53.1
+          # On failure the test binary writes every compose service's log
+          # here before it removes the lab; the next step uploads it.
+          HELLO_LAB_LOG_DIR: ${{ github.workspace }}/lab-logs
         run: go test -count=1 -timeout 50m -v ./test/integration/
+      - name: Upload lab service logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lab-logs-${{ github.run_id }}
+          path: lab-logs/
+          if-no-files-found: warn
+          retention-days: 14
 
   chart:
     # The Helm chart (deploy/helm/hello) rendered and checked: lint, the
