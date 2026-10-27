@@ -137,6 +137,8 @@ func (s *Store) ReplaceRingMap(ctx context.Context, actor string, groupID *int64
 				return rid, false, fieldError(p+".tag", "no such ring tag")
 			case !slices.Contains(prov.RingVendors, prov.Vendor(e.Vendor)):
 				return rid, false, fieldError(p+".vendor", "must be yealink, poly, grandstream, snom or fanvil")
+			case seen[[2]string{e.Tag, e.Vendor}]:
+				return rid, false, fieldError(p, "tag and vendor appear twice")
 			case prov.ValidRingTone(prov.Vendor(e.Vendor), e.Tone):
 			case strings.HasPrefix(e.Tone, prov.CustomPrefix):
 				name, _ := prov.CustomToneName(e.Tone)
@@ -148,10 +150,8 @@ func (s *Store) ReplaceRingMap(ctx context.Context, actor string, groupID *int64
 				default:
 					toneIDs[i] = sql.NullInt64{Int64: id, Valid: true}
 				}
-			case true:
+			default:
 				return rid, false, fieldError(p+".tone", "not a ringer of "+e.Vendor)
-			case seen[[2]string{e.Tag, e.Vendor}]:
-				return rid, false, fieldError(p, "tag and vendor appear twice")
 			}
 			seen[[2]string{e.Tag, e.Vendor}] = true
 		}

@@ -88,6 +88,9 @@ func TestRingtoneLibrary(t *testing.T) {
 	}
 	c.header.Set("Content-Type", "application/json")
 	put := func(code int, entries ...map[string]any) response {
+		if entries == nil {
+			entries = []map[string]any{}
+		}
 		return c.must(code, "PUT", "/api/v1/ring-map", map[string]any{"entries": entries})
 	}
 	put(http.StatusBadRequest, map[string]any{"tag": "doorbell", "vendor": "poly", "tone": "custom:chime"})
