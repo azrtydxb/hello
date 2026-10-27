@@ -607,7 +607,9 @@ func (l *lab) failover(t *testing.T, crash bool) {
 		if r.err != nil || r.resp.status() != 200 {
 			t.Fatalf("the takeover re-INVITE sent during the outage: %v %v", r.resp, r.err)
 		}
-		if r.at.Before(moved.Add(-time.Second)) {
+		// After a crash nothing answers until the VIP moves; after a graceful
+		// loss the old instance may still answer for a moment.
+		if crash && r.at.Before(moved.Add(-time.Second)) {
 			t.Errorf("the re-INVITE completed at %s, before the VIP answered at %s", r.at.Format("15:04:05.000"), moved.Format("15:04:05.000"))
 		}
 		t.Logf("the takeover re-INVITE completed %s after the loss", r.at.Sub(t0).Round(100*time.Millisecond))
@@ -708,7 +710,7 @@ func (l *lab) rolling(t *testing.T) {
 				mu.Lock()
 				minReady = min(minReady, n)
 				mu.Unlock()
-				if n < 2 {
+				if n < 1 {
 					out, _ := l.tryKubectl("-n", l.namespace, "get", "pods", "-l", "app.kubernetes.io/component=edge", "-o", "wide")
 					t.Logf("%s: %d Ready:\n%s", time.Now().Format("15:04:05"), n, out)
 				}
