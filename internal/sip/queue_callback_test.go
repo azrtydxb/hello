@@ -11,6 +11,7 @@ import (
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/queue"
+	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/azrtydxb/hello/internal/voiceprompt"
 )
@@ -71,7 +72,9 @@ func callbackPBX(t *testing.T, q snapshot.Queue, st queue.Store, cbs queue.Callb
 	t.Helper()
 	oldOffer := callbackOfferCheck
 	callbackOfferCheck = 50 * time.Millisecond
-	t.Cleanup(func() { callbackOfferCheck = oldOffer })
+	oldWatch := callbackWatchEvery
+	callbackWatchEvery = 100 * time.Millisecond
+	t.Cleanup(func() { callbackOfferCheck, callbackWatchEvery = oldOffer, oldWatch })
 	feats := func(s *snapshot.Snapshot) { s.WithQueues([]snapshot.Queue{q}) }
 	base := []pbxOpt{shortRing(3 * time.Second), withMedia(false), withFeatures(feats),
 		withVoicemail(newVMStore(), &fakeObjects{}), withQueues(st), withCallbacks(cbs), withSpeech(sp), withCallbackSweep(50 * time.Millisecond)}
@@ -601,4 +604,183 @@ func TestQueueDetailRoundTrip(t *testing.T) {
 			t.Errorf("parseQueueDetail(%q) = %q %d %d", d, n, e, c)
 		}
 	}
+}
+
+// TestQueueCallbackTrunkFailover: a number outside is called back through the
+// outbound route's trunks in route order, failing over on the route's
+// failover codes the way a normal outbound call does. It fails if a 503 from
+// the first trunk does not move on to the second, a code outside the failover
+// list is retried on the next trunk, or the trace and CDR do not show the
+// failover and the trunk that carried the call.
+func TestQueueCallbackTrunkFailover(t *testing.T) {
+	setup := func(t *testing.T, primaryCode int64) (*testPBX, *carrier, *carrier, *phone, queue.Store, *queue.MemCallbacks, snapshot.Queue) {
+		primary, backup := newCarrier(t, "acct1", "pw1"), newCarrier(t, "acct2", "pw2")
+		cfg := routing.Config{
+			Trunks: []routing.Trunk{primary.trunk(1, "carrier-primary", "ip"), backup.trunk(2, "carrier-backup", "ip")},
+			Outbound: []routing.OutboundRoute{{ID: 1, Position: 1, Name: "UAE Mobile", MatchKind: "regex", Match: `^05([0-9]{8})$`,
+				Number: routing.Transform{Regex: `^05([0-9]{8})$`, Template: "+9715${1}"}, Trunks: []int64{1, 2}, Enabled: true}},
+			Extensions: map[string]string{"100": "+97140000100", "200": ""},
+		}
+		primary.inviteCode.Store(primaryCode)
+		st, cbs, sp := queue.NewMemStore(), queue.NewMemCallbacks(), &fakeSpeaker{}
+		q := callbackQueue()
+		pbx := callbackPBX(t, q, st, cbs, sp, trunkCfg(newFakeTrunkState()), withEngine(t, cfg))
+		b := newPhone(t, pbx, "b1", "pb1")
+		b.register(t)
+		b.setCallee(answerAfter(nil))
+		if _, _, err := cbs.Request(t.Context(), q.ID, "0501234567", "", time.Now().Add(-time.Minute).UnixMilli()); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetAgent(t.Context(), queue.AgentState{Ext: "200", LoggedIn: true}); err != nil {
+			t.Fatal(err)
+		}
+		return pbx, primary, backup, b, st, cbs, q
+	}
+	t.Run("a failover code moves on to the next trunk", func(t *testing.T) {
+		pbx, primary, backup, b, _, cbs, q := setup(t, 503)
+		waitReq(t, primary.invites, "INVITE to the first trunk")
+		inv := waitReq(t, backup.invites, "INVITE to the second trunk")
+		if inv.Recipient.User != "+971501234567" {
+			t.Fatalf("backup INVITE R-URI %s, want the rewritten number", inv.Recipient.String())
+		}
+		waitReq(t, b.invites, "the agent rings once the second trunk answered")
+		eventually(t, "the request is connected", func() bool {
+			r := callbackRows(t, cbs, q.ID)[0]
+			return r.Status == queue.CallbackConnected && r.Attempts == 1
+		})
+		dss := <-serversOf(b)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		if err := dss.Bye(ctx); err != nil {
+			t.Fatal(err)
+		}
+		rec := cdrOfKind(t, pbx, cdr.KindCallback)
+		wantTrace(t, rec.Trace, "carrier-primary ("+primary.addr+") -> 503 Service Unavailable", "Failover permitted for 503", "carrier-backup -> 200 OK")
+		if rec.Trunk != "carrier-backup" || rec.Direction != "outbound" {
+			t.Fatalf("CDR trunk %q direction %q", rec.Trunk, rec.Direction)
+		}
+	})
+	t.Run("another code ends the attempt", func(t *testing.T) {
+		_, primary, backup, b, _, cbs, q := setup(t, 486)
+		waitReq(t, primary.invites, "INVITE to the first trunk")
+		eventually(t, "the attempt failed busy", func() bool {
+			r := callbackRows(t, cbs, q.ID)[0]
+			return r.Status == queue.CallbackWaiting && r.Attempts == 1 && r.Result == "busy"
+		})
+		noReq(t, backup.invites, 300*time.Millisecond, "a second trunk tried after a busy answer")
+		noReq(t, b.invites, 10*time.Millisecond, "the agent rung for a busy customer")
+	})
+}
+
+// TestQueueCallbackCancel: an operator's cancel of a request that is being
+// dialled stops it: the ringing customer phone is cancelled, or the customer
+// already on the line is hung up, the row stays cancelled (no further
+// attempt) and the CDR says so. It fails if the phone keeps ringing, the
+// caller stays on the line, the agent is rung, or the request is retried.
+func TestQueueCallbackCancel(t *testing.T) {
+	setup := func(t *testing.T, chA chan struct{}) (*testPBX, *phone, *phone, queue.Store, *queue.MemCallbacks, snapshot.Queue) {
+		st, cbs, sp := queue.NewMemStore(), queue.NewMemCallbacks(), &fakeSpeaker{}
+		q := callbackQueue()
+		pbx := callbackPBX(t, q, st, cbs, sp)
+		a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
+		a.register(t)
+		b.register(t)
+		a.setCallee(answerAfter(chA))
+		b.setCallee(answerAfter(nil))
+		if _, _, err := cbs.Request(t.Context(), q.ID, "100", "", time.Now().Add(-time.Minute).UnixMilli()); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetAgent(t.Context(), queue.AgentState{Ext: "200", LoggedIn: true}); err != nil {
+			t.Fatal(err)
+		}
+		return pbx, a, b, st, cbs, q
+	}
+	t.Run("while the customer's phone rings", func(t *testing.T) {
+		pbx, a, b, _, cbs, q := setup(t, make(chan struct{}))
+		waitReq(t, a.invites, "the callback rings the caller")
+		if err := cbs.Cancel(t.Context(), q.ID, 1); err != nil {
+			t.Fatal(err)
+		}
+		waitReq(t, a.cancels, "the ringing phone is cancelled")
+		rec := cdrOfKind(t, pbx, cdr.KindCallback)
+		if rec.FinalStatus != 487 || !slices.Contains(queueLegEvents(rec), "callback_failed") {
+			t.Fatalf("CDR status %d legs %v", rec.FinalStatus, queueLegEvents(rec))
+		}
+		if r := callbackRows(t, cbs, q.ID)[0]; r.Status != queue.CallbackCancelled {
+			t.Fatalf("request is %s", r.Status)
+		}
+		if v := pbx.metric(t, "hello_callback_total", map[string]string{"result": "cancelled"}); v != 1 {
+			t.Fatalf("hello_callback_total{cancelled} = %v", v)
+		}
+		noReq(t, b.invites, 300*time.Millisecond, "the agent rung for a cancelled request")
+		noReq(t, a.invites, 10*time.Millisecond, "a retry of a cancelled request")
+	})
+	t.Run("while the customer waits on the line", func(t *testing.T) {
+		pbx, a, b, st, cbs, q := setup(t, nil)
+		b.setCallee(ringForever())
+		waitReq(t, a.invites, "the callback rings the caller")
+		// The agent pauses, so the customer waits on the line for one.
+		if err := st.SetAgent(t.Context(), queue.AgentState{Ext: "200", LoggedIn: true, Paused: true}); err != nil {
+			t.Fatal(err)
+		}
+		waitReq(t, a.acks, "the customer answered")
+		eventually(t, "the customer waits", func() bool {
+			ws, _ := st.Waiting(t.Context(), "sales")
+			return len(ws) == 1
+		})
+		if err := cbs.Cancel(t.Context(), q.ID, 1); err != nil {
+			t.Fatal(err)
+		}
+		waitReq(t, a.byes, "the customer is hung up")
+		eventually(t, "the customer left the queue", func() bool {
+			ws, _ := st.Waiting(t.Context(), "sales")
+			return len(ws) == 0
+		})
+		rec := cdrOfKind(t, pbx, cdr.KindCallback)
+		if events := queueLegEvents(rec); !slices.Contains(events, "callback_failed") || slices.Contains(events, "abandon") {
+			t.Fatalf("queue legs = %v", events)
+		}
+		if r := callbackRows(t, cbs, q.ID)[0]; r.Status != queue.CallbackCancelled {
+			t.Fatalf("request is %s", r.Status)
+		}
+		noReq(t, a.invites, 300*time.Millisecond, "a retry of a cancelled request")
+	})
+}
+
+// TestQueueCallbackReservesAgent: the sweep holds the agent the callback will
+// use while the customer's phone rings, so a caller who waits less cannot
+// take the last free agent, and it does not reserve (or dial for) an agent
+// that is being rung for another caller. It fails if the agent's lease is not
+// held while the phone rings or is not given back once the customer answered
+// (the queue must be able to offer it), or a callback is dialled for an agent
+// leased to someone else.
+func TestQueueCallbackReservesAgent(t *testing.T) {
+	st, cbs, sp := queue.NewMemStore(), queue.NewMemCallbacks(), &fakeSpeaker{}
+	q := callbackQueue()
+	pbx := callbackPBX(t, q, st, cbs, sp)
+	a, b := newPhone(t, pbx, "a1", "pa"), newPhone(t, pbx, "b1", "pb1")
+	a.register(t)
+	b.register(t)
+	chA := make(chan struct{})
+	a.setCallee(answerAfter(chA))
+	b.setCallee(answerAfter(nil))
+	if _, _, err := cbs.Request(t.Context(), q.ID, "100", "", time.Now().Add(-time.Minute).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	// The only agent is being rung for another caller: nothing is dialled.
+	if ok, _ := st.Acquire(t.Context(), queue.AgentLease("200"), "other/call", time.Minute); !ok {
+		t.Fatal("could not lease the agent")
+	}
+	if err := st.SetAgent(t.Context(), queue.AgentState{Ext: "200", LoggedIn: true}); err != nil {
+		t.Fatal(err)
+	}
+	noReq(t, a.invites, 400*time.Millisecond, "a callback dialled for an agent rung for another caller")
+	_ = st.Release(t.Context(), queue.AgentLease("200"), "other/call")
+	waitReq(t, a.invites, "the callback rings the caller once the agent is free")
+	holder, held, err := st.Holder(t.Context(), queue.AgentLease("200"))
+	if err != nil || !held || holder != "sip-test/callback" {
+		t.Fatalf("agent lease = %q %v %v while the customer's phone rings", holder, held, err)
+	}
+	close(chA)
+	waitReq(t, b.invites, "the queue offers the agent once the customer answered")
 }

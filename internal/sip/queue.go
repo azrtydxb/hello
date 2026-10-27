@@ -355,9 +355,15 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 				s.log.Warn("queue heartbeat failed", "queue", q.Name, "correlation_id", c.id, "error", err)
 			}
 		}
-		if cbID != 0 && now.Sub(lastRenew) >= callbackRenewEvery {
+		if cbID != 0 && now.Sub(lastRenew) >= callbackWatchEvery {
 			lastRenew = now
-			c.cbRenew()
+			if !c.cbRenew() {
+				// An operator cancelled the request: hang up on the caller.
+				moh.halt()
+				c.cbFinish("cancelled", "")
+				leave("cancelled", snapshot.QueueDest{Kind: snapshot.IVRHangup})
+				return
+			}
 		}
 		if !callbackOffered && now.Sub(lastCB) >= callbackOfferCheck && c.callbackOffered(q) {
 			lastCB = now
@@ -722,7 +728,7 @@ func (c *call) queueAnnounce(ctx context.Context, snap *snapshot.Snapshot, q sna
 		seq = append(seq, numberPrompts(q.DigitsPrefix, queue.Minutes(est))...)
 		seq = append(seq, q.MinutesPrompt)
 	}
-	if q.BreakoutKey != "" && c.queueBreakout(snap, q, q.BreakoutKey[0]) {
+	if q.BreakoutKey != "" && !c.isCallback() {
 		seq = append(seq, q.BreakoutPrompt)
 	}
 	c.addTrace(fmt.Sprintf("Queue %s: announcing position %d, about %d min", q.Name, pos, queue.Minutes(est)))

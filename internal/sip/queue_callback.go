@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -40,9 +41,6 @@ import (
 
 // Timings of the callback work.
 const (
-	// callbackRenewEvery is how often a callback call renews its lease; the
-	// lease (60 s) outlasts a takeover several times over.
-	callbackRenewEvery = 20 * time.Second
 	// callbackPurgeEvery is how often finished requests are purged.
 	callbackPurgeEvery = 10 * time.Minute
 	// callbackDBWait bounds one PostgreSQL call of the callback work, which
@@ -61,6 +59,9 @@ var (
 	callbackEvery       = 3 * time.Second
 	callbackOfferCheck  = 3 * time.Second
 	callbackRingTimeout = 30 * time.Second
+	// callbackWatchEvery is how often a ringing attempt, or a caller on the
+	// line, checks that the request was not cancelled (and renews its lease).
+	callbackWatchEvery = 2 * time.Second
 )
 
 // callbackNumberRe is a number a callback can dial: digits with an optional
@@ -278,10 +279,14 @@ func (c *call) cbFinish(result, agent string) {
 		final bool
 		err   error
 	)
-	if result == "connected" {
+	switch result {
+	case "connected":
 		err = s.deps.Callbacks.Connect(ctx, id, s.cfg.NodeID, agent)
 		c.qLeg(cdr.QueueCallbackConnected, qn, agent, 0, "")
-	} else {
+	case "cancelled":
+		// An operator ended the request: the row is already cancelled.
+		c.qLeg(cdr.QueueCallbackFailed, qn, "", 0, result)
+	default:
 		final, err = s.deps.Callbacks.Fail(ctx, id, s.cfg.NodeID, result)
 		c.qLeg(cdr.QueueCallbackFailed, qn, "", 0, result)
 	}
@@ -299,19 +304,32 @@ func (c *call) cbFinish(result, agent string) {
 
 // cbRenew renews the request's lease from this node; a takeover adopts the
 // request the same way.
-func (c *call) cbRenew() {
+//
+// It reports false when the request is no longer dialling: an operator
+// cancelled it (or it expired), and the call must end. A store that cannot be
+// reached reports true: the call carries on and tries again.
+func (c *call) cbRenew() bool {
 	c.mu.Lock()
 	id, done := c.cbID, c.cbDone
 	c.mu.Unlock()
 	if id == 0 || done {
-		return
+		return true
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), callbackDBWait)
 	defer cancel()
-	if err := c.s.deps.Callbacks.Renew(ctx, id, c.s.cfg.NodeID); err != nil && !errors.Is(err, queue.ErrCallbackNotFound) {
+	err := c.s.deps.Callbacks.Renew(ctx, id, c.s.cfg.NodeID)
+	switch {
+	case errors.Is(err, queue.ErrCallbackNotFound):
+		return false
+	case err != nil:
 		c.s.log.Warn("queue callback lease not renewed", "request", id, "error", err)
 	}
+	return true
 }
+
+// callbackReserve is how long the sweep holds an agent for a ringing caller:
+// the ring time and a margin.
+func callbackReserve() time.Duration { return callbackRingTimeout + 30*time.Second }
 
 // --- the sweep ----------------------------------------------------------------
 
@@ -417,17 +435,41 @@ func (s *Server) callbackSweep(ctx context.Context, snap *snapshot.Snapshot, q s
 	if err != nil || len(free) == 0 || len(free) <= dialling {
 		return // no agent would take it now
 	}
+	// Reserve the agent the strategy would ring first (the first of the plan
+	// that is not being rung for another caller) while the caller's phone
+	// rings, so a caller who waits less cannot take it meanwhile.
+	token := s.cfg.NodeID + "/callback"
+	var agent string
+	for _, round := range queue.Plan(q.Strategy, free, 0, queue.Seed(q.Name, strconv.FormatInt(head.ID, 10))) {
+		for _, ext := range round {
+			lctx, cancel := s.stateCtx()
+			got, err := st.Acquire(lctx, queue.AgentLease(ext), token, callbackReserve())
+			cancel()
+			if err == nil && got {
+				agent = ext
+				break
+			}
+		}
+		if agent != "" {
+			break
+		}
+	}
+	if agent == "" {
+		return // every free agent is being rung for another caller
+	}
+	release := func() {
+		lctx, cancel := s.stateCtx()
+		_ = st.Release(lctx, queue.AgentLease(agent), token)
+		cancel()
+	}
 	cb, ok, err := cbs.Claim(dctx, q.ID, s.cfg.NodeID)
 	if err != nil || !ok {
+		release()
 		return
-	}
-	agent := free[0].Ext
-	if rounds := queue.Plan(q.Strategy, free, 0, queue.Seed(q.Name, strconv.FormatInt(cb.ID, 10))); len(rounds) > 0 && len(rounds[0]) > 0 {
-		agent = rounds[0][0]
 	}
 	s.bg.Go(func() {
 		defer contain(s.log, "queue callback")
-		s.callbackAttempt(snap, q, cb, agent)
+		s.callbackAttempt(snap, q, cb, agent, release)
 	})
 }
 
@@ -448,39 +490,54 @@ func (s *Server) newCallbackCall(q snapshot.Queue, cb queue.Callback) *call {
 	return c
 }
 
-// callbackLegs rings the caller's number: an extension's phones, or the
-// first usable trunk of the outbound route that matches, decided as a call
-// from agent (the one the queue would ring first). It returns why when
-// nothing can be rung.
-func (c *call) callbackLegs(snap *snapshot.Snapshot, q snapshot.Queue, number, agent string) (legs []*leg, host, why string) {
+// callbackPlan is how the caller's number is reached: an extension's phones
+// (all rung together), or the outbound route's trunk candidates, tried in
+// route order like any outbound call.
+type callbackPlan struct {
+	phones   func() []*leg // an extension's phones, nil for a trunk plan
+	dec      routing.Decision
+	host     string // where the caller's media is expected, for the offer
+	why      string // set when nothing can be rung
+	external bool
+}
+
+// callbackPlan decides how to reach number: an extension's own phones, or
+// outbound routing as a call from agent (the one the queue would ring first).
+func (c *call) callbackPlan(snap *snapshot.Snapshot, q snapshot.Queue, number, agent string) callbackPlan {
 	s := c.s
 	ident := &legIdent{fromNum: orDefault(q.Number, q.Name), fromName: q.Name, toNum: number}
-	bindingLegs := func(ext string) []*leg {
-		var out []*leg
+	var host string
+	phonesOf := func(ext string) func() []*leg {
+		var bindings []livestate.Binding
 		for _, d := range snap.DevicesForExtension(ext) {
 			ctx, cancel := s.stateCtx()
 			bs, err := s.deps.State.Bindings(ctx, s.aor(d.Username))
 			cancel()
-			if err != nil {
-				continue
-			}
-			for _, b := range bs {
-				out = append(out, c.addLeg(&leg{binding: b, ident: ident}))
-				if host == "" {
-					var u sip.Uri
-					if sip.ParseUri(trimAngle(b.ContactURI), &u) == nil {
-						host = u.Host
-					}
-				}
+			if err == nil {
+				bindings = append(bindings, bs...)
 			}
 		}
-		return out
+		if len(bindings) == 0 {
+			return nil
+		}
+		var u sip.Uri
+		if sip.ParseUri(trimAngle(bindings[0].ContactURI), &u) == nil {
+			host = u.Host
+		}
+		return func() []*leg {
+			out := make([]*leg, 0, len(bindings))
+			for _, b := range bindings {
+				out = append(out, c.addLeg(&leg{binding: b, ident: ident}))
+			}
+			return out
+		}
 	}
 	if snap.HasExtension(number) {
-		if legs = bindingLegs(number); len(legs) == 0 {
-			return nil, "", "extension " + number + " has no phone registered"
+		mk := phonesOf(number)
+		if mk == nil {
+			return callbackPlan{why: "extension " + number + " has no phone registered"}
 		}
-		return legs, host, ""
+		return callbackPlan{phones: mk, host: host}
 	}
 	dec := s.decide(snap.Routing(), routing.Call{FromExtension: agent, Number: number, CallerID: orDefault(q.Number, q.Name), At: time.Now()})
 	c.mu.Lock()
@@ -493,35 +550,88 @@ func (c *call) callbackLegs(snap *snapshot.Snapshot, q snapshot.Queue, number, a
 		c.direction = cdr.DirectionOutbound
 		c.mu.Unlock()
 		for _, cand := range dec.Candidates {
-			t := cand.Trunk
-			if t == nil {
-				continue
+			if cand.Trunk != nil && len(cand.Destinations) > 0 {
+				return callbackPlan{dec: dec, host: cand.Destinations[0].Host, external: true}
 			}
-			if ok, _ := c.acquireSlot(t, dec.Emergency, c.id); !ok {
-				continue
-			}
-			c.mu.Lock()
-			c.trunkName = t.Name
-			c.mu.Unlock()
-			for _, d := range cand.Destinations {
-				legs = append(legs, c.addLeg(&leg{trunk: t, dest: d, addr: s.trunks.destAddr(d), number: dec.Number, callerID: dec.CallerID}))
-				if host == "" {
-					host = d.Host
-				}
-			}
-			break
 		}
-		if len(legs) == 0 {
-			return nil, "", "no trunk could take the call"
-		}
-		return legs, host, ""
+		return callbackPlan{why: "no trunk could take the call"}
 	case dec.Kind == routing.KindInternal && dec.Extension != "":
-		if legs = bindingLegs(dec.Extension); len(legs) > 0 {
-			return legs, host, ""
+		if mk := phonesOf(dec.Extension); mk != nil {
+			return callbackPlan{phones: mk, host: host}
 		}
-		return nil, "", "extension " + dec.Extension + " has no phone registered"
+		return callbackPlan{why: "extension " + dec.Extension + " has no phone registered"}
 	}
-	return nil, "", "routing: " + orDefault(dec.Reason, "no route for "+number)
+	return callbackPlan{why: "routing: " + orDefault(dec.Reason, "no route for "+number)}
+}
+
+// callbackDial rings the caller. Phones ring together. A trunk plan follows
+// setupOutbound: each candidate in route order, taking a call slot (a full
+// trunk is skipped), each destination not known down in turn; a failover code
+// or a silent attempt moves on to the next, any other final answer ends the
+// attempt with that response.
+func (c *call) callbackDial(plan callbackPlan) (w *leg, status int, result, reason string) {
+	s := c.s
+	if plan.phones != nil {
+		legs := plan.phones()
+		for _, l := range legs {
+			go l.run()
+		}
+		w, status, result, reason, _ = c.callbackAwait(len(legs), 0, nil, 0)
+		return w, status, result, reason
+	}
+	dec := plan.dec
+	lastStatus, lastResult, lastReason := sip.StatusServiceUnavailable, "failed", "no trunk connected the call"
+	for _, cand := range dec.Candidates {
+		t := cand.Trunk
+		if t == nil {
+			continue
+		}
+		if ok, why := c.acquireSlot(t, dec.Emergency, c.id); !ok {
+			c.addTrace(fmt.Sprintf("Trunk %s skipped: %s", t.Name, why))
+			continue
+		}
+		c.mu.Lock()
+		c.trunkName = t.Name
+		c.mu.Unlock()
+		for _, d := range cand.Destinations {
+			if s.trunks.destinationDown(t.ID, d) && !dec.Emergency {
+				c.addTrace(fmt.Sprintf("Trunk %s destination %s:%d skipped: down", t.Name, d.Host, d.Port))
+				continue
+			}
+			addr := s.trunks.destAddr(d)
+			c.mu.Lock()
+			c.stageSeq++
+			stage := c.stageSeq
+			c.mu.Unlock()
+			l := c.addLeg(&leg{trunk: t, dest: d, addr: addr, number: dec.Number, callerID: dec.CallerID, stage: stage})
+			go l.run()
+			w, status, result, reason, code := c.callbackAwait(1, stage, l, s.cfg.TrunkAttemptTimeout)
+			if w != nil {
+				c.addTrace(t.Name + " -> 200 OK")
+				return w, 0, "", ""
+			}
+			switch result {
+			case "cancelled", "draining":
+				return nil, status, result, reason
+			case "silent":
+				c.addTrace(fmt.Sprintf("%s (%s) -> no answer", t.Name, addr))
+				c.addTrace("Failover permitted for no answer")
+				lastStatus, lastResult, lastReason = sip.StatusRequestTimeout, "no_answer", "no answer from the trunk"
+				continue
+			case "no_answer":
+				return nil, status, result, reason // it rang and nobody answered: no failover
+			}
+			c.addTrace(fmt.Sprintf("%s (%s) -> %d %s", t.Name, addr, code, statusText(code)))
+			if !slices.Contains(failoverCodes(dec), code) {
+				c.addTrace(fmt.Sprintf("No failover for %d", code))
+				return nil, status, result, reason
+			}
+			c.addTrace(fmt.Sprintf("Failover permitted for %d", code))
+			lastStatus, lastResult, lastReason = status, result, reason
+		}
+		c.releaseSlot(t.ID, c.id) // this trunk did not take the call
+	}
+	return nil, lastStatus, lastResult, lastReason
 }
 
 // callbackFail ends an attempt that never reached the caller.
@@ -534,6 +644,8 @@ func (c *call) callbackFail(result string, status int, reason string) {
 		res = ResultBusy
 	case "no_answer":
 		res = ResultNoAnswer
+	case "cancelled":
+		res = ResultCancelled
 	}
 	c.end(status, cdr.SideCallee, reason, res)
 }
@@ -554,8 +666,17 @@ func callbackOffer(host string, port int) ([]byte, media.AudioSDP) {
 }
 
 // callbackAttempt rings the caller of one claimed request and, when the
-// caller answers, queues the call at the caller's original place.
-func (s *Server) callbackAttempt(snap *snapshot.Snapshot, q snapshot.Queue, cb queue.Callback, agent string) {
+// caller answers, queues the call at the caller's original place. release
+// frees the agent the sweep reserved for the attempt.
+func (s *Server) callbackAttempt(snap *snapshot.Snapshot, q snapshot.Queue, cb queue.Callback, agent string, release func()) {
+	released := false
+	free := func() {
+		if !released {
+			released = true
+			release()
+		}
+	}
+	defer free()
 	c := s.newCallbackCall(q, cb)
 	s.m.ActiveCalls.Inc()
 	c.addTrace(fmt.Sprintf("Callback request %d for queue %s, attempt %d: ringing %s", cb.ID, q.Name, cb.Attempts, cb.Number))
@@ -563,9 +684,9 @@ func (s *Server) callbackAttempt(snap *snapshot.Snapshot, q snapshot.Queue, cb q
 	s.m.CallbackTotal.WithLabelValues("dialled").Inc()
 	c.queueLog("queue callback dialled", q.Name, "request", cb.ID, "attempt", cb.Attempts)
 
-	legs, host, why := c.callbackLegs(snap, q, cb.Number, agent)
-	if len(legs) == 0 {
-		c.callbackFail("failed", sip.StatusNotFound, why)
+	plan := c.callbackPlan(snap, q, cb.Number, agent)
+	if plan.why != "" {
+		c.callbackFail("failed", sip.StatusNotFound, plan.why)
 		return
 	}
 	relay, err := media.NewRelay(s.cfg.RTPPortMin, s.cfg.RTPPortMax)
@@ -580,7 +701,7 @@ func (s *Server) callbackAttempt(snap *snapshot.Snapshot, q snapshot.Queue, cb q
 			return
 		}
 	}
-	host = s.anchorHostOr(host)
+	host := s.anchorHostOr(plan.host)
 	body, off := callbackOffer(host, relay.LegPort(legCaller))
 	relay.SetCodecs(legCaller, off.Codecs, off.DTMFPayloadType)
 	relay.SetCodecs(legCallee, off.Codecs, off.DTMFPayloadType)
@@ -589,15 +710,13 @@ func (s *Server) callbackAttempt(snap *snapshot.Snapshot, q snapshot.Queue, cb q
 	}
 	c.mu.Lock()
 	c.relay, c.anchorHost, c.cbOffer = relay, host, body
-	c.callID = legs[0].callID
+	c.callID = newID() // the dialog's own Call-ID is the first leg's, set once it is dialled
 	c.mu.Unlock()
 	c.publish()
 	go c.heartbeat()
 
-	for _, l := range legs {
-		go l.run()
-	}
-	w, status, result, reason := c.callbackAwait(len(legs))
+	w, status, result, reason := c.callbackDial(plan)
+	free() // the agent is the queue's to offer from here on
 	if w == nil {
 		c.callbackFail(result, status, reason)
 		return
@@ -610,51 +729,77 @@ func (s *Server) callbackAttempt(snap *snapshot.Snapshot, q snapshot.Queue, cb q
 }
 
 // callbackAwait waits for the first leg to answer, every leg to fail, or the
-// ring time. On failure it classifies the outcome for the row and the CDR.
-func (c *call) callbackAwait(pending int) (w *leg, status int, result, reason string) {
+// ring time. silent, when set, is how long an attempt may go without a
+// ringing response before it counts as silent (result "silent", for trunk
+// failover). On failure it classifies the outcome for the row and the CDR;
+// code is the last final response. While it waits, it watches the request:
+// an operator who cancelled it stops the ringing.
+func (c *call) callbackAwait(pending, stage int, only *leg, silent time.Duration) (w *leg, status int, result, reason string, code int) {
 	s := c.s
 	timer := time.NewTimer(callbackRingTimeout)
 	defer timer.Stop()
+	var silentC <-chan time.Time
+	if silent > 0 {
+		st := time.NewTimer(silent)
+		defer st.Stop()
+		silentC = st.C
+	}
+	watch := time.NewTicker(callbackWatchEvery)
+	defer watch.Stop()
 	total, busy := pending, 0
 	for {
 		select {
 		case ev := <-c.events:
+			if ev.leg != nil && ev.leg.stage != stage {
+				continue // a leg an earlier attempt gave up on
+			}
 			switch ev.kind {
 			case evRinging:
+				silentC = nil
 				c.mu.Lock()
 				if c.ringTime.IsZero() {
 					c.ringTime = time.Now()
 				}
 				c.mu.Unlock()
 			case evAnswered:
-				return ev.leg, 0, "", ""
+				return ev.leg, 0, "", "", 0
 			case evFailed:
 				pending--
+				code = ev.code
 				if isBusy(ev.code) {
 					busy++
 				}
 				if pending == 0 {
-					c.closeSetup()
 					if busy == total {
-						return nil, sip.StatusBusyHere, "busy", "caller busy"
+						return nil, sip.StatusBusyHere, "busy", "caller busy", code
 					}
-					return nil, sip.StatusTemporarilyUnavailable, "failed", "the caller's phone could not be reached"
+					return nil, ev.code, "failed", "the caller's phone could not be reached", code
 				}
+			}
+		case <-silentC:
+			silentC = nil
+			if only != nil && c.abandon(only) {
+				return nil, sip.StatusRequestTimeout, "silent", "no response", 0
 			}
 		case <-timer.C:
 			if c.closeSetup() {
 				c.cancelForks(nil)
-				return nil, sip.StatusRequestTimeout, "no_answer", "ring timeout"
+				return nil, sip.StatusRequestTimeout, "no_answer", "ring timeout", 0
 			}
 			// a leg answered just now: its event is on the way
+		case <-watch.C:
+			if !c.cbRenew() && c.closeSetup() {
+				c.cancelForks(nil)
+				return nil, sip.StatusRequestTerminated, "cancelled", "cancelled by an operator", 0
+			}
 		case <-c.aborted:
 			c.closeSetup()
 			c.cancelForks(nil)
-			return nil, sip.StatusServiceUnavailable, "failed", "the node is draining"
+			return nil, sip.StatusServiceUnavailable, "draining", "the node is draining", 0
 		case <-s.done:
 			c.closeSetup()
 			c.cancelForks(nil)
-			return nil, sip.StatusServiceUnavailable, "failed", "the node is shutting down"
+			return nil, sip.StatusServiceUnavailable, "draining", "the node is shutting down", 0
 		}
 	}
 }
@@ -666,6 +811,9 @@ func (c *call) callbackAwait(pending int) (w *leg, status int, result, reason st
 func (c *call) callbackHome(snap *snapshot.Snapshot, q snapshot.Queue, cb queue.Callback, w *leg, off media.AudioSDP) bool {
 	s := c.s
 	c.cancelForks(w)
+	c.mu.Lock()
+	c.callID = w.callID
+	c.mu.Unlock()
 	dcs := w.session()
 	relay := c.anchorRelay()
 	if dcs == nil || dcs.InviteRequest == nil || dcs.InviteResponse == nil || relay == nil {
@@ -731,4 +879,11 @@ func filterLegs(legs []*leg, w *leg) []*leg {
 		}
 	}
 	return out
+}
+
+// isCallback reports whether the call serves a callback request.
+func (c *call) isCallback() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cbID != 0
 }

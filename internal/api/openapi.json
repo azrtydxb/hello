@@ -14655,7 +14655,7 @@
       "delete": {
         "operationId": "cancelQueueCallback",
         "summary": "Cancel a callback request",
-        "description": "Withdraws an open callback request (waiting or dialling). A request that already finished is a 404.",
+        "description": "Withdraws an open callback request (waiting or dialling). A request being dialled stops within a couple of seconds: a ringing phone is cancelled and a caller already on the line is hung up; it is not retried. A request that already finished is a 404.",
         "tags": ["queues"],
         "parameters": [
           {

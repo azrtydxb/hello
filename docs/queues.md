@@ -179,7 +179,10 @@ by default; turn it on in the queue's **Callback** section (or
   is rung first, as the queue (its number, else its name) through the caller's
   extension or the outbound route that matches, decided as a call from the
   agent the strategy would ring first. The agent is rung only after the caller
-  answered. The answered caller hears a welcome prompt and music, then joins the
+  answered. While the phone rings, the sweep holds the agent (its lease) so a
+  caller who waited less cannot take it. An outside number is dialled through the
+  route's trunks in route order, failing over on the route's failover codes as a
+  normal outbound call does. The answered caller hears a welcome prompt and music, then joins the
   queue at its original place and is offered like any waiting caller.
 - **Attempts.** No answer, busy, a failure, a hang-up before an agent was
   connected, or no agent within the queue's maximum wait counts as an attempt.
@@ -194,6 +197,9 @@ by default; turn it on in the queue's **Callback** section (or
 - **Language.** The prompts are spoken in the queue's **Prompt language**, else
   the deployment language, else English; a language whose clip cannot be
   produced is spoken in English.
+- **Cancelling** a request that is being dialled stops it within about 2 s: a
+  ringing phone is cancelled, a caller already on the line is hung up, and the
+  request is not retried.
 - **Operators.** `GET /api/v1/queues/{id}/callbacks` and `DELETE
   /api/v1/queues/{id}/callbacks/{callbackId}` (also the **Callbacks** page of a
   queue) list requests and cancel an open one.
