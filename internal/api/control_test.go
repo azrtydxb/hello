@@ -84,6 +84,7 @@ func newEnvConfig(t *testing.T, cfg Config, box *secret.Box) *env {
 	cfg.Phonebooks = st
 	cfg.Messages = st
 	cfg.Conferences = st
+	cfg.Blocklist = st
 	if box != nil {
 		cfg.ProvStore = st
 	}

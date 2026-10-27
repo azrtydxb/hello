@@ -150,6 +150,8 @@ func (t *Table) compileTrunks(in []Trunk, errs *[]FieldError) {
 		if pats := compileDialing(tr.InternalDialing, p+".internalDialing", errs); pats != nil {
 			t.dial[tr.ID] = pats
 		}
+		ValidateCallerPolicy(tr.CallerPolicy, p+".callerPolicy", errs)
+		tr.CallerPolicy.AllowedCountryCodes = slices.Clone(tr.CallerPolicy.AllowedCountryCodes)
 		if len(tr.Destinations) == 0 {
 			addErr(errs, p+".destinations", "at least one destination is required")
 		}

@@ -99,6 +99,12 @@ interface TrunkDraft {
   dialingConfirm: boolean;
   /** The codecs offered to the trunk, as codecs[]. */
   codecs: string[];
+  /** Caller screening (pbx-gaps S-8). */
+  rejectAnonymous: boolean;
+  /** Country calling codes, comma or space separated. */
+  allowedCountryCodes: string;
+  unknownCallerAction: "allow" | "block";
+  rejectCode: "603" | "486";
 }
 
 /** The codecs a trunk may be offered, in the order they are stored. */
@@ -152,7 +158,18 @@ const NEW_TRUNK: TrunkDraft = {
   dialingPatterns: "",
   dialingConfirm: false,
   codecs: DEFAULT_TRUNK_CODECS,
+  rejectAnonymous: false,
+  allowedCountryCodes: "",
+  unknownCallerAction: "block",
+  rejectCode: "603",
 };
+
+const COUNTRY_CODE_PATTERN = /^[1-9][0-9]{0,2}$/;
+
+/** "41, +49" -> ["41", "49"]; a leading + is dropped. */
+function countryCodes(value: string): string[] {
+  return splitList(value).map((c) => c.replace(/^\+/, ""));
+}
 
 function toDraft(t: Trunk): TrunkDraft {
   const dialing = t.internalDialing;
@@ -182,6 +199,10 @@ function toDraft(t: Trunk): TrunkDraft {
     dialingPatterns: (dialing?.patterns ?? []).join("\n"),
     dialingConfirm: false,
     codecs: t.codecs?.length ? t.codecs : DEFAULT_TRUNK_CODECS,
+    rejectAnonymous: t.rejectAnonymous === true,
+    allowedCountryCodes: (t.allowedCountryCodes ?? []).join(", "),
+    unknownCallerAction: t.unknownCallerAction === "allow" ? "allow" : "block",
+    rejectCode: t.rejectCode === 486 ? "486" : "603",
   };
 }
 
@@ -199,6 +220,15 @@ function dialingLabel(dialing: InternalDialing): string {
     default:
       return "Off";
   }
+}
+
+/** What the trunk screens, for the card. */
+function screeningLabel(t: Trunk): string {
+  const parts: string[] = [];
+  if (t.rejectAnonymous) parts.push("anonymous rejected");
+  const codes = t.allowedCountryCodes ?? [];
+  if (codes.length > 0) parts.push(`only +${codes.join(", +")}`);
+  return parts.length > 0 ? parts.join(", ") : "Off";
 }
 
 /** Client-side checks; the server validates everything again. */
@@ -238,6 +268,16 @@ function validate(d: TrunkDraft): Record<string, string> {
   if (d.codecs.length === 0) {
     e.codecs = "Offer at least one codec.";
   }
+  const bad = countryCodes(d.allowedCountryCodes).filter(
+    (c) => !COUNTRY_CODE_PATTERN.test(c),
+  );
+  if (bad.length > 0) {
+    e.allowedCountryCodes =
+      "Use calling codes of 1 to 3 digits without a leading 0, such as 41 or 49.";
+  }
+  if (countryCodes(d.allowedCountryCodes).length > 50) {
+    e.allowedCountryCodes = "Use at most 50 country codes.";
+  }
   if (d.dialingMode === "all" && !d.dialingConfirm) {
     e["internalDialing.confirm"] =
       "Confirm that this trunk may dial every internal number.";
@@ -267,6 +307,10 @@ function toInput(d: TrunkDraft): TrunkInput {
     internalDialing: toDialingInput(d),
     messaging: d.messaging,
     codecs: TRUNK_CODECS.map((c) => c.name).filter((n) => d.codecs.includes(n)),
+    rejectAnonymous: d.rejectAnonymous,
+    allowedCountryCodes: countryCodes(d.allowedCountryCodes),
+    unknownCallerAction: d.unknownCallerAction,
+    rejectCode: d.rejectCode === "486" ? 486 : 603,
   };
 }
 
@@ -307,6 +351,10 @@ function knownKeys(d: TrunkDraft): string[] {
     "internalDialing.patterns",
     "internalDialing.confirm",
     "messaging",
+    "rejectAnonymous",
+    "allowedCountryCodes",
+    "unknownCallerAction",
+    "rejectCode",
     ...d.destinations.flatMap((_, i) => [
       `destinations[${i}]`,
       ...["host", "port", "priority", "weight"].map(
@@ -559,6 +607,7 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Caller screening", value: screeningLabel(t) },
           { label: "Password", value: password },
         ]
       : [
@@ -579,6 +628,7 @@ function TrunkCard({
             value: dialingLabel(t.internalDialing),
           },
           { label: "SMS over SIP", value: t.messaging ? "On" : "Off" },
+          { label: "Caller screening", value: screeningLabel(t) },
           { label: "Password", value: password },
         ];
 
@@ -986,6 +1036,59 @@ function TrunkDrawer({
               </p>
             )}
           </div>
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Caller screening</legend>
+          <p className="cf-form__note">
+            Applies to calls arriving on this trunk, after the blocklist's allow
+            entries. Calls from phones are never screened. The blocklist itself
+            is on the Blocklist page.
+          </p>
+          <Switch
+            label="Reject anonymous callers"
+            hint="Turn away a caller who withholds the number (From anonymous, Privacy: id, or no number)."
+            labelPosition="end"
+            checked={draft.rejectAnonymous}
+            onChange={(e) => set("rejectAnonymous", e.target.checked)}
+          />
+          <Input
+            id={fid("allowedCountryCodes")}
+            label="Allowed country codes"
+            mono
+            value={draft.allowedCountryCodes}
+            error={errors.allowedCountryCodes}
+            hint="Leave empty for no restriction. Callers from any other country are turned away, e.g. 41, 49."
+            onChange={(e) => set("allowedCountryCodes", e.target.value)}
+          />
+          <Select
+            id={fid("unknownCallerAction")}
+            label="Caller number cannot be placed"
+            value={draft.unknownCallerAction}
+            hint="Only used with a country list. A withheld number counts as one that cannot be placed."
+            onChange={(e) =>
+              set(
+                "unknownCallerAction",
+                e.target.value === "allow" ? "allow" : "block",
+              )
+            }
+            options={[
+              { value: "block", label: "Block the call" },
+              { value: "allow", label: "Allow the call" },
+            ]}
+          />
+          <Select
+            id={fid("rejectCode")}
+            label="Answer a screened call with"
+            value={draft.rejectCode}
+            onChange={(e) =>
+              set("rejectCode", e.target.value === "486" ? "486" : "603")
+            }
+            options={[
+              { value: "603", label: "603 Decline" },
+              { value: "486", label: "486 Busy Here" },
+            ]}
+          />
         </fieldset>
 
         <fieldset

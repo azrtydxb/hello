@@ -15,6 +15,8 @@ const (
 	ResultNotFound    = "not_found"
 	ResultUnavailable = "unavailable"
 	ResultFailed      = "failed"
+	// ResultBlocked is a call a trunk's screening turned away (pbx-gaps S-7).
+	ResultBlocked = "blocked"
 )
 
 // Metrics are the SIP node's Prometheus series.
@@ -86,6 +88,9 @@ type Metrics struct {
 	// TimeConditionTotal counts time condition decisions: open, closed,
 	// holiday, forced_open, forced_closed, loop, missing and toggled.
 	TimeConditionTotal *prometheus.CounterVec // result
+	// BlockedCalls counts inbound trunk calls turned away before routing,
+	// by reason: blocklist, anonymous or country (pbx-gaps S-7, S-8).
+	BlockedCalls *prometheus.CounterVec // reason
 
 	// Phase 7 (in-call HA, spec S-13). DialogReplicated counts replication
 	// writes by result; DialogTakeovers the calls this node took over;
@@ -252,6 +257,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.TimeConditionTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_time_condition_total", Help: "Time condition decisions (open, closed, holiday, forced_open, forced_closed, loop, missing, toggled).",
 	}, []string{"result"})
+	m.BlockedCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_blocked_calls_total", Help: "Inbound trunk calls turned away before routing, by reason (blocklist, anonymous, country).",
+	}, []string{"reason"})
 	m.PagingLegs = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_paging_legs_total", Help: "Page member legs by result (answered, busy, dnd, no_answer, no_registration).",
 	}, []string{"result"})
@@ -270,7 +278,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls,
-		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.TimeConditionTotal,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.TimeConditionTotal, m.BlockedCalls,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)

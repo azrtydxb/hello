@@ -293,6 +293,14 @@ export interface TrunkFields {
    * accept G.711 only.
    */
   codecs: string[];
+  /** Turn away calls from a withheld caller (anonymous, Privacy: id). */
+  rejectAnonymous: boolean;
+  /** Calling codes callers must come from; empty is no restriction. */
+  allowedCountryCodes: string[];
+  /** What a restricted trunk does with a number it cannot place. */
+  unknownCallerAction: "allow" | "block";
+  /** The final response of a screened call: 603 Decline or 486 Busy Here. */
+  rejectCode: 603 | 486;
 }
 
 /** A trunk as returned: the password is never returned, only hasPassword. */

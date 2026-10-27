@@ -21,6 +21,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo"
@@ -91,6 +92,10 @@ type Config struct {
 	// TrustedProxies are the edge proxies (Kamailio) whose X-Hello-Client
 	// and Path headers are believed (plan contract 7).
 	TrustedProxies []netip.Prefix
+	// Dialing is the numbering context (HELLO_DIAL_INTL_PREFIX and
+	// HELLO_DIAL_COUNTRY_CODE) caller numbers are normalised in for the
+	// blocklist and the country restriction (pbx-gaps S-7, S-8).
+	Dialing phonebook.Dialing
 
 	// RTPPortMin and RTPPortMax bound the UDP port range anchored media
 	// sessions draw their relay sockets from (20000-21000 default,

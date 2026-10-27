@@ -93,7 +93,14 @@ type CDRFilter struct {
 	// Failed keeps only calls whose final status is outside 2xx, the same
 	// rule the CDR detail's explanation uses.
 	Failed bool
+	// Disposition keeps one disposition: "blocked" is the calls a trunk's
+	// screening turned away (blocklist, anonymous reject, country
+	// restriction; pbx-gaps S-7, S-8). Empty keeps all.
+	Disposition string
 }
+
+// blockedReasonPrefix starts the failure reason of a screened call.
+const blockedReasonPrefix = "blocked: "
 
 // ListCDRs returns up to limit CDRs matching f with id below before (0
 // means from the newest), newest first, and the cursor for the next page
@@ -102,7 +109,8 @@ func (s *Store) ListCDRs(ctx context.Context, f CDRFilter, before int64, limit i
 	rows, err := s.db.QueryContext(ctx, `SELECT `+cdrCols+`
 		FROM cdrs WHERE ($1 = 0 OR id < $1) AND ($3::text = '' OR direction = $3::text)
 			AND (NOT $4::boolean OR final_status NOT BETWEEN 200 AND 299)
-		ORDER BY id DESC LIMIT $2`, before, limit+1, f.Direction, f.Failed)
+			AND ($5::text = '' OR ($5::text = 'blocked' AND left(failure_reason, length($6::text)) = $6::text))
+		ORDER BY id DESC LIMIT $2`, before, limit+1, f.Direction, f.Failed, f.Disposition, blockedReasonPrefix)
 	if err != nil {
 		return nil, "", err
 	}

@@ -16,12 +16,15 @@ export interface CdrFilter {
   direction?: Cdr["direction"];
   /** Only calls whose final status is outside 2xx. */
   failed?: boolean;
+  /** "blocked": calls a trunk's screening turned away (blocklist, anonymous, country). */
+  disposition?: "blocked";
 }
 
 function filterQuery(filter: CdrFilter): URLSearchParams {
   const q = new URLSearchParams();
   if (filter.direction) q.set("direction", filter.direction);
   if (filter.failed) q.set("failed", "true");
+  if (filter.disposition) q.set("disposition", filter.disposition);
   return q;
 }
 

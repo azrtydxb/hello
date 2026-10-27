@@ -191,6 +191,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		TwoFALogins:     api.NewTwoFactorMetrics(metrics.Registry),
 		ConferenceLive:  vk,
 		Messages:        st,
+		Blocklist:       st,
 		Dialing:         cfg.Dial,
 		PromptLanguage:  cfg.VoicePromptLanguage,
 		Prov:            provAPI(cfg, settings, deployment, objs, log),

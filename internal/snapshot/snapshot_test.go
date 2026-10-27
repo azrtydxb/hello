@@ -362,3 +362,51 @@ func TestExtensionByBox(t *testing.T) {
 		}
 	}
 }
+
+// TestBlocklistLoad fails if an enabled blocklist entry (with its trunk
+// scope and announcement name) or a trunk's caller policy is not in the
+// snapshot, or a disabled entry is.
+func TestBlocklistLoad(t *testing.T) {
+	cfg := scratch(t)
+	ctx := context.Background()
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	var trunk, ann int64
+	if err := conn.QueryRow(ctx, `INSERT INTO trunks (name, mode, reject_anonymous, allowed_country_codes, unknown_caller_action, reject_code)
+		VALUES ('carrier', 'ip', true, '{41,49}', 'allow', 486) RETURNING id`).Scan(&trunk); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO trunk_destinations (trunk_id, host, port, priority, weight) VALUES ($1, '203.0.113.10', 5060, 1, 1)`, trunk); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(ctx, `INSERT INTO announcements (name, minio_object) VALUES ('sorry', 'ann/sorry.wav') RETURNING id`).Scan(&ann); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO call_blocklist (pattern, match, action, trunk_id, announcement_id, enabled) VALUES
+		('+4122*', 'prefix', 'block', NULL, $2, true), ('+33123456789', 'exact', 'allow', $1, NULL, true), ('+33999999999', 'exact', 'block', NULL, NULL, false)`, trunk, ann); err != nil {
+		t.Fatal(err)
+	}
+	w := &Watcher{Domain: domain}
+	s, err := w.loadAll(ctx, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rs := s.Routing()
+	if len(rs.Config.Blocklist) != 2 || rs.Blocklist.Len() != 2 {
+		t.Fatalf("blocklist = %+v (compiled %d), want the 2 enabled entries", rs.Config.Blocklist, rs.Blocklist.Len())
+	}
+	if e := rs.Config.Blocklist[0]; e.Pattern != "+4122*" || e.Match != "prefix" || e.Announcement != "sorry" || e.TrunkID != 0 {
+		t.Fatalf("first entry = %+v", e)
+	}
+	if e := rs.Config.Blocklist[1]; e.Action != "allow" || e.TrunkID != trunk {
+		t.Fatalf("second entry = %+v", e)
+	}
+	tr, ok := rs.Router.Trunk(trunk)
+	if !ok || !tr.CallerPolicy.RejectAnonymous || tr.CallerPolicy.RejectCode != 486 || tr.CallerPolicy.UnknownCallerAction != "allow" ||
+		len(tr.CallerPolicy.AllowedCountryCodes) != 2 {
+		t.Fatalf("trunk policy = %+v ok=%v", tr, ok)
+	}
+}
