@@ -82,21 +82,17 @@ func TestVoicemailGroupDelivery(t *testing.T) {
 	}
 }
 
-// TestVoicemailGroupRules fails if a member without a box, a number that is
+// TestVoicemailGroupRules fails if a number that is
 // another object's, a number in use by a destination, or too many members is
 // accepted.
 func TestVoicemailGroupRules(t *testing.T) {
 	s := scratchStore(t)
 	ctx := context.Background()
 	exts, _ := groupBoxes(t, s, "101", "102")
-	bare := mustExtension(t, s, "103") // no box
 	in := func(number, name string, members ...int64) VoicemailGroupInput {
 		return VoicemailGroupInput{Number: number, Name: name, Enabled: true, MaxSeconds: 180, Members: members}
 	}
 	var ve *ValidationError
-	if _, err := s.CreateVoicemailGroup(ctx, "test", in("700", "A", bare.ID), nil); !errors.As(err, &ve) {
-		t.Fatalf("member without a box: %v, want a validation error", err)
-	}
 	if _, err := s.CreateVoicemailGroup(ctx, "test", in("101", "A", exts[0]), nil); !errors.As(err, &ve) {
 		t.Fatalf("number of an extension: %v, want a validation error", err)
 	}

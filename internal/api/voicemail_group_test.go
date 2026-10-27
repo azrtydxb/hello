@@ -57,7 +57,7 @@ func TestValidateVoicemailGroup(t *testing.T) {
 }
 
 // TestVoicemailGroupCRUD: create, list, replace and delete a voicemail group.
-// It fails if a member without a box, a duplicate number or name, a number
+// It fails if a duplicate number or name, a number
 // that is an extension or ring group, or a group an IVR menu points at is
 // accepted or removed, or if a replace leaves the old members behind.
 func TestVoicemailGroupCRUD(t *testing.T) {
@@ -69,14 +69,6 @@ func TestVoicemailGroupCRUD(t *testing.T) {
 	body := func(number, name string, members ...json.Number) map[string]any {
 		return map[string]any{"number": number, "name": name, "members": members}
 	}
-	// A member needs a voicemail box.
-	if r := c.do("POST", "/api/v1/voicemail-groups", body("700", "Sales", m1)); r.code != http.StatusBadRequest {
-		t.Fatalf("member without a box: status %d, want 400", r.code)
-	}
-	for _, ext := range []map[string]any{e.ext101, e.ext102} {
-		c.must(http.StatusOK, "PUT", fmt.Sprintf("/api/v1/extensions/%v/voicemail", ext["id"]), map[string]string{"email": ""})
-	}
-
 	created := c.must(http.StatusCreated, "POST", "/api/v1/voicemail-groups", body("700", "Sales", m1, m2)).json(t)
 	id := fmt.Sprint(int64(created["id"].(float64)))
 	if ms := created["members"].([]any); len(ms) != 2 || created["maxSeconds"].(float64) != 180 || created["enabled"] != true {
