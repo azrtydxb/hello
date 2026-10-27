@@ -206,7 +206,7 @@ func TestFeatureCodeStart(t *testing.T) {
 	in.ParkLots = []store.ParkLot{{ID: 1, Name: "lot", SlotStart: 701, SlotEnd: 709, Enabled: true}}
 	monday := at(t, "2026-10-26T10:00:00+01:00")
 	trace := func(dialled string) ([]TraceStep, bool) {
-		s, ok := FeatureCodeStart(in, "102", dialled)
+		s, ok := FeatureCodeStart(in, "102", dialled, nil)
 		if !ok {
 			return nil, false
 		}
@@ -256,5 +256,97 @@ func TestFeatureCodeStart(t *testing.T) {
 	in.FeatureCodes = append(in.FeatureCodes, store.FeatureCode{Code: "*9", Action: "dnd_on"})
 	if s, _ := trace("*97101"); !strings.Contains(s[0].Text, "voicemail") {
 		t.Errorf("longest code %+v", s)
+	}
+}
+
+func queueFixture() Input {
+	in := traceFixture("")
+	in.Queues = []store.Queue{{ID: 1, Name: "support", Number: "820", Enabled: true, Strategy: "ring_all", MaxWait: 60,
+		Timeout:  store.IVRDestination{Kind: "voicemail", Target: "101"},
+		NoAgents: store.IVRDestination{Kind: "announcement", Target: "closed"},
+		Members: []store.QueueMember{
+			{ExtensionID: 10, Number: "101"},                // static
+			{ExtensionID: 11, Number: "102", Dynamic: true}, // must log in
+		}}}
+	return in
+}
+
+func TestTraceQueueLiveState(t *testing.T) {
+	monday := at(t, "2026-10-26T10:00:00+01:00")
+	enter := TraceStart{Enter: &Ref{Node: "queue:1", Port: "call"}}
+	run := func(live *Live) []TraceStep {
+		steps, err := Trace(queueFixture(), enter, TraceOptions{At: monday, Live: live})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return steps
+	}
+
+	// Unknown: both outcomes are branches and the step says so.
+	s := run(nil)
+	if len(s) != 1 || !strings.Contains(s[0].Text, Unknown) || len(s[0].Branches) != 2 {
+		t.Fatalf("unknown: %+v", s)
+	}
+	if got := pathOf(s[0].Branches[0].Steps); got != "queue:1: > queue:1:timeout > extension:10:voicemail" {
+		t.Errorf("available branch %s", got)
+	}
+	if got := pathOf(s[0].Branches[1].Steps); !strings.HasPrefix(got, "queue:1:noAgents > announcement:2:") {
+		t.Errorf("no-agent branch %s", got)
+	}
+	// Known, the static agent is available: the timeout exit.
+	s = run(&Live{AgentsKnown: true})
+	if !strings.Contains(s[0].Text, "101 available, 102 logged out") || s[1].Port != "timeout" || len(s[0].Branches) != 0 {
+		t.Errorf("static agent: %+v", s)
+	}
+	// Paused static agent and a logged-out dynamic one: nobody, so noAgents.
+	s = run(&Live{AgentsKnown: true, Agents: map[string]AgentState{"101": {Paused: true, Reason: "lunch"}}})
+	if !strings.Contains(s[0].Text, "101 paused (lunch)") || s[1].Port != "noAgents" {
+		t.Errorf("paused: %+v", s)
+	}
+	// The dynamic agent logs in to another queue only.
+	s = run(&Live{AgentsKnown: true, Agents: map[string]AgentState{
+		"101": {Paused: true}, "102": {LoggedIn: true, Queues: []string{"sales"}}}})
+	if s[1].Port != "noAgents" {
+		t.Errorf("other queue: %+v", s)
+	}
+	s = run(&Live{AgentsKnown: true, Agents: map[string]AgentState{
+		"101": {Paused: true}, "102": {LoggedIn: true, Queues: []string{"support"}}}})
+	if s[1].Port != "timeout" || !strings.Contains(s[0].Text, "102 logged in") {
+		t.Errorf("logged in: %+v", s)
+	}
+}
+
+func TestFeatureCodeLiveState(t *testing.T) {
+	in := queueFixture()
+	in.FeatureCodes = []store.FeatureCode{{Code: "*8", Action: "park_retrieve"}, {Code: "*45", Action: "queue_pause"}}
+	in.ParkLots = []store.ParkLot{{ID: 1, Name: "lot", SlotStart: 701, SlotEnd: 709, Enabled: true}}
+	text := func(dialled string, live *Live) string {
+		s, ok := FeatureCodeStart(in, "102", dialled, live)
+		if !ok {
+			t.Fatalf("%s is not a code", dialled)
+		}
+		return s.Steps[0].Text
+	}
+	if got := text("*8705", nil); !strings.Contains(got, Unknown) {
+		t.Errorf("unknown slot: %s", got)
+	}
+	if got := text("*8705", &Live{}); !strings.Contains(got, Unknown) {
+		t.Errorf("unread slot: %s", got)
+	}
+	known := &Live{ParkKnown: true, Parked: map[string]string{"705": "101"}}
+	if got := text("*8705", known); !strings.Contains(got, "parked by extension 101") {
+		t.Errorf("occupied: %s", got)
+	}
+	if got := text("*8706", known); !strings.Contains(got, "slot is empty") {
+		t.Errorf("empty: %s", got)
+	}
+	if got := text("705", known); !strings.Contains(got, "parked by extension 101") {
+		t.Errorf("slot dialled: %s", got)
+	}
+	if got := text("*45820", &Live{AgentsKnown: true, Agents: map[string]AgentState{"102": {LoggedIn: true, Paused: true}}}); !strings.Contains(got, "logged in and paused") {
+		t.Errorf("agent code: %s", got)
+	}
+	if got := text("*45820", nil); !strings.Contains(got, Unknown) {
+		t.Errorf("agent code unknown: %s", got)
 	}
 }

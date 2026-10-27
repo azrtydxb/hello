@@ -115,4 +115,68 @@ describe("flow canvas trace mode", () => {
       within(panel).getByText("Choose who calls and the number they dial."),
     ).toBeInTheDocument();
   });
+
+  it("lists the busy and not-registered branches of a ringing extension", async () => {
+    const withBranches: FlowTrace = {
+      ...TRACE,
+      steps: [
+        {
+          node: "extension:1",
+          port: "ring",
+          text: "Rings extension 100 Ann",
+          branches: [
+            {
+              port: "forwardBusy",
+              label: "If busy",
+              steps: [
+                {
+                  node: "extension:1",
+                  port: "forwardBusy",
+                  text: "Busy: the call forwards to 101",
+                },
+              ],
+            },
+            {
+              port: "voicemail",
+              label: "If not registered",
+              steps: [
+                {
+                  node: "extension:1",
+                  port: "voicemail",
+                  text: "No device is registered: the caller reaches the voicemail",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    api("viewer", () => json(withBranches));
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Trace a call" }));
+    const panel = await screen.findByRole("complementary", {
+      name: "Trace a call",
+    });
+    fireEvent.change(within(panel).getByLabelText("Dialled number"), {
+      target: { value: "800" },
+    });
+    fireEvent.click(within(panel).getByRole("button", { name: "Key 1" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Key 2" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Trace" }));
+
+    expect(await within(panel).findByText("If busy")).toBeInTheDocument();
+    expect(within(panel).getByText("If not registered")).toBeInTheDocument();
+    expect(
+      within(panel).getByText("Busy: the call forwards to 101"),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).getByText(
+        "No device is registered: the caller reaches the voicemail",
+      ),
+    ).toBeInTheDocument();
+    // The ring step itself is listed once, above its branches.
+    expect(
+      within(panel).getByText("Rings extension 100 Ann"),
+    ).toBeInTheDocument();
+  });
 });

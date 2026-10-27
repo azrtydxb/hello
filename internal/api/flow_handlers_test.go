@@ -3,6 +3,9 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"github.com/azrtydxb/hello/internal/livestate"
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/routing"
 	"log/slog"
 	"net/http"
@@ -196,15 +199,19 @@ func (f *traceFake) ListInboundRoutes(context.Context) ([]store.InboundRoute, er
 	return f.inbound, nil
 }
 func (f *traceFake) ListFeatureCodes(context.Context) ([]store.FeatureCode, error) {
-	return []store.FeatureCode{{Code: "*97", Action: "voicemail"}}, nil
+	return []store.FeatureCode{{Code: "*97", Action: "voicemail"}, {Code: "*8", Action: "park_retrieve"}}, nil
 }
 func (f *traceFake) RoutingConfig(context.Context) (store.RoutingSnapshot, error) {
 	return store.RoutingSnapshot{Config: f.cfg}, nil
 }
 
-func traceGet(t *testing.T, f *traceFake, url string) (int, flowTraceBody) {
+func traceGet(t *testing.T, f *traceFake, url string, opts ...func(*Config)) (int, flowTraceBody) {
 	t.Helper()
-	s := &server{Config{Store: f, Router: engineRouter{}, Log: slog.New(slog.DiscardHandler)}}
+	cfg := Config{Store: f, Router: engineRouter{}, Log: slog.New(slog.DiscardHandler)}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	s := &server{cfg}
 	rec := httptest.NewRecorder()
 	s.getFlowTrace(rec, httptest.NewRequest("GET", url, nil))
 	var out flowTraceBody
@@ -287,5 +294,75 @@ func TestTrace(t *testing.T) {
 		if code, _ := traceGet(t, f, "/api/v1/flow/trace"+bad); code == 200 {
 			t.Errorf("%q was accepted", bad)
 		}
+	}
+}
+
+type tracePark struct {
+	calls []livestate.ParkedCall
+	err   error
+}
+
+func (f tracePark) ParkList(context.Context) ([]livestate.ParkedCall, error) { return f.calls, f.err }
+
+type traceAgents struct {
+	QueueLive
+	agents map[string]queue.AgentState
+	err    error
+}
+
+func (f traceAgents) Agents(context.Context) (map[string]queue.AgentState, error) {
+	return f.agents, f.err
+}
+
+// TestTraceLiveState reads the live state the trace branches on: the park
+// slot and the queue agents, and says so when it cannot.
+func TestTraceLiveState(t *testing.T) {
+	f := &traceFake{
+		flowFake: flowFake{rev: 3,
+			exts: []store.Extension{{ID: 1, Number: "100", Name: "Ann"}, {ID: 2, Number: "101", Name: "Bob"}},
+			lots: []store.ParkLot{{ID: 1, Name: "lot", SlotStart: 701, SlotEnd: 709, Enabled: true}},
+			queues: []store.Queue{{ID: 1, Name: "support", Number: "820", Enabled: true, Strategy: "ring_all", MaxWait: 30,
+				Timeout: store.IVRDestination{Kind: "hangup"}, NoAgents: store.IVRDestination{Kind: "hangup"},
+				Members: []store.QueueMember{{ExtensionID: 2, Number: "101", Dynamic: true}}}}},
+		cfg: routing.Config{Extensions: map[string]string{"100": "", "101": ""}},
+	}
+	first := func(tr flowTraceBody) string { return tr.Steps[1].Text }
+
+	// Nothing wired: both parts are unknown.
+	if _, tr := traceGet(t, f, "/api/v1/flow/trace?from=100&number=*8705"); !strings.Contains(first(tr), "unknown (live state unavailable)") {
+		t.Errorf("no live state: %s", first(tr))
+	}
+	if _, tr := traceGet(t, f, "/api/v1/flow/trace?from=100&number=820"); len(tr.Steps[1].Branches) != 2 {
+		t.Errorf("no live agents: %+v", tr.Steps)
+	}
+	// Unreadable is unknown too.
+	broken := func(c *Config) {
+		c.Parked = tracePark{err: errors.New("valkey down")}
+		c.Queues = traceAgents{err: errors.New("valkey down")}
+	}
+	if _, tr := traceGet(t, f, "/api/v1/flow/trace?from=100&number=*8705", broken); !strings.Contains(first(tr), "unknown (live state unavailable)") {
+		t.Errorf("unreadable: %s", first(tr))
+	}
+	// Readable: an occupied slot, an empty one, a logged-in agent.
+	live := func(c *Config) {
+		c.Parked = tracePark{calls: []livestate.ParkedCall{{Slot: "705", ParkedBy: "101"}}}
+		c.Queues = traceAgents{agents: map[string]queue.AgentState{"101": {Ext: "101", LoggedIn: true}}}
+	}
+	if _, tr := traceGet(t, f, "/api/v1/flow/trace?from=100&number=*8705", live); !strings.Contains(first(tr), "parked by extension 101") {
+		t.Errorf("occupied: %s", first(tr))
+	}
+	if _, tr := traceGet(t, f, "/api/v1/flow/trace?from=100&number=*8706", live); !strings.Contains(first(tr), "slot is empty") {
+		t.Errorf("empty: %s", first(tr))
+	}
+	if _, tr := traceGet(t, f, "/api/v1/flow/trace?from=100&number=820", live); len(tr.Steps[1].Branches) != 0 || !strings.Contains(tr.Steps[1].Text, "101 logged in") {
+		t.Errorf("agents: %+v", tr.Steps[1])
+	}
+	// A logged-out agent leaves nobody: the no-agents exit.
+	out := func(c *Config) {
+		c.Parked = tracePark{}
+		c.Queues = traceAgents{agents: map[string]queue.AgentState{}}
+	}
+	if _, tr := traceGet(t, f, "/api/v1/flow/trace?from=100&number=820", out); !strings.Contains(tr.Steps[1].Text, "101 logged out") {
+		t.Errorf("logged out: %+v", tr.Steps[1])
 	}
 }

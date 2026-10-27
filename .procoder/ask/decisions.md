@@ -955,8 +955,18 @@ conflict`), and a batch that deleted a device or phone (which a batch cannot
   queue login/logout/pause, time condition override, park retrieve, pickup and
   the settings codes (forward, DND, call waiting) end in one step that says
   what they do to the caller's own extension; park and the transfer codes
-  dialled as a call are rejected (403). Whether a call is parked in a slot is
-  live state and is not read.
+  dialled as a call are rejected (403).
+- **Live state** (park slots, queue agents) is read by the handler (`s.Parked`,
+  `s.Queues`, 2 s timeout) and given to the walk as `flow.Live`. Park retrieve
+  and a dialled slot say whether the slot holds a call and who parked it. A
+  queue lists each agent (static agents are available unless paused; dynamic
+  ones need a login to this queue) and takes the `timeout` exit when someone is
+  staffed, else `noAgents`. What cannot be read (reader not wired, error, or
+  timeout) is shown as "unknown (live state unavailable)", and the queue then
+  has two branches, "If an agent is available" and "If no agent is available".
+  The agent codes also say whether the caller's extension is logged in or paused.
+  Whether an agent's phone is busy, in DND or registered is not judged for a
+  queue (the SIP node does), only the shared login and pause state.
 - **Ring groups and queues** follow the failure path (`noAnswer`; for a queue
   `timeout`, or `noAgents` when it has none): a member or agent who answers ends
   the call, so the trace shows what happens when nobody does. The step text
@@ -989,7 +999,5 @@ conflict`), and a batch that deleted a device or phone (which a batch cannot
   after `buildView`, so the page keeps one extra line of state and the P4
   editing code is untouched. Traced objects that are not on the canvas are
   counted in a note, not drawn.
-- **Still out** (live state only): whether a call sits in a park slot, whether
-  an agent is logged in.
 - **Not in this change** (their phases): `traceFlow` in `assistantTools` and the
   skill (P6).

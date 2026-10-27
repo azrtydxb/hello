@@ -41,6 +41,66 @@ type TraceBranch struct {
 	Steps []TraceStep `json:"steps"`
 }
 
+// Unknown is what the trace says about live state it could not read.
+const Unknown = "unknown (live state unavailable)"
+
+// Live is the live state a trace reads (spec S-18): which park slots hold a
+// call and the agents' login and pause state. A nil *Live, or a part that is
+// not Known, is state that could not be read: the trace says so and branches
+// on both possibilities instead of guessing.
+type Live struct {
+	ParkKnown bool
+	// Parked maps an occupied slot to the extension that parked the call.
+	Parked map[string]string
+	// AgentsKnown says Agents was read.
+	AgentsKnown bool
+	// Agents maps an extension number to its shared state; an extension
+	// with no entry has never logged in or paused.
+	Agents map[string]AgentState
+}
+
+// AgentState is an agent's login and pause state.
+type AgentState struct {
+	LoggedIn bool
+	// Queues limits the login to those queue names; empty means all.
+	Queues []string
+	Paused bool
+	Reason string
+}
+
+func (a AgentState) loggedInTo(queue string) bool {
+	if !a.LoggedIn {
+		return false
+	}
+	if len(a.Queues) == 0 {
+		return true
+	}
+	for _, q := range a.Queues {
+		if q == queue {
+			return true
+		}
+	}
+	return false
+}
+
+// agentStatus says how an agent stands in a queue: staffed, or why not.
+func agentStatus(l *Live, queue string, dynamic bool, ext string) (staffed bool, why string) {
+	st := l.Agents[ext]
+	switch {
+	case st.Paused:
+		why = "paused"
+		if st.Reason != "" {
+			why += " (" + st.Reason + ")"
+		}
+		return false, why
+	case !dynamic:
+		return true, "available"
+	case st.loggedInTo(queue):
+		return true, "logged in"
+	}
+	return false, "logged out"
+}
+
 // TraceStart says where the walk begins. The routing decision has already
 // produced Steps (the trunk, the matched route); the walk then continues
 // from the output port Follow, or enters the node input Enter.
@@ -60,6 +120,8 @@ type TraceOptions struct {
 	// Digits are the keys pressed in IVR menus, in order. With none left at
 	// a menu, every configured key is listed as a branch.
 	Digits string
+	// Live is the live state; nil means it could not be read.
+	Live *Live
 }
 
 type walker struct {
@@ -301,20 +363,45 @@ func (w *walker) ringGroup(id, digits string, depth int, st *state) []TraceStep 
 func (w *walker) queue(id, digits string, depth int, st *state) []TraceStep {
 	q := w.queues[id]
 	s := TraceStep{Node: id}
-	port, dest := "timeout", q.Timeout
-	if len(q.Members) == 0 {
-		port, dest = "noAgents", q.NoAgents
-		s.Text = fmt.Sprintf("Queue %s has no agents", q.Name)
-	} else {
-		s.Text = fmt.Sprintf("Joins queue %s (%s, %d agents); an agent who answers ends the trace; after %d s of waiting", q.Name, q.Strategy, len(q.Members), q.MaxWait)
+	exit := func(port string, dest store.IVRDestination, st *state) []TraceStep {
+		if NoDestination[dest.Kind] {
+			return []TraceStep{{Node: id, Text: "The call is hung up"}}
+		}
+		return append([]TraceStep{{Node: id, Port: port, Text: "It goes to " + dest.Kind + " " + dest.Target}}, w.follow(Ref{id, port}, digits, depth, st)...)
 	}
-	if NoDestination[dest.Kind] {
-		s.Text += ": the call is hung up"
+	if len(q.Members) == 0 {
+		s.Text = fmt.Sprintf("Queue %s has no agents", q.Name)
+		return append([]TraceStep{s}, exit("noAgents", q.NoAgents, st)...)
+	}
+	s.Text = fmt.Sprintf("Joins queue %s (%s, %d agents)", q.Name, q.Strategy, len(q.Members))
+	live := w.opt.Live
+	if live == nil || !live.AgentsKnown {
+		// The agents' state is live: both outcomes are shown.
+		s.Text += "; whether an agent is logged in and not paused is " + Unknown
+		yes := TraceBranch{Port: "timeout", Label: "If an agent is available"}
+		yes.Steps = append([]TraceStep{{Node: id, Text: fmt.Sprintf("An agent who answers ends the trace; after %d s of waiting", q.MaxWait)}},
+			exit("timeout", q.Timeout, st.clone())...)
+		no := TraceBranch{Port: "noAgents", Label: "If no agent is available"}
+		no.Steps = exit("noAgents", q.NoAgents, st.clone())
+		s.Branches = []TraceBranch{yes, no}
 		return []TraceStep{s}
 	}
-	s.Port = port
-	s.Text += ": it goes to " + dest.Kind + " " + dest.Target
-	return append([]TraceStep{s}, w.follow(Ref{id, port}, digits, depth, st)...)
+	var staffed int
+	var parts []string
+	for _, m := range q.Members {
+		ok, why := agentStatus(live, q.Name, m.Dynamic, m.Number)
+		if ok {
+			staffed++
+		}
+		parts = append(parts, m.Number+" "+why)
+	}
+	s.Text += "; agents: " + strings.Join(parts, ", ")
+	if staffed == 0 {
+		s.Text += "; none is available, so the call takes the no-agents exit"
+		return append([]TraceStep{s}, exit("noAgents", q.NoAgents, st)...)
+	}
+	s.Text += fmt.Sprintf("; an agent who answers ends the trace; after %d s of waiting", q.MaxWait)
+	return append([]TraceStep{s}, exit("timeout", q.Timeout, st)...)
 }
 
 func (w *walker) announcement(id, then string) []TraceStep {
@@ -460,8 +547,8 @@ func (w *walker) timeCondition(id, digits string, depth int, st *state) []TraceS
 // FeatureCodeStart starts a trace at what hello-sip does with a number dialled
 // from extension from that is a park slot or a feature code (the code, or the
 // code and its argument). ok is false when the number is neither. Only the
-// configuration is read: whether a call is parked in a slot is live state.
-func FeatureCodeStart(in Input, from, dialled string) (TraceStart, bool) {
+// configuration and live (which may be nil: unknown) are read.
+func FeatureCodeStart(in Input, from, dialled string, live *Live) (TraceStart, bool) {
 	caller := ""
 	for _, e := range in.Extensions {
 		if e.Number == from {
@@ -474,11 +561,20 @@ func FeatureCodeStart(in Input, from, dialled string) (TraceStart, bool) {
 	step := func(node, port, text string) []TraceStep {
 		return []TraceStep{{Node: node, Port: port, Text: text}}
 	}
+	slotState := func(slot string) string {
+		switch {
+		case live == nil || !live.ParkKnown:
+			return "whether a call is parked there is " + Unknown
+		case live.Parked[slot] != "":
+			return "a call parked by extension " + live.Parked[slot] + " is there and is connected"
+		}
+		return "the slot is empty: there is nothing to retrieve"
+	}
 	if n, err := strconv.Atoi(dialled); err == nil {
 		for _, l := range in.ParkLots {
 			if l.Enabled && n >= l.SlotStart && n <= l.SlotEnd {
 				return TraceStart{Steps: step(nid(KindParkLot, l.ID), "",
-					"Dialling slot "+dialled+" of park lot "+l.Name+" retrieves the call parked there, if there is one")}, true
+					"Dialling slot "+dialled+" of park lot "+l.Name+" retrieves the call parked there: "+slotState(dialled))}, true
 			}
 		}
 	}
@@ -572,12 +668,25 @@ func FeatureCodeStart(in Input, from, dialled string) (TraceStart, bool) {
 		return s, true
 	case "queue_login", "queue_logout", "queue_pause", "queue_unpause":
 		what := strings.TrimPrefix(fc.Action, "queue_")
-		for _, q := range in.Queues {
-			if arg != "" && q.Number == arg {
-				return TraceStart{Steps: step(nid(KindQueue, q.ID), "", head+": the caller's extension is "+what+"d in queue "+q.Name)}, true
+		now := "whether the extension is now logged in or paused is " + Unknown
+		if live != nil && live.AgentsKnown {
+			a := live.Agents[from]
+			now = "the extension is now "
+			if a.LoggedIn {
+				now += "logged in"
+			} else {
+				now += "logged out"
+			}
+			if a.Paused {
+				now += " and paused"
 			}
 		}
-		return TraceStart{Steps: step(caller, "", head+": the caller's extension is "+what+"d in the queue it names, or in every queue it is an agent of")}, true
+		for _, q := range in.Queues {
+			if arg != "" && q.Number == arg {
+				return TraceStart{Steps: step(nid(KindQueue, q.ID), "", head+": the caller's extension is "+what+"d in queue "+q.Name+" ("+now+")")}, true
+			}
+		}
+		return TraceStart{Steps: step(caller, "", head+": the caller's extension is "+what+"d in the queue it names, or in every queue it is an agent of ("+now+")")}, true
 	case "tc_override":
 		for _, tc := range in.TimeConditions {
 			if tc.ToggleNumber != "" && tc.ToggleNumber == arg {
@@ -591,7 +700,7 @@ func FeatureCodeStart(in Input, from, dialled string) (TraceStart, bool) {
 		if n, err := strconv.Atoi(arg); err == nil {
 			for _, l := range in.ParkLots {
 				if l.Enabled && n >= l.SlotStart && n <= l.SlotEnd {
-					return TraceStart{Steps: step(nid(KindParkLot, l.ID), "", head+" retrieves the call parked in slot "+arg+" of park lot "+l.Name+", if there is one")}, true
+					return TraceStart{Steps: step(nid(KindParkLot, l.ID), "", head+" retrieves the call parked in slot "+arg+" of park lot "+l.Name+": "+slotState(arg))}, true
 				}
 			}
 		}

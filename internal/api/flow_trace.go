@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -108,9 +109,10 @@ func (s *server) getFlowTrace(w http.ResponseWriter, r *http.Request) {
 		ConfigRevision: rev, At: call.At.UTC().Format(time.RFC3339), From: from, Number: number,
 		Steps: []flow.TraceStep{}, RoutingTrace: routing.Trace{},
 	}
-	opt := flow.TraceOptions{At: call.At, Digits: digits}
+	live := s.traceLive(r.Context())
+	opt := flow.TraceOptions{At: call.At, Digits: digits, Live: live}
 	var start flow.TraceStart
-	if call.FromExtension == "" || !s.startFromExtension(&start, &res, in, call) {
+	if call.FromExtension == "" || !s.startFromExtension(&start, &res, in, call, live) {
 		if !s.decide(w, r, &start, &res, in, call) {
 			return
 		}
@@ -130,7 +132,7 @@ func (s *server) getFlowTrace(w http.ResponseWriter, r *http.Request) {
 // startFromExtension resolves the numbers hello-sip answers before routing
 // (paging code, conference room, IVR number, queue number, ring group
 // name), in its order. It reports false when routing must decide.
-func (s *server) startFromExtension(start *flow.TraceStart, res *traceResult, in flow.Input, call routing.Call) bool {
+func (s *server) startFromExtension(start *flow.TraceStart, res *traceResult, in flow.Input, call routing.Call, live *flow.Live) bool {
 	caller := extNode(in, call.FromExtension)
 	n := call.Number
 	enter := ""
@@ -144,7 +146,7 @@ func (s *server) startFromExtension(start *flow.TraceStart, res *traceResult, in
 		enter = ivrNode(in, n)
 	case queueNode(in, n) != "":
 		enter = queueNode(in, n)
-	case featureOrSlot(in, call.FromExtension, n, start):
+	case featureOrSlot(in, call.FromExtension, n, start, live):
 		res.Outcome = "internal"
 		res.RoutingTrace.Add("Dialled " + n + " is a feature code or a park slot: answered before routing")
 		start.Steps = append(callerSteps(caller, call), start.Steps...)
@@ -361,10 +363,40 @@ func outboundSteps(in flow.Input, d routing.Decision) []flow.TraceStep {
 }
 
 // featureOrSlot fills start for a dialled park slot or feature code.
-func featureOrSlot(in flow.Input, from, n string, start *flow.TraceStart) bool {
-	s, ok := flow.FeatureCodeStart(in, from, n)
+func featureOrSlot(in flow.Input, from, n string, start *flow.TraceStart, live *flow.Live) bool {
+	s, ok := flow.FeatureCodeStart(in, from, n, live)
 	if ok {
 		*start = s
 	}
 	return ok
+}
+
+// traceLive reads the live state a trace branches on: the occupied park
+// slots and the queue agents' state. A part that cannot be read (no Valkey,
+// a timeout) is left not Known, and the trace says "unknown".
+func (s *server) traceLive(ctx context.Context) *flow.Live {
+	live := &flow.Live{Parked: map[string]string{}, Agents: map[string]flow.AgentState{}}
+	ctx, cancel := context.WithTimeout(ctx, liveTimeout)
+	defer cancel()
+	if s.Parked != nil {
+		if ps, err := s.Parked.ParkList(ctx); err == nil {
+			live.ParkKnown = true
+			for _, p := range ps {
+				live.Parked[p.Slot] = p.ParkedBy
+			}
+		} else {
+			s.Log.Warn("flow trace: parked calls unavailable", "error", err)
+		}
+	}
+	if s.Queues != nil {
+		if as, err := s.Queues.Agents(ctx); err == nil {
+			live.AgentsKnown = true
+			for ext, a := range as {
+				live.Agents[ext] = flow.AgentState{LoggedIn: a.LoggedIn, Queues: a.Queues, Paused: a.Paused, Reason: a.Reason}
+			}
+		} else {
+			s.Log.Warn("flow trace: agent state unavailable", "error", err)
+		}
+	}
+	return live
 }
