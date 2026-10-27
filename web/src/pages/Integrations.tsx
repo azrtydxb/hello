@@ -17,6 +17,7 @@ import {
 } from "../design/azrty/components";
 import { useCan } from "../role";
 import { ServiceAccounts, Tokens } from "./AIAccess";
+import { ClickToCallPolicy } from "./ClickToCallPolicy";
 import "./platform/platform.css";
 
 const EYEBROW = "Integrations";
@@ -68,7 +69,10 @@ export function IntegrationsOverview() {
         description="Third parties reach Hello with scoped credentials: calls (click-to-call), events (live call events) and recordings (expiring links)."
       />
       {admin ? (
-        <Credentials />
+        <>
+          <ClickToCallPolicy />
+          <Credentials />
+        </>
       ) : (
         <Alert tone="warn" title="Administrators only">
           Your role cannot manage integration credentials.

@@ -243,6 +243,9 @@ func (c *call) answerSelf(body []byte) bool {
 		return false
 	}
 	tag := sip.GenerateTagN(8)
+	if c.orig != nil {
+		tag = c.orig.agentTag // the phone's dialog knows us by the tag of our INVITE
+	}
 	res := sip.NewResponseFromRequest(c.inv, sip.StatusOK, "OK", body)
 	res.To().Params = append(res.To().Params, sip.HeaderParams{{K: "tag", V: tag}}...)
 	if len(body) > 0 {

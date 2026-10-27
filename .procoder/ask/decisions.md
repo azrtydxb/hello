@@ -832,3 +832,98 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - Not done: `exhausted` after a forward stage still uses the dialled
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
+
+## Integrations P3: click-to-call (2026-10-27)
+
+Built from spec `integrations.md` I-37 to I-39. Choices the spec left open:
+
+- **The phone's answer drives the ordinary call path.** `call` and everything
+  under it (recording, anchoring, hold, transfer, voicemail, events, in-call
+  HA) assume the caller is a UAS dialog (`c.dss`, 43 uses). Rather than a
+  second call engine, leg A is an INVITE to the extension's contacts with no
+  SDP, and the phone's 200 (carrying its offer) becomes a synthetic INVITE
+  "from the extension to the destination" that enters `routeCaller` (the part
+  of `handleInvite` after digest verification, split out unchanged). The
+  synthetic request mirrors the phone's dialog: Call-ID, the phone's tag as the
+  From tag, our From tag as the To tag (set in `originateTx.attach`, because
+  sipgo draws a random To tag in `ReadInvite`), the 200's Contact, its
+  Record-Route reversed, its source address and our CSeq. A transaction
+  adapter (`originateTx`) stands in for the server transaction: the engine's
+  answer becomes the ACK of the phone's 200 (with the SDP answer), a final
+  failure becomes a BYE, the phone's BYE before the destination answers is the
+  caller's CANCEL. Then BYE, re-INVITE, hold and takeover from either side
+  work with no click-to-call code. The cost: three small hooks in `b2bua.go`
+  (`begin`, `byeA`, `handleBye`) and one in `record`.
+- **Leg A is a late-offer INVITE.** The destination's SDP answer is the first
+  media description the phone sees, so no media address is promised before the
+  destination answers. A phone that answers without an offer fails the request
+  `agent_no_answer` (it cannot be bridged).
+- **Not on 180**: leg B is dialled only on the phone's 2xx, as the spec says;
+  the phone is ACKed only when the destination answers (RFC 3261 permits it,
+  the 200 is retransmitted meanwhile). A phone that hangs up in between is
+  handled (the destination's ring is cancelled).
+- **State**: the live state is Valkey (`hello:originate:state:<id>`, an hour);
+  `originate_requests` is the record. `GET` shows the live state and copies a
+  changed state into the row; a sweeper in hello-control (one pod at a time,
+  advisory lock) copies the rest, closes requests stuck for 60 s
+  `node_unavailable` (a connected one after 12 h `ended`), frees the setup
+  slot and purges finished rows after 30 days. Migration 00047 (the highest
+  open PR migration is 00046; the merge captain renumbers).
+- **Limits** are fixed windows (the window number is in the key, so the
+  Retry-After is the time left). A request first takes the extension's setup
+  slot (`SET NX`, released by the node once the request is past
+  `ringing_agent`, by the sweeper or on any refusal), then counts credential
+  minute and day, extension hour, destination and global. A replay with a known
+  idempotency key is answered before any counting. Five refusals in ten
+  minutes raise one `originate.anomaly` audit row per credential per window.
+- **Emergency** is refused at the API (`422 emergency_not_allowed`) from the
+  route table's `emergency` flag, and again at the node. Destinations the
+  routing denies, feature codes and paging codes fail `route_denied` at the node
+  before the phone rings (the control process cannot tell a ring group or
+  queue number from a bad one). The administrator's country restriction
+  travels with the queued request and is applied by the node to outbound
+  routes only (internal numbers are never restricted); a prefix may match the
+  dialled or the rewritten number.
+- **Caller ID**: the presented number is always the routing's choice for the
+  extension (the engine has no caller-ID input for an extension caller). A
+  `callerId` in the request is accepted only if it equals the extension's
+  number, its external number or what the outbound route presents for that
+  destination, else `422 caller_id_not_allowed`; so it is a check, not a
+  selector, until the routing offers more than one number per extension.
+- **Who**: a user or viewer rings only their own linked extensions (`403
+forbidden_role` for another, `403 no_extension` with none); an operator or
+  administrator any; a service account any inside its `extensionScope` (any
+  when it has none), and one extension in scope is the default. `GET` and
+  `DELETE` belong to the credential that started the request (same audit
+  actor) and to operators and administrators (not to service accounts, which
+  see their own); anyone else gets 404.
+- **Auto-answer** asked for while the administrator has not enabled it is a
+  `400` on `autoAnswer` (the request is not downgraded to a plain ring).
+- **DELETE answers 202** with the state at that moment: hanging up is
+  asynchronous. A queued request no node took is closed by the DELETE itself.
+- **New reason `cancelled`** (client DELETE, or the phone hung up while the
+  destination rang), added to the spec's list; new error codes
+  `emergency_not_allowed`, `caller_id_not_allowed`, `route_denied`.
+- **MCP**: the three originate operations and the policy operations are
+  excluded (`x-hello-mcp.exclude`). The spec excludes originate; the policy
+  (toll-fraud controls) is excluded on the same grounds.
+- **Policy routes** are `GET`/`PUT /api/v1/integrations/click-to-call` (admin),
+  not under `/calls/originate`, which `{id}` would shadow. Settings live in the
+  singleton `originate_settings`; the policy shown on Integrations > Overview.
+- **`/dial` polls** `GET /calls/originate/{id}` once a second instead of
+  holding an event-stream connection (the stream is limited to 5 per
+  credential and the page needs the state, which GET already answers); the
+  events still carry every state for other clients. The page is a nav item in
+  _My phone_ and a route for every role. `tel:` registration is the explicit
+  _Use Hello for phone links_ button.
+- **No `hello-dialer` OAuth client**: the spec registers one with P3 for the
+  dialer, but `/dial` runs in the console with the session cookie; nothing
+  uses a pre-registered client until P5 (extension) and P6 (HubSpot), which
+  register their own. Reported, not built.
+- **Setup timeout** is `HELLO`-independent: 30 s (`Config.OriginateRing`), not
+  an environment variable; the request carries no override.
+- **Audit** rows: `originate` (the extension and the first four digits of the
+  number, the rest masked), `originate_refused`, `originate.anomaly`,
+  settings `update`. The OAuth client is the audit `via` automatically.
+- **Device**: the API takes the numeric device id and the queued request
+  carries its SIP username; a device of another extension is a `400`.

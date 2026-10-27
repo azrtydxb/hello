@@ -14615,6 +14615,264 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/calls/originate": {
+      "post": {
+        "operationId": "originateCall",
+        "summary": "Place a click-to-call",
+        "description": "Rings the caller's own phone first; when it is answered, dials the destination as if the extension had dialled it at the desk phone (internal extension, ring group or outbound route, with every class and permission check of the routing), and bridges the two. The call is never dialled to the destination before the phone answers. The extension defaults to the caller's single linked extension; a user credential may name only its own, an operator or administrator any, a service account any within its extensionScope. The caller ID is the one the routing presents for that extension; a callerId is honoured only if it is one of the numbers the routing allows the extension to present. Emergency numbers are refused. The destination is digits, +, * and # only (no SIP addresses). Replies 202 with the request id; poll GET /calls/originate/{id} or follow call.originate.progress events. The same idempotency key (body or Idempotency-Key header) from the same credential within 10 minutes returns the same request. Limits: per credential 10 per minute and 200 per day, per extension 1 call in setup and 30 per hour, per destination 3 per 10 minutes, 600 per hour in all (429 with Retry-After).",
+        "tags": ["calls"],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Same as the idempotencyKey field."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OriginateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted: the request is queued for a hello-sip node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OriginateStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "calls",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "places phone calls"
+        }
+      }
+    },
+    "/api/v1/calls/originate/{id}": {
+      "get": {
+        "operationId": "getOriginate",
+        "summary": "State of a click-to-call",
+        "description": "The state of a request the caller started: queued, ringing_agent, agent_answered, dialing_target, connected, ended or failed (with a reason). Only the credential that started it, or an operator or administrator, can read it; anyone else gets 404.",
+        "tags": ["calls"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The originateId returned when the request was made."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OriginateStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "calls",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "belongs to click-to-call, which an AI agent may not place"
+        }
+      },
+      "delete": {
+        "operationId": "cancelOriginate",
+        "summary": "Hang up a click-to-call",
+        "description": "Stops the request wherever it is: cancels the ring of the phone, cancels the ring of the destination, or hangs up a connected call. Replies 202 with the state at that moment; the request ends asynchronously (read it or follow the events). 409 when the request is already over.",
+        "tags": ["calls"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The originateId returned when the request was made."
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Hang-up requested",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OriginateStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "calls",
+        "x-hello-role": "user",
+        "x-hello-mcp": {
+          "exclude": "belongs to click-to-call, which an AI agent may not place"
+        }
+      }
+    },
+    "/api/v1/integrations/click-to-call": {
+      "get": {
+        "operationId": "getClickToCallSettings",
+        "summary": "Read the click-to-call policy",
+        "description": "Which destinations click-to-call may dial (the outbound routes decide, or only internal numbers and the listed country prefixes) and whether a request may ask the phone to answer by itself (off by default).",
+        "tags": ["calls"],
+        "responses": {
+          "200": {
+            "description": "The policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClickToCallSettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "toll-fraud controls of click-to-call are set in the console only"
+        }
+      },
+      "put": {
+        "operationId": "putClickToCallSettings",
+        "summary": "Set the click-to-call policy",
+        "description": "Replaces the policy. Admin only, audited. With restricted, a destination that leaves through an outbound route must start with one of the country prefixes; internal numbers are always allowed.",
+        "tags": ["calls"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClickToCallSettings"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The policy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClickToCallSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "toll-fraud controls of click-to-call are set in the console only"
+        }
+      }
+    },
     "/api/v1/events": {
       "get": {
         "operationId": "listEvents",
@@ -14995,6 +15253,16 @@
       },
       "Upstream": {
         "description": "Object storage (MinIO) answered with an error; try again shortly (code upstream)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unprocessable": {
+        "description": "The request is well formed but refused: emergency_not_allowed, caller_id_not_allowed or route_denied",
         "content": {
           "application/json": {
             "schema": {
@@ -18202,7 +18470,10 @@
                   "rate_limited",
                   "too_large",
                   "messaging_disabled",
-                  "no_messaging_trunk"
+                  "no_messaging_trunk",
+                  "emergency_not_allowed",
+                  "caller_id_not_allowed",
+                  "route_denied"
                 ]
               },
               "message": {
@@ -25559,6 +25830,126 @@
           "nextCursor": {
             "type": "string",
             "description": "The cursor to pass as after (order asc) or before (order desc) for the next page; empty when there is no more."
+          }
+        }
+      },
+      "OriginateRequest": {
+        "type": "object",
+        "required": ["destination"],
+        "properties": {
+          "destination": {
+            "type": "string",
+            "pattern": "^[0-9+*#]{1,64}$",
+            "description": "What to dial: digits, +, * and #, at most 64. Never a SIP address."
+          },
+          "extension": {
+            "type": "string",
+            "pattern": "^[0-9]{2,10}$",
+            "description": "The extension whose phone rings first; defaults to the caller's single linked extension."
+          },
+          "deviceId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Ring only this device of the extension; by default every registered contact rings."
+          },
+          "callerId": {
+            "type": "string",
+            "description": "Must be a number the routing allows the extension to present; the presented number is otherwise the routing's own choice. Anonymous cannot be requested."
+          },
+          "autoAnswer": {
+            "type": "boolean",
+            "description": "Ask the phone to answer by itself. Refused (400) unless the administrator has enabled it."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The same key from the same credential within 10 minutes returns the same request."
+          }
+        }
+      },
+      "OriginateStatus": {
+        "type": "object",
+        "required": [
+          "originateId",
+          "state",
+          "extension",
+          "destination",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "originateId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "ringing_agent",
+              "agent_answered",
+              "dialing_target",
+              "connected",
+              "ended",
+              "failed"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why a request failed: no_registration, agent_no_answer, agent_busy, agent_dnd, target_busy, target_no_answer, route_denied, rate_limited, node_unavailable or cancelled.",
+            "enum": [
+              "no_registration",
+              "agent_no_answer",
+              "agent_busy",
+              "agent_dnd",
+              "target_busy",
+              "target_no_answer",
+              "route_denied",
+              "rate_limited",
+              "node_unavailable",
+              "cancelled"
+            ]
+          },
+          "extension": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          },
+          "correlationId": {
+            "type": "string",
+            "description": "The CDR correlation id of the bridged call, once the destination is being dialled."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ClickToCallSettings": {
+        "type": "object",
+        "required": ["destinations", "countryPrefixes", "autoAnswerAllowed"],
+        "properties": {
+          "destinations": {
+            "type": "string",
+            "enum": ["inherit", "restricted"],
+            "description": "inherit: the outbound routes decide. restricted: internal numbers plus numbers that start with one of countryPrefixes."
+          },
+          "countryPrefixes": {
+            "type": "array",
+            "description": "Allowed number prefixes when destinations is restricted, for example +971 or 0097.",
+            "maxItems": 100,
+            "items": {
+              "type": "string",
+              "pattern": "^\\+?[0-9]{1,15}$"
+            }
+          },
+          "autoAnswerAllowed": {
+            "type": "boolean",
+            "description": "Whether a click-to-call may ask the phone to answer by itself."
           }
         }
       },

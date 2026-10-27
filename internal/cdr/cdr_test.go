@@ -236,8 +236,8 @@ func TestCallQualityCDR(t *testing.T) {
 	if err := w.write(context.Background(), base); err != nil {
 		t.Fatal(err)
 	}
-	if len(db.args) != 27 {
-		t.Fatalf("insert takes %d arguments, want 27", len(db.args))
+	if len(db.args) != 29 {
+		t.Fatalf("insert takes %d arguments, want 29", len(db.args))
 	}
 	for i, a := range db.args[21:24] {
 		if v, ok := a.(*int64); (ok && v != nil) || (!ok && a != (*float64)(nil)) {
@@ -256,5 +256,28 @@ func TestCallQualityCDR(t *testing.T) {
 	gp, gl, gj := db.args[21].(*int64), db.args[22].(*int64), db.args[23].(*float64)
 	if *gp != 1000 || *gl != 12 || *gj != 37.5 {
 		t.Fatalf("quality = %d, %d, %v", *gp, *gl, *gj)
+	}
+}
+
+// TestCDROrigin fails if a click-to-call's origin and client are not the last
+// insert arguments, or a record without an origin is not stored as a call
+// dialled at a phone.
+func TestCDROrigin(t *testing.T) {
+	db := &argsDB{}
+	w := NewWriter(db, newCounter(), discard)
+	now := time.Now()
+	r := Record{CorrelationID: "o", StartTime: now, EndTime: now}
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[27] != OriginPhone || db.args[28] != "" {
+		t.Fatalf("default origin = %v %v, want phone and no client", db.args[27], db.args[28])
+	}
+	r.Origin, r.OriginClient = OriginAPI, "token:7"
+	if err := w.write(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if db.args[27] != OriginAPI || db.args[28] != "token:7" {
+		t.Fatalf("origin = %v %v, want api and token:7", db.args[27], db.args[28])
 	}
 }
