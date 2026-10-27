@@ -863,4 +863,4 @@ another group) is lifted: the ring state machine can open a new ring stage.
   line without a priority always shows); Phones > Unknown syslog page; Yealink, Poly and snom keys
   (all marked verify; Poly has no port so it needs UDP 514; the level scales are mapped from the guides:
   Yealink debug and info 6, warning 4, error 3; Poly 0, 1, 4, 5). Fanvil has no documented syslog keys, so
-  none. Migration number: origin/main's highest is 00045, so 00046 stays.
+  none. Migration number: 00046 went to PR #236 (boss links), so this one is 00047.
