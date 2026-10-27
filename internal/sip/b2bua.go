@@ -677,6 +677,7 @@ func (c *call) setup(pending int) {
 				if ev.leg != nil && ev.leg.stage != c.curStage() {
 					continue // a leg the forwarding stage abandoned
 				}
+				c.bossAssistantFailed(ev.leg)
 				pending--
 				if isBusy(ev.code) {
 					busy++

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/media"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/snapshot"
 	"github.com/emiago/sipgo"
@@ -566,4 +567,96 @@ func TestBossLinkFromIVR(t *testing.T) {
 	if rec.AnsweredBy != "300" {
 		t.Fatalf("answeredBy = %q, want 300", rec.AnsweredBy)
 	}
+}
+
+// TestBossAssistantDeclinesRingsBoss: with assistant_first, an assistant who
+// declines sends the call to the boss at once, not after the lead time. It
+// fails if the boss's phone only rings when the 10 s lead has passed.
+func TestBossAssistantDeclinesRingsBoss(t *testing.T) {
+	link := bossLink()
+	link.RingMode = snapshot.BossRingAssistantFirst
+	pbx := startPBX(t, threeDevices(), shortRing(5*time.Second), bossOpts([]snapshot.BossLink{link}))
+	a, b, c, _ := bossPhones(t, pbx)
+	c.setCallee(busy())
+	b.setCallee(answerAfter(nil))
+	start := time.Now()
+	r := waitCall(t, dial(t.Context(), a, "200"))
+	if r.err != nil {
+		t.Fatalf("call: %v", r.err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("the boss rang after %v, want at once (the lead is %v)", d, bossAssistantLead)
+	}
+	waitReq(t, b.invites, "INVITE to the boss after the assistant declined")
+	hangup(t, r.dcs)
+	if rec := pbx.nextCDR(t); rec.AnsweredBy != "" {
+		t.Fatalf("answeredBy = %q, want the boss's own answer", rec.AnsweredBy)
+	}
+}
+
+// TestBossScreeningFromIVR: a menu's call to a screened boss plays the prompt
+// to the assistant too, and 2 sends the caller to the boss's voicemail. It
+// fails if the assistant simply takes the call or the boss's box is not
+// opened.
+func TestBossScreeningFromIVR(t *testing.T) {
+	vm := newVMStore()
+	vm.boxes["200"] = VoicemailBox{ID: 5, Extension: "200"}
+	objs := &fakeObjects{}
+	link := bossLink()
+	link.Screening = true
+	feats := func(s *snapshot.Snapshot) {
+		s.WithAnnouncements(map[string]string{"greet": "ann/greet.wav"})
+		s.WithIVRMenus([]snapshot.IVRMenu{ivrMenu("main", "800", map[string]snapshot.IVRDest{"1": ext("200")})})
+		s.WithBossLinks([]snapshot.BossLink{link})
+		s.WithExtensionData([]snapshot.Extension{{Number: "200", Name: "Boss", VoicemailEnabled: true, VoicemailBoxID: 5}})
+	}
+	_ = objs.Put(t.Context(), "ann/greet.wav", media.EncodeWAV(make([]byte, 16000), 8000))
+	pbx := startPBX(t, threeDevices(), shortRing(5*time.Second), withMedia(false), withFeatures(feats), withVoicemail(vm, objs))
+	a, b, c := registerABC(t, pbx)
+	b.setCallee(ringForever())
+	heard := answerCounting(t, c)
+	r := waitCall(t, dial(t.Context(), a, "800"))
+	if r.err != nil {
+		t.Fatalf("call to the menu: %v", r.err)
+	}
+	seq := r.dcs.InviteRequest.CSeq().SeqNo + 10
+	sendDigits(t, a, r.dcs, "1", &seq)
+	invC := waitReq(t, c.invites, "INVITE to the assistant")
+	eventually(t, "the screening prompt reaches the assistant", func() bool { return heard.Load() > 0 })
+	feed := startRTPFeed(t, invC.Body())
+	eventually(t, "the boss's voicemail is opened", func() bool {
+		feed.digit(2)
+		vm.mu.Lock()
+		defer vm.mu.Unlock()
+		for _, e := range vm.looked {
+			if e == "200" {
+				return true
+			}
+		}
+		return false
+	})
+	waitReq(t, b.cancels, "CANCEL to the boss's phone")
+	hangup(t, r.dcs)
+}
+
+// TestBossLinkTransferTarget: a call transferred to a boss rings the
+// assistant's phone too. It fails if only the boss's own phone is rung.
+func TestBossLinkTransferTarget(t *testing.T) {
+	link := snapshot.BossLink{Boss: "300", Assistant: "210", RingMode: snapshot.BossRingBoth}
+	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), bossOpts([]snapshot.BossLink{link}))
+	a, b, c, d := bossPhones(t, pbx)
+	r := waitCall(t, dial(t.Context(), a, "200"))
+	if r.err != nil {
+		t.Fatalf("call: %v", r.err)
+	}
+	waitReq(t, b.invites, "INVITE to b")
+	waitReq(t, b.acks, "ACK to b")
+	dss := <-serversOf(b)
+	c.setCallee(answerAfter(nil))
+	d.setCallee(ringForever())
+	if res := b.sendReferFromCallee(t, dss, "<sip:300@"+testDomain+">"); res.StatusCode != 202 {
+		t.Fatalf("REFER = %d, want 202", res.StatusCode)
+	}
+	waitReq(t, c.invites, "INVITE to the boss, the transfer target")
+	waitReq(t, d.invites, "INVITE to the boss's assistant")
 }

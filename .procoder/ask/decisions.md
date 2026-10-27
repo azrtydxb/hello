@@ -839,7 +839,7 @@ Built to the spec (D16): one assistant per boss, an assistant for many bosses,
 both sets of phones ring and the first answer wins, the boss's forward always
 wins over the link. The choices the spec left open:
 
-- Table `boss_links` and column `cdrs.answered_by`, migration `00050` (the
+- Table `boss_links` and column `cdrs.answered_by`, migration `00046` (the
   merge captain renumbers it). `*64` is a new feature-code action
   `boss_divert` (CHECK widened additively through `pg_temp.hello_check_values`),
   seeded for an existing install only when the code is free, and in
@@ -885,8 +885,22 @@ wins over the link. The choices the spec left open:
   language tables, spoken through the voicemail speaker, a tone when none is
   configured. Only one device of the assistant is screened at a time; another
   that answers meanwhile is dropped.
-- Screening is not offered to an IVR menu's call (the assistant answers as for
-  any call); the boss and the assistant ring there as for any other call.
+- IVR: a menu option that dials the boss rings the assistant too, and screening
+  is offered there as on a direct call. A menu's call always rings both sets of
+  phones at once (the ring mode does not apply), so putting a screened call
+  through has nothing to release; 2 goes to the boss's box through the menu's
+  voicemail exit.
+- Transfer: a call transferred to a boss rings the assistant's phones as well
+  (no screening, no `answered_by`, the boss's own DND and divert are not applied
+  to the transfer's legs, which is how transfers treat DND today).
+- Early decline: with `assistant_first`, once every assistant leg has ended
+  without taking the call (486, 603, unreachable, hang-up, no screening choice)
+  the boss's legs start at once (`bossAssistantFailed`), not after the 10 s.
+- Not built, and why: a boss who is a ring-group member or a queue agent rings
+  as an ordinary extension. S-18 and D16 define the link for "calls to the boss";
+  a call to a group or queue is a call to the group or queue, and no spec line
+  asks for the link there. The spec excludes: "Two or more assistants on one boss,
+  and a boss-side call-screening queue" (pbx-gaps.md, Out of scope, line 287).
 - CDR: `answered_by` is the assistant's extension when the assistant answered,
   empty otherwise (not filled with the answering extension of every call). The
   trace reads "Answered by assistant 300 for 200" (extension numbers, no names).
@@ -904,7 +918,6 @@ wins over the link. The choices the spec left open:
   extension whose external number and caller-ID rule the outbound decision
   uses; the route is still matched for the assistant's own extension, so the
   flag grants no dialling rights.
-- Not done here: a link for a boss that is a ring group member or queue agent;
-  the CDR page does not show `answered_by` (it is in the API); the boss's BLF
+- Not done here: the boss's BLF
   does not show the divert; no second assistant per boss (the spec's out of
   scope).

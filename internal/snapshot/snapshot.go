@@ -211,7 +211,7 @@ type Snapshot struct {
 	// groups (migration 00032).
 	parkLots []ParkLot
 	pickups  []PickupGroup
-	// bosses maps a boss extension number to its enabled link (migration 00050).
+	// bosses maps a boss extension number to its enabled link (migration 00046).
 	bosses map[string]BossLink
 	// mohs maps a music on hold class ID to its playlist; mohDefault is the
 	// global default class (0 when none is set).

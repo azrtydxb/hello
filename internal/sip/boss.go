@@ -62,6 +62,13 @@ type bossCall struct {
 	active atomic.Bool
 	digits chan byte
 	cur    *leg
+
+	// aLegs is how many assistant legs the call forked and aFailed how many
+	// of them have ended without the call: when all have, the boss rings at
+	// once (guarded by call.mu). msg is set when a screened assistant chose
+	// the boss's voicemail on an IVR menu's call.
+	aLegs, aFailed int
+	msg            bool
 }
 
 // bindingsOrFail is the live bindings of ext's devices; ok is false when the
@@ -126,6 +133,7 @@ func (c *call) ringBoss(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 	for _, t := range aTargets {
 		legs = append(legs, c.addLeg(&leg{binding: t, stage: stage, screen: link.Screening}))
 	}
+	b.aLegs = len(legs)
 	c.mu.Unlock()
 	mode := "both"
 	if link.RingMode == snapshot.BossRingAssistantFirst && len(bTargets) > 0 {
@@ -310,10 +318,11 @@ func (c *call) screenRun(l *leg, b *bossCall, relay *media.Relay, ans media.Audi
 		b.release()
 		report(legEvent{leg: l, kind: evFailed, code: sip.StatusTemporarilyUnavailable})
 	case '2':
-		c.mu.Lock()
-		st := c.stages
-		c.mu.Unlock()
-		if st != nil && c.voicemailConfigured(st.feats) {
+		var boss snapshot.Extension
+		if snap := c.s.deps.Snapshots.Current(); snap != nil {
+			boss, _ = snap.Extension(b.boss)
+		}
+		if c.voicemailConfigured(boss) {
 			c.addTrace(fmt.Sprintf("Boss screening: assistant %s sends the call to the voicemail of %s", b.assistant, b.boss))
 			s.log.Info("boss screening", "boss", b.boss, "assistant", b.assistant, "result", bossScreenMessage)
 			report(legEvent{leg: l, kind: evScreenMessage})
@@ -492,24 +501,89 @@ func (c *call) handleBossDivert(tx sip.ServerTransaction) {
 // ivrAssistant is the assistant's live bindings for a menu's call to ext when
 // ext is a boss whose link applies, and whether the boss's divert is on. It
 // is nil when no link applies or the assistant has no registered phone.
-func (c *call) ivrAssistant(snap *snapshot.Snapshot, ext string) (bs []livestate.Binding, divert bool) {
+func (c *call) ivrAssistant(snap *snapshot.Snapshot, ext string) (bs []livestate.Binding, screen, divert bool) {
 	link, ok := snap.BossLinkOf(ext)
 	if !ok || link.Assistant == ext || !snap.HasExtension(link.Assistant) {
-		return nil, false
+		return nil, false, false
+	}
+	e, _ := snap.Extension(ext)
+	c.mu.Lock()
+	caller := c.callerNum
+	c.mu.Unlock()
+	if caller == link.Assistant || caller == ext {
+		return nil, false, false
+	}
+	bs, err := c.extensionBindings(snap, link.Assistant)
+	if err != nil || len(bs) == 0 {
+		return nil, false, false
+	}
+	c.mu.Lock()
+	// A menu's call rings both phones at once, so putting a screened call
+	// through has nothing to release.
+	b := &bossCall{boss: ext, assistant: link.Assistant, bossName: e.Name, digits: make(chan byte, 8), release: func() {}}
+	c.boss = b
+	c.mu.Unlock()
+	c.addTrace(fmt.Sprintf("Boss %s rings with assistant %s", ext, link.Assistant))
+	return bs, link.Screening, link.DivertOn
+}
+
+// bossAssistantFailed notes that an assistant leg ended without taking the
+// call (declined, busy, unreachable, hung up or made no choice). When every
+// assistant leg has, an assistant_first link rings the boss at once instead
+// of waiting out the lead time.
+func (c *call) bossAssistantFailed(l *leg) {
+	c.mu.Lock()
+	b := c.boss
+	if b == nil || l == nil || l.binding.Extension != b.assistant || b.release == nil {
+		c.mu.Unlock()
+		return
+	}
+	b.aFailed++
+	all := b.aLegs > 0 && b.aFailed >= b.aLegs
+	c.mu.Unlock()
+	if all {
+		c.addTrace(fmt.Sprintf("Assistant %s did not take the call: boss %s rings now", b.assistant, b.boss))
+		b.release()
+	}
+}
+
+// noteBossMessage records that a screened assistant on a menu's call chose
+// the boss's voicemail (the menu's ring loop reads it with bossMessageChosen).
+func (c *call) noteBossMessage() {
+	c.mu.Lock()
+	if c.boss != nil {
+		c.boss.msg = true
+	}
+	c.mu.Unlock()
+}
+
+// bossMessageChosen reports and clears the choice noted by noteBossMessage.
+func (c *call) bossMessageChosen() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.boss == nil || !c.boss.msg {
+		return false
+	}
+	c.boss.msg = false
+	return true
+}
+
+// transferAssistant is the assistant's live bindings for a transfer to the
+// boss ext (S-18): the devices a direct call rings, without screening.
+func (c *call) transferAssistant(snap *snapshot.Snapshot, ext string) []livestate.Binding {
+	link, ok := snap.BossLinkOf(ext)
+	if !ok || link.Assistant == ext || !snap.HasExtension(link.Assistant) {
+		return nil
 	}
 	c.mu.Lock()
 	caller := c.callerNum
 	c.mu.Unlock()
 	if caller == link.Assistant || caller == ext {
-		return nil, false
+		return nil
 	}
 	bs, err := c.extensionBindings(snap, link.Assistant)
-	if err != nil || len(bs) == 0 {
-		return nil, false
+	if err != nil {
+		return nil
 	}
-	c.mu.Lock()
-	c.boss = &bossCall{boss: ext, assistant: link.Assistant}
-	c.mu.Unlock()
-	c.addTrace(fmt.Sprintf("Boss %s rings with assistant %s", ext, link.Assistant))
-	return bs, link.DivertOn
+	return bs
 }

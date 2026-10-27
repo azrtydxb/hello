@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// BossLink is one enabled boss and assistant link (migration 00050, spec
+// BossLink is one enabled boss and assistant link (migration 00046, spec
 // pbx-gaps S-18, S-19). Boss and Assistant are extension numbers. DivertOn is
 // the *64 state: it is in PostgreSQL and rides the snapshot, so every replica
 // sees it.

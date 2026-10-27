@@ -46,10 +46,11 @@ the caller ID of one boss only, so two links of one assistant cannot both set
   the call trace reads "Answered by assistant 300 for 200". The CDR in the API
   (`GET /api/v1/cdrs/{id}`) carries the extension in `answeredBy`.
 
-A boss reached through an IVR menu option or a forward rings the same way
-(screening is offered to calls that ring directly or by forward, not to a
-menu's call). A boss who is a member of a ring group, an agent of a queue or the
-target of a transfer rings as an ordinary extension, with no assistant.
+A boss reached through an IVR menu option, a forward or a transfer rings the
+same way (a menu's call always rings both sets of phones at once). A boss who is
+a member of a ring group or an agent of a queue rings as an ordinary extension,
+with no assistant. With `assistant_first`, an assistant who declines or whose
+phones all fail sends the call to the boss at once.
 
 ## Screening
 
@@ -68,7 +69,7 @@ The prompt is repeated once. No key within 8 seconds after the second round,
 or the assistant hanging up, is no choice: the assistant's leg ends and the
 call goes on with the other phones that still ring. While the prompt plays the
 caller keeps hearing ringback and the assistant does not hear the caller.
-Screening needs the media anchor (always on); a call that cannot be anchored
+Screening works on a direct call, a forward and a menu's call. It needs the media anchor (always on); a call that cannot be anchored
 is answered by the assistant as an ordinary call, and the trace says so.
 
 Each choice is logged with the boss and assistant extensions only, and it
