@@ -100,6 +100,14 @@ const (
 	GreetUnavailableTail Key = "greet.unavailable.tail"
 	GreetBusyTail        Key = "greet.busy.tail"
 	GreetUnreachableTail Key = "greet.unreachable.tail"
+
+	// Queue callback (pbx-gaps S-9). Spoken in the queue's language (S-20).
+	QueueCallbackOffer   Key = "queue.callback.offer"   // {digit}: the key that accepts
+	QueueCallbackConfirm Key = "queue.callback.confirm" // after the caller accepted; the call then ends
+	QueueCallbackFull    Key = "queue.callback.full"    // the request could not be taken
+	QueueCallbackWelcome Key = "queue.callback.welcome" // when the called-back caller answers
+	WordStar             Key = "word.star"
+	WordPound            Key = "word.pound"
 )
 
 // tables holds the language tables. Add a language here and in its own file.
@@ -152,6 +160,18 @@ func Resolve(box, global string) Lang {
 		return Parse(box)
 	}
 	return Default
+}
+
+// CallbackOffer words the offer of a callback for the key digit: a digit is
+// spoken as itself, '*' and '#' by their names in the language.
+func CallbackOffer(l Lang, digit string) string {
+	switch digit {
+	case "*":
+		digit = Text(l, WordStar, nil)
+	case "#":
+		digit = Text(l, WordPound, nil)
+	}
+	return Text(l, QueueCallbackOffer, Vars{"digit": digit})
 }
 
 // template returns the raw template, falling back to English; ok is false

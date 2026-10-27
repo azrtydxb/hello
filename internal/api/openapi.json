@@ -14608,6 +14608,96 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/queues/{id}/callbacks": {
+      "get": {
+        "operationId": "listQueueCallbacks",
+        "summary": "List a queue's callback requests",
+        "description": "Returns the callback requests of a call queue, newest first: the open ones (`waiting` for their next attempt, `dialling` while the caller is rung or waits on the line for an agent) and the finished ones (`connected`, `failed`, `cancelled`, `expired`) kept for 7 days. A request keeps the place its caller had in the queue (`positionKey`, the original enqueue time in Unix milliseconds).",
+        "tags": ["queues"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The callback requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueCallbackList"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/queues/{id}/callbacks/{callbackId}": {
+      "delete": {
+        "operationId": "cancelQueueCallback",
+        "summary": "Cancel a callback request",
+        "description": "Withdraws an open callback request (waiting or dialling). A request that already finished is a 404.",
+        "tags": ["queues"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "callbackId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 1
+            },
+            "description": "Id of the callback request, as the callback list returns it."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Cancelled"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/queue-agents": {
       "get": {
         "operationId": "listQueueAgents",
@@ -20068,8 +20158,8 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["call", "page", "intercom", "conference"],
-            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room."
+            "enum": ["call", "page", "intercom", "conference", "callback"],
+            "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room, or callback for a call Hello placed to a queue caller who asked to be called back."
           }
         },
         "description": "Null times are omitted."
@@ -21468,7 +21558,7 @@
               },
               "queueLegs": {
                 "type": "array",
-                "description": "For a call that waited in a call queue, what it did there, in order: enter, agent (a ring), wait, answered, abandon, exit",
+                "description": "For a call that waited in a call queue, what it did there, in order: enter, agent (a ring), wait, answered, abandon, exit; and for a callback, callback_requested (the caller asked to be called back), callback_dialled (the caller is being rung), callback_connected (an agent was connected) and callback_failed (an attempt failed; the last one ends the request)",
                 "items": {
                   "type": "object",
                   "required": [
@@ -21488,7 +21578,11 @@
                         "answered",
                         "wait",
                         "abandon",
-                        "exit"
+                        "exit",
+                        "callback_requested",
+                        "callback_dialled",
+                        "callback_connected",
+                        "callback_failed"
                       ]
                     },
                     "queue": {
@@ -21505,7 +21599,7 @@
                     },
                     "result": {
                       "type": "string",
-                      "description": "agent: answered, no_answer or busy; wait and exit: the outcome (answered, abandoned, timeout, full, no_agents, breakout)"
+                      "description": "agent: answered, no_answer or busy; wait and exit: the outcome (answered, abandoned, timeout, full, no_agents, breakout); callback events: the attempt's outcome (no_answer, busy, failed, abandoned, accepted)"
                     },
                     "at": {
                       "type": "string",
@@ -25066,6 +25160,25 @@
             "pattern": "^([0-9]{2,10})?$",
             "description": "Extension whose voicemail box takes the message."
           },
+          "callbackEnabled": {
+            "type": "boolean",
+            "description": "Offer a waiting caller a call back instead of holding the line. Default false."
+          },
+          "callbackOfferAfterSeconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3600,
+            "description": "Offer the callback once the estimated wait exceeds this many seconds. Default 120."
+          },
+          "callbackDigit": {
+            "type": "string",
+            "pattern": "^[0-9*#]$",
+            "description": "The key that accepts the offer, and that asks for a callback at any time while waiting. Default 2; must differ from the breakout key."
+          },
+          "promptLanguage": {
+            "type": "string",
+            "description": "Language of the queue's spoken prompts (callback offer and confirmation). Empty inherits the deployment language, then English. One of the languages with a complete prompt table (en, nl)."
+          },
           "members": {
             "type": "array",
             "maxItems": 200,
@@ -25106,6 +25219,10 @@
           "breakoutKey",
           "breakoutPromptId",
           "breakoutVoicemail",
+          "callbackEnabled",
+          "callbackOfferAfterSeconds",
+          "callbackDigit",
+          "promptLanguage",
           "periodicPromptName",
           "positionPromptName",
           "waitPromptName",
@@ -25249,6 +25366,19 @@
             "type": "string",
             "description": "Extension whose voicemail box takes the message."
           },
+          "callbackEnabled": {
+            "type": "boolean"
+          },
+          "callbackOfferAfterSeconds": {
+            "type": "integer"
+          },
+          "callbackDigit": {
+            "type": "string"
+          },
+          "promptLanguage": {
+            "type": "string",
+            "description": "The queue's own prompt language; empty inherits."
+          },
           "periodicPromptName": {
             "type": "string"
           },
@@ -25288,6 +25418,39 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Queue"
+            }
+          }
+        }
+      },
+      "QueueCallback": {
+        "type": "object",
+        "required": ["id", "queueId", "number", "callerName", "status", "attempts", "positionKey", "nextAttemptAt", "claimedBy", "agent", "result", "createdAt", "expiresAt"],
+        "properties": {
+          "id": {"type": "integer", "format": "int64"},
+          "queueId": {"type": "integer", "format": "int64"},
+          "number": {"type": "string", "description": "The number to call back."},
+          "callerName": {"type": "string", "description": "From the shared name sources (phonebooks); empty when none."},
+          "status": {"type": "string", "enum": ["waiting", "dialling", "connected", "failed", "cancelled", "expired"]},
+          "attempts": {"type": "integer", "description": "Attempts made, at most 3."},
+          "positionKey": {"type": "integer", "format": "int64", "description": "The caller's original enqueue time (Unix ms): the request sorts by it among the waiting callers."},
+          "nextAttemptAt": {"type": "string", "format": "date-time"},
+          "claimedBy": {"type": "string", "description": "The node working on it while dialling."},
+          "leaseUntil": {"type": "string", "format": "date-time", "description": "Present while dialling; a request whose lease lapsed is reclaimed by another node."},
+          "agent": {"type": "string", "description": "The agent it was connected to."},
+          "result": {"type": "string", "description": "The last attempt's outcome or the way the request ended."},
+          "createdAt": {"type": "string", "format": "date-time"},
+          "expiresAt": {"type": "string", "format": "date-time"},
+          "finishedAt": {"type": "string", "format": "date-time"}
+        }
+      },
+      "QueueCallbackList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueCallback"
             }
           }
         }

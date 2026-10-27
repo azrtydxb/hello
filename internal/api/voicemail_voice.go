@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/ttscache"
 	"github.com/azrtydxb/hello/internal/voiceprompt"
@@ -68,7 +69,7 @@ func (s *server) prewarmLanguages() {
 }
 
 // promptLanguagesInUse is every language a call can need: the deployment
-// language (when one is configured) and each language a box set for itself.
+// language (when one is configured) and each language a box or a queue set for itself.
 // Each is a language with a complete table, once, sorted.
 func (s *server) promptLanguagesInUse(ctx context.Context) []voiceprompt.Lang {
 	seen := map[voiceprompt.Lang]bool{}
@@ -80,6 +81,15 @@ func (s *server) promptLanguagesInUse(ctx context.Context) []voiceprompt.Lang {
 		s.Log.Warn("tts: reading the box languages", "error", err)
 	}
 	for _, l := range boxes {
+		if voiceprompt.Valid(l) {
+			seen[voiceprompt.Parse(l)] = true
+		}
+	}
+	queues, err := s.Store.QueuePromptLanguages(ctx)
+	if err != nil {
+		s.Log.Warn("tts: reading the queue languages", "error", err)
+	}
+	for _, l := range queues {
 		if voiceprompt.Valid(l) {
 			seen[voiceprompt.Parse(l)] = true
 		}
@@ -107,6 +117,9 @@ func (s *server) prewarmVoicemail() {
 		for _, e := range voiceprompt.Static(lang) {
 			texts = append(texts, e.Text)
 		}
+		// The callback offer names its key, so it is not static; the default
+		// key is spoken ahead (another key is generated on first use).
+		texts = append(texts, voiceprompt.CallbackOffer(lang, queue.DefaultCallbackDigit))
 		res, err := s.speech.Prewarm(ctx, texts, 3)
 		if err != nil {
 			s.Log.Warn("tts: pre-generating the voicemail prompts stopped", "language", string(lang),

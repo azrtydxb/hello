@@ -173,6 +173,7 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 		Store:           st,
 		Live:            vk,
 		Queues:          vk,
+		Callbacks:       st.QueueCallbacks(),
 		Trunks:          vk,
 		Cluster:         vk,
 		Valkey:          vk,

@@ -79,4 +79,11 @@ var dutch = map[Key]string{
 	GreetUnavailableTail: "is niet beschikbaar. Laat een bericht achter na de toon.",
 	GreetBusyTail:        "is in gesprek. Laat een bericht achter na de toon.",
 	GreetUnreachableTail: "is momenteel niet bereikbaar. Laat een bericht achter na de toon.",
+
+	QueueCallbackOffer:   "Wilt u teruggebeld worden zodra een medewerker vrij is, met behoud van uw plaats in de wachtrij? Druk dan op {digit}.",
+	QueueCallbackConfirm: "Dank u. Wij bellen u terug op dit nummer zodra een medewerker vrij is. U behoudt uw plaats in de wachtrij. Tot ziens.",
+	QueueCallbackFull:    "Sorry, een terugbelverzoek kan nu niet worden ingepland. Blijf aan de lijn.",
+	QueueCallbackWelcome: "Dit is het terugbelverzoek dat u had aangevraagd. Een ogenblik, wij verbinden u door met een medewerker.",
+	WordStar:             "ster",
+	WordPound:            "hekje",
 }

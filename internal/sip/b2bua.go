@@ -246,6 +246,14 @@ type call struct {
 	// qWaiting is true while the caller waits in a queue, since qEnteredAt.
 	qWaiting   bool
 	qEnteredAt time.Time
+	// Queue callback (queue_callback.go), guarded by mu. cbID is the request
+	// this call serves (0 for an ordinary call), cbQueue its queue, cbDone is
+	// set once the request's outcome was recorded, and cbOffer is the SDP
+	// offer the caller was rung with, kept until the caller's dialog is homed.
+	cbID    int64
+	cbQueue string
+	cbDone  bool
+	cbOffer []byte
 	// Time conditions (timecond.go): tcVisited lists the conditions the call
 	// passed, so a loop through ring group failover or an IVR menu is caught;
 	// vmPre is an announcement played before the voicemail greeting. Guarded
@@ -316,7 +324,13 @@ type leg struct {
 	// pl is set on a page member leg (Phase E): it carries the page's
 	// per-member state and offer.
 	pl *pageLeg
+	// ident presents other identities than the call's: a callback is placed
+	// by the queue, to the caller's own number (queue_callback.go).
+	ident *legIdent
 }
+
+// legIdent overrides the user parts of a fork's From and To.
+type legIdent struct{ fromNum, fromName, toNum string }
 
 func (l *leg) session() *sipgo.DialogClientSession {
 	l.mu.Lock()
@@ -1200,6 +1214,7 @@ func (c *call) end(status int, side, reason, result string) {
 			return
 		}
 		c.queueAbandoned()
+		c.cbFinish("abandoned", "") // a callback call that ends before an agent was connected
 		go c.queueEnded()
 		c.unpublish()
 		c.record(status, side, reason, result)
@@ -1519,6 +1534,8 @@ func (l *leg) invite() (*sip.Request, error) {
 			if ct := c.inv.ContentType(); ct != nil {
 				req.AppendHeader(sip.HeaderClone(ct))
 			}
+		} else {
+			req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 		}
 		req.SetBody(body)
 	}
@@ -1531,6 +1548,14 @@ func (l *leg) invite() (*sip.Request, error) {
 				req.RemoveHeader("Content-Type")
 				req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 			}
+		}
+	}
+	if id := l.ident; id != nil {
+		if id.fromNum != "" {
+			from.Address.User, from.DisplayName = id.fromNum, id.fromName
+		}
+		if id.toNum != "" && l.trunk == nil && l.uri == nil {
+			to.Address.User = id.toNum
 		}
 	}
 	l.addPagingHeaders(req)

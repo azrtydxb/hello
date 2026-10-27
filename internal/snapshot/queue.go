@@ -34,7 +34,14 @@ type Queue struct {
 	PeriodicPrompt, PositionPrompt           string
 	WaitPrompt, MinutesPrompt, DigitsPrefix  string
 	BreakoutKey, BreakoutPrompt, BreakoutBox string
-	Members                                  []QueueMember
+	// Callback (migration 00054): offered once the estimated wait exceeds
+	// CallbackOfferAfter seconds, accepted (or asked for) with CallbackDigit.
+	CallbackEnabled    bool
+	CallbackOfferAfter int
+	CallbackDigit      string
+	// PromptLanguage is the queue's own prompt language ("" inherits).
+	PromptLanguage string
+	Members        []QueueMember
 }
 
 // WithQueues installs the call queues (tests and Load); it returns s.
@@ -81,7 +88,8 @@ func loadQueues(ctx context.Context, db Querier) ([]Queue, error) {
 		q.timeout_kind, q.timeout_target, q.full_kind, q.full_target, q.no_agents_kind, q.no_agents_target, COALESCE(q.moh_class_id, 0),
 		q.announce_frequency, q.announce_position, q.announce_wait,
 		COALESCE(pp.name, ''), COALESCE(po.name, ''), COALESCE(wp.name, ''), COALESCE(mp.name, ''), q.digits_prefix,
-		q.breakout_key, COALESCE(bp.name, ''), q.breakout_voicemail
+		q.breakout_key, COALESCE(bp.name, ''), q.breakout_voicemail,
+		q.callback_enabled, q.callback_offer_after_seconds, q.callback_digit, COALESCE(q.prompt_language, '')
 		FROM queues q
 		LEFT JOIN announcements pp ON pp.id = q.periodic_prompt_id
 		LEFT JOIN announcements po ON po.id = q.position_prompt_id
@@ -100,7 +108,8 @@ func loadQueues(ctx context.Context, db Querier) ([]Queue, error) {
 			&q.Timeout.Kind, &q.Timeout.Target, &q.Full.Kind, &q.Full.Target, &q.NoAgents.Kind, &q.NoAgents.Target, &q.MOHClassID,
 			&q.AnnounceFrequency, &q.AnnouncePosition, &q.AnnounceWait,
 			&q.PeriodicPrompt, &q.PositionPrompt, &q.WaitPrompt, &q.MinutesPrompt, &q.DigitsPrefix,
-			&q.BreakoutKey, &q.BreakoutPrompt, &q.BreakoutBox); err != nil {
+			&q.BreakoutKey, &q.BreakoutPrompt, &q.BreakoutBox,
+			&q.CallbackEnabled, &q.CallbackOfferAfter, &q.CallbackDigit, &q.PromptLanguage); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("snapshot: scan queue: %w", err)
 		}

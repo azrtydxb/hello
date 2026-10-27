@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/queue"
@@ -26,33 +28,37 @@ var (
 // queueBody is the create and replace body; absent optional fields take the
 // defaults of toInput.
 type queueBody struct {
-	Name              *string            `json:"name"`
-	Number            *string            `json:"number"`
-	Enabled           *bool              `json:"enabled"`
-	Strategy          *string            `json:"strategy"`
-	AgentTimeout      *int               `json:"agentTimeout"`
-	RetryDelay        *int               `json:"retryDelay"`
-	WrapUp            *int               `json:"wrapUp"`
-	MaxCallers        *int               `json:"maxCallers"`
-	MaxWait           *int               `json:"maxWait"`
-	JoinEmpty         *bool              `json:"joinEmpty"`
-	LeaveEmpty        *bool              `json:"leaveEmpty"`
-	Timeout           *ivrDestBody       `json:"timeout"`
-	Full              *ivrDestBody       `json:"full"`
-	NoAgents          *ivrDestBody       `json:"noAgents"`
-	MOHClassID        *int64             `json:"mohClassId"`
-	AnnounceFrequency *int               `json:"announceFrequency"`
-	AnnouncePosition  *bool              `json:"announcePosition"`
-	AnnounceWait      *bool              `json:"announceWait"`
-	PeriodicPromptID  *int64             `json:"periodicPromptId"`
-	PositionPromptID  *int64             `json:"positionPromptId"`
-	WaitPromptID      *int64             `json:"waitPromptId"`
-	MinutesPromptID   *int64             `json:"minutesPromptId"`
-	DigitsPrefix      *string            `json:"digitsPrefix"`
-	BreakoutKey       *string            `json:"breakoutKey"`
-	BreakoutPromptID  *int64             `json:"breakoutPromptId"`
-	BreakoutVoicemail *string            `json:"breakoutVoicemail"`
-	Members           *[]queueMemberBody `json:"members"`
+	Name               *string            `json:"name"`
+	Number             *string            `json:"number"`
+	Enabled            *bool              `json:"enabled"`
+	Strategy           *string            `json:"strategy"`
+	AgentTimeout       *int               `json:"agentTimeout"`
+	RetryDelay         *int               `json:"retryDelay"`
+	WrapUp             *int               `json:"wrapUp"`
+	MaxCallers         *int               `json:"maxCallers"`
+	MaxWait            *int               `json:"maxWait"`
+	JoinEmpty          *bool              `json:"joinEmpty"`
+	LeaveEmpty         *bool              `json:"leaveEmpty"`
+	Timeout            *ivrDestBody       `json:"timeout"`
+	Full               *ivrDestBody       `json:"full"`
+	NoAgents           *ivrDestBody       `json:"noAgents"`
+	MOHClassID         *int64             `json:"mohClassId"`
+	AnnounceFrequency  *int               `json:"announceFrequency"`
+	AnnouncePosition   *bool              `json:"announcePosition"`
+	AnnounceWait       *bool              `json:"announceWait"`
+	PeriodicPromptID   *int64             `json:"periodicPromptId"`
+	PositionPromptID   *int64             `json:"positionPromptId"`
+	WaitPromptID       *int64             `json:"waitPromptId"`
+	MinutesPromptID    *int64             `json:"minutesPromptId"`
+	DigitsPrefix       *string            `json:"digitsPrefix"`
+	BreakoutKey        *string            `json:"breakoutKey"`
+	BreakoutPromptID   *int64             `json:"breakoutPromptId"`
+	BreakoutVoicemail  *string            `json:"breakoutVoicemail"`
+	CallbackEnabled    *bool              `json:"callbackEnabled"`
+	CallbackOfferAfter *int               `json:"callbackOfferAfterSeconds"`
+	CallbackDigit      *string            `json:"callbackDigit"`
+	PromptLanguage     *string            `json:"promptLanguage"`
+	Members            *[]queueMemberBody `json:"members"`
 }
 
 type queueMemberBody struct {
@@ -67,6 +73,7 @@ func (b queueBody) toInput() store.QueueInput {
 	in := store.QueueInput{
 		Enabled: true, Strategy: queue.RingAll, AgentTimeout: 20, RetryDelay: 5, MaxWait: 600, JoinEmpty: true,
 		Timeout: hang, Full: hang, NoAgents: hang, Members: []store.QueueMember{},
+		CallbackOfferAfter: queue.DefaultCallbackOffer, CallbackDigit: queue.DefaultCallbackDigit,
 	}
 	setS := func(dst *string, v *string) {
 		if v != nil {
@@ -111,6 +118,10 @@ func (b queueBody) toInput() store.QueueInput {
 	setS(&in.DigitsPrefix, b.DigitsPrefix)
 	setS(&in.BreakoutKey, b.BreakoutKey)
 	setS(&in.BreakoutVoicemail, b.BreakoutVoicemail)
+	setB(&in.CallbackEnabled, b.CallbackEnabled)
+	setI(&in.CallbackOfferAfter, b.CallbackOfferAfter)
+	setS(&in.CallbackDigit, b.CallbackDigit)
+	setS(&in.PromptLanguage, b.PromptLanguage)
 	if b.Members != nil {
 		for i, m := range *b.Members {
 			if m.Position == 0 {
@@ -160,6 +171,14 @@ func validateQueue(in *store.QueueInput) fieldErrs {
 	if in.BreakoutVoicemail != "" && !numberRe.MatchString(in.BreakoutVoicemail) {
 		f.add("breakoutVoicemail", "must be an extension number (2-10 digits)")
 	}
+	between("callbackOfferAfterSeconds", in.CallbackOfferAfter, 0, 3600)
+	if !breakoutKeyRe.MatchString(in.CallbackDigit) || in.CallbackDigit == "" {
+		f.add("callbackDigit", "must be one of 0-9, * or #")
+	}
+	if in.CallbackEnabled && in.BreakoutKey != "" && in.BreakoutKey == in.CallbackDigit {
+		f.add("callbackDigit", "must differ from the breakout key")
+	}
+	checkPromptLanguage(&f, "promptLanguage", in.PromptLanguage)
 	for path, id := range map[string]*int64{"periodicPromptId": in.PeriodicPromptID, "positionPromptId": in.PositionPromptID,
 		"waitPromptId": in.WaitPromptID, "minutesPromptId": in.MinutesPromptID, "breakoutPromptId": in.BreakoutPromptID} {
 		if id != nil && *id <= 0 {
@@ -260,6 +279,9 @@ func (s *server) createQueue(w http.ResponseWriter, r *http.Request) {
 		s.configError(w, "queue", err)
 		return
 	}
+	if q.PromptLanguage != "" {
+		s.prewarmLanguages() // the queue's language needs its prompts spoken ahead
+	}
 	writeJSON(w, http.StatusCreated, q)
 }
 
@@ -287,6 +309,9 @@ func (s *server) putQueue(w http.ResponseWriter, r *http.Request) {
 		s.configError(w, "queue", err)
 		return
 	}
+	if q.PromptLanguage != "" {
+		s.prewarmLanguages()
+	}
 	writeJSON(w, http.StatusOK, q)
 }
 
@@ -298,6 +323,71 @@ func (s *server) deleteQueue(w http.ResponseWriter, r *http.Request) {
 	if err := s.Store.DeleteQueue(r.Context(), actor(r).String(), id, s.check()); err != nil {
 		s.configError(w, "queue", err)
 		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- callbacks (migration 00054, S-10) ---------------------------------------
+
+func (s *server) callbacksOK(w http.ResponseWriter) bool {
+	if s.Callbacks == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "callback requests are unavailable; try again shortly")
+		return false
+	}
+	return true
+}
+
+// listQueueCallbacks is GET /api/v1/queues/{id}/callbacks: the queue's
+// callback requests, newest first.
+func (s *server) listQueueCallbacks(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if _, err := s.Store.GetQueue(r.Context(), id); err != nil {
+		s.configError(w, "queue", err)
+		return
+	}
+	if !s.callbacksOK(w) {
+		return
+	}
+	cbs, err := s.Callbacks.List(r.Context(), id)
+	if err != nil {
+		s.internal(w, "list queue callbacks", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items(cbs))
+}
+
+// cancelQueueCallback is DELETE /api/v1/queues/{id}/callbacks/{callbackId}:
+// an operator withdraws an open request. One already finished is a 404.
+func (s *server) cancelQueueCallback(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	cbID, err := strconv.ParseInt(r.PathValue("callbackId"), 10, 64)
+	if err != nil || cbID <= 0 {
+		writeError(w, http.StatusNotFound, "not_found", "not found")
+		return
+	}
+	if _, err := s.Store.GetQueue(r.Context(), id); err != nil {
+		s.configError(w, "queue", err)
+		return
+	}
+	if !s.callbacksOK(w) {
+		return
+	}
+	if err := s.Callbacks.Cancel(r.Context(), id, cbID); err != nil {
+		if errors.Is(err, queue.ErrCallbackNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "no open callback request with that id")
+			return
+		}
+		s.internal(w, "cancel queue callback", err)
+		return
+	}
+	if err := s.Store.Audit(r.Context(), actor(r).String(), "cancel", "queue_callback", strconv.FormatInt(cbID, 10)); err != nil {
+		s.Log.Warn("audit: queue callback cancel", "error", err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

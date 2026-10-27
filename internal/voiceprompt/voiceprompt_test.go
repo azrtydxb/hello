@@ -258,3 +258,37 @@ func TestPromptLanguage(t *testing.T) {
 		t.Error("Dutch and English PIN prompts are the same text")
 	}
 }
+
+// TestCallbackPrompts: the callback offer names its key in every language,
+// '*' and '#' by name, and the three static callback prompts are among the
+// ones pre-generated. It fails if a key is spoken as a symbol, the digit is
+// missing, or a static prompt would not be pre-generated.
+func TestCallbackPrompts(t *testing.T) {
+	for _, l := range Languages() {
+		two := CallbackOffer(l, "2")
+		if !strings.Contains(two, "2") || strings.Contains(two, "{") {
+			t.Errorf("%s offer = %q", l, two)
+		}
+		if s := CallbackOffer(l, "*"); strings.Contains(s, "*") || !strings.Contains(s, Text(l, WordStar, nil)) {
+			t.Errorf("%s star offer = %q", l, s)
+		}
+		if s := CallbackOffer(l, "#"); strings.Contains(s, "#") || !strings.Contains(s, Text(l, WordPound, nil)) {
+			t.Errorf("%s pound offer = %q", l, s)
+		}
+		static := map[Key]bool{}
+		for _, e := range Static(l) {
+			static[e.Key] = true
+		}
+		for _, k := range []Key{QueueCallbackConfirm, QueueCallbackFull, QueueCallbackWelcome} {
+			if !static[k] {
+				t.Errorf("%s: %s is not pre-generated", l, k)
+			}
+		}
+		if static[QueueCallbackOffer] {
+			t.Errorf("%s: the offer names its key and is generated on first use", l)
+		}
+	}
+	if CallbackOffer(Dutch, "2") == CallbackOffer(English, "2") {
+		t.Error("Dutch and English offers are the same")
+	}
+}

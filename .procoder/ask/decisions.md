@@ -832,3 +832,17 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - Not done: `exhausted` after a forward stage still uses the dialled
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
+
+## Queue callback (pbx-gaps wave B, B4)
+
+- **Merged gaps-languages.** PR #208 (voicemail box languages, `voiceprompt.Resolve`) was not on main, so origin/gaps-languages is merged into this branch. The queue's language is `Resolve(queue.prompt_language, deployment language)`; `queues.prompt_language` is NULL for inherit, no CHECK (validated by the API), migration 00054.
+- **The callback call is a queued caller, not a new call type.** The customer's answered dialog is turned into the only dialog of a call built like one a survivor rebuilds after a takeover (homed solo call, phase `queue`). It then runs `queueResume`/`queueRun` with `EnteredMs = position_key`, so ordering, music, offering, bridging (`ivrConnect`) and failover all reuse the queue code, and the caller is rung before any agent by construction. `originateFor` was not used: it needs an inbound caller dialog.
+- **HA.** The replicated queue detail gains `:cb<id>`. A takeover re-homes the customer and the survivor renews (adopts) the lease. A node lost before the customer answers leaves the row `dialling`; the 60 s lease lapses and any node claims it again (counts as an attempt; a lapsed third attempt becomes `failed`/`node_lost`).
+- **Ordering.** A sweep claims the head request only when no waiting caller with an earlier place is unserved and free agents exceed live claims. Waiting callers are held back from an agent while a request with an earlier place is due or being served (`Due`, one query per node per sweep, cached; PostgreSQL errors clear it, so calls are never held for a store that is down). A caller who entered later may still take the last free agent during the seconds the customer's phone rings; accepted.
+- **Source of the origination.** Outbound routing needs a source extension: the agent the strategy would ring first. The caller is presented as the queue (number, else name). Only the first usable trunk candidate is tried (as `originateFor` does), not failover across candidates.
+- **Dialable number.** `^\+?[0-9]{2,20}$` after dropping spaces, dashes and brackets; used as the caller presented it (no national/E.164 normalisation, which needs P-10/`HELLO_DIAL_*` work not on main).
+- **Caller name.** The row carries the name the call already has. The shared-book lookup (phonebooks-ptt P-10) is not on main; when it lands the same field carries it, and a personal book never names a queue caller.
+- **Callback in the wait.** The wait and maximum wait of a called-back caller count from when it answered; its place is the original one. Voicemail breakout is off for it. No agent within the maximum wait is a failed attempt (`no_agent`), retried.
+- **Offer threshold.** 0 offers at once. With nobody staffed the time waited stands in for the estimate. The default-key offer text is pre-generated; other keys are synthesized on first use.
+- **CDR.** No `disposition` column exists; `callback_failed` is a queue leg with the attempt's result, and the call's kind is `callback`. Every attempt that dialled has its own CDR. `callback_requested` is on the original call's CDR, whose exit result is `callback` (no abandon).
+- **Cancelling** a request that is dialling does not hang up a customer already on the line; it only stops further attempts.
