@@ -66,6 +66,9 @@ func (c *call) sessionSelf(body []byte) []sip.Header {
 	if !linked || c.inv == nil {
 		return nil
 	}
+	c.mu.Lock()
+	c.rawCaller = true
+	c.mu.Unlock()
 	c.ses.mu.Lock()
 	defer c.ses.mu.Unlock()
 	c.ses.sdp[sessCaller] = append([]byte(nil), body...)
@@ -73,9 +76,6 @@ func (c *call) sessionSelf(body []byte) []sip.Header {
 		c.ses.addr[sessCaller] = sdpAddr(off)
 	}
 	c.ses.leg[sessCaller] = c.callerLeg()
-	c.mu.Lock()
-	c.rawCaller = true
-	c.mu.Unlock()
 	return callerSessionHeaders(c.inv, c.ses.leg[sessCaller])
 }
 
@@ -282,4 +282,76 @@ func (c *call) noteBridgeSDP(idx int, body []byte) {
 	c.ses.mu.Lock()
 	c.ses.bridge[idx] = append([]byte(nil), body...)
 	c.ses.mu.Unlock()
+}
+
+// sessionSolo negotiates the caller's dialog of a call Hello answers itself
+// and keeps on the relay (an IVR menu, a call queue), and returns the headers
+// of the 2xx. Hello is the refresher: a caller that named itself the
+// refresher gets no timer, because during the application its refresh would
+// be a request the call does not handle (a re-INVITE gets 481 there), and a
+// refresh refused with 481 ends the session on the phone.
+func (c *call) sessionSolo(body []byte) []sip.Header {
+	if c.inv == nil {
+		return nil
+	}
+	st := c.callerLeg()
+	if st != nil && !st.local {
+		st = nil
+	}
+	c.ses.mu.Lock()
+	defer c.ses.mu.Unlock()
+	c.ses.sdp[sessCaller] = append([]byte(nil), body...)
+	if off, err := media.ParseAudioSDP(c.inv.Body()); err == nil {
+		c.ses.addr[sessCaller] = sdpAddr(off)
+	}
+	c.ses.leg[sessCaller] = st
+	return callerSessionHeaders(c.inv, st)
+}
+
+// sessionBridgedTo gives the call an application (an IVR menu, a queue) has
+// connected to the destination leg w the destination's session timer, and
+// starts the dead-media watch, which the application phase left off.
+func (c *call) sessionBridgedTo(w *leg, bres *sip.Response) {
+	var inv *sip.Request
+	if dcs := w.session(); dcs != nil {
+		inv = dcs.InviteRequest
+	}
+	c.ses.mu.Lock()
+	if old := c.ses.leg[sessCallee]; old != nil && old.timer != nil {
+		old.timer.Stop()
+	}
+	c.ses.leg[sessCallee] = c.s.calleeSession(w, bres)
+	if inv != nil {
+		c.ses.sdp[sessCallee] = append([]byte(nil), inv.Body()...)
+	}
+	if bres != nil {
+		if ans, err := media.ParseAudioSDP(bres.Body()); err == nil {
+			c.ses.addr[sessCallee] = sdpAddr(ans)
+		}
+	}
+	c.ses.mu.Unlock()
+	c.mediaTouched()
+	c.sessionArm()
+	c.startMediaWatch()
+}
+
+// sessionQueued carries the caller dialog's timer of a call a transfer puts
+// in a queue (c2 takes the caller dialog from from): kept when Hello is the
+// refresher, dropped when the phone is (see sessionSolo).
+func (c2 *call) sessionQueued(from *call, aOffer []byte) {
+	from.ses.mu.Lock()
+	var st *sessLeg
+	if l := from.ses.leg[sessCaller]; l != nil && l.local {
+		cp := *l
+		cp.timer = nil
+		st = &cp
+	}
+	addr := from.ses.addr[sessCaller]
+	from.ses.mu.Unlock()
+	c2.ses.mu.Lock()
+	c2.ses.leg[sessCaller] = st
+	c2.ses.sdp[sessCaller] = append([]byte(nil), aOffer...)
+	c2.ses.addr[sessCaller] = addr
+	c2.ses.mu.Unlock()
+	c2.sessionArm()
 }

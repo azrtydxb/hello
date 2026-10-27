@@ -1,11 +1,13 @@
 package sip
 
 import (
+	"net"
 	"net/netip"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
@@ -430,4 +432,92 @@ func TestTrunkTimersPolicy(t *testing.T) {
 			t.Errorf("expires %v global %v setting %q = %v, want %v", tc.expires, tc.global, tc.setting, got, tc.want)
 		}
 	}
+}
+
+// parkTakeoverWithTimer parks a call whose callee b answers with the given
+// Session-Expires, kills the owner and returns what the survivor sees.
+func parkTakeoverWithTimer(t *testing.T, sessionExpires string) (rec livestate.DialogState, taker *testPBX, b *phone, takenAt time.Time) {
+	t.Helper()
+	st := parkStore(t)
+	ha := newFakeHA()
+	mem := &fakeMembership{}
+	owner := startPBX(t, threeDevices(), withMedia(false), withNodeID("sip-1"), withHA(ha, mem), withPark(st, "sip-1", testLot),
+		withSessions(2*time.Second, time.Second, 0))
+	taker = startPBX(t, threeDevices(), withMedia(false), withNodeID("sip-2"), withHA(ha, mem), withPark(st, "sip-2", testLot),
+		withSessions(2*time.Second, time.Second, 0))
+	a := newPhone(t, owner, "a1", "pa")
+	b = newPhone(t, owner, "b1", "pb1")
+	a.register(t)
+	registerAs(t, b, grandstreamUA)
+	a.setCallee(answerAfter(nil))
+	b.setCallee(answerWithTimer(sessionExpires))
+	pc := establish(t, a, b)
+	parkBy(t, a, pc, "*74")
+	occupied(t, st, "701", "100")
+	waitReq(t, a.byes, "BYE to the parker")
+	rec = waitRecord(t, ha, "the parked call is replicated with its session timer", "sip-1", func(s livestate.DialogState) bool {
+		return s.State == haPhasePark && s.Session != nil && s.Session.Legs[sessCallee] != nil
+	})
+	haReinviteTimeout = time.Second
+	killNode(owner, mem, map[string]int{"sip-1": 1}, "sip-2")
+	taker.srv.takeoverPass(t.Context())
+	waitReq(t, b.reinvites, "takeover re-INVITE to the parked party")
+	waitReq(t, b.acks, "ACK of the parked party's 200")
+	return rec, taker, b, time.Now()
+}
+
+// TestSessionTimersParkTakeover fails if a parked call's negotiated session
+// timer is not carried in the replicated state, or a surviving node does not
+// resume it with the same interval and refresher: a Hello-refreshed leg
+// refreshed at the negotiated interval (not the node's default), a leg the
+// phone must refresh ended when it does not.
+func TestSessionTimersParkTakeover(t *testing.T) {
+	t.Run("Hello refreshes at the negotiated interval", func(t *testing.T) {
+		rec, taker, b, takenAt := parkTakeoverWithTimer(t, "6;refresher=uac")
+		leg := rec.Session.Legs[sessCallee]
+		if leg.IntervalSecs != 6 || !leg.Local {
+			t.Fatalf("replicated timer = %+v, want 6 s refreshed by Hello", leg)
+		}
+		_, takerPort, _ := net.SplitHostPort(taker.addr)
+		// The survivor's refreshes only: the dead owner's contact differs.
+		var got *sip.Request
+		deadline := time.After(8 * time.Second)
+		for got == nil {
+			select {
+			case r := <-b.reinvites:
+				if strings.Contains(headerOfReq(r, "Contact"), ":"+takerPort) {
+					got = r
+				}
+			case <-deadline:
+				t.Fatal("the survivor never refreshed the parked party")
+			}
+		}
+		if d := time.Since(takenAt); d < 2*time.Second {
+			t.Fatalf("first refresh after %v: the node's own 2 s default, not the negotiated 6 s (half = 3 s)", d)
+		}
+		if h := headerOfReq(got, "Session-Expires"); h != "6;refresher=uac" {
+			t.Fatalf("refresh Session-Expires = %q, want 6;refresher=uac", h)
+		}
+	})
+
+	t.Run("a phone that must refresh is ended when it does not", func(t *testing.T) {
+		rec, taker, b, takenAt := parkTakeoverWithTimer(t, "6;refresher=uas")
+		leg := rec.Session.Legs[sessCallee]
+		if leg.IntervalSecs != 6 || leg.Local {
+			t.Fatalf("replicated timer = %+v, want 6 s refreshed by the phone", leg)
+		}
+		for _, r := range drain(b.reinvites) {
+			t.Fatalf("the survivor refreshed a leg whose phone is the refresher: %s", r.StartLine())
+		}
+		// The survivor's BYE: the dead owner's timer may fire too.
+		_, takerPort, _ := net.SplitHostPort(taker.addr)
+		for {
+			if bye := waitReq(t, b.byes, "BYE from the survivor to the phone that never refreshed"); strings.Contains(headerOfReq(bye, "Via"), ":"+takerPort) {
+				break
+			}
+		}
+		if d := time.Since(takenAt); d < 3*time.Second {
+			t.Fatalf("BYE after %v, want near the 6 s interval, not the node's 2 s default", d)
+		}
+	})
 }

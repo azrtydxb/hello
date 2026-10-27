@@ -115,7 +115,9 @@ ringing a dead address.
   follows `HELLO_SIP_SESSION_TIMERS_TRUNKS` (false unless set); an inbound
   trunk call is covered by `on` even when the carrier sent no
   `Session-Expires`. `HELLO_SIP_MAX_CALL_DURATION` is still the backstop.
-  After a node takeover every leg restarts as Hello-refreshed with UPDATE.
+  IVR menus and queues time the caller (Hello refreshes; a caller that must
+  refresh gets no timer there) and the destination once connected. After a node
+  takeover the timers resume with the negotiated interval and refresher.
 - **Dead media.** An anchored call with no RTP either way for
   `HELLO_MEDIA_DEAD_SECONDS` (60) is ended unless it is on hold
   ([media.md](media.md#roaming-and-dead-media)).

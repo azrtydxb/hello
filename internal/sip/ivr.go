@@ -196,6 +196,9 @@ func (c *call) soloAnswer(phase, detail, what string) bool {
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
+	for _, h := range c.sessionSolo(body) {
+		res.AppendHeader(h)
+	}
 	s.m.response(sip.StatusOK)
 	if err := c.dss.WriteResponse(res); err != nil {
 		if c.dss.LoadState() == sip.DialogStateEnded {
@@ -225,6 +228,7 @@ func (c *call) soloAnswer(phase, detail, what string) bool {
 		c.vmTag = tagParam(res.To())
 	}
 	c.mu.Unlock()
+	c.sessionArm()
 	if s.deps.HAState != nil {
 		// Replicated like a voicemail call: a taker re-INVITEs the caller
 		// onto its own relay and restarts the menu from its greeting.
@@ -1050,6 +1054,9 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 	c.haSolo, c.haPhase, c.haDetail = false, "", ""
 	c.mu.Unlock()
 	st.active.Store(false)
+	// The bridged call keeps the caller's timer (set when the application
+	// answered) and gets the destination's, with the media watch.
+	c.sessionBridgedTo(w, bres)
 	c.ivrFinishSetup()
 	c.addTrace("IVR: caller connected to " + orDefault(ext, "the destination"))
 	c.s.m.IVRTotal.WithLabelValues("connected").Inc()

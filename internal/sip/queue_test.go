@@ -41,6 +41,11 @@ func testQueue(name, number, strategy string, members ...snapshot.QueueMember) s
 // queuePBX starts a PBX with the queues over the shared store. The
 // announcements are one object each, so a test can tell which was fetched.
 func queuePBX(t *testing.T, st queue.Store, extra func(s *snapshot.Snapshot), queues ...snapshot.Queue) (*testPBX, *fakeObjects) {
+	return queuePBXWith(t, st, extra, nil, queues...)
+}
+
+// queuePBXWith is queuePBX with more PBX options.
+func queuePBXWith(t *testing.T, st queue.Store, extra func(s *snapshot.Snapshot), opts []pbxOpt, queues ...snapshot.Queue) (*testPBX, *fakeObjects) {
 	t.Helper()
 	objs := &fakeObjects{}
 	anns := map[string]string{}
@@ -62,8 +67,9 @@ func queuePBX(t *testing.T, st queue.Store, extra func(s *snapshot.Snapshot), qu
 			extra(s)
 		}
 	}
-	pbx := startPBX(t, threeDevices(), shortRing(3*time.Second), withMedia(false), withFeatures(feats),
-		withVoicemail(newVMStore(), objs), withQueues(st))
+	all := append([]pbxOpt{shortRing(3 * time.Second), withMedia(false), withFeatures(feats),
+		withVoicemail(newVMStore(), objs), withQueues(st)}, opts...)
+	pbx := startPBX(t, threeDevices(), all...)
 	return pbx, objs
 }
 

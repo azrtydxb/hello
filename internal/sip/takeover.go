@@ -1084,6 +1084,7 @@ func (s *Server) haNewCall(st livestate.DialogState, from string, a, b *haLeg, t
 	}
 	c.connected = true
 	c.answerTime = orTime(st.AnsweredAt, takenAt)
+	c.ses.carry(st.Session)
 	c.homedCall = &homedCall{takenFrom: from, takenAt: takenAt, legs: [2]*haLeg{a, b}}
 	if b != nil {
 		c.winner = &leg{c: c, callID: b.callID, binding: livestate.Binding{AOR: b.endpoint}}

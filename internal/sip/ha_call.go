@@ -397,6 +397,7 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 // one logical call with one CDR that starts where the call started.
 func (c *call) haContinuity(st *livestate.DialogState) {
 	st.OwnerIncarnation = c.s.cfg.Incarnation
+	st.Session = c.sessionSnapshot() // before c.mu: the session lock is never taken under it
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	st.StartedAt, st.RingAt = c.start, c.ringTime

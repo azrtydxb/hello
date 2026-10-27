@@ -875,5 +875,24 @@ another group) is lifted: the ring state machine can open a new ring stage.
   so it does not end the call (some carriers do not take an in-dialog
   re-INVITE with credentials or a re-offered SDP); no answer, 408, 481 and the
   other failures still do.
-- Not changed: after an HA takeover every leg is Hello-refreshed with UPDATE,
-  as before; a parked call a survivor took over is not given timers here.
+- HA takeover: the call's negotiated timers (interval, refresher, UPDATE) ride
+  in the replicated dialog state (`DialogState.Session`, by dialog: caller or
+  callee, whatever `Legs` holds), also for a parked call, which replicates only
+  its party's dialog. A survivor resumes them as they were (a 6 s timer that
+  Hello refreshes is refreshed at 3 s, a phone that must refresh is ended when
+  it does not) instead of restarting at its own default. From an owner that
+  sent none, a taken-over call gets Hello-refreshed defaults only on dialogs it
+  still has: a one-legged call (menu, queue, voicemail) or a parked call used
+  to be given a callee timer whose refresh could not be sent and ended it.
+- IVR menus and queues: the caller's dialog gets a timer with Hello as
+  refresher when the application answers. A caller that named itself the
+  refresher gets none, because during the application its refresh is a
+  request the call does not handle (a re-INVITE gets 481, which ends the
+  session on the phone). When the application connects the caller to a
+  destination, the call keeps the caller's timer, gets the destination's, and
+  the dead-media watch starts (it was off for the whole call before). A
+  transfer into a queue carries a Hello-refreshed caller timer over.
+- Not given session timers, with the reason: voicemail, announcements, paging
+  and music on hold are short and bounded by the application; a conference
+  participant is on the room's mixer and handles its own in-dialog requests; a
+  phone-refreshed caller dialog in a queue transfer (see above).
