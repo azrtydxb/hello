@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
@@ -260,6 +261,16 @@ type call struct {
 	ringedExts  []string
 	answeredExt string
 	evSubjects  []string
+	// evMu orders the sequence numbers of the call's events with their
+	// hand-off to the sink; evSeq is the last number used (events.go).
+	// evLegacy marks a call taken over from a node that did not replicate
+	// its event state: it is never reported missed.
+	evMu     sync.Mutex
+	evSeq    atomic.Int64
+	evLegacy bool
+	// evCaller is the calling extension of a taken-over call, whose caller
+	// device the taker does not know.
+	evCaller string
 }
 
 // callStages is the forwarding/DND context of the extension a call is

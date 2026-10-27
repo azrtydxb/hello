@@ -979,6 +979,10 @@ func (c *call) ivrRing(ctx context.Context, forks []ivrFork, hunt bool, total ti
 				continue
 			}
 			switch ev.kind {
+			case evRinging:
+				// The extension is ringing for an IVR destination, a queue
+				// agent or a ring group reached through a menu.
+				c.noteRinging(ev.leg.binding.Extension)
 			case evAnswered:
 				return ev.leg, false
 			case evFailed:
@@ -1054,6 +1058,10 @@ func (c *call) ivrConnect(w *leg, ext string) ivrResult {
 	c.addTrace("IVR: caller connected to " + orDefault(ext, "the destination"))
 	c.s.m.IVRTotal.WithLabelValues("connected").Inc()
 	c.publish()
+	// The extension that answered (a queue agent, a group member or the
+	// dialled extension) and the caller get call.answered; the destination
+	// may be a trunk, which has no extension.
+	c.noteAnswered(w.binding.Extension)
 	if snap := c.s.deps.Snapshots.Current(); snap != nil && ext != "" {
 		c.s.publishDeviceState(c.s.devicesOf(snap, ext), ext, StateOnCall)
 		if e, ok := snap.Extension(ext); ok && e.RecordDefault {

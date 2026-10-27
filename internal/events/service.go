@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -87,8 +88,9 @@ type Service struct {
 	Log     *slog.Logger
 	Metrics *ServiceMetrics
 
-	once sync.Once
-	hub  *hub
+	once  sync.Once
+	hub   *hub
+	users userCache
 }
 
 func (s *Service) init() {
@@ -209,6 +211,7 @@ func (s *Service) liveLoop(ctx context.Context) {
 		for _, x := range res[StreamKey] {
 			last = x.ID
 			if e, ok := decode(x.ID, x.FieldValues); ok {
+				s.users.fill(ctx, s.DB, []*Event{&e.Event})
 				s.hub.publish(e)
 			}
 		}
@@ -330,13 +333,39 @@ func (s *Service) store(ctx context.Context, c valkey.Client, batch []rawEntry) 
 	var (
 		results = map[string]int{}
 		lagging []Entry
+		decoded = make([]Entry, 0, len(batch))
+		valid   = make([]bool, len(batch))
+		pending []*Event
 	)
-	for _, r := range batch {
+	for i, r := range batch {
 		e, ok := decode(r.id, r.fields)
-		if !ok {
+		decoded = append(decoded, e)
+		valid[i] = ok
+		if ok {
+			pending = append(pending, &decoded[i].Event)
+		}
+	}
+	// The SIP node does not know users: the user an extension is linked to
+	// is resolved here, once for the batch, and stored with the event.
+	var exts []string
+	for _, e := range pending {
+		if e.Data.Extension != "" && !slices.Contains(exts, e.Data.Extension) {
+			exts = append(exts, e.Data.Extension)
+		}
+	}
+	owners, err := usersOf(ctx, tx, exts)
+	if err != nil {
+		return err
+	}
+	for _, e := range pending {
+		e.Data.UserID = owners[e.Data.Extension]
+	}
+	for i := range batch {
+		if !valid[i] {
 			results["invalid"]++
 			continue
 		}
+		e := decoded[i]
 		fresh, err := insert(ctx, tx, e)
 		if err != nil {
 			return err
@@ -398,7 +427,11 @@ func (s *Service) purge(ctx context.Context) {
 	if days < 1 || days > 30 {
 		days = DefaultRetentionDays
 	}
-	res, err := s.DB.ExecContext(ctx, `DELETE FROM integration_events WHERE created_at < now() - make_interval(days => $1)`, days)
+	// An event stays while a webhook delivery that still needs it (waiting,
+	// retrying, or a dead letter that can be redelivered) refers to it.
+	res, err := s.DB.ExecContext(ctx, `
+		DELETE FROM integration_events e WHERE e.created_at < now() - make_interval(days => $1)
+		AND NOT EXISTS (SELECT 1 FROM webhook_deliveries d WHERE d.event_id = e.id AND d.status IN ('pending', 'retrying', 'dead'))`, days)
 	if err != nil {
 		s.Log.Warn("events: retention purge failed", "error", err)
 		return
@@ -475,6 +508,7 @@ func (s *Service) Replay(ctx context.Context, after Cursor, f Filter, fn func(En
 		}
 		for _, x := range es {
 			if e, ok := decode(x.ID, x.FieldValues); ok && f.Matches(e.Event) {
+				s.users.fill(ctx, s.DB, []*Event{&e.Event})
 				if err := emit(e); err != nil {
 					return err
 				}

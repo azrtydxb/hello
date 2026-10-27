@@ -456,3 +456,93 @@ func TestPurge(t *testing.T) {
 		t.Fatalf("after purge: %v, want [evt_1 evt_2]", ids)
 	}
 }
+
+// TestIngestResolvesUserID fails if the user an extension is linked to is not
+// stored with the event (the SIP node does not know users), if an extension
+// no user owns gets one, or if the live stream and a stream replay omit it.
+func TestIngestResolvesUserID(t *testing.T) {
+	p := newPipeline(t)
+	ctx := context.Background()
+	var uid int64
+	if err := p.db.QueryRowContext(ctx, `INSERT INTO users (username, password_hash, role) VALUES ('ann', 'x', 'user') RETURNING id`).Scan(&uid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.db.ExecContext(ctx, `INSERT INTO extensions (number, name) VALUES ('200', 'Ann'), ('300', 'Spare')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.db.ExecContext(ctx, `INSERT INTO user_extensions (user_id, extension_id) SELECT $1, id FROM extensions WHERE number = '200'`, uid); err != nil {
+		t.Fatal(err)
+	}
+	p.run(t)
+	sub := p.svc.Subscribe(Filter{})
+	defer sub.Close()
+	time.Sleep(300 * time.Millisecond) // the live reader has found the stream's tail
+	owned, spare := ev(CallRinging, "200"), ev(CallRinging, "300")
+	p.emit(t, owned)
+	p.emit(t, spare)
+	es := p.waitStored(t, 2)
+	for _, e := range es {
+		switch e.Data.Extension {
+		case "200":
+			if e.Data.UserID != uid {
+				t.Fatalf("stored userId for 200 = %d, want %d", e.Data.UserID, uid)
+			}
+		case "300":
+			if e.Data.UserID != 0 {
+				t.Fatalf("stored userId for an unowned extension = %d", e.Data.UserID)
+			}
+		}
+	}
+	for range 2 {
+		select {
+		case e := <-sub.C:
+			if e.Data.Extension == "200" && e.Data.UserID != uid {
+				t.Fatalf("live userId for 200 = %d, want %d", e.Data.UserID, uid)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("no live event")
+		}
+	}
+}
+
+// TestPurgeKeepsEventsThatWebhooksNeed fails if the retention job deletes an
+// event a waiting, retrying or dead webhook delivery still refers to (a dead
+// letter is redeliverable for 30 days), or keeps one only finished
+// deliveries refer to.
+func TestPurgeKeepsEventsThatWebhooksNeed(t *testing.T) {
+	p := newPipeline(t)
+	ctx := context.Background()
+	p.svc.RetentionDays = 3
+	if _, err := p.db.ExecContext(ctx, `INSERT INTO webhook_endpoints (id, name, url, secret_enc) VALUES (1, 'e', 'https://example.com', '\x00')`); err != nil {
+		t.Fatal(err)
+	}
+	for i, status := range []string{"pending", "retrying", "dead", "succeeded", ""} {
+		id := fmt.Sprintf("evt_old_%d", i)
+		if _, err := p.db.ExecContext(ctx, `INSERT INTO integration_events (id, cursor_ms, cursor_seq, type, created_at, payload)
+			VALUES ($1, $2, 0, 'call.ended', now() - interval '10 days', '{}')`, id, i+1); err != nil {
+			t.Fatal(err)
+		}
+		if status == "" {
+			continue
+		}
+		if _, err := p.db.ExecContext(ctx, `INSERT INTO webhook_deliveries (endpoint_id, event_id, event_type, status, next_attempt_at)
+			VALUES (1, $1, 'call.ended', $2, now())`, id, status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p.svc.purge(ctx)
+	rows, err := p.db.QueryContext(ctx, `SELECT id FROM integration_events ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		_ = rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	if !slices.Equal(ids, []string{"evt_old_0", "evt_old_1", "evt_old_2"}) {
+		t.Fatalf("after purge: %v, want the events of the pending, retrying and dead deliveries", ids)
+	}
+}

@@ -259,6 +259,9 @@ type Config struct {
 	// Events is the call-event pipeline (stream, history, tickets); nil
 	// answers 503 on the event routes.
 	Events EventService
+	// Webhooks is the outbound webhook service (endpoints, deliveries,
+	// dead letters); nil answers 503 on the webhook routes.
+	Webhooks WebhookService
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
 	// Objects is the voicemail audio store; nil makes the audio routes and
