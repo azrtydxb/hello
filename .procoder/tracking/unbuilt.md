@@ -98,7 +98,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | --- | ------------------------------------------------ | ----------------------- |
 | P2  | Read-only canvas, canvases, layout API           | wip (#191)              |
 | P3  | Batch backend                                    | todo (after P2)         |
-| P4  | Editing UI                                       | wip (#PR)               |
+| P4  | Editing UI                                       | wip (#227)              |
 | P5  | traceFlow, trace mode                            | todo (after P3)         |
 | P6  | AI on the canvas                                 | todo (after P4)         |
 | P7  | New node types: batch ops, trace, override badge | todo (after P5)         |
