@@ -849,7 +849,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - **Redaction.** There was no shared line redactor, so `syslogsink.Redact` combines the Authorization
   header, credential key/value, provisioning-path and 52+ char token rules (same token shape as
   `prov.RedactPath`), plus URL passwords. It runs before truncation and storage.
-- **Config.** Group setting in two columns on `phone_groups` (migration 00046), default off, level
+- **Config.** Group setting in two columns on `phone_groups` (migration 00047), default off, level
   default info; `PUT /api/v1/phone-groups/{id}/syslog` (admin). Template change is Grandstream only
   (P207/P208, as the spec says [R8x6 TPL]); other vendors are not touched. Off is written explicitly
   (P207 empty, P208 0) so disabling reaches phones. P208 mapping debug 1, info 2, warning 3, error 4
