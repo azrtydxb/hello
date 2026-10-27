@@ -162,6 +162,9 @@ type call struct {
 	// intercom call only, spec P-16). page is the state of a server page.
 	kind       string
 	autoAnswer bool
+	// doorCaller marks a call from a door station (spec S-45): it may not
+	// use a trunk. Guarded by mu.
+	doorCaller bool
 	page       *pageState
 
 	// park is the parking of a held call (spec S-6); link joins a parked,
@@ -392,6 +395,11 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	c := s.newCall(req)
 	c.callerNum, c.callerName, c.callerDevice = dev.Extension, dev.ExtensionName, dev.Username
+	// A door station reaches its targets only (spec S-45).
+	if snap.IsDoor(dev.Extension) {
+		c.doorCall(req, tx, snap)
+		return
+	}
 	// A paging group's code (Phase E, spec P-12) pages its members; the
 	// store keeps page codes from colliding with feature codes.
 	if g, ok := snap.PagingGroup(c.dialled); ok {

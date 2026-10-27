@@ -72,6 +72,7 @@ type Store interface {
 	ListExtensions(ctx context.Context) ([]store.Extension, error)
 	GetExtension(ctx context.Context, id int64) (store.Extension, error)
 	CreateExtension(ctx context.Context, actor, number, name, externalNumber string, check store.Check) (store.Extension, error)
+	CreateExtensionKind(ctx context.Context, actor, number, name, externalNumber, kind string, targets store.DoorTargets, check store.Check) (store.Extension, error)
 	UpdateExtension(ctx context.Context, actor string, id int64, c store.ExtensionChange, check store.Check) (store.Extension, error)
 	DeleteExtension(ctx context.Context, actor string, id int64, check store.Check) error
 

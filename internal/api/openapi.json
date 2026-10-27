@@ -16781,6 +16781,7 @@
           "failureKind",
           "failureTarget",
           "members",
+          "isDoor",
           "createdAt",
           "updatedAt"
         ],
@@ -16852,6 +16853,10 @@
           "ringTag": {
             "type": "string",
             "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
+          },
+          "isDoor": {
+            "type": "boolean",
+            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
           },
           "failureTarget": {
             "type": "string"
@@ -16947,6 +16952,10 @@
           "ringTag": {
             "type": "string",
             "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
+          },
+          "isDoor": {
+            "type": "boolean",
+            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
           },
           "failureTarget": {
             "type": "string",
@@ -17063,6 +17072,10 @@
           "ringTag": {
             "type": "string",
             "description": "Ring tag that replaces ringgroup for calls through this group; empty keeps ringgroup. Must name an existing ring tag."
+          },
+          "isDoor": {
+            "type": "boolean",
+            "description": "Marks the Door group: a door station may call it, its calls have kind door and ring with the doorbell tag. A new Door group with no ringTag gets doorbell."
           },
           "failureTarget": {
             "type": "string",
@@ -19581,7 +19594,9 @@
           "allowIntercom",
           "callWaiting",
           "noAnswerRings",
-          "directoryHidden"
+          "directoryHidden",
+          "kind",
+          "doorTargets"
         ],
         "properties": {
           "id": {
@@ -19606,6 +19621,14 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["user", "door"],
+            "description": "user (default) or door. A door station has no voicemail, joins no group, receives no pickup, page, intercom or MESSAGE, and may call only its doorTargets and the Door ring groups; any other destination is 403. Its calls carry the doorbell ring tag and CDR kind door. Turning an extension into a door station is refused while it is in a ring group, paging group, pickup group or queue; it then loses voicemail and intercom and is hidden from the extensions phonebook unless directoryHidden says otherwise."
+          },
+          "doorTargets": {
+            "$ref": "#/components/schemas/DoorTargets"
           },
           "externalNumber": {
             "type": "string",
@@ -19669,6 +19692,23 @@
           }
         }
       },
+      "DoorTargets": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "The extra destinations a door station may call besides every Door ring group: extension ids and ring group ids. A door station cannot list itself or another door station.",
+        "properties": {
+          "extensions": {
+            "type": "array",
+            "items": { "type": "integer", "format": "int64" },
+            "maxItems": 50
+          },
+          "ringGroups": {
+            "type": "array",
+            "items": { "type": "integer", "format": "int64" },
+            "maxItems": 50
+          }
+        }
+      },
       "ExtensionCreate": {
         "type": "object",
         "additionalProperties": false,
@@ -19686,6 +19726,14 @@
             "maxLength": 100,
             "example": "Reception",
             "description": "Display name shown as caller ID inside the PBX."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["user", "door"],
+            "description": "user (default) or door. A door station has no voicemail, joins no group, receives no pickup, page, intercom or MESSAGE, and may call only its doorTargets and the Door ring groups; any other destination is 403. Its calls carry the doorbell ring tag and CDR kind door. Turning an extension into a door station is refused while it is in a ring group, paging group, pickup group or queue; it then loses voicemail and intercom and is hidden from the extensions phonebook unless directoryHidden says otherwise."
+          },
+          "doorTargets": {
+            "$ref": "#/components/schemas/DoorTargets"
           },
           "externalNumber": {
             "type": "string",
@@ -19711,6 +19759,14 @@
             "maxLength": 100,
             "example": "Reception",
             "description": "New display name."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["user", "door"],
+            "description": "user (default) or door. A door station has no voicemail, joins no group, receives no pickup, page, intercom or MESSAGE, and may call only its doorTargets and the Door ring groups; any other destination is 403. Its calls carry the doorbell ring tag and CDR kind door. Turning an extension into a door station is refused while it is in a ring group, paging group, pickup group or queue; it then loses voicemail and intercom and is hidden from the extensions phonebook unless directoryHidden says otherwise."
+          },
+          "doorTargets": {
+            "$ref": "#/components/schemas/DoorTargets"
           },
           "externalNumber": {
             "type": "string",
@@ -20352,7 +20408,7 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["call", "page", "intercom", "conference"],
+            "enum": ["call", "page", "intercom", "conference", "door"],
             "description": "call, or page for a server paging group, or intercom for a 1-to-1 intercom call, or conference for a participant of a conference room."
           },
           "ringTag": {

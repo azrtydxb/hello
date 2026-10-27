@@ -486,14 +486,17 @@ type RingGroup struct {
 	MOHRingback bool   `json:"mohRingback"`
 	// RingTag overrides the ringgroup ring tag for calls through the group
 	// (empty: ringgroup; migration 00046).
-	RingTag   string            `json:"ringTag"`
+	RingTag string `json:"ringTag"`
+	// IsDoor marks the Door group (migration 00047, spec S-46): its calls
+	// carry kind door and the doorbell tag, and a door station may call it.
+	IsDoor    bool              `json:"isDoor"`
 	Members   []RingGroupMember `json:"members"`
 	CreatedAt time.Time         `json:"createdAt"`
 	UpdatedAt time.Time         `json:"updatedAt"`
 }
 
 const groupCols = `g.id, g.name, g.strategy, g.hunt, g.ring_timeout, g.member_delay, g.ignore_dnd,
-	g.failure_kind, g.failure_target, g.moh_class_id, g.moh_ringback, coalesce(g.ring_tag, ''), g.created_at, g.updated_at`
+	g.failure_kind, g.failure_target, g.moh_class_id, g.moh_ringback, coalesce(g.ring_tag, ''), g.is_door, g.created_at, g.updated_at`
 
 // listRingGroups reads groups (optionally one) and then their members.
 func listRingGroups(ctx context.Context, q querier, where string, args ...any) ([]RingGroup, error) {
@@ -508,7 +511,7 @@ func listRingGroups(ctx context.Context, q querier, where string, args ...any) (
 		var g RingGroup
 		var moh sql.NullInt64
 		if err := rows.Scan(&g.ID, &g.Name, &g.Strategy, &g.Hunt, &g.RingTimeout, &g.MemberDelay, &g.IgnoreDND,
-			&g.FailureKind, &g.FailureTarget, &moh, &g.MOHRingback, &g.RingTag, &g.CreatedAt, &g.UpdatedAt); err != nil {
+			&g.FailureKind, &g.FailureTarget, &moh, &g.MOHRingback, &g.RingTag, &g.IsDoor, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
 		if moh.Valid {
@@ -577,7 +580,10 @@ type RingGroupInput struct {
 	MOHClassID    *int64
 	MOHRingback   bool
 	RingTag       string // "" keeps the ringgroup tag
-	Members       []RingGroupMember
+	// IsDoor marks the Door group; a new Door group with no ring tag gets
+	// the doorbell tag.
+	IsDoor  bool
+	Members []RingGroupMember
 }
 
 // ListRingGroups returns every group with its members.
@@ -608,15 +614,18 @@ func (s *Store) CreateRingGroup(ctx context.Context, actor string, in RingGroupI
 		if err := checkMOHClass(ctx, tx, "mohClassId", in.MOHClassID); err != nil {
 			return 0, err
 		}
+		if in.IsDoor && in.RingTag == "" {
+			in.RingTag = "doorbell" // S-46: a new Door group rings with the doorbell tone
+		}
 		if err := checkRingTag(ctx, tx, "ringTag", in.RingTag); err != nil {
 			return 0, err
 		}
 		if err := tx.QueryRowContext(ctx, `
 			INSERT INTO ring_groups (name, strategy, hunt, ring_timeout, member_delay, ignore_dnd, failure_kind, failure_target,
-			                         moh_class_id, moh_ringback, ring_tag)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, '')) RETURNING id`,
+			                         moh_class_id, moh_ringback, ring_tag, is_door)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''), $12) RETURNING id`,
 			in.Name, in.Strategy, in.Hunt, in.RingTimeout, in.MemberDelay, in.IgnoreDND, in.FailureKind, in.FailureTarget,
-			in.MOHClassID, in.MOHRingback, in.RingTag).Scan(&id); err != nil {
+			in.MOHClassID, in.MOHRingback, in.RingTag, in.IsDoor).Scan(&id); err != nil {
 			return 0, err
 		}
 		if err := writeGroupMembers(ctx, tx, id, in.Members); err != nil {
@@ -657,9 +666,9 @@ func (s *Store) UpdateRingGroup(ctx context.Context, actor string, id int64, in 
 		res, err := tx.ExecContext(ctx, `
 			UPDATE ring_groups SET name = $2, strategy = $3, hunt = $4, ring_timeout = $5, member_delay = $6,
 			       ignore_dnd = $7, failure_kind = $8, failure_target = $9, moh_class_id = $10, moh_ringback = $11,
-			       ring_tag = NULLIF($12, ''), updated_at = now()
+			       ring_tag = NULLIF($12, ''), is_door = $13, updated_at = now()
 			WHERE id = $1`, id, in.Name, in.Strategy, in.Hunt, in.RingTimeout, in.MemberDelay, in.IgnoreDND,
-			in.FailureKind, in.FailureTarget, in.MOHClassID, in.MOHRingback, in.RingTag)
+			in.FailureKind, in.FailureTarget, in.MOHClassID, in.MOHRingback, in.RingTag, in.IsDoor)
 		if err != nil {
 			return id, err
 		}
@@ -778,6 +787,13 @@ func getGroupTx(ctx context.Context, tx *sql.Tx, id int64) (RingGroup, error) {
 // group with a deferred constraint, so any order of inserts works.
 func writeGroupMembers(ctx context.Context, tx *sql.Tx, id int64, members []RingGroupMember) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM ring_group_members WHERE group_id = $1`, id); err != nil {
+		return err
+	}
+	ids := make([]int64, 0, len(members))
+	for _, m := range members {
+		ids = append(ids, m.ExtensionID)
+	}
+	if err := checkNoDoor(ctx, tx, "members", ids); err != nil {
 		return err
 	}
 	for _, m := range members {

@@ -101,6 +101,9 @@ func writePickupMembers(ctx context.Context, tx *sql.Tx, id int64, members []int
 	if _, err := tx.ExecContext(ctx, `DELETE FROM pickup_group_members WHERE group_id = $1`, id); err != nil {
 		return err
 	}
+	if err := checkNoDoor(ctx, tx, "members", members); err != nil {
+		return err
+	}
 	for _, ext := range members {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO pickup_group_members (group_id, extension_id) VALUES ($1, $2)`, id, ext); err != nil {
 			return pagingFK(err, "members")

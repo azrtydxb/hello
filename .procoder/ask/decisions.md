@@ -832,3 +832,40 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - Not done: `exhausted` after a forward stage still uses the dialled
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
+
+## Door station extension kind and Door group (2026-10-27) — phone-feature-parity item 13 (S-45, S-46)
+
+- Migration `00047_door_station`: `extensions.kind` (user/door, default user),
+  `extensions.door_targets` (jsonb `{"extensions":[ids],"ringGroups":[ids]}`, ids
+  not foreign keys; the snapshot drops an id that no longer exists),
+  `ring_groups.is_door`, and `door` added to `cdrs_kind_check` through
+  `pg_temp.hello_check_values`. The open code, hang-up flag and webhooks belong
+  to items 14 and 16 and are not in this migration.
+- A station may call its listed extensions, its listed ring groups and every ring
+  group marked door (reading S-45 "the Door ring group" as any Door group). A
+  door station can be listed as no one's target and cannot list itself.
+- Enforcement is in `handleInvite` right after the caller is verified: the
+  dialled number goes straight to the ring group or extension and never through
+  routing, so no route can send it out; anything else is `403` with the CDR kind
+  door. The trunk ban is also in `acquireSlot` (every trunk leg takes a slot), so
+  a callee's forward-always, a group's external failure, an IVR dial-out and a
+  transfer cannot carry a station's call onto a trunk. Emergency routes are
+  never blocked (S-45 edge case). Transfer copies the flag to the new call.
+- Call kind: a call from a station, or into a Door group, has kind door, so rule
+  1 of S-40 gives it the doorbell tag; the caller kind for rules is `door`. Kind
+  already set to page or intercom is not overwritten by reaching a Door group.
+- No voicemail, no groups: creating a station makes no voicemail box; turning a
+  user into a station switches voicemail and intercom off and hides it from the
+  extensions phonebook (admin may show it); it is refused (field `kind`) while the
+  extension is in a ring group, paging group, pickup group or queue. The same
+  members are refused on write (`checkNoDoor`), the snapshot drops a station from
+  ring group members, and a station has an empty pickup scope and is in no
+  one's. Intercom to a station is `403`. MESSAGE to or from a station is `403`
+  (SIP) and `ErrMessageForbidden` (store); broadcast skips stations. Page needs no
+  extra code: a station is never a paging member.
+- A new Door group with no ring tag gets `doorbell` (S-46), stored explicitly so
+  the group shows it; later edits keep whatever tag is set.
+- Hello still does not provision door stations; the station's button dials the
+  group's number, set on the unit.
+- HA: `doorCaller` is not replicated to the other node. A door call taken over by
+  a surviving node during setup is not re-checked; this is reported, not changed here.

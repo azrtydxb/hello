@@ -379,6 +379,7 @@ interface GroupDraft {
   mohClassId: Id | null;
   mohRingback: boolean;
   ringTag: string;
+  isDoor: boolean;
   members: MemberDraft[];
 }
 
@@ -395,6 +396,7 @@ function groupDraft(group: RingGroup | null): GroupDraft {
     mohClassId: group?.mohClassId ?? null,
     mohRingback: group?.mohRingback ?? false,
     ringTag: group?.ringTag ?? "",
+    isDoor: group?.isDoor ?? false,
     members: (group?.members ?? [])
       .slice()
       .sort((a, b) => a.position - b.position)
@@ -419,6 +421,7 @@ function groupBody(d: GroupDraft): RingGroupFields {
     mohClassId: d.mohClassId,
     mohRingback: d.mohRingback,
     ringTag: d.ringTag,
+    isDoor: d.isDoor,
     members: d.members.map((m, i) => ({
       extensionId: m.extensionId,
       position: i + 1,
@@ -442,6 +445,7 @@ function groupKeys(d: GroupDraft): string[] {
     "mohClassId",
     "mohRingback",
     "ringTag",
+    "isDoor",
     "members",
     ...d.members.flatMap((_, i) => [
       `members[${i}]`,
@@ -721,6 +725,13 @@ function RingGroupDrawer({
           value={d.ringTag}
           error={errors.ringTag}
           onChange={(v) => set("ringTag", v)}
+        />
+        <Switch
+          label="Door group"
+          hint="Door stations can call this group, and its calls ring as a doorbell (a new Door group gets the doorbell ring tag)"
+          labelPosition="end"
+          checked={d.isDoor}
+          onChange={(e) => set("isDoor", e.target.checked)}
         />
 
         <fieldset

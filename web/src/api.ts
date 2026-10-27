@@ -80,6 +80,12 @@ export interface CreatedApiToken extends ApiToken {
   token: string;
 }
 
+/** The extra destinations a door station may call (ids); every Door group is allowed too. */
+export interface DoorTargets {
+  extensions: Id[];
+  ringGroups: Id[];
+}
+
 /** An extension: a dialable number, with its Phase 4 call features. */
 export interface Extension {
   id: Id;
@@ -113,6 +119,10 @@ export interface Extension {
   voicemailBoxId?: Id | null;
   /** Music on hold class callers hear while this extension holds them; null = the default. */
   mohClassId?: Id | null;
+  /** user (default) or door: a door station calls only its targets and the Door groups. */
+  kind?: "user" | "door";
+  /** The destinations a door station may call besides the Door groups. */
+  doorTargets?: DoorTargets;
   createdAt: string;
   updatedAt: string;
 }
@@ -740,6 +750,8 @@ export const createExtension = (input: {
   number: string;
   name: string;
   externalNumber?: string;
+  kind?: "user" | "door";
+  doorTargets?: DoorTargets;
 }) => request<Extension>("POST", "/api/v1/extensions", { body: input });
 
 export const updateExtension = (
@@ -757,6 +769,8 @@ export const updateExtension = (
     directoryHidden?: boolean;
     allowIntercom?: boolean;
     callWaiting?: boolean;
+    kind?: "user" | "door";
+    doorTargets?: DoorTargets;
     /** null clears the pick (the global default plays). */
     mohClassId?: Id | null;
     noAnswerRings?: number;
@@ -1184,6 +1198,8 @@ export interface RingGroupFields {
   mohRingback?: boolean;
   /** Ring tag that replaces ringgroup for calls through the group; "" keeps it. */
   ringTag?: string;
+  /** The Door group: a door station may call it; its calls ring as a doorbell. */
+  isDoor?: boolean;
 }
 
 /** A ring group as returned. */

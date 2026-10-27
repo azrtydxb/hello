@@ -133,6 +133,7 @@ func splitmix64(state *uint64) uint64 {
 // groups ring one member at a time; ring groups fork (staggered by delay).
 func (c *call) ringGroup(req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot, g snapshot.RingGroup, members []snapshot.RingGroupMember) {
 	s := c.s
+	c.noteDoorGroup(g)
 	// A nil tx means the call has begun already (a failover from another
 	// group opens a new stage on it), as in the IVR, queue and time
 	// condition entries.

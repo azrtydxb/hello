@@ -34,6 +34,7 @@ const (
 	KindPage       = "page"
 	KindIntercom   = "intercom"
 	KindConference = "conference"
+	KindDoor       = "door" // a door station's call or a call to a Door group (migration 00047)
 )
 
 // Termination sides.

@@ -112,7 +112,7 @@ ring map (a tone per tag and per vendor, written into the phone's provisioned
 configuration) is the next step. Until then, set the distinctive-ring rules on
 the phone by hand: match the Alert-Info text `hello-<tag>` (or the
 `Bellcore-drN` URL) and pick a ringer. Kinds that come from features not yet in
-Hello (door stations, alarm calls, emergency callbacks) are recognised by the
+Hello (alarm calls, emergency callbacks) are recognised by the
 rules already, and take effect when those features arrive.
 
 ## API
