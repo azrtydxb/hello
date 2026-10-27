@@ -121,7 +121,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Blocklist, anonymous reject, country limits   | wip (spec #199)                |
 | Queue callback                                | wip (spec #199)                |
 | 2FA                                           | wip (#209)                     |
-| Dial-by-name                                  | wip (spec #199)                |
+| Dial-by-name                                  | wip (#229, B3)                 |
 | Voicemail groups                              | wip (spec #199)                |
 | Fax                                           | wip (spec #199)                |
 | Boss/secretary                                | wip (spec #199)                |
