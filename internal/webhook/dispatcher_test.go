@@ -19,6 +19,9 @@ import (
 // after 10 seconds (fake clock, no jitter), if the retry is attempted early,
 // if the event id is not stable across the attempts while the delivery id is
 // unique per attempt, or if the success is not recorded once.
+// near reports whether two times agree to the microsecond PostgreSQL keeps.
+func near(a, b time.Duration) bool { return (a-b).Abs() < time.Millisecond }
+
 func TestDeliverSignsAndRetriesAServerError(t *testing.T) {
 	forEachStore(t, func(t *testing.T, r *rig) {
 		ep, sec := r.endpoint(EndpointInput{})
@@ -37,7 +40,7 @@ func TestDeliverSignsAndRetriesAServerError(t *testing.T) {
 		if d.Status != StatusRetrying || d.Attempts != 1 || d.LastStatus == nil || *d.LastStatus != 503 || d.NextAttemptAt == nil {
 			t.Fatalf("after a 503: %+v", d)
 		}
-		if got := d.NextAttemptAt.Sub(r.clk.Now()); got != 10*time.Second {
+		if got := d.NextAttemptAt.Sub(r.clk.Now()); !near(got, 10*time.Second) {
 			t.Fatalf("next attempt in %v, want 10s", got)
 		}
 		if n := r.run(); n != 0 {
@@ -177,7 +180,7 @@ func TestRetriesFollowTheSchedule(t *testing.T) {
 				t.Fatalf("attempt %d: %d attempts", i+1, n)
 			}
 			d := r.delivery(ep.ID)
-			if d.Status != StatusRetrying || d.NextAttemptAt == nil || d.NextAttemptAt.Sub(r.clk.Now()) != want {
+			if d.Status != StatusRetrying || d.NextAttemptAt == nil || !near(d.NextAttemptAt.Sub(r.clk.Now()), want) {
 				t.Fatalf("after attempt %d: %+v, want a retry in %v", i+1, d, want)
 			}
 			r.clk.Advance(want - time.Second)
@@ -214,7 +217,7 @@ func TestRetryAfterIsHonouredUpToAnHour(t *testing.T) {
 			r.env.emit(t, event(events.CallEnded, "200"))
 			r.run()
 			ds := r.deliveries(ep.ID, StatusRetrying)
-			if len(ds) != 1 || ds[0].NextAttemptAt.Sub(r.clk.Now()) != tc.want {
+			if len(ds) != 1 || !near(ds[0].NextAttemptAt.Sub(r.clk.Now()), tc.want) {
 				t.Fatalf("Retry-After %q: %+v, want a retry in %v", tc.header, ds, tc.want)
 			}
 			if _, err := r.svc.Redeliver(context.Background(), "u", ds[0].ID); err != nil {
