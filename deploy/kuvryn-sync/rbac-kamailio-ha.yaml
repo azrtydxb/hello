@@ -17,6 +17,18 @@ rules:
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # kube-vip's election Lease. Sync creates the kamailio-vip Role that grants
+  # it, and Kubernetes only lets a subject create a Role (or bind it) whose
+  # rules it holds itself, so the deployer must hold them too. The verbs are
+  # those of that Role; the deployer never creates a Lease itself.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # The bootstrap Role lets the deployer create Roles and RoleBindings but
+  # not change them; a later edit of kamailio-vip would be refused.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["update", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

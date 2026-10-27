@@ -742,6 +742,163 @@ jobs:
         if: always()
         run: kind delete cluster --name hello || true
 
+  kamailio-ha:
+    # The Kamailio pair's failover on kind (.procoder/specs/kamailio-ha.md,
+    # acceptance criteria): the kw edge manifests - two hostNetwork Kamailio,
+    # a kube-vip sidecar each, one VIP - applied to a kind cluster, with the
+    # test (test/kindha) playing the phones and the Hello nodes. It kills the
+    # active instance with calls up (by deleting its pod, and by freezing its
+    # node), requires the VIP to move, BYE from either side and a takeover
+    # re-INVITE to succeed through the survivor and a registered phone to be
+    # called without re-registering, then restarts both instances one at a time.
+    # Full tier: on a pull request only when the change touches the edge (the
+    # first step decides); always on main, the nightly cron and dispatch.
+    # Starts after the unit jobs finish (whatever their result): a kind control
+    # plane is etcd on the runner's disk, and on the shared 4-core runners it
+    # times out requests (load average 10) while go, chart and web are running.
+    needs: [go, chart, web, kamailio-config]
+    if: ${{ !cancelled() }}
+    runs-on: arc-azrtydxb
+    timeout-minutes: 50
+    env:
+      KIND_VERSION: v0.30.0
+      KUBECTL_VERSION: v1.34.0
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: changed
+        name: Does the change touch the edge?
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git diff --name-only "$BASE_SHA" HEAD | grep -E '^(deploy/kamailio/|docker/kamailio/|deploy/kuvryn-sync/kw/|deploy/helm/|test/kindha/|\.github/workflows/ci\.yaml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "the change does not touch the edge: skipping the failover test"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.run == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Tools on the runner
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          docker version
+          arch=$(uname -m); case $arch in
+            x86_64) a=amd64 ;;
+            aarch64|arm64) a=arm64 ;;
+            *) echo "unsupported arch $arch"; exit 1 ;;
+          esac
+          mkdir -p "$HOME/bin"
+          curl -fsSL "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-${a}" -o "$HOME/bin/kind"
+          curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${a}/kubectl" -o "$HOME/bin/kubectl"
+          chmod +x "$HOME/bin/kind" "$HOME/bin/kubectl"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - if: steps.changed.outputs.run == 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          buildkitd-config-inline: |
+            [registry."192.168.10.131"]
+              insecure = true
+            [registry."192.168.10.131:5000"]
+              insecure = true
+            [registry."docker.io"]
+              mirrors = ["ant.azrty.com"]
+      - id: ant-cache-ha
+        if: steps.changed.outputs.run == 'true'
+        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+        with:
+          build-cache: "true"
+          cache-name: kamailio
+          cache-write: ${{ github.event_name == 'push' }}
+          sccache: "false"
+          go: "false"
+          npm: "false"
+          cargo: "false"
+          pip: "false"
+      - name: Build kamailio
+        if: steps.changed.outputs.run == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: docker/kamailio
+          load: true
+          tags: hello.local/kamailio:ha
+          cache-from: ${{ steps.ant-cache-ha.outputs.cache-from }}
+          cache-to: ${{ steps.ant-cache-ha.outputs.cache-to }}
+      # Compile the test before the cluster exists, so the compiler does not
+      # compete with etcd for the runner's CPU while the cluster settles.
+      - name: Compile the failover test
+        if: steps.changed.outputs.run == 'true'
+        run: go test -c -o "$RUNNER_TEMP/kindha.test" ./test/kindha/
+      - name: Create the kind cluster
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          cat > kind.yaml <<'EOF'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+              # A throwaway cluster on a busy runner: etcd without fsync and
+              # with relaxed timeouts, or it times out requests under load.
+              kubeadmConfigPatches:
+                - |
+                  kind: ClusterConfiguration
+                  etcd:
+                    local:
+                      extraArgs:
+                        unsafe-no-fsync: "true"
+                        heartbeat-interval: "500"
+                        election-timeout: "5000"
+            - role: worker
+            - role: worker
+          EOF
+          # kind's kubelets need more inotify instances than the default 128.
+          docker run --rm --privileged alpine:3.22 sh -c 'sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576' || echo "could not raise the inotify limits"
+          nproc; free -m || true; uptime
+          kind create cluster --name kamailio-ha --config kind.yaml --wait 5m --retain || {
+            docker ps -a
+            kind export logs --name kamailio-ha ./kind-logs || true
+            tail -n 60 ./kind-logs/*/journal.log 2>/dev/null || true
+            exit 1
+          }
+          # kube-vip is a multi-arch index that `kind load` cannot import from
+          # the runner's single-platform copy; the nodes pull it from ghcr.io.
+          kind load docker-image --name kamailio-ha hello.local/kamailio:ha
+          kubectl get nodes -o wide
+      - name: Failover test
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          # The VIP: a free address of the kind network, far from the nodes'.
+          subnet=$(docker network inspect kind -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/' | head -1)
+          IFS=. read -r a b c _ <<< "${subnet%/*}"
+          if [ "${subnet#*/}" -le 16 ]; then vip="$a.$b.255.200"; else vip="$a.$b.$c.200"; fi
+          echo "kind network $subnet, VIP $vip"
+          export HELLO_KINDHA=1
+          export KINDHA_NODES=kamailio-ha-worker,kamailio-ha-worker2
+          export KINDHA_CONTROL=kamailio-ha-control-plane
+          export KINDHA_VIP="$vip"
+          export KINDHA_IMAGE=hello.local/kamailio:ha
+          export KINDHA_CONTEXT=kind-kamailio-ha
+          "$RUNNER_TEMP/kindha.test" -test.count=1 -test.timeout 40m -test.v
+      - name: Cluster state on failure
+        if: failure() && steps.changed.outputs.run == 'true'
+        run: |
+          kubectl -n hello get pods -o wide || true
+          kubectl -n hello get lease || true
+          kubectl -n hello get events --sort-by=.lastTimestamp | tail -40 || true
+          kubectl -n kube-system get pods -o wide || true
+          for p in $(kubectl -n hello get pods -o name); do
+            for c in wait-dispatcher kamailio vip; do
+              echo "=== $p $c"; kubectl -n hello logs "$p" -c "$c" --tail=100 || true
+            done
+          done
+      - name: Remove the cluster
+        if: always() && steps.changed.outputs.run == 'true'
+        run: kind delete cluster --name kamailio-ha || true
+
   publish:
     # Only what lands on main becomes an image; a pull request is tested and
     # nothing more.

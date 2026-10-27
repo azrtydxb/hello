@@ -1,12 +1,12 @@
 package deploy
 
 import (
+	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
-
-	"go.yaml.in/yaml/v3"
 )
 
 // Kamailio HA (.procoder/specs/kamailio-ha.md, Option A): two hostNetwork
@@ -111,74 +111,153 @@ func TestKwKamailioPDB(t *testing.T) {
 	}
 }
 
-// TestKwKamailioAdvertisesItsOwnNode guards the no-VIP stage: each instance
-// binds and advertises its own node address (the pod IP under hostNetwork),
-// so master-11 keeps serving 192.168.10.101 for every provisioned phone and
-// master-12 serves 192.168.10.102 for a test phone.
-func TestKwKamailioAdvertisesItsOwnNode(t *testing.T) {
-	c := containerNamed(t, kwObject(t, "Deployment", "kamailio"), false, "kamailio")
-	env := envOf(c)
-	for _, name := range []string{"KAMAILIO_LISTEN_IP", "KAMAILIO_PUBLIC_HOST"} {
-		if got := str(dig(env[name], "valueFrom", "fieldRef", "fieldPath")); got != "status.podIP" {
-			t.Errorf("%s = %v, want the pod IP (each instance advertises its own node address)", name, env[name])
+// kwVIP is the address phones are moved to (decision "Kamailio HA option and
+// VIP", 2026-10-26): outside Cilium LB-IPAM's 192.168.10.120-159 and not a
+// node.
+const kwVIP = "192.168.10.109"
+
+// TestKwKamailioVIP guards the VIP stage: every address a dialog names is the
+// VIP (advertised host, bound sockets, kube-vip's address), the node address
+// stays served for phones not yet moved, kube-vip is the mechanism already
+// running on the cluster (same image) electing on its own Lease, and its VIP
+// follows the health of the Kamailio beside it.
+func TestKwKamailioVIP(t *testing.T) {
+	dep := kwObject(t, "Deployment", "kamailio")
+	kam := containerNamed(t, dep, false, "kamailio")
+	env := envOf(kam)
+	for _, name := range []string{"KAMAILIO_PUBLIC_HOST", "KAMAILIO_EDGE_VIP"} {
+		if got := str(env[name]["value"]); got != kwVIP {
+			t.Errorf("%s = %q, want the VIP %s: the phone-facing and Hello-facing names must survive the instance", name, got, kwVIP)
 		}
 	}
+	for _, name := range []string{"KAMAILIO_LISTEN_IP", "KAMAILIO_LEGACY_IP"} {
+		if got := str(dig(env[name], "valueFrom", "fieldRef", "fieldPath")); got != "status.podIP" {
+			t.Errorf("%s = %v, want the pod IP: the node address stays served until the last phone has moved", name, env[name])
+		}
+	}
+
+	// The VIP is not an address anything else owns.
+	if ip := net.ParseIP(kwVIP).To4(); ip == nil || ip[3] >= 120 && ip[3] <= 159 || ip[3] >= 101 && ip[3] <= 108 || ip[3] == 100 || ip[3] == 245 || ip[3] == 246 {
+		t.Errorf("VIP %s is inside Cilium LB-IPAM's 120-159, a node (101-108, 245, 246) or the API server's .100", kwVIP)
+	}
+
+	// Hello trusts the edge by address: the VIP is in HELLO_SIP_TRUSTED_PROXIES.
+	for _, n := range []string{"hello-sip-1", "hello-sip-2"} {
+		sip := envOf(containerNamed(t, kwObject(t, "Deployment", n), false, "hello-sip"))
+		trusted := false
+		for _, cidr := range strings.Split(str(sip["HELLO_SIP_TRUSTED_PROXIES"]["value"]), ",") {
+			if _, nw, err := net.ParseCIDR(strings.TrimSpace(cidr)); err == nil && nw.Contains(net.ParseIP(kwVIP)) {
+				trusted = true
+			}
+		}
+		if !trusted {
+			t.Errorf("%s: HELLO_SIP_TRUSTED_PROXIES %q does not cover the VIP %s", n, sip["HELLO_SIP_TRUSTED_PROXIES"]["value"], kwVIP)
+		}
+	}
+
+	vip := containerNamed(t, dep, false, "vip")
+	venv := envOf(vip)
+	want := map[string]string{
+		"vip_arp": "true", "address": kwVIP, "vip_interface": "bond0", "cp_enable": "true",
+		"cp_namespace": "hello", "svc_enable": "false", "vip_leaderelection": "true",
+		"vip_leasename": "kamailio-vip", "vip_leaseduration": "5",
+	}
+	for k, v := range want {
+		if got := str(venv[k]["value"]); got != v {
+			t.Errorf("vip env %s = %q, want %q", k, got, v)
+		}
+	}
+	if venv["vip_leasename"]["value"] == "plndr-cp-lock" {
+		t.Error("vip must not share the API server's Lease")
+	}
+	// The same image as the DaemonSet that already holds .100 on this cluster.
+	if got := str(vip["image"]); got != "ghcr.io/kube-vip/kube-vip:v1.2.3" {
+		t.Errorf("vip image = %q, want ghcr.io/kube-vip/kube-vip:v1.2.3 (the version kube-system/kube-vip-ds runs)", got)
+	}
+	caps := strOf(list(dig(vip, "securityContext", "capabilities", "add")))
+	sort.Strings(caps)
+	if strings.Join(caps, ",") != "NET_ADMIN,NET_RAW" {
+		t.Errorf("vip capabilities = %v, want NET_ADMIN and NET_RAW", caps)
+	}
+	// The VIP follows Kamailio: both probes ask Kamailio's own /healthz.
+	metrics := str(env["KAMAILIO_METRICS_PORT"]["value"])
+	for _, probe := range []string{"livenessProbe", "startupProbe"} {
+		if got := str(dig(vip, probe, "httpGet", "path")); got != "/healthz" {
+			t.Errorf("vip %s path = %q, want /healthz of the Kamailio beside it", probe, got)
+		}
+		if got := str(dig(vip, probe, "httpGet", "port")); got != metrics {
+			t.Errorf("vip %s port = %q, want Kamailio's metrics port %s", probe, got, metrics)
+		}
+	}
+	live := intOf(t, dig(vip, "livenessProbe", "periodSeconds")) * intOf(t, dig(vip, "livenessProbe", "failureThreshold"))
+	if live > 10 {
+		t.Errorf("vip liveness takes %ds to hand the VIP over, want at most 10s", live)
+	}
+
+	// Its identity: a dedicated ServiceAccount that can only use Leases, its
+	// token mounted into the vip container alone.
+	spec := podSpec(dep)
+	if got := str(dig(spec, "serviceAccountName")); got != "kamailio-vip" {
+		t.Errorf("serviceAccountName = %q, want kamailio-vip", got)
+	}
+	if str(dig(spec, "automountServiceAccountToken")) != "false" {
+		t.Error("automountServiceAccountToken must be false: only the vip container gets the token (projected volume)")
+	}
+	role := kwObject(t, "Role", "kamailio-vip")
+	for _, r := range list(dig(role, "rules")) {
+		if got := strings.Join(strOf(list(dig(r, "resources"))), ","); got != "leases" {
+			t.Errorf("Role kamailio-vip grants %q, want leases only", got)
+		}
+	}
+	kwObject(t, "RoleBinding", "kamailio-vip")
+	kwObject(t, "ServiceAccount", "kamailio-vip")
 }
 
-// TestKamailioHARBAC fails if the kw manifests carry a kind the original
-// deployer Role does not cover and deploy/kuvryn-sync/rbac-kamailio-ha.yaml
-// does not grant. Sync applies the manifests as the kuvryn-sync-deployer
+// TestKamailioHARBAC fails if the kw manifests need a grant the deployer
+// does not have. Sync applies them as the kuvryn-sync-deployer
 // ServiceAccount; a missing rule fails the release, not a test, so this is
-// where the admin step is kept honest.
+// where the admin step (deploy/kuvryn-sync/rbac-kamailio-ha.yaml) is kept
+// honest. Two checks: every kind in kw/resources.yaml is covered with the
+// verbs Sync needs (create and update), and every Role in it grants only
+// rules the deployer holds itself (Kubernetes refuses to create or bind a
+// Role that would escalate).
 func TestKamailioHARBAC(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kuvryn-sync", "rbac-kamailio-ha.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	granted := map[string]map[string]bool{} // "group/resource" -> verbs
-	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
-	for {
-		var d struct {
-			Kind  string `yaml:"kind"`
-			Rules []struct {
-				APIGroups []string `yaml:"apiGroups"`
-				Resources []string `yaml:"resources"`
-				Verbs     []string `yaml:"verbs"`
-			} `yaml:"rules"`
-		}
-		if err := dec.Decode(&d); err != nil {
-			break
-		}
-		if d.Kind != "Role" {
-			continue
-		}
-		for _, r := range d.Rules {
-			for _, g := range r.APIGroups {
-				for _, res := range r.Resources {
-					k := g + "/" + res
-					if granted[k] == nil {
-						granted[k] = map[string]bool{}
-					}
-					for _, v := range r.Verbs {
-						granted[k][v] = true
-					}
+	type rule struct{ group, resource, verb string }
+	have := map[rule]bool{}
+	add := func(groups, resources, verbs []string) {
+		for _, g := range groups {
+			for _, r := range resources {
+				for _, v := range verbs {
+					have[rule{g, r, v}] = true
 				}
 			}
 		}
 	}
-	// What the original deployer Role (bootstrap, README) covers.
-	covered := map[string]bool{
-		"/configmaps": true, "apps/deployments": true, "networking.k8s.io/ingresses": true,
-		"/services": true, "/secrets": true, "/serviceaccounts": true,
-		"rbac.authorization.k8s.io/roles": true, "rbac.authorization.k8s.io/rolebindings": true,
+	rw := []string{"get", "list", "watch", "create", "update", "patch"}
+	// The original bootstrap Role (README, "Bootstrap").
+	add([]string{""}, []string{"configmaps", "services", "secrets", "serviceaccounts"}, rw)
+	add([]string{"apps"}, []string{"deployments"}, rw)
+	add([]string{"networking.k8s.io"}, []string{"ingresses"}, rw)
+	add([]string{"rbac.authorization.k8s.io"}, []string{"roles", "rolebindings"}, []string{"get", "list", "watch", "create"})
+
+	raw, err := os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kuvryn-sync", "rbac-kamailio-ha.yaml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	// kind -> "group/resource" for every kind the manifests may carry.
-	resourceOf := map[string]string{
-		"ConfigMap": "/configmaps", "Deployment": "apps/deployments", "Ingress": "networking.k8s.io/ingresses",
-		"Service": "/services", "Secret": "/secrets", "ServiceAccount": "/serviceaccounts",
-		"Role": "rbac.authorization.k8s.io/roles", "RoleBinding": "rbac.authorization.k8s.io/rolebindings",
-		"PodDisruptionBudget": "policy/poddisruptionbudgets", "Certificate": "cert-manager.io/certificates",
-		"Lease": "coordination.k8s.io/leases",
+	for _, o := range decodeAll(t, string(raw)) {
+		if str(o["kind"]) != "Role" {
+			continue
+		}
+		for _, r := range list(o["rules"]) {
+			add(strOf(list(dig(r, "apiGroups"))), strOf(list(dig(r, "resources"))), strOf(list(dig(r, "verbs"))))
+		}
+	}
+
+	resourceOf := map[string][2]string{
+		"ConfigMap": {"", "configmaps"}, "Deployment": {"apps", "deployments"}, "Ingress": {"networking.k8s.io", "ingresses"},
+		"Service": {"", "services"}, "Secret": {"", "secrets"}, "ServiceAccount": {"", "serviceaccounts"},
+		"Role": {"rbac.authorization.k8s.io", "roles"}, "RoleBinding": {"rbac.authorization.k8s.io", "rolebindings"},
+		"PodDisruptionBudget": {"policy", "poddisruptionbudgets"},
 	}
 	raw, err = os.ReadFile(filepath.Join(repoRoot(t), "deploy", "kuvryn-sync", "kw", "resources.yaml"))
 	if err != nil {
@@ -186,7 +265,22 @@ func TestKamailioHARBAC(t *testing.T) {
 	}
 	seen := map[string]bool{}
 	for _, o := range decodeAll(t, string(raw)) {
-		seen[str(o["kind"])] = true
+		kind := str(o["kind"])
+		seen[kind] = true
+		if kind != "Role" {
+			continue
+		}
+		for _, r := range list(o["rules"]) {
+			for _, g := range strOf(list(dig(r, "apiGroups"))) {
+				for _, res := range strOf(list(dig(r, "resources"))) {
+					for _, v := range strOf(list(dig(r, "verbs"))) {
+						if !have[rule{g, res, v}] {
+							t.Errorf("Role %s grants %s on %s/%s, which the deployer does not hold: Kubernetes refuses the escalation; add it to rbac-kamailio-ha.yaml", dig(o, "metadata", "name"), v, g, res)
+						}
+					}
+				}
+			}
+		}
 	}
 	for kind := range seen {
 		res, known := resourceOf[kind]
@@ -194,13 +288,9 @@ func TestKamailioHARBAC(t *testing.T) {
 			t.Errorf("kw manifests carry kind %s: add it to this test's resource table and say how the deployer is granted it", kind)
 			continue
 		}
-		if covered[res] {
-			continue
-		}
-		verbs := granted[res]
 		for _, v := range []string{"get", "create", "update", "patch"} {
-			if !verbs[v] {
-				t.Errorf("kw manifests carry %s but rbac-kamailio-ha.yaml does not grant %s on %s", kind, v, res)
+			if !have[rule{res[0], res[1], v}] {
+				t.Errorf("kw manifests carry %s but no Role grants the deployer %s on %s/%s", kind, v, res[0], res[1])
 			}
 		}
 	}

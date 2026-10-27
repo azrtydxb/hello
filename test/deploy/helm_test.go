@@ -317,12 +317,13 @@ var kwOnlyEnv = map[string]string{
 	"HELLO_AI_TIMEOUT":                   "kw tuning; set through control.extraEnv",
 }
 
-// kwKamailioChartLag lists Kamailio env vars whose kw form (a field
-// reference) the chart does not render yet, each with the kamailio-ha phase
-// that closes the gap. The list must be empty once the chart option for two
-// instances lands (phase 4).
+// kwKamailioChartLag lists Kamailio env vars the kw manifests set and the
+// chart does not render yet, each with the kamailio-ha phase that closes the
+// gap. The list must be empty once the chart option for two
+// instances and the VIP lands (phase 4).
 var kwKamailioChartLag = map[string]string{
-	"KAMAILIO_PUBLIC_HOST": "phase 1: kw's two instances advertise their own node address (status.podIP); the chart option follows in phase 4",
+	"KAMAILIO_EDGE_VIP":  "phase 2: kw binds the phones and hello sockets to the VIP; the chart option follows in phase 4",
+	"KAMAILIO_LEGACY_IP": "phase 2: kw serves phones still on the node address; the chart option follows in phase 4",
 }
 
 // TestChartEnvParityWithKw fails if a hello-sip, hello-control or Kamailio
