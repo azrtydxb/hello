@@ -989,8 +989,41 @@ conflict`), and a batch that deleted a device or phone (which a batch cannot
   number or SIP URI) and removed with a Disconnect button; the pointer drag
   and the Delete key on a selected edge are shortcuts to the same operations.
   Objects are not deleted with the key: they have a confirmation.
-- **Not in P4, with the reason.** "Generate prompt" waits for tts-prompts on
-  main; the spec's `web/src/forms/*Form.tsx` extraction is not done: the panel
-  edits the fields that matter on the canvas from the same operations, and the
-  form pages are untouched (their tests pass unchanged). Creating devices,
-  phones and trunks with credentials stays out of scope (spec).
+- **Forms are shared (spec S-15).** The create/edit drawers of ring groups,
+  IVR menus, queues, time conditions, conferences, inbound and outbound routes,
+  extensions and the text prompt editor moved from `web/src/pages/*.tsx` to
+  `web/src/forms/*Form.tsx` unchanged (their page tests pass unmodified). Each
+  drawer that the canvas uses got one optional prop, `commit(body)`: when set
+  the drawer hands its validated body to the caller instead of calling the
+  API. The canvas panel's "Edit all settings" opens the same drawer
+  (`FormHost`) with the object's GET (plus what the draft already changes) and
+  stages the result with `stageBody`.
+- **`stageBody`** keeps only the fields that differ from the object as it
+  stands, runs the rename cascade when the name changed, and recomputes the
+  edges the new values draw (`wanted.ts` reads the stored fields the way the
+  graph builder does, per owner-field group; groups it does not cover are left
+  alone) so the projected graph is right without a round trip.
+- **Every connection with a stored form is wirable.** Adapters were added for
+  outbound trunk order (`trunks`, ordered ids), hold music (`mohClassId` on
+  extension, ring group, inbound route and queue), prompts (IVR
+  `greetingId`/`invalidPromptId`/`timeoutPromptId`, queue prompt ids,
+  conference entry/exit announcement names, hold music `announcementIds`),
+  device to extension (`extensionId`), phone to device (`deviceId`), calendars
+  to schedules (`calendarIds`), schedule to time condition (`scheduleId`),
+  paging group multicast channel and paging members/callers. All use existing
+  batchable operations, so no backend change was needed. Required fields
+  (an IVR greeting, a device's extension, a time condition's schedule) can be
+  re-pointed but not cleared; the panel says why. None of these truly cannot
+  be stored.
+- **Draft node positions** are persisted with the draft
+  (`{baseRevision, ops, history, positions}`) and restored into the layout
+  reducer on load, for nodes whose create operation survived the rebase.
+- **Generate prompt** (tts-prompts is on main, PR #139): the panel's
+  announcement section and a toolbar button open the Announcements page's
+  prompt editor (`PromptHost`). Generation calls the speech provider and
+  stores audio, which a batch cannot roll back, so it runs immediately and is
+  not staged; the canvas then reloads and places the announcement.
+- **Still out of scope.** Creating devices, phones and trunks with credentials
+  (spec). The extension drawer is shared but not wired to `commit` (its
+  voicemail, device and live panes act on the server at once); the panel edits
+  an extension's name and DND and its forwards and hold music as connections.

@@ -560,3 +560,114 @@ describe("flow canvas editing", { timeout: 90000 }, () => {
     ).toBeInTheDocument();
   });
 });
+
+describe(
+  "flow canvas editing: forms, prompts and positions",
+  { timeout: 90000 },
+  () => {
+    it("opens the object's own form from the panel and stages its changes", async () => {
+      api("operator", {
+        "GET /api/v1/ring-groups": () => json({ items: [] }),
+        "GET /api/v1/extensions": () => json({ items: [] }),
+        "GET /api/v1/announcements": () => json({ items: [] }),
+        "GET /api/v1/paging-groups": () => json({ items: [] }),
+        "GET /api/v1/ivr-menus": () => json({ items: [] }),
+        "GET /api/v1/moh-classes": () => json({ items: [] }),
+        "GET /api/v1/time-conditions": () => json({ items: [] }),
+        "GET /api/v1/schedules": () => json({ items: [] }),
+        "GET /api/v1/trunks": () => json({ items: [] }),
+        "POST /api/v1/config/batch": () => json(RESULT(false)),
+      });
+      await open();
+      fireEvent.click(screen.getByText("sales"));
+      const panel = await screen.findByRole("complementary", {
+        name: "Selected node",
+      });
+      fireEvent.click(
+        await within(panel).findByRole("button", { name: "Edit all settings" }),
+      );
+      const form = await screen.findByRole(
+        "form",
+        { name: "Edit ring group sales" },
+        { timeout: 20000 },
+      );
+      fireEvent.change(within(form).getByLabelText("Ring timeout (s)"), {
+        target: { value: "45" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save group" }));
+      await waitFor(() => {
+        const txt = document.body.textContent ?? "";
+        if (!/1 staged change/.test(txt)) throw new Error(txt.slice(-1500));
+      });
+      // Nothing was saved by the form itself.
+      expect(
+        calls.filter((c) => c.method === "PUT" || c.method === "PATCH"),
+      ).toHaveLength(0);
+      await waitFor(() => expect(batchCalls().length).toBeGreaterThan(0));
+      const ops = batchBody(batchCalls().at(-1)!).ops as {
+        operationId: string;
+        body: Record<string, unknown>;
+      }[];
+      expect(ops[0]).toMatchObject({
+        operationId: "updateRingGroup",
+        body: { ringTimeout: 45 },
+      });
+    });
+
+    it("offers to generate a prompt from text on an announcement", async () => {
+      api("operator", {
+        "GET /api/v1/announcements/1": () =>
+          json({ id: 1, name: "greeting", updatedAt: "x" }),
+        "GET /api/v1/tts/voices": () => json({ models: [] }),
+      });
+      renderApp("/flow/1");
+      await screen.findByRole(
+        "heading",
+        { name: "Main office" },
+        { timeout: 60000 },
+      );
+      fireEvent.click(
+        await screen.findByRole("button", { name: "New prompt from text" }),
+      );
+      expect(
+        await screen.findByText(
+          "New prompt from text",
+          { selector: "h2" },
+          { timeout: 30000 },
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Generate announcement" }),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps the positions of new nodes in the persisted draft", async () => {
+      api("operator", {
+        "POST /api/v1/config/batch": () => json(RESULT(false)),
+      });
+      await open();
+      fireEvent.click(screen.getByRole("button", { name: "Add object" }));
+      const dialog = await screen.findByRole("dialog", {
+        name: "Add an object",
+      });
+      fireEvent.change(within(dialog).getByLabelText("Kind"), {
+        target: { value: "ringGroup" },
+      });
+      fireEvent.change(await within(dialog).findByLabelText("Name"), {
+        target: { value: "night" },
+      });
+      fireEvent.click(
+        within(dialog).getByRole("button", { name: "Add to draft" }),
+      );
+      await screen.findByText(/1 staged change/);
+      await waitFor(() => {
+        const saved = JSON.parse(
+          localStorage.getItem("hello.flow.draft.1.ann") ?? "{}",
+        ) as {
+          positions?: Record<string, { x: number; y: number }>;
+        };
+        expect(saved.positions?.["ringGroup:~n1"]).toBeDefined();
+      });
+    });
+  },
+);

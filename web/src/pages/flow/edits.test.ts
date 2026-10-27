@@ -17,6 +17,7 @@ import {
   referrersOf,
   rename,
   setSetting,
+  stageBody,
   terminalNode,
   type EditCtx,
 } from "./edits";
@@ -378,3 +379,106 @@ describe("create", () => {
     expect(r.ok).toBe(false);
   });
 });
+
+describe("the other connections", () => {
+  it("hold music is a class id on the object that plays it", async () => {
+    const ops = await ok(
+      connect(
+        ctxFor(),
+        node("mohClass:1"),
+        "use",
+        node("queue:1"),
+        "holdMusic",
+      ),
+    );
+    expect(ops[0]?.operationId).toBe("putQueue");
+    expect(ops[0]?.body?.mohClassId).toBe(1);
+    expect(ops[0]?.edges[0]?.add[0]?.id).toBe(
+      "mohClass:1.use->queue:1.holdMusic",
+    );
+  });
+
+  it("outbound trunk order is the trunks list of the route", async () => {
+    const ops = await ok(
+      connect(
+        ctxFor(),
+        node("outboundRoute:1"),
+        "trunks",
+        node("trunk:1"),
+        "carrier",
+      ),
+    );
+    expect(ops[0]?.operationId).toBe("updateOutboundRoute");
+    expect(ops[0]?.body).toEqual({ trunks: [1] });
+  });
+
+  it("a calendar joins a schedule through calendarIds", async () => {
+    const ops = await ok(
+      connect(
+        ctxFor(),
+        node("holidayCalendar:1"),
+        "use",
+        node("schedule:1"),
+        "calendars",
+      ),
+    );
+    expect(ops[0]?.operationId).toBe("putSchedule");
+    expect(ops[0]?.body?.calendarIds).toEqual([1]);
+    expect(ops[0]?.body?.name).toBe("office");
+  });
+
+  it("a greeting cannot be cleared, with the reason", async () => {
+    const g: FlowEdgeLike = {
+      id: "announcement:1.audio->ivr:1.greeting",
+      source: { node: "announcement:1", port: "audio" },
+      target: { node: "ivr:1", port: "greeting" },
+      owner: { node: "ivr:1", field: "greetingId" },
+    };
+    const r = await disconnect(ctxFor(), g);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/always needs a greeting/);
+  });
+});
+
+describe("a whole-object form edit", () => {
+  it("stages only what changed, rewires the edges and cascades a rename", async () => {
+    const body = {
+      ...EDIT_BODIES["/api/v1/ring-groups/1"],
+      name: "sales-team",
+      ringTimeout: 45,
+      failureKind: "queue",
+      failureTarget: "helpdesk",
+      members: [{ extensionId: 1, position: 1, weight: 1, delay: 0 }],
+    };
+    const r = await stageBody(ctxFor(), node("ringGroup:1"), body);
+    if (!r.ok) throw new Error(r.error);
+    const group = r.ops.find((o) => o.operationId === "updateRingGroup")!;
+    expect(group.body).toEqual({
+      name: "sales-team",
+      ringTimeout: 45,
+      failureKind: "queue",
+      failureTarget: "helpdesk",
+    });
+    expect(r.ops.some((o) => o.operationId === "putIVRMenu")).toBe(true);
+    const g = project(
+      EDIT_GRAPH,
+      draftReducer(emptyDraft(7), { type: "stage", ops: r.ops }),
+    );
+    expect(g.edges.map((e) => e.id)).toContain(
+      "ringGroup:1.noAnswer->queue:1.call",
+    );
+    // The member edge is still there.
+    expect(g.edges.map((e) => e.id)).toContain(
+      "extension:1.member->ringGroup:1.members",
+    );
+  });
+
+  it("an unchanged form stages nothing", async () => {
+    const r = await stageBody(ctxFor(), node("ringGroup:2"), {
+      ...EDIT_BODIES["/api/v1/ring-groups/2"],
+    });
+    expect(r).toEqual({ ok: true, ops: [] });
+  });
+});
+
+type FlowEdgeLike = Parameters<typeof disconnect>[1];

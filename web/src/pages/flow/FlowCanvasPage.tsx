@@ -17,6 +17,8 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -78,6 +80,7 @@ import {
   rebase,
   saveDraft,
   type Body,
+  type DraftPositions,
   type DraftState,
 } from "./draft";
 import {
@@ -88,6 +91,7 @@ import {
   disconnect,
   referrersOf,
   setSetting,
+  stageBody,
   type EditCtx,
   type EditResult,
   type FormValues,
@@ -103,6 +107,14 @@ import { ReviewDialog } from "./ReviewDialog";
 import { FlowNodeView, StubNodeView } from "./nodes";
 import { DRAG_TYPE, OffCanvasList } from "./OffCanvasList";
 import { PortStylesContext, portStylesOf } from "./portStyles";
+
+// The shared forms are big and only needed when one is opened.
+const FormHost = lazy(() =>
+  import("./FormHost").then((m) => ({ default: m.FormHost })),
+);
+const PromptHost = lazy(() =>
+  import("./PromptHost").then((m) => ({ default: m.PromptHost })),
+);
 
 const nodeTypes: NodeTypes = { flow: FlowNodeView, stub: StubNodeView };
 
@@ -222,31 +234,22 @@ function CanvasView({
   const stageRef = useRef<HTMLDivElement>(null);
 
   const [graph, setGraph] = useState(initialGraph);
-  const [layout, dispatch] = useReducer(layoutReducer, emptyLayout, () =>
-    layoutReducer(emptyLayout, {
-      type: "load",
-      version: canvas.layoutVersion,
-      nodes: canvas.nodes,
-    }),
-  );
-  const [selected, setSelected] = useState<string | null>(null);
-  const [save, setSave] = useState<{ state: SaveState; message?: string }>({
-    state: "idle",
-  });
-  const [note, setNote] = useState("");
-  const [tick, setTick] = useState(0);
-  const saving = useRef(false);
-
   // --- the draft (spec S-12): staged changes, kept in the browser ------------
   const auth = useAuth();
   const user = auth.state.status === "signedIn" ? auth.state.username : "";
   const storageKey = draftKey(canvas.id, user);
   const [started] = useState(() => {
-    const saved = canEdit ? loadDraft(storageKey) : null;
-    if (!saved)
-      return { draft: emptyDraft(initialGraph.configRevision), dropped: [] };
+    const loaded = canEdit ? loadDraft(storageKey) : null;
+    if (!loaded) {
+      return {
+        draft: emptyDraft(initialGraph.configRevision),
+        dropped: [] as string[],
+        positions: {} as DraftPositions,
+      };
+    }
+    const { positions, ...saved } = loaded;
     if (saved.baseRevision === initialGraph.configRevision) {
-      return { draft: saved, dropped: [] };
+      return { draft: saved, dropped: [] as string[], positions };
     }
     const r = rebase(saved, initialGraph);
     return {
@@ -258,8 +261,34 @@ function CanvasView({
         future: [],
       },
       dropped: r.dropped.map((o) => o.summary || o.operationId),
+      positions,
     };
   });
+  const [layout, dispatch] = useReducer(layoutReducer, emptyLayout, () => {
+    const loaded = layoutReducer(emptyLayout, {
+      type: "load",
+      version: canvas.layoutVersion,
+      nodes: canvas.nodes,
+    });
+    // The new nodes of a draft kept in the browser keep their places.
+    const mine = started.draft.ops
+      .filter((o) => o.kind === "create")
+      .flatMap((o) => {
+        const p = started.positions[o.node];
+        return p ? [{ node: o.node, x: p.x, y: p.y }] : [];
+      });
+    return mine.length > 0
+      ? layoutReducer(loaded, { type: "place", nodes: mine })
+      : loaded;
+  });
+  const [selected, setSelected] = useState<string | null>(null);
+  const [save, setSave] = useState<{ state: SaveState; message?: string }>({
+    state: "idle",
+  });
+  const [note, setNote] = useState("");
+  const [tick, setTick] = useState(0);
+  const saving = useRef(false);
+
   const [draft, dispatchDraft] = useReducer(draftReducer, started.draft);
   const [dropped, setDropped] = useState<string[]>(started.dropped);
   const [checked, setChecked] = useState<{
@@ -270,6 +299,11 @@ function CanvasView({
     "create" | "review" | "history" | "discard" | null
   >(null);
   const [deleting, setDeleting] = useState<FlowNode | null>(null);
+  const [formNode, setFormNode] = useState<FlowNode | null>(null);
+  // A prompt being written: an announcement node, or null for a new one.
+  const [promptFor, setPromptFor] = useState<FlowNode | null | undefined>(
+    undefined,
+  );
   const [keyPrompt, setKeyPrompt] = useState<{
     src: FlowNode;
     port: string;
@@ -277,8 +311,14 @@ function CanvasView({
     tgtPort: string;
   } | null>(null);
   useEffect(() => {
-    if (canEdit) saveDraft(storageKey, draft);
-  }, [canEdit, storageKey, draft]);
+    if (!canEdit) return;
+    const positions: DraftPositions = {};
+    for (const o of draft.ops) {
+      const p = o.kind === "create" ? layout.positions[o.node] : undefined;
+      if (p) positions[o.node] = { x: p.x, y: p.y };
+    }
+    saveDraft(storageKey, draft, positions);
+  }, [canEdit, storageKey, draft, layout.positions]);
 
   // A newer configuration: keep the staged changes nothing else touched.
   const draftRef = useRef(draft);
@@ -611,6 +651,8 @@ function CanvasView({
           run(connect(ctx, node, port, tgt, tgtPort)),
         onDisconnect: (edge: FlowEdge) => run(disconnect(ctx, edge)),
         onDelete: setDeleting,
+        onOpenForm: setFormNode,
+        onPrompt: (node) => setPromptFor(node),
       }
     : undefined;
 
@@ -969,6 +1011,14 @@ function CanvasView({
           </Button>
           <Button
             size="sm"
+            variant="secondary"
+            icon="wand-sparkles"
+            onClick={() => setPromptFor(null)}
+          >
+            New prompt from text
+          </Button>
+          <Button
+            size="sm"
             variant="ghost"
             icon="undo-2"
             disabled={draft.past.length === 0}
@@ -1198,6 +1248,37 @@ function CanvasView({
           onConfirm={applyDraft}
           onClose={() => setDialog(null)}
         />
+      )}
+      {formNode && (
+        <Suspense fallback={null}>
+          <FormHost
+            node={formNode}
+            draftBody={
+              draft.ops.find(
+                (o) => o.kind === "update" && o.node === formNode.id,
+              )?.body
+            }
+            onClose={() => setFormNode(null)}
+            onCommit={async (body) => {
+              const err = await run(stageBody(ctx, formNode, body));
+              if (err) throw new Error(err);
+            }}
+          />
+        </Suspense>
+      )}
+      {promptFor !== undefined && (
+        <Suspense fallback={null}>
+          <PromptHost
+            node={promptFor}
+            onClose={() => setPromptFor(undefined)}
+            onDone={async (id, message) => {
+              setPromptFor(undefined);
+              setNote(message);
+              await reload().catch(() => undefined);
+              addFromList(`announcement:${String(id)}`);
+            }}
+          />
+        </Suspense>
       )}
       {deleting && (
         <DeleteDialog

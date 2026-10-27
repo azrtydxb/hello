@@ -13,7 +13,7 @@ import {
   Select,
   Switch,
 } from "../../design/azrty/components";
-import type { Body } from "./draft";
+import { isPending, type Body } from "./draft";
 import {
   connectChoices,
   terminalNode,
@@ -25,6 +25,7 @@ import {
   adapterFor,
   canDeleteKind,
   canEditKind,
+  FORM_KINDS,
   OBJECTS,
   portBase,
   portIsEditable,
@@ -52,6 +53,10 @@ export interface NodeEditApi {
   ) => Promise<string | null>;
   onDisconnect: (edge: FlowEdge) => Promise<string | null>;
   onDelete: (node: FlowNode) => void;
+  /** Opens the object's own form (the one its page uses). */
+  onOpenForm: (node: FlowNode) => void;
+  /** Opens the text prompt editor of an announcement. */
+  onPrompt: (node: FlowNode) => void;
 }
 
 export function NodeEditor({
@@ -109,6 +114,35 @@ export function NodeEditor({
         <Alert tone="bad" title="Could not read the object">
           {loadError}
         </Alert>
+      )}
+      {FORM_KINDS.has(node.kind) && !isPending(node.id) && (
+        <div className="flow-panel__section">
+          <Button
+            size="sm"
+            variant="secondary"
+            icon="square-pen"
+            onClick={() => edit.onOpenForm(node)}
+          >
+            Edit all settings
+          </Button>
+        </div>
+      )}
+      {node.kind === "announcement" && (
+        <div className="flow-panel__section">
+          <h3>Prompt</h3>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon="wand-sparkles"
+            onClick={() => edit.onPrompt(node)}
+          >
+            Generate prompt from text
+          </Button>
+          <p>
+            The audio is generated at once and stored; it is not part of the
+            draft. Upload recordings on the Announcements page.
+          </p>
+        </div>
       )}
       {def?.settings && view && (
         <div className="flow-panel__section">

@@ -234,6 +234,7 @@ export const EDIT_CATALOGUE: FlowCatalogue = {
       kind: "trunk",
       label: "Trunk",
       ports: [
+        port({ id: "carrier", direction: "in", type: "carrier" }),
         port({
           id: "inbound",
           direction: "out",
@@ -311,7 +312,55 @@ export const EDIT_CATALOGUE: FlowCatalogue = {
     {
       kind: "queue",
       label: "Call queue",
-      ports: [port({ id: "call", direction: "in" })],
+      ports: [
+        port({ id: "call", direction: "in" }),
+        port({
+          id: "holdMusic",
+          direction: "in",
+          type: "holdMusic" as never,
+          many: false,
+        }),
+      ],
+    },
+    {
+      kind: "mohClass",
+      label: "Hold music class",
+      ports: [
+        port({
+          id: "use",
+          direction: "out",
+          type: "holdMusic" as never,
+          many: true,
+          targets: [t("queue", "holdMusic")],
+        }),
+      ],
+    },
+    {
+      kind: "outboundRoute",
+      label: "Outbound route",
+      ports: [
+        port({
+          id: "trunks",
+          direction: "out",
+          type: "carrier",
+          many: true,
+          field: "trunks",
+          targets: [t("trunk", "carrier")],
+        }),
+      ],
+    },
+    {
+      kind: "holidayCalendar",
+      label: "Holiday calendar",
+      ports: [
+        port({
+          id: "use",
+          direction: "out",
+          type: "schedule" as never,
+          many: true,
+          targets: [t("schedule", "calendars")],
+        }),
+      ],
     },
     {
       kind: "timeCondition",
@@ -354,6 +403,7 @@ export const EDIT_CATALOGUE: FlowCatalogue = {
       kind: "schedule",
       label: "Schedule",
       ports: [
+        port({ id: "calendars", direction: "in", type: "schedule" as never }),
         port({
           id: "use",
           direction: "out",
@@ -401,6 +451,9 @@ export const EDIT_GRAPH: FlowGraph = {
     n("timeCondition:1", "hours"),
     n("schedule:1", "office"),
     n("announcement:1", "greeting"),
+    n("mohClass:1", "music"),
+    n("outboundRoute:1", "Out UAE"),
+    n("holidayCalendar:1", "holidays"),
     n("featureCode:*72", "*72", { code: "*72", action: "announcement" }),
     n("featureCode:*73", "*73", { code: "*73", action: "ivr" }),
   ],
@@ -452,6 +505,10 @@ export const EDIT_BODIES: Record<string, Record<string, unknown>> = {
     id: 1,
     name: "sales",
     strategy: "ring-all",
+    hunt: false,
+    memberDelay: 0,
+    ignoreDnd: false,
+    mohRingback: false,
     ringTimeout: 20,
     failureKind: "none",
     failureTarget: "",
@@ -495,6 +552,15 @@ export const EDIT_BODIES: Record<string, Record<string, unknown>> = {
     override: "auto",
   },
   "/api/v1/queues/1": { id: 1, name: "helpdesk", members: [] },
+  "/api/v1/routes/outbound/1": { id: 1, name: "Out UAE", trunks: [] },
+  "/api/v1/schedules/1": {
+    id: 1,
+    name: "office",
+    timeZone: "UTC",
+    ranges: [],
+    calendarIds: [],
+  },
+  "/api/v1/moh-classes/1": { id: 1, name: "music", tracks: [] },
   "/api/v1/extensions/1": { id: 1, number: "100", name: "Ann" },
   "/api/v1/extensions/2": { id: 2, number: "101", name: "Bob" },
   "/api/v1/feature-codes": {

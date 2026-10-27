@@ -21,6 +21,7 @@ import {
   type EdgeChange,
 } from "./draft";
 import { kindLabel } from "./model";
+import { reconcile } from "./wanted";
 import {
   adapterFor,
   canConnect,
@@ -350,33 +351,92 @@ export function rename(
   const s = new Session(ctx);
   return finish(s, async () => {
     await s.view(node);
-    const label = labelFor(node, trimmed);
-    s.edit(
-      node,
-      { [key]: trimmed },
-      null,
-      `Rename ${node.label} to ${label}`,
-      label,
-    );
-    if (node.kind === "extension") return null; // the number is what is stored
-    const renamed: FlowNode = { ...node, label };
-    for (const e of ctx.graph.edges) {
-      if (e.implicit || e.target.node !== node.id || e.owner.node === node.id) {
-        continue;
-      }
-      const src = byId(ctx.graph, e.source.node);
-      if (!src) continue;
-      const ad = adapterFor(src.kind, e.source.port, node.kind, e.target.port);
-      if (!ad?.byName) continue;
-      const err = await connectIn(
-        s,
-        src,
-        e.source.port,
-        renamed,
-        e.target.port,
-      );
-      if (err) return `${src.label} cannot follow the new name: ${err}`;
+    return renameIn(s, node, key, trimmed, {});
+  });
+}
+
+/** The rename inside a session: the object, then every object that names it. */
+async function renameIn(
+  s: Session,
+  node: FlowNode,
+  key: string,
+  name: string,
+  more: Body,
+  edges: EdgeChange | null = null,
+): Promise<string | null> {
+  const label = labelFor(node, name);
+  s.edit(
+    node,
+    { ...more, [key]: name },
+    edges,
+    `Rename ${node.label} to ${label}`,
+    label,
+  );
+  if (node.kind === "extension") return null; // the number is what is stored
+  const renamed: FlowNode = { ...node, label };
+  for (const e of s.ctx.graph.edges) {
+    if (e.implicit || e.target.node !== node.id || e.owner.node === node.id) {
+      continue;
     }
+    const src = byId(s.ctx.graph, e.source.node);
+    if (!src) continue;
+    const ad = adapterFor(src.kind, e.source.port, node.kind, e.target.port);
+    if (!ad?.byName) continue;
+    const err = await connectIn(s, src, e.source.port, renamed, e.target.port);
+    if (err) return `${src.label} cannot follow the new name: ${err}`;
+  }
+  return null;
+}
+
+const same = (a: unknown, b: unknown): boolean => {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a as Body);
+  const kb = Object.keys(b as Body);
+  return (
+    ka.length === kb.length &&
+    ka.every((k) => same((a as Body)[k], (b as Body)[k]))
+  );
+};
+
+/**
+ * Stages what a form of the object produced: only the fields that differ from
+ * the object as it stands (stored plus the draft), the rename cascade when the
+ * name changed, and the edges the new values draw.
+ */
+export function stageBody(
+  ctx: EditCtx,
+  node: FlowNode,
+  body: Body,
+): Promise<EditResult> {
+  const def = OBJECTS[node.kind];
+  if (!def?.update) {
+    return Promise.resolve(fail("This object is changed on its own page."));
+  }
+  const s = new Session(ctx);
+  return finish(s, async () => {
+    const view = await s.view(node);
+    const delta: Body = {};
+    for (const [k, v] of Object.entries(body)) {
+      if (!same(v, view[k])) delta[k] = v;
+    }
+    if (Object.keys(delta).length === 0) return null;
+    const next = { ...view, ...delta };
+    const rec = reconcile(ctx.graph, node, next);
+    const edges: EdgeChange | null = rec
+      ? {
+          remove: rec.remove,
+          add: rec.add.map((w) => w.edge),
+          nodes: rec.add.flatMap((w) => (w.node ? [w.node] : [])),
+        }
+      : null;
+    const key = def.nameKey;
+    if (key && delta[key] !== undefined && delta[key] !== view[key]) {
+      const { [key]: name, ...more } = delta;
+      return renameIn(s, node, key, String(name).trim(), more, edges);
+    }
+    s.edit(node, delta, edges, `Change ${node.label}`);
     return null;
   });
 }

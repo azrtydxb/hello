@@ -207,11 +207,9 @@ export function rebase(
   }
   // A gesture changes several objects (a rename and every referrer): when
   // one of them cannot be kept, none of them is.
-  for (let grew = true; grew; ) {
+  for (let grew = true; grew;) {
     grew = false;
-    const hit = new Set(
-      [...stale].flatMap((o) => o.groups ?? []),
-    );
+    const hit = new Set([...stale].flatMap((o) => o.groups ?? []));
     for (const op of state.ops) {
       if (!stale.has(op) && (op.groups ?? []).some((g) => hit.has(g))) {
         stale.add(op);
@@ -325,7 +323,12 @@ export function draftMarks(
 export const draftKey = (canvasId: number | string, user: string): string =>
   `hello.flow.draft.${canvasId}.${user}`;
 
-export function loadDraft(key: string): DraftState | null {
+/** Where the draft's new nodes sit, kept with the draft. */
+export type DraftPositions = Record<string, { x: number; y: number }>;
+
+export function loadDraft(
+  key: string,
+): (DraftState & { positions: DraftPositions }) | null {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
@@ -341,13 +344,22 @@ export function loadDraft(key: string): DraftState | null {
       ops: v.ops,
       past: v.history?.past ?? [],
       future: v.history?.future ?? [],
+      positions:
+        typeof (v as { positions?: unknown }).positions === "object" &&
+        (v as { positions?: unknown }).positions !== null
+          ? (v as { positions: DraftPositions }).positions
+          : {},
     };
   } catch {
     return null;
   }
 }
 
-export function saveDraft(key: string, state: DraftState): void {
+export function saveDraft(
+  key: string,
+  state: DraftState,
+  positions: DraftPositions = {},
+): void {
   try {
     if (state.ops.length === 0 && state.past.length === 0) {
       localStorage.removeItem(key);
@@ -360,6 +372,7 @@ export function saveDraft(key: string, state: DraftState): void {
         seq: state.seq,
         ops: state.ops,
         history: { past: state.past, future: state.future },
+        positions,
       }),
     );
   } catch {

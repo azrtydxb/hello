@@ -44,6 +44,8 @@ export interface ObjectDef {
   settings?: Setting[];
 }
 
+const list = (v: unknown): Body[] => (Array.isArray(v) ? (v as Body[]) : []);
+
 const only =
   (keys: readonly string[]) =>
   (got: Body): Body => {
@@ -171,8 +173,23 @@ export const OBJECTS: Record<string, ObjectDef> = {
       { key: "enabled", label: "Enabled", type: "bool" },
     ],
   },
-  outboundRoute: { delete: "deleteOutboundRoute" },
+  outboundRoute: {
+    read: (id) => `/api/v1/routes/outbound/${id}`,
+    update: "updateOutboundRoute",
+    delete: "deleteOutboundRoute",
+    nameKey: "name",
+  },
   trunk: { delete: "deleteTrunk" },
+  device: {
+    read: (id) => `/api/v1/devices/${id}`,
+    update: "updateDevice",
+    delete: "deleteDevice",
+  },
+  phone: {
+    read: (id) => `/api/v1/phones/${id}`,
+    update: "updatePhone",
+    delete: "deletePhone",
+  },
   ivr: {
     read: (id) => `/api/v1/ivr-menus/${id}`,
     update: "putIVRMenu",
@@ -249,14 +266,62 @@ export const OBJECTS: Record<string, ObjectDef> = {
       { key: "toggleNumber", label: "Toggle number", type: "text" },
     ],
   },
-  schedule: { create: "createSchedule", delete: "deleteSchedule" },
+  schedule: {
+    read: (id) => `/api/v1/schedules/${id}`,
+    update: "putSchedule",
+    create: "createSchedule",
+    delete: "deleteSchedule",
+    nameKey: "name",
+    put: true,
+    pick: (g) => only(["name", "timeZone", "ranges", "calendarIds"])(g),
+  },
   holidayCalendar: { delete: "deleteCalendar" },
-  mohClass: { delete: "deleteMOHClass" },
+  mohClass: {
+    read: (id) => `/api/v1/moh-classes/${id}`,
+    update: "putMOHClass",
+    delete: "deleteMOHClass",
+    nameKey: "name",
+    put: true,
+    pick: (g) => ({
+      ...only(["name", "mode", "isDefault"])(g),
+      announcementIds: list(g.tracks).map((t) => t.announcementId),
+    }),
+  },
   parkLot: { delete: "deleteParkLot" },
   pickupGroup: { delete: "deletePickupGroup" },
-  conference: { create: "createConference", delete: "deleteConference" },
+  conference: {
+    read: (id) => `/api/v1/conferences/${id}`,
+    update: "updateConference",
+    create: "createConference",
+    delete: "deleteConference",
+    nameKey: "name",
+    put: true,
+    pick: only([
+      "name",
+      "number",
+      "maxParticipants",
+      "waitForLeader",
+      "muteOnEntry",
+      "entryExit",
+      "entryAnnouncement",
+      "exitAnnouncement",
+      "record",
+      "enabled",
+    ]),
+  },
   multicastChannel: { delete: "deleteMulticastChannel" },
-  pagingGroup: { delete: "deletePagingGroup" },
+  pagingGroup: {
+    read: (id) => `/api/v1/paging-groups/${id}`,
+    update: "putPagingGroup",
+    delete: "deletePagingGroup",
+    nameKey: "name",
+    put: true,
+    pick: (g) => ({
+      ...only(["name", "code", "priority", "enabled", "multicastChannelId"])(g),
+      members: list(g.members).map((m) => m.extensionId),
+      callers: list(g.callers).map((m) => m.extensionId),
+    }),
+  },
   featureCode: {
     read: () => "/api/v1/feature-codes",
     update: "putFeatureCodes",
@@ -424,8 +489,6 @@ function forwardAdapter(field: string): EdgeAdapter {
   };
 }
 
-const list = (v: unknown): Body[] => (Array.isArray(v) ? (v as Body[]) : []);
-
 function memberAdapter(keys: readonly string[]): EdgeAdapter {
   return {
     owner: "target",
@@ -453,6 +516,109 @@ function memberAdapter(keys: readonly string[]): EdgeAdapter {
     },
   };
 }
+
+// --- id lists and single ids (the resources around a call) -----------------------
+
+const ids = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const same = (a: unknown, b: unknown) => String(a) === String(b);
+
+/** An id kept in a list of the owner (outbound trunks, calendars, tracks). */
+function idListAdapter(
+  owner: "source" | "target",
+  key: string,
+  other: (c: Conn) => unknown,
+  extra?: Partial<EdgeAdapter>,
+): EdgeAdapter {
+  return {
+    owner,
+    byName: false,
+    connect: (v, c) => {
+      const id = other(c);
+      const cur = ids(v[key]);
+      return { [key]: cur.some((x) => same(x, id)) ? cur : [...cur, id] };
+    },
+    disconnect: (v, c) => {
+      const id = other(c);
+      return { [key]: ids(v[key]).filter((x) => !same(x, id)) };
+    },
+    ...extra,
+  };
+}
+
+/** An id kept in one field of the owner (a hold music class, a prompt, a device's extension). */
+function idAdapter(
+  owner: "source" | "target",
+  key: string,
+  other: (c: Conn) => unknown,
+  clear: "null" | { keep: string },
+  extra?: Partial<EdgeAdapter>,
+): EdgeAdapter {
+  const ad: EdgeAdapter = {
+    owner,
+    byName: false,
+    connect: (_v, c) => ({ [key]: other(c) }),
+    ...extra,
+  };
+  if (clear === "null") ad.disconnect = () => ({ [key]: null });
+  else ad.keep = clear.keep;
+  return ad;
+}
+
+const srcId = (c: Conn) => c.idOf(c.src);
+const tgtId = (c: Conn) => c.idOf(c.tgt);
+
+const PROMPT_FIELDS: Record<string, Record<string, string>> = {
+  ivr: {
+    greeting: "greetingId",
+    invalidPrompt: "invalidPromptId",
+    timeoutPrompt: "timeoutPromptId",
+  },
+  queue: {
+    periodicPrompt: "periodicPromptId",
+    positionPrompt: "positionPromptId",
+    waitPrompt: "waitPromptId",
+    minutesPrompt: "minutesPromptId",
+    breakoutPrompt: "breakoutPromptId",
+  },
+};
+
+const announcementAdapters = (): EdgeAdapter[] => {
+  const out: EdgeAdapter[] = [];
+  for (const [kind, ports] of Object.entries(PROMPT_FIELDS)) {
+    for (const [port, key] of Object.entries(ports)) {
+      out.push(
+        idAdapter(
+          "target",
+          key,
+          srcId,
+          kind === "ivr" && port === "greeting"
+            ? {
+                keep: "An IVR menu always needs a greeting: connect another announcement instead.",
+              }
+            : "null",
+          { when: (k, p) => k === kind && p === port },
+        ),
+      );
+    }
+  }
+  for (const port of ["entryAnnouncement", "exitAnnouncement"]) {
+    out.push({
+      owner: "target",
+      byName: true,
+      when: (k, p) => k === "conference" && p === port,
+      connect: (_v, c) => ({ [port]: c.src.label }),
+      disconnect: () => ({ [port]: "" }),
+    });
+  }
+  out.push(
+    idListAdapter("target", "announcementIds", srcId, {
+      when: (k, p) => k === "mohClass" && p === "tracks",
+    }),
+  );
+  return out;
+};
+
+const PAGING_LISTS = { members: "members", callers: "callers" } as const;
 
 /**
  * How each connection is stored, by the source node kind and port. The
@@ -536,6 +702,14 @@ export const EDGE_ADAPTERS: Record<string, EdgeAdapter[]> = {
       ...memberAdapter(["extensionId", "dynamic", "penalty", "position"]),
       when: (k) => k === "queue",
     },
+    {
+      ...idListAdapter("target", "members", srcId),
+      when: (k, p) => k === "pagingGroup" && p === PAGING_LISTS.members,
+    },
+    {
+      ...idListAdapter("target", "callers", srcId),
+      when: (k, p) => k === "pagingGroup" && p === PAGING_LISTS.callers,
+    },
   ],
   "featureCode.target": [
     {
@@ -553,6 +727,29 @@ export const EDGE_ADAPTERS: Record<string, EdgeAdapter[]> = {
       },
       keep: "A feature code needs a target: connect it to another one instead.",
     },
+  ],
+  "outboundRoute.trunks": [idListAdapter("source", "trunks", tgtId)],
+  "mohClass.use": ["extension", "ringGroup", "inboundRoute", "queue"].map(
+    (kind) =>
+      idAdapter("target", "mohClassId", srcId, "null", {
+        when: (k) => k === kind,
+      }),
+  ),
+  "announcement.audio": announcementAdapters(),
+  "device.extension": [
+    idAdapter("source", "extensionId", tgtId, {
+      keep: "A device always belongs to an extension: connect it to another one instead.",
+    }),
+  ],
+  "phone.device": [idAdapter("source", "deviceId", tgtId, "null")],
+  "holidayCalendar.use": [idListAdapter("target", "calendarIds", srcId)],
+  "schedule.use": [
+    idAdapter("target", "scheduleId", srcId, {
+      keep: "A time condition always needs a schedule: connect another one instead.",
+    }),
+  ],
+  "pagingGroup.multicast": [
+    idAdapter("source", "multicastChannelId", tgtId, "null"),
   ],
   "trunk.inbound": [
     {
@@ -737,3 +934,14 @@ export const CREATE_FORMS: Record<string, CreateForm> = {
     summary: (v) => ({ did: v.did ?? "", enabled: true }),
   },
 };
+
+/** The kinds whose own form (shared with its page) opens from the panel. */
+export const FORM_KINDS = new Set([
+  "ringGroup",
+  "ivr",
+  "queue",
+  "timeCondition",
+  "conference",
+  "inboundRoute",
+  "outboundRoute",
+]);

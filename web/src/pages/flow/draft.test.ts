@@ -265,8 +265,11 @@ describe("persistence", () => {
   it("saves and loads the draft per canvas and user", () => {
     const key = draftKey(3, "ann");
     const s = stage(emptyDraft(7), upd("ringGroup:1", { hunt: true }));
-    saveDraft(key, s);
-    expect(loadDraft(key)).toEqual(s);
+    saveDraft(key, s, { "ringGroup:~n1": { x: 10, y: 20 } });
+    expect(loadDraft(key)).toEqual({
+      ...s,
+      positions: { "ringGroup:~n1": { x: 10, y: 20 } },
+    });
     expect(loadDraft(draftKey(3, "bob"))).toBeNull();
     saveDraft(key, emptyDraft(7));
     expect(loadDraft(key)).toBeNull();
