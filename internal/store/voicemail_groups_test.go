@@ -36,7 +36,7 @@ func TestVoicemailGroupDelivery(t *testing.T) {
 	ctx := context.Background()
 	exts, boxes := groupBoxes(t, s, "101", "102", "103")
 	g, err := s.CreateVoicemailGroup(ctx, "test", VoicemailGroupInput{
-		Number: "700", Name: "Sales", Enabled: true, MaxSeconds: 180, Members: exts[:2]}, nil)
+		Number: "650", Name: "Sales", Enabled: true, MaxSeconds: 180, Members: exts[:2]}, nil)
 	if err != nil {
 		t.Fatalf("create group: %v", err)
 	}
@@ -96,21 +96,21 @@ func TestVoicemailGroupRules(t *testing.T) {
 	if _, err := s.CreateVoicemailGroup(ctx, "test", in("101", "A", exts[0]), nil); !errors.As(err, &ve) {
 		t.Fatalf("number of an extension: %v, want a validation error", err)
 	}
-	g, err := s.CreateVoicemailGroup(ctx, "test", in("700", "A", exts...), nil)
+	g, err := s.CreateVoicemailGroup(ctx, "test", in("650", "A", exts...), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateVoicemailGroup(ctx, "test", in("700", "B", exts[0]), nil); !errors.Is(err, ErrConflict) {
+	if _, err := s.CreateVoicemailGroup(ctx, "test", in("650", "B", exts[0]), nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate number: %v, want a conflict", err)
 	}
-	if _, err := s.CreateExtension(ctx, "test", "700", "Clash", "", nil); !errors.As(err, &ve) {
+	if _, err := s.CreateExtension(ctx, "test", "650", "Clash", "", nil); !errors.As(err, &ve) {
 		t.Fatalf("extension on the group's number: %v, want a validation error", err)
 	}
 	many := make([]int64, MaxVoicemailGroupMembers+1)
 	for i := range many {
 		many[i] = exts[0]
 	}
-	if _, err := s.UpdateVoicemailGroup(ctx, "test", g.ID, in("700", "A", many...), nil); err == nil {
+	if _, err := s.UpdateVoicemailGroup(ctx, "test", g.ID, in("650", "A", many...), nil); err == nil {
 		t.Fatal("more than the member limit accepted")
 	}
 

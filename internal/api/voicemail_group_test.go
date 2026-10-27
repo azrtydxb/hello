@@ -13,7 +13,7 @@ import (
 // TestValidateVoicemailGroup covers the field checks that need no database.
 func TestValidateVoicemailGroup(t *testing.T) {
 	good := func() store.VoicemailGroupInput {
-		return store.VoicemailGroupInput{Number: "700", Name: "Sales", Enabled: true, MaxSeconds: 180, Members: []int64{1, 2}}
+		return store.VoicemailGroupInput{Number: "650", Name: "Sales", Enabled: true, MaxSeconds: 180, Members: []int64{1, 2}}
 	}
 	if f := validateVoicemailGroup(ptr(good())); len(f) > 0 {
 		t.Fatalf("a good group failed: %v", f)
@@ -69,26 +69,26 @@ func TestVoicemailGroupCRUD(t *testing.T) {
 	body := func(number, name string, members ...json.Number) map[string]any {
 		return map[string]any{"number": number, "name": name, "members": members}
 	}
-	created := c.must(http.StatusCreated, "POST", "/api/v1/voicemail-groups", body("700", "Sales", m1, m2)).json(t)
+	created := c.must(http.StatusCreated, "POST", "/api/v1/voicemail-groups", body("650", "Sales", m1, m2)).json(t)
 	id := fmt.Sprint(int64(created["id"].(float64)))
 	if ms := created["members"].([]any); len(ms) != 2 || created["maxSeconds"].(float64) != 180 || created["enabled"] != true {
 		t.Fatalf("created = %v", created)
 	}
-	c.must(http.StatusConflict, "POST", "/api/v1/voicemail-groups", body("700", "Other", m1))
-	c.must(http.StatusConflict, "POST", "/api/v1/voicemail-groups", body("701", "Sales", m1))
+	c.must(http.StatusConflict, "POST", "/api/v1/voicemail-groups", body("650", "Other", m1))
+	c.must(http.StatusConflict, "POST", "/api/v1/voicemail-groups", body("651", "Sales", m1))
 	// The number is in the dial space: it cannot be an extension number.
 	if r := c.do("POST", "/api/v1/voicemail-groups", body("101", "Clash", m1)); r.code != http.StatusBadRequest {
 		t.Errorf("number of an extension: status %d, want 400", r.code)
 	}
-	if r := c.do("POST", "/api/v1/extensions", map[string]string{"number": "700", "name": "Clash"}); r.code != http.StatusBadRequest {
+	if r := c.do("POST", "/api/v1/extensions", map[string]string{"number": "650", "name": "Clash"}); r.code != http.StatusBadRequest {
 		t.Errorf("extension on a group number: status %d, want 400", r.code)
 	}
 	for name, b := range map[string]map[string]any{
-		"no members":     body("702", "A"),
-		"unknown member": {"number": "702", "name": "A", "members": []int{999999}},
+		"no members":     body("652", "A"),
+		"unknown member": {"number": "652", "name": "A", "members": []int{999999}},
 		"bad number":     body("7", "A", m1),
-		"missing name":   {"number": "702", "members": []json.Number{m1}},
-		"extra":          {"number": "702", "name": "A", "members": []json.Number{m1}, "extra": 1},
+		"missing name":   {"number": "652", "members": []json.Number{m1}},
+		"extra":          {"number": "652", "name": "A", "members": []json.Number{m1}, "extra": 1},
 	} {
 		if r := c.do("POST", "/api/v1/voicemail-groups", b); r.code != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400", name, r.code)
@@ -102,12 +102,12 @@ func TestVoicemailGroupCRUD(t *testing.T) {
 	}
 
 	replaced := c.must(http.StatusOK, "PUT", "/api/v1/voicemail-groups/"+id, map[string]any{
-		"number": "700", "name": "Support", "members": []json.Number{m2}, "maxSeconds": 600, "enabled": false}).json(t)
+		"number": "650", "name": "Support", "members": []json.Number{m2}, "maxSeconds": 600, "enabled": false}).json(t)
 	if ms := replaced["members"].([]any); replaced["name"] != "Support" || len(ms) != 1 || ms[0].(map[string]any)["number"] != "102" ||
 		replaced["maxSeconds"].(float64) != 600 || replaced["enabled"] != false {
 		t.Fatalf("replaced = %v", replaced)
 	}
-	c.must(http.StatusNotFound, "PUT", "/api/v1/voicemail-groups/987654", body("703", "X", m2))
+	c.must(http.StatusNotFound, "PUT", "/api/v1/voicemail-groups/987654", body("653", "X", m2))
 
 	// A menu that sends calls to the group pins it.
 	greet, err := e.st.CreateAnnouncement(context.Background(), "test", "greet", "ann/greet.wav", nil)
@@ -116,10 +116,10 @@ func TestVoicemailGroupCRUD(t *testing.T) {
 	}
 	menu := c.must(http.StatusCreated, "POST", "/api/v1/ivr-menus", map[string]any{
 		"name": "main", "number": "800", "greetingId": greet.ID,
-		"options": []map[string]any{{"digit": "1", "kind": "voicemail_group", "target": "700"}},
+		"options": []map[string]any{{"digit": "1", "kind": "voicemail_group", "target": "650"}},
 	}).json(t)
 	c.must(http.StatusConflict, "DELETE", "/api/v1/voicemail-groups/"+id, nil)
-	if r := c.do("PUT", "/api/v1/voicemail-groups/"+id, map[string]any{"number": "710", "name": "Support", "members": []json.Number{m2}}); r.code != http.StatusConflict {
+	if r := c.do("PUT", "/api/v1/voicemail-groups/"+id, map[string]any{"number": "660", "name": "Support", "members": []json.Number{m2}}); r.code != http.StatusConflict {
 		t.Errorf("renumber of a referenced group: status %d, want 409", r.code)
 	}
 	if r := c.do("POST", "/api/v1/ivr-menus", map[string]any{"name": "bad", "greetingId": greet.ID,
