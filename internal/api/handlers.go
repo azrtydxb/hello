@@ -378,21 +378,49 @@ func validateExtension(number, name, externalNumber *string) fieldErrs {
 	return f
 }
 
+// validateKind checks an extension's kind and its door targets (spec S-45).
+func validateKind(f *fieldErrs, kind string, t *store.DoorTargets) {
+	if kind != store.ExtensionUser && kind != store.ExtensionDoor {
+		f.add("kind", "must be user or door")
+		return
+	}
+	if t == nil {
+		return
+	}
+	if kind == store.ExtensionUser && !t.Empty() {
+		f.add("doorTargets", "only a door station has door targets")
+	}
+	if len(t.Extensions)+len(t.RingGroups) > store.MaxDoorTargets {
+		f.add("doorTargets", "at most %d targets", store.MaxDoorTargets)
+	}
+}
+
 func (s *server) createExtension(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Number         string `json:"number"`
-		Name           string `json:"name"`
-		ExternalNumber string `json:"externalNumber"`
+		Number         string             `json:"number"`
+		Name           string             `json:"name"`
+		ExternalNumber string             `json:"externalNumber"`
+		Kind           string             `json:"kind"`
+		DoorTargets    *store.DoorTargets `json:"doorTargets"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
 	name := in.Name
-	if f := validateExtension(&in.Number, &name, &in.ExternalNumber); len(f) > 0 {
+	f := validateExtension(&in.Number, &name, &in.ExternalNumber)
+	if in.Kind == "" {
+		in.Kind = store.ExtensionUser
+	}
+	validateKind(&f, in.Kind, in.DoorTargets)
+	if len(f) > 0 {
 		writeFields(w, f)
 		return
 	}
-	e, err := s.Store.CreateExtension(r.Context(), actor(r).String(), in.Number, name, in.ExternalNumber, s.check())
+	var targets store.DoorTargets
+	if in.DoorTargets != nil {
+		targets = *in.DoorTargets
+	}
+	e, err := s.Store.CreateExtensionKind(r.Context(), actor(r).String(), in.Number, name, in.ExternalNumber, in.Kind, targets, s.check())
 	if err != nil {
 		s.configError(w, "extension", err)
 		return
@@ -421,6 +449,10 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		// MOHClassID is null to clear (use the global default).
 		MOHClassID    nullable[int64] `json:"mohClassId"`
 		NoAnswerRings *int            `json:"noAnswerRings"`
+		// Kind is user or door; DoorTargets replaces a door station's
+		// targets (spec S-45).
+		Kind        *string            `json:"kind"`
+		DoorTargets *store.DoorTargets `json:"doorTargets"`
 	}
 	if !decode(w, r, &in) {
 		return
@@ -428,7 +460,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 	if in.Number == nil && in.Name == nil && in.ExternalNumber == nil && in.DND == nil && in.NoAnswerRings == nil &&
 		in.ForwardAlways == nil && in.ForwardBusy == nil && in.ForwardNoAnswer == nil &&
 		in.VoicemailEnabled == nil && in.RecordDefault == nil && in.AllowIntercom == nil && in.DirectoryHidden == nil && in.CallWaiting == nil &&
-		!in.MOHClassID.Set {
+		in.Kind == nil && in.DoorTargets == nil && !in.MOHClassID.Set {
 		badRequest(w, "a field to change is required")
 		return
 	}
@@ -437,6 +469,9 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var f fieldErrs
+	if in.Kind != nil {
+		validateKind(&f, *in.Kind, in.DoorTargets)
+	}
 	if in.NoAnswerRings != nil && (*in.NoAnswerRings < 0 || *in.NoAnswerRings > 20) {
 		f.add("noAnswerRings", "must be 0 (system default) to 20")
 	}
@@ -457,7 +492,7 @@ func (s *server) updateExtension(w http.ResponseWriter, r *http.Request) {
 		ForwardNoAnswer: in.ForwardNoAnswer, VoicemailEnabled: in.VoicemailEnabled,
 		RecordDefault: in.RecordDefault, AllowIntercom: in.AllowIntercom, DirectoryHidden: in.DirectoryHidden, CallWaiting: in.CallWaiting,
 		MOHClassID: in.MOHClassID.Value, ClearMOHClass: in.MOHClassID.Set && in.MOHClassID.Value == nil,
-		NoAnswerRings: in.NoAnswerRings,
+		NoAnswerRings: in.NoAnswerRings, Kind: in.Kind, DoorTargets: in.DoorTargets,
 	}, s.check())
 	if err != nil {
 		s.configError(w, "extension", err)

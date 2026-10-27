@@ -18,6 +18,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/ringtag"
 	"github.com/azrtydxb/hello/internal/store"
 )
 
@@ -494,6 +495,8 @@ type ringGroupBody struct {
 	Members       *[]ringGroupMemberIn `json:"members"`
 	MOHClassID    nullable[int64]      `json:"mohClassId"`
 	MOHRingback   *bool                `json:"mohRingback"`
+	RingTag       *string              `json:"ringTag"`
+	IsDoor        *bool                `json:"isDoor"`
 }
 
 type ringGroupMemberIn struct {
@@ -538,6 +541,12 @@ func (b ringGroupBody) toInput(base store.RingGroupInput) (store.RingGroupInput,
 	if b.MOHRingback != nil {
 		base.MOHRingback = *b.MOHRingback
 	}
+	if b.RingTag != nil {
+		base.RingTag = *b.RingTag
+	}
+	if b.IsDoor != nil {
+		base.IsDoor = *b.IsDoor
+	}
 	if b.Members != nil {
 		base.Members = make([]store.RingGroupMember, 0, len(*b.Members))
 		for _, m := range *b.Members {
@@ -565,6 +574,9 @@ func validateRingGroup(in *store.RingGroupInput) fieldErrs {
 	}
 	if !slices.Contains(strategies, in.Strategy) {
 		f.add("strategy", `must be one of ring-all, sequential, round-robin, longest-idle, weighted`)
+	}
+	if in.RingTag != "" && !ringtag.ValidName(in.RingTag) {
+		f.add("ringTag", "must be a ring tag name of 1-32 of a-z 0-9 -")
 	}
 	if in.RingTimeout < 5 || in.RingTimeout > 300 {
 		f.add("ringTimeout", "must be 5-300 seconds")
@@ -701,7 +713,7 @@ func (s *server) updateRingGroup(w http.ResponseWriter, r *http.Request) {
 		Name: current.Name, Strategy: current.Strategy, Hunt: current.Hunt,
 		RingTimeout: current.RingTimeout, MemberDelay: current.MemberDelay, IgnoreDND: current.IgnoreDND,
 		FailureKind: current.FailureKind, FailureTarget: current.FailureTarget, Members: current.Members,
-		MOHClassID: current.MOHClassID, MOHRingback: current.MOHRingback,
+		MOHClassID: current.MOHClassID, MOHRingback: current.MOHRingback, RingTag: current.RingTag, IsDoor: current.IsDoor,
 	}
 	in, _ := b.toInput(base)
 	// The store checks that an IVR or time condition failure destination

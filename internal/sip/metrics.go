@@ -54,6 +54,7 @@ type Metrics struct {
 	Parks                 *prometheus.CounterVec // kind, result
 	Forwarded             *prometheus.CounterVec // kind
 	GroupCalls            *prometheus.CounterVec // group, strategy, result
+	RingTags              *prometheus.CounterVec // tag: calls that rang an internal device with the tag (S-39)
 	PresenceSubscriptions prometheus.Gauge
 	// MWINotify counts message-summary NOTIFYs by kind and result (S-1).
 	MWINotify  *prometheus.CounterVec // kind, result
@@ -207,6 +208,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.GroupCalls = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_group_calls_total", Help: "Group call attempts by group, strategy and result.",
 	}, []string{"group", "strategy", "result"})
+	m.RingTags = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_ring_tag_total", Help: "Calls that rang an internal device, by ring tag.",
+	}, []string{"tag"})
 	m.PresenceSubscriptions = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_presence_subscriptions", Help: "Live dialog (BLF) subscriptions served by this node.",
 	})
@@ -269,7 +273,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	})
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
-		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls,
+		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls, m.RingTags,
 		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.TimeConditionTotal,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)

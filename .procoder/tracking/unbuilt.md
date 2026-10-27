@@ -10,7 +10,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 10  | Ring tags, Alert-Info rules, CDR ring_tag (S-39..41)                          | wip (ring-tags)             |
 | 11  | Ring map provisioning, Ringing page (S-42, S-44)                              | todo (after 10)             |
 | 12  | Tone library (S-43)                                                           | todo (after 11)             |
-| 13  | Door station extension kind, Door group (S-45, S-46)                          | todo (after 10)             |
+| 13  | Door station extension kind, Door group (S-45, S-46)                          | wip (#225)                  |
 | 14  | Door-open DTMF `*50` (S-47)                                                   | todo (after 13)             |
 | 15  | Setting overrides and WP extras (S-12)                                        | todo                        |
 | 16  | Doorbell webhook (S-48)                                                       | todo (after 13)             |
@@ -88,7 +88,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | 6b  | Video recording                             | blocked (6)                  |
 | 10  | Video phones and door stations              | todo (code), hw (test)       |
 | 11  | Conference-room video                       | blocked (6)                  |
-| 13  | Teams SBC-peer trunk profile, docs/teams.md | todo                         |
+| 13  | Teams SBC-peer trunk profile, docs/teams.md | wip (#225)                   |
 | 7-9 | Push gateway, mobile apps, mobile video     | not now                      |
 | 12  | Public reach                                | not now (user decides later) |
 

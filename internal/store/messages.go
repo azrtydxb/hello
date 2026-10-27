@@ -271,12 +271,15 @@ func (s *Store) PutMessageSettings(ctx context.Context, actor string, m MessageS
 func resolveMessageTargets(ctx context.Context, tx *sql.Tx, in MessageInput) (recipients []string, scope, ref string, err error) {
 	switch in.TargetKind {
 	case MsgKindExtension:
-		var n string
-		if err = tx.QueryRowContext(ctx, `SELECT number FROM extensions WHERE number = $1`, in.Target).Scan(&n); err != nil {
+		var n, kind string
+		if err = tx.QueryRowContext(ctx, `SELECT number, kind FROM extensions WHERE number = $1`, in.Target).Scan(&n, &kind); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, "", "", ErrMessageTarget
 			}
 			return nil, "", "", err
+		}
+		if kind == ExtensionDoor {
+			return nil, "", "", ErrMessageForbidden // a door station never receives MESSAGE (S-45)
 		}
 		return []string{n}, MsgScopeDirect, "", nil
 	case MsgKindExternal:
@@ -324,7 +327,7 @@ func resolveMessageTargets(ctx context.Context, tx *sql.Tx, in MessageInput) (re
 		return recipients, MsgScopePagingGroup, name, err
 	case MsgScopeBroadcast:
 		recipients, err = queryStrings(ctx, tx, `SELECT DISTINCT e.number FROM extensions e
-			JOIN devices d ON d.extension_id = e.id AND d.enabled ORDER BY e.number`)
+			JOIN devices d ON d.extension_id = e.id AND d.enabled WHERE e.kind = 'user' ORDER BY e.number`)
 		return recipients, MsgScopeBroadcast, "", err
 	}
 	return nil, "", "", fmt.Errorf("store: unknown message target kind %q", in.TargetKind)

@@ -262,6 +262,9 @@ func checkQueue(ctx context.Context, tx *sql.Tx, id int64, in QueueInput) error 
 		if n == 0 {
 			return fieldError(fmt.Sprintf("members[%d].extensionId", i), "extension does not exist")
 		}
+		if err := checkNoDoor(ctx, tx, fmt.Sprintf("members[%d].extensionId", i), []int64{m.ExtensionID}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

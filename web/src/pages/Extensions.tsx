@@ -10,6 +10,7 @@ import {
   listExtensions,
   updateExtension,
   type Device,
+  type DoorTargets,
   type Extension,
   type Id,
 } from "../api";
@@ -44,6 +45,7 @@ import { LIVE_REFRESH_MS, usePolling } from "../usePolling";
 import "./directory/directory.css";
 import { Can } from "../role";
 import { MOHSelect } from "./media/MohSelect";
+import { DoorTargetsField } from "./directory/DoorTargetsField";
 
 const NUMBER_HINT = "2 to 10 digits.";
 const EXTERNAL_PATTERN = /^(\+?[0-9]{2,20})?$/;
@@ -67,6 +69,8 @@ const FIELDS = [
   "noAnswerRings",
   "voicemailEnabled",
   "recordDefault",
+  "kind",
+  "doorTargets",
 ] as const;
 type Field = (typeof FIELDS)[number];
 type Errors = Partial<Record<Field, string>>;
@@ -203,7 +207,17 @@ export function Extensions() {
     {
       key: "name",
       label: "Name",
-      render: (e) => <span className="az-table__primary">{e.name}</span>,
+      render: (e) => (
+        <span className="az-table__primary">
+          {e.name}
+          {e.kind === "door" && (
+            <>
+              {" "}
+              <Badge tone="info">Door station</Badge>
+            </>
+          )}
+        </span>
+      ),
     },
     {
       key: "externalNumber",
@@ -323,6 +337,7 @@ export function Extensions() {
           key={String(current.id)}
           ext={current}
           devices={devicesOf(devices, current)}
+          extensions={all}
           live={live}
           onClose={() => setSelected(null)}
           onSaved={(saved) => {
@@ -377,6 +392,7 @@ function NewExtension({
   const [number, setNumber] = useState("");
   const [name, setName] = useState("");
   const [external, setExternal] = useState("");
+  const [door, setDoor] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -403,6 +419,7 @@ function NewExtension({
           name: name.trim(),
           // Sent only when given, so a create without one stays the Phase 1 shape.
           ...(external.trim() ? { externalNumber: external.trim() } : {}),
+          ...(door ? { kind: "door" as const } : {}),
         }),
       );
     } catch (err) {
@@ -473,14 +490,26 @@ function NewExtension({
           value={external}
           onChange={(e) => setExternal(e.target.value)}
         />
+        <Switch
+          label="Door station"
+          hint="A door unit (GDS, 2N, Akuvox, DoorBird) that registers with this extension. It has no voicemail, is hidden from the phonebook and can call only the targets you pick afterwards."
+          labelPosition="end"
+          checked={door}
+          onChange={(e) => setDoor(e.target.checked)}
+        />
       </form>
     </Modal>
   );
 }
 
+const sameIds = (a: Id[], b: Id[]) =>
+  a.length === b.length &&
+  [...a].map(String).sort().join(",") === [...b].map(String).sort().join(",");
+
 function ExtensionDrawer({
   ext,
   devices,
+  extensions,
   live,
   onClose,
   onSaved,
@@ -488,6 +517,7 @@ function ExtensionDrawer({
 }: {
   ext: Extension;
   devices: Device[];
+  extensions: Extension[];
   live: LiveDirectory;
   onClose: () => void;
   onSaved: (ext: Extension) => void;
@@ -508,6 +538,11 @@ function ExtensionDrawer({
   const [intercom, setIntercom] = useState(ext.allowIntercom !== false);
   const [callWaiting, setCallWaiting] = useState(ext.callWaiting !== false);
   const [mohClass, setMohClass] = useState<Id | null>(ext.mohClassId ?? null);
+  const [door, setDoor] = useState(ext.kind === "door");
+  const [targets, setTargets] = useState<DoorTargets>({
+    extensions: ext.doorTargets?.extensions ?? [],
+    ringGroups: ext.doorTargets?.ringGroups ?? [],
+  });
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -537,11 +572,21 @@ function ExtensionDrawer({
       draft.noAnswerRings.trim() === "" ? 0 : Number(draft.noAnswerRings);
     if (rings !== (ext.noAnswerRings ?? 0)) patch.noAnswerRings = rings;
     if (dnd !== (ext.dnd ?? false)) patch.dnd = dnd;
-    if (voicemail !== (ext.voicemailEnabled !== false)) {
+    if (door !== (ext.kind === "door")) patch.kind = door ? "door" : "user";
+    if (
+      door &&
+      (!sameIds(targets.extensions, ext.doorTargets?.extensions ?? []) ||
+        !sameIds(targets.ringGroups, ext.doorTargets?.ringGroups ?? []))
+    ) {
+      patch.doorTargets = targets;
+    }
+    // A door station has no voicemail or intercom; the server switches both
+    // off when the kind changes, so they are not sent for it.
+    if (!door && voicemail !== (ext.voicemailEnabled !== false)) {
       patch.voicemailEnabled = voicemail;
     }
     if (record !== (ext.recordDefault ?? false)) patch.recordDefault = record;
-    if (intercom !== (ext.allowIntercom !== false)) {
+    if (!door && intercom !== (ext.allowIntercom !== false)) {
       patch.allowIntercom = intercom;
     }
     if (callWaiting !== (ext.callWaiting !== false)) {
@@ -647,6 +692,32 @@ function ExtensionDrawer({
           <div
             className="dir-section"
             role="group"
+            aria-labelledby="ext-door-label"
+          >
+            <span id="ext-door-label" className="az-eyebrow">
+              Door station
+            </span>
+            <Switch
+              label="Door station"
+              hint="A door unit that registers with this extension. It has no voicemail, takes no pickup, page, intercom or message, and can call only its targets. A member of a ring group, paging group, pickup group or queue cannot become one."
+              labelPosition="end"
+              checked={door}
+              onChange={(e) => setDoor(e.target.checked)}
+            />
+          </div>
+          {door && (
+            <DoorTargetsField
+              self={ext.id}
+              extensions={extensions}
+              value={targets}
+              error={errors.doorTargets ?? errors.kind}
+              onChange={setTargets}
+            />
+          )}
+
+          <div
+            className="dir-section"
+            role="group"
             aria-labelledby="ext-features-label"
           >
             <span id="ext-features-label" className="az-eyebrow">
@@ -659,13 +730,15 @@ function ExtensionDrawer({
               checked={dnd}
               onChange={(e) => setDnd(e.target.checked)}
             />
-            <Switch
-              label="Voicemail"
-              hint="Unanswered and busy calls go to this box"
-              labelPosition="end"
-              checked={voicemail}
-              onChange={(e) => setVoicemail(e.target.checked)}
-            />
+            {!door && (
+              <Switch
+                label="Voicemail"
+                hint="Unanswered and busy calls go to this box"
+                labelPosition="end"
+                checked={voicemail}
+                onChange={(e) => setVoicemail(e.target.checked)}
+              />
+            )}
             <Switch
               label="Record calls by default"
               hint="*1 toggles recording mid-call either way"
@@ -673,13 +746,15 @@ function ExtensionDrawer({
               checked={record}
               onChange={(e) => setRecord(e.target.checked)}
             />
-            <Switch
-              label="Allow intercom"
-              hint="An intercom call (*80 plus the number) auto-answers; off rings like a normal call"
-              labelPosition="end"
-              checked={intercom}
-              onChange={(e) => setIntercom(e.target.checked)}
-            />
+            {!door && (
+              <Switch
+                label="Allow intercom"
+                hint="An intercom call (*80 plus the number) auto-answers; off rings like a normal call"
+                labelPosition="end"
+                checked={intercom}
+                onChange={(e) => setIntercom(e.target.checked)}
+              />
+            )}
             <Switch
               label="Call waiting"
               hint="On: a second call rings the phone while it is busy. Off: the caller gets forward-busy or busy. *71 and *70 toggle it; the phone follows at its next resync"
