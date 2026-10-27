@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
+	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/snapshot"
 )
@@ -122,4 +123,29 @@ func TestDoorExtension(t *testing.T) {
 			t.Errorf("a MESSAGE to or from a door station was queued: %d sends", len(q.sends))
 		}
 	})
+}
+
+// TestDoorCallerSurvivesTakeover fails if a call from a door station loses
+// its restrictions or its CDR kind when another node takes it over: the
+// replicated dialog state must carry them, so a transfer after the takeover
+// still cannot reach a trunk (spec S-45).
+func TestDoorCallerSurvivesTakeover(t *testing.T) {
+	owner := &call{s: &Server{}, doorCaller: true, kind: cdr.KindDoor}
+	var st livestate.DialogState
+	owner.haContinuity(&st)
+	if !st.Door || st.Kind != cdr.KindDoor {
+		t.Fatalf("replicated state door=%v kind=%q, want a door call", st.Door, st.Kind)
+	}
+	taker := (&Server{}).haNewCall(st, "node-a", &haLeg{callID: "x"}, nil, time.Now())
+	if !taker.doorCaller || taker.kind != cdr.KindDoor {
+		t.Fatalf("taken-over call doorCaller=%v kind=%q, want both kept", taker.doorCaller, taker.kind)
+	}
+	if !taker.doorBlocksTrunk(false) || taker.doorBlocksTrunk(true) {
+		t.Error("a taken-over door call must be barred from a trunk, emergency routes aside")
+	}
+	var plain livestate.DialogState
+	(&call{s: &Server{}}).haContinuity(&plain)
+	if plain.Door || plain.Kind != "" && plain.Kind != cdr.KindCall {
+		t.Errorf("an ordinary call replicated as door=%v kind=%q", plain.Door, plain.Kind)
+	}
 }

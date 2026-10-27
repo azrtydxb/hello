@@ -867,5 +867,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
   the group shows it; later edits keep whatever tag is set.
 - Hello still does not provision door stations; the station's button dials the
   group's number, set on the unit.
-- HA: `doorCaller` is not replicated to the other node. A door call taken over by
-  a surviving node during setup is not re-checked; this is reported, not changed here.
+- HA: `Door` and `Kind` ride the replicated dialog state (`haContinuity`, which
+  builds it under the call lock, covers answered, homed and parked calls), and
+  `haNewCall` restores them, so a taken-over door call keeps the trunk ban and CDR
+  kind door (`TestDoorCallerSurvivesTakeover`).

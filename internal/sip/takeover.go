@@ -1072,6 +1072,7 @@ func (s *Server) haNewCall(st livestate.DialogState, from string, a, b *haLeg, t
 		start: orTime(st.StartedAt, orTime(st.AnsweredAt, takenAt)), ringTime: st.RingAt,
 		direction: orDefault(st.Direction, cdr.DirectionInternal), mediaMode: "anchored",
 		route: st.Route, trunkName: st.Trunk, rewritten: st.Rewritten,
+		doorCaller: st.Door, kind: st.Kind,
 		canceled: make(chan struct{}), stopHB: make(chan struct{}),
 		setupDone: make(chan struct{}), aborted: make(chan struct{}),
 		haStop: make(chan struct{}),

@@ -401,6 +401,7 @@ func (c *call) haContinuity(st *livestate.DialogState) {
 	defer c.mu.Unlock()
 	st.StartedAt, st.RingAt = c.start, c.ringTime
 	st.Direction, st.Route, st.Trunk, st.Rewritten = c.direction, c.route, c.trunkName, c.rewritten
+	st.Door, st.Kind = c.doorCaller, c.kind
 	st.Trace = make([]string, 0, len(c.trace))
 	for _, step := range c.trace {
 		st.Trace = append(st.Trace, step.Text)

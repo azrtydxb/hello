@@ -81,8 +81,12 @@ type DialogState struct {
 	Direction string    `json:"direction,omitempty"`
 	Route     string    `json:"route,omitempty"`
 	Trunk     string    `json:"trunk,omitempty"`
-	Rewritten string    `json:"rewritten,omitempty"`
-	Trace     []string  `json:"trace,omitempty"`
+	// Door marks a call from a door station (spec S-45) and Kind is the CDR
+	// kind, so a taker keeps the trunk ban and the CDR kind door.
+	Door      bool     `json:"door,omitempty"`
+	Kind      string   `json:"kind,omitempty"`
+	Rewritten string   `json:"rewritten,omitempty"`
+	Trace     []string `json:"trace,omitempty"`
 }
 
 // LegCallIDs are the Call-IDs of the dialogs the record carries.
