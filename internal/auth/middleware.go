@@ -38,6 +38,10 @@ type Actor struct {
 	// (an admin set the current one); the API admits nothing but the
 	// password change, /auth/me and logout meanwhile.
 	MustChangePassword bool
+	// MustEnrollMFA is set on a session of a user who is required to use
+	// 2FA (per user or per role) and has not enrolled: the API admits only
+	// the /me/2fa routes, /auth/me and logout meanwhile (spec pbx-gaps S-12).
+	MustEnrollMFA bool
 	// ExtensionScope limits a service credential to these extension
 	// numbers (spec integrations I-33); nil is every extension. A user's
 	// own limit comes from the extensions linked to the user, not from here.
