@@ -33,3 +33,31 @@ func TestGrandstreamDSCPRendered(t *testing.T) {
 		}
 	}
 }
+
+// TestVendorDSCPRendered fails if Yealink or Poly do not write the SIP and
+// RTP DSCP from the configured values (spec S-21).
+func TestVendorDSCPRendered(t *testing.T) {
+	cases := []struct {
+		v     Vendor
+		model string
+		file  string
+		want  []string
+	}{
+		{Yealink, "T54W", "{mac}.cfg", []string{"static.network.qos.signaltos = 24\n", "static.network.qos.audiotos = 34\n"}},
+		{Poly, "VVX 450", "{mac}-hello.cfg", []string{`qos.ip.callControl.dscp="24"`, `qos.ip.rtp.dscp="34"`}},
+	}
+	for _, c := range cases {
+		d := renderSample(false)
+		d.Phone.Vendor, d.Phone.Model = c.v, c.model
+		d.Prov.DSCPSIP, d.Prov.DSCPRTP = 24, 34
+		out, err := Render(context.Background(), builtinFor(t, c.v), ExpandPattern(c.file, d.Phone), d)
+		if err != nil {
+			t.Fatalf("%s: %v", c.v, err)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(string(out), w) {
+				t.Errorf("%s: %q missing from the rendered config", c.v, w)
+			}
+		}
+	}
+}

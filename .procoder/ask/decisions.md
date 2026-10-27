@@ -845,10 +845,22 @@ P1558 / P1559 from the same two values.
 - hello-control reads the same two env vars so phones are provisioned with the
   values hello-sip marks with; set both services alike.
 - A refused mark (platform, sandbox) is logged once and never fails SIP or a
-  call. SIP requests the server originates reuse the marked listening socket
-  (sipgo pool), so the mark covers them; a socket sipgo opens for a new
-  remote on demand is not marked (not seen on the UDP path).
-- Only the Grandstream template carries DSCP keys; the spec names no other
-  vendor, so Yealink, Snom, Poly and Fanvil are untouched. Site overrides go
-  through S-12.
+  call.
+- Originated SIP and the mark. Verified by test: sipgo copies the client's
+  forced local address (the listening socket) into a request only when no
+  request options are passed. The six call sites in `edge.go` and
+  `takeover.go` that pass `ClientRequestAddVia` got an ephemeral socket of
+  sipgo's own (v1.6.0 has no socket-control hook or dialer Control), which
+  nothing can mark and which was not on the SIP port. They now use
+  `Server.addViaFromListener` / `fromListener`, which set the request's local
+  address to the listener, so all originated SIP leaves from the marked
+  socket (`TestDSCPOutboundOnMarkedSocket`). A forked sipgo was rejected as
+  too heavy for this.
+- Other vendors, from the vendors' administrator guides (nothing in this repo
+  documents them): Yealink `static.network.qos.signaltos` / `audiotos`, Poly
+  `qos.ip.callControl.dscp` / `qos.ip.rtp.dscp`, written like Grandstream,
+  unverified on hardware. Snom and Fanvil: no documented DSCP provisioning key
+  could be confirmed (snom uses TOS-byte settings whose exact names are not
+  in this repo; Fanvil's are device-specific), so none is written rather than
+  guessed. Revisit with the vendor guides. Site overrides go through S-12.
 - No migration, no API or UI change; TCP/TLS SIP is not served by hello-sip.
