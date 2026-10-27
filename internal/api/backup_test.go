@@ -185,6 +185,10 @@ func TestBackupRunsAPI(t *testing.T) {
 	if rec := bkCall(h, "admin", "DELETE", "/api/v1/backups/5", nil); rec.Code != 404 {
 		t.Fatalf("delete missing: %d", rec.Code)
 	}
+	r.err = backup.ErrBusy
+	if rec := bkCall(h, "admin", "DELETE", "/api/v1/backups/6", nil); rec.Code != 409 || acctErrCode(rec) != "backup_busy" {
+		t.Fatalf("delete running: %d", rec.Code)
+	}
 }
 
 func TestBackupRestoreAPI(t *testing.T) {
