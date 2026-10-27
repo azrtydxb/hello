@@ -51,6 +51,10 @@ func TestRingMapRenderInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// First sight of the phone stores the hash and queues nothing.
+	if queued, err := st.AutoResync(ctx, c.Phone.ID, "", h0); err != nil || queued {
+		t.Fatalf("first auto resync queued = %v, %v; want the hash stored and no push", queued, err)
+	}
 
 	if _, err := st.ReplaceRingMap(ctx, "test", nil, []RingMapEntry{
 		{Tag: "doorbell", Vendor: "yealink", Tone: "7"},
