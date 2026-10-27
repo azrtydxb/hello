@@ -42,7 +42,7 @@ func TestRoutesTable(t *testing.T) {
 		}
 		return strings.HasPrefix(r.Pattern, "/api/v1/me/") || strings.HasPrefix(r.Pattern, "/api/v1/events")
 	}
-	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true}
+	public := map[string]bool{"GET /api/v1/version": true, "GET /api/v1/openapi.json": true, "POST /api/v1/auth/login": true, "POST /api/v1/auth/login/2fa": true}
 	seen := map[string]bool{}
 	for _, r := range Routes() {
 		key := r.Method + " " + r.Pattern
