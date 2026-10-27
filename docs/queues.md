@@ -142,13 +142,13 @@ how it ended), `answered`, `abandon` and `exit` (with `timeout`, `full`,
 `callback_dialled`, `callback_connected` and `callback_failed` (see
 [Callback](#callback)). The call detail API returns them as `queueLegs`.
 
-| Metric                                    | Meaning                                                                                     |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `hello_queue_waiting{queue}`              | Callers waiting in queues this node holds; sum it across nodes.                             |
-| `hello_queue_wait_seconds{queue,outcome}` | Histogram of the wait by outcome (answered, abandoned, timeout, full, no_agents, breakout). |
-| `hello_queue_abandoned_total{queue}`      | Callers who hung up while waiting.                                                          |
-| `hello_queue_calls_total{queue,event}`    | entered, answered, abandoned, `exit_<reason>`.                                              |
-| `hello_queue_agents{queue,state}`         | Agents by state, reported by one node at a time (the holder of a lease).                    |
+| Metric                                    | Meaning                                                                                                          |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `hello_queue_waiting{queue}`              | Callers waiting in queues this node holds; sum it across nodes.                                                  |
+| `hello_queue_wait_seconds{queue,outcome}` | Histogram of the wait by outcome (answered, abandoned, timeout, full, no_agents, breakout).                      |
+| `hello_queue_abandoned_total{queue}`      | Callers who hung up while waiting.                                                                               |
+| `hello_queue_calls_total{queue,event}`    | entered, answered, abandoned, `exit_<reason>`.                                                                   |
+| `hello_queue_agents{queue,state}`         | Agents by state, reported by one node at a time (the holder of a lease).                                         |
 | `hello_callback_total{result}`            | Callback outcomes: requested, coalesced, full, dialled, connected, no_answer, busy, failed, abandoned, no_agent. |
 
 ## Callback
@@ -201,7 +201,7 @@ by default; turn it on in the queue's **Callback** section (or
   ringing phone is cancelled, a caller already on the line is hung up, and the
   request is not retried.
 - **Operators.** `GET /api/v1/queues/{id}/callbacks` and `DELETE
-  /api/v1/queues/{id}/callbacks/{callbackId}` (also the **Callbacks** page of a
+/api/v1/queues/{id}/callbacks/{callbackId}` (also the **Callbacks** page of a
   queue) list requests and cancel an open one.
 
 The CDR of the call placed to the caller has kind `callback`.
