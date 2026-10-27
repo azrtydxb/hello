@@ -124,7 +124,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Dial-by-name                                  | wip (spec #199)                |
 | Voicemail groups                              | wip (spec #199)                |
 | Fax                                           | wip (spec #199)                |
-| Boss/secretary                                | wip (#PR, B2)                  |
+| Boss/secretary                                | wip (#236, B2)                 |
 | Multi-language prompts (Dutch option per box) | wip (spec #199)                |
 | Codec in call history                         | wip (spec pbx-gaps; cdr-codec) |
 | Phone LDAP directory                          | wip (spec #199)                |
