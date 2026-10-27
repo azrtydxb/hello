@@ -915,3 +915,65 @@ conflict`), and a batch that deleted a device or phone (which a batch cannot
 - **Metrics:** `hello_config_batches_total{result}` and
   `hello_config_batch_ops`. The graph build and trace metrics belong to their
   phases.
+
+## Flow canvas P5: traceFlow and trace mode (2026-10-27)
+
+- **Where the walk lives.** `flow.Trace(Input, TraceStart, TraceOptions)` builds
+  the graph and walks its edges, so the trace can only name a node and port the
+  canvas draws. The API handler decides the call (`routing.Decide`, as
+  `routingTest` does) and turns the decision into the start: the trunk step,
+  the matched inbound route step, then `Follow` (an output port) or `Enter` (an
+  input port); an outbound hop is appended as `Tail`. `internal/flow` does not
+  import `routing`.
+- **Step contract.** `{node, port, text, at?, branches?}`. `port` is the
+  output port the call leaves the node through; the canvas highlights the graph
+  edge from `(node, port)` to the next step's node. A last step's `port` is the
+  input it ends at (`voicemail`). Steps on the same node (an extension rings,
+  then its voicemail) draw no edge.
+- **Which inbound route matched** is read from the first `Route "x" matched`
+  line of the routing trace, because an `external` destination overwrites
+  `Decision.Route` with the outbound route's name.
+- **Numbers answered before routing.** From an extension, hello-sip answers a
+  paging code, a conference room, an IVR number, a queue number and a ring
+  group name before it asks routing (`b2bua.go`). The trace repeats that order,
+  then falls through to `routing.Decide`. Park retrieval, feature codes and
+  `Replaces` pickup are not traced.
+- **Extensions.** `forwardAlways`; do not disturb goes to voicemail when the box
+  is on, else the call is declined (as `failoverExtension` does); otherwise it
+  rings and then the no-answer forward or voicemail. Whether a device is
+  registered is live state and is not read. Busy forwarding is not traced (it
+  needs live call state).
+- **Ring groups and queues** follow the failure path (`noAnswer`; for a queue
+  `timeout`, or `noAgents` when it has none): a member or agent who answers ends
+  the call, so the trace shows what happens when nobody does. The step text
+  says so.
+- **IVR.** The first key of `digits` picks the option (`port key:<d>`); the rest
+  go on to the next menu. A key that is not an option takes `invalid`. With no
+  keys left, the menu step carries a branch per key and for `timeout`
+  (`invalid` is not listed). "To depth 6" is six nested menus expanded; deeper
+  ones are not expanded and the step says so. A loop (same node, port and
+  remaining keys twice on one path) ends the path with a step that says so; a
+  path is cut at 64 steps.
+- **Time conditions** use `timecond.Resolve` on the conditions built the way the
+  store builds them for the evaluate endpoint, at `at`, override included.
+  Each condition in a chain is one step with the branch as its port (a holiday
+  with no holiday destination takes `closed`, the edge the graph draws). A
+  forced branch says so and who set it and when; the override has no expiry in
+  the data, so the "until" wording of the spec is not shown. An announcement
+  followed by a "then voicemail" box adds a voicemail step.
+- **Endpoint.** `GET /api/v1/flow/trace`, `traceFlow`, read/viewer (unlike
+  `testRouting`, which is write/operator: it reads the configuration only and
+  places no call). Answers `{configRevision, at, from, number, outcome, route,
+  reason, steps, routingTrace}`. A rejected call (no route matched, outside an
+  inbound schedule) is `200` with `outcome: reject` and a final step on the
+  trunk. Trunk usability uses the same live-state rule as `routingTest`. The
+  metric is `hello_flow_trace_total`, registered with the batch metrics.
+- **Canvas.** Trace mode is a button in the canvas toolbar (viewers too) that
+  swaps the node panel for a trace panel: source, number, caller ID, time
+  (`datetime-local`, empty is now), a keypad, and the result list. Highlighting
+  is done by two pure functions (`traceHighlight.ts`) that mark the view
+  after `buildView`, so the page keeps one extra line of state and the P4
+  editing code is untouched. Traced objects that are not on the canvas are
+  counted in a note, not drawn.
+- **Not in this change** (their phases): `traceFlow` in `assistantTools` and the
+  skill (P6).

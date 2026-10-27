@@ -3,9 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/azrtydxb/hello/internal/routing"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/azrtydxb/hello/internal/flow"
 	"github.com/azrtydxb/hello/internal/phonebook"
@@ -176,4 +180,98 @@ func TestFlowGraphStatuses(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.must(http.StatusRequestEntityTooLarge, "GET", "/api/v1/flow/graph", nil)
+}
+
+// traceFake adds the routing configuration to the flow fake.
+type traceFake struct {
+	flowFake
+	inbound []store.InboundRoute
+	cfg     routing.Config
+}
+
+func (f *traceFake) ListTrunks(context.Context) ([]store.Trunk, error) {
+	return []store.Trunk{{ID: 1, Name: "carrier", Mode: "ip", Enabled: true}}, nil
+}
+func (f *traceFake) ListInboundRoutes(context.Context) ([]store.InboundRoute, error) {
+	return f.inbound, nil
+}
+func (f *traceFake) RoutingConfig(context.Context) (store.RoutingSnapshot, error) {
+	return store.RoutingSnapshot{Config: f.cfg}, nil
+}
+
+func traceGet(t *testing.T, f *traceFake, url string) (int, flowTraceBody) {
+	t.Helper()
+	s := &server{Config{Store: f, Router: engineRouter{}, Log: slog.New(slog.DiscardHandler)}}
+	rec := httptest.NewRecorder()
+	s.getFlowTrace(rec, httptest.NewRequest("GET", url, nil))
+	var out flowTraceBody
+	if rec.Code == 200 {
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return rec.Code, out
+}
+
+type flowTraceBody struct {
+	Outcome string           `json:"outcome"`
+	Route   string           `json:"route"`
+	Reason  string           `json:"reason"`
+	Steps   []flow.TraceStep `json:"steps"`
+}
+
+func (b flowTraceBody) path() string {
+	var p []string
+	for _, s := range b.Steps {
+		p = append(p, s.Node+":"+s.Port)
+	}
+	return strings.Join(p, " > ")
+}
+
+// TestTrace covers the trace endpoint: the routing decision becomes the
+// start of the walk, an inbound schedule closes the route, and a bad
+// request is refused.
+func TestTrace(t *testing.T) {
+	f := &traceFake{
+		flowFake: flowFake{rev: 3, exts: []store.Extension{{ID: 1, Number: "100", Name: "Ann", VoicemailEnabled: true}}},
+		inbound:  []store.InboundRoute{{ID: 7, Name: "office", DIDKind: "exact", DID: "5551", DestinationKind: "extension", Destination: "100", Enabled: true}},
+		cfg: routing.Config{
+			Trunks:     []routing.Trunk{{ID: 1, Name: "carrier", Mode: "ip", Enabled: true, Destinations: []routing.Destination{{Host: "192.0.2.1"}}}},
+			Extensions: map[string]string{"100": ""},
+			Inbound: []routing.InboundRoute{{ID: 7, Name: "office", DIDKind: "exact", DID: "5551", DestinationKind: "extension", Destination: "100", Enabled: true,
+				Schedule: &routing.Schedule{TimeZone: "UTC", Windows: []routing.Window{{
+					Days:  []time.Weekday{time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday},
+					Start: "09:00", End: "17:00"}}}}},
+		},
+	}
+
+	code, tr := traceGet(t, f, "/api/v1/flow/trace?from=trunk:1&number=5551&at=2026-10-26T10:00:00Z")
+	if code != 200 || tr.Outcome != "inbound" || tr.Route != "office" {
+		t.Fatalf("open hours: %d %+v", code, tr)
+	}
+	if got := tr.path(); got != "trunk:1:inbound > inboundRoute:7:destination > extension:1:ring > extension:1:voicemail" {
+		t.Errorf("open hours path %s", got)
+	}
+
+	// Outside the route's schedule no inbound route matches: the trace ends
+	// on the trunk with the routing reason.
+	code, tr = traceGet(t, f, "/api/v1/flow/trace?from=trunk:1&number=5551&at=2026-10-25T20:00:00Z")
+	if code != 200 || tr.Outcome != "reject" || !strings.Contains(tr.Reason, "No inbound route matched") {
+		t.Fatalf("closed hours: %d %+v", code, tr)
+	}
+	if last := tr.Steps[len(tr.Steps)-1]; last.Node != "trunk:1" || !strings.Contains(last.Text, "rejected") {
+		t.Errorf("closed hours last step %+v", last)
+	}
+
+	// An extension dialling another walks the extension.
+	code, tr = traceGet(t, f, "/api/v1/flow/trace?from=100&number=100")
+	if code != 200 || tr.Outcome != "internal" || tr.path() != "extension:1: > extension:1:ring > extension:1:voicemail" {
+		t.Errorf("internal: %d %s %+v", code, tr.path(), tr)
+	}
+
+	for _, bad := range []string{"", "?from=abc&number=1", "?from=trunk:1", "?from=trunk:1&number=1&at=noon", "?from=trunk:1&number=1&digits=ab"} {
+		if code, _ := traceGet(t, f, "/api/v1/flow/trace"+bad); code == 200 {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
 }
