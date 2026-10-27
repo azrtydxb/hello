@@ -413,7 +413,10 @@ func validSenderNumber(n string) bool { return senderNumberRe.MatchString(n) }
 func (s *Server) relayTyping(req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot, dev snapshot.Device,
 	send MessageSend, count func(string),
 ) {
-	if send.TargetKind == MsgTargetExtension && snap.HasExtension(send.Target) {
+	// Whether the recipient is registered is decided here, before the reply:
+	// looked up in the background it would also find a phone that registers
+	// just after, and relay it a typing indication sent while it was offline.
+	if send.TargetKind == MsgTargetExtension && snap.HasExtension(send.Target) && s.isOnline(snap, send.Target) {
 		job := MessageJob{
 			Sender: send.Sender, SenderKind: send.SenderKind, SenderName: send.SenderName,
 			Recipient: send.Target, RecipientKind: MsgTargetExtension, Scope: "direct",
