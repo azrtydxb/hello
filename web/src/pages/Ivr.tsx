@@ -5,6 +5,7 @@ import {
   errorMessage,
   fieldErrors,
   IVR_DESTINATION_LABEL,
+  hasNoTarget,
   listAnnouncements,
   listExtensions,
   listIvrMenus,
@@ -45,7 +46,11 @@ import {
 import { listTimeConditions, type TimeCondition } from "../api/timecond";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { FormAlert } from "./callflow/ui";
-import { announcementAudioPath } from "../api/media";
+import {
+  announcementAudioPath,
+  PROMPT_LANGUAGE_LABELS,
+  promptLanguageLabel,
+} from "../api/media";
 import { NowPlaying, usePlayback } from "./media/MediaParts";
 import { Can } from "../role";
 
@@ -95,8 +100,8 @@ function useChoices(): { choices: DestinationChoices; error: string | null } {
 }
 
 function destinationText(d: IvrDestination): string {
-  return d.kind === "hangup"
-    ? IVR_DESTINATION_LABEL.hangup
+  return hasNoTarget(d.kind)
+    ? IVR_DESTINATION_LABEL[d.kind]
     : `${IVR_DESTINATION_LABEL[d.kind]} ${d.target}`;
 }
 
@@ -329,6 +334,7 @@ interface Draft {
   interDigitTimeout: string;
   maxRetries: string;
   allowDirectDial: boolean;
+  promptLanguage: string;
   timeout: IvrDestination;
   invalid: IvrDestination;
   options: IvrOption[];
@@ -349,6 +355,7 @@ const draftOf = (m: IvrMenu | null): Draft =>
         interDigitTimeout: String(m.interDigitTimeout),
         maxRetries: String(m.maxRetries),
         allowDirectDial: m.allowDirectDial,
+        promptLanguage: m.promptLanguage ?? "",
         timeout: { ...m.timeout },
         invalid: { ...m.invalid },
         options: m.options.map((o) => ({ ...o })),
@@ -364,6 +371,7 @@ const draftOf = (m: IvrMenu | null): Draft =>
         interDigitTimeout: "3",
         maxRetries: "3",
         allowDirectDial: false,
+        promptLanguage: "",
         timeout: { kind: "hangup", target: "" },
         invalid: { kind: "hangup", target: "" },
         options: [],
@@ -380,6 +388,7 @@ const KEYS = [
   "interDigitTimeout",
   "maxRetries",
   "allowDirectDial",
+  "promptLanguage",
   "timeout",
   "invalid",
   "options",
@@ -392,7 +401,7 @@ function validateDest(
   key: string,
   d: IvrDestination,
 ) {
-  if (d.kind === "hangup") return;
+  if (hasNoTarget(d.kind)) return;
   if (d.target.trim() === "") out[`${key}.target`] = "Choose a target.";
   else if (
     d.kind === "external" &&
@@ -542,6 +551,7 @@ function IvrDrawer({
         interDigitTimeout: Number(d.interDigitTimeout),
         maxRetries: Number(d.maxRetries),
         allowDirectDial: d.allowDirectDial,
+        promptLanguage: d.promptLanguage,
         timeout: d.timeout,
         invalid: d.invalid,
         options: d.options,
@@ -738,6 +748,21 @@ function IvrDrawer({
             labelPosition="end"
             checked={d.allowDirectDial}
             onChange={(e) => set("allowDirectDial", e.target.checked)}
+          />
+          <Select
+            id="ivr-language"
+            label="Prompt language"
+            hint="The language of the spoken prompts this menu adds, such as the dial-by-name directory. Default follows the system language."
+            value={d.promptLanguage}
+            error={errors.promptLanguage}
+            options={[
+              { value: "", label: "Default" },
+              ...Object.keys(PROMPT_LANGUAGE_LABELS).map((code) => ({
+                value: code,
+                label: promptLanguageLabel(code),
+              })),
+            ]}
+            onChange={(e) => set("promptLanguage", e.target.value)}
           />
         </fieldset>
 

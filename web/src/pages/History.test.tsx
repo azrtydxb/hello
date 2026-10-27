@@ -141,7 +141,6 @@ describe("Call History", () => {
     ).toBeVisible();
   });
 
-
   it("says so when the history cannot load", async () => {
     mockApi({
       ...ME,

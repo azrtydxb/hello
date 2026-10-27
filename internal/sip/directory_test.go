@@ -201,3 +201,21 @@ func TestDirectoryFeatureCode(t *testing.T) {
 		}
 	}
 }
+
+// TestDirectoryPromptLanguage: a menu's promptLanguage chooses the language
+// of the directory prompts. It fails if the English text is spoken.
+func TestDirectoryPromptLanguage(t *testing.T) {
+	pbx, sp := dirPBX(t, func(m *snapshot.IVRMenu) { m.PromptLanguage = "nl" })
+	a, _, _ := registerABC(t, pbx)
+	r := waitCall(t, dial(t.Context(), a, "800"))
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	seq := r.dcs.InviteRequest.CSeq().SeqNo + 10
+	sendDigits(t, a, r.dcs, "5", &seq)
+	waitSpoke(t, sp, voiceprompt.Text(voiceprompt.Dutch, voiceprompt.DirectoryEnter, nil))
+	if sp.spoke(dirText(voiceprompt.DirectoryEnter, nil)) {
+		t.Fatal("the English prompt was spoken")
+	}
+	_ = r.dcs.Bye(t.Context())
+}

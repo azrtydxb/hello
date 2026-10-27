@@ -176,6 +176,9 @@ func TestCompileValidation(t *testing.T) {
 				InboundRoute{ID: 520, Position: 520, Name: "n3", DIDKind: "exact", DID: "92", DestinationKind: "announcement", Destination: "closed", Enabled: true},
 				InboundRoute{ID: 530, Position: 530, Name: "n4", DIDKind: "exact", DID: "93", DestinationKind: "paging", Destination: "*88", Enabled: true})
 		}, nil},
+		{"directory destination takes no target", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "directory", "" }), nil},
+		{"directory destination with a target", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "directory", "x" }), []FieldError{
+			fe(I("destination"), `must be empty when destinationKind is "directory"`)}},
 		{"extension destination must exist", in(func(r *InboundRoute) { r.Destination = "999" }), []FieldError{fe(I("destination"), `extension "999" does not exist`)}},
 		{"external destination must be a number", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "external", "05 01" }), []FieldError{
 			fe(I("destination"), "must be a number (+, digits, * and #)")}},

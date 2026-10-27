@@ -164,7 +164,7 @@ func (c *call) ivrDirectoryExit(ctx context.Context, snap *snapshot.Snapshot, m 
 // ivrDirectory runs the directory. done means the call is connected or over;
 // next names a menu to continue in; neither means no name was chosen.
 func (c *call) ivrDirectory(ctx context.Context, snap *snapshot.Snapshot, m snapshot.IVRMenu) (next string, done bool) {
-	lang := c.s.promptLang()
+	lang := voiceprompt.Resolve(m.PromptLanguage, c.s.cfg.PromptLanguage)
 	times := menuDirectoryTimes(m)
 	for attempt := 0; attempt < directoryAttempts; attempt++ {
 		keys, res := c.directoryEntry(ctx, lang, times)

@@ -107,6 +107,8 @@ function failureText(g: RingGroup): string {
       return `Queue ${g.failureTarget || UNKNOWN}`;
     case "time_condition":
       return `Time condition ${g.failureTarget || UNKNOWN}`;
+    case "directory":
+      return "Dial-by-name directory";
     case "extension":
       return `Extension ${g.failureTarget || UNKNOWN}`;
     case "ring_group":
@@ -412,7 +414,10 @@ function groupBody(d: GroupDraft): RingGroupFields {
     memberDelay: Number(d.memberDelay),
     ignoreDnd: d.ignoreDnd,
     failureKind: d.failureKind,
-    failureTarget: d.failureKind === "none" ? "" : d.failureTarget.trim(),
+    failureTarget:
+      d.failureKind === "none" || d.failureKind === "directory"
+        ? ""
+        : d.failureTarget.trim(),
     mohClassId: d.mohClassId,
     mohRingback: d.mohRingback,
     members: d.members.map((m, i) => ({
@@ -852,6 +857,7 @@ function RingGroupDrawer({
               { value: "ivr", label: "IVR menu" },
               { value: "queue", label: "Call queue" },
               { value: "time_condition", label: "Time condition" },
+              { value: "directory", label: "Dial-by-name directory" },
               { value: "extension", label: "Extension" },
               { value: "ring_group", label: "Ring group" },
             ]}
@@ -950,6 +956,7 @@ function RingGroupDrawer({
             />
           )}
           {d.failureKind !== "none" &&
+            d.failureKind !== "directory" &&
             d.failureKind !== "ivr" &&
             d.failureKind !== "queue" &&
             d.failureKind !== "time_condition" &&

@@ -3,6 +3,7 @@ import {
   errorMessage,
   fieldErrors,
   IVR_DESTINATION_LABEL,
+  hasNoTarget,
   listAnnouncements,
   listExtensions,
   listIvrMenus,
@@ -59,6 +60,8 @@ const destText = (d: TcDestination): string => {
   switch (d.kind) {
     case "hangup":
       return IVR_DESTINATION_LABEL.hangup;
+    case "directory":
+      return IVR_DESTINATION_LABEL.directory;
     case "announcement":
       return `Announcement ${d.target}, then ${
         d.thenVoicemail ? `voicemail ${d.thenVoicemail}` : "hang up"
@@ -524,7 +527,7 @@ function validateDest(
   key: string,
   d: TcDestination,
 ) {
-  if (d.kind === "hangup") return;
+  if (hasNoTarget(d.kind)) return;
   if (d.target.trim() === "") out[`${key}.target`] = "Choose a target.";
   else if (
     d.kind === "external" &&

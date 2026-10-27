@@ -235,3 +235,44 @@ func TestGraphConference(t *testing.T) {
 		t.Error("the room has no node")
 	}
 }
+
+// TestGraphDirectory: the dial-by-name directory is one node that a route,
+// a ring group fallback, an IVR key and a feature code all draw an edge to.
+// It fails if the kind is unknown to the builder (a missing node and a
+// dangling warning instead).
+func TestGraphDirectory(t *testing.T) {
+	in := Input{
+		Extensions: []store.Extension{{ID: 1, Number: "101", Name: "Ann"}},
+		RingGroups: []store.RingGroup{{ID: 1, Name: "sales", FailureKind: "directory",
+			Members: []store.RingGroupMember{{ExtensionID: 1, Position: 1}}}},
+		FeatureCodes: []store.FeatureCode{{Code: "*42", Action: "directory"}},
+		Inbound:      []store.InboundRoute{{ID: 1, Name: "main", DID: "5", DestinationKind: "directory"}},
+	}
+	g, err := Build(in, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nodes int
+	for _, n := range g.Nodes {
+		if n.Kind == KindDirectory {
+			nodes++
+		}
+	}
+	if nodes != 1 {
+		t.Fatalf("%d directory nodes, want 1", nodes)
+	}
+	into := 0
+	for _, e := range g.Edges {
+		if e.Target.Node == KindDirectory+":names" {
+			into++
+		}
+	}
+	if into != 3 {
+		t.Fatalf("%d edges into the directory, want 3 (route, group, feature code): %v", into, edgeIDs(g))
+	}
+	for _, w := range g.Warnings {
+		if w.Code == WarnDangling {
+			t.Fatalf("dangling warning: %s", w.Message)
+		}
+	}
+}

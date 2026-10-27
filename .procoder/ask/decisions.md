@@ -832,3 +832,43 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - Not done: `exhausted` after a forward stage still uses the dialled
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
+
+## Dial-by-name directory (pbx-gaps B3, S-13) (2026-10-27)
+
+- A new destination kind `directory` with an empty target, accepted by every
+  output that stores a call destination: inbound routes, ring group fallback,
+  IVR keys / timeout / invalid, time condition branches, queue exits (decision
+  3), plus the feature-code action `directory`. Migration 00052 (renumbered by
+  the merge captain) widens the CHECK lists additively with
+  `pg_temp.hello_check_values`; down removes or hangs up the rows of the kind.
+- Default feature code is `*42`, not `*411` (D11). `*411` extends the default
+  directed-pickup code `*41`, and the dial-space guard refuses a code that is
+  a prefix of or prefixed by another, so it could never be seeded. The action
+  is configurable, so an installation that frees `*41` can use `*411`.
+  Reported to the coordinator: the same clash exists for follow-me `*74`/`*75`
+  against park.
+- The index is built into the snapshot (`Snapshot.DirectorySearch`), with
+  `directory_hidden` carried in the snapshot's extension row. Matching is by
+  keypad spelling of the first or last word of the extension name (the
+  extensions book has one name field); accents fold; digits 0 and 1 carry no
+  letters. More than 7 keys are refused with an extra prompt key
+  `directory.toolong` (the spec lists six keys; "asks for fewer" needs its own
+  sentence).
+- Connection uses the IVR's own dial path (`ivrDial`), not a REFER: the caller
+  is a one-legged B2BUA call on the relay, so putting the extension in front
+  of the relay gives the "blind transfer" result, keeps the CDR as one call and
+  applies the extension's own forwarding and voicemail.
+- The one connected name is the voicemail box's recording (`name_object`)
+  when present, read with one box lookup at hand-over time as the voicemail
+  application does; otherwise spoken with the Speaker (the text-to-speech
+  cache over go-ai-sdk). `directory.connecting` is "Connecting you to" with no
+  name placeholder so the recording and the spoken name both follow it.
+- A call that reaches the directory without a menu (route, time condition,
+  group fallback, `*42`) uses phase `directory` for HA: a taker restarts it
+  from its first prompt. Inside a menu the menu's phase is kept.
+- Canvas: one pseudo-terminal node `directory:names` that every output kind
+  and the feature code draw an edge to.
+- S-20 for menus: `ivr_menus.prompt_language` (NULL inherits), resolved with
+  `voiceprompt.Resolve` as voicemail boxes are; API `promptLanguage`, console
+  select on the IVR form. Merged `origin/gaps-languages` (PR 208) for
+  `voiceprompt.Resolve`; the PR depends on it.

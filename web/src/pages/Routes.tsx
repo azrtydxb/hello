@@ -425,6 +425,7 @@ const DESTINATION_KIND: Record<
   voicemail: { label: "Voicemail", icon: "voicemail" },
   announcement: { label: "Announcement", icon: "megaphone" },
   paging: { label: "Paging group", icon: "megaphone" },
+  directory: { label: "Dial-by-name directory", icon: "book-user" },
 };
 
 function Destination({
@@ -1181,7 +1182,7 @@ function inboundBody(d: InboundDraft): InboundRouteFields {
     schedule: d.schedule,
     callerIdTransform: toTransform(d.callerIdTransform),
     destinationKind: d.destinationKind,
-    destination: d.destination.trim(),
+    destination: d.destinationKind === "directory" ? "" : d.destination.trim(),
     enabled: d.enabled,
     mohClassId: d.mohClassId,
     mohRingback: d.mohRingback,
@@ -1198,7 +1199,7 @@ function validateInbound(d: InboundDraft): Record<string, string> {
   if (d.headerRegex !== "" && d.headerName === "") {
     e.headerName = "Name the header the regex applies to.";
   }
-  if (d.destination.trim() === "") {
+  if (d.destinationKind !== "directory" && d.destination.trim() === "") {
     e.destination = isListed(d.destinationKind)
       ? `Choose a ${LISTED_NOUN[d.destinationKind]}.`
       : "Enter where calls go.";
@@ -1237,6 +1238,7 @@ const DESTINATION_LABEL: Record<InboundDraft["destinationKind"], string> = {
   voicemail: "Voicemail box of",
   announcement: "Announcement",
   paging: "Paging group",
+  directory: "Dial-by-name directory",
 };
 
 type ListedKind = "ring_group" | "voicemail" | "announcement" | "paging";
@@ -1422,6 +1424,7 @@ function InboundDrawer({
               { value: "voicemail", label: "Voicemail" },
               { value: "announcement", label: "Announcement" },
               { value: "paging", label: "Paging group" },
+              { value: "directory", label: "Dial-by-name directory" },
             ]}
             onChange={(e) =>
               // The target belongs to the kind: a name chosen for one kind
@@ -1434,7 +1437,9 @@ function InboundDrawer({
               }))
             }
           />
-          {d.destinationKind === "queue" ? (
+          {d.destinationKind === "directory" ? (
+            <span />
+          ) : d.destinationKind === "queue" ? (
             <QueueSelect
               id={id("destination")}
               label={DESTINATION_LABEL.queue}
