@@ -127,7 +127,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Boss/secretary                                | wip (spec #199)                |
 | Multi-language prompts (Dutch option per box) | wip (spec #199)                |
 | Codec in call history                         | wip (spec pbx-gaps; cdr-codec) |
-| Phone LDAP directory                          | wip (spec #199)                |
+| Phone LDAP directory                          | wip (gaps-ldap)                |
 
 ## Other
 

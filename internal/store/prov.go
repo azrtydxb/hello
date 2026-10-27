@@ -52,6 +52,11 @@ type ProvSettings struct {
 	// Deployment lists the vendors whose redirect credentials the
 	// deployment sets (they count as configured whatever is stored).
 	Deployment map[prov.Vendor]bool
+	// LDAPBase is HELLO_LDAP_BASE while hello-control serves LDAP, empty
+	// otherwise (no phone is then given LDAP keys). LDAPPort is the port
+	// phones reach it on.
+	LDAPBase string
+	LDAPPort int
 }
 
 // WithProv sets the provisioning settings and returns s.
@@ -1014,3 +1019,15 @@ func setRedirectStatus(ctx context.Context, tx *sql.Tx, id int64, st redirect.St
 	_, err = tx.ExecContext(ctx, `UPDATE phones SET redirect_status = $2 WHERE id = $1`, id, string(b))
 	return err
 }
+
+// LDAPHost is the host phones reach the LDAP directory at, the host of the
+// public provisioning URL; empty while LDAP is not served.
+func (p ProvSettings) LDAPHost() string {
+	if !p.ldapOn() {
+		return ""
+	}
+	return p.ldapHost()
+}
+
+// LDAPServed reports whether hello-control serves the LDAP directory.
+func (p ProvSettings) LDAPServed() bool { return p.ldapOn() }

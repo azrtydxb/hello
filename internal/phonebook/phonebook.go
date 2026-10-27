@@ -172,9 +172,12 @@ type Group struct {
 	Multicast     []MulticastChannel `json:"multicast"`
 	PagingOptions PagingOptions      `json:"pagingOptions"`
 	PTT           PTT                `json:"ptt"`
-	PhoneCount    int                `json:"phoneCount"`
-	CreatedAt     time.Time          `json:"createdAt"`
-	UpdatedAt     time.Time          `json:"updatedAt"`
+	// LDAPEnabled turns the phone LDAP directory on for the group's phones
+	// (spec pbx-gaps S-26).
+	LDAPEnabled bool      `json:"ldapEnabled"`
+	PhoneCount  int       `json:"phoneCount"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // ValidName reports whether s is a usable book or group name: 1 to max

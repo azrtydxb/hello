@@ -25,6 +25,7 @@ func TestRoutesTable(t *testing.T) {
 		"POST /api/v1/phones/{id}/rearm":                 true,
 		"POST /api/v1/phones/{id}/admin-password/reveal": true,
 		"POST /api/v1/phones/{id}/admin-password/rotate": true,
+		"POST /api/v1/phones/{id}/ldap/password":         true,
 	}
 	// Self-service routes (spec P-19, user accounts) ask only the user role,
 	// which ranks below viewer: the signed-in user's own profile, contacts,

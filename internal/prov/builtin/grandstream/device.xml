@@ -243,6 +243,22 @@
     <P333>1</P333>
 {{- end}}
 {{- end}}
+{{- /* LDAP phonebook (pbx-gaps S-26): no template or guide in the references on hand lists the LDAP P-values for the WP8x6, WP856 or WP8xx, so P8020 to P8032 below are not confirmed on a phone (verify, needs hardware). They are written only to a phone in a group that turned LDAP on. */}}
+{{- with .LDAP}}
+    <P8020>{{xml .Host}}</P8020>
+    <P8021>{{.Port}}</P8021>
+    <P8022>{{xml .Base}}</P8022>
+    <P8023>{{xml .BindDN}}</P8023>
+    <P8024>{{xml .Password}}</P8024>
+    <P8025>cn sn</P8025>
+    <P8026>telephoneNumber mobile homePhone</P8026>
+    <P8027>cn</P8027>
+    <P8028>{{.MaxHits}}</P8028>
+    <P8029>3</P8029>
+    <P8030>(|(cn=%)(sn=%))</P8030>
+    <P8031>(|(telephoneNumber=%)(mobile=%)(homePhone=%))</P8031>
+    <P8032>2</P8032>
+{{- end}}
     <P30>{{xml .Time.NTP}}</P30>
 {{- with .Time.TZ.POSIX}}
     <P64>{{xml .}}</P64>

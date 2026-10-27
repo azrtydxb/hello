@@ -100,6 +100,9 @@ type RenderData struct {
 	Prov     ProvInfo
 	Firmware *FirmwareInfo // nil when no firmware is pinned for the model
 	Book     *BookInfo     // nil when the phone has no address book to fetch
+	// LDAP is the phone's LDAP directory setting (spec pbx-gaps S-26); nil
+	// when its group has LDAP off, LDAP is not served or the model has none.
+	LDAP *LDAPInfo
 	// Multicast is the multicast paging the phone listens to (its group's
 	// catalog channels, or every enabled paging channel when the group names
 	// none or the phone has no group); nil when there is none. PTT is the
@@ -371,6 +374,15 @@ func PhoneTokenAAD(phoneID int64) string { return "phone-token:" + strconv.Forma
 
 // PhoneAdminAAD is the context of a phone's sealed admin password.
 func PhoneAdminAAD(phoneID int64) string { return "phone-admin:" + strconv.FormatInt(phoneID, 10) }
+
+// PhoneLDAPAAD and PhoneLDAPPrevAAD are the contexts of a phone's sealed
+// LDAP password and of the previous one kept after a rotation.
+func PhoneLDAPAAD(phoneID int64) string { return "phone-ldap:" + strconv.FormatInt(phoneID, 10) }
+
+// PhoneLDAPPrevAAD is the context of the previous LDAP password.
+func PhoneLDAPPrevAAD(phoneID int64) string {
+	return "phone-ldap-prev:" + strconv.FormatInt(phoneID, 10)
+}
 
 // RedirectAAD is the context of a vendor's sealed redirect credentials.
 func RedirectAAD(v Vendor) string { return "redirect:" + string(v) }

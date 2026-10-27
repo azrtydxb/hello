@@ -7854,6 +7854,97 @@
         }
       }
     },
+    "/api/v1/phones/{id}/ldap": {
+      "get": {
+        "operationId": "getPhoneLDAP",
+        "summary": "Get a phone's LDAP directory state",
+        "description": "Returns the phone's LDAP bind DN, whether a password is set, when it was last rotated, whether the previous password still binds and when the phone last bound. Never the password. Viewer.",
+        "tags": ["phones"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneLDAP"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phones/{id}/ldap/password": {
+      "post": {
+        "operationId": "rotatePhoneLDAPPassword",
+        "summary": "Rotate a phone's LDAP password",
+        "description": "Generates a new 32-character LDAP password for the phone and returns it once, with the bind DN. The phone is queued a check-sync so it takes the new password with its configuration; the old password keeps working until it has fetched it. Admin, secrets scope.",
+        "tags": ["phones"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The new password, shown once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneLDAPPassword"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "secrets",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "secrets-scoped: the password is shown only in the console"
+        }
+      }
+    },
     "/api/v1/phones/{id}/fetches": {
       "get": {
         "operationId": "listPhoneFetches",
@@ -13186,6 +13277,106 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/phone-groups/{id}/ldap": {
+      "get": {
+        "operationId": "getPhoneGroupLDAP",
+        "summary": "Get a phone group's LDAP directory setting",
+        "description": "Returns whether the group's phones are given the LDAP directory, whether this server serves LDAP at all, and where phones reach it. Viewer.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The setting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupLDAP"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "setPhoneGroupLDAP",
+        "summary": "Turn a phone group's LDAP directory on or off",
+        "description": "Turns the read-only LDAP directory on or off for the group's phones. On, each phone of the group is given its LDAP bind DN and a generated password in its rendered configuration (LDAPS, the same delivered address books as the XML directory). Needs HELLO_LDAP_ENABLED on the server; turning it on without answers 409. Phones pick the change up at their next fetch. Admin only.",
+        "tags": ["phone-groups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhoneGroupLDAPInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The setting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneGroupLDAP"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "500": {
             "$ref": "#/components/responses/Internal"
@@ -23826,6 +24017,10 @@
           "pagingOptions": {
             "$ref": "#/components/schemas/PagingOptions"
           },
+          "ldapEnabled": {
+            "type": "boolean",
+            "description": "The group's phones are given the LDAP directory (see PUT /phone-groups/{id}/ldap)."
+          },
           "phoneCount": {
             "type": "integer"
           },
@@ -23836,6 +24031,107 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "PhoneGroupLDAP": {
+        "type": "object",
+        "required": ["enabled", "served", "host", "port", "base", "phoneCount"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "The group's phones are given the LDAP directory."
+          },
+          "served": {
+            "type": "boolean",
+            "description": "This server serves LDAP (HELLO_LDAP_ENABLED and a public provisioning URL)."
+          },
+          "host": {
+            "type": "string",
+            "description": "Where phones reach the LDAPS listener; empty when not served."
+          },
+          "port": {
+            "type": "integer"
+          },
+          "base": {
+            "type": "string",
+            "description": "The base DN phones search (ou=phonebook under HELLO_LDAP_BASE)."
+          },
+          "phoneCount": {
+            "type": "integer"
+          }
+        }
+      },
+      "PhoneGroupLDAPInput": {
+        "type": "object",
+        "required": ["enabled"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Give the group's phones the LDAP directory."
+          }
+        }
+      },
+      "PhoneLDAP": {
+        "type": "object",
+        "required": ["served", "supported", "groupEnabled", "host", "port", "base", "bindDn", "passwordSet", "rotatedAt", "previousValid", "lastBindAt"],
+        "properties": {
+          "served": {
+            "type": "boolean"
+          },
+          "supported": {
+            "type": "boolean",
+            "description": "The phone's model has an LDAP client the built-in template writes keys for."
+          },
+          "groupEnabled": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "base": {
+            "type": "string"
+          },
+          "bindDn": {
+            "type": "string",
+            "description": "The phone's own bind DN, uid=<phone id>,ou=phones under the base."
+          },
+          "passwordSet": {
+            "type": "boolean"
+          },
+          "rotatedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "previousValid": {
+            "type": "boolean",
+            "description": "The password before the last rotation still binds, because the phone has not fetched its new configuration."
+          },
+          "lastBindAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "When the phone last bound (a minute's resolution). Null: the phone has not queried the directory."
+          }
+        }
+      },
+      "PhoneLDAPPassword": {
+        "type": "object",
+        "required": ["bindDn", "password", "resyncQueued"],
+        "properties": {
+          "bindDn": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "x-hello-secret": true,
+            "description": "The new password, shown once."
+          },
+          "resyncQueued": {
+            "type": "boolean",
+            "description": "A check-sync was queued so the phone takes the password."
           }
         }
       },
