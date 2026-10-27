@@ -36,9 +36,10 @@ import { Can } from "../role";
 import { moved } from "../useOrderedList";
 import { FormAlert } from "./callflow/ui";
 import { RingMap } from "./ringtags/RingMap";
+import { ToneLibrary } from "./ringtags/ToneLibrary";
 import { HHMM, HHMM_END, WEEK, useLoadedList } from "./timecond/shared";
 
-type Tab = "tags" | "rules" | "map" | "test";
+type Tab = "tags" | "rules" | "map" | "tones" | "test";
 
 /** The longest rule list the API takes. */
 const MAX_RULES = 100;
@@ -62,7 +63,7 @@ export function RingTags() {
         description="Tag calls so phones ring differently for a door, a customer or a colleague. A call's kind (page, alarm, door) comes first, then these rules in order, then the ring group's tag, then external for trunk calls and internal for the rest."
       />
       <Tabs<Tab>
-        aria-label="Ringing: tags, rules, ring map and test"
+        aria-label="Ringing: tags, rules, ring map, tones and test"
         className="cf-tabs"
         idPrefix="rt"
         value={tab}
@@ -71,6 +72,7 @@ export function RingTags() {
           { id: "tags", label: "Tags" },
           { id: "rules", label: "Rules" },
           { id: "map", label: "Ring map" },
+          { id: "tones", label: "Tones" },
           { id: "test", label: "Test a call" },
         ]}
       />
@@ -82,6 +84,7 @@ export function RingTags() {
         {tab === "tags" && <Tags />}
         {tab === "rules" && <Rules />}
         {tab === "map" && <RingMap />}
+        {tab === "tones" && <ToneLibrary />}
         {tab === "test" && <TestCall />}
       </div>
     </section>

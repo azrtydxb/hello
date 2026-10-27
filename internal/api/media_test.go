@@ -506,6 +506,13 @@ func (f *flakyObjects) PutAnnouncement(ctx context.Context, object string, r io.
 	return f.memObjects.PutAnnouncement(ctx, object, r, size)
 }
 
+func (f *flakyObjects) PutRingtone(ctx context.Context, object string, r io.Reader, size int64) error {
+	if f.broken.Load() {
+		return errObjectStoreDown
+	}
+	return f.memObjects.PutRingtone(ctx, object, r, size)
+}
+
 // TestObjectStoreFailures fails if a MinIO error on an upload (announcement
 // create and replace, voicemail greeting) or a playback (voicemail message,
 // recording, announcement) answers anything but 502 upstream, or if a

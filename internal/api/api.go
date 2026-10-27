@@ -21,6 +21,7 @@ import (
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/mailer"
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/routing"
 	"github.com/azrtydxb/hello/internal/store"
@@ -120,6 +121,10 @@ type Store interface {
 	ReplaceRingRules(ctx context.Context, actor string, in []store.RingRuleInput) ([]store.RingRule, error)
 	GetRingMap(ctx context.Context) (store.RingMap, error)
 	ReplaceRingMap(ctx context.Context, actor string, groupID *int64, in []store.RingMapEntry) (store.RingMap, error)
+	ListRingtones(ctx context.Context) ([]store.RingtoneFile, error)
+	RingtoneExists(ctx context.Context, name string) (bool, error)
+	CreateRingtone(ctx context.Context, actor, name string, info prov.ToneInfo, size int64, sha256 string) (store.RingtoneFile, error)
+	DeleteRingtone(ctx context.Context, actor string, id int64) (string, error)
 	ListTimeConditions(ctx context.Context) ([]store.TimeCondition, error)
 	GetTimeCondition(ctx context.Context, id int64) (store.TimeCondition, error)
 	CreateTimeCondition(ctx context.Context, actor string, in store.TimeConditionInput, check store.Check) (store.TimeCondition, error)

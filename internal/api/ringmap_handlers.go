@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/azrtydxb/hello/internal/prov"
 	"github.com/azrtydxb/hello/internal/store"
@@ -18,6 +19,9 @@ type ringVendor struct {
 	Label  string          `json:"label"`
 	Slots  int             `json:"slots"`
 	Tones  []prov.RingTone `json:"tones"`
+	// CustomTones is whether tones of the library (custom:<name>) can be
+	// chosen for this vendor.
+	CustomTones bool `json:"customTones"`
 }
 
 // ringMapView is what GET /api/v1/ring-map returns: the vendors' ringer
@@ -51,7 +55,7 @@ func (s *server) getRingMap(w http.ResponseWriter, r *http.Request) {
 	}
 	view := ringMapView{RingMap: m, Vendors: []ringVendor{}, Defaults: []store.RingMapEntry{}}
 	for _, v := range prov.RingVendors {
-		view.Vendors = append(view.Vendors, ringVendor{Vendor: string(v), Label: ringVendorLabels[v], Slots: ringVendorSlots[v], Tones: prov.RingTones(v)})
+		view.Vendors = append(view.Vendors, ringVendor{Vendor: string(v), Label: ringVendorLabels[v], Slots: ringVendorSlots[v], Tones: prov.RingTones(v), CustomTones: prov.CustomRingSupported(v)})
 		for _, t := range tags {
 			view.Defaults = append(view.Defaults, store.RingMapEntry{Tag: t.Name, Vendor: string(v), Tone: prov.DefaultRingTone(v, t.BellcoreSlot)})
 		}
@@ -82,7 +86,15 @@ func ringMapEntries(w http.ResponseWriter, r *http.Request) ([]store.RingMapEntr
 		switch {
 		case prov.RingTones(v) == nil:
 			f.add(p+".vendor", "must be yealink, poly, grandstream, snom or fanvil")
-		case !prov.ValidRingTone(v, e.Tone):
+		case prov.ValidRingTone(v, e.Tone):
+		case strings.HasPrefix(e.Tone, prov.CustomPrefix):
+			// A custom tone from the library: the store checks it exists.
+			if _, ok := prov.CustomToneName(e.Tone); !ok {
+				f.add(p+".tone", "is not a valid tone name")
+			} else if !prov.CustomRingSupported(v) {
+				f.add(p+".tone", "custom tones are not provisioned to %s phones", e.Vendor)
+			}
+		default:
 			f.add(p+".tone", "is not a ringer of %s", e.Vendor)
 		}
 		if e.Tag == "" {

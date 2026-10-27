@@ -886,6 +886,55 @@ another group) is lifted: the ring state machine can open a new ring stage.
   (replace one group; empty list removes). Whole-list replace, like the rules.
   Operator for writes, viewer reads. Three MCP tools follow from the spec.
 - UI: the page is now called Ringing (`/ringing`; the old `/ring-tags`
-  route is gone, it was never linked outside the nav) with a new Ring map tab; the tone library tab arrives with S-43.
+  route is gone, it was never linked outside the nav) with a new Ring map tab (a Tones tab follows with S-43).
 - Tests that touch real configs assert on lines inline; no golden file of a
   rendered phone configuration is added.
+
+## Tone library (phone-feature-parity S-43), 2026-10-27
+
+- Built on ring-map (#226), which depends on #204. Migration 00048 is the next
+  number after ring-map's 00047 (main has 00045).
+- Storage: table `ringtones` (id, name unique, object_key, size, sha256,
+  sample rate, duration) and the audio in MinIO bucket `hello-ringtones` under
+  `<name>/<sha256>.wav`. The hash in the key means a name that is deleted and
+  uploaded again with other audio never overwrites an object a phone may still
+  be fetching. The spec says `DELETE /api/v1/ringtones/{id}`, so the row has an
+  id; the name is also unique and is what the phone URL and the ring map use.
+- A name is `[a-z0-9][a-z0-9-]{0,31}`, never changes and cannot be re-uploaded
+  while it exists (409), so a phone's ETag for a name is stable.
+- Format check is by the bytes (RIFF/WAVE, fmt tag 1, mono, 16-bit, 8000 or
+  16000 Hz, at most 30 s, file at most 512 KiB, the request at most 576 KiB);
+  every refusal is a `400` field error on `file` or `name`.
+- Ring map reference: the API id is `custom:<name>`. In the table the choice is
+  `tone = 'custom'` plus `custom_tone_id` (FK, ON DELETE RESTRICT) with a CHECK
+  that the two agree, so the existing `tone` regex CHECK is not widened (it
+  already accepts `custom`) and no value-list CHECK needs changing. Deleting a
+  tone a choice uses is a 409 naming the choice.
+- The one CHECK that is a value list, `prov_fetches_kind_check`, gets `ringtone`
+  through `pg_temp.hello_check_values` (additive; the Down removes the rows of
+  that kind first). The Go contract test reads 00048 for it.
+- Vendors given a custom tone: Yealink (`ringtone.url` = the phone's tone URL
+  under its own token, rule `.ringer` = `<name>.wav`) and Snom
+  (`custom_melody_url`, class sound `Custom`), the spec's keys for the "custom
+  tone delivery" row. Both keys take one file, so a phone is delivered the
+  first custom choice in tag order; another custom tone on the same phone plays
+  the default for its slot. The value forms are marked verify in the templates.
+- No key, so no custom tone: **Poly** (the spec names `saf.x` for the file but
+  no ringer value that plays it; guessing the saf-to-ringer mapping is not
+  allowed), **Fanvil** (the spec says "custom ring URL key (verify)" and names
+  none), **Grandstream** (format verify, not produced, as the spec says). The API
+  refuses `custom:` for those vendors (400) and the page only offers library
+  tones to Yealink and Snom. A Grandstream template never references a custom
+  tone (tested).
+- The Yealink line key `account.1.ringtone.ring_type` is left unset when the
+  internal tag maps a custom tone (it takes a built-in ringer or a sound file
+  of a name the spec does not give).
+- Conversion: the spec allows server-side resample/PCM conversion "only where
+  stdlib can do it" for vendors that need another format. None of the vendors
+  Hello gives a custom tone has a documented other format in the spec, so none
+  is done; a converter would be unused code. Revisit with the lab run.
+- The tone URL is built from the phone's `Prov.URL` in the template, so
+  previews mask the token as they do for the firmware URL.
+- API: `GET|POST /api/v1/ringtones`, `DELETE /api/v1/ringtones/{id}`; operator
+  to write, viewer to read; upload is multipart and excluded from MCP like the
+  other uploads; list and delete are MCP tools. UI: a Tones tab on Ringing.

@@ -115,6 +115,24 @@ func (m *memObjects) RemoveAnnouncement(_ context.Context, object string) error 
 	return nil
 }
 
+func (m *memObjects) PutRingtone(_ context.Context, object string, r io.Reader, _ int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	m.objs["ring:"+object] = b
+	return nil
+}
+
+func (m *memObjects) RemoveRingtone(_ context.Context, object string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.objs, "ring:"+object)
+	return nil
+}
+
 func (m *memObjects) EnsureMediaBuckets(context.Context) error { return nil }
 
 func (m *memObjects) has(object string) bool {
