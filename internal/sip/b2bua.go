@@ -1874,6 +1874,9 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, sip.StatusNotAcceptableHere, "Not Acceptable Here")
 		return
 	}
+	if ref.leg == nil && c.soloInDialog(req, tx) {
+		return // a refresh or a roam on an application's dialog: answered here
+	}
 	c.mu.Lock()
 	w, connected := c.winner, c.connected
 	c.mu.Unlock()

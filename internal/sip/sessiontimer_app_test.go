@@ -46,7 +46,7 @@ func TestSessionTimersQueue(t *testing.T) {
 		}
 	})
 
-	t.Run("a caller that must refresh gets no timer in the queue", func(t *testing.T) {
+	t.Run("a caller that must refresh keeps its session: refreshes get 200 and the SDP", func(t *testing.T) {
 		st := queue.NewMemStore()
 		pbx, _ := queuePBXWith(t, st, nil, sessionOpts(), testQueue("sales", "600", queue.RingAll, static("300", 0, 1)))
 		a, _, _ := registerABC(t, pbx)
@@ -57,11 +57,59 @@ func TestSessionTimersQueue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := dcs.InviteResponse.GetHeader("Session-Expires"); got != nil {
-			t.Fatalf("200 carries Session-Expires %q: its refresh would be a request the queue does not handle", got.Value())
+		if got := dcs.InviteResponse.GetHeader("Session-Expires"); got == nil || got.Value() != "2;refresher=uac" {
+			t.Fatalf("200 Session-Expires = %v, want the caller's refresher=uac kept", got)
 		}
-		noReq(t, a.reinvites, 2500*time.Millisecond, "a refresh of a caller that refreshes itself")
+		target := *dcs.InviteRequest.Recipient.Clone()
+		if ct := dcs.InviteResponse.Contact(); ct != nil {
+			target = *ct.Address.Clone()
+		}
+		// Longer than the 2 s interval: only answered refreshes keep it up.
+		for i := 0; i < 5; i++ {
+			time.Sleep(700 * time.Millisecond)
+			m := sip.UPDATE
+			var body []byte
+			if i%2 == 1 {
+				m, body = sip.INVITE, []byte(a.sdp)
+			}
+			up := sip.NewRequest(m, target)
+			up.AppendHeader(sip.NewHeader("Session-Expires", "2;refresher=uac"))
+			if body != nil {
+				up.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+				up.SetBody(body)
+			}
+			up.SetTransport("UDP")
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			res, err := dcs.Do(ctx, up)
+			cancel()
+			if err != nil || res.StatusCode != 200 {
+				t.Fatalf("refresh %d (%s): %v %v, want 200 not 481", i, m, res, err)
+			}
+			if m == sip.INVITE {
+				if _, perr := media.ParseAudioSDP(res.Body()); perr != nil {
+					t.Fatalf("re-INVITE refresh answered without usable SDP: %v", perr)
+				}
+				_ = dcs.WriteRequest(sip.NewRequest(sip.ACK, target))
+			}
+		}
+		noReq(t, a.byes, 100*time.Millisecond, "BYE to a caller that refreshed")
+		for _, r := range drain(a.reinvites) {
+			t.Fatalf("Hello refreshed a caller that refreshes itself: %s", r.StartLine())
+		}
 		hangup(t, dcs)
+	})
+
+	t.Run("a caller that must refresh and does not is ended", func(t *testing.T) {
+		st := queue.NewMemStore()
+		pbx, _ := queuePBXWith(t, st, nil, sessionOpts(), testQueue("sales", "600", queue.RingAll, static("300", 0, 1)))
+		a, _, _ := registerABC(t, pbx)
+		req := a.inviteReq("600")
+		req.AppendHeader(sip.NewHeader("Supported", "timer"))
+		req.AppendHeader(sip.NewHeader("Session-Expires", "2;refresher=uac"))
+		if _, err := a.callReq(callCtx(t), req); err != nil {
+			t.Fatal(err)
+		}
+		waitReq(t, a.byes, "BYE to a caller that never refreshed")
 	})
 
 	t.Run("the call bridged to the agent has timers on both dialogs", func(t *testing.T) {
@@ -205,4 +253,67 @@ func TestSessionTimersIVRTakeover(t *testing.T) {
 	if n := len(liveCalls(t, taker)); n != 1 {
 		t.Fatalf("live calls on the survivor = %d, want the menu call", n)
 	}
+}
+
+// TestSessionTimersIVRCallerRefreshes fails if a caller that names itself the
+// refresher gets 481 for its refresh (UPDATE or re-INVITE) while the IVR menu
+// holds it, which ends its session, or gets no timer.
+func TestSessionTimersIVRCallerRefreshes(t *testing.T) {
+	objs := &fakeObjects{}
+	_ = objs.Put(context.Background(), "ann/greet.wav", media.EncodeWAV(make([]byte, 16000), 8000))
+	m := ivrMenu("main", "800", map[string]snapshot.IVRDest{"1": ext("300")})
+	m.DigitTimeout = 30
+	feats := func(s *snapshot.Snapshot) {
+		s.WithAnnouncements(map[string]string{"greet": "ann/greet.wav"})
+		s.WithIVRMenus([]snapshot.IVRMenu{m})
+	}
+	pbx := startPBX(t, threeDevices(), withMedia(false), withFeatures(feats), withVoicemail(newVMStore(), objs), withSessions(2*time.Second, time.Second, 0))
+	a := newPhone(t, pbx, "a1", "pa")
+	a.register(t)
+	req := a.inviteReq("800")
+	req.AppendHeader(sip.NewHeader("Supported", "timer"))
+	req.AppendHeader(sip.NewHeader("Session-Expires", "2;refresher=uac"))
+	dcs, err := a.callReq(callCtx(t), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dcs.InviteResponse.GetHeader("Session-Expires"); got == nil || got.Value() != "2;refresher=uac" {
+		t.Fatalf("200 Session-Expires = %v, want the caller's refresher=uac kept", got)
+	}
+	target := *dcs.InviteRequest.Recipient.Clone()
+	if ct := dcs.InviteResponse.Contact(); ct != nil {
+		target = *ct.Address.Clone()
+	}
+	for i := 0; i < 5; i++ {
+		time.Sleep(700 * time.Millisecond)
+		m := sip.UPDATE
+		var body []byte
+		if i%2 == 1 {
+			m, body = sip.INVITE, []byte(a.sdp)
+		}
+		up := sip.NewRequest(m, target)
+		up.AppendHeader(sip.NewHeader("Session-Expires", "2;refresher=uac"))
+		if body != nil {
+			up.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+			up.SetBody(body)
+		}
+		up.SetTransport("UDP")
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		res, err := dcs.Do(ctx, up)
+		cancel()
+		if err != nil || res.StatusCode != 200 {
+			t.Fatalf("refresh %d (%s): %v %v, want 200 not 481", i, m, res, err)
+		}
+		if m == sip.INVITE {
+			if _, perr := media.ParseAudioSDP(res.Body()); perr != nil {
+				t.Fatalf("re-INVITE refresh answered without usable SDP: %v", perr)
+			}
+			_ = dcs.WriteRequest(sip.NewRequest(sip.ACK, target))
+		}
+	}
+	noReq(t, a.byes, 100*time.Millisecond, "BYE to a caller that refreshed")
+	for _, r := range drain(a.reinvites) {
+		t.Fatalf("Hello refreshed a caller that refreshes itself: %s", r.StartLine())
+	}
+	hangup(t, dcs)
 }

@@ -286,18 +286,13 @@ func (c *call) noteBridgeSDP(idx int, body []byte) {
 
 // sessionSolo negotiates the caller's dialog of a call Hello answers itself
 // and keeps on the relay (an IVR menu, a call queue), and returns the headers
-// of the 2xx. Hello is the refresher: a caller that named itself the
-// refresher gets no timer, because during the application its refresh would
-// be a request the call does not handle (a re-INVITE gets 481 there), and a
-// refresh refused with 481 ends the session on the phone.
+// of the 2xx. A caller that names itself the refresher is honoured: its
+// refreshes are answered by soloInDialog.
 func (c *call) sessionSolo(body []byte) []sip.Header {
 	if c.inv == nil {
 		return nil
 	}
 	st := c.callerLeg()
-	if st != nil && !st.local {
-		st = nil
-	}
 	c.ses.mu.Lock()
 	defer c.ses.mu.Unlock()
 	c.ses.sdp[sessCaller] = append([]byte(nil), body...)
@@ -336,12 +331,11 @@ func (c *call) sessionBridgedTo(w *leg, bres *sip.Response) {
 }
 
 // sessionQueued carries the caller dialog's timer of a call a transfer puts
-// in a queue (c2 takes the caller dialog from from): kept when Hello is the
-// refresher, dropped when the phone is (see sessionSolo).
+// in a queue (c2 takes the caller dialog from from), whoever refreshes.
 func (c2 *call) sessionQueued(from *call, aOffer []byte) {
 	from.ses.mu.Lock()
 	var st *sessLeg
-	if l := from.ses.leg[sessCaller]; l != nil && l.local {
+	if l := from.ses.leg[sessCaller]; l != nil {
 		cp := *l
 		cp.timer = nil
 		st = &cp
@@ -354,4 +348,45 @@ func (c2 *call) sessionQueued(from *call, aOffer []byte) {
 	c2.ses.addr[sessCaller] = addr
 	c2.ses.mu.Unlock()
 	c2.sessionArm()
+}
+
+// soloInDialog answers a re-INVITE or UPDATE the caller sends on the dialog
+// of a call an application (an IVR menu, a queue) holds: a session refresh, a
+// keep-alive re-INVITE or a roam. It answers 200 with the SDP Hello last gave
+// the caller (direction mirrored, the relay re-aimed at a new media address)
+// instead of 481, which would end the caller's session. It reports whether it
+// answered; any other call goes on to the ordinary handling.
+func (c *call) soloInDialog(req *sip.Request, tx sip.ServerTransaction) bool {
+	c.mu.Lock()
+	ok := c.connected && !c.ended && !c.hungUp && c.winner == nil && c.ivr != nil && c.ivr.active.Load() &&
+		c.homedCall == nil && c.link == nil && c.park == nil && c.page == nil
+	c.mu.Unlock()
+	if !ok || (req.Method != sip.INVITE && req.Method != sip.UPDATE) {
+		return false
+	}
+	var done bool
+	if tx, done = c.sessionIn(sessCaller, req, tx); done {
+		return true
+	}
+	c.ses.mu.Lock()
+	last := append([]byte(nil), c.ses.sdp[sessCaller]...)
+	c.ses.mu.Unlock()
+	body := req.Body()
+	dir := media.SDPDirection(body)
+	var ans []byte
+	if len(last) > 0 && len(body) > 0 {
+		ans = withDirection(last, mirrorDirection(dir))
+		if off, err := media.ParseAudioSDP(body); err == nil {
+			c.relearnMedia(true, req.Source(), off)
+		}
+	} else if len(last) > 0 && req.Method == sip.INVITE {
+		ans = last // a late offer: ours goes in the 200
+	}
+	res := sip.NewResponseFromRequest(req, sip.StatusOK, "OK", ans)
+	if len(ans) > 0 {
+		res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+	}
+	res.AppendHeader(sip.HeaderClone(&c.s.contact))
+	c.s.send(tx, res)
+	return true
 }
