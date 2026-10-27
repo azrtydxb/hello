@@ -68,6 +68,12 @@ control:
       annotations:
         nginx.ingress.kubernetes.io/ssl-redirect: "false"
         nginx.ingress.kubernetes.io/enable-access-log: "false"
+  # Backups (docs/backup.md): the scheduler runs in every replica and one
+  # takes the run. The dump and the archive are staged in an emptyDir of this
+  # size before upload; it must hold the database dump plus its encrypted
+  # copy. Schedule, destination and retention are set in the console.
+  backup:
+    stagingSize: 4Gi
   oauthDynamicClientRegistration: false
   # The API's Service. ClusterIP unless something outside the cluster
   # (a test harness, a load balancer) must reach the API directly.

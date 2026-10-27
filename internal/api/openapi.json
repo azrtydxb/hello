@@ -3,7 +3,7 @@
   "info": {
     "title": "Hello management API",
     "version": "v1",
-    "description": "hello-control REST API. Every route except version, openapi.json and auth/login requires the hello_session cookie or an `Authorization: Bearer <token>` header. Secrets (device SIP secrets, API tokens, trunk passwords) appear only in the response that creates them; trunk passwords never appear in any response."
+    "description": "hello-control REST API. Every route except version, openapi.json and auth/login requires the hello_session cookie or an `Authorization: Bearer <token>` header. Secrets (device SIP secrets, API tokens, trunk passwords) appear only in the response that creates them; trunk passwords never appear in any response. While a backup restore runs, every request that is not a read (GET, HEAD, OPTIONS) is refused with 503 and the error code `maintenance`, whatever its operation documents; retry after the Retry-After seconds."
   },
   "security": [
     {
@@ -1715,6 +1715,286 @@
         "x-hello-role": "admin",
         "x-hello-mcp": {
           "exclude": "system email settings stay in the console"
+        }
+      }
+    },
+    "/api/v1/backups/settings": {
+      "get": {
+        "operationId": "getBackupSettings",
+        "summary": "Backup schedule and destination",
+        "description": "Admin only. Returns the backup schedule (a five-field cron expression, server time), whether scheduled backups are enabled, the destination (the bundled MinIO bucket hello-backups, or an external S3 service), how many archives are kept and the address a failure email goes to. The S3 credentials are never returned; s3KeysSet says whether they are stored.",
+        "tags": ["backups"],
+        "responses": {
+          "200": {
+            "description": "The settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSettings"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console"
+        }
+      },
+      "put": {
+        "operationId": "putBackupSettings",
+        "summary": "Save the backup schedule and destination",
+        "description": "Admin only, audited. Saves the schedule and destination. The S3 access key and secret key are sealed in the database; omit both to keep the stored ones, send both to replace them, or send both empty to remove them. Changes apply from the next scheduler pass.",
+        "tags": ["backups"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupSettingsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console"
+        }
+      }
+    },
+    "/api/v1/backups": {
+      "get": {
+        "operationId": "listBackups",
+        "summary": "Backup runs",
+        "description": "Admin only. Lists the newest 200 backup runs, scheduled and manual, with status, sizes and the stored archive key.",
+        "tags": ["backups"],
+        "responses": {
+          "200": {
+            "description": "Runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BackupRun"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console"
+        }
+      },
+      "post": {
+        "operationId": "createBackup",
+        "summary": "Run a backup now",
+        "description": "Admin only, audited. Starts a manual backup in the background and answers 202 with the run (status running). 409 backup_busy while another backup or a restore is running. Poll the list for the outcome.",
+        "tags": ["backups"],
+        "responses": {
+          "202": {
+            "description": "The run that was started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupRun"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console"
+        }
+      }
+    },
+    "/api/v1/backups/{id}": {
+      "delete": {
+        "operationId": "deleteBackup",
+        "summary": "Delete a backup",
+        "description": "Admin only, audited. Removes the archive from the destination and the run row. Stored objects no remaining archive references are removed by the next run. 409 backup_busy for a run still in progress.",
+        "tags": ["backups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console"
+        }
+      }
+    },
+    "/api/v1/backups/{id}/restore": {
+      "post": {
+        "operationId": "restoreBackup",
+        "summary": "Restore a backup",
+        "description": "Admin only, audited. With dry_run=true it verifies the manifest and every part hash and returns counts only, and writes nothing. Otherwise the body must carry confirm: \"RESTORE <id>\". A restore puts the API in maintenance (every write answers 503 maintenance) while it replaces the database in one transaction and restores missing or changed objects, never deleting one. It is refused with 409 schema_newer for an archive from a newer schema, 409 key_mismatch for another HELLO_SECRET_KEY and 409 backup_invalid when verification fails. SIP keeps running on its current snapshot, then rebuilds it.",
+        "tags": ["backups"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Verify the archive and report counts without restoring."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupRestore"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The restore report (counts only)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupRestoreReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "admin",
+        "x-hello-role": "admin",
+        "x-hello-mcp": {
+          "exclude": "backup and restore stay in the console"
         }
       }
     },
@@ -18202,7 +18482,12 @@
                   "rate_limited",
                   "too_large",
                   "messaging_disabled",
-                  "no_messaging_trunk"
+                  "no_messaging_trunk",
+                  "backup_busy",
+                  "backup_invalid",
+                  "key_mismatch",
+                  "schema_newer",
+                  "maintenance"
                 ]
               },
               "message": {
@@ -18976,6 +19261,246 @@
             "maxLength": 512,
             "x-hello-secret": true,
             "description": "Omit to keep the stored password; an empty string clears it."
+          }
+        }
+      },
+      "BackupSettings": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "cron",
+          "kind",
+          "bucket",
+          "s3Endpoint",
+          "s3Bucket",
+          "s3Region",
+          "s3PathStyle",
+          "s3KeysSet",
+          "keepCount",
+          "notifyEmail",
+          "updatedAt"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "cron": {
+            "type": "string",
+            "description": "Five-field cron expression in server time; the default 0 2 * * * is daily at 02:00."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["minio", "s3"]
+          },
+          "bucket": {
+            "type": "string",
+            "description": "The bucket archives go to for the minio destination."
+          },
+          "s3Endpoint": {
+            "type": "string"
+          },
+          "s3Bucket": {
+            "type": "string"
+          },
+          "s3Region": {
+            "type": "string"
+          },
+          "s3PathStyle": {
+            "type": "boolean"
+          },
+          "s3KeysSet": {
+            "type": "boolean",
+            "description": "Whether S3 credentials are stored. They are never returned."
+          },
+          "keepCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365
+          },
+          "notifyEmail": {
+            "type": "string",
+            "description": "Where the email goes when a scheduled backup fails twice; empty for none."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BackupSettingsUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["enabled", "cron", "kind", "keepCount"],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether scheduled backups run; manual backups are always possible."
+          },
+          "cron": {
+            "type": "string",
+            "description": "Five-field cron expression in server time, such as 0 2 * * * for daily at 02:00."
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["minio", "s3"],
+            "description": "minio is the bundled bucket hello-backups; s3 is an external S3-compatible service."
+          },
+          "s3Endpoint": {
+            "type": "string",
+            "description": "https://host[:port] of the S3 service (kind s3)."
+          },
+          "s3Bucket": {
+            "type": "string",
+            "description": "The bucket archives go to (kind s3)."
+          },
+          "s3Region": {
+            "type": "string",
+            "description": "The S3 region; empty when the service has none."
+          },
+          "s3PathStyle": {
+            "type": "boolean",
+            "description": "Use path-style bucket addressing instead of virtual-hosted style."
+          },
+          "s3AccessKey": {
+            "type": "string",
+            "description": "Send with s3SecretKey to replace the stored credentials; both empty remove them; omit both to keep them."
+          },
+          "s3SecretKey": {
+            "type": "string",
+            "description": "The S3 secret key; write-only, sealed in the database and never returned."
+          },
+          "keepCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "description": "How many of the newest archives to keep."
+          },
+          "notifyEmail": {
+            "type": "string",
+            "description": "The address told when a scheduled backup fails twice; empty for none."
+          }
+        }
+      },
+      "BackupRun": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "attempt",
+          "startedAt",
+          "finishedAt",
+          "dbBytes",
+          "objectCount",
+          "objectBytes",
+          "archiveBytes",
+          "objectKey",
+          "errorClass"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["scheduled", "manual"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["running", "succeeded", "failed"]
+          },
+          "attempt": {
+            "type": "integer"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "dbBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objectCount": {
+            "type": "integer"
+          },
+          "objectBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "archiveBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objectKey": {
+            "type": "string"
+          },
+          "errorClass": {
+            "type": "string",
+            "description": "A short class (db_dump, storage, verify, source, settings, interrupted, ...) for a failed run; never a message with names or secrets."
+          }
+        }
+      },
+      "BackupRestore": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "confirm": {
+            "type": "string",
+            "description": "RESTORE <id>; required unless dry_run=true."
+          }
+        }
+      },
+      "BackupRestoreReport": {
+        "type": "object",
+        "required": [
+          "dryRun",
+          "helloVersion",
+          "schemaVersion",
+          "createdAt",
+          "dbBytes",
+          "objects",
+          "objectBytes",
+          "objectsToRestore",
+          "objectsMissingInBackup"
+        ],
+        "properties": {
+          "dryRun": {
+            "type": "boolean"
+          },
+          "helloVersion": {
+            "type": "string"
+          },
+          "schemaVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dbBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objects": {
+            "type": "integer"
+          },
+          "objectBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "objectsToRestore": {
+            "type": "integer",
+            "description": "Live objects that are missing or differ from the backup."
+          },
+          "objectsMissingInBackup": {
+            "type": "integer",
+            "description": "Objects the archive lists that the backup store no longer holds; a restore refuses while this is not zero."
           }
         }
       },

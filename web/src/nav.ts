@@ -260,6 +260,13 @@ export const NAV_GROUPS: readonly NavGroup[] = [
         icon: "mail",
         minRole: "admin",
       },
+      {
+        label: "Backups",
+        path: "/settings/backups",
+        phase: 5,
+        icon: "archive",
+        minRole: "admin",
+      },
       { label: "AI access", path: "/ai", phase: 5, icon: "bot" },
       {
         label: "Users",
