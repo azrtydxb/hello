@@ -14502,10 +14502,10 @@
             "$ref": "#/components/responses/Internal"
           },
           "502": {
-            "description": "Object storage failed; try again shortly"
+            "$ref": "#/components/responses/Upstream"
           },
           "503": {
-            "description": "Object storage is unavailable"
+            "$ref": "#/components/responses/Unavailable"
           }
         },
         "x-hello-scope": "write",
@@ -25252,16 +25252,31 @@
       },
       "Ringtone": {
         "type": "object",
-        "required": ["id", "name", "sizeBytes", "sha256", "sampleRate", "durationMs", "createdAt", "usedBy"],
+        "required": [
+          "id",
+          "name",
+          "sizeBytes",
+          "sha256",
+          "sampleRate",
+          "durationMs",
+          "createdAt",
+          "usedBy"
+        ],
         "properties": {
-          "id": {"type": "integer", "format": "int64"},
-          "name": {"type": "string"},
-          "sizeBytes": {"type": "integer"},
-          "sha256": {"type": "string", "description": "Hex SHA-256 of the WAV; the ETag a phone gets."},
-          "sampleRate": {"type": "integer", "enum": [8000, 16000]},
-          "durationMs": {"type": "integer"},
-          "createdAt": {"type": "string", "format": "date-time"},
-          "usedBy": {"type": "integer", "description": "How many ring map choices name the tone."}
+          "id": { "type": "integer", "format": "int64" },
+          "name": { "type": "string" },
+          "sizeBytes": { "type": "integer" },
+          "sha256": {
+            "type": "string",
+            "description": "Hex SHA-256 of the WAV; the ETag a phone gets."
+          },
+          "sampleRate": { "type": "integer", "enum": [8000, 16000] },
+          "durationMs": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "usedBy": {
+            "type": "integer",
+            "description": "How many ring map choices name the tone."
+          }
         }
       },
       "RingtoneList": {
