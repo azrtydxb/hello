@@ -248,7 +248,7 @@ func retrySlowDown(t *testing.T, op func() error) {
 			return
 		}
 		missing := isNoBucket(err)
-		if !(isSlowDown(err) || missing) || time.Now().After(deadline) {
+		if (!isSlowDown(err) && !missing) || time.Now().After(deadline) {
 			t.Fatal(err)
 		}
 		if missing {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -675,4 +676,25 @@ func TestQueueIVRDestination(t *testing.T) {
 		return pbx.metric(t, "hello_queue_calls_total", map[string]string{"queue": "sales", "event": "answered"}) == 1
 	})
 	hangup(t, r.dcs)
+}
+
+// TestQueueAnsweredAgentHungUpWhenCallEnds: an agent answers just as the
+// caller's flow is cancelled (the call ended some way other than the
+// caller's BYE). It fails if the answered agent's dialog is left up with no
+// BYE, which leaves the agent's phone on a dead call.
+func TestQueueAnsweredAgentHungUpWhenCallEnds(t *testing.T) {
+	st := queue.NewMemStore()
+	pbx, _ := queuePBX(t, st, nil, testQueue("sales", "600", queue.RingAll, static("200", 0, 1)))
+	a, b, _ := registerABC(t, pbx)
+	b.setCallee(answerAfter(nil))
+	var once sync.Once
+	hook := func(c *call) { once.Do(c.stopIVR) }
+	queueOfferedHook.Store(&hook)
+	t.Cleanup(func() { queueOfferedHook.Store(nil) })
+	r := waitCall(t, dial(t.Context(), a, "600"))
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	waitReq(t, b.invites, "INVITE to the agent")
+	waitReq(t, b.byes, "the answered agent is hung up")
 }

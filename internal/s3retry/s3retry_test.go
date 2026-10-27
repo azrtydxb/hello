@@ -25,9 +25,11 @@ func TestBodyAbandonedAfterAnyResponse(t *testing.T) {
 			return &http.Response{StatusCode: code, Body: http.NoBody, Request: r}, nil
 		}))
 		req, _ := http.NewRequest("PUT", "http://x/", io.NopCloser(strings.NewReader("payload")))
-		if _, err := rt.RoundTrip(req); err != nil {
+		resp, err := rt.RoundTrip(req)
+		if err != nil {
 			t.Fatal(err)
 		}
+		_ = resp.Body.Close()
 		if _, err := sent.Read(make([]byte, 4)); !errors.Is(err, errAbandoned) {
 			t.Errorf("status %d: read after the response = %v, want errAbandoned", code, err)
 		}

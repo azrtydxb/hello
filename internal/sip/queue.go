@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/azrtydxb/hello/internal/cdr"
@@ -131,6 +132,10 @@ func (c *call) queueResume(detail string) {
 		c.queueRun(ctx, snap, q, entered)
 	}()
 }
+
+// queueOfferedHook, when set (tests), runs after every offer round, before
+// the flow looks at the outcome.
+var queueOfferedHook atomic.Pointer[func(c *call)]
 
 // queueSession puts the (answered) caller in q and carries the call to its
 // end: an agent, or a failover destination.
@@ -347,10 +352,16 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 			continue
 		}
 		w, ext, release := c.queueOffer(ctx, snap, q)
+		if h := queueOfferedHook.Load(); h != nil && w != nil {
+			(*h)(c)
+		}
 		if ctx.Err() != nil {
 			if release != nil {
 				release()
 			}
+			// An agent may have answered just as the call ended: nobody is
+			// left to bridge it to, so hang its dialog up.
+			w.bye()
 			return
 		}
 		if w == nil {
