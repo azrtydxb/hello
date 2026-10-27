@@ -45,6 +45,20 @@ export interface Me {
   voicemailEmail?: VoicemailEmailPrefs;
   /** Whether the system can send email at all. */
   emailDelivery?: boolean;
+  /** 2FA is required of the user and not enrolled: only the enrolment works. */
+  mustEnrollMfa?: boolean;
+  /** The user's own two-factor state. */
+  twoFactor?: TwoFactorState;
+}
+
+/** GET /api/v1/me/2fa */
+export interface TwoFactorState {
+  enabled: boolean;
+  /** A secret was issued and not yet confirmed. */
+  pending: boolean;
+  /** The account or its role requires 2FA. */
+  required: boolean;
+  recoveryCodesLeft: number;
 }
 
 /** An API token as listed; the token itself is never returned. */
@@ -658,9 +672,35 @@ export async function fetchVersion(signal?: AbortSignal): Promise<VersionInfo> {
 // --- auth ------------------------------------------------------------------
 
 /** POST /api/v1/auth/login; a 401 is thrown to the caller, never redirected. */
-export async function login(username: string, password: string): Promise<void> {
-  await request<void>("POST", "/api/v1/auth/login", {
-    body: { username, password },
+export async function login(
+  username: string,
+  password: string,
+): Promise<LoginResult> {
+  const r = await request<MfaChallenge | undefined>(
+    "POST",
+    "/api/v1/auth/login",
+    { body: { username, password }, redirectOn401: false },
+  );
+  return r && r.mfa === "required" ? r : { mfa: "none" };
+}
+
+/** A password-verified login that still needs its second factor (202). */
+export interface MfaChallenge {
+  mfa: "required";
+  /** Single use, valid 5 minutes; give it to loginSecondFactor. */
+  mfaToken: string;
+}
+
+/** What POST /auth/login came to: a session, or a challenge to answer. */
+export type LoginResult = MfaChallenge | { mfa: "none" };
+
+/** POST /api/v1/auth/login/2fa: an authenticator code or a recovery code. */
+export async function loginSecondFactor(
+  mfaToken: string,
+  code: string,
+): Promise<void> {
+  await request<void>("POST", "/api/v1/auth/login/2fa", {
+    body: { mfaToken, code },
     redirectOn401: false,
   });
 }

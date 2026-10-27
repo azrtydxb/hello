@@ -159,11 +159,12 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 		ExtensionID    json.RawMessage `json:"extensionId"`
 		ExtensionIDs   *[]int64        `json:"extensionIds"`
 		VoicemailEmail *vmPrefsIn      `json:"voicemailEmail"`
+		TOTPRequired   *bool           `json:"totpRequired"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if in.Role == nil && in.DisplayName == nil && in.Email == nil && in.Enabled == nil && in.Password == nil &&
+	if in.TOTPRequired == nil && in.Role == nil && in.DisplayName == nil && in.Email == nil && in.Enabled == nil && in.Password == nil &&
 		in.ExtensionID == nil && in.ExtensionIDs == nil && in.VoicemailEmail == nil {
 		badRequest(w, "a field to change is required")
 		return
@@ -200,6 +201,7 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 		c.Email = in.Email
 	}
 	c.Enabled = in.Enabled
+	c.TOTPRequired, c.SetterID = in.TOTPRequired, actor(r).UserID
 	if in.Password != nil {
 		if err := auth.ValidatePassword(*in.Password); err != nil {
 			f.add("password", "%s", strings.TrimPrefix(err.Error(), auth.ErrPasswordPolicy.Error()+": "))
@@ -255,6 +257,10 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 	u, err := s.Store.UpdateAccount(r.Context(), actor(r).String(), id, c)
 	if errors.Is(err, store.ErrLastAdmin) {
 		writeError(w, http.StatusConflict, "last_admin", "at least one enabled user must remain admin")
+		return
+	}
+	if errors.Is(err, store.ErrTwoFactorRequired) {
+		writeError(w, http.StatusConflict, "two_factor_required", "enrol two-factor authentication yourself before requiring it for an admin")
 		return
 	}
 	if err != nil {
