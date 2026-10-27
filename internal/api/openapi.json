@@ -1282,8 +1282,8 @@
       },
       "put": {
         "operationId": "updateMyVoicemail",
-        "summary": "Change my voicemail PIN or greetings",
-        "description": "Changes the PIN and uploads or replaces greetings of the signed-in user's own voicemail box. JSON with pin (4 to 10 digits), or multipart/form-data with pin plus optional greeting and unreachable PCM WAV files of at most 5 MiB, such as a recording made in the browser. The box email address is not settable here. An extension that is not the user's answers 404.",
+        "summary": "Change my voicemail PIN, language or greetings",
+        "description": "Changes the PIN and uploads or replaces greetings of the signed-in user's own voicemail box. JSON with pin (4 to 10 digits) and/or promptLanguage (en or nl, empty to inherit), or multipart/form-data with pin plus optional greeting and unreachable PCM WAV files of at most 5 MiB, such as a recording made in the browser. The box email address is not settable here. An extension that is not the user's answers 404.",
         "tags": ["me"],
         "parameters": [
           {
@@ -3995,7 +3995,7 @@
       "put": {
         "operationId": "updateExtensionVoicemail",
         "summary": "Change a voicemail box",
-        "description": "Changes an extension's voicemail box: PIN, notification email and, through the multipart form, greetings. JSON with password and/or email, or multipart/form-data with the same fields plus optional `greeting`, `busy`, `unreachable` and `name` WAV files (PCM, 5 MiB max); they land in the hello-voicemail bucket and the previous object is removed. A slot with no audio of its own is spoken in the configured AI voice. At least one field is required. The password is stored as a hash and never returned.",
+        "description": "Changes an extension's voicemail box: PIN, notification email, prompt language (promptLanguage: en or nl, empty to inherit) and, through the multipart form, greetings. JSON with password, email and/or promptLanguage, or multipart/form-data with the same fields plus optional `greeting`, `busy`, `unreachable` and `name` WAV files (PCM, 5 MiB max); they land in the hello-voicemail bucket and the previous object is removed. A slot with no audio of its own is spoken in the configured AI voice. At least one field is required. The password is stored as a hash and never returned.",
         "tags": ["voicemail"],
         "parameters": [
           {
@@ -4118,6 +4118,97 @@
         },
         "x-hello-scope": "read",
         "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/voicemail/boxes/{id}/language": {
+      "get": {
+        "operationId": "getVoicemailBoxLanguage",
+        "summary": "A voicemail box's prompt language",
+        "description": "Returns the language a voicemail box speaks its prompts in. `promptLanguage` is the box's own setting, empty when it inherits the deployment language; `effective` is the language callers hear today; `languages` lists the languages a box can be set to. `{id}` is the voicemail box id, as listed by the box list.",
+        "tags": ["voicemail"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The box language",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailBoxLanguage"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "updateVoicemailBoxLanguage",
+        "summary": "Set a voicemail box's prompt language",
+        "description": "Sets the language a voicemail box speaks its prompts in: the default greeting and the retrieval menus. English is the default; Dutch (`nl`) is the other language. An empty value clears the setting so the box inherits the deployment language. The static prompts of the language are generated in the background when a text-to-speech key is configured.",
+        "tags": ["voicemail"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoicemailBoxLanguageUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The box language after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoicemailBoxLanguage"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
         "x-hello-mcp": true
       }
     },
@@ -16131,7 +16222,8 @@
           "createdAt",
           "updatedAt",
           "emailDelivery",
-          "aiVoice"
+          "aiVoice",
+          "promptLanguage"
         ],
         "properties": {
           "id": {
@@ -16187,6 +16279,10 @@
             "type": "boolean",
             "description": "Whether this deployment can email voicemail (SMTP is configured). When false, messages are not emailed whatever the box's address."
           },
+          "promptLanguage": {
+            "type": "string",
+            "description": "The box's own prompt language, `en` or `nl`; empty when it inherits the deployment language."
+          },
           "aiVoice": {
             "type": "boolean",
             "description": "Whether a text-to-speech key is configured. A greeting slot with no audio of its own is then spoken in the configured AI voice (Default (AI voice)); without it callers hear no greeting before the tone."
@@ -16207,12 +16303,33 @@
           "email": {
             "type": "string",
             "description": "Address new messages are mailed to; empty disables voicemail email."
+          },
+          "promptLanguage": {
+            "type": "string",
+            "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."
           }
+        }
+      },
+      "VoicemailBoxLanguage": {
+        "type": "object",
+        "required": ["promptLanguage", "effective", "languages"],
+        "properties": {
+          "promptLanguage": {"type": "string", "description": "The box's own language, `en` or `nl`; empty when it inherits the deployment language."},
+          "effective": {"type": "string", "description": "The language callers hear for this box now."},
+          "languages": {"type": "array", "items": {"type": "string"}, "description": "The languages a box can be set to."}
+        }
+      },
+      "VoicemailBoxLanguageUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["promptLanguage"],
+        "properties": {
+          "promptLanguage": {"type": "string", "description": "`en` or `nl`; empty clears the setting so the box inherits the deployment language."}
         }
       },
       "VoicemailBoxSummary": {
         "type": "object",
-        "required": ["id", "extensionId", "number", "name", "unheard", "total"],
+        "required": ["id", "extensionId", "number", "name", "unheard", "total", "promptLanguage"],
         "properties": {
           "id": {
             "type": "integer",
@@ -16237,6 +16354,10 @@
           "total": {
             "type": "integer",
             "format": "int64"
+          },
+          "promptLanguage": {
+            "type": "string",
+            "description": "The box's own prompt language, `en` or `nl`; empty when it inherits the deployment language."
           }
         }
       },
@@ -18808,7 +18929,9 @@
           "boxId",
           "hasPin",
           "hasGreeting",
-          "hasUnreachableGreeting"
+          "hasUnreachableGreeting",
+          "promptLanguage",
+          "languages"
         ],
         "properties": {
           "extensionId": {
@@ -18828,18 +18951,31 @@
           },
           "hasUnreachableGreeting": {
             "type": "boolean"
+          },
+          "promptLanguage": {
+            "type": "string",
+            "description": "The box's own prompt language, `en` or `nl`; empty when it inherits the deployment language."
+          },
+          "languages": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "The languages the box can be set to."
           }
         }
       },
       "SelfVoicemailUpdate": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["pin"],
+        "description": "At least one field is required.",
         "properties": {
           "pin": {
             "type": "string",
             "pattern": "^[0-9]{4,10}$",
             "description": "The new PIN, 4 to 10 digits."
+          },
+          "promptLanguage": {
+            "type": "string",
+            "description": "The language of the box's spoken prompts, `en` or `nl`; empty clears it so the box inherits the deployment language."
           }
         }
       },

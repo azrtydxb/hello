@@ -1,6 +1,7 @@
 package sip
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -269,5 +270,61 @@ func TestRetrievalFallsBackWithoutVoice(t *testing.T) {
 			// The application ends the call once the messages are played.
 			pbx.nextCDR(t)
 		})
+	}
+}
+
+// TestPromptLanguage fails if a box does not speak in its own language: a Dutch
+// box gets the Dutch default greeting, an unset box inherits the deployment
+// language, a box set to English stays English under a Dutch deployment, and
+// English is the default (pbx-gaps S-20).
+func TestPromptLanguage(t *testing.T) {
+	en := voiceprompt.GreetingText(voiceprompt.English, voiceprompt.Unavailable, "Jan Peeters")
+	nl := voiceprompt.GreetingText(voiceprompt.Dutch, voiceprompt.Unavailable, "Jan Peeters")
+	if en == nl {
+		t.Fatal("the English and Dutch greetings are the same text")
+	}
+	for _, tc := range []struct {
+		name, global, box, want string
+	}{
+		{"default is english", "", "", en},
+		{"dutch box", "", "nl", nl},
+		{"dutch box over english deployment", "en", "nl", nl},
+		{"unset box inherits dutch deployment", "nl", "", nl},
+		{"english box over dutch deployment", "nl", "en", en},
+		{"unknown box language is english", "nl", "xx", en},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sp := &fakeSpeaker{}
+			c := greetingCall(sp, &fakeObjects{})
+			c.s.cfg.PromptLanguage = tc.global
+			c.playGreeting(t.Context(), newFakeSess(time.Millisecond), VoicemailBox{ID: 5, PromptLanguage: tc.box}, "no-answer")
+			if sp.n(tc.want) != 1 || len(sp.texts()) != 1 {
+				t.Errorf("spoke %v, want only %q", sp.texts(), tc.want)
+			}
+		})
+	}
+}
+
+// onlyEnglish is a speaker that can voice English but not Dutch, like a
+// provider with no clip stored for a language.
+type onlyEnglish struct{ fakeSpeaker }
+
+func (o *onlyEnglish) Speak(ctx context.Context, text string) ([]byte, error) {
+	if text == voiceprompt.GreetingText(voiceprompt.Dutch, voiceprompt.Unavailable, "Jan Peeters") {
+		return nil, errors.New("no Dutch voice")
+	}
+	return o.fakeSpeaker.Speak(ctx, text)
+}
+
+// TestPromptLanguageFallsBackToEnglish fails if a Dutch greeting that cannot be
+// spoken leaves the caller in silence instead of hearing English (S-21).
+func TestPromptLanguageFallsBackToEnglish(t *testing.T) {
+	sp := &onlyEnglish{}
+	c := greetingCall(sp, &fakeObjects{})
+	sess := newFakeSess(time.Millisecond)
+	c.playGreeting(t.Context(), sess, VoicemailBox{ID: 5, PromptLanguage: "nl"}, "no-answer")
+	want := voiceprompt.GreetingText(voiceprompt.English, voiceprompt.Unavailable, "Jan Peeters")
+	if sp.n(want) != 1 || sess.playCount() != 1 {
+		t.Fatalf("spoke %v, plays %d; want the English greeting", sp.texts(), sess.playCount())
 	}
 }

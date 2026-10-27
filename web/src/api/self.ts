@@ -24,6 +24,10 @@ export interface SelfVoicemailBox {
   hasPin: boolean;
   hasGreeting: boolean;
   hasUnreachableGreeting: boolean;
+  /** The box's own prompt language ("en", "nl"); "" inherits. */
+  promptLanguage: string;
+  /** The languages the box can be set to. */
+  languages: string[];
 }
 
 /** One message in the user's box. */
@@ -84,14 +88,35 @@ export function getMyVoicemail(
   );
 }
 
-/** Change the PIN and/or upload greetings (WAV files). */
-export function updateMyVoicemail(
+/**
+ * Change the PIN, the prompt language and/or upload greetings (WAV files).
+ * The language travels as JSON, so with files it is sent first, on its own.
+ */
+export async function updateMyVoicemail(
   extensionId: Id,
-  input: { pin?: string; greeting?: Blob; unreachable?: Blob },
+  input: {
+    pin?: string;
+    promptLanguage?: string;
+    greeting?: Blob;
+    unreachable?: Blob;
+  },
 ): Promise<SelfVoicemailBox> {
   const path = `/api/v1/me/extensions/${seg(extensionId)}/voicemail`;
-  if (!input.greeting && !input.unreachable) {
-    return request<SelfVoicemailBox>("PUT", path, { body: { pin: input.pin } });
+  const files = Boolean(input.greeting || input.unreachable);
+  if (!files) {
+    return request<SelfVoicemailBox>("PUT", path, {
+      body: {
+        ...(input.pin !== undefined ? { pin: input.pin } : {}),
+        ...(input.promptLanguage !== undefined
+          ? { promptLanguage: input.promptLanguage }
+          : {}),
+      },
+    });
+  }
+  if (input.promptLanguage !== undefined) {
+    await request<SelfVoicemailBox>("PUT", path, {
+      body: { promptLanguage: input.promptLanguage },
+    });
   }
   const form = new FormData();
   if (input.pin) form.set("pin", input.pin);

@@ -85,6 +85,8 @@ func (s *server) routes() []route {
 		{"DELETE", "/api/v1/extensions/{id}/voicemail/greeting/{slot}", auth.ScopeWrite, auth.RoleOperator, false, s.revertVoicemailGreeting},
 
 		{"GET", "/api/v1/voicemail/boxes", auth.ScopeRead, auth.RoleViewer, false, s.listVoicemailBoxes},
+		{"GET", "/api/v1/voicemail/boxes/{id}/language", auth.ScopeRead, auth.RoleViewer, false, s.getBoxLanguage},
+		{"PUT", "/api/v1/voicemail/boxes/{id}/language", auth.ScopeWrite, auth.RoleOperator, false, s.putBoxLanguage},
 		{"GET", "/api/v1/voicemail/messages", auth.ScopeRead, auth.RoleViewer, false, s.listVoicemailMessages},
 		{"POST", "/api/v1/voicemail/messages/{id}/heard", auth.ScopeWrite, auth.RoleOperator, false, s.markMessageHeard},
 		{"DELETE", "/api/v1/voicemail/messages/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteMessage},

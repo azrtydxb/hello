@@ -141,7 +141,7 @@ naming the key, if one is missing or malformed.
 | `HELLO_PROV_AUTO_RESYNC`                          | control | `false`; push a resync to a phone 30 s after a change to what its configuration renders from                                  |
 | `HELLO_DIAL_INTL_PREFIX` / `_COUNTRY_CODE`        | control | `00` / unset; digits standing for `+`, and the country code a leading `0` belongs to (lookup keys)                            |
 | `HELLO_PROV_TIMEZONE` / `_NTP`                    | control | `UTC` / `pool.ntp.org`                                                                                                        |
-| `HELLO_VOICEMAIL_LANGUAGE`                        | both    | `en`; language of the spoken voicemail prompts (`en`, `nl`), docs/voicemail.md                                                |
+| `HELLO_VOICEMAIL_LANGUAGE`                        | both    | `en`; deployment language of the spoken voicemail prompts (`en`, `nl`); a box can set its own, docs/voicemail.md              |
 | `HELLO_TIMEZONE`                                  | sip     | `HELLO_PROV_TIMEZONE`, else `UTC`; the zone message times are spoken in                                                       |
 | `HELLO_PROV_AUDIT_RETENTION`                      | control | `90d`; how long the fetch audit is kept                                                                                       |
 | `HELLO_PROV_RATE_*`                               | control | `IP_PER_MIN` `60`, `DENIED_PER_10MIN` `10`, `PHONE_PER_HOUR` `30`                                                             |

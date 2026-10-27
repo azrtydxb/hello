@@ -17,6 +17,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/store"
+	"github.com/azrtydxb/hello/internal/voiceprompt"
 )
 
 // selfUser returns the caller's user id, answering 403 for a credential that
@@ -221,11 +222,19 @@ type selfBoxView struct {
 	HasPIN         bool  `json:"hasPin"`
 	HasGreeting    bool  `json:"hasGreeting"`
 	HasUnreachable bool  `json:"hasUnreachableGreeting"`
+	// PromptLanguage is the box's own language ("" inherits) and Languages
+	// the ones it can be set to.
+	PromptLanguage string   `json:"promptLanguage"`
+	Languages      []string `json:"languages"`
 }
 
 func selfBox(e store.Extension, b store.VoicemailBox, found bool) selfBoxView {
-	v := selfBoxView{ExtensionID: e.ID}
+	v := selfBoxView{ExtensionID: e.ID, Languages: []string{}}
+	for _, l := range voiceprompt.Languages() {
+		v.Languages = append(v.Languages, string(l))
+	}
 	if found {
+		v.PromptLanguage = b.PromptLanguage
 		v.BoxID, v.HasPIN = b.ID, b.HasPassword
 		v.HasGreeting, v.HasUnreachable = b.GreetingObject != "", b.UnreachableObject != ""
 	}

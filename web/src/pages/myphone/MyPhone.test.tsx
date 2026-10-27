@@ -235,6 +235,41 @@ describe("My phone (role user)", () => {
     );
   });
 
+  it("sets the voicemail language of the user's own box", async () => {
+    const box = {
+      extensionId: 10,
+      boxId: 100,
+      hasPin: true,
+      hasGreeting: false,
+      hasUnreachableGreeting: false,
+      promptLanguage: "",
+      languages: ["en", "nl"],
+    };
+    const calls = api({
+      "GET /api/v1/me/extensions/10/voicemail/messages": () =>
+        json({ items: [] }),
+      "GET /api/v1/me/extensions/10/voicemail": () => json(box),
+      "PUT /api/v1/me/extensions/10/voicemail": () =>
+        json({ ...box, promptLanguage: "nl" }),
+    });
+    renderApp("/me/voicemail");
+    const select = await screen.findByLabelText("Voicemail language");
+    expect(select).toHaveValue("");
+    fireEvent.change(select, { target: { value: "nl" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "PUT",
+        url: "/api/v1/me/extensions/10/voicemail",
+        body: { promptLanguage: "nl" },
+      }),
+    );
+    expect(
+      await screen.findByText("Voicemail settings saved."),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Voicemail language")).toHaveValue("nl");
+  });
+
   it("changes the PIN and uploads a greeting", async () => {
     const calls = api({
       "GET /api/v1/me/extensions/10/voicemail/messages": () =>
