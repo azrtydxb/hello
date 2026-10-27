@@ -389,6 +389,57 @@ describe("Voicemail", () => {
     expect(screen.getByText("front@hello.lab")).toBeVisible();
   });
 
+  it("sets the prompt language of a box to Dutch", async () => {
+    const calls = setup({
+      "PUT /api/v1/voicemail/boxes/11/language": () =>
+        json({
+          promptLanguage: "nl",
+          effective: "nl",
+          languages: ["en", "nl"],
+        }),
+      "PUT /api/v1/extensions/1/voicemail": () =>
+        json({ ...DETAIL, promptLanguage: "nl" }),
+    });
+    renderApp("/voicemail");
+    await screen.findByText("reception@hello.lab");
+    fireEvent.click(screen.getByRole("button", { name: "Box settings" }));
+    const dialog = screen.getByRole("dialog", { name: "Box settings for 100" });
+
+    const language = within(dialog).getByLabelText("Prompt language");
+    expect(language).toHaveValue("");
+    expect(
+      within(language).getByRole("option", { name: "Dutch (Nederlands)" }),
+    ).toBeInTheDocument();
+    fireEvent.change(language, { target: { value: "nl" } });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Save box settings" }),
+    );
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: "PUT",
+        url: "/api/v1/voicemail/boxes/11/language",
+        body: { promptLanguage: "nl" },
+      }),
+    );
+    expect(await screen.findByText("Box 100 saved.")).toBeInTheDocument();
+
+    // Reopened, the box shows its language.
+    fireEvent.click(screen.getByRole("button", { name: "Box settings" }));
+    expect(screen.getByLabelText("Prompt language")).toHaveValue("nl");
+  });
+
+  it("does not touch the language route when it is unchanged", async () => {
+    const calls = setup({
+      "PUT /api/v1/extensions/1/voicemail": () => json(DETAIL),
+    });
+    renderApp("/voicemail");
+    await screen.findByText("reception@hello.lab");
+    fireEvent.click(screen.getByRole("button", { name: "Box settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save box settings" }));
+    expect(await screen.findByText("Box 100 saved.")).toBeInTheDocument();
+    expect(calls.some((c) => c.url.includes("/language"))).toBe(false);
+  });
+
   it("uploads a greeting as a multipart part", async () => {
     const calls = setup({
       "PUT /api/v1/extensions/1/voicemail": () => json(DETAIL),
