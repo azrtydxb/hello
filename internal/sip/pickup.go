@@ -141,6 +141,9 @@ func (c *call) answerPickup(req *pickupReq) {
 	res := sip.NewResponseFromRequest(c.dss.InviteRequest, sip.StatusOK, "OK", body)
 	res.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	res.AppendHeader(sip.NewHeader("Allow", allow))
+	for _, h := range c.sessionPickedUp(body) {
+		res.AppendHeader(h)
+	}
 	s.m.response(sip.StatusOK)
 	if err := c.dss.WriteResponse(res); err != nil {
 		s.log.Info("caller did not acknowledge the picked-up call", "correlation_id", c.id, "error", err)
@@ -152,6 +155,8 @@ func (c *call) answerPickup(req *pickupReq) {
 		c.maxTimer = time.AfterFunc(s.cfg.MaxCallDuration, c.expire)
 	}
 	c.mu.Unlock()
+	c.sessionArm()
+	c.startMediaWatch()
 }
 
 // pickupCandidate is one ringing call a picker may take, local or remote.

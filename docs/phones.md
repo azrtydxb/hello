@@ -71,3 +71,62 @@ rings, and **Active Calls** shows the call while it is up. After you hang up,
   the `HELLO_SIP*_ADVERTISED` values from step 1.
 - **No audio.** Phase 1 does not relay media. The two phones send RTP directly
   to each other, so they must be able to reach each other's IP.
+
+## Roaming, keep-alive and dead calls
+
+A Wi-Fi handset that drops off the network mid-call, goes to sleep behind NAT
+or moves to another access point must not leave a call hung or a contact
+ringing a dead address.
+
+- **Keep-alive.** A double CRLF ping (RFC 5626) is answered with a single CRLF
+  over TCP and TLS, and ignored without an error log over UDP. That is the SIP
+  transport library's behaviour, pinned by a test; hello-sip listens on UDP
+  today, and the TCP and TLS listeners (phone-feature-parity S-13, S-14) inherit
+  it. The Grandstream
+  template turns on the phone's own keep-alive: P2397 = 1 (SIP OPTIONS) on
+  WP8x6 and P84989 = 0 (RFC 5626 off) on WP822 and WP8xx, whose OPTIONS and
+  registration refresh already hold the NAT flow. The OPTIONS interval and
+  max-tries keys are left at the phone's defaults until the lab confirms them.
+- **Session timers (RFC 4028).** Hello honours a phone's `Session-Expires`
+  (with the refresher it names) and `Min-SE`: a request below `Min-SE` gets
+  `422` with Min-SE. On a call from a phone that sent none, Hello adds
+  `Session-Expires: 1800;refresher=uas` to the 200 and refreshes the call
+  itself. On the leg to a phone of a vendor that supports it
+  (Grandstream, Yealink, Poly, Snom, Fanvil; anything Hello cannot identify
+  gets no request) the INVITE carries `Supported: timer`,
+  `Session-Expires: 1800;refresher=uac` and `Min-SE: 90`. Where the phone
+  does not take over the refresher role, Hello refreshes at half the interval
+  with an UPDATE, or a re-INVITE repeating the leg's last SDP when the phone
+  does not list UPDATE. A refresh nobody answers (8 s) or that is refused
+  (anything but a retry after `422`, `491`, or `405`/`501` to an UPDATE) ends
+  the call: both legs get BYE, the CDR side is `system` with the reason
+  `session timer: refresh failed`. When the phone is the refresher and no
+  refresh arrives shortly before the interval ends, the call ends the same way
+  (`refresh missing`). A refresh from a phone restarts that leg's timer; a
+  bodiless UPDATE that only refreshes is answered by Hello, not relayed.
+  Tune with `HELLO_SIP_SESSION_EXPIRES_SECONDS` (`0` turns the feature off)
+  and `HELLO_SIP_SESSION_MIN_SE_SECONDS`. A parked, picked-up or transferred
+  call keeps its timers on the dialogs it moved to: the party left on a
+  parked call is refreshed (or must refresh) as before, and the phone that
+  retrieves or picks the call up, the parker a returned call rings, and the
+  target of a transfer each get a timer of their own. Legs to trunks follow
+  the trunk's session-timers setting: `on` requests `Session-Expires` on its
+  calls and keeps a timer on calls from it, `off` never does, and `default`
+  follows `HELLO_SIP_SESSION_TIMERS_TRUNKS` (false unless set); an inbound
+  trunk call is covered by `on` even when the carrier sent no
+  `Session-Expires`. `HELLO_SIP_MAX_CALL_DURATION` is still the backstop.
+  After a node takeover every leg restarts as Hello-refreshed with UPDATE.
+- **Dead media.** An anchored call with no RTP either way for
+  `HELLO_MEDIA_DEAD_SECONDS` (60) is ended unless it is on hold
+  ([media.md](media.md#roaming-and-dead-media)).
+- **Roam.** A re-INVITE with a new media address is relayed and the anchor
+  re-learns it. A re-REGISTER from a new address replaces the old contact of
+  the same phone: the same `+sip.instance`, or else the same Call-ID (a
+  contact the request itself registers or removes is left as it is), so a
+  phone that got a new IP does not keep a stale contact until it expires.
+
+Lab checks that need hardware (WP822 and WP8x6): a mid-call AP roam on the same
+subnet, a roam across subnets, a handset idle for more than an hour behind NAT,
+the P2397 and P84989 keys on an exported XML, and that the phones accept
+`Session-Expires` on a call and UPDATE as a refresh.
+

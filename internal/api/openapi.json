@@ -20093,7 +20093,8 @@
           "destinations",
           "internalDialing",
           "codecs",
-          "messaging"
+          "messaging",
+          "sessionTimers"
         ],
         "properties": {
           "id": {
@@ -20191,6 +20192,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Off by default."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },
@@ -20293,6 +20299,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },
@@ -20395,6 +20406,11 @@
           "messaging": {
             "type": "boolean",
             "description": "SMS over SIP: whether text messages (SIP MESSAGE) may be sent and received through this trunk. Default false."
+          },
+          "sessionTimers": {
+            "type": "string",
+            "enum": ["default", "on", "off"],
+            "description": "Whether Hello asks for and keeps an RFC 4028 session timer on this trunk's calls, so a call whose far end vanished is cleared within one interval. \"on\" always does, \"off\" never does, and \"default\" (the default) follows HELLO_SIP_SESSION_TIMERS_TRUNKS (off unless set). HELLO_SIP_SESSION_EXPIRES_SECONDS=0 turns session timers off everywhere, whatever the trunk says."
           }
         }
       },

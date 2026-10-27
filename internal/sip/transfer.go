@@ -291,6 +291,9 @@ func (c2 *call) awaitTransfer(from *call, w *leg, legs []*leg, kind, transfereeE
 					c2.maxTimer = time.AfterFunc(s.cfg.MaxCallDuration, c2.expire)
 					c2.mu.Unlock()
 				}
+				// The transferred call's dialogs keep their session timers
+				// (S-9); the original call's stop with it, below.
+				c2.sessionTransferred(from, ev.leg)
 				from.end(sip.StatusOK, cdr.SideCallee, kind+" transfer", ResultAnswered)
 				// The transferred call replicates from here on (incall-ha
 				// S-5): after from.end, whose record deletion shares the
@@ -370,10 +373,12 @@ func (c2 *call) handOver(from *call, l *leg) {
 		c2.addTrace("Transferred caller re-INVITE failed; media follows the old path")
 		return
 	}
+	c2.noteSDP(sessCallee, aSDP) // the SDP last sent on each dialog, for a refresh
 	aAns, ok := reinviteA(from.dss, cSDP)
 	if !ok {
 		return
 	}
+	c2.noteSDP(sessCaller, cSDP)
 	ackLate(l.session(), aAns)
 	c2.addTrace("Caller media handed to the transferred leg")
 }
@@ -558,11 +563,13 @@ func (c *call) bridge(other *call) bool {
 		if !ok {
 			return false
 		}
+		other.noteBridgeSDP(sessCallee, aSDP)
 		// 2. re-INVITE A (the original caller) with C's answer.
 		aAns, ok := reinviteA(other.dss, cSDP)
 		if !ok {
 			return false
 		}
+		other.noteBridgeSDP(sessCaller, cSDP)
 		// 3. C's ACK carries A's answer.
 		ackLate(wB.session(), aAns)
 	} else if !anchoredOK {
@@ -583,6 +590,8 @@ func (c *call) bridge(other *call) bool {
 	c3.connected = true
 	c3.answerTime = time.Now()
 	c3.mu.Unlock()
+	// The bridged call's dialogs keep the session timers they had (S-9).
+	c3.sessionBridged(other, c, wB)
 	if relay != nil {
 		// The bridged call keeps A's anchor: the relay moves from the
 		// original call (whose end must not close it) to the bridge.
@@ -773,12 +782,14 @@ func (c2 *call) handOverAnchored(from *call, l *leg) bool {
 	}
 	ackLate(l.session(), nil)
 	haAim(relay, legCallee, cAns)
+	c2.noteSDP(sessCallee, cOffer)
 	targetAns, _ := media.ParseAudioSDP(cAns)
 	neg := media.AnswerFor(off, targetAns)
 	c2.applyNegotiated(neg, "transfer", "")
 	aOffer := neg.Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(from.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
+		c2.noteSDP(sessCaller, aOffer)
 	}
 	c2.addTrace("Caller media handed to the transferred leg through the anchor")
 	return true
@@ -807,12 +818,14 @@ func (other *call) bridgeAnchored(wB *leg) (*media.Relay, bool) {
 	}
 	ackLate(wB.session(), nil)
 	haAim(relay, legCallee, cAns)
+	other.noteBridgeSDP(sessCallee, cOffer) // the SDP last sent on C's dialog, for a refresh
 	targetAns, _ := media.ParseAudioSDP(cAns)
 	neg := media.AnswerFor(off, targetAns)
 	other.applyNegotiated(neg, "transfer", "")
 	aOffer := neg.Build(host, relay.LegPort(legCaller), "sendrecv")
 	if aAns, ok := reinviteA(other.dss, aOffer); ok {
 		haAim(relay, legCaller, aAns)
+		other.noteBridgeSDP(sessCaller, aOffer)
 	}
 	return relay, true
 }

@@ -177,6 +177,27 @@ func TestLoadMaxCallDuration(t *testing.T) {
 	}
 }
 
+// TestLoadSessionTimers fails if the session timer and dead-media settings
+// do not default to 1800 s, 90 s and 60 s, parse whole seconds, accept 0 as
+// off, or accept a Min-SE above the interval or junk.
+func TestLoadSessionTimers(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil || c.SessionExpires != 1800*time.Second || c.SessionMinSE != 90*time.Second || c.MediaDeadAfter != 60*time.Second {
+		t.Fatalf("defaults = %v %v %v, %v", c.SessionExpires, c.SessionMinSE, c.MediaDeadAfter, err)
+	}
+	c, err = LoadSIP(env(map[string]string{
+		"HELLO_SIP_SESSION_EXPIRES_SECONDS": "0", "HELLO_SIP_SESSION_MIN_SE_SECONDS": "500", "HELLO_MEDIA_DEAD_SECONDS": "0"}))
+	if err != nil || c.SessionExpires != 0 || c.MediaDeadAfter != 0 {
+		t.Fatalf("zero = %v %v, %v; want both off", c.SessionExpires, c.MediaDeadAfter, err)
+	}
+	for key, bad := range map[string]string{
+		"HELLO_SIP_SESSION_EXPIRES_SECONDS": "-1", "HELLO_MEDIA_DEAD_SECONDS": "soon", "HELLO_SIP_SESSION_MIN_SE_SECONDS": "5000"} {
+		if _, err := LoadSIP(env(map[string]string{key: bad})); err == nil || !strings.Contains(err.Error(), key) {
+			t.Fatalf("%s=%q accepted: %v", key, bad, err)
+		}
+	}
+}
+
 // TestLoadValkeyTopology fails if both or neither Valkey topologies are
 // accepted, if Sentinel mode lacks its master, or if a valid Sentinel list
 // is not parsed.
@@ -456,5 +477,22 @@ func TestLoadVoicemailVoice(t *testing.T) {
 	ctl, err := LoadControl(env(map[string]string{"HELLO_VOICEMAIL_LANGUAGE": "nl"}))
 	if err != nil || ctl.VoicePromptLanguage != "nl" {
 		t.Fatalf("control language = %q %v", ctl.VoicePromptLanguage, err)
+	}
+}
+
+// TestLoadSessionTimersTrunks fails if HELLO_SIP_SESSION_TIMERS_TRUNKS is not
+// off by default, does not read true, or accepts junk.
+func TestLoadSessionTimersTrunks(t *testing.T) {
+	c, err := LoadSIP(env(nil))
+	if err != nil || c.SessionTimersTrunks {
+		t.Fatalf("default = %v, %v; want off", c.SessionTimersTrunks, err)
+	}
+	c, err = LoadSIP(env(map[string]string{"HELLO_SIP_SESSION_TIMERS_TRUNKS": "true"}))
+	if err != nil || !c.SessionTimersTrunks {
+		t.Fatalf("true = %v, %v", c.SessionTimersTrunks, err)
+	}
+	if _, err := LoadSIP(env(map[string]string{"HELLO_SIP_SESSION_TIMERS_TRUNKS": "yes"})); err == nil ||
+		!strings.Contains(err.Error(), "HELLO_SIP_SESSION_TIMERS_TRUNKS") {
+		t.Fatalf("junk accepted: %v", err)
 	}
 }

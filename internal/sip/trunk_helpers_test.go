@@ -406,6 +406,11 @@ type carrier struct {
 	acks     chan *sip.Request
 	messages chan *sip.Request // SIP MESSAGEs (SMS over SIP), answered 202
 	rejected atomic.Int64      // requests with bad credentials
+
+	// reinvites gets every in-dialog INVITE; reinviteCode, when set,
+	// answers them with that status instead of a 200 (0 = 200).
+	reinvites    chan *sip.Request
+	reinviteCode atomic.Int64
 }
 
 func newCarrier(t *testing.T, user, pass string) *carrier {
@@ -424,7 +429,8 @@ func newCarrier(t *testing.T, user, pass string) *carrier {
 	cr := &carrier{t: t, addr: addr, host: host, port: port, user: user, pass: pass, realm: "carrier.test", ua: ua, srv: srv,
 		sdp:     "v=0\r\no=carrier-" + strconv.Itoa(port) + " 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=audio 30000 RTP/AVP 0\r\n",
 		dialogs: map[string]*sipgo.DialogServerSession{}, invites: make(chan *sip.Request, 16), cancels: make(chan *sip.Request, 16),
-		byes: make(chan *sip.Request, 16), acks: make(chan *sip.Request, 16), messages: make(chan *sip.Request, 16)}
+		byes: make(chan *sip.Request, 16), acks: make(chan *sip.Request, 16), messages: make(chan *sip.Request, 16),
+		reinvites: make(chan *sip.Request, 16)}
 	cr.dua = &sipgo.DialogUA{Client: cli, ContactHDR: sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: "carrier", Host: host, Port: port}}}
 	cr.grant.Store(60)
 	cr.inviteCode.Store(200)
@@ -538,6 +544,11 @@ func (cr *carrier) onOptions(req *sip.Request, tx sip.ServerTransaction) {
 
 func (cr *carrier) onInvite(req *sip.Request, tx sip.ServerTransaction) {
 	if _, ok := req.To().Params.Get("tag"); ok {
+		push(cr.reinvites, req)
+		if code := cr.reinviteCode.Load(); code > 0 {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, int(code), "Refused", nil))
+			return
+		}
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", req.Body()))
 		return
 	}

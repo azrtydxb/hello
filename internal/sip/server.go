@@ -52,6 +52,21 @@ type Config struct {
 	RecountInterval time.Duration
 	// MaxCallDuration ends a connected call with BYE to both legs (4h).
 	MaxCallDuration time.Duration
+	// SessionExpires is the RFC 4028 interval Hello requests on legs to
+	// phones and applies when a phone's call names none (30m); 0 turns
+	// session timers off. SessionMinSE is the smallest interval accepted
+	// from a peer (90s). MediaDeadAfter ends an anchored call with no RTP in
+	// either direction for this long, unless held (60s); 0 turns it off.
+	// Unset (zero) in a Config means off: only the daemon's environment
+	// supplies the defaults.
+	SessionExpires time.Duration
+	SessionMinSE   time.Duration
+	// SessionTimersTrunks is what a trunk whose session-timers setting is
+	// "default" does: true requests and keeps a session timer on its calls.
+	SessionTimersTrunks bool
+	MediaDeadAfter      time.Duration
+	// SessionRefreshTimeout bounds one session refresh transaction (8s).
+	SessionRefreshTimeout time.Duration
 	// Server paging (spec P-12): PageMaxDuration ends a page (120s),
 	// PageAnswerTimeout gives up when no member answers (10s), PageFanout
 	// caps the legs of one page (200) and PageConcurrent the pages a node

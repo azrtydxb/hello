@@ -89,8 +89,12 @@ type call struct {
 	route     string
 	rewritten string
 	trunkName string
-	trace     routing.Trace
-	slots     []heldSlot // trunk call slots held, released when the attempt ends
+	// inTrunk is the trunk an inbound trunk call came from (nil for a call
+	// from a phone); its session-timers setting decides the caller dialog's
+	// timer.
+	inTrunk *routing.Trunk
+	trace   routing.Trace
+	slots   []heldSlot // trunk call slots held, released when the attempt ends
 
 	// Phase 4 call-flow state. stages carries the forwarding/DND context of
 	// the extension being rung (nil for a plain call); mediaMode is the CDR's
@@ -221,6 +225,18 @@ type call struct {
 	// dialog (set by transferBlindVia for the rethreaded call).
 	transferNotify func(fragment string, final bool)
 
+	// ses is the RFC 4028 session timers and the dead-media watch
+	// (sessiontimer.go).
+	ses sessionState
+
+	// rawCaller marks a caller dialog Hello answered through the raw
+	// transaction (answerSelf: a retriever or a picker), where sipgo has no
+	// confirmed dialog to send a session refresh on. linkHeld is the hold of
+	// a linked call's pair as the party and its peer signalled it (guarded
+	// by mu); the dead-media watch leaves a held pair alone.
+	rawCaller bool
+	linkHeld  bool
+
 	// IVR state (ivr.go). ivr is the menu session, ivrCancel stops its
 	// flow with the call, ivrAnswered is when the menu answered (billing
 	// starts there), vmExt names the voicemail box a menu hands the call to
@@ -350,6 +366,9 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		// merged or looped request (RFC 3261 §8.2.2.2).
 		s.logInviteReject(req, "", sip.StatusLoopDetected, "loop detected")
 		s.respond(tx, req, sip.StatusLoopDetected, "Loop Detected")
+		return
+	}
+	if s.sessionTooSmall(req, tx) {
 		return
 	}
 	snap := s.deps.Snapshots.Current() // one snapshot for the whole request
@@ -902,6 +921,9 @@ func (c *call) answer(w *leg) {
 		res.AppendHeader(sip.HeaderClone(ct))
 	}
 	res.AppendHeader(sip.NewHeader("Allow", allow))
+	for _, h := range c.sessionAnswer(w, bres, body) {
+		res.AppendHeader(h)
+	}
 	// Counted when sent; WriteResponse blocks until the caller ACKs (or
 	// 64*T1).
 	c.s.m.response(sip.StatusOK)
@@ -909,13 +931,14 @@ func (c *call) answer(w *leg) {
 	if err == nil {
 		c.mu.Lock()
 		if !c.ended {
-			// debt: a fixed cap stands in for RFC 4028 session timers, which
-			// would clear a call within minutes of a phone vanishing without
-			// BYE. Revisit when calls must be cleared that fast, or when a
-			// 4h call is a real use case.
+			// MaxCallDuration is the backstop; the session timers (RFC 4028)
+			// and the dead-media watch clear a call whose far end vanished
+			// within an interval.
 			c.maxTimer = time.AfterFunc(c.s.cfg.MaxCallDuration, c.expire)
 		}
 		c.mu.Unlock()
+		c.sessionArm()
+		c.startMediaWatch()
 		// Replication starts with the dialog confirmed: the snapshot is
 		// taken here and after every in-dialog transaction, and the
 		// heartbeat's write cadence is the owner's liveness.
@@ -1160,6 +1183,7 @@ func (c *call) end(status int, side, reason, result string) {
 			c.maxTimer.Stop()
 		}
 		c.mu.Unlock()
+		c.sessionStop()
 		c.endMOH()
 		c.closeMedia()
 		c.stopIVR()
@@ -1514,6 +1538,7 @@ func (l *leg) invite() (*sip.Request, error) {
 	req.AppendHeader(&maxFwd)
 	req.AppendHeader(sip.HeaderClone(&s.contact))
 	req.AppendHeader(sip.NewHeader("Allow", allow))
+	l.addSessionHeaders(req)
 	if body := c.offerSDP(); len(body) > 0 {
 		if c.inv != nil {
 			if ct := c.inv.ContentType(); ct != nil {
@@ -1865,6 +1890,17 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 	if c.confInDialog(req, tx) {
 		return // a conference participant: answered from its own media socket
 	}
+	// A refresh from the phone (RFC 4028) restarts its dialog's session
+	// timer; a bodiless UPDATE that only refreshes is answered here, and the
+	// 2xx of any other carries the negotiated Session-Expires.
+	idx := sessCallee
+	if ref.leg == nil {
+		idx = sessCaller
+	}
+	var done bool
+	if tx, done = c.sessionIn(idx, req, tx); done {
+		return
+	}
 	if hom := c.homed(); hom != nil {
 		// A taken-over call terminates media in dialog from the replicated
 		// relay: hold direction mirrored, the peer re-INVITEd the same way.
@@ -1897,6 +1933,7 @@ func (s *Server) handleInDialog(req *sip.Request, tx sip.ServerTransaction) {
 			out.AppendHeader(sip.HeaderClone(ct))
 		}
 		out.SetBody(body)
+		c.noteSDP(1-idx, body) // the other dialog's last SDP, for a refresh
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()

@@ -306,6 +306,23 @@ type SIP struct {
 	// MaxCallDuration ends a connected call that has run this long (both
 	// legs get BYE), so a call whose phones vanished without BYE is cleared.
 	MaxCallDuration time.Duration
+	// SessionExpires (HELLO_SIP_SESSION_EXPIRES_SECONDS, default 1800; 0
+	// turns session timers off) is the RFC 4028 Session-Expires Hello
+	// requests and applies on legs to phones; SessionMinSE
+	// (HELLO_SIP_SESSION_MIN_SE_SECONDS, default 90) is the smallest
+	// interval it accepts from a peer (422 below it).
+	SessionExpires time.Duration
+	SessionMinSE   time.Duration
+	// SessionTimersTrunks (HELLO_SIP_SESSION_TIMERS_TRUNKS, default false) is
+	// what a trunk whose session-timers setting is "default" does: false
+	// leaves its calls without a session timer unless the carrier asks for
+	// one, true requests and keeps one. A trunk set to "on" or "off" ignores
+	// it; SessionExpires 0 turns session timers off for every trunk.
+	SessionTimersTrunks bool
+	// MediaDeadAfter (HELLO_MEDIA_DEAD_SECONDS, default 60; 0 turns it off)
+	// ends an anchored call that carried no RTP in either direction for this
+	// long, unless it is on hold.
+	MediaDeadAfter time.Duration
 	// Server paging (phonebooks-ptt spec P-12): a page ends after
 	// PageMaxDuration (HELLO_PAGE_MAX_SECONDS, 120 s); a node runs at most
 	// PageConcurrent pages (HELLO_PAGE_CONCURRENT, 5) of at most PageFanout
@@ -748,6 +765,13 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	}
 	c.Dial = r.dialing()
 	c.PageMaxDuration = time.Duration(r.positiveInt("HELLO_PAGE_MAX_SECONDS", 120)) * time.Second
+	c.SessionExpires = time.Duration(r.seconds("HELLO_SIP_SESSION_EXPIRES_SECONDS", 1800)) * time.Second
+	c.SessionMinSE = time.Duration(r.seconds("HELLO_SIP_SESSION_MIN_SE_SECONDS", 90)) * time.Second
+	c.MediaDeadAfter = time.Duration(r.seconds("HELLO_MEDIA_DEAD_SECONDS", 60)) * time.Second
+	c.SessionTimersTrunks = r.boolean("HELLO_SIP_SESSION_TIMERS_TRUNKS")
+	if c.SessionExpires > 0 && c.SessionMinSE > c.SessionExpires {
+		r.fail("HELLO_SIP_SESSION_MIN_SE_SECONDS", errors.New("must not exceed HELLO_SIP_SESSION_EXPIRES_SECONDS"))
+	}
 	c.PageConcurrent = r.positiveInt("HELLO_PAGE_CONCURRENT", 5)
 	c.PageFanout = r.positiveInt("HELLO_PAGE_FANOUT", 200)
 	c.PageMulticastIface = r.getenv("HELLO_PAGE_MULTICAST_IFACE")
@@ -1012,6 +1036,20 @@ func (r *reader) positiveInt(key string, def int) int {
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
 		r.fail(key, errors.New("must be a positive integer"))
+	}
+	return n
+}
+
+// seconds reads a whole number of seconds, 0 included (the setting is off).
+func (r *reader) seconds(key string, def int) int {
+	v := r.getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > 86400 {
+		r.fail(key, errors.New("must be a whole number of seconds from 0 to 86400"))
+		return def
 	}
 	return n
 }

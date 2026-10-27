@@ -89,7 +89,7 @@ The user asked for everything and left the details open. These defaults settle e
   - The answer-200-and-drop path in `internal/sip/features.go` is removed.
 - [S-9] **Wi-Fi roam, keep-alive and dead-call detection.**
   - A CRLF keep-alive (RFC 5626 double-CRLF ping over UDP/TCP) is answered with a single CRLF over TCP and TLS, and ignored without an error log over UDP.
-  - Session timers (RFC 4028) are supported. Hello honours a phone's `Session-Expires` and `Min-SE` and refreshes as the refresher when the far end does not. It requests `Session-Expires: 1800` on legs to devices of models whose capability says they support it, and tears down a call whose refresh fails, so a handset that drops off Wi-Fi mid-call no longer leaves the call hung. The anchor also ends an anchored call after `HELLO_MEDIA_DEAD_SECONDS` (default 60) without RTP in both directions, unless the call is on hold.
+  - Session timers (RFC 4028) are supported. Hello honours a phone's `Session-Expires` and `Min-SE` and refreshes as the refresher when the far end does not. It requests `Session-Expires: 1800` on legs to devices of models whose capability says they support it, and tears down a call whose refresh fails, so a handset that drops off Wi-Fi mid-call no longer leaves the call hung. The timers follow a call onto the dialogs it moves to (park, retrieve, pickup, return, blind and attended transfer). Each trunk has a session-timers setting, on, off or default (`HELLO_SIP_SESSION_TIMERS_TRUNKS`, off unless set); on requests Session-Expires on its calls and keeps a timer on calls from it. The anchor also ends an anchored call after `HELLO_MEDIA_DEAD_SECONDS` (default 60) without RTP in both directions, unless the call is on hold.
   - A re-INVITE carrying a new `c=` address mid-call (an IP change after a roam) is relayed and the anchor re-learns the address. A re-REGISTER from a new address replaces the old contact for the same instance (`+sip.instance` or same Call-ID).
   - The lab confirms a mid-call AP roam on the same subnet, a roam across subnets, and a handset idle for more than 1 h behind NAT [R822 §10].
 
@@ -452,7 +452,7 @@ These items are checked on hardware (two WP836 on 1.0.1.44 and 1.0.1.80, upgrade
   - a body appears in a log line;
   - the 1,300-byte or 30-per-minute limits are not enforced;
   - the 200-and-drop path still exists.
-- [ ] [S-9] `TestSessionTimersAndKeepalive` in `internal/sip` passes. It fails if:
+- [x] [S-9] `TestSessionTimersAndKeepalive` in `internal/sip` passes. It fails if:
   - a CRLF ping produces an error log or no pong on TCP;
   - a call whose session refresh fails is not torn down;
   - a call with no RTP in both directions for `HELLO_MEDIA_DEAD_SECONDS` stays up while not on hold;

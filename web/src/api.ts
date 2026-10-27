@@ -288,6 +288,12 @@ export interface TrunkFields {
   /** SMS over SIP: text messages may be sent and received through it. */
   messaging: boolean;
   /**
+   * RFC 4028 session timers on the trunk's calls: "on" asks for and keeps
+   * one, "off" never does, "default" follows Hello's own setting
+   * (HELLO_SIP_SESSION_TIMERS_TRUNKS).
+   */
+  sessionTimers: "default" | "on" | "off";
+  /**
    * The audio codecs offered to the trunk (store.Trunk.codecs): any of
    * "PCMU", "PCMA", "G722", "opus". Default ["PCMU", "PCMA"]: most carriers
    * accept G.711 only.
