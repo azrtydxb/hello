@@ -1,6 +1,12 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
-import { ApiError, errorMessage, login, safeNext } from "../api";
+import {
+  ApiError,
+  errorMessage,
+  login,
+  loginSecondFactor,
+  safeNext,
+} from "../api";
 import { useAuth } from "../auth";
 import { HelloLogo } from "../brand";
 import {
@@ -47,6 +53,36 @@ export function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Set once the password was right for a user with two-factor authentication.
+  const [challenge, setChallenge] = useState<string | null>(null);
+  const [code, setCode] = useState("");
+
+  async function onCode(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (busy || challenge === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await loginSecondFactor(challenge, code.trim());
+    } catch (err) {
+      setCode("");
+      setError(
+        err instanceof ApiError && err.status === 401
+          ? "The code is incorrect or has expired. Try again, or sign in again."
+          : errorMessage(err),
+      );
+      setBusy(false);
+      return;
+    }
+    await refresh();
+    navigate(safeNext(params.get("next")), { replace: true });
+  }
+
+  function backToPassword() {
+    setChallenge(null);
+    setCode("");
+    setError(null);
+  }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -54,7 +90,13 @@ export function Login() {
     setBusy(true);
     setError(null);
     try {
-      await login(username, password);
+      const result = await login(username, password);
+      if (result.mfa === "required") {
+        setPassword("");
+        setChallenge(result.mfaToken);
+        setBusy(false);
+        return;
+      }
     } catch (err) {
       setPassword("");
       setError(
@@ -100,50 +142,89 @@ export function Login() {
             </Alert>
           )}
 
-          <form
-            className="signin__form"
-            onSubmit={(e) => void onSubmit(e)}
-            aria-busy={busy || undefined}
-            noValidate
-          >
-            <Input
-              id="login-username"
-              label="Username"
-              name="username"
-              autoComplete="username"
-              autoCapitalize="none"
-              spellCheck={false}
-              required
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              aria-invalid={error ? true : undefined}
-              aria-describedby={describedBy}
-            />
-            <Input
-              id="login-password"
-              label="Password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              hint="Forgot it? An administrator can reset it."
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              aria-invalid={error ? true : undefined}
-              aria-describedby={
-                error ? `${ERROR_ID} ${PASSWORD_HINT_ID}` : PASSWORD_HINT_ID
-              }
-            />
-            <Button
-              type="submit"
-              size="lg"
-              block
-              disabled={busy}
-              iconRight={busy ? "loader" : "arrow-right"}
+          {challenge !== null ? (
+            <form
+              className="signin__form"
+              onSubmit={(e) => void onCode(e)}
+              aria-busy={busy || undefined}
+              aria-label="Second step"
+              noValidate
             >
-              {busy ? "Signing in…" : "Sign in"}
-            </Button>
-          </form>
+              <Input
+                id="login-code"
+                label="Authentication code"
+                name="code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                autoCapitalize="none"
+                spellCheck={false}
+                autoFocus
+                required
+                hint="The 6-digit code from your authenticator app, or one of your recovery codes."
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={describedBy}
+              />
+              <Button
+                type="submit"
+                size="lg"
+                block
+                disabled={busy}
+                iconRight={busy ? "loader" : "arrow-right"}
+              >
+                {busy ? "Verifying…" : "Verify"}
+              </Button>
+              <Button variant="ghost" block onClick={backToPassword}>
+                Use a different account
+              </Button>
+            </form>
+          ) : (
+            <form
+              className="signin__form"
+              onSubmit={(e) => void onSubmit(e)}
+              aria-busy={busy || undefined}
+              noValidate
+            >
+              <Input
+                id="login-username"
+                label="Username"
+                name="username"
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                required
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={describedBy}
+              />
+              <Input
+                id="login-password"
+                label="Password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                hint="Forgot it? An administrator can reset it."
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={
+                  error ? `${ERROR_ID} ${PASSWORD_HINT_ID}` : PASSWORD_HINT_ID
+                }
+              />
+              <Button
+                type="submit"
+                size="lg"
+                block
+                disabled={busy}
+                iconRight={busy ? "loader" : "arrow-right"}
+              >
+                {busy ? "Signing in…" : "Sign in"}
+              </Button>
+            </form>
+          )}
         </section>
 
         <footer className="signin__foot">
