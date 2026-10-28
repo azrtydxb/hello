@@ -40,7 +40,7 @@ func provSettings(cfg config.Control, deployment map[prov.Vendor]redirect.Creden
 	p := store.ProvSettings{
 		SIPServer: cfg.Prov.SIPServer, Domain: cfg.SIPDomain, Expiry: cfg.Prov.RegisterExpiry,
 		Resync: cfg.Prov.Resync, BookRefresh: cfg.Prov.BookRefresh, Timezone: cfg.Prov.Timezone, NTP: cfg.Prov.NTP, TokenGrace: cfg.Prov.TokenGrace,
-		CACertFile: cfg.Prov.CACert,
+		CACertFile: cfg.Prov.CACert, DSCPSIP: cfg.Prov.DSCPSIP, DSCPRTP: cfg.Prov.DSCPRTP,
 		Deployment: map[prov.Vendor]bool{},
 	}
 	if cfg.Prov.PublicURL != nil {

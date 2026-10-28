@@ -114,6 +114,7 @@ func bindFrom(minPort, maxPort int, other *net.UDPConn) (*net.UDPConn, error) {
 			last = err
 			continue
 		}
+		markRTP(c)
 		return c, nil
 	}
 	if last == nil {
