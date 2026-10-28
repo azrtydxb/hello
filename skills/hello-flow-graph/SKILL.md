@@ -16,8 +16,9 @@ once; `testRouting` proves one particular call.
 ## Connecting
 
 - MCP server: `https://<hello host>/mcp` (on kw: `https://hello.kw.watteel.lab/mcp`).
-- Scope `read`, role `viewer`. Every tool here is read-only; the changes that
-  the graph tells you about are made with the tools of the other skills.
+- Scope `read`, role `viewer` for the graph and the canvases. The changes the
+  graph tells you about are made with the tools of the other skills, or all at
+  once with a configuration batch (scope `write`, role `operator`, below).
 
 ## Tools
 
@@ -52,6 +53,30 @@ people; never to change a call flow.
 "y": 80 } ], "remove": [] }`. Send the `layoutVersion` you read with the
   canvas; a 409 `layout_stale` means somebody else saved first and nothing was
   stored, so read the canvas again and merge your moves node by node.
+
+## Batches: many changes at once
+
+A configuration batch applies a list of object writes in one transaction: all
+of them or none, one revision step, one hello-sip notification. It is what the
+canvas editor saves with, and it is the safest way to make a change that spans
+several objects (create a ring group and point a route at it).
+
+- `applyConfigBatch` with `baseRevision` (from `getFlowRevision`), `ops` (each
+  an `operationId` with its `pathParams` and `body`, exactly as that tool takes
+  them; `ref` names a result that later operations use as `${ref.id}` or
+  `${ref.name}`; `expect` is the node `version` from `getFlowGraph`), and
+  optionally `canvasId` with `layout` to place new nodes. Send `dryRun: true`
+  first and show the `results` and `warnings` before applying.
+- A `409 config_stale` lists the operations whose target changed since your
+  `baseRevision`: read the graph again and rebuild those operations. A `422`
+  names the failing `opIndex`; nothing was applied. Operations that carry a
+  secret, touch storage or live state, or need the `secrets` scope are
+  `400 op_not_batchable`: make those with their own tool.
+- `listConfigBatches` (newest first) and `getConfigBatch` (operations,
+  results and diffs) show what was applied and by whom.
+- `revertConfigBatch` undoes a batch (with `dryRun` to preview). It refuses
+  with 409 when an object it changed has changed since; a batch reverts once.
+  Ask before reverting: other users may build on the change.
 
 ## Workflows
 
