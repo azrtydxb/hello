@@ -1666,6 +1666,13 @@ spec:
               # cluster-ca's certificate, from the hello-prov-tls secret
               # cert-manager writes; served at /p/ca.crt for phones to trust.
               value: /etc/hello/prov/ca.crt
+            # Phone syslog sink (phone-feature-parity S-27): UDP :5514, reached
+            # through the hello-syslog NodePort. Phones get HELLO_SYSLOG_HOST
+            # in P207 only for a phone group that turned syslog on.
+            - name: HELLO_SYSLOG_UDP_ADDR
+              value: ":5514"
+            - name: HELLO_SYSLOG_HOST
+              value: 192.168.10.101:30514
             # Vendor redirect-service credentials (spec S-11) from the
             # hello-prov-redirect secret, every key optional: until the
             # secret exists the redirect clients stay unconfigured (see
@@ -1757,6 +1764,9 @@ spec:
               containerPort: 8081
             - name: prov
               containerPort: 8083
+            - name: syslog
+              containerPort: 5514
+              protocol: UDP
           readinessProbe:
             httpGet:
               path: /readyz
@@ -1809,6 +1819,33 @@ spec:
       port: 8081
       protocol: TCP
       targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hello-syslog
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: control
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  # Phones send syslog to 192.168.10.101:30514 (UDP). Local keeps the phone's
+  # source address, which is how Hello attributes a line to its phone; a line
+  # from an address no phone owns is still kept, under that address.
+  type: NodePort
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: control
+  ports:
+    - name: syslog
+      port: 514
+      protocol: UDP
+      targetPort: syslog
+      nodePort: 30514
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -246,6 +246,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Multicast, d.PTT, d.Paging, err = s.multicastInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
 		return d, prov.Template{}, err
 	}
+	if d.Syslog, err = s.syslogInfo(ctx, phoneID); err != nil {
+		return d, prov.Template{}, err
+	}
 	if d.BLF, err = s.blfKeys(ctx, blfJSON); err != nil {
 		return d, prov.Template{}, err
 	}

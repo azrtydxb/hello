@@ -88,6 +88,59 @@ type Control struct {
 	AI AI
 	// AIAgent is the in-product AI agent (HELLO_AI_*, spec ai-agent).
 	AIAgent AIAgent
+	// Syslog is the phone syslog sink (HELLO_SYSLOG_*).
+	Syslog Syslog
+}
+
+// Syslog configures the phone syslog sink (phone-feature-parity S-27). It is
+// off until a listen address is set.
+type Syslog struct {
+	// UDPAddr (HELLO_SYSLOG_UDP_ADDR) and TLSAddr (HELLO_SYSLOG_TLS_ADDR) are
+	// the listen addresses; empty turns that listener off. The Service maps
+	// the well-known ports 514 and 6514 onto them.
+	UDPAddr, TLSAddr string
+	// TLSCert and TLSKey (HELLO_SYSLOG_TLS_CERT, HELLO_SYSLOG_TLS_KEY) are
+	// required with TLSAddr.
+	TLSCert, TLSKey string
+	// Host (HELLO_SYSLOG_HOST) is the address phones are told to send
+	// syslog to; empty keeps syslog out of every phone configuration.
+	Host string
+	// Rate (HELLO_SYSLOG_RATE, default 20) is the sustained lines per second
+	// kept per phone and Burst (HELLO_SYSLOG_BURST, default 200) the burst;
+	// lines over it are dropped.
+	Rate, Burst int
+}
+
+// Enabled reports whether the sink listens at all.
+func (s Syslog) Enabled() bool { return s.UDPAddr != "" || s.TLSAddr != "" }
+
+// syslog reads the HELLO_SYSLOG_* settings.
+func (r *reader) syslog() Syslog {
+	s := Syslog{
+		UDPAddr: r.getenv("HELLO_SYSLOG_UDP_ADDR"),
+		TLSAddr: r.getenv("HELLO_SYSLOG_TLS_ADDR"),
+		TLSCert: r.getenv("HELLO_SYSLOG_TLS_CERT"),
+		TLSKey:  r.getenv("HELLO_SYSLOG_TLS_KEY"),
+		Host:    r.getenv("HELLO_SYSLOG_HOST"),
+		Rate:    r.positiveInt("HELLO_SYSLOG_RATE", 20),
+		Burst:   r.positiveInt("HELLO_SYSLOG_BURST", 200),
+	}
+	r.hostPort("HELLO_SYSLOG_UDP_ADDR", s.UDPAddr)
+	r.hostPort("HELLO_SYSLOG_TLS_ADDR", s.TLSAddr)
+	if s.Host != "" && !ntpRe.MatchString(s.Host) {
+		r.fail("HELLO_SYSLOG_HOST", errors.New("must be a host name or address"))
+	}
+	switch {
+	case (s.TLSCert == "") != (s.TLSKey == ""):
+		r.fail("HELLO_SYSLOG_TLS_CERT", errors.New("HELLO_SYSLOG_TLS_CERT and HELLO_SYSLOG_TLS_KEY are set together"))
+	case s.TLSAddr != "" && s.TLSCert == "":
+		r.fail("HELLO_SYSLOG_TLS_CERT", errors.New("required with HELLO_SYSLOG_TLS_ADDR"))
+	case s.TLSCert != "":
+		if _, err := tls.LoadX509KeyPair(s.TLSCert, s.TLSKey); err != nil {
+			r.fail("HELLO_SYSLOG_TLS_CERT", errors.New("cannot load the certificate and key"))
+		}
+	}
+	return s
 }
 
 // AIAgent configures the in-product AI agent: an LLM endpoint reached
@@ -410,6 +463,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
 	c.AI = r.ai()
 	c.AIAgent = r.aiAgent()
+	c.Syslog = r.syslog()
 	return c, r.err()
 }
 

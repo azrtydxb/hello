@@ -2,6 +2,7 @@
 {{- $ctx := dict "root" . "component" "control" -}}
 {{- $prov := .Values.control.provisioning -}}
 {{- $provOn := ne $prov.publicUrl "" -}}
+{{- $syslog := .Values.control.syslog -}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -129,6 +130,14 @@ spec:
             {{- end }}
             {{- end }}
             {{- end }}
+            {{- if $syslog.enabled }}
+            - name: HELLO_SYSLOG_UDP_ADDR
+              value: ":5514"
+            {{- with $syslog.host }}
+            - name: HELLO_SYSLOG_HOST
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.control.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -144,6 +153,11 @@ spec:
             {{- if $provOn }}
             - name: prov
               containerPort: 8083
+            {{- end }}
+            {{- if $syslog.enabled }}
+            - name: syslog
+              containerPort: 5514
+              protocol: UDP
             {{- end }}
           readinessProbe:
             httpGet:
@@ -240,4 +254,28 @@ spec:
                 name: {{ $full }}-prov
                 port:
                   number: 8083
+{{- end }}
+{{- if $syslog.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-syslog
+  labels:
+    {{- include "hello.labels" (dict "root" . "component" "control") | nindent 4 }}
+spec:
+  type: {{ $syslog.service.type }}
+  {{- if ne $syslog.service.type "ClusterIP" }}
+  externalTrafficPolicy: {{ $syslog.service.externalTrafficPolicy }}
+  {{- end }}
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: syslog
+      port: 514
+      protocol: UDP
+      targetPort: syslog
+      {{- if and $syslog.service.nodePort (ne $syslog.service.type "ClusterIP") }}
+      nodePort: {{ $syslog.service.nodePort }}
+      {{- end }}
 {{- end }}

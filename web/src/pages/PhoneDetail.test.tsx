@@ -102,6 +102,84 @@ describe("Phone detail", () => {
     ).toHaveLength(2);
   });
 
+  it("shows the syslog lines of the phone and an empty state", async () => {
+    api(phone(), {
+      "GET /api/v1/phones/5/syslog?limit=200": () =>
+        json({
+          items: [
+            {
+              at: "2026-10-02T10:05:00Z",
+              source: "192.0.2.10",
+              severity: 3,
+              message: "sip: registration failed",
+            },
+            {
+              at: "2026-10-02T10:04:00Z",
+              source: "192.0.2.10",
+              severity: 6,
+              message: "sip: registered",
+            },
+          ],
+          cap: 10000,
+          retentionSeconds: 86400,
+        }),
+    });
+    renderApp("/phones/5");
+    await screen.findByRole("table", { name: "Fetch log" });
+    fireEvent.click(screen.getByRole("tab", { name: "Syslog" }));
+    const table = await screen.findByRole("table", { name: "Syslog" });
+    expect(within(table).getByText("sip: registration failed")).toBeVisible();
+    expect(within(table).getByText("error")).toHaveClass("az-badge--bad");
+    expect(within(table).getByText("info")).toHaveClass("az-badge--neutral");
+    expect(screen.getByText(/kept for 24 h/)).toBeInTheDocument();
+  });
+
+  it("filters the syslog by severity", async () => {
+    const line = (severity: number, message: string) => ({
+      at: "2026-10-02T10:05:00Z",
+      source: "192.0.2.10",
+      severity,
+      message,
+    });
+    api(phone(), {
+      "GET /api/v1/phones/5/syslog?limit=200": () =>
+        json({
+          items: [
+            line(3, "boom"),
+            line(4, "careful"),
+            line(6, "chatty"),
+            line(7, "noisy"),
+            line(-1, "[hello] 4 lines dropped"),
+          ],
+          cap: 10000,
+          retentionSeconds: 86400,
+        }),
+    });
+    renderApp("/phones/5");
+    await screen.findByRole("table", { name: "Fetch log" });
+    fireEvent.click(screen.getByRole("tab", { name: "Syslog" }));
+    await screen.findByText("noisy");
+    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "4" } });
+    expect(screen.getByText("boom")).toBeInTheDocument();
+    expect(screen.getByText("careful")).toBeInTheDocument();
+    expect(screen.queryByText("chatty")).toBeNull();
+    expect(screen.queryByText("noisy")).toBeNull();
+    expect(screen.getByText(/lines dropped/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Show"), { target: { value: "3" } });
+    expect(screen.queryByText("careful")).toBeNull();
+  });
+
+  it("explains an empty syslog", async () => {
+    api(phone(), {
+      "GET /api/v1/phones/5/syslog?limit=200": () =>
+        json({ items: [], cap: 10000, retentionSeconds: 86400 }),
+    });
+    renderApp("/phones/5");
+    await screen.findByRole("table", { name: "Fetch log" });
+    fireEvent.click(screen.getByRole("tab", { name: "Syslog" }));
+    expect(await screen.findByText(/No syslog lines yet/)).toBeInTheDocument();
+  });
+
   it("previews a file, encoding its name in the URL", async () => {
     const calls = api(phone(), {
       "GET /api/v1/phones/5/preview?file=a+b%26c%3D1.cfg": () =>

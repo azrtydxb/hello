@@ -10,6 +10,8 @@ import {
   setGroupBooks,
   setGroupMulticast,
   setGroupPtt,
+  setGroupSyslog,
+  SYSLOG_LEVELS,
   updateGroup,
   type Book,
   type CatalogChannel,
@@ -18,6 +20,8 @@ import {
   type MulticastInput,
   type PagingOptions,
   type Ptt,
+  type Syslog,
+  type SyslogLevel,
   defaultPagingOptions,
 } from "../api/phonebook";
 import { listPhones, pushGroup, type Phone } from "../api/prov";
@@ -73,6 +77,10 @@ function channelInputs(
 }
 
 /** A group's PTT as it is written back: without the read-only address. */
+function syslogInput(s: Syslog | undefined): Syslog {
+  return { enabled: s?.enabled ?? false, level: s?.level ?? "info" };
+}
+
 function pttInput(ptt: Ptt | undefined): Ptt {
   const p = ptt ?? emptyPtt();
   return {
@@ -396,6 +404,7 @@ function GroupModal({
   const [options, setOptions] = useState<PagingOptions>(
     optionsInput(group?.pagingOptions),
   );
+  const [syslog, setSyslog] = useState<Syslog>(syslogInput(group?.syslog));
   const [mcErrors, setMcErrors] = useState<PathErrors>({});
   const [pttErrors, setPttErrors] = useState<PathErrors>({});
   const [errors, setErrors] = useState<ErrorMap>({});
@@ -469,6 +478,17 @@ function GroupModal({
           setPttErrors(pathErrors(err));
           setFormError(
             `The group was saved, but its push-to-talk settings were not: ${errorMessage(err)}`,
+          );
+          setBusy(false);
+          return;
+        }
+      }
+      if (JSON.stringify(syslogInput(saved.syslog)) !== JSON.stringify(syslog)) {
+        try {
+          saved = await setGroupSyslog(saved.id, syslog);
+        } catch (err) {
+          setFormError(
+            `The group was saved, but its syslog setting was not: ${errorMessage(err)}`,
           );
           setBusy(false);
           return;
@@ -645,6 +665,32 @@ function GroupModal({
           errors={pttErrors}
           onChange={setPtt}
         />
+
+        <div className="prov-stack">
+          <Switch
+            label="Send phone logs to Hello (syslog)"
+            hint="Grandstream phones. Needs HELLO_SYSLOG_HOST on the server."
+            labelPosition="end"
+            checked={syslog.enabled}
+            onChange={(e) =>
+              setSyslog((s) => ({ ...s, enabled: e.target.checked }))
+            }
+          />
+          {syslog.enabled && (
+            <Select
+              id="group-syslog-level"
+              label="Syslog level"
+              value={syslog.level}
+              onChange={(e) =>
+                setSyslog((s) => ({
+                  ...s,
+                  level: e.target.value as SyslogLevel,
+                }))
+              }
+              options={SYSLOG_LEVELS.map((l) => ({ value: l, label: l }))}
+            />
+          )}
+        </div>
 
         {group && (
           <div className="prov-stack">

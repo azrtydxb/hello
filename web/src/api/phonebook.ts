@@ -60,6 +60,8 @@ export interface Group {
   ptt?: Ptt;
   /** How the group's phones take a page and an intercom call. */
   pagingOptions?: PagingOptions;
+  /** Whether the group's phones send their log to Hello's syslog sink. */
+  syslog?: Syslog;
   phoneCount: number;
   createdAt: string;
   updatedAt: string;
@@ -421,6 +423,21 @@ export const setGroupMulticast = (
 ) =>
   request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/multicast`, {
     body: options ? { channels, options } : { channels },
+  });
+
+export const SYSLOG_LEVELS = ["debug", "info", "warning", "error"] as const;
+export type SyslogLevel = (typeof SYSLOG_LEVELS)[number];
+
+/** A phone group's syslog setting; off by default. */
+export interface Syslog {
+  enabled: boolean;
+  level: SyslogLevel;
+}
+
+/** PUT /api/v1/phone-groups/{id}/syslog: sets the group's syslog setting. */
+export const setGroupSyslog = (groupId: Id, syslog: Syslog) =>
+  request<Group>("PUT", `/api/v1/phone-groups/${seg(groupId)}/syslog`, {
+    body: { enabled: syslog.enabled, level: syslog.level },
   });
 
 /** PUT /api/v1/phone-groups/{id}/ptt: replaces the group's push-to-talk settings. */

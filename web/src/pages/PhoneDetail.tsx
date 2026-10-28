@@ -4,6 +4,8 @@ import { errorMessage } from "../api";
 import {
   getPhone,
   listPhoneFetches,
+  listPhoneSyslog,
+  type SyslogLine,
   listPhonePushes,
   previewPhoneFile,
   pushPhone,
@@ -31,6 +33,7 @@ import {
   useToast,
 } from "../design/azrty/components";
 import { formatTime } from "../format";
+import { SyslogTable } from "./phones/syslog";
 import { usePolling } from "../usePolling";
 import {
   DeletePhoneDialog,
@@ -63,7 +66,7 @@ type PhoneState =
   | { status: "ready"; phone: Phone };
 
 type Pending = "rotate" | "rearm" | "delete" | "rotate-admin" | "reboot" | null;
-type Tab = "fetches" | "preview";
+type Tab = "fetches" | "syslog" | "preview";
 
 const FETCH_PAGE = 50;
 
@@ -374,6 +377,7 @@ export function PhoneDetail() {
               idPrefix="phone"
               items={[
                 { id: "fetches", label: "Fetch log" },
+                { id: "syslog", label: "Syslog" },
                 { id: "preview", label: "Preview" },
               ]}
               value={tab}
@@ -386,6 +390,8 @@ export function PhoneDetail() {
             >
               {tab === "fetches" ? (
                 <FetchLog phoneId={phone.id} />
+              ) : tab === "syslog" ? (
+                <SyslogLog phoneId={phone.id} />
               ) : (
                 <Preview phone={phone} />
               )}
@@ -595,6 +601,60 @@ function FetchLog({ phoneId }: { phoneId: Phone["id"] }) {
             Load older
           </Button>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** The lines the phone sent to Hello's syslog sink (S-27), newest first. */
+function SyslogLog({ phoneId }: { phoneId: Phone["id"] }) {
+  const [state, setState] = useState<
+    | { status: "loading" }
+    | { status: "error"; message: string }
+    | { status: "ready"; lines: SyslogLine[]; hours: number }
+  >({ status: "loading" });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listPhoneSyslog(phoneId, 200, controller.signal)
+      .then((page) =>
+        setState({
+          status: "ready",
+          lines: page.items,
+          hours: Math.round(page.retentionSeconds / 3600),
+        }),
+      )
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) {
+          setState({ status: "error", message: errorMessage(err) });
+        }
+      });
+    return () => controller.abort();
+  }, [phoneId]);
+
+  if (state.status === "loading") return <Spinner label="Loading syslog…" />;
+  if (state.status === "error") {
+    return (
+      <Alert tone="bad" title="Could not load the syslog">
+        {state.message}
+      </Alert>
+    );
+  }
+  return (
+    <div className="prov-stack">
+      {state.lines.length === 0 ? (
+        <p className="prov-muted">
+          No syslog lines yet. Turn syslog on for the phone's group, then resync
+          the phone.
+        </p>
+      ) : (
+        <>
+          <p className="prov-muted">
+            The newest {state.lines.length} lines, kept for {state.hours} h.
+            Secrets are redacted.
+          </p>
+          <SyslogTable caption="Syslog" lines={state.lines} />
+        </>
       )}
     </div>
   );

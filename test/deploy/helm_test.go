@@ -331,6 +331,8 @@ func TestChartEnvParityWithKw(t *testing.T) {
 		"--set", "control.provisioning.trustedProxies=10.0.0.0/8",
 		"--set", "control.provisioning.caSecret=hello-prov-tls",
 		"--set", "secrets.provRedirectSecret=hello-prov-redirect",
+		"--set", "control.syslog.enabled=true",
+		"--set", "control.syslog.host=192.168.10.101:30514",
 	)
 	pairs := []struct {
 		name        string

@@ -49,6 +49,9 @@ type ProvSettings struct {
 	// CACertFile is HELLO_PROV_CA_CERT, read per render into
 	// ProvInfo.CACertPEM.
 	CACertFile string
+	// SyslogHost is HELLO_SYSLOG_HOST: the address phones send syslog to
+	// (UDP 514); empty leaves syslog out of every configuration.
+	SyslogHost string
 	// Deployment lists the vendors whose redirect credentials the
 	// deployment sets (they count as configured whatever is stored).
 	Deployment map[prov.Vendor]bool

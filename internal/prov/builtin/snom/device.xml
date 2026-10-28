@@ -54,6 +54,8 @@
     <prov_polling_mode perm="R">rel</prov_polling_mode>
     <prov_polling_period perm="R">{{.Prov.ResyncSeconds}}</prov_polling_period>
     <ntp_server perm="R">{{xml .Time.NTP}}</ntp_server>
+{{- /* Syslog (phone-feature-parity S-27): syslog_server, a host or host:port (snom administration manual, "syslog_server"). Not confirmed on a phone (verify); no level is written. Empty for a group without syslog. */}}
+    <syslog_server perm="R">{{with .Syslog}}{{xml .Address}}{{end}}</syslog_server>
 {{- with .Time.TZ.SnomCode}}
     <timezone perm="R">{{xml .}}</timezone>
 {{- end}}
