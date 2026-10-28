@@ -18,6 +18,7 @@ the `viewer` role; change tools need `write` and `operator`.
 | `listRegistrations`        | read  | Every registered contact in the cluster.                                                 |
 | `getExtensionVoicemail`    | read  | One extension's voicemail box.                                                           |
 | `updateExtensionVoicemail` | write | Set the voicemail PIN and notification e-mail.                                           |
+| `revertVoicemailGreeting`  | write | Remove a greeting slot's own audio so the default prompt plays.                          |
 | `listVoicemailBoxes`       | read  | Every box with message counts.                                                           |
 | `listPhones`               | read  | Every provisioned phone, ordered by MAC.                                                 |
 | `getPhone`                 | read  | One phone.                                                                               |

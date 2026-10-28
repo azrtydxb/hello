@@ -1042,3 +1042,49 @@ func TestPhoneGroupMulticastAndPTT(t *testing.T) {
 		t.Fatalf("deleted channel still linked: %v", mc)
 	}
 }
+
+// TestPhonebookImportJSON fails if JSON rows are not held to the CSV rules
+// (a dry run writes nothing, a failing row blocks the whole import and is
+// named by its position) or if append and replace differ from the CSV form.
+func TestPhonebookImportJSON(t *testing.T) {
+	e := newEnv(t, noLive{})
+	c := e.login()
+	book := rowID(c.must(http.StatusCreated, "POST", "/api/v1/phonebooks", map[string]string{"name": "JSON"}).json(t))
+	imp := "/api/v1/phonebooks/" + book + "/import"
+	c.header.Set("Content-Type", "application/json")
+
+	good := map[string]any{"rows": []map[string]string{
+		{"first_name": "Ada", "last_name": "Lovelace", "company": "AE", "work": "+41 44 111 22 33"},
+		{"first_name": "Charles", "last_name": "Babbage", "home": "044 222 33 44"},
+	}}
+	r := c.must(http.StatusOK, "POST", imp+"?dry_run=true", good).json(t)
+	if r["ok"] != true || r["dryRun"] != true || r["rows"] != float64(2) || r["imported"] != float64(0) {
+		t.Fatalf("dry run = %v", r)
+	}
+	if n := entryCount(t, c, book); n != 0 {
+		t.Fatalf("a dry run wrote %d entries", n)
+	}
+	bad := map[string]any{"rows": []map[string]string{
+		{"first_name": "A", "last_name": "One", "work": "1234"},
+		{"work": "5678"}, // no name
+	}}
+	if r := c.must(http.StatusBadRequest, "POST", imp, bad).json(t); r["ok"] == true {
+		t.Fatalf("a failing row was accepted: %v", r)
+	}
+	if n := entryCount(t, c, book); n != 0 {
+		t.Fatalf("a failing import wrote %d entries", n)
+	}
+	if r := c.must(http.StatusOK, "POST", imp, good).json(t); r["ok"] != true || r["imported"] != float64(2) {
+		t.Fatalf("import = %v", r)
+	}
+	if n := entryCount(t, c, book); n != 2 {
+		t.Fatalf("%d entries after import, want 2", n)
+	}
+	repl := map[string]any{"rows": []map[string]string{{"first_name": "Grace", "last_name": "Hopper", "work": "9999"}}}
+	c.must(http.StatusOK, "POST", imp+"?mode=replace", repl)
+	if n := entryCount(t, c, book); n != 1 {
+		t.Fatalf("%d entries after replace, want 1", n)
+	}
+	c.must(http.StatusBadRequest, "POST", imp, map[string]any{"rows": []map[string]string{{"nickname": "x"}}})
+	c.must(http.StatusBadRequest, "POST", imp, map[string]any{"rows": []any{}})
+}
