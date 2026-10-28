@@ -26,7 +26,7 @@ const (
 )
 
 // IVRVoicemailGroup is the destination kind that leaves a message in every
-// member's box (migration 00046). The target is the group's number.
+// member's box (migration 00058). The target is the group's number.
 const IVRVoicemailGroup = "voicemail_group"
 
 // VoicemailGroup is a group with its members in number order.
