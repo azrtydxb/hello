@@ -1,6 +1,6 @@
 package store
 
-// The tone library (migration 00048, spec phone-feature-parity S-43): the
+// The tone library (migration 00052, spec phone-feature-parity S-43): the
 // uploaded WAVs a ring map choice can name. The audio is in MinIO; the row
 // holds what the API lists and the provisioning handler needs to serve it.
 

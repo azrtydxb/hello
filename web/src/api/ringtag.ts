@@ -1,4 +1,4 @@
-// Ring tags and tag rules client (migration 00046): the tags a call rings
+// Ring tags and tag rules client (migration 00050): the tags a call rings
 // with, and the ordered rules that choose one.
 
 import { list, request } from "../api";
@@ -102,7 +102,7 @@ export function evaluateRingRules(q: RingQuery, signal?: AbortSignal) {
   );
 }
 
-// --- ring map (migration 00047) --------------------------------------------
+// --- ring map (migration 00051) --------------------------------------------
 
 /** The vendors that have a ring map. */
 export type RingVendorId =
@@ -169,7 +169,7 @@ export const putRingMapGroup = (
     },
   );
 
-// --- tone library (migration 00048) ----------------------------------------
+// --- tone library (migration 00052) ----------------------------------------
 
 /** A custom tone: an uploaded WAV the ring map can choose as custom:<name>. */
 export interface Ringtone {

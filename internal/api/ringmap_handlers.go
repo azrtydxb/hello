@@ -9,7 +9,7 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// The ring map (migration 00047, spec phone-feature-parity S-42 and S-44): a
+// The ring map (migration 00051, spec phone-feature-parity S-42 and S-44): a
 // tone per ring tag and vendor, written into the phones' provisioned
 // configuration. Reads are open to a viewer; changes need the write scope.
 

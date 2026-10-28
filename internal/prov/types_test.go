@@ -46,16 +46,16 @@ func latestKindList(t *testing.T) []string {
 	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
 		out = append(out, q[1])
 	}
-	// 00048 widened it with hello_check_values (the kinds it adds, before
+	// 00052 widened it with hello_check_values (the kinds it adds, before
 	// "other", which closes the Go list).
-	b, err = os.ReadFile("../../migrations/00048_ringtones.sql")
+	b, err = os.ReadFile("../../migrations/00052_ringtones.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	up, _, _ = strings.Cut(string(b), "-- +goose Down")
 	m = regexp.MustCompile(`'prov_fetches', 'prov_fetches_kind_check',\s+ARRAY\[([^\]]*)\]`).FindStringSubmatch(up)
 	if m == nil {
-		t.Fatal("00048 does not widen the kind list")
+		t.Fatal("00052 does not widen the kind list")
 	}
 	for _, q := range regexp.MustCompile(`'([a-z_]+)'`).FindAllStringSubmatch(m[1], -1) {
 		out = slices.Insert(out, len(out)-1, q[1])

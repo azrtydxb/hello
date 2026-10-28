@@ -13,7 +13,7 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// The tone library (migration 00048, spec phone-feature-parity S-43): WAV
+// The tone library (migration 00052, spec phone-feature-parity S-43): WAV
 // files the ring map can choose, kept in MinIO bucket hello-ringtones and
 // served to phones under their token at /p/<token>/ring/<name>.wav.
 

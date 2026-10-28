@@ -835,7 +835,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
 
 ## Ring map provisioning, phone-feature-parity S-42 and S-44 (2026-10-27)
 
-- Storage: `ring_map` (migration 00047) holds explicit choices only, keyed by
+- Storage: `ring_map` (migration 00051) holds explicit choices only, keyed by
   (group or global, tag, vendor), tone being a vendor ringer id. A tag and
   vendor with no row use the vendor's default for the tag's current Bellcore
   slot, so the map needs no seeding and a new custom tag works at once. The
@@ -892,8 +892,8 @@ another group) is lifted: the ring state machine can open a new ring stage.
 
 ## Tone library (phone-feature-parity S-43), 2026-10-27
 
-- Built on ring-map (#226), which depends on #204. Migration 00048 is the next
-  number after ring-map's 00047 (main has 00045).
+- Built on ring-map (#226), which depends on #204. Migration 00052 is the next
+  number after ring-map's 00051 (main has 00045).
 - Storage: table `ringtones` (id, name unique, object_key, size, sha256,
   sample rate, duration) and the audio in MinIO bucket `hello-ringtones` under
   `<name>/<sha256>.wav`. The hash in the key means a name that is deleted and
@@ -912,7 +912,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
   tone a choice uses is a 409 naming the choice.
 - The one CHECK that is a value list, `prov_fetches_kind_check`, gets `ringtone`
   through `pg_temp.hello_check_values` (additive; the Down removes the rows of
-  that kind first). The Go contract test reads 00048 for it.
+  that kind first). The Go contract test reads 00052 for it.
 - Vendors given a custom tone: Yealink (`ringtone.url` = the phone's tone URL
   under its own token, rule `.ringer` = `<name>.wav`) and Snom
   (`custom_melody_url`, class sound `Custom`), the spec's keys for the "custom

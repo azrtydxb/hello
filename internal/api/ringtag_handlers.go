@@ -9,7 +9,7 @@ import (
 	"github.com/azrtydxb/hello/internal/store"
 )
 
-// Ring tags and tag rules (migration 00046, spec phone-feature-parity S-39
+// Ring tags and tag rules (migration 00050, spec phone-feature-parity S-39
 // and S-40). Reads are open to a viewer; changes need the write scope, like
 // ring groups.
 
