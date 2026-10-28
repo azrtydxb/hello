@@ -85,7 +85,7 @@ func scanConference(row interface{ Scan(...any) error }) (Conference, error) {
 
 // ListConferences returns every room.
 func (s *Store) ListConferences(ctx context.Context) ([]Conference, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms ORDER BY number`)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms ORDER BY number`)
 	if err != nil {
 		return nil, err
 	}
@@ -103,13 +103,13 @@ func (s *Store) ListConferences(ctx context.Context) ([]Conference, error) {
 
 // GetConference returns one room.
 func (s *Store) GetConference(ctx context.Context, id int64) (Conference, error) {
-	c, err := scanConference(s.db.QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE id = $1`, id))
+	c, err := scanConference(s.q(ctx).QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE id = $1`, id))
 	return c, mapErr(err)
 }
 
 // ConferenceByNumber returns the room dialled as number.
 func (s *Store) ConferenceByNumber(ctx context.Context, number string) (Conference, error) {
-	c, err := scanConference(s.db.QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE number = $1`, number))
+	c, err := scanConference(s.q(ctx).QueryRowContext(ctx, `SELECT `+conferenceCols+` FROM conference_rooms WHERE number = $1`, number))
 	return c, mapErr(err)
 }
 

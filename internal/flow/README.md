@@ -4,13 +4,13 @@ The model behind the flow canvas (spec `.procoder/specs/flow-canvas.md`): a
 catalogue of node and port types, and a graph built from the stored
 configuration. Nothing here is stored; the canvas is a view.
 
-| File | What it holds |
-|---|---|
-| `catalogue.go` | The node and port table the UI, the batch validator and the AI read (`GET /api/v1/flow/catalogue`). Compatibility is decided here and nowhere else. |
-| `kinds.go` | The contract with the rest of the code base: stored destination kinds, the columns that hold them, feature-code actions, which configuration objects are nodes and which are deliberately not. |
-| `build.go` | The graph builder: one function per object type, one resolver (`resolve`) for every `(kind, target)` pair. |
-| `warnings.go` | Warnings that need the whole graph (`unreachable`, `loop`, `shadowed_route`). |
-| `graph.go` | The graph types, `closure` scope and node versions. |
+| File           | What it holds                                                                                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `catalogue.go` | The node and port table the UI, the batch validator and the AI read (`GET /api/v1/flow/catalogue`). Compatibility is decided here and nowhere else.                                            |
+| `kinds.go`     | The contract with the rest of the code base: stored destination kinds, the columns that hold them, feature-code actions, which configuration objects are nodes and which are deliberately not. |
+| `build.go`     | The graph builder: one function per object type, one resolver (`resolve`) for every `(kind, target)` pair.                                                                                     |
+| `warnings.go`  | Warnings that need the whole graph (`unreachable`, `loop`, `shadowed_route`).                                                                                                                  |
+| `graph.go`     | The graph types, `closure` scope and node versions.                                                                                                                                            |
 
 ## Add a node type (checklist)
 
@@ -52,8 +52,12 @@ a step is missing.
    `go test ./internal/flow -run TestGraphGolden -update`, and read the diff of
    `testdata/*.graph.json`. Add a case to `TestCanConnect` for the new
    connections.
-9. **Batch ops** (later phases): the owner field names the update an edge
-   change becomes; keep them in step with the OpenAPI operations.
+9. **Batch ops** (`internal/configbatch/ops.go`, `docs/config-batch.md`): add
+   the object's create, update and delete operations to `Ops` (they must be
+   JSON, write- or admin-scoped and return no secret), or list the node kind in
+   `NoBatchOps` with the reason. The owner field names the update an edge change
+   becomes; `TestEdgeRoundTrip` (in `internal/api`) applies it through a batch.
+   `TestBatchCoverage` fails when a node has neither.
 10. **Spec**: record the node in `.procoder/specs/flow-canvas.md` (S-1 table).
 
 A feature that lands in a branch before its node does may mark the node or
@@ -66,15 +70,17 @@ shipped.
 These tests fail CI when a feature is merged without canvas support. They are
 in `drift_test.go` and `drift_db_test.go`.
 
-| Test | Fails when |
-|---|---|
-| `TestCatalogueDrift/database` | A destination kind in a CHECK constraint (read with `pg_get_constraintdef` from a migrated database) has no catalogue node; the catalogue offers a connection the column refuses, or the column stores a kind the catalogue does not offer; a CHECK constraint lists destination kinds and is not in `KindFields`; a feature-code action is unclassified. It needs `HELLO_TEST_DATABASE_URL`, so it runs in the `integration` job and skips on a pull request. |
-| `TestCatalogueDrift/openapi`, `/go lists`, `/stored kinds` | The same for every OpenAPI enum of destination kinds, the Go list the IVR API validates against, and the tables in `kinds.go`. They run everywhere. An enum that merely looks like destination kinds is listed in `NotDestinationEnums` with the reason. |
-| `TestResourceCoverage` | An object with CRUD routes in `openapi.json` is neither a node (`ResourceNodes`) nor on the reasoned `NonFlowResources` list, or a catalogue node is drawn from no object. |
-| `TestNoStaleRequires` | A node or connection keeps a `requires` marker for a feature whose OpenAPI path already exists. |
-| `TestGuardsDetect` | A guard stops detecting the gap it is for (it feeds each one a gap and expects a report). |
-| `TestGraphGolden` | A fixture configuration no longer produces its stored graph, or an edge lacks its owner. |
-| `TestGraphBench` | (`HELLO_BENCH=1`, the `bench` job) building the graph takes 200 ms or more at 10 000 extensions and 1 000 routes. |
+| Test                                                                                                   | Fails when                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TestCatalogueDrift/database`                                                                          | A destination kind in a CHECK constraint (read with `pg_get_constraintdef` from a migrated database) has no catalogue node; the catalogue offers a connection the column refuses, or the column stores a kind the catalogue does not offer; a CHECK constraint lists destination kinds and is not in `KindFields`; a feature-code action is unclassified. It needs `HELLO_TEST_DATABASE_URL`, so it runs in the `integration` job and skips on a pull request. |
+| `TestCatalogueDrift/openapi`, `/go lists`, `/stored kinds`                                             | The same for every OpenAPI enum of destination kinds, the Go list the IVR API validates against, and the tables in `kinds.go`. They run everywhere. An enum that merely looks like destination kinds is listed in `NotDestinationEnums` with the reason.                                                                                                                                                                                                       |
+| `TestResourceCoverage`                                                                                 | An object with CRUD routes in `openapi.json` is neither a node (`ResourceNodes`) nor on the reasoned `NonFlowResources` list, or a catalogue node is drawn from no object.                                                                                                                                                                                                                                                                                     |
+| `TestNoStaleRequires`                                                                                  | A node or connection keeps a `requires` marker for a feature whose OpenAPI path already exists.                                                                                                                                                                                                                                                                                                                                                                |
+| `TestBatchCoverage` (`internal/configbatch`)                                                           | A catalogue node kind has no update operation in a batch and is not on the reasoned `NoBatchOps` list.                                                                                                                                                                                                                                                                                                                                                         |
+| `TestBatchableOps` (`internal/configbatch`), `TestBatchableHandlersNoExternalEffects` (`internal/api`) | A batchable operation is missing from `openapi.json`, returns a secret, is not JSON or write/admin scoped, has no GET to read it, or its handler reaches object storage, a speech provider, a page test, the queue state or SMTP.                                                                                                                                                                                                                              |
+| `TestGuardsDetect`                                                                                     | A guard stops detecting the gap it is for (it feeds each one a gap and expects a report).                                                                                                                                                                                                                                                                                                                                                                      |
+| `TestGraphGolden`                                                                                      | A fixture configuration no longer produces its stored graph, or an edge lacks its owner.                                                                                                                                                                                                                                                                                                                                                                       |
+| `TestGraphBench`                                                                                       | (`HELLO_BENCH=1`, the `bench` job) building the graph takes 200 ms or more at 10 000 extensions and 1 000 routes.                                                                                                                                                                                                                                                                                                                                              |
 
 ## Notes
 

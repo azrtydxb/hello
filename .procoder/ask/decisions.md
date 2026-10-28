@@ -860,6 +860,89 @@ number, labelled "number · name"; a stored number the list no longer has stays
 selectable as "(not found)". An empty target is refused with "Choose a conference
 room." This closes the gap noted for flow canvas P1.
 
+## Flow canvas P3: the batch backend (2026-10-26)
+
+Built per `.procoder/specs/flow-canvas.md` (P3). Choices the spec left open:
+
+- **Store shape.** The spec's `store.WithBatch(ctx, tx)` is `Store.RunBatch(ctx,
+dryRun, fn)`: it opens the transaction, takes the configuration lock, reads
+  the revision and the baseline routing configuration, and calls `fn` with a
+  context that carries the batch. Every store write and read made under that
+  context uses the batch's transaction (`Store.q(ctx)` replaces `s.db` in the
+  configuration files, `Store.tx`, `configChangeID` and `provChange` join the
+  batch), so an operation sees the ones before it. `configChangeID` then skips
+  the lock, the per-operation check and the revision bump and records which
+  check functions the batch used; `RunBatch` runs them once at the end against
+  the baseline, bumps the revision once and notifies once. The audit via is
+  `batch:<uuid>`; the outer origin goes on the `config_batches` row.
+- **The batch table** is `00046_config_batches.sql` (`ops`, `results`,
+  `reverts`, 90 days, pruned on insert). `ops` holds the operations as they ran
+  with credential values withheld; `results` holds, per operation, the object
+  before and after as its GET returns it, the diff and, for a delete, the
+  node's canvas positions.
+- **Which operations.** An explicit table (`internal/configbatch/ops.go`), not
+  "everything with write scope": the object writes of the canvas. Refused with
+  `400 op_not_batchable`: operations whose response carries a secret
+  (`createDevice`, `createPhone`, so devices and phones are updated and deleted
+  in a batch but not created), credential scopes (`secrets`, `session`),
+  multipart, and anything that touches MinIO, a speech provider, a phone or
+  Valkey state (announcements, greetings, firmware, queue agent login,
+  conference control, calendar import, the time condition override toggle).
+  Admin-scoped object writes (paging groups, conferences, multicast channels)
+  are allowed: the inner operation still needs its own scope and role.
+  Decision 2 lets credential operations into the AI path once their secret is
+  stripped; that belongs to P6 and is not done here.
+- **Announcements are not batchable** (audio is in MinIO, generation calls a
+  provider). A batch can point at an existing announcement (an IVR greeting)
+  but not create one; the canvas links to the Announcements page.
+- **`baseRevision` is required.** `expect` is the node `version` of the graph
+  (hash of the stored object) and is checked only when the revision moved; an
+  operation without `expect`, or aimed at an object the batch creates, never
+  conflicts. Revert uses its own stricter check (below).
+- **Errors.** The first failing operation stops the batch (later operations
+  depend on earlier ones), so `errors` has the failing operation's fields, not
+  one entry per operation. A refused operation is `403` with the inner code
+  (`forbidden_role`, `insufficient_scope`) and its index in the message. Any
+  other non-success of an operation (400, 404, 409) is `422 validation_failed`
+  with `errors: [{opIndex, node, path, message}]`. The final routing check names
+  the operation that changed the item the error is about, or `-1`.
+- **Placeholders** take any field of the referenced response (checked against
+  the operation's response schema before anything runs). A string that is
+  exactly one placeholder keeps the value's type.
+- **Nested replay.** `replay.Request.Inherit` lets the batch replay its
+  operations inside an MCP replay (the batch route is itself called as an MCP
+  tool); the outer replay marker, and so the OAuth client, is kept.
+- **Layout in a batch.** `canvasId` plus `layout` places new nodes (the node id
+  may hold a placeholder); every applied batch prunes layout of nodes that no
+  longer exist on every canvas. A layout write moves `layout_version` and is
+  audited as `flow_canvas layout`, and is not a configuration change.
+- **Warnings** in the answer are the flow warnings the batch introduces (after
+  minus before), not all of them.
+- **Revert.** The inverse is built from `before`: a PATCH restores only the
+  keys its body set (a key absent in `before` is sent as null); a PUT or create
+  sends the writable fields of the GET (pruned to the request schema, which also
+  drops read-only fields); credentials a batch set are never stored, so they are
+  listed in `skipped`. A deleted object is made again with a new id and later
+  operations of the same revert use it. The staleness check compares, for the
+  last operation that touched each object, the writable fields of its recorded
+  `after` with the object now (fields outside the request schema, such as
+  timestamps and live state, are ignored). A batch reverts once (`409
+conflict`), and a batch that deleted a device or phone (which a batch cannot
+  create) is `422`.
+- **TestEdgeRoundTrip** exercises every connection the catalogue offers from a
+  stored "call goes to" field (inbound route, ring group, IVR keys, timeout and
+  invalid, queue exits, time condition branches), reading the target kinds from
+  the catalogue so a new connection fails until it has a fixture, plus the
+  member ports (`TestEdgeRoundTripMembers`). The `internalDid` target is not
+  exercised (its target is the route's own DID; the golden graph covers it).
+  Resource edges that are plain id lists (outbound trunks, hold music, schedule
+  calendars, device and phone binding, prompts) are drawn from the same
+  `Owner` field table and covered by the golden graph; their batch operations
+  are the ordinary updates.
+- **Metrics:** `hello_config_batches_total{result}` and
+  `hello_config_batch_ops`. The graph build and trace metrics belong to their
+  phases.
+
 ## DSCP marking, parity item 28 (S-21) (2026-10-27)
 
 Built to the spec: SIP socket DSCP 26, relay/anchor/fanout/party RTP sockets
