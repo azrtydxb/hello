@@ -810,6 +810,29 @@ func TestChartKubeconform(t *testing.T) {
 	}
 }
 
+// TestChartUIDnsResolver fails if the UI's HELLO_DNS_RESOLVER is not empty by
+// default (the container then derives it from /etc/resolv.conf, so the chart
+// works on any service CIDR) or if an explicit ui.dnsResolver does not
+// override it.
+func TestChartUIDnsResolver(t *testing.T) {
+	resolver := func(objs []object) (string, bool) {
+		ui := containerNamed(t, findObj(t, objs, "Deployment", "hello-ui"), false, "hello-ui")
+		e, ok := envOf(ui)["HELLO_DNS_RESOLVER"]
+		if !ok {
+			return "", false
+		}
+		return str(e["value"]), true
+	}
+	for name, objs := range map[string][]object{"eval": evalRender(t), "ha": haRender(t)} {
+		if v, ok := resolver(objs); !ok || v != "" {
+			t.Errorf("%s render: HELLO_DNS_RESOLVER = %q (present=%v), want present and empty (derived from resolv.conf)", name, v, ok)
+		}
+	}
+	if v, ok := resolver(evalRender(t, "--set", "ui.dnsResolver=10.43.0.10")); !ok || v != "10.43.0.10" {
+		t.Errorf("explicit ui.dnsResolver: HELLO_DNS_RESOLVER = %q, want 10.43.0.10", v)
+	}
+}
+
 // TestChartLint fails if `helm lint --strict` rejects the chart with either
 // values file.
 func TestChartLint(t *testing.T) {

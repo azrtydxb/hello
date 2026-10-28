@@ -69,6 +69,12 @@ set `global.imageRegistry` for any other registry).
 
 Sign in as `admin` with the `bootstrapPassword` and change it.
 
+The UI's nginx re-resolves `hello-control` at request time and needs a DNS
+resolver for that. `ui.dnsResolver` defaults to empty, and the UI container
+then uses the first `nameserver` in its own `/etc/resolv.conf`, which is the
+cluster DNS on any cluster whatever its service CIDR. Set `ui.dnsResolver`
+(IPv6 addresses in brackets, `[fd00::a]`) only to force a different resolver.
+
 ## SIP networking
 
 SIP and media are the part of Hello that does not behave like a web
