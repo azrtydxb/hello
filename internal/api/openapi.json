@@ -3543,6 +3543,91 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/flow/trace": {
+      "get": {
+        "operationId": "traceFlow",
+        "summary": "Trace the path a call would take through the call flow",
+        "description": "Answers what happens when `from` calls `number` at `at`: it decides the call against the saved configuration as `testRouting` does, then walks the flow graph from the matched route or extension through ring groups, IVR menus (the keys in `digits`), queues, time conditions (evaluated at `at`, override included), announcements and voicemail. A ringing extension lists \"If busy\" and \"If not registered\" as branches, since the configuration decides them but the live state is not read. Parked calls and queue agents are read live; when that state cannot be read the step says \"unknown (live state unavailable)\" and a queue shows both outcomes as branches. From an extension it also traces park slots and feature codes (voicemail, IVR, announcement, time condition, intercom, queue, park, pickup and the settings codes). Returns the ordered steps, each naming a graph node and the output port the call leaves through, so the canvas can highlight the path. Places no call and writes nothing.",
+        "tags": ["flow"],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "description": "Where the call comes from: an extension number, or `trunk:<id>` for a call arriving on a trunk.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "number",
+            "in": "query",
+            "required": true,
+            "description": "The dialled number, or for a trunk call the called DID.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "callerId",
+            "in": "query",
+            "required": false,
+            "description": "The caller ID the call presents. Optional.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "at",
+            "in": "query",
+            "required": false,
+            "description": "The instant to trace at, an RFC 3339 time. Schedules, holidays and time condition overrides are evaluated at this instant. Defaults to now.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "digits",
+            "in": "query",
+            "required": false,
+            "description": "The keys pressed in IVR menus, in order, for example `12`. With none left at a menu, every key of the menu is listed as a branch to six menus deep.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The path",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowTrace"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/flow/canvases": {
       "get": {
         "operationId": "listFlowCanvases",
@@ -18004,6 +18089,45 @@
               "$ref": "#/components/schemas/Conference"
             }
           }
+        }
+      },
+      "FlowTraceStep": {
+        "type": "object",
+        "required": ["node", "text"],
+        "properties": {
+          "node": { "type": "string", "description": "A graph node id." },
+          "port": { "type": "string", "description": "The output port of the node the call leaves through; for a last step, the port it ends at." },
+          "text": { "type": "string" },
+          "at": { "type": "string", "description": "On a time condition step, the instant that was evaluated." },
+          "branches": {
+            "type": "array",
+            "description": "The choices of an IVR menu traced without a key.",
+            "items": { "$ref": "#/components/schemas/FlowTraceBranch" }
+          }
+        }
+      },
+      "FlowTraceBranch": {
+        "type": "object",
+        "required": ["port", "label", "steps"],
+        "properties": {
+          "port": { "type": "string" },
+          "label": { "type": "string" },
+          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } }
+        }
+      },
+      "FlowTrace": {
+        "type": "object",
+        "required": ["configRevision", "at", "from", "number", "outcome", "steps", "routingTrace"],
+        "properties": {
+          "configRevision": { "type": "integer", "format": "int64" },
+          "at": { "type": "string" },
+          "from": { "type": "string" },
+          "number": { "type": "string" },
+          "outcome": { "type": "string", "description": "The routing decision: internal, inbound, outbound or reject; `internal` also for the numbers hello-sip answers before routing." },
+          "route": { "type": "string" },
+          "reason": { "type": "string", "description": "Why the call was rejected." },
+          "steps": { "type": "array", "items": { "$ref": "#/components/schemas/FlowTraceStep" } },
+          "routingTrace": { "type": "array", "items": { "$ref": "#/components/schemas/TraceStep" } }
         }
       },
       "FlowRevision": {

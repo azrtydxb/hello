@@ -579,6 +579,81 @@
   pointer-events: none;
 }
 
+/* --- trace mode (P5) ------------------------------------------------------ */
+
+.flow-trace__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.flow-trace__keypad {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.flow-trace__keypad legend {
+  padding: 0;
+  font-size: var(--az-text-sm);
+  color: var(--az-muted);
+}
+
+.flow-trace__keys {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.flow-trace__keys > :last-child {
+  grid-column: 1 / -1;
+}
+
+.flow-trace__steps {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.flow-trace__steps p {
+  margin: 2px 0 0;
+  font-size: var(--az-text-sm);
+}
+
+.flow-trace__branches {
+  list-style: none;
+  margin: 6px 0 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--az-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* While a trace is shown, what the call does not touch fades back. */
+.flow-stage--tracing .react-flow__node:not(.flow-node--traced) {
+  opacity: 0.35;
+}
+
+.flow-stage--tracing .react-flow__edge:not(.flow-edge--traced) {
+  opacity: 0.2;
+}
+
+.flow-stage .flow-node--traced .flow-node {
+  border-color: var(--az-indicator);
+  box-shadow: 0 0 0 2px var(--az-indicator);
+}
+
+.flow-stage .flow-edge--traced .react-flow__edge-path {
+  stroke: var(--az-indicator);
+  stroke-width: 4;
+}
+
 .flow-empty .az-empty__action {
   pointer-events: auto;
 }

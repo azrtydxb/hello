@@ -217,6 +217,7 @@ func (s *server) routes() []route {
 
 		{"GET", "/api/v1/flow/catalogue", auth.ScopeRead, auth.RoleViewer, false, s.getFlowCatalogue},
 		{"GET", "/api/v1/flow/graph", auth.ScopeRead, auth.RoleViewer, false, s.getFlowGraph},
+		{"GET", "/api/v1/flow/trace", auth.ScopeRead, auth.RoleViewer, false, s.getFlowTrace},
 		{"GET", "/api/v1/flow/revision", auth.ScopeRead, auth.RoleViewer, false, s.getFlowRevision},
 		{"GET", "/api/v1/flow/canvases", auth.ScopeRead, auth.RoleViewer, false, s.listFlowCanvases},
 		{"POST", "/api/v1/flow/canvases", auth.ScopeWrite, auth.RoleOperator, false, s.createFlowCanvas},

@@ -30,6 +30,7 @@ import {
 } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError, errorMessage, request } from "../../api";
+import type { FlowTrace } from "../../api/flowTrace";
 import {
   applyConfigBatch,
   conflictsOf,
@@ -101,6 +102,12 @@ import { Legend } from "./Legend";
 import { emptyLayout, layoutReducer, pendingWrite } from "./layoutState";
 import { buildView, kindLabel, neighbour, type FlowRFNode } from "./model";
 import { NodePanel } from "./NodePanel";
+import { TracePanel } from "./TracePanel";
+import {
+  applyHighlight,
+  highlightOf,
+  missingFromCanvas,
+} from "./traceHighlight";
 import type { NodeEditApi } from "./NodeEditor";
 import { OBJECTS, idOf } from "./objects";
 import { ReviewDialog } from "./ReviewDialog";
@@ -465,7 +472,7 @@ function CanvasView({
       : [];
 
   // --- the drawn nodes ------------------------------------------------------
-  const view = useMemo(
+  const baseView = useMemo(
     () =>
       buildView({
         graph: shown,
@@ -477,6 +484,32 @@ function CanvasView({
         errors: nodeErrors,
       }),
     [shown, catalogue, layout.positions, selected, canEdit, draft, nodeErrors],
+  );
+  // Trace mode (P5): the path of a traced call is marked on the view.
+  const [tracing, setTracing] = useState(false);
+  const [trace, setTrace] = useState<FlowTrace | null>(null);
+  const highlight = useMemo(
+    () => (trace ? highlightOf(trace, graph) : null),
+    [trace, graph],
+  );
+  const view = useMemo(
+    () => applyHighlight(baseView, highlight),
+    [baseView, highlight],
+  );
+  const traceOffCanvas = highlight
+    ? missingFromCanvas(highlight, (id) => layout.positions[id] !== undefined)
+    : 0;
+  const closeTrace = useCallback(() => {
+    setTracing(false);
+    setTrace(null);
+  }, [setTrace]);
+  const focusTraced = useCallback(
+    (id: string) => {
+      if (rf.getNode(id)) {
+        void rf.fitView({ nodes: [{ id }], duration: 200, maxZoom: 1 });
+      }
+    },
+    [rf],
   );
   // The library's own copy of the nodes follows the view (React's pattern
   // for state derived from a changed value: set it while rendering).
@@ -974,6 +1007,15 @@ function CanvasView({
         }
         actions={
           <div className="flow-toolbar">
+            <Button
+              variant={tracing ? "primary" : "secondary"}
+              size="sm"
+              icon="route"
+              aria-pressed={tracing}
+              onClick={() => (tracing ? closeTrace() : setTracing(true))}
+            >
+              Trace a call
+            </Button>
             {canEdit && (
               <>
                 <Select
@@ -1039,6 +1081,12 @@ function CanvasView({
             .join(" ")}
         </span>
       </div>
+      {trace && traceOffCanvas > 0 && (
+        <Alert tone="info">
+          {traceOffCanvas} steps of the traced call are on objects that are not
+          on this canvas. Add them from the list to see the whole path.
+        </Alert>
+      )}
       {canEdit && (
         <div className="flow-draftbar" role="group" aria-label="Draft">
           <Button
@@ -1144,7 +1192,7 @@ function CanvasView({
         <PortStylesContext.Provider value={styles}>
           <div
             ref={stageRef}
-            className="flow-stage"
+            className={`flow-stage${trace ? " flow-stage--tracing" : ""}`}
             role="region"
             aria-label="Flow canvas. Arrow keys move between nodes, Enter opens details, Alt and an arrow key moves a node."
             onKeyDown={onKeyDown}
@@ -1235,7 +1283,16 @@ function CanvasView({
             )}
           </div>
         </PortStylesContext.Provider>
-        {selectedNode && (
+        {tracing && (
+          <TracePanel
+            graph={graph}
+            trace={trace}
+            onTrace={setTrace}
+            onFocusNode={focusTraced}
+            onClose={closeTrace}
+          />
+        )}
+        {selectedNode && !tracing && (
           <NodePanel
             node={selectedNode}
             graph={shown}

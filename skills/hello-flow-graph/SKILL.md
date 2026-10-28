@@ -89,6 +89,10 @@ several objects (create a ring group and point a route at it).
    office hours, to the Closed announcement otherwise."
 3. Prove a real call with `testRouting` (caller `trunk:<id>`, the DID) and,
    for a time condition, `evaluateTimeCondition`.
+4. `traceFlow` (`from` an extension or `trunk:<id>`, `number`, optionally `at`
+   and the IVR keys in `digits`) walks that call node by node: each step names
+   the graph node and the output it leaves through, and a ringing extension
+   lists "If busy" and "If not registered" as branches. It places no call.
 
 ### What uses this object
 

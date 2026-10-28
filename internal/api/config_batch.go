@@ -50,6 +50,8 @@ type BatchService interface {
 type BatchMetrics struct {
 	Batches *prometheus.CounterVec
 	Ops     prometheus.Histogram
+	// Traces counts flow traces (hello_flow_trace_total).
+	Traces prometheus.Counter
 }
 
 // NewBatchMetrics creates the series and registers them on reg; a nil reg
@@ -65,9 +67,13 @@ func NewBatchMetrics(reg prometheus.Registerer) *BatchMetrics {
 			Help:    "Operations per configuration batch.",
 			Buckets: []float64{1, 2, 5, 10, 20, 50, 100, 200},
 		}),
+		Traces: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "hello_flow_trace_total",
+			Help: "Call flow traces answered.",
+		}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.Batches, m.Ops)
+		reg.MustRegister(m.Batches, m.Ops, m.Traces)
 	}
 	return m
 }
