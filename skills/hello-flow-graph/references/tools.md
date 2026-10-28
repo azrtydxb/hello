@@ -10,5 +10,6 @@
 | `getConfigBatch`        | read  | One batch with its operations, results and diffs.                       |
 | `revertConfigBatch`     | write | Undo a batch (with `dryRun` to preview).                                |
 | `testRouting`           | read  | Decide one call against the saved configuration with a trace.           |
+| `traceFlow`             | read  | The path one call takes through the flow graph, step by step.           |
 | `evaluateTimeCondition` | read  | What a time condition does now or at a given time.                      |
 | `listInboundRoutes`     | read  | Inbound routes, to find a route id for a closure.                       |
