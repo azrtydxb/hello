@@ -122,12 +122,12 @@ func listMOH(ctx context.Context, q querier, where string, args ...any) ([]MOHCl
 
 // ListMOHClasses returns every class ordered by name.
 func (s *Store) ListMOHClasses(ctx context.Context) ([]MOHClass, error) {
-	return listMOH(ctx, s.db, "")
+	return listMOH(ctx, s.q(ctx), "")
 }
 
 // GetMOHClass returns one class.
 func (s *Store) GetMOHClass(ctx context.Context, id int64) (MOHClass, error) {
-	return getMOH(ctx, s.db, id)
+	return getMOH(ctx, s.q(ctx), id)
 }
 
 func getMOH(ctx context.Context, q querier, id int64) (MOHClass, error) {
