@@ -29,6 +29,12 @@ import (
 
 const flowMACLen = 16
 
+// edgeRefusedHeader marks the 403 an edge proxy gives a request it will not
+// relay (an unknown peer, an invalid or expired flow token). It never reached
+// the phone, and the cause is the cluster's state (a node that has briefly
+// lost its peer set), not the phone's answer, so a sender may ask again.
+const edgeRefusedHeader = "X-Hello-Edge-Refused"
+
 // flowToken names a flow (source address and transport) until expires. Its
 // MAC means only a node holding the cluster secret can mint one, so a
 // token cannot be forged to point a node at an arbitrary address. A token
@@ -113,7 +119,9 @@ func (s *Server) proxy(req *sip.Request, tx sip.ServerTransaction, token string)
 	forbid := func(why string) bool {
 		s.log.Warn("edge: refused", "reason", why, "method", req.Method.String(), "source", req.Source())
 		if !req.IsAck() {
-			s.respond(tx, req, sip.StatusForbidden, "Forbidden")
+			// The header tells a peer node this 403 is the edge's own
+			// refusal, not an answer from the phone (see edgeRefusedHeader).
+			s.respond(tx, req, sip.StatusForbidden, "Forbidden", sip.NewHeader(edgeRefusedHeader, "1"))
 		}
 		return true
 	}
