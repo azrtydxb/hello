@@ -8,6 +8,9 @@ import type { FlowCatalogue, FlowNode } from "../../api/flow";
 import { Button, Input } from "../../design/azrty/components";
 import { groupByKind } from "./model";
 
+/** A short list shows its groups open; a long one starts collapsed. */
+const OPEN_LIMIT = 40;
+
 export const DRAG_TYPE = "application/x-hello-flow-node";
 
 export interface OffCanvasListProps {
@@ -15,6 +18,8 @@ export interface OffCanvasListProps {
   catalogue: FlowCatalogue | undefined;
   /** Absent for a viewer: the list is then only a list. */
   onAdd?: (id: string) => void;
+  /** Places every object on the list, laid out. Absent for a viewer. */
+  onAddAll?: () => void;
   onSelect: (id: string) => void;
 }
 
@@ -22,6 +27,7 @@ export function OffCanvasList({
   nodes,
   catalogue,
   onAdd,
+  onAddAll,
   onSelect,
 }: OffCanvasListProps) {
   const [query, setQuery] = useState("");
@@ -40,11 +46,20 @@ export function OffCanvasList({
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Name or type"
       />
+      {onAddAll && nodes.length > 0 && (
+        <Button size="sm" variant="secondary" icon="plus" onClick={onAddAll}>
+          {`Add all (${nodes.length})`}
+        </Button>
+      )}
       <div className="flow-side__list">
         {nodes.length === 0 && <p>Everything is on this canvas.</p>}
         {nodes.length > 0 && groups.length === 0 && <p>Nothing matches.</p>}
         {groups.map((g) => (
-          <details key={g.kind} className="flow-group" open={query !== ""}>
+          <details
+            key={g.kind}
+            className="flow-group"
+            open={query !== "" || nodes.length <= OPEN_LIMIT}
+          >
             <summary>
               {g.label} ({g.nodes.length})
             </summary>
