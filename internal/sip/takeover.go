@@ -18,7 +18,6 @@ import (
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
-	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 )
 
@@ -200,7 +199,7 @@ func (s *Server) haAck(l *haLeg, inv *sip.Request, res *sip.Response) {
 	if hop := l.helloHop(s); hop != "" {
 		ack.SetDestination(hop)
 	}
-	if err := s.client.WriteRequest(ack, sipgo.ClientRequestAddVia); err != nil {
+	if err := s.client.WriteRequest(ack, s.addViaFromListener); err != nil {
 		s.log.Debug("takeover ACK failed", "error", err)
 	}
 }
