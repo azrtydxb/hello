@@ -220,7 +220,7 @@ func TestWriterPostgres(t *testing.T) {
 type argsDB struct{ args []any }
 
 // TestAnsweredByCDR fails if the assistant's extension is not the insert's
-// last argument (the answered_by column of migration 00046).
+// last argument (the answered_by column of migration 00064).
 func TestAnsweredByCDR(t *testing.T) {
 	db := &argsDB{}
 	w := NewWriter(db, newCounter(), discard)

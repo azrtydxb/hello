@@ -839,7 +839,7 @@ Built to the spec (D16): one assistant per boss, an assistant for many bosses,
 both sets of phones ring and the first answer wins, the boss's forward always
 wins over the link. The choices the spec left open:
 
-- Table `boss_links` and column `cdrs.answered_by`, migration `00046` (the
+- Table `boss_links` and column `cdrs.answered_by`, migration `00064` (the
   merge captain renumbers it). `*64` is a new feature-code action
   `boss_divert` (CHECK widened additively through `pg_temp.hello_check_values`),
   seeded for an existing install only when the code is free, and in

@@ -40,7 +40,7 @@ type CDR struct {
 	// Kind is call, page or intercom (migration 00013).
 	Kind string `json:"kind"`
 	// AnsweredBy is the assistant's extension when a boss's call was answered
-	// by the assistant (migration 00046); empty otherwise.
+	// by the assistant (migration 00064); empty otherwise.
 	AnsweredBy string `json:"answeredBy"`
 	// PageLegs is a page's outcome per member (migration 00014); set by
 	// GetCDR for a page only.

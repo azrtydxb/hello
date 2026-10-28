@@ -76,7 +76,7 @@ type Record struct {
 	// Kind is call (default), page or intercom.
 	Kind string
 	// AnsweredBy is the extension that answered when it was not the one
-	// dialled: the assistant of a boss link (migration 00046). Empty otherwise.
+	// dialled: the assistant of a boss link (migration 00064). Empty otherwise.
 	AnsweredBy string
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
