@@ -327,6 +327,8 @@ func (s *server) routes() []route {
 		{"GET", "/api/v1/prov/firmware", auth.ScopeRead, auth.RoleViewer, false, s.listFirmware},
 		{"POST", "/api/v1/prov/firmware", auth.ScopeWrite, auth.RoleOperator, false, s.uploadFirmware},
 		{"PUT", "/api/v1/prov/firmware/pins", auth.ScopeWrite, auth.RoleOperator, false, s.putFirmwarePins},
+		{"GET", "/api/v1/prov/firmware/minimums", auth.ScopeRead, auth.RoleViewer, false, s.listFirmwareMinimums},
+		{"PUT", "/api/v1/prov/firmware/minimums", auth.ScopeWrite, auth.RoleOperator, false, s.putFirmwareMinimums},
 		{"DELETE", "/api/v1/prov/firmware/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteFirmware},
 
 		{"GET", "/api/v1/prov/redirect", auth.ScopeAdmin, auth.RoleAdmin, false, s.listRedirect},

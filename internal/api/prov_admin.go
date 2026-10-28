@@ -294,11 +294,13 @@ type firmwareView struct {
 	SHA256     string      `json:"sha256"`
 	UploadedAt time.Time   `json:"uploadedAt"`
 	Pinned     bool        `json:"pinned"`
+	// UpgradeHour is the pin's daily upgrade hour (Grandstream), or null.
+	UpgradeHour *int `json:"upgradeHour"`
 }
 
 func viewFirmware(f store.FirmwareFile) firmwareView {
 	return firmwareView{ID: f.ID, Vendor: f.Vendor, ModelGlob: f.ModelGlob, Version: f.Version, Filename: f.Filename,
-		Size: f.Size, SHA256: f.SHA256, UploadedAt: f.UploadedAt, Pinned: f.Pinned}
+		Size: f.Size, SHA256: f.SHA256, UploadedAt: f.UploadedAt, Pinned: f.Pinned, UpgradeHour: f.UpgradeHour}
 }
 
 func (s *server) listFirmware(w http.ResponseWriter, r *http.Request) {
@@ -518,6 +520,9 @@ func (s *server) putFirmwarePins(w http.ResponseWriter, r *http.Request) {
 		if p.FirmwareID <= 0 {
 			fe.add(fmt.Sprintf("[%d].firmwareId", i), "is required")
 		}
+		if p.UpgradeHour != nil && (*p.UpgradeHour < 0 || *p.UpgradeHour > 23) {
+			fe.add(fmt.Sprintf("[%d].upgradeHour", i), "must be an hour from 0 to 23")
+		}
 	}
 	if len(fe) > 0 {
 		writeFields(w, fe)
@@ -526,6 +531,58 @@ func (s *server) putFirmwarePins(w http.ResponseWriter, r *http.Request) {
 	out, err := s.ProvStore.PutFirmwarePins(r.Context(), actor(r).String(), pins)
 	if err != nil {
 		s.provError(w, "firmware pins", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items(out))
+}
+
+var firmwareVersionRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`)
+
+// listFirmwareMinimums returns the minimum and recommended version rules.
+func (s *server) listFirmwareMinimums(w http.ResponseWriter, r *http.Request) {
+	if s.provDisabled(w) {
+		return
+	}
+	out, err := s.ProvStore.ListFirmwareMinimums(r.Context())
+	if err != nil {
+		s.internal(w, "list firmware minimums", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, items(out))
+}
+
+// putFirmwareMinimums replaces every minimum rule with the body's list (spec
+// S-26). A pin below a minimum is refused at the pin and not rendered.
+func (s *server) putFirmwareMinimums(w http.ResponseWriter, r *http.Request) {
+	if s.provDisabled(w) {
+		return
+	}
+	var rules []prov.FirmwareMinimum
+	if !decode(w, r, &rules) {
+		return
+	}
+	var fe fieldErrs
+	for i, m := range rules {
+		if !m.Vendor.Valid() {
+			fe.add(fmt.Sprintf("[%d].vendor", i), "must be a vendor")
+		}
+		if !globRe.MatchString(m.ModelGlob) {
+			fe.add(fmt.Sprintf("[%d].modelGlob", i), "must be 1-64 characters of a model name or * ? [ ]")
+		}
+		if m.MinVersion != "" && !firmwareVersionRe.MatchString(m.MinVersion) {
+			fe.add(fmt.Sprintf("[%d].minVersion", i), "must be a version such as 1.0.11.22, or empty")
+		}
+		if m.Recommended != "" && !firmwareVersionRe.MatchString(m.Recommended) {
+			fe.add(fmt.Sprintf("[%d].recommended", i), "must be a version such as 1.0.11.78, or empty")
+		}
+	}
+	if len(fe) > 0 {
+		writeFields(w, fe)
+		return
+	}
+	out, err := s.ProvStore.PutFirmwareMinimums(r.Context(), actor(r).String(), rules)
+	if err != nil {
+		s.provError(w, "firmware minimums", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, items(out))

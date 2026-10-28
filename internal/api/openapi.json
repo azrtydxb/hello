@@ -8860,6 +8860,108 @@
         }
       }
     },
+    "/api/v1/prov/firmware/minimums": {
+      "get": {
+        "operationId": "listFirmwareMinimums",
+        "summary": "Firmware minimum and recommended versions",
+        "description": "Lists the minimum firmware version per vendor and model glob. A pin below it is refused and never rendered. The recommended version is the documented lab build.",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "The rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirmwareMinimum"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      },
+      "put": {
+        "operationId": "putFirmwareMinimums",
+        "summary": "Replace every firmware minimum version rule",
+        "description": "Replaces every firmware minimum version rule.",
+        "tags": ["provisioning"],
+        "responses": {
+          "200": {
+            "description": "The rules",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/FirmwareMinimum"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FirmwareMinimum"
+                }
+              }
+            }
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/prov/firmware/pins": {
       "put": {
         "operationId": "putFirmwarePins",
@@ -15370,6 +15472,15 @@
           "firmwareSeen": {
             "type": "string"
           },
+          "firmwarePinned": {
+            "type": "string"
+          },
+          "firmwareMinimum": {
+            "type": "string"
+          },
+          "firmwareDrift": {
+            "type": "boolean"
+          },
           "id": {
             "type": "integer"
           },
@@ -16012,6 +16123,9 @@
           },
           "pinned": {
             "type": "boolean"
+          },
+          "upgradeHour": {
+            "type": ["integer", "null"]
           }
         }
       },
@@ -16027,6 +16141,29 @@
           },
           "firmwareId": {
             "type": "integer"
+          },
+          "upgradeHour": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "maximum": 23
+          }
+        }
+      },
+      "FirmwareMinimum": {
+        "type": "object",
+        "required": ["vendor", "modelGlob"],
+        "properties": {
+          "vendor": {
+            "type": "string"
+          },
+          "modelGlob": {
+            "type": "string"
+          },
+          "minVersion": {
+            "type": "string"
+          },
+          "recommended": {
+            "type": "string"
           }
         }
       },

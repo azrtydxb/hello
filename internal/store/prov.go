@@ -153,9 +153,15 @@ type Phone struct {
 	LastFetchUA    string          `json:"lastFetchUa"`
 	LastFetchFile  string          `json:"lastFetchFile"`
 	FirmwareSeen   string          `json:"firmwareSeen"`
-	RenderError    bool            `json:"renderError"`
-	CreatedAt      time.Time       `json:"createdAt"`
-	UpdatedAt      time.Time       `json:"updatedAt"`
+	// FirmwarePinned is the version pinned for the model, FirmwareMinimum
+	// the model's floor, each "" for none. FirmwareDrift is set when the
+	// firmware seen differs from the pin or is below the floor.
+	FirmwarePinned  string    `json:"firmwarePinned"`
+	FirmwareMinimum string    `json:"firmwareMinimum"`
+	FirmwareDrift   bool      `json:"firmwareDrift"`
+	RenderError     bool      `json:"renderError"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 const phoneSelect = `
@@ -207,7 +213,11 @@ func nullInt(n sql.NullInt64) *int64 {
 
 // ListPhones returns every phone ordered by MAC.
 func (s *Store) ListPhones(ctx context.Context) ([]Phone, error) {
-	return listPhones(ctx, s.db, ` ORDER BY p.mac`)
+	ps, err := listPhones(ctx, s.db, ` ORDER BY p.mac`)
+	if err != nil {
+		return nil, err
+	}
+	return ps, s.withFirmwareState(ctx, ps)
 }
 
 func listPhones(ctx context.Context, q querier, suffix string, args ...any) ([]Phone, error) {
@@ -230,7 +240,14 @@ func listPhones(ctx context.Context, q querier, suffix string, args ...any) ([]P
 // GetPhone returns one phone.
 func (s *Store) GetPhone(ctx context.Context, id int64) (Phone, error) {
 	p, err := scanPhone(s.db.QueryRowContext(ctx, phoneSelect+` WHERE p.id = $1`, id))
-	return p, mapErr(err)
+	if err != nil {
+		return p, mapErr(err)
+	}
+	one := []Phone{p}
+	if err := s.withFirmwareState(ctx, one); err != nil {
+		return p, err
+	}
+	return one[0], nil
 }
 
 // PhoneInput creates a phone. DeviceID 0 creates a device for the
