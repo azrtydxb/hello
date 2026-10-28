@@ -36,7 +36,7 @@ func scanBook(r interface{ Scan(...any) error }) (phonebook.Book, error) {
 // (the company and extensions books first), and the id to continue after,
 // 0 on the last page. Personal books are not listed.
 func (s *Store) ListPhonebooks(ctx context.Context, after int64, limit int) ([]phonebook.Book, int64, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+bookCols+` FROM phonebooks b
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+bookCols+` FROM phonebooks b
 		WHERE b.kind <> 'personal' AND b.id > $1 ORDER BY b.id LIMIT $2`, after, limit+1)
 	if err != nil {
 		return nil, 0, err
@@ -68,7 +68,7 @@ func page[T any](rows []T, limit int, id func(T) int64) ([]T, int64) {
 
 // GetPhonebook returns one book; a personal book is ErrNotFound.
 func (s *Store) GetPhonebook(ctx context.Context, id int64) (phonebook.Book, error) {
-	b, err := scanBook(s.db.QueryRowContext(ctx, `SELECT `+bookCols+` FROM phonebooks b WHERE b.id = $1 AND b.kind <> 'personal'`, id))
+	b, err := scanBook(s.q(ctx).QueryRowContext(ctx, `SELECT `+bookCols+` FROM phonebooks b WHERE b.id = $1 AND b.kind <> 'personal'`, id))
 	return b, mapErr(err)
 }
 
@@ -219,10 +219,10 @@ func (s *Store) ListPhonebookEntries(ctx context.Context, bookID, after int64, l
 	}
 	var rows *sql.Rows
 	if b.Kind == phonebook.KindExtensions {
-		rows, err = s.db.QueryContext(ctx, `SELECT id, number, name, created_at, updated_at FROM extensions
+		rows, err = s.q(ctx).QueryContext(ctx, `SELECT id, number, name, created_at, updated_at FROM extensions
 			WHERE NOT directory_hidden AND id > $1 ORDER BY id LIMIT $2`, after, limit+1)
 	} else {
-		rows, err = s.db.QueryContext(ctx, `SELECT `+entryCols+` FROM phonebook_entries
+		rows, err = s.q(ctx).QueryContext(ctx, `SELECT `+entryCols+` FROM phonebook_entries
 			WHERE book_id = $1 AND id > $2 ORDER BY id LIMIT $3`, bookID, after, limit+1)
 	}
 	if err != nil {
@@ -273,10 +273,10 @@ func (s *Store) bookEntries(ctx context.Context, bookID int64, kind phonebook.Ki
 		err  error
 	)
 	if kind == phonebook.KindExtensions {
-		rows, err = s.db.QueryContext(ctx, `SELECT id, number, name, created_at, updated_at FROM extensions
+		rows, err = s.q(ctx).QueryContext(ctx, `SELECT id, number, name, created_at, updated_at FROM extensions
 			WHERE NOT directory_hidden ORDER BY lower(name), number`)
 	} else {
-		rows, err = s.db.QueryContext(ctx, `SELECT `+entryCols+` FROM phonebook_entries
+		rows, err = s.q(ctx).QueryContext(ctx, `SELECT `+entryCols+` FROM phonebook_entries
 			WHERE book_id = $1 ORDER BY lower(last_name), lower(first_name), id`, bookID)
 	}
 	if err != nil {
@@ -505,7 +505,7 @@ func scanPhoneGroup(r interface{ Scan(...any) error }) (phonebook.Group, error) 
 // ListPhoneGroups returns up to limit groups with an id above after, by id,
 // and the id to continue after (0 on the last page).
 func (s *Store) ListPhoneGroups(ctx context.Context, after int64, limit int) ([]phonebook.Group, int64, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+phoneGroupCols+` FROM phone_groups g WHERE g.id > $1 ORDER BY g.id LIMIT $2`, after, limit+1)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+phoneGroupCols+` FROM phone_groups g WHERE g.id > $1 ORDER BY g.id LIMIT $2`, after, limit+1)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -522,7 +522,7 @@ func (s *Store) ListPhoneGroups(ctx context.Context, after int64, limit int) ([]
 		return nil, 0, err
 	}
 	out, next := page(out, limit, func(g phonebook.Group) int64 { return g.ID })
-	if err := loadGroupChannels(ctx, s.db, out); err != nil {
+	if err := loadGroupChannels(ctx, s.q(ctx), out); err != nil {
 		return nil, 0, err
 	}
 	return out, next, nil
@@ -530,7 +530,7 @@ func (s *Store) ListPhoneGroups(ctx context.Context, after int64, limit int) ([]
 
 // GetPhoneGroup returns one group.
 func (s *Store) GetPhoneGroup(ctx context.Context, id int64) (phonebook.Group, error) {
-	return getPhoneGroup(ctx, s.db, id)
+	return getPhoneGroup(ctx, s.q(ctx), id)
 }
 
 func getPhoneGroup(ctx context.Context, q querier, id int64) (phonebook.Group, error) {

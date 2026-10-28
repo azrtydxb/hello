@@ -68,12 +68,12 @@ func resolvePTT(ptts []phonebook.Channel, ids ...*int64) (phonebook.Channel, boo
 
 // ListMulticastChannels returns the whole catalog, paging channels first.
 func (s *Store) ListMulticastChannels(ctx context.Context) ([]phonebook.Channel, error) {
-	return catalogChannels(ctx, s.db, "", false)
+	return catalogChannels(ctx, s.q(ctx), "", false)
 }
 
 // GetMulticastChannel returns one catalog channel.
 func (s *Store) GetMulticastChannel(ctx context.Context, id int64) (phonebook.Channel, error) {
-	c, err := scanChannel(s.db.QueryRowContext(ctx, `SELECT `+channelCols+` FROM multicast_channels WHERE id = $1 AND group_id IS NULL`, id))
+	c, err := scanChannel(s.q(ctx).QueryRowContext(ctx, `SELECT `+channelCols+` FROM multicast_channels WHERE id = $1 AND group_id IS NULL`, id))
 	return c, mapErr(err)
 }
 
