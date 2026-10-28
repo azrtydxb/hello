@@ -215,8 +215,114 @@
   font-size: var(--az-text-sm);
 }
 
+.flow-node {
+  position: relative;
+}
+
 .flow-node--pseudo {
   border-style: dashed;
+}
+
+/* The draft: what is staged and not applied yet (spec S-12). */
+.flow-node--draft-new {
+  border-color: var(--az-good-strong);
+  border-style: dashed;
+}
+
+.flow-node--draft-changed {
+  border-color: var(--az-info-strong);
+}
+
+.flow-node--error {
+  border-color: var(--az-bad-strong);
+  box-shadow: 0 0 0 2px var(--az-bad-strong);
+}
+
+.flow-node__draft {
+  position: absolute;
+  bottom: 2px;
+  right: 8px;
+  color: var(--az-muted);
+  font-size: 10px;
+}
+
+.flow-node__error {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  padding: 4px 8px;
+  border-radius: var(--az-radius-sm);
+  background: var(--az-bad-tint);
+  color: var(--az-bad-strong);
+  font-size: 11px;
+}
+
+.flow-draftbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--az-surface);
+  border: 1px solid var(--az-border);
+  border-radius: var(--az-radius-lg);
+}
+
+.flow-draftbar__status {
+  flex: 1;
+  min-width: 200px;
+  color: var(--az-text-2);
+  font-size: var(--az-text-sm);
+}
+
+.flow-diff {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--az-text-sm);
+}
+
+.flow-diff th,
+.flow-diff td {
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--az-border);
+  word-break: break-word;
+}
+
+.flow-diff__before {
+  color: var(--az-bad-strong);
+}
+
+.flow-diff__after {
+  color: var(--az-good-strong);
+}
+
+.flow-review {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.flow-review h3 {
+  margin: 0 0 4px;
+  font-size: var(--az-text-md);
+}
+
+.flow-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.flow-edit-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
 }
 
 .flow-node--selected {
@@ -546,4 +652,8 @@
 .flow-stage .flow-edge--traced .react-flow__edge-path {
   stroke: var(--az-indicator);
   stroke-width: 4;
+}
+
+.flow-empty .az-empty__action {
+  pointer-events: auto;
 }

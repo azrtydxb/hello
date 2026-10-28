@@ -191,6 +191,11 @@ type Prov struct {
 	// SIPServer (HELLO_PROV_SIP_SERVER, default HELLO_SIP_ADVERTISED_ADDR)
 	// is the host:port rendered configs register with.
 	SIPServer string
+	// DSCPSIP and DSCPRTP (HELLO_DSCP_SIP, HELLO_DSCP_RTP; defaults 26 and
+	// 46) are the QoS values rendered configs carry, the same ones hello-sip
+	// marks its sockets with (spec phone-feature-parity S-21).
+	DSCPSIP int
+	DSCPRTP int
 	// RegisterExpiry is the registration expiry rendered configs carry:
 	// HELLO_SIP_REGISTER_MAX_EXPIRES (default 1h), the same value hello-sip
 	// caps registrations at, so it is always inside its window.
@@ -306,6 +311,17 @@ type SIP struct {
 	// MaxCallDuration ends a connected call that has run this long (both
 	// legs get BYE), so a call whose phones vanished without BYE is cleared.
 	MaxCallDuration time.Duration
+	// SessionExpires (HELLO_SIP_SESSION_EXPIRES_SECONDS, default 1800; 0
+	// turns session timers off) is the RFC 4028 Session-Expires Hello
+	// requests and applies on legs to phones; SessionMinSE
+	// (HELLO_SIP_SESSION_MIN_SE_SECONDS, default 90) is the smallest
+	// interval it accepts from a peer (422 below it).
+	SessionExpires time.Duration
+	SessionMinSE   time.Duration
+	// MediaDeadAfter (HELLO_MEDIA_DEAD_SECONDS, default 60; 0 turns it off)
+	// ends an anchored call that carried no RTP in either direction for this
+	// long, unless it is on hold.
+	MediaDeadAfter time.Duration
 	// Server paging (phonebooks-ptt spec P-12): a page ends after
 	// PageMaxDuration (HELLO_PAGE_MAX_SECONDS, 120 s); a node runs at most
 	// PageConcurrent pages (HELLO_PAGE_CONCURRENT, 5) of at most PageFanout
@@ -325,6 +341,11 @@ type SIP struct {
 	// their relay sockets from.
 	RTPPortMin int
 	RTPPortMax int
+	// DSCPSIP (HELLO_DSCP_SIP, default 26, CS3) marks the SIP socket and
+	// DSCPRTP (HELLO_DSCP_RTP, default 46, EF) the relay RTP sockets; 0 to
+	// 63 (spec phone-feature-parity S-21).
+	DSCPSIP int
+	DSCPRTP int
 	// MediaForceAnchor (HELLO_MEDIA_FORCE_ANCHOR, default false) anchors
 	// every call's media regardless of the per-call triggers (spec S-1d).
 	MediaForceAnchor bool
@@ -573,6 +594,8 @@ func (r *reader) prov() Prov {
 		SIPServer:          r.optional("HELLO_PROV_SIP_SERVER", r.getenv("HELLO_SIP_ADVERTISED_ADDR")),
 		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
 		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
+		DSCPSIP:            r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP),
+		DSCPRTP:            r.dscp("HELLO_DSCP_RTP", DefaultDSCPRTP),
 		Resync:             r.days("HELLO_PROV_RESYNC", 24*time.Hour),
 		BookRefresh:        r.days("HELLO_PROV_BOOK_REFRESH", 15*time.Minute),
 		Timezone:           r.optional("HELLO_PROV_TIMEZONE", "UTC"),
@@ -748,12 +771,20 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	}
 	c.Dial = r.dialing()
 	c.PageMaxDuration = time.Duration(r.positiveInt("HELLO_PAGE_MAX_SECONDS", 120)) * time.Second
+	c.SessionExpires = time.Duration(r.seconds("HELLO_SIP_SESSION_EXPIRES_SECONDS", 1800)) * time.Second
+	c.SessionMinSE = time.Duration(r.seconds("HELLO_SIP_SESSION_MIN_SE_SECONDS", 90)) * time.Second
+	c.MediaDeadAfter = time.Duration(r.seconds("HELLO_MEDIA_DEAD_SECONDS", 60)) * time.Second
+	if c.SessionExpires > 0 && c.SessionMinSE > c.SessionExpires {
+		r.fail("HELLO_SIP_SESSION_MIN_SE_SECONDS", errors.New("must not exceed HELLO_SIP_SESSION_EXPIRES_SECONDS"))
+	}
 	c.PageConcurrent = r.positiveInt("HELLO_PAGE_CONCURRENT", 5)
 	c.PageFanout = r.positiveInt("HELLO_PAGE_FANOUT", 200)
 	c.PageMulticastIface = r.getenv("HELLO_PAGE_MULTICAST_IFACE")
 	c.PageMulticastTTL = r.positiveInt("HELLO_PAGE_MULTICAST_TTL", 1)
 	c.RTPPortMin = r.port("HELLO_RTP_PORT_MIN", 20000)
 	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
+	c.DSCPSIP = r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP)
+	c.DSCPRTP = r.dscp("HELLO_DSCP_RTP", DefaultDSCPRTP)
 	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"
 	c.MediaRecordingNotice = r.getenv("HELLO_MEDIA_RECORDING_NOTICE") != "false"
 	c.MediaAnchorHost = r.optional("HELLO_MEDIA_ANCHOR_HOST", "")
@@ -1004,6 +1035,27 @@ func (r *reader) port(key string, def int) int {
 	return n
 }
 
+// Default DSCP values (spec phone-feature-parity S-21): SIP signalling CS3,
+// RTP EF.
+const (
+	DefaultDSCPSIP = 26
+	DefaultDSCPRTP = 46
+)
+
+// dscp reads a DSCP value, 0 to 63.
+func (r *reader) dscp(key string, def int) int {
+	v := r.getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > 63 {
+		r.fail(key, errors.New("must be a DSCP value from 0 to 63"))
+		return def
+	}
+	return n
+}
+
 func (r *reader) positiveInt(key string, def int) int {
 	v := r.getenv(key)
 	if v == "" {
@@ -1012,6 +1064,20 @@ func (r *reader) positiveInt(key string, def int) int {
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
 		r.fail(key, errors.New("must be a positive integer"))
+	}
+	return n
+}
+
+// seconds reads a whole number of seconds, 0 included (the setting is off).
+func (r *reader) seconds(key string, def int) int {
+	v := r.getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > 86400 {
+		r.fail(key, errors.New("must be a whole number of seconds from 0 to 86400"))
+		return def
 	}
 	return n
 }

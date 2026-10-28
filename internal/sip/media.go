@@ -904,6 +904,9 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 		return
 	}
 	dir := media.SDPDirection(body)
+	// A new media address after a roam (a handset on another AP or subnet)
+	// re-learns the leg's address before anything is relayed (S-9).
+	c.relearnMedia(fromCaller, req.Source(), off)
 	c.setHADirs(fromCaller, dir)
 	// An inactive hold stays inactive toward the holder, but the held peer
 	// is offered sendonly so it can hear the music (S-33).
@@ -928,6 +931,13 @@ func (c *call) handleAnchoredInDialog(req *sip.Request, tx sip.ServerTransaction
 	// The peer gets our SDP in the same direction (a held side hears
 	// silence because the held side stopped sending).
 	peer := off.Build(c.anchorHost, c.legPortFor(!fromCaller), peerDir)
+	if fromCaller {
+		c.noteSDP(sessCaller, ans)
+		c.noteSDP(sessCallee, peer)
+	} else {
+		c.noteSDP(sessCallee, ans)
+		c.noteSDP(sessCaller, peer)
+	}
 	c.mu.Lock()
 	w := c.winner
 	c.mu.Unlock()
