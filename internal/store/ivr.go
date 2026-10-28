@@ -172,12 +172,12 @@ func listIVRMenus(ctx context.Context, q querier, where string, args ...any) ([]
 
 // ListIVRMenus returns every IVR menu.
 func (s *Store) ListIVRMenus(ctx context.Context) ([]IVRMenu, error) {
-	return listIVRMenus(ctx, s.db, "")
+	return listIVRMenus(ctx, s.q(ctx), "")
 }
 
 // GetIVRMenu returns one IVR menu.
 func (s *Store) GetIVRMenu(ctx context.Context, id int64) (IVRMenu, error) {
-	ms, err := listIVRMenus(ctx, s.db, ` WHERE m.id = $1`, id)
+	ms, err := listIVRMenus(ctx, s.q(ctx), ` WHERE m.id = $1`, id)
 	if err != nil {
 		return IVRMenu{}, err
 	}
@@ -518,7 +518,7 @@ func (s *Store) DeleteIVRMenu(ctx context.Context, actor string, id int64, check
 // settings that name one (ring group failover, feature codes).
 func (s *Store) IVRMenuNameExists(ctx context.Context, name string) (bool, error) {
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM ivr_menus WHERE name = $1`, name).Scan(&n); err != nil {
+	if err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM ivr_menus WHERE name = $1`, name).Scan(&n); err != nil {
 		return false, err
 	}
 	return n > 0, nil

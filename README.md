@@ -22,7 +22,8 @@ findings and proposals). For the IVR / auto-attendant see
 [docs/ivr.md](docs/ivr.md), and for call queues [docs/queues.md](docs/queues.md). For time and date routing (schedules, holiday calendars, time conditions, the day/night toggle) see
 [docs/time-conditions.md](docs/time-conditions.md). For the call events that integrations read (live stream, history, scopes) see [docs/integrations.md](docs/integrations.md). To run Hello on Kubernetes (Helm chart, SIP
 networking, highly available state, rolling upgrades) see
-[docs/kubernetes.md](docs/kubernetes.md).
+[docs/kubernetes.md](docs/kubernetes.md). For SIP over TLS and `sips:` see
+[docs/tls.md](docs/tls.md).
 
 ## Layout
 
@@ -117,6 +118,9 @@ naming the key, if one is missing or malformed.
 | `HELLO_SIP_REGISTER_MIN_EXPIRES` / `_MAX_EXPIRES` | sip     | `60s` / `1h`                                                                                                                  |
 | `HELLO_SIP_RING_TIMEOUT`                          | sip     | `30s`                                                                                                                         |
 | `HELLO_SIP_MAX_CALL_DURATION`                     | sip     | `4h`; a call with no BYE (phone gone) is cleared after this                                                                   |
+| `HELLO_SIP_SESSION_EXPIRES_SECONDS`               | sip     | `1800`; RFC 4028 Session-Expires Hello requests and applies on legs to phones; `0` turns session timers off                  |
+| `HELLO_SIP_SESSION_MIN_SE_SECONDS`                | sip     | `90`; the smallest interval accepted from a peer (`422` with Min-SE below it); must not exceed the setting above              |
+| `HELLO_MEDIA_DEAD_SECONDS`                        | sip     | `60`; an anchored call with no RTP in either direction for this long is ended unless held; `0` turns it off                  |
 | `HELLO_PAGE_MAX_SECONDS`                          | sip     | `120`; a server page ends after this many seconds                                                                             |
 | `HELLO_PAGE_CONCURRENT`                           | sip     | `5`; pages one node runs at once, beyond that the caller hears busy                                                           |
 | `HELLO_PAGE_FANOUT`                               | sip     | `200`; legs of one page, beyond that the caller hears busy                                                                    |

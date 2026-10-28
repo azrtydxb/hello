@@ -42,6 +42,8 @@ function setup(extra: Parameters<typeof mockApi>[0] = {}) {
     ...ME,
     "GET /api/v1/extensions": () => json({ items: [EXT100, EXT200] }),
     "GET /api/v1/ring-groups": () => json({ items: [] }),
+    "GET /api/v1/announcements": () =>
+      json({ items: [{ id: 1, name: "closed" }] }),
     ...extra,
   });
 }
@@ -134,6 +136,12 @@ describe("RingGroups", () => {
       label: "Ring group",
       choose: "Sales",
       card: "Ring group Sales",
+    },
+    {
+      kind: "announcement",
+      label: "Announcement",
+      choose: "closed",
+      card: "Announcement closed",
     },
   ])(
     "offers $kind as the failure destination and sends the chosen target",

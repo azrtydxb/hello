@@ -219,6 +219,7 @@ func (s *server) routes() []route {
 
 		{"GET", "/api/v1/flow/catalogue", auth.ScopeRead, auth.RoleViewer, false, s.getFlowCatalogue},
 		{"GET", "/api/v1/flow/graph", auth.ScopeRead, auth.RoleViewer, false, s.getFlowGraph},
+		{"GET", "/api/v1/flow/trace", auth.ScopeRead, auth.RoleViewer, false, s.getFlowTrace},
 		{"GET", "/api/v1/flow/revision", auth.ScopeRead, auth.RoleViewer, false, s.getFlowRevision},
 		{"GET", "/api/v1/flow/canvases", auth.ScopeRead, auth.RoleViewer, false, s.listFlowCanvases},
 		{"POST", "/api/v1/flow/canvases", auth.ScopeWrite, auth.RoleOperator, false, s.createFlowCanvas},
@@ -226,6 +227,10 @@ func (s *server) routes() []route {
 		{"PATCH", "/api/v1/flow/canvases/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.updateFlowCanvas},
 		{"DELETE", "/api/v1/flow/canvases/{id}", auth.ScopeWrite, auth.RoleOperator, false, s.deleteFlowCanvas},
 		{"PUT", "/api/v1/flow/canvases/{id}/layout", auth.ScopeWrite, auth.RoleOperator, false, s.putFlowLayout},
+		{"POST", "/api/v1/config/batch", auth.ScopeWrite, auth.RoleOperator, false, s.applyConfigBatch},
+		{"GET", "/api/v1/config/batches", auth.ScopeRead, auth.RoleViewer, false, s.listConfigBatches},
+		{"GET", "/api/v1/config/batches/{id}", auth.ScopeRead, auth.RoleViewer, false, s.getConfigBatch},
+		{"POST", "/api/v1/config/batches/{id}/revert", auth.ScopeWrite, auth.RoleOperator, false, s.revertConfigBatch},
 
 		{"POST", "/api/v1/routing/test", auth.ScopeWrite, auth.RoleOperator, false, s.routingTest},
 

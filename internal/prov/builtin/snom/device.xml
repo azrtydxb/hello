@@ -78,5 +78,9 @@
 {{- range $i, $k := .BLF}}
     <fkey idx="{{$k.Slot}}" context="active" label="{{xml $k.Label}}" perm="R">blf {{xml $k.URI}}</fkey>
 {{- end}}
+{{- /* Transfer-to-voicemail key (Hello's *97<ext>): the first key after the BLF keys, none when they fill the phone. The fkey type "transfer" with the target URI is Snom's transfer function key (Service Hub, "Function Keys"); the value format is not checked on a phone (verify). */}}
+{{- with .VMKey}}
+    <fkey idx="{{.Slot}}" context="active" label="{{xml .Label}}" perm="R">transfer {{xml .URI}}</fkey>
+{{- end}}
   </functionKeys>
 </settings>

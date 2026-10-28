@@ -22,12 +22,18 @@ type Binding struct {
 	Device       string    `json:"device"`     // device SIP username
 	ContactURI   string    `json:"contactUri"` // as sent in Contact
 	Source       string    `json:"source"`     // ip:port the REGISTER came from
-	Transport    string    `json:"transport"`  // udp
+	Transport    string    `json:"transport"`  // udp, tcp or tls: the phone leg of the REGISTER
 	UserAgent    string    `json:"userAgent"`
 	Path         []string  `json:"path,omitempty"`
 	ReceivedNode string    `json:"receivedNode"` // node ID that handled the REGISTER
 	Expires      time.Time `json:"expires"`
 	UpdatedAt    time.Time `json:"updatedAt"`
+
+	// Instance is the Contact's +sip.instance and CallID the REGISTER's
+	// Call-ID: a later REGISTER of the same instance (or Call-ID) from a new
+	// address replaces this binding (a handset that roamed).
+	Instance string `json:"instance,omitempty"`
+	CallID   string `json:"callId,omitempty"`
 }
 
 // Call is one active call, published by the node that owns its dialogs.

@@ -3,6 +3,8 @@
 {{- $k := .Values.kamailio -}}
 {{- $publicHost := required "kamailio.publicHost is required: the address phones reach Kamailio at" $k.publicHost -}}
 {{- $list := include "hello.dispatcherList" . -}}
+{{- $tls := $k.tls | default dict -}}
+{{- if and $tls.enabled (not $tls.secretName) }}{{ fail "kamailio.tls.secretName is required when kamailio.tls.enabled: a kubernetes.io/tls Secret issued by the Hello CA" }}{{ end }}
 {{- if le (int .Values.sip.nodes) 0 }}{{ fail "sip.nodes must be at least 1" }}{{ end }}
 apiVersion: v1
 kind: ConfigMap
@@ -14,6 +16,9 @@ data:
   # A copy of deploy/kamailio/kamailio.cfg; a test keeps them equal.
   kamailio.cfg: |
     {{- .Files.Get "files/kamailio.cfg" | nindent 4 }}
+  # A copy of deploy/kamailio/tls.cfg; read only when kamailio.tls.enabled.
+  tls.cfg: |
+    {{- .Files.Get "files/tls.cfg" | nindent 4 }}
   dispatcher.list: |
     {{- $list | nindent 4 }}
 ---
@@ -142,6 +147,13 @@ spec:
               value: {{ $k.metricsPort | quote }}
             - name: KAMAILIO_INVITE_TIMEOUT
               value: {{ $k.inviteTimeout | quote }}
+            {{- if $tls.enabled }}
+            # SIP over TLS (S-14): needs an image with the tls module.
+            - name: KAMAILIO_TLS_PORT
+              value: {{ $tls.port | quote }}
+            - name: KAMAILIO_PUBLIC_TLS_PORT
+              value: {{ $tls.publicPort | quote }}
+            {{- end }}
           ports:
             - name: phones
               containerPort: {{ $k.phonesPort }}
@@ -149,6 +161,11 @@ spec:
             - name: phones-tcp
               containerPort: {{ $k.phonesPort }}
               protocol: TCP
+            {{- if $tls.enabled }}
+            - name: phones-tls
+              containerPort: {{ $tls.port }}
+              protocol: TCP
+            {{- end }}
             - name: hello
               containerPort: 5070
               protocol: UDP
@@ -173,6 +190,11 @@ spec:
               readOnly: true
             - name: run
               mountPath: /run/kamailio
+            {{- if $tls.enabled }}
+            - name: tls
+              mountPath: /etc/hello-tls
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml $k.resources | nindent 12 }}
       volumes:
@@ -182,6 +204,12 @@ spec:
             defaultMode: 420
         - name: run
           emptyDir: {}
+        {{- if $tls.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ $tls.secretName }}
+            defaultMode: 288
+        {{- end }}
 ---
 # In-cluster only: metrics.
 apiVersion: v1
@@ -237,4 +265,13 @@ spec:
       {{- if and $k.service.nodePort (ne $k.service.type "ClusterIP") }}
       nodePort: {{ $k.service.nodePort }}
       {{- end }}
+    {{- if $tls.enabled }}
+    - name: phones-tls
+      port: {{ $tls.publicPort }}
+      protocol: TCP
+      targetPort: phones-tls
+      {{- if and $tls.nodePort (ne $k.service.type "ClusterIP") }}
+      nodePort: {{ $tls.nodePort }}
+      {{- end }}
+    {{- end }}
 {{- end }}

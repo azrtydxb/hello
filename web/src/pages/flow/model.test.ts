@@ -230,3 +230,59 @@ describe("helpers", () => {
     expect(neighbour(nodes, "zzz", "up")).toBe("a");
   });
 });
+
+describe("buildView collisions", () => {
+  // 101 sits where the stubs of the group's other members would go.
+  const mk = (n: number) => ({
+    id: `extension:${n}`,
+    kind: "extension",
+    label: `${n}`,
+    summary: {},
+  });
+  const edge = (n: number) => ({
+    id: `extension:${n}.member>ringGroup:1.members`,
+    source: { node: `extension:${n}`, port: "member" },
+    target: { node: "ringGroup:1", port: "members" },
+    owner: { node: "ringGroup:1", field: "members" },
+    data: { position: n },
+  });
+  const graph = {
+    ...GRAPH,
+    nodes: [GRAPH.nodes[1]!, mk(1), mk(2), mk(3), mk(4)],
+    edges: [1, 2, 3, 4].map(edge),
+  };
+  const view = buildView({
+    graph,
+    catalogue: CATALOGUE,
+    positions: {
+      "extension:1": { x: 120, y: 0, collapsed: false },
+      "ringGroup:1": { x: 400, y: 0, collapsed: false },
+    },
+  });
+
+  it("never draws a stub over a node or another stub", () => {
+    const boxes = view.nodes.map((n) => ({
+      id: n.id,
+      x: n.position.x,
+      y: n.position.y,
+      w: n.initialWidth ?? 0,
+      h: n.initialHeight ?? 0,
+    }));
+    expect(boxes.length).toBe(5);
+    for (const a of boxes)
+      for (const b of boxes) {
+        if (a.id >= b.id) continue;
+        const hit =
+          a.x < b.x + b.w &&
+          b.x < a.x + a.w &&
+          a.y < b.y + b.h &&
+          b.y < a.y + a.h;
+        expect(hit, `${a.id} overlaps ${b.id}`).toBe(false);
+      }
+  });
+
+  it("spreads the labels of edges that meet at one port", () => {
+    const shifts = view.edges.map((e) => JSON.stringify(e.labelStyle ?? {}));
+    expect(new Set(shifts).size).toBe(4);
+  });
+});

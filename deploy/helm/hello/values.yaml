@@ -55,6 +55,12 @@ control:
     publicUrl: ""
     # Where provisioned phones register; default <kamailio.publicHost>:<kamailio.publicPort>.
     sipServer: ""
+    # With kamailio.tls.enabled, the SIP-over-TLS address (default
+    # <kamailio.publicHost>:<kamailio.tls.publicPort>) and the models that
+    # register over it: comma separated vendors or vendor:model-prefix
+    # (default grandstream:WP; "none" keeps every phone on UDP).
+    sipTlsServer: ""
+    sipTlsModels: ""
     # Proxies whose X-Forwarded-* is believed (the ingress controller's pods).
     trustedProxies: ""
     # Secret holding ca.crt (cert-manager writes it next to the certificate);
@@ -153,6 +159,17 @@ kamailio:
   metricsPort: 9090
   # Above sip.ringTimeout, in milliseconds.
   inviteTimeout: 45000
+  # SIP over TLS for phones (phone-feature-parity S-14). Kamailio ends TLS
+  # and speaks UDP to the hello-sip nodes. Needs a kamailio image with the
+  # tls module (docker/kamailio) and a kubernetes.io/tls Secret issued by
+  # the Hello CA whose names include publicHost (cert-manager on kw).
+  tls:
+    enabled: false
+    # The port Kamailio binds on its pod address, and the port phones use.
+    port: 5061
+    publicPort: 5061
+    nodePort: null
+    secretName: ""
   # Phones' Service when hostNetwork is off.
   service:
     type: LoadBalancer

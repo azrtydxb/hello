@@ -58,6 +58,9 @@ type Metrics struct {
 	// MWINotify counts message-summary NOTIFYs by kind and result (S-1).
 	MWINotify  *prometheus.CounterVec // kind, result
 	HoldActive prometheus.Gauge
+	// Session counts the refreshes and the teardowns of session timers and
+	// dead-media detection (S-9).
+	Session *SessionMetrics
 	// CheckSync counts check-sync NOTIFYs by event and result (S-5).
 	CheckSync *prometheus.CounterVec // event, result
 	// MessagesIn counts SIP MESSAGE requests by source (phone, trunk) and
@@ -65,6 +68,13 @@ type Metrics struct {
 	// route (phone, trunk) and result. Bodies are never labels or logged.
 	MessagesIn        *prometheus.CounterVec // source, outcome
 	MessageDeliveries *prometheus.CounterVec // via, result
+
+	// Transports (phone-feature-parity S-14). RegistrationsByTransport is
+	// this node's bindings by the transport the phone registered over
+	// (udp, tcp, tls); SecureRefused counts sips: requests refused for want
+	// of a TLS path, by reason (caller_not_tls, no_tls_binding, no_tls_route).
+	RegistrationsByTransport *prometheus.GaugeVec   // transport
+	SecureRefused            *prometheus.CounterVec // reason
 
 	// Phase E (spec P-12, P-13): server pages and intercom calls.
 	PagingTotal   *prometheus.CounterVec // result
@@ -228,6 +238,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		Name: "hello_sip_message_deliveries_total",
 		Help: "Stored message deliveries by route (phone, trunk) and result (delivered, not_registered, retry, failed).",
 	}, []string{"via", "result"})
+	m.RegistrationsByTransport = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "hello_sip_registrations_by_transport", Help: "Bindings last registered through this node, by the phone's transport (udp, tcp, tls).",
+	}, []string{"transport"})
+	m.SecureRefused = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_sip_sips_refused_total", Help: "sips: requests refused because no TLS path exists, by reason.",
+	}, []string{"reason"})
 	m.HoldActive = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "hello_hold_active", Help: "Calls currently held on this node (either leg sendonly).",
 	})
@@ -277,10 +293,11 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
 		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls,
-		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.DirectoryTotal, m.TimeConditionTotal,
+		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.RegistrationsByTransport, m.SecureRefused, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.DirectoryTotal, m.TimeConditionTotal,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
 	m.Conf = newConfMetrics(reg)
+	m.Session = newSessionMetrics(reg)
 	return m
 }
 

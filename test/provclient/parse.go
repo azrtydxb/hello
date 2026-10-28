@@ -316,9 +316,11 @@ func ParseFanvil(b []byte) (Config, error) {
 		case fanvilKeyRE.MatchString(k) && strings.HasSuffix(k, " Type"):
 			types[page+"|"+strings.TrimSuffix(k, " Type")] = v
 		case fanvilKeyRE.MatchString(k) && strings.HasSuffix(k, " Value"):
-			if types[page+"|"+strings.TrimSuffix(k, " Value")] == "1" {
+			// A memory key (Type 1) is a BLF key when its value ends in "/b";
+			// "/f" is the speed-dial key of the transfer-to-voicemail key.
+			if types[page+"|"+strings.TrimSuffix(k, " Value")] == "1" && strings.HasSuffix(strings.TrimSpace(v), "/b") {
 				num, _, _ := strings.Cut(v, "@")
-				c.BLF = append(c.BLF, num)
+				c.BLF = append(c.BLF, strings.TrimSpace(num))
 			}
 		}
 	}

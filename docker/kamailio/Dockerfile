@@ -7,7 +7,10 @@ FROM debian:trixie-slim
 
 # wget is not in the slim base, but the lab's healthchecks (compose.yaml)
 # and an operator's readyz probe both use it the way the Hello images do.
-RUN apt-get update && apt-get install -y --no-install-recommends kamailio wget \
+# kamailio-tls-modules carries tls.so, which terminates SIP over TLS for
+# phones (phone-feature-parity S-14); it is only loaded when the pod sets
+# KAMAILIO_TLS_PORT (deploy/kamailio/kamailio.cfg).
+RUN apt-get update && apt-get install -y --no-install-recommends kamailio kamailio-tls-modules wget \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # The kw manifest pins runAsUser/runAsGroup 102 (the official image's
@@ -48,13 +51,14 @@ RUN printf '%s\n' \
       'request_route { drop; }' \
       > /tmp/check.cfg \
     && kamailio -c -f /tmp/check.cfg > /dev/null \
-    && rm /tmp/check.cfg
+    && rm /tmp/check.cfg \
+    && find /usr/lib -name tls.so | grep -q .
 
 # The k8s pod mounts an emptyDir at /run/kamailio (fsGroup 102) and the
 # ConfigMap at /etc/kamailio; the container itself needs nothing writable
 # beyond /run/kamailio.
 USER 102:102
-EXPOSE 5060/udp 5070/udp 9090
+EXPOSE 5060/udp 5061/tcp 5070/udp 9090
 ENTRYPOINT ["kamailio"]
 # -DD: stay in the foreground without forking into daemon mode, but still
 # fork the UDP/TCP listener children (plain -D would run no-fork and bind

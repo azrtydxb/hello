@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 )
 
@@ -29,6 +28,12 @@ import (
 // nodes announced in Valkey (see Presence); nothing else is relayed.
 
 const flowMACLen = 16
+
+// edgeRefusedHeader marks the 403 an edge proxy gives a request it will not
+// relay (an unknown peer, an invalid or expired flow token). It never reached
+// the phone, and the cause is the cluster's state (a node that has briefly
+// lost its peer set), not the phone's answer, so a sender may ask again.
+const edgeRefusedHeader = "X-Hello-Edge-Refused"
 
 // flowToken names a flow (source address and transport) until expires. Its
 // MAC means only a node holding the cluster secret can mint one, so a
@@ -114,7 +119,9 @@ func (s *Server) proxy(req *sip.Request, tx sip.ServerTransaction, token string)
 	forbid := func(why string) bool {
 		s.log.Warn("edge: refused", "reason", why, "method", req.Method.String(), "source", req.Source())
 		if !req.IsAck() {
-			s.respond(tx, req, sip.StatusForbidden, "Forbidden")
+			// The header tells a peer node this 403 is the edge's own
+			// refusal, not an answer from the phone (see edgeRefusedHeader).
+			s.respond(tx, req, sip.StatusForbidden, "Forbidden", sip.NewHeader(edgeRefusedHeader, "1"))
 		}
 		return true
 	}
@@ -159,7 +166,7 @@ func (s *Server) proxy(req *sip.Request, tx sip.ServerTransaction, token string)
 
 	if req.IsAck() {
 		// ACK for a 2xx is its own transaction: forward statelessly.
-		if err := s.client.WriteRequest(out, sipgo.ClientRequestAddVia); err != nil {
+		if err := s.client.WriteRequest(out, s.addViaFromListener); err != nil {
 			s.log.Debug("edge: ACK forward failed", "error", err)
 		}
 		return true
@@ -174,7 +181,7 @@ func (s *Server) proxy(req *sip.Request, tx sip.ServerTransaction, token string)
 // here so the phone does not keep a dangling dialog.
 func (s *Server) proxyStateful(req *sip.Request, tx sip.ServerTransaction, out *sip.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	ctx2, err := s.client.TransactionRequest(ctx, out, sipgo.ClientRequestAddVia)
+	ctx2, err := s.client.TransactionRequest(ctx, out, s.addViaFromListener)
 	cancel()
 	if err != nil {
 		s.log.Debug("edge: forward failed", "method", req.Method.String(), "error", err)
@@ -249,7 +256,7 @@ func (s *Server) sendCancel(c *sip.Request) {
 	defer contain(s.log, "edge cancel")
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	tx, err := s.client.TransactionRequest(ctx, c, func(*sipgo.Client, *sip.Request) error { return nil })
+	tx, err := s.client.TransactionRequest(ctx, c, s.fromListener)
 	if err != nil {
 		s.log.Debug("edge: CANCEL failed", "error", err)
 		return
@@ -284,12 +291,12 @@ func (s *Server) endOrphan(inv *sip.Request, res *sip.Response) {
 		return r
 	}
 	seq := inv.CSeq().SeqNo
-	if err := s.client.WriteRequest(build(sip.ACK, seq), sipgo.ClientRequestAddVia); err != nil {
+	if err := s.client.WriteRequest(build(sip.ACK, seq), s.addViaFromListener); err != nil {
 		s.log.Debug("edge: orphan ACK failed", "error", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	tx, err := s.client.TransactionRequest(ctx, build(sip.BYE, seq+1), sipgo.ClientRequestAddVia)
+	tx, err := s.client.TransactionRequest(ctx, build(sip.BYE, seq+1), s.addViaFromListener)
 	if err != nil {
 		return
 	}

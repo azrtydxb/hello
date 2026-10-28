@@ -48,7 +48,9 @@ data:
     #   - adds Path (with the phone's received address) to REGISTER, so any
     #     Hello node reaches any phone through Kamailio;
     #   - record-routes initial INVITEs in both directions;
-    #   - tells Hello the phone's real source in X-Hello-Client;
+    #   - tells Hello the phone's real source in X-Hello-Client and the transport
+    #     of the phone's connection (udp, tcp or tls) in X-Hello-Transport;
+    #   - terminates SIP over TLS for phones (optional, see TLS below);
     #   - rate-limits REGISTER, INVITE and MESSAGE per source IP (pike).
     #
     # SIP MESSAGE (RFC 3428, text messaging) is routed like an initial INVITE:
@@ -114,6 +116,23 @@ data:
     #!trydefenv METRICS_PORT=KAMAILIO_METRICS_PORT
     #!ifndef METRICS_PORT
     #!define METRICS_PORT 9090
+    #!endif
+
+    # SIP over TLS (phone-feature-parity S-14), off unless KAMAILIO_TLS_PORT is
+    # set. Phones connect to PUBLIC_HOST:PUBLIC_TLS_PORT; Kamailio ends TLS and
+    # talks plain UDP to the hello-sip nodes inside the edge network, telling
+    # them the phone leg was TLS in X-Hello-Transport. The certificate and key
+    # (issued by the Hello CA: cert-manager on kw, the lab CA in compose) are
+    # read from /etc/hello-tls/tls.crt and tls.key by tls.cfg. TLS 1.2 is the
+    # minimum, 1.3 is used when the phone offers it. Enabling it needs an image
+    # with the tls module (docker/kamailio installs kamailio-tls-modules); an
+    # image without it must run with KAMAILIO_TLS_PORT unset.
+    #!trydefenv TLS_PORT=KAMAILIO_TLS_PORT
+    #!trydefenv PUBLIC_TLS_PORT=KAMAILIO_PUBLIC_TLS_PORT
+    #!ifdef TLS_PORT
+    #!ifndef PUBLIC_TLS_PORT
+    #!define PUBLIC_TLS_PORT 5061
+    #!endif
     #!endif
 
     # How long (ms) an INVITE towards Hello may stay unanswered after its first
@@ -186,12 +205,22 @@ data:
     # headers (rr enable_double_rr), each naming the socket its side uses.
     listen=udp:LISTEN_IP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones"
     listen=tcp:LISTEN_IP:PHONES_PORT advertise PUBLIC_HOST:PUBLIC_PORT name "phones_tcp"
+    #!ifdef TLS_PORT
+    listen=tls:LISTEN_IP:TLS_PORT advertise PUBLIC_HOST:PUBLIC_TLS_PORT name "phones_tls"
+    #!endif
     listen=udp:LISTEN_IP:5070 name "hello"
     # Prometheus metrics (xhttp_prom), internal only: not published to the host.
     # HTTP is served only here (event_route[xhttp:request] refuses it on the
     # phones TCP socket); SIP sent to it is dropped in request_route.
     listen=tcp:LISTEN_IP:METRICS_PORT name "metrics"
     tcp_accept_no_cl=yes
+    # A phone's TCP or TLS connection is also the path Hello's requests (INVITE,
+    # NOTIFY, MESSAGE) take back to it, so an idle one stays open for an hour
+    # (phone-feature-parity S-13); a phone's keep-alive (OPTIONS, CRLF) resets it.
+    tcp_connection_lifetime=3600
+    #!ifdef TLS_PORT
+    enable_tls=yes
+    #!endif
 
     # Answer quickly when a Hello node is gone: DNS failover and SRV are not
     # used (the dispatcher list holds the nodes' addresses), and the DNS blocklist would
@@ -233,10 +262,18 @@ data:
     loadmodule "xhttp.so"
     loadmodule "xhttp_prom.so"
     loadmodule "rtimer.so"
+    #!ifdef TLS_PORT
+    loadmodule "tls.so"
+    #!endif
 
     # ctl: kamcmd's default socket (/run/kamailio/kamailio_ctl), so
     # `docker compose exec kamailio kamcmd dispatcher.list` works as the
     # kamailio user the container runs as.
+
+    #!ifdef TLS_PORT
+    # tls: certificate, key and the 1.2 minimum are in tls.cfg (next to this file).
+    modparam("tls", "config", "/etc/kamailio/tls.cfg")
+    #!endif
 
     # jsonrpcs: RPC over the FIFO only (no HTTP transport here).
     modparam("jsonrpcs", "transport", 1)
@@ -400,8 +437,9 @@ data:
     ####### Requests from phones (towards Hello) #######
 
     route[FROM_PHONE] {
-    	# Only Kamailio says where a request came from.
+    	# Only Kamailio says where a request came from and over what.
     	remove_hf("X-Hello-Client");
+    	remove_hf("X-Hello-Transport");
     	force_rport();
 
     	if (is_method("REGISTER|INVITE|MESSAGE") && !has_totag()) {
@@ -574,6 +612,10 @@ data:
     	} else {
     		append_hf("X-Hello-Client: $si:$sp\r\n");
     	}
+    	# The phone's transport (udp, tcp or tls): Hello records it on the
+    	# registration and uses it to decide whether a sips: request has a TLS
+    	# path. Set from the socket the request arrived on, never from the phone.
+    	append_hf("X-Hello-Transport: $pr\r\n");
     	if (!has_totag()) {
     		t_on_failure("HELLO_FAILOVER"); # initial requests only
     	}
@@ -619,11 +661,17 @@ data:
     	route(TO_PHONE);
     }
 
-    # Send towards a phone from the phones socket of the phone's transport: TCP
-    # when the destination (the Path's received, an alias or the R-URI) says so,
-    # UDP otherwise.
+    # Send towards a phone from the phones socket of the phone's transport: TLS
+    # or TCP when the destination (the Path's received, an alias or the R-URI)
+    # says so, UDP otherwise.
     route[PHONES_SOCKET] {
-    	if ($dP == "tcp") {
+    	if ($dP == "tls") {
+    #!ifdef TLS_PORT
+    		$fsn = "phones_tls";
+    #!else
+    		$fsn = "phones_tcp";
+    #!endif
+    	} else if ($dP == "tcp") {
     		$fsn = "phones_tcp";
     	} else {
     		$fsn = "phones";
@@ -761,6 +809,32 @@ data:
     	}
     	xhttp_reply("404", "Not Found", "text/plain", "not found\n");
     }
+  # Verbatim copy of deploy/kamailio/tls.cfg (test/deploy). Read only when
+  # KAMAILIO_TLS_PORT is set on the pod (see the kamailio Deployment).
+  tls.cfg: |
+    # Kamailio tls module configuration (phone-feature-parity S-14). Read only
+    # when KAMAILIO_TLS_PORT is set (see kamailio.cfg).
+    #
+    # The server certificate is issued by the Hello CA (cert-manager's
+    # cluster-ca on kw, the lab CA in compose) and mounted at /etc/hello-tls,
+    # which phones already trust through the CA push of provisioning (P8433 and
+    # the other vendors' trusted-certificate keys). TLS 1.2 is the minimum and
+    # TLS 1.3 is used when the phone supports it ("TLSv1.2+").
+    #
+    # Phones are not asked for a certificate: they authenticate with SIP digest
+    # like on UDP, TLS protects the transport.
+    [server:default]
+    method = TLSv1.2+
+    certificate = /etc/hello-tls/tls.crt
+    private_key = /etc/hello-tls/tls.key
+    verify_certificate = no
+    require_certificate = no
+
+    # Connections Kamailio itself opens (it normally reuses the phone's own).
+    [client:default]
+    method = TLSv1.2+
+    verify_certificate = no
+    require_certificate = no
   dispatcher.list: |
     # Hello SIP edge dispatcher destinations (lab twin:
     # deploy/kamailio/dispatcher.list). Format:
@@ -856,7 +930,7 @@ spec:
         # its dispatcher.list. Kamailio reads its config only at startup and
         # Sync does not restart pods on a ConfigMap change, so this rolls the
         # pod whenever the config changes. test/deploy enforces it.
-        hello.watteel.com/kamailio-config-sha256: c2181bb13ef995400c3f323fb0de08b660b9174452d0addbee1c8afbd24d9559
+        hello.watteel.com/kamailio-config-sha256: 31302b7cc705eb5fc24de3380a674a116483a66c9d0e251e32434b8eb3cc264d
     spec:
       # Phones must reach Kamailio with no NAT in between: through a NodePort
       # Cilium SNATs them, Kamailio records the SNAT mapping as the phone's
@@ -960,6 +1034,13 @@ spec:
             - name: KAMAILIO_INVITE_TIMEOUT
               # Above HELLO_SIP_RING_TIMEOUT (10s), as in the lab.
               value: "25000"
+            # SIP over TLS (phone-feature-parity S-14) is switched on by
+            # adding KAMAILIO_TLS_PORT="30509" (and KAMAILIO_PUBLIC_TLS_PORT
+            # "30509") here and the phones-tls port below, in the same change
+            # that pins a kamailio image built with kamailio-tls-modules
+            # (docker/kamailio): an image without tls.so exits on loading it.
+            # The certificate (Certificate hello-sip-tls below) is already
+            # issued and mounted at /etc/hello-tls.
           ports:
             - name: phones
               containerPort: 30508
@@ -993,6 +1074,9 @@ spec:
               # The ctl socket and RPC FIFO (/run/kamailio) must be writable
               # by the kamailio user.
               mountPath: /run/kamailio
+            - name: tls
+              mountPath: /etc/hello-tls
+              readOnly: true
           resources:
             requests:
               cpu: 50m
@@ -1006,6 +1090,52 @@ spec:
             defaultMode: 420
         - name: run
           emptyDir: {}
+        - name: tls
+          secret:
+            secretName: hello-sip-tls
+            defaultMode: 288
+            # Absent until cert-manager has issued it; only read when TLS is
+            # on, so the pod starts either way.
+            optional: true
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: hello-sip-tls
+  namespace: hello
+  labels:
+    app.kubernetes.io/name: hello
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/component: edge
+    app.kubernetes.io/managed-by: kuvryn-sync
+spec:
+  # The SIP-over-TLS certificate Kamailio presents to phones (S-14), issued
+  # by the Hello CA (cluster-ca) that phones already trust through the CA
+  # push of provisioning. Phones connect to the node address, so it is an IP
+  # SAN; the DNS names serve a phone provisioned with a name. RSA, because
+  # the older phone TLS stacks handle it everywhere. Renewed 30 days before
+  # expiry: cert-manager keeps serving the old certificate if a renewal
+  # fails, and the alert in docs/tls.md fires 14 days before it runs out.
+  secretName: hello-sip-tls
+  issuerRef:
+    name: cluster-ca
+    kind: ClusterIssuer
+  commonName: hello.kw.watteel.lab
+  dnsNames:
+    - hello.kw.watteel.lab
+    - sip.hello.kw.watteel.lab
+  ipAddresses:
+    - 192.168.10.101
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
 ---
 apiVersion: v1
 kind: Service
@@ -1085,7 +1215,7 @@ spec:
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-f64d2393f385ac1c3e18299c8ae868f629103853
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-80a5de85636c5b3b58ec317e1c37c0a9a3bca31e
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1307,7 +1437,7 @@ spec:
       terminationGracePeriodSeconds: 270
       containers:
         - name: hello-sip
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-f64d2393f385ac1c3e18299c8ae868f629103853
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-sip:sha-80a5de85636c5b3b58ec317e1c37c0a9a3bca31e
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1502,7 +1632,7 @@ spec:
           # hello-migrate); a Sync-managed Job would need RBAC the deployer
           # does not have, so it runs as an init container instead. The retry
           # loop absorbs PostgreSQL and the Sentinel quorum still coming up.
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-f64d2393f385ac1c3e18299c8ae868f629103853
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-80a5de85636c5b3b58ec317e1c37c0a9a3bca31e
           command:
             - sh
             - -c
@@ -1549,7 +1679,7 @@ spec:
               value: "false"
       containers:
         - name: hello-control
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-f64d2393f385ac1c3e18299c8ae868f629103853
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-control:sha-80a5de85636c5b3b58ec317e1c37c0a9a3bca31e
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.
@@ -1841,7 +1971,7 @@ spec:
     spec:
       containers:
         - name: hello-ui
-          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-ui:sha-f64d2393f385ac1c3e18299c8ae868f629103853
+          image: ant.kw.watteel.lab/oci-hosted/azrtydxb/hello-ui:sha-80a5de85636c5b3b58ec317e1c37c0a9a3bca31e
           # Pinned to the tag ci.yaml published for commit 1c3fe03 (the
           # full sha tag; the registry keeps no short tags). Later: an
           # immutable repository@sha256:... digest.

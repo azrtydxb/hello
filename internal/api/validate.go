@@ -428,7 +428,7 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 	case "sip_uri":
 		switch {
 		case strings.HasPrefix(strings.ToLower(in.Destination), "sips:"):
-			f.add("destination", "sips: needs SIP over TLS, and Hello is UDP-only in this phase; use a sip: URI")
+			f.add("destination", "sips: is not supported for an external destination: Hello reaches it over UDP only (phones may use sips: and TLS, see docs/tls.md); use a sip: URI")
 		case !validSIPURI(in.Destination):
 			f.add("destination", "must be a sip: URI of at most 255 characters")
 		}

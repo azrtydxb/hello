@@ -4,6 +4,7 @@ package api
 // CSV phone import (plan contract 7).
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -822,14 +823,8 @@ func (s *server) importPhones(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "dryRun must be true or false")
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxImportBytes))
-	if err != nil {
-		badRequest(w, "the CSV body is larger than 1 MiB")
-		return
-	}
-	recs, err := readCSV(body)
-	if err != nil {
-		badRequest(w, err.Error())
+	recs, ok := phoneImportRecords(w, r)
+	if !ok {
 		return
 	}
 	rows, inputs, err := s.checkImport(r.Context(), recs)
@@ -837,7 +832,7 @@ func (s *server) importPhones(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "import phones: check", err)
 		return
 	}
-	ok := true
+	ok = true
 	for _, row := range rows {
 		ok = ok && len(row.Errors) == 0
 	}
@@ -858,6 +853,59 @@ func (s *server) importPhones(w http.ResponseWriter, r *http.Request) {
 	}
 	resp["created"] = len(created)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// phoneImportJSON is the JSON form of the import: the same columns as the
+// CSV, one object per row, checked by the same code.
+type phoneImportJSON struct {
+	Rows []struct {
+		MAC       string   `json:"mac"`
+		Vendor    string   `json:"vendor"`
+		Model     string   `json:"model"`
+		Extension string   `json:"extension"`
+		Label     string   `json:"label"`
+		BLF       []string `json:"blf"`
+	} `json:"rows"`
+}
+
+// phoneImportRecords reads the rows of an import, from text/csv (the
+// console) or JSON (agents), as the records checkImport validates. It
+// answers 400 itself and reports false.
+func phoneImportRecords(w http.ResponseWriter, r *http.Request) ([]csvRecord, bool) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxImportBytes))
+	if err != nil {
+		badRequest(w, "the body is larger than 1 MiB")
+		return nil, false
+	}
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		recs, err := readCSV(body)
+		if err != nil {
+			badRequest(w, err.Error())
+			return nil, false
+		}
+		return recs, true
+	}
+	var in phoneImportJSON
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		badRequest(w, "invalid JSON body: "+jsonProblem(err))
+		return nil, false
+	}
+	switch {
+	case len(in.Rows) == 0:
+		badRequest(w, "rows has no rows")
+		return nil, false
+	case len(in.Rows) > maxImportRows:
+		badRequest(w, fmt.Sprintf("at most %d rows per import", maxImportRows))
+		return nil, false
+	}
+	recs := make([]csvRecord, len(in.Rows))
+	for i, row := range in.Rows {
+		// "line" of a JSON row is its 1-based position in rows.
+		recs[i] = csvRecord{line: i + 1, fields: []string{row.MAC, row.Vendor, row.Model, row.Extension, row.Label, strings.Join(row.BLF, ";")}}
+	}
+	return recs, true
 }
 
 type csvRecord struct {

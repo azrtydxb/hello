@@ -8,6 +8,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -581,4 +582,39 @@ func TestObjectStoreFailures(t *testing.T) {
 	c.header.Del("Content-Type")
 	// An unknown extension has no box to change.
 	c.must(http.StatusNotFound, "PUT", "/api/v1/extensions/999999/voicemail", map[string]string{"email": ""})
+}
+
+// TestAnnouncementJSONUpload: the JSON form {name, audioBase64} stores the
+// same audio as the multipart form, with the same validation, so an agent
+// can upload and replace announcements. It fails if a duplicate name
+// overwrites, a non-WAV or oversize payload is stored, or the name changes.
+func TestAnnouncementJSONUpload(t *testing.T) {
+	objs := newMemObjects()
+	e := newPBXEnv(t, objs)
+	c := e.login()
+	c.header.Set("Content-Type", "application/json")
+	b64 := base64.StdEncoding.EncodeToString(wav)
+
+	created := c.must(http.StatusCreated, "POST", "/api/v1/announcements", map[string]any{"name": "welcome", "audioBase64": b64}).json(t)
+	if created["name"] != "welcome" || !objs.has("ann:ann/welcome.wav") {
+		t.Fatalf("created = %v, objects %v", created, objs.objs)
+	}
+	c.must(http.StatusConflict, "POST", "/api/v1/announcements", map[string]any{"name": "welcome", "audioBase64": b64})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/announcements", map[string]any{"name": "bad name", "audioBase64": b64})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/announcements", map[string]any{"name": "other", "audioBase64": base64.StdEncoding.EncodeToString([]byte("not audio"))})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/announcements", map[string]any{"name": "other"})
+	c.must(http.StatusBadRequest, "POST", "/api/v1/announcements", map[string]any{"name": "other", "audioBase64": b64, "file": "x"})
+	if objs.has("ann:ann/other.wav") {
+		t.Fatal("a refused upload stored audio")
+	}
+
+	path := fmt.Sprintf("/api/v1/announcements/%v", created["id"])
+	longer := media.EncodeWAV(make([]byte, 3200), 8000)
+	c.must(http.StatusOK, "PUT", path, map[string]any{"audioBase64": base64.StdEncoding.EncodeToString(longer)})
+	if got := objs.objs["ann:ann/welcome.wav"]; len(got) <= len(wav) {
+		t.Fatalf("the audio was not replaced (%d bytes)", len(got))
+	}
+	c.must(http.StatusBadRequest, "PUT", path, map[string]any{"name": "renamed", "audioBase64": b64})
+	c.must(http.StatusBadRequest, "PUT", path, map[string]any{"audioBase64": base64.StdEncoding.EncodeToString([]byte("not audio"))})
+	c.must(http.StatusNotFound, "PUT", "/api/v1/announcements/999999", map[string]any{"audioBase64": b64})
 }
