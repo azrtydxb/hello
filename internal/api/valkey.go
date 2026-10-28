@@ -415,3 +415,87 @@ func (l *LazyValkey) AvgHandle(ctx context.Context, name string) (time.Duration,
 	}
 	return q.AvgHandle(ctx, name)
 }
+
+// Click-to-call (spec integrations I-37): the queue, state, idempotency keys
+// and limit counters, through the connected client.
+
+// EnqueueOriginate implements OriginateLive.
+func (l *LazyValkey) EnqueueOriginate(ctx context.Context, r livestate.OriginateRequest) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.live.EnqueueOriginate(ctx, r)
+}
+
+// PutOriginateState implements OriginateLive.
+func (l *LazyValkey) PutOriginateState(ctx context.Context, st livestate.OriginateState) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.live.PutOriginateState(ctx, st)
+}
+
+// GetOriginateState implements OriginateLive.
+func (l *LazyValkey) GetOriginateState(ctx context.Context, id string) (livestate.OriginateState, bool, error) {
+	c, err := l.get()
+	if err != nil {
+		return livestate.OriginateState{}, false, err
+	}
+	return c.live.GetOriginateState(ctx, id)
+}
+
+// CancelOriginate implements OriginateLive.
+func (l *LazyValkey) CancelOriginate(ctx context.Context, id string) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.live.CancelOriginate(ctx, id)
+}
+
+// LookupIdempotent implements OriginateLive.
+func (l *LazyValkey) LookupIdempotent(ctx context.Context, key string) (string, bool, error) {
+	c, err := l.get()
+	if err != nil {
+		return "", false, err
+	}
+	return c.live.LookupIdempotent(ctx, key)
+}
+
+// Idempotent implements OriginateLive.
+func (l *LazyValkey) Idempotent(ctx context.Context, key, id string) (string, bool, error) {
+	c, err := l.get()
+	if err != nil {
+		return "", false, err
+	}
+	return c.live.Idempotent(ctx, key, id)
+}
+
+// Incr implements originate.Backend.
+func (l *LazyValkey) Incr(ctx context.Context, key string, ttl time.Duration) (int64, error) {
+	c, err := l.get()
+	if err != nil {
+		return 0, err
+	}
+	return c.live.Incr(ctx, key, ttl)
+}
+
+// AcquireOriginateSetup implements originate.Backend.
+func (l *LazyValkey) AcquireOriginateSetup(ctx context.Context, extension, id string, ttl time.Duration) (bool, error) {
+	c, err := l.get()
+	if err != nil {
+		return false, err
+	}
+	return c.live.AcquireOriginateSetup(ctx, extension, id, ttl)
+}
+
+// ReleaseOriginateSetup implements originate.Backend.
+func (l *LazyValkey) ReleaseOriginateSetup(ctx context.Context, extension, id string) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.live.ReleaseOriginateSetup(ctx, extension, id)
+}

@@ -36,6 +36,12 @@ const (
 	KindConference = "conference"
 )
 
+// Call origins (migration 00056).
+const (
+	OriginPhone = "phone"
+	OriginAPI   = "api"
+)
+
 // Termination sides.
 const (
 	SideCaller = "caller"
@@ -75,6 +81,11 @@ type Record struct {
 	RTPJitterMs *float64
 	// Kind is call (default), page or intercom.
 	Kind string
+	// Origin is phone (default: dialled at a phone) or api (a click-to-call
+	// request, spec integrations I-37); OriginClient names the OAuth client
+	// or token id behind an api call (migration 00056).
+	Origin       string
+	OriginClient string
 	// PageLegs is a page's outcome per member (migration 00014), one row
 	// each; empty for any other call.
 	PageLegs []PageLeg
@@ -186,9 +197,9 @@ const insert = `WITH c AS (INSERT INTO cdrs (correlation_id, sip_call_id, source
     start_time, ring_time, answer_time, end_time, duration_ms, billable_ms,
     sip_node, media_mode, final_status, termination_side, failure_reason,
     direction, original_destination, rewritten_destination, route_name, trunk_name, trace,
-    rtp_packets, rtp_lost, rtp_jitter_ms, kind)
+    rtp_packets, rtp_lost, rtp_jitter_ms, kind, origin, origin_client)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+    $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $28, $29)
 ON CONFLICT (correlation_id) DO NOTHING RETURNING id),
 p AS (INSERT INTO cdr_page_legs (cdr_id, position, extension, device, result)
 SELECT c.id, l.ord, l.leg->>'extension', l.leg->>'device', l.leg->>'result'
@@ -293,11 +304,15 @@ func (w *Writer) write(ctx context.Context, r Record) error {
 	if err != nil {
 		return err
 	}
+	origin := r.Origin
+	if origin == "" {
+		origin = OriginPhone
+	}
 	_, err = w.db.Exec(wctx, insert, r.CorrelationID, r.SIPCallID, r.Source, r.Destination,
 		r.StartTime, nullTime(r.RingTime), nullTime(r.AnswerTime), r.EndTime, r.DurationMs, r.BillableMs,
 		r.SIPNode, media, r.FinalStatus, r.TerminationSide, r.FailureReason,
 		direction, r.OriginalDestination, r.RewrittenDestination, r.Route, r.Trunk, string(tj),
-		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, string(lj), string(qj))
+		r.RTPPackets, r.RTPLost, r.RTPJitterMs, kind, string(lj), string(qj), origin, r.OriginClient)
 	if err != nil {
 		return err
 	}

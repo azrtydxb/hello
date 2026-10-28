@@ -72,6 +72,9 @@ type call struct {
 	gfDepth  int
 	gfChain  []string
 	stageSeq int // the current forwarding stage; legs carry the stage they belong to
+	// orig is the click-to-call this call carries (originate.go); nil for
+	// every other call.
+	orig *originated
 	// invTx is the caller INVITE's server transaction, kept so a
 	// callee-less answer (voicemail) can respond without sipgo's dialog
 	// ACK-wait; vmTag is the To tag that answer carries.
@@ -388,6 +391,14 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	c := s.newCall(req)
 	c.callerNum, c.callerName, c.callerDevice = dev.Extension, dev.ExtensionName, dev.Username
+	s.routeCaller(c, req, tx, snap, dev)
+}
+
+// routeCaller carries an authenticated caller's INVITE to what it dialled:
+// the special numbers first, then routing. It is the part of handleInvite a
+// click-to-call (originate.go) shares, whose caller is a phone that has
+// already answered our own INVITE.
+func (s *Server) routeCaller(c *call, req *sip.Request, tx sip.ServerTransaction, snap *snapshot.Snapshot, dev snapshot.Device) {
 	// A paging group's code (Phase E, spec P-12) pages its members; the
 	// store keeps page codes from colliding with feature codes.
 	if g, ok := snap.PagingGroup(c.dialled); ok {
@@ -608,6 +619,9 @@ func (c *call) begin(req *sip.Request, tx sip.ServerTransaction) bool {
 	if err != nil {
 		s.respond(tx, req, sip.StatusBadRequest, "Bad Request")
 		return false
+	}
+	if ot, ok := tx.(*originateTx); ok {
+		ot.attach(dss) // the phone's dialog identifiers, not ours
 	}
 	c.dss = dss
 	c.mu.Lock()
@@ -1141,6 +1155,12 @@ func (c *call) endBoth(reason string) {
 }
 
 func (c *call) byeA() {
+	if c.orig != nil {
+		// A click-to-call's phone is reached through the dialog our own
+		// INVITE made, with its route set.
+		c.orig.byeAgent()
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
 	if err := c.dss.Bye(ctx); err != nil {
@@ -1296,6 +1316,10 @@ func (c *call) record(status int, side, reason, result string) {
 	c.mu.Unlock()
 	if peer {
 		return // the node that reached the caller writes the participation's CDR
+	}
+	if c.orig != nil {
+		r.Origin, r.OriginClient = cdr.OriginAPI, c.orig.rq.Client
+		defer c.orig.callEnded(result)
 	}
 	c.s.deps.CDRs.Enqueue(r)
 }
@@ -1808,6 +1832,12 @@ func (s *Server) handleBye(req *sip.Request, tx sip.ServerTransaction) {
 	w, connected := c.winner, c.connected
 	c.mu.Unlock()
 	switch {
+	case !connected && ref.leg == nil && c.orig != nil && c.dss != nil:
+		// The phone a click-to-call rang first hung up while the
+		// destination still rings: the caller's CANCEL.
+		_ = c.dss.ReadBye(req, tx)
+		s.m.response(sip.StatusOK)
+		c.orig.agentHungUp()
 	case !connected || (w == nil && ref.leg != nil):
 		s.respond(tx, req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist")
 	case ref.leg == nil:

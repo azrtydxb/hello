@@ -82,6 +82,9 @@ func (c *call) eventDataLocked(ext string) events.Data {
 		CallID: c.id, Direction: c.direction, Extension: ext, From: from, To: to,
 		Trunk: c.trunkName, StartedAt: c.start.UTC(),
 	}
+	if c.orig != nil {
+		d.OriginateID = c.orig.rq.ID
+	}
 	if !c.answerTime.IsZero() {
 		d.AnsweredAt = c.answerTime.UTC()
 	}

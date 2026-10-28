@@ -64,6 +64,7 @@ import { Phones } from "./pages/Phones";
 import { ProvFirmware } from "./pages/ProvFirmware";
 import { ProvSettings } from "./pages/ProvSettings";
 import { ProvTemplates } from "./pages/ProvTemplates";
+import { Dial } from "./pages/Dial";
 import { Placeholder } from "./pages/Placeholder";
 import { FlowCanvases } from "./pages/FlowCanvases";
 import { Users } from "./pages/Users";
@@ -106,6 +107,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/phones": Phones,
   "/onboarding": Onboarding,
   "/phonebooks": Phonebooks,
+  "/dial": Dial,
   "/me/contacts": MyContacts,
   "/me/messages": MyMessages,
   "/messages": Messages,

@@ -20,6 +20,7 @@ import (
 	"github.com/azrtydxb/hello/internal/auth"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/mailer"
+	"github.com/azrtydxb/hello/internal/originate"
 	"github.com/azrtydxb/hello/internal/phonebook"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/routing"
@@ -266,6 +267,15 @@ type Config struct {
 	// Events is the call-event pipeline (stream, history, tickets); nil
 	// answers 503 on the event routes.
 	Events EventService
+	// Originate and OriginateLive carry click-to-call (spec integrations
+	// I-37): its requests and policy in PostgreSQL, its queue, live state
+	// and limit counters in Valkey; nil answers 503. OriginateLimits
+	// overrides the default abuse limits (tests); OriginateMetrics counts
+	// the requests the limits refused.
+	Originate        OriginateStore
+	OriginateLive    OriginateLive
+	OriginateLimits  *originate.Limits
+	OriginateMetrics *OriginateMetrics
 	// Parked is the live view of the occupied park slots; nil answers 503.
 	Parked ParkedLive
 	// Objects is the voicemail audio store; nil makes the audio routes and

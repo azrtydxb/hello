@@ -37,30 +37,30 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 
 ## integrations
 
-| #   | Item                                           | Status      |
-| --- | ---------------------------------------------- | ----------- |
-| P1  | Call events: stream, integration_events, SSE   | done (#205) |
-| P2  | Webhooks: signing, retries, DLQ                | wip (#222)  |
-| P3  | Click-to-call: originate API, /dial, tel:      | todo        |
-| P4  | Recording links and lookup API                 | todo        |
-| P5  | Browser extension (MV3), fixed signing key     | todo        |
-| P6  | HubSpot and internal/crm framework             | todo        |
-| P7  | Zapier                                         | todo        |
-| P8  | Directory engine, AD/LDAP                      | todo        |
-| P9  | Google Workspace and Entra connectors          | todo        |
-| P10 | SCIM 2.0                                       | todo        |
-| P11 | OIDC SSO, LDAP bind login                      | todo        |
-| P12 | Auto-provisioning extensions from a range      | todo        |
-| P13 | Salesforce Open CTI                            | todo        |
-| P14 | Pipedrive                                      | todo        |
-| P15 | Zoho CRM                                       | todo        |
-| P16 | Zendesk, Freshdesk                             | todo        |
-| P17 | Slack, n8n, Make                               | todo        |
-| P18 | Outlook/Google contacts lookup, calendar DND   | todo        |
-| P19 | Dynamics 365 CIF                               | todo        |
-| P20 | ConnectWise, Autotask, HaloPSA, Clio           | todo        |
-| P21 | Odoo, Bitrix24                                 | todo        |
-| P22 | Teams Direct Routing guide (shared with WR 13) | todo        |
+| #   | Item                                           | Status                                       |
+| --- | ---------------------------------------------- | -------------------------------------------- |
+| P1  | Call events: stream, integration_events, SSE   | done (#205)                                  |
+| P2  | Webhooks: signing, retries, DLQ                | wip (#222)                                   |
+| P3  | Click-to-call: originate API, /dial, tel:      | wip (#234); ring tag on leg A waits for #204 |
+| P4  | Recording links and lookup API                 | todo                                         |
+| P5  | Browser extension (MV3), fixed signing key     | todo                                         |
+| P6  | HubSpot and internal/crm framework             | todo                                         |
+| P7  | Zapier                                         | todo                                         |
+| P8  | Directory engine, AD/LDAP                      | todo                                         |
+| P9  | Google Workspace and Entra connectors          | todo                                         |
+| P10 | SCIM 2.0                                       | todo                                         |
+| P11 | OIDC SSO, LDAP bind login                      | todo                                         |
+| P12 | Auto-provisioning extensions from a range      | todo                                         |
+| P13 | Salesforce Open CTI                            | todo                                         |
+| P14 | Pipedrive                                      | todo                                         |
+| P15 | Zoho CRM                                       | todo                                         |
+| P16 | Zendesk, Freshdesk                             | todo                                         |
+| P17 | Slack, n8n, Make                               | todo                                         |
+| P18 | Outlook/Google contacts lookup, calendar DND   | todo                                         |
+| P19 | Dynamics 365 CIF                               | todo                                         |
+| P20 | ConnectWise, Autotask, HaloPSA, Clio           | todo                                         |
+| P21 | Odoo, Bitrix24                                 | todo                                         |
+| P22 | Teams Direct Routing guide (shared with WR 13) | todo                                         |
 
 ## messaging-channels
 

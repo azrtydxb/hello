@@ -47,10 +47,15 @@ type Metrics struct {
 	// is incremented by the SMTP worker in hello-control through this shared
 	// registry. PresenceSubscriptions counts this node's live dialog
 	// subscriptions; HoldActive the calls currently held on this node.
-	VoicemailMessages     *prometheus.CounterVec // result
-	VoicemailStorage      prometheus.Gauge
-	VoicemailEmail        *prometheus.CounterVec // result
-	Transfers             *prometheus.CounterVec // kind, result
+	VoicemailMessages *prometheus.CounterVec // result
+	VoicemailStorage  prometheus.Gauge
+	VoicemailEmail    *prometheus.CounterVec // result
+	Transfers         *prometheus.CounterVec // kind, result
+	// Originates counts click-to-call requests by how they ended (spec
+	// integrations I-37): connected, or the failure reason. OriginateSetup is
+	// the time from taking a request to the target answering.
+	Originates            *prometheus.CounterVec // result
+	OriginateSetup        prometheus.Histogram
 	Parks                 *prometheus.CounterVec // kind, result
 	Forwarded             *prometheus.CounterVec // kind
 	GroupCalls            *prometheus.CounterVec // group, strategy, result
@@ -198,6 +203,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m.Transfers = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_transfers_total", Help: "Blind and attended transfers by kind and result.",
 	}, []string{"kind", "result"})
+	m.Originates = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hello_originate_total", Help: "Click-to-call requests by result: connected, or the reason they failed.",
+	}, []string{"result"})
+	m.OriginateSetup = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name: "hello_originate_setup_seconds", Help: "Time from a node taking a click-to-call request to the target answering.",
+		Buckets: []float64{1, 2, 5, 10, 15, 20, 30, 45, 60},
+	})
 	m.Parks = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hello_park_total", Help: "Call park and pickup operations by kind (park, retrieve, return, pickup) and result.",
 	}, []string{"kind", "result"})
@@ -269,7 +281,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	})
 	reg.MustRegister(m.Registrations, m.ActiveCalls, m.Calls, m.Requests, m.Responses,
 		m.TrunkStatus, m.TrunkRegistered, m.TrunkOptionsLatency, m.TrunkCalls, m.TrunkActiveCalls, m.TrunkSlotOvercommit, m.RouteDecision,
-		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Parks, m.Forwarded, m.GroupCalls,
+		m.VoicemailMessages, m.VoicemailStorage, m.VoicemailEmail, m.Transfers, m.Originates, m.OriginateSetup, m.Parks, m.Forwarded, m.GroupCalls,
 		m.PresenceSubscriptions, m.MWINotify, m.CheckSync, m.MessagesIn, m.MessageDeliveries, m.HoldActive, m.PagingTotal, m.PagingLegs, m.IntercomTotal, m.IVRTotal, m.TimeConditionTotal,
 		m.QueueWaiting, m.QueueWait, m.QueueAbandoned, m.QueueCalls, m.QueueAgents,
 		m.DialogReplicated, m.DialogTakeovers, m.ZombieCalls)
