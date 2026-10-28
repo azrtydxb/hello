@@ -82,12 +82,12 @@ func listPickupGroups(ctx context.Context, q querier, where string, args ...any)
 
 // ListPickupGroups returns every pickup group.
 func (s *Store) ListPickupGroups(ctx context.Context) ([]PickupGroup, error) {
-	return listPickupGroups(ctx, s.db, "")
+	return listPickupGroups(ctx, s.q(ctx), "")
 }
 
 // GetPickupGroup returns one pickup group.
 func (s *Store) GetPickupGroup(ctx context.Context, id int64) (PickupGroup, error) {
-	gs, err := listPickupGroups(ctx, s.db, `WHERE g.id = $1`, id)
+	gs, err := listPickupGroups(ctx, s.q(ctx), `WHERE g.id = $1`, id)
 	if err != nil {
 		return PickupGroup{}, err
 	}

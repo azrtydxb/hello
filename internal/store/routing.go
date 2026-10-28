@@ -184,12 +184,12 @@ func listTrunks(ctx context.Context, q querier, where, lock string, args ...any)
 
 // ListTrunks returns every trunk ordered by id.
 func (s *Store) ListTrunks(ctx context.Context) ([]Trunk, error) {
-	return listTrunks(ctx, s.db, "", "")
+	return listTrunks(ctx, s.q(ctx), "", "")
 }
 
 // GetTrunk returns one trunk.
 func (s *Store) GetTrunk(ctx context.Context, id int64) (Trunk, error) {
-	return getTrunk(ctx, s.db, id, "")
+	return getTrunk(ctx, s.q(ctx), id, "")
 }
 
 func getTrunk(ctx context.Context, q querier, id int64, suffix string) (Trunk, error) {
@@ -465,12 +465,12 @@ func listOutbound(ctx context.Context, q querier, where, lock string, args ...an
 
 // ListOutboundRoutes returns every outbound route in position order.
 func (s *Store) ListOutboundRoutes(ctx context.Context) ([]OutboundRoute, error) {
-	return listOutbound(ctx, s.db, "", "")
+	return listOutbound(ctx, s.q(ctx), "", "")
 }
 
 // GetOutboundRoute returns one outbound route.
 func (s *Store) GetOutboundRoute(ctx context.Context, id int64) (OutboundRoute, error) {
-	return getOutbound(ctx, s.db, id, "")
+	return getOutbound(ctx, s.q(ctx), id, "")
 }
 
 func getOutbound(ctx context.Context, q querier, id int64, suffix string) (OutboundRoute, error) {
@@ -713,12 +713,12 @@ func listInbound(ctx context.Context, q querier, where, lock string, args ...any
 
 // ListInboundRoutes returns every inbound route in position order.
 func (s *Store) ListInboundRoutes(ctx context.Context) ([]InboundRoute, error) {
-	return listInbound(ctx, s.db, "", "")
+	return listInbound(ctx, s.q(ctx), "", "")
 }
 
 // GetInboundRoute returns one inbound route.
 func (s *Store) GetInboundRoute(ctx context.Context, id int64) (InboundRoute, error) {
-	return getInbound(ctx, s.db, id, "")
+	return getInbound(ctx, s.q(ctx), id, "")
 }
 
 func getInbound(ctx context.Context, q querier, id int64, suffix string) (InboundRoute, error) {
@@ -879,6 +879,9 @@ type RoutingSnapshot struct {
 // RoutingConfig loads the routing configuration in one read-only,
 // repeatable-read transaction, so it is consistent and writes nothing.
 func (s *Store) RoutingConfig(ctx context.Context) (RoutingSnapshot, error) {
+	if b := s.batchOf(ctx); b != nil {
+		return s.loadRouting(ctx, b.tx)
+	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return RoutingSnapshot{}, err
