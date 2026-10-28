@@ -131,10 +131,15 @@ func bindRTP() (*net.UDPConn, error) {
 		}
 		p := lo + int(binary.BigEndian.Uint16(b[:]))%(hi-lo+1)
 		if c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: p}); err == nil {
+			markRTP(c)
 			return c, nil
 		}
 	}
-	return net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	if err == nil {
+		markRTP(c)
+	}
+	return c, err
 }
 
 // anchorSession is the Session implementation over one UDP socket.

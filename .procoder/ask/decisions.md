@@ -854,3 +854,35 @@ Choices:
 - Every key type is unverified on a phone and marked "(verify)" in the templates
   (Yealink type 3, Snom `transfer`, Fanvil memory key `/f`, Poly efk macro).
   The provclient Fanvil parser now counts only `/b` memory keys as BLF.
+
+## DSCP marking, parity item 28 (S-21) (2026-10-27)
+
+Built to the spec: SIP socket DSCP 26, relay/anchor/fanout/party RTP sockets
+DSCP 46, `HELLO_DSCP_SIP` / `HELLO_DSCP_RTP` (0 to 63, validated), Grandstream
+P1558 / P1559 from the same two values.
+
+- RTP DSCP is a process-wide setting (`media.SetRTPDSCP`, default 46) read at
+  every bind, not a parameter of each constructor: one value per process, and
+  the six bind sites keep their signatures.
+- hello-control reads the same two env vars so phones are provisioned with the
+  values hello-sip marks with; set both services alike.
+- A refused mark (platform, sandbox) is logged once and never fails SIP or a
+  call.
+- Originated SIP and the mark. Verified by test: sipgo copies the client's
+  forced local address (the listening socket) into a request only when no
+  request options are passed. The six call sites in `edge.go` and
+  `takeover.go` that pass `ClientRequestAddVia` got an ephemeral socket of
+  sipgo's own (v1.6.0 has no socket-control hook or dialer Control), which
+  nothing can mark and which was not on the SIP port. They now use
+  `Server.addViaFromListener` / `fromListener`, which set the request's local
+  address to the listener, so all originated SIP leaves from the marked
+  socket (`TestDSCPOutboundOnMarkedSocket`). A forked sipgo was rejected as
+  too heavy for this.
+- Other vendors, from the vendors' administrator guides (nothing in this repo
+  documents them): Yealink `static.network.qos.signaltos` / `audiotos`, Poly
+  `qos.ip.callControl.dscp` / `qos.ip.rtp.dscp`, written like Grandstream,
+  unverified on hardware. Snom and Fanvil: no documented DSCP provisioning key
+  could be confirmed (snom uses TOS-byte settings whose exact names are not
+  in this repo; Fanvil's are device-specific), so none is written rather than
+  guessed. Revisit with the vendor guides. Site overrides go through S-12.
+- No migration, no API or UI change; TCP/TLS SIP is not served by hello-sip.
