@@ -191,6 +191,15 @@ type Prov struct {
 	// SIPServer (HELLO_PROV_SIP_SERVER, default HELLO_SIP_ADVERTISED_ADDR)
 	// is the host:port rendered configs register with.
 	SIPServer string
+	// SIPTLSServer (HELLO_PROV_SIP_TLS_SERVER, host:port) is the SIP-over-TLS
+	// address rendered configs register with for the models SIPTLSModels
+	// selects; empty keeps every phone on UDP (phone-feature-parity S-14).
+	SIPTLSServer string
+	// SIPTLSModels (HELLO_PROV_SIP_TLS_MODELS, comma separated, default
+	// "grandstream:WP") are the vendors ("grandstream") or vendor model
+	// prefixes ("grandstream:WP8") provisioned for TLS once SIPTLSServer is
+	// set. Taking a model out switches it back to UDP at its next resync.
+	SIPTLSModels []string
 	// DSCPSIP and DSCPRTP (HELLO_DSCP_SIP, HELLO_DSCP_RTP; defaults 26 and
 	// 46) are the QoS values rendered configs carry, the same ones hello-sip
 	// marks its sockets with (spec phone-feature-parity S-21).
@@ -592,6 +601,8 @@ func (r *reader) prov() Prov {
 	p := Prov{
 		Addr:               r.optional("HELLO_PROV_ADDR", ":8083"),
 		SIPServer:          r.optional("HELLO_PROV_SIP_SERVER", r.getenv("HELLO_SIP_ADVERTISED_ADDR")),
+		SIPTLSServer:       r.getenv("HELLO_PROV_SIP_TLS_SERVER"),
+		SIPTLSModels:       r.tlsModels("HELLO_PROV_SIP_TLS_MODELS", "grandstream:WP"),
 		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
 		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
 		DSCPSIP:            r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP),
@@ -629,6 +640,15 @@ func (r *reader) prov() Prov {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must be an address phones can reach, not unspecified"))
 	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
 		r.fail("HELLO_PROV_SIP_SERVER", errors.New("must end in a port number"))
+	}
+	if p.SIPTLSServer != "" {
+		if host, port, err := net.SplitHostPort(p.SIPTLSServer); err != nil {
+			r.fail("HELLO_PROV_SIP_TLS_SERVER", err)
+		} else if unspecified(host) {
+			r.fail("HELLO_PROV_SIP_TLS_SERVER", errors.New("must be an address phones can reach, not unspecified"))
+		} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			r.fail("HELLO_PROV_SIP_TLS_SERVER", errors.New("must end in a port number"))
+		}
 	}
 	for key, d := range map[string]time.Duration{"HELLO_PROV_TOKEN_GRACE": p.TokenGrace, "HELLO_PROV_AUDIT_RETENTION": p.AuditRetention} {
 		if d == 0 {

@@ -115,6 +115,15 @@ spec:
               value: {{ $prov.publicUrl | quote }}
             - name: HELLO_PROV_SIP_SERVER
               value: {{ default (printf "%s:%v" (required "kamailio.publicHost is required" .Values.kamailio.publicHost) .Values.kamailio.publicPort) $prov.sipServer | quote }}
+            {{- if .Values.kamailio.tls.enabled }}
+            # Phones of the models in sipTlsModels register over TLS (S-14).
+            - name: HELLO_PROV_SIP_TLS_SERVER
+              value: {{ default (printf "%s:%v" (required "kamailio.publicHost is required" .Values.kamailio.publicHost) .Values.kamailio.tls.publicPort) $prov.sipTlsServer | quote }}
+            {{- with $prov.sipTlsModels }}
+            - name: HELLO_PROV_SIP_TLS_MODELS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
             {{- with $prov.trustedProxies }}
             - name: HELLO_PROV_TRUSTED_PROXIES
               value: {{ . | quote }}
