@@ -28,6 +28,9 @@
     <P62>8</P62>
 {{- end}}
     <P32>{{div .Server.Expiry 60}}</P32>
+{{- /* QoS marking (phone-feature-parity S-21): P1558 = Layer 3 QoS for SIP (DSCP), P1559 = Layer 3 QoS for audio (DSCP) [R8x6 TPL]; the same values hello-sip marks its own sockets with (HELLO_DSCP_SIP 26, HELLO_DSCP_RTP 46). UNVERIFIED on hardware. */}}
+    <P1558>{{.Prov.DSCPSIP}}</P1558>
+    <P1559>{{.Prov.DSCPRTP}}</P1559>
 {{- /* MWI (spec S-1): P99 = Subscribe for MWI [R8x6 TPL, R8x6 section 5; WP822 same key]; P33 = voicemail access number, defaulting to Hello's voicemail feature code. */}}
     <P99>1</P99>
     <P33>{{xml (or .Line.VoicemailCode "*97")}}</P33>
