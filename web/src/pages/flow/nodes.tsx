@@ -21,7 +21,7 @@ function PortHandle({ port }: { port: PortView }) {
       id={`${port.direction}:${port.id}`}
       type={port.direction === "in" ? "target" : "source"}
       position={port.direction === "in" ? Position.Left : Position.Right}
-      isConnectable={false}
+      isConnectable={Boolean(port.editable)}
       className={`flow-handle flow-handle--${shape}`}
       style={{
         color: `var(--flow-port-${port.type}, ${style?.colour ?? "currentColor"})`,
@@ -44,7 +44,17 @@ export function FlowNodeView({
   data,
   selected,
 }: NodeProps<Node<FlowNodeData, "flow">>) {
-  const { node, typeLabel, inputs, outputs, warnings, summary, pseudo } = data;
+  const {
+    node,
+    typeLabel,
+    inputs,
+    outputs,
+    warnings,
+    summary,
+    pseudo,
+    draft,
+    errors,
+  } = data;
   const rows = Math.max(inputs.length, outputs.length, 1);
   return (
     <div
@@ -54,6 +64,8 @@ export function FlowNodeView({
         selected ? "flow-node--selected" : "",
         warnings.length > 0 ? "flow-node--warn" : "",
         pseudo ? "flow-node--pseudo" : "",
+        draft ? `flow-node--draft-${draft}` : "",
+        errors.length > 0 ? "flow-node--error" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -64,6 +76,16 @@ export function FlowNodeView({
           {node.label}
         </span>
         {summary && <span className="flow-node__summary">{summary}</span>}
+        {draft && (
+          <span className="flow-node__draft">
+            {draft === "new" ? "New, not applied" : "Changed, not applied"}
+          </span>
+        )}
+        {errors.length > 0 && (
+          <span className="flow-node__error" role="alert">
+            {errors.join(" ")}
+          </span>
+        )}
         {warnings.length > 0 && (
           <span
             className="flow-node__warn"
