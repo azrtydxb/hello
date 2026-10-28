@@ -37,6 +37,7 @@ import {
   IntegrationsOverview,
 } from "./pages/Integrations";
 import { IntegrationEvents } from "./pages/IntegrationEvents";
+import { Webhooks } from "./pages/Webhooks";
 import { AIAssistant } from "./pages/AIAssistant";
 import { AIFindings } from "./pages/AIFindings";
 import { AIProposalDetail } from "./pages/AIProposalDetail";
@@ -145,6 +146,7 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/integrations": IntegrationsOverview,
   "/integrations/api-access": IntegrationsApiAccess,
   "/integrations/events": IntegrationEvents,
+  "/integrations/webhooks": Webhooks,
 };
 
 /** The canvas pulls in the graph library, so it loads on first use. */

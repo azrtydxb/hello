@@ -398,13 +398,14 @@ func (c *call) haHomedState(hom *homedCall) (livestate.DialogState, bool) {
 func (c *call) haContinuity(st *livestate.DialogState) {
 	st.OwnerIncarnation = c.s.cfg.Incarnation
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	st.StartedAt, st.RingAt = c.start, c.ringTime
 	st.Direction, st.Route, st.Trunk, st.Rewritten = c.direction, c.route, c.trunkName, c.rewritten
 	st.Trace = make([]string, 0, len(c.trace))
 	for _, step := range c.trace {
 		st.Trace = append(st.Trace, step.Text)
 	}
+	c.mu.Unlock()
+	st.Events = c.evState() // takes mu itself
 }
 
 // replicate writes the call's recovery state (contract 1). A failure is

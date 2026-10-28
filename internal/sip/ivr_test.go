@@ -33,6 +33,12 @@ func ext(n string) snapshot.IVRDest { return snapshot.IVRDest{Kind: snapshot.IVR
 // audio given) and bad, and voicemail wiring.
 func ivrPBX(t *testing.T, greetSeconds int, menus ...snapshot.IVRMenu) (*testPBX, *fakeObjects) {
 	t.Helper()
+	return ivrPBXWith(t, greetSeconds, nil, menus...)
+}
+
+// ivrPBXWith is ivrPBX with more PBX options (an event sink).
+func ivrPBXWith(t *testing.T, greetSeconds int, opts []pbxOpt, menus ...snapshot.IVRMenu) (*testPBX, *fakeObjects) {
+	t.Helper()
 	objs := &fakeObjects{}
 	_ = objs.Put(context.Background(), "ann/greet.wav", media.EncodeWAV(make([]byte, 16000*greetSeconds), 8000))
 	_ = objs.Put(context.Background(), "ann/bad.wav", media.EncodeWAV(make([]byte, 3200), 8000))
@@ -41,8 +47,8 @@ func ivrPBX(t *testing.T, greetSeconds int, menus ...snapshot.IVRMenu) (*testPBX
 		s.WithIVRMenus(menus)
 		s.WithFeatureCodes([]snapshot.FeatureCode{{Code: "*88", Action: ActionIVR, Argument: menus[0].Name}})
 	}
-	pbx := startPBX(t, threeDevices(), shortRing(2*time.Second), withMedia(false),
-		withFeatures(feats), withVoicemail(newVMStore(), objs))
+	pbx := startPBX(t, threeDevices(), append([]pbxOpt{shortRing(2 * time.Second), withMedia(false),
+		withFeatures(feats), withVoicemail(newVMStore(), objs)}, opts...)...)
 	return pbx, objs
 }
 

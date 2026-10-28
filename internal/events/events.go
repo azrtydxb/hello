@@ -76,7 +76,14 @@ type Data struct {
 	// Direction is internal, inbound or outbound.
 	Direction string `json:"direction,omitempty"`
 	// Extension is the extension the event is about: the subject.
-	Extension  string    `json:"extension,omitempty"`
+	Extension string `json:"extension,omitempty"`
+	// UserID is the user the extension is linked to, resolved when the event
+	// is stored (zero when no user owns the extension).
+	UserID int64 `json:"userId,omitempty"`
+	// Sequence orders the events of one call: it only ever increases for a
+	// callId, across subjects and across a takeover, but is not contiguous.
+	// Delivery order is best effort; receivers order by it.
+	Sequence   int64     `json:"sequence,omitempty"`
 	From       Party     `json:"from"`
 	To         Party     `json:"to"`
 	Trunk      string    `json:"trunk,omitempty"`

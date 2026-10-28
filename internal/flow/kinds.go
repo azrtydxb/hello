@@ -133,6 +133,7 @@ var NonFlowResources = map[string]string{
 	"tokens":                        "API credentials, not call routing",
 	"users":                         "console logins, not call routing",
 	"service-accounts":              "API credentials, not call routing",
+	"webhooks":                      "outbound event receivers, not call routing",
 	"service-accounts/{id}/secrets": "API credentials, not call routing",
 	"prov/templates":                "phone provisioning templates, not call routing",
 	"prov/firmware":                 "phone firmware files, not call routing",

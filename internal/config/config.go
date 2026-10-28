@@ -22,6 +22,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cluster"
 	"github.com/azrtydxb/hello/internal/phonebook"
+	"github.com/azrtydxb/hello/internal/safehttp"
 	"github.com/azrtydxb/hello/internal/secret"
 	"github.com/azrtydxb/hello/internal/telemetry"
 	"github.com/jackc/pgx/v5"
@@ -63,6 +64,11 @@ type Control struct {
 	// EventRetentionDays is how long call events stay in the database
 	// (HELLO_EVENT_RETENTION_DAYS, 1 to 30, default 7).
 	EventRetentionDays int
+	// IntegrationsAllowedCIDRs are the private ranges an outbound webhook
+	// marked allowPrivate may reach (HELLO_INTEGRATIONS_ALLOWED_CIDRS; the
+	// RFC 1918 ranges by default, "none" for no private target at all).
+	// Loopback, link-local and metadata addresses are never allowed.
+	IntegrationsAllowedCIDRs []netip.Prefix
 	// MinIO (voicemail audio) and SMTP (voicemail email). SMTP is optional:
 	// an empty SmtpHost disables the mailer.
 	MinioEndpoint      string
@@ -391,6 +397,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 	if c.EventRetentionDays > 30 {
 		r.fail("HELLO_EVENT_RETENTION_DAYS", errors.New("must be between 1 and 30"))
 	}
+	c.IntegrationsAllowedCIDRs = r.allowedCIDRs("HELLO_INTEGRATIONS_ALLOWED_CIDRS")
 	c.Database = r.database(c.DatabaseURL)
 	c.ValkeyAddr, c.ValkeySentinels, c.ValkeyMaster = r.valkey()
 	c.SecretKey = r.secretKey()
@@ -915,6 +922,30 @@ func (r *reader) valkey() (addr string, sentinels []string, master string) {
 		r.hostPort("HELLO_VALKEY_ADDR", addr)
 	}
 	return addr, sentinels, master
+}
+
+// defaultAllowedCIDRs are the private ranges webhooks may reach unless the
+// administrator says otherwise: RFC 1918 only.
+const defaultAllowedCIDRs = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+// allowedCIDRs reads the private ranges outbound integrations may reach: a
+// comma-separated list inside the private ranges, "none" for no range, the
+// RFC 1918 ranges when unset. A range that overlaps loopback, link-local or
+// multicast space (the cloud metadata address) is refused at start-up.
+func (r *reader) allowedCIDRs(key string) []netip.Prefix {
+	v := strings.TrimSpace(r.getenv(key))
+	switch strings.ToLower(v) {
+	case "none":
+		return nil
+	case "":
+		v = defaultAllowedCIDRs
+	}
+	out, err := safehttp.ParseAllow(v)
+	if err != nil {
+		r.fail(key, err)
+		return nil
+	}
+	return out
 }
 
 // prefixes reads a comma-separated CIDR list.

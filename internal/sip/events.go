@@ -7,6 +7,7 @@ import (
 
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/events"
+	"github.com/azrtydxb/hello/internal/livestate"
 )
 
 // EventSink receives call events (spec integrations I-34); *events.Emitter
@@ -61,7 +62,7 @@ func (c *call) eventData(ext string) events.Data {
 
 func (c *call) eventDataLocked(ext string) events.Data {
 	from := events.Party{Number: c.callerNum, Name: c.callerName}
-	if c.callerDevice != "" {
+	if c.callerExtLocked() != "" {
 		from.Extension = c.callerNum
 	}
 	to := events.Party{Number: c.dialled}
@@ -88,9 +89,52 @@ func (c *call) eventDataLocked(ext string) events.Data {
 	return d
 }
 
-// emit sends one event of type typ about ext.
+// emit sends one event of type typ, stamping the call's next sequence number.
+// The number is taken and the event handed to the sink under one lock, so the
+// events of a call reach the stream in sequence order.
 func (c *call) emit(typ string, d events.Data, extra string) {
+	c.evMu.Lock()
+	defer c.evMu.Unlock()
+	d.Sequence = c.evSeq.Add(1)
 	c.s.deps.Events.Emit(events.New(typ, d, extra, time.Now()))
+}
+
+// takeoverSeqJump is how far a taker moves a call's event sequence past the
+// value its owner last replicated: events the owner emitted after that write
+// and before it died keep lower numbers than the taker's. Sequence numbers
+// only ever increase; they are not contiguous across a takeover.
+const takeoverSeqJump = 100
+
+// evState is the call's event bookkeeping for its replicated dialog record.
+func (c *call) evState() *livestate.DialogEvents {
+	if c.s.deps.Events == nil {
+		return nil
+	}
+	c.mu.Lock()
+	st := &livestate.DialogEvents{AnsweredExt: c.answeredExt, CallerExt: c.callerExtLocked(), Rung: slices.Clone(c.ringedExts)}
+	legacy := c.evLegacy
+	c.mu.Unlock()
+	st.Seq = c.evSeq.Load()
+	if legacy {
+		return nil // keep a legacy call legacy: its state was never complete
+	}
+	return st
+}
+
+// restoreEvents continues a taken-over call's events from the owner's
+// replicated state: who answered and who rang come across, and the sequence
+// resumes past the last number the owner is known to have used. A record
+// without the state (an older owner) leaves the call legacy.
+func (c *call) restoreEvents(st *livestate.DialogEvents) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if st == nil {
+		c.evLegacy = true
+		return
+	}
+	c.answeredExt, c.evCaller = st.AnsweredExt, st.CallerExt
+	c.ringedExts = slices.Clone(st.Rung)
+	c.evSeq.Store(st.Seq + takeoverSeqJump)
 }
 
 // noteRinging reports that ext is ringing (call.ringing, once per extension
@@ -145,7 +189,7 @@ func (c *call) callerExtLocked() string {
 	if c.callerDevice != "" {
 		return c.callerNum
 	}
-	return ""
+	return c.evCaller
 }
 
 // subjectsLocked lists the local extensions the call is about: the caller,
@@ -211,16 +255,18 @@ func (c *call) endEvents(result, reason string, end, answered time.Time, durMs, 
 	subjects := c.subjectsLocked()
 	c.evSubjects = slices.Clone(subjects)
 	answeredExt, callerExt := c.answeredExt, c.callerExtLocked()
-	// A call taken over from another node was answered there: its answer is
-	// not known here, so it is never reported as missed.
-	taken := c.homedCall != nil
+	// A call taken over from a node that did not replicate its event state
+	// (an older release) was answered there and its answer is not known
+	// here, so it is never reported as missed. A taken call whose state came
+	// across is judged like any other.
+	legacy := c.evLegacy
 	datas := make(map[string]events.Data, len(subjects))
 	for _, s := range subjects {
 		datas[s] = c.eventDataLocked(s)
 	}
 	c.mu.Unlock()
 	disp := dispositionOf(result)
-	var completed []events.Event
+	ended := make(map[string]events.Data, len(subjects))
 	for _, s := range subjects {
 		d := datas[s]
 		d.EndedAt, d.DurationMs, d.BillableMs, d.Disposition = end.UTC(), durMs, billMs, disp
@@ -231,26 +277,32 @@ func (c *call) endEvents(result, reason string, end, answered time.Time, durMs, 
 		if answered.IsZero() {
 			d.BillableMs = 0
 		}
+		ended[s] = d
 		c.emit(events.CallEnded, d, "")
-		completed = append(completed, events.New(events.CallCompleted, d, "", end))
 	}
-	if answeredExt != "" || taken {
-		return completed
-	}
-	mr, ok := missedReason(result, reason)
-	if !ok && result == ResultAnswered {
-		mr, ok = missedNoAnswer, true // the caller reached voicemail or an announcement: no person picked up
-	}
-	if !ok {
-		return completed
-	}
-	for _, s := range subjects {
-		if s == callerExt {
-			continue
+	if answeredExt == "" && !legacy {
+		mr, ok := missedReason(result, reason)
+		if !ok && result == ResultAnswered {
+			mr, ok = missedNoAnswer, true // the caller reached voicemail or an announcement: no person picked up
 		}
-		d := datas[s]
-		d.EndedAt, d.DurationMs, d.Disposition, d.Reason = end.UTC(), durMs, disp, mr
-		c.emit(events.CallMissed, d, "")
+		if ok {
+			for _, s := range subjects {
+				if s == callerExt {
+					continue
+				}
+				d := datas[s]
+				d.EndedAt, d.DurationMs, d.Disposition, d.Reason = end.UTC(), durMs, disp, mr
+				c.emit(events.CallMissed, d, "")
+			}
+		}
+	}
+	// The completed events are published later, by the CDR writer; they
+	// take their sequence numbers now so they follow the events above.
+	completed := make([]events.Event, 0, len(subjects))
+	for _, s := range subjects {
+		d := ended[s]
+		d.Sequence = c.evSeq.Add(1)
+		completed = append(completed, events.New(events.CallCompleted, d, "", end))
 	}
 	return completed
 }
@@ -270,6 +322,6 @@ func (s *Server) recordingEvents(c *call, recordingID, durMs int64) {
 	for _, ext := range subjects {
 		d := c.eventData(ext)
 		d.RecordingID, d.DurationMs = recordingID, durMs
-		s.deps.Events.Emit(events.New(events.CallRecordingReady, d, strconv.FormatInt(recordingID, 10), time.Now()))
+		c.emit(events.CallRecordingReady, d, strconv.FormatInt(recordingID, 10))
 	}
 }
