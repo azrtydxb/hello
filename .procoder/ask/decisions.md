@@ -833,6 +833,16 @@ another group) is lifted: the ring state machine can open a new ring stage.
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
 
+message. `conference` was left for a follow-up (see below).
+
+## Routes form: conference destination (2026-10-26)
+
+The inbound route drawer also offers `conference` ("Conference room"). The target
+is chosen from the rooms list (`GET /api/v1/conferences`) and stored as the room
+number, labelled "number · name"; a stored number the list no longer has stays
+selectable as "(not found)". An empty target is refused with "Choose a conference
+room." This closes the gap noted for flow canvas P1.
+
 ## Flow canvas P3: the batch backend (2026-10-26)
 
 Built per `.procoder/specs/flow-canvas.md` (P3). Choices the spec left open:
