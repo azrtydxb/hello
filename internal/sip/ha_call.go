@@ -917,4 +917,5 @@ func (c *call) haArmMaxDuration(answeredAt, start time.Time) {
 	if !c.ended && c.maxTimer == nil {
 		c.maxTimer = time.AfterFunc(left, c.expire)
 	}
+	c.sessionArmHomed()
 }
