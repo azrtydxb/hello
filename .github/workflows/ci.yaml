@@ -666,6 +666,8 @@ jobs:
           # most twice more. Anything else, a chart or workload error included,
           # fails at once and the retry never masks it.
           transient='cannot watch resource|cannot list resource|connection reset by peer|connection refused|etcdserver: (request timed out|leader changed)|TLS handshake timeout|the server is currently unable to handle the request|unexpected EOF'
+          # The upgrade test's call is signalling only, held for minutes with
+          # no RTP: dead-media teardown (HELLO_MEDIA_DEAD_SECONDS, S-9) is off.
           helm_args=(
             -f deploy/helm/hello/values-eval.yaml
             --set global.imageRegistry=hello.local
@@ -674,6 +676,8 @@ jobs:
             --set sip.hostNetwork=false
             --set sip.mediaAnchorHost=podIP
             --set sip.trustedProxies=10.0.0.0/8
+            --set 'sip.extraEnv[0].name=HELLO_MEDIA_DEAD_SECONDS'
+            --set-string 'sip.extraEnv[0].value=0'
             --set kamailio.hostNetwork=false
             --set kamailio.service.type=NodePort
             --set kamailio.service.nodePort=30508
