@@ -333,8 +333,10 @@ jobs:
     # container. The go job must be green first: the lab builds the same
     # images from the same source.
     # Integration tier: the compose lab is far too slow for the PR path, so it
-    # runs only on the nightly schedule and on manual dispatch.
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    # runs only on the nightly schedule and on manual dispatch. The go job is
+    # skipped on dispatch, which would skip this job too; so a dispatch runs
+    # lab regardless, while the schedule still requires go to be green.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && needs.go.result == 'success')) }}
     needs: [go]
     runs-on: arc-azrtydxb
     timeout-minutes: 60
