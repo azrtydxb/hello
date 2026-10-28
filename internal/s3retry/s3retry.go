@@ -52,17 +52,13 @@ func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	r2 := req.Clone(req.Context())
 	r2.Body = gb
 	resp, err := t.base.RoundTrip(r2)
-	if err != nil || retryable(resp.StatusCode) {
-		// minio-go is about to rewind and resend the body (or give up):
-		// nothing may read this attempt's body after this point.
-		gb.abandon()
-	}
+	// minio-go retries on S3 error codes as well as on statuses (a 400
+	// RequestTimeout from a server too slow to read the body is retried), so
+	// the status alone cannot say whether a rewind follows. Once a response
+	// is back this attempt's body is finished with either way: a server that
+	// answered 2xx has read all of it. Nothing may read it after this point.
+	gb.abandon()
 	return resp, err
-}
-
-// retryable reports the statuses minio-go retries on.
-func retryable(code int) bool {
-	return code == http.StatusTooManyRequests || code >= 500
 }
 
 // gatedBody serialises reads with abandon.
