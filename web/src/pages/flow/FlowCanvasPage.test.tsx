@@ -349,3 +349,82 @@ describe("flow canvas page", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("flow canvas page, a new canvas", () => {
+  const emptyCanvas = () => json({ ...CANVAS, nodes: [], nodeCount: 0 });
+
+  it("offers Add everything to an operator, which places the whole PBX", async () => {
+    const calls = api("admin", {
+      "GET /api/v1/flow/canvases/1": emptyCanvas,
+      "PUT /api/v1/flow/canvases/1/layout": () =>
+        json({ ...CANVAS, layoutVersion: 4 }),
+    });
+    renderApp("/flow/1");
+    const btn = await screen.findByRole("button", {
+      name: /^Add everything \(\d+\)$/,
+    });
+    fireEvent.click(btn);
+    await screen.findByText(new RegExp(`Placed ${GRAPH.nodes.length} nodes`));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PUT")).toBe(true),
+    );
+    const body = calls.find((c) => c.method === "PUT")?.body as {
+      nodes: unknown[];
+    };
+    expect(body.nodes).toHaveLength(GRAPH.nodes.length);
+  });
+
+  it("lists the objects with their groups open and an Add all button", async () => {
+    api("admin", { "GET /api/v1/flow/canvases/1": emptyCanvas });
+    renderApp("/flow/1");
+    const side = (
+      await screen.findByRole("heading", { name: "Not on this canvas" })
+    ).closest("section")!;
+    expect(
+      within(side).getByRole("button", { name: /^Add all \(\d+\)$/ }),
+    ).toBeInTheDocument();
+    const groups = side.querySelectorAll("details");
+    expect(groups.length).toBeGreaterThan(0);
+    groups.forEach((g) => expect(g.open).toBe(true));
+  });
+
+  it("gives a viewer no Add everything", async () => {
+    api("viewer", { "GET /api/v1/flow/canvases/1": emptyCanvas });
+    renderApp("/flow/1");
+    await screen.findByText("This canvas is empty");
+    expect(
+      screen.queryByRole("button", { name: /Add everything|Add all/ }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("flow canvas page, Arrange", () => {
+  it("re-lays out the placed nodes and saves them", async () => {
+    const calls = api("operator", {
+      "PUT /api/v1/flow/canvases/1/layout": () =>
+        json({ ...CANVAS, layoutVersion: 4 }),
+    });
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Arrange" }));
+    await screen.findByText(/Arranged 3 nodes/);
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PUT")).toBe(true),
+    );
+    const body = calls.find((c) => c.method === "PUT")?.body as {
+      nodes: { node: string; x: number; y: number }[];
+    };
+    expect(body.nodes.map((n) => n.node).sort()).toEqual(
+      CANVAS.nodes.map((n) => n.node).sort(),
+    );
+    // Dagre starts at the origin, not where the nodes were.
+    expect(Math.min(...body.nodes.map((n) => n.x))).toBe(0);
+  });
+
+  it("is not offered to a viewer", async () => {
+    api("viewer");
+    await open();
+    expect(
+      screen.queryByRole("button", { name: "Arrange" }),
+    ).not.toBeInTheDocument();
+  });
+});
