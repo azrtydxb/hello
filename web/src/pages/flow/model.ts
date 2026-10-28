@@ -281,7 +281,23 @@ export function buildView({
   }
 
   const edges: Edge[] = [];
-  const stubSlots = new Map<string, number>();
+  // Boxes already used: every placed node, then each stub as it is put down.
+  const taken = nodes.map((n) => ({
+    x: n.position.x,
+    y: n.position.y,
+    w: NODE_WIDTH,
+    h: sizes.get(n.id)?.h ?? 0,
+  }));
+  // Edges meeting at one port: their labels are spread so none hides another.
+  const labelSlots = new Map<string, number>();
+  const labelOffset = (e: FlowEdge): Record<string, string> => {
+    if (edgeLabel(e) === undefined) return {};
+    const key = `${e.target.node}|${e.target.port}`;
+    const k = labelSlots.get(key) ?? 0;
+    labelSlots.set(key, k + 1);
+    if (k === 0) return {};
+    return { transform: `translate(${-k * 34}px, 0px)` };
+  };
   let stubs = 0;
   let hidden = 0;
   const addStub = (e: FlowEdge, dir: "in" | "out"): string | null => {
@@ -295,21 +311,30 @@ export function buildView({
       return null;
     }
     stubs++;
-    const slotKey = `${anchorId}|${dir}`;
-    const slot = stubSlots.get(slotKey) ?? 0;
-    stubSlots.set(slotKey, slot + 1);
     const size = sizes.get(anchorId);
     const id = `stub:${dir}:${e.id}`;
+    const x =
+      dir === "out"
+        ? anchor.x + (size?.w ?? NODE_WIDTH) + STUB_GAP
+        : anchor.x - STUB_WIDTH - STUB_GAP;
+    // The next free slot down the column: never on a placed node or stub.
+    let y = anchor.y;
+    while (
+      taken.some(
+        (r) =>
+          x < r.x + r.w &&
+          r.x < x + STUB_WIDTH &&
+          y < r.y + r.h &&
+          r.y < y + STUB_HEIGHT,
+      )
+    ) {
+      y += STUB_HEIGHT + 12;
+    }
+    taken.push({ x, y, w: STUB_WIDTH, h: STUB_HEIGHT });
     nodes.push({
       id,
       type: "stub",
-      position: {
-        x:
-          dir === "out"
-            ? anchor.x + (size?.w ?? NODE_WIDTH) + STUB_GAP
-            : anchor.x - STUB_WIDTH - STUB_GAP,
-        y: anchor.y + slot * (STUB_HEIGHT + 12),
-      },
+      position: { x, y },
       initialWidth: STUB_WIDTH,
       initialHeight: STUB_HEIGHT,
       draggable: false,
@@ -330,8 +355,11 @@ export function buildView({
     const dst = onCanvas(e.target.node);
     if (!src && !dst) continue;
     const type = typeOfPort.get(`${e.source.node}|${e.source.port}`) ?? "call";
+    const shift = labelOffset(e);
     const base = {
       label: edgeLabel(e),
+      labelStyle: shift,
+      labelBgStyle: shift,
       data: { implicit: Boolean(e.implicit), type },
       className: e.implicit ? "flow-edge flow-edge--implicit" : "flow-edge",
       style: { stroke: `var(--flow-port-${type}, var(--az-muted))` },
