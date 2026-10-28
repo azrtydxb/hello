@@ -1,3 +1,4 @@
+import { CATALOGUE, GRAPH } from "./flow/fixtures";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { apiError, json, mockApi, noContent, renderApp } from "../test/api";
@@ -58,6 +59,11 @@ describe("Call flows page", () => {
       ] as never,
       "POST /api/v1/flow/canvases": () =>
         json({ ...canvas(3, "Sites"), nodes: [] }, 201),
+      "GET /api/v1/flow/canvases/3": () =>
+        json({ ...canvas(3, "Sites"), nodes: [] }),
+      "GET /api/v1/flow/catalogue": () => json(CATALOGUE),
+      "GET /api/v1/flow/graph": () => json(GRAPH),
+      "GET /api/v1/flow/revision": () => json({ configRevision: 12 }),
     });
     renderApp("/flow");
     await screen.findByText("No canvases yet");
@@ -78,7 +84,8 @@ describe("Call flows page", () => {
       target: { value: "All sites" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create canvas" }));
-    await screen.findByRole("link", { name: "Sites" });
+    // The new canvas opens, ready to be filled.
+    await screen.findByRole("heading", { name: "Sites" });
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
       name: "Sites",
       description: "All sites",
