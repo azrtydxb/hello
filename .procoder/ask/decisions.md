@@ -837,7 +837,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
 
 - Already on main: `prov_firmware` and `prov_firmware_pins`, upload and pin API
   and page, `firmware_seen` from the User-Agent shown as plain text, P238 = 0.
-- Minimum versions are a table (`prov_firmware_minimums`, migration 00046) with
+- Minimum versions are a table (`prov_firmware_minimums`, migration 00055) with
   an admin PUT/GET, not a constant, because the spec says per vendor and model
   glob. Seeded: Grandstream `WP822*` min 1.0.11.22 (R822 RN). A rule's
   recommended version holds the "WP defaults" of the spec: WP822 1.0.11.78
