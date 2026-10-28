@@ -222,7 +222,10 @@ func waitBucket(t *testing.T, o *MinioObjects) {
 // isSlowDown reports whether err is the store throttling or briefly refusing
 // writes (S3 SlowDown: "please reduce your request rate").
 func isSlowDown(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "reduce your request rate")
+	// An overloaded MinIO also answers the retry of a throttled upload before
+	// it has read the body, which the client reports as a short body.
+	return err != nil && (strings.Contains(err.Error(), "reduce your request rate") ||
+		strings.Contains(err.Error(), "did not provide the number of bytes specified"))
 }
 
 // isNoBucket reports whether err is a write to a bucket the store does not

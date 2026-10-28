@@ -286,6 +286,9 @@ func TestTrace(t *testing.T) {
 	}
 	// The ring step lists the busy and not-registered branches.
 	code, tr = traceGet(t, f, "/api/v1/flow/trace?from=100&number=100")
+	if code != 200 || len(tr.Steps) < 2 {
+		t.Fatalf("ring: %d %+v", code, tr)
+	}
 	if ring := tr.Steps[1]; len(ring.Branches) != 2 || ring.Branches[0].Label != "If busy" {
 		t.Errorf("ring branches: %+v", tr.Steps)
 	}

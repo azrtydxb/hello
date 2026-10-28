@@ -38,7 +38,7 @@ const (
 // provSettings is the store's view of the provisioning configuration.
 func provSettings(cfg config.Control, deployment map[prov.Vendor]redirect.Credentials) store.ProvSettings {
 	p := store.ProvSettings{
-		SIPServer: cfg.Prov.SIPServer, Domain: cfg.SIPDomain, Expiry: cfg.Prov.RegisterExpiry,
+		SIPServer: cfg.Prov.SIPServer, SIPTLSServer: cfg.Prov.SIPTLSServer, SIPTLSModels: cfg.Prov.SIPTLSModels, Domain: cfg.SIPDomain, Expiry: cfg.Prov.RegisterExpiry,
 		Resync: cfg.Prov.Resync, BookRefresh: cfg.Prov.BookRefresh, Timezone: cfg.Prov.Timezone, NTP: cfg.Prov.NTP, TokenGrace: cfg.Prov.TokenGrace,
 		CACertFile: cfg.Prov.CACert, DSCPSIP: cfg.Prov.DSCPSIP, DSCPRTP: cfg.Prov.DSCPRTP,
 		Deployment: map[prov.Vendor]bool{},
