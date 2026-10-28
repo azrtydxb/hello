@@ -116,6 +116,14 @@ func mapErr(err error) error {
 }
 
 func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
+	if b := s.batchOf(ctx); b != nil {
+		// Inside a batch the batch owns the transaction: it commits or rolls
+		// back everything together.
+		if err := fn(b.tx); err != nil {
+			return mapErr(err)
+		}
+		return nil
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -140,6 +148,9 @@ func insertAudit(ctx context.Context, q interface {
 // request's actor, the actor's own via (an AI agent), or NULL for the
 // console, API tokens and the system.
 func auditVia(ctx context.Context) any {
+	if b := BatchFrom(ctx); b != nil {
+		return BatchViaPrefix + b.id
+	}
 	if a, ok := auth.ActorFrom(ctx); ok {
 		switch {
 		case a.ClientID != "":
@@ -182,6 +193,16 @@ func (s *Store) configChange(ctx context.Context, actor, action, resource string
 }
 
 func (s *Store) configChangeID(ctx context.Context, actor, action, resource string, check Check, fn func(*sql.Tx) (string, error)) error {
+	if b := s.batchOf(ctx); b != nil {
+		// Inside a batch the lock is already held, the check runs once at
+		// the end and the revision moves once (RunBatch).
+		id, err := fn(b.tx)
+		if err != nil {
+			return mapErr(err)
+		}
+		b.record(check, resource, id)
+		return insertAudit(ctx, b.tx, actor, action, resource, id)
+	}
 	return s.tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(configLockKey)); err != nil {
 			return err
@@ -324,13 +345,13 @@ func relative(fields []routing.FieldError, prefix string) []routing.FieldError {
 
 // Audit records a non-configuration event such as a login.
 func (s *Store) Audit(ctx context.Context, actor, action, resource, resourceID string) error {
-	return insertAudit(ctx, s.db, actor, action, resource, resourceID)
+	return insertAudit(ctx, s.q(ctx), actor, action, resource, resourceID)
 }
 
 // ConfigRevision returns the current configuration revision.
 func (s *Store) ConfigRevision(ctx context.Context) (int64, error) {
 	var rev int64
-	err := s.db.QueryRowContext(ctx, `SELECT config_revision FROM schema_info`).Scan(&rev)
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT config_revision FROM schema_info`).Scan(&rev)
 	return rev, err
 }
 
@@ -339,7 +360,7 @@ func (s *Store) ConfigRevision(ctx context.Context) (int64, error) {
 // CountUsers reports how many management users exist.
 func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&n)
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&n)
 	return n, err
 }
 
@@ -372,27 +393,27 @@ func (s *Store) UserByName(ctx context.Context, username string) (int64, string,
 		id   int64
 		hash string
 	)
-	err := s.db.QueryRowContext(ctx,
+	err := s.q(ctx).QueryRowContext(ctx,
 		`SELECT id, password_hash FROM users WHERE username = $1`, username).Scan(&id, &hash)
 	return id, hash, mapErr(err)
 }
 
 // CreateSession stores a session by the hash of its cookie value.
 func (s *Store) CreateSession(ctx context.Context, userID int64, hash []byte, expires time.Time) error {
-	_, err := s.db.ExecContext(ctx,
+	_, err := s.q(ctx).ExecContext(ctx,
 		`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)`, hash, userID, expires)
 	return err
 }
 
 // DeleteSession removes a session.
 func (s *Store) DeleteSession(ctx context.Context, hash []byte) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = $1`, hash)
+	_, err := s.q(ctx).ExecContext(ctx, `DELETE FROM sessions WHERE token_hash = $1`, hash)
 	return err
 }
 
 // PruneSessions deletes expired sessions and reports how many.
 func (s *Store) PruneSessions(ctx context.Context) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= now()`)
+	res, err := s.q(ctx).ExecContext(ctx, `DELETE FROM sessions WHERE expires_at <= now()`)
 	if err != nil {
 		return 0, err
 	}
@@ -417,7 +438,7 @@ func (s *Store) SessionActor(ctx context.Context, hash []byte) (auth.Actor, erro
 // UserActor implements auth.Lookup for the in-product agent.
 func (s *Store) UserActor(ctx context.Context, id int64) (auth.Actor, error) {
 	a := auth.Actor{UserID: id}
-	err := s.db.QueryRowContext(ctx, `SELECT username, role, must_change_password FROM users WHERE id = $1 AND enabled`, id).
+	err := s.q(ctx).QueryRowContext(ctx, `SELECT username, role, must_change_password FROM users WHERE id = $1 AND enabled`, id).
 		Scan(&a.Username, &a.Role, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
@@ -468,7 +489,7 @@ func (s *Store) TokenActor(ctx context.Context, hash []byte) (auth.Actor, error)
 		scopes, resources sql.NullString
 		extScope          sql.NullString
 	)
-	err := s.db.QueryRowContext(ctx, tokenActorSQL, hash).Scan(&a.TokenID, &a.UserID, &a.Username, &a.Role,
+	err := s.q(ctx).QueryRowContext(ctx, tokenActorSQL, hash).Scan(&a.TokenID, &a.UserID, &a.Username, &a.Role,
 		&kind, &scopes, &a.ClientID, &resources, &a.ServiceName, &extScope, &a.MustChangePassword)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, auth.ErrNoCredentials
@@ -545,7 +566,7 @@ type NewToken struct {
 
 // ListTokens returns a user's live API tokens, oldest first.
 func (s *Store) ListTokens(ctx context.Context, userID int64) ([]Token, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.q(ctx).QueryContext(ctx, `
 		SELECT id, name, kind, to_json(scopes)::text, created_at, expires_at, last_used_at FROM api_tokens
 		WHERE user_id = $1 AND revoked_at IS NULL ORDER BY id`, userID)
 	if err != nil {
