@@ -93,6 +93,17 @@ export function cdrExportUrl(filter: CdrFilter): string {
   return `/api/v1/cdrs/export${qs ? `?${qs}` : ""}`;
 }
 
+/**
+ * The codec of a call for a table cell: the one codec both legs ended on, the
+ * two as "caller → callee" when they differ, or "—" when none was recorded.
+ */
+export function codecSummary(c: Pick<Cdr, "callerCodec" | "calleeCodec">) {
+  const a = c.callerCodec || "";
+  const b = c.calleeCodec || "";
+  if (a && b && a !== b) return `${a} → ${b}`;
+  return a || b || "—";
+}
+
 /** GET /api/v1/cdrs/{id}, with the failover note. */
 export interface CallRecord extends CdrDetail {
   /** For an answered call that failed over: what happened. Empty otherwise. */
