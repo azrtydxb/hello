@@ -1,6 +1,6 @@
 package store
 
-// Queue callback requests (migration 00054, pbx-gaps S-9 and S-10): the
+// Queue callback requests (migration 00049, pbx-gaps S-9 and S-10): the
 // durable rows hello-sip's sweeps claim, and the operator's list and cancel.
 // Unlike the queue configuration these rows change at call rate, so they are
 // not configuration changes: no revision bump, no audit row per attempt. An

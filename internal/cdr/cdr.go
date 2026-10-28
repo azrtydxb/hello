@@ -34,7 +34,7 @@ const (
 	KindPage       = "page"
 	KindIntercom   = "intercom"
 	KindConference = "conference"
-	KindCallback   = "callback" // a call Hello placed to a queue caller who asked for a callback (migration 00054)
+	KindCallback   = "callback" // a call Hello placed to a queue caller who asked for a callback (migration 00049)
 )
 
 // Termination sides.
@@ -97,7 +97,7 @@ const (
 	QueueAbandon  = "abandon"  // the caller hung up while waiting
 	QueueExit     = "exit"     // the queue sent the caller elsewhere (Result: timeout, full, no_agents, breakout)
 
-	// Callback events (migration 00054, pbx-gaps S-9, S-10).
+	// Callback events (migration 00049, pbx-gaps S-9, S-10).
 	QueueCallbackRequested = "callback_requested" // the caller asked to be called back (Result: accepted)
 	QueueCallbackDialled   = "callback_dialled"   // Hello rang the caller back
 	QueueCallbackConnected = "callback_connected" // the caller and an agent were connected (Extension: the agent)

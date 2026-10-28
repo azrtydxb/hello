@@ -327,7 +327,7 @@ func (s *server) deleteQueue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// --- callbacks (migration 00054, S-10) ---------------------------------------
+// --- callbacks (migration 00049, S-10) ---------------------------------------
 
 func (s *server) callbacksOK(w http.ResponseWriter) bool {
 	if s.Callbacks == nil {

@@ -1,4 +1,4 @@
-// Queue callback (pbx-gaps S-9, S-10; migration 00054, docs/queues.md).
+// Queue callback (pbx-gaps S-9, S-10; migration 00049, docs/queues.md).
 //
 // A caller who would wait long is offered a call back instead. Accepting
 // writes a durable queue_callbacks row (the caller's number, and its original

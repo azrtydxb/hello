@@ -34,7 +34,7 @@ type Queue struct {
 	PeriodicPrompt, PositionPrompt           string
 	WaitPrompt, MinutesPrompt, DigitsPrefix  string
 	BreakoutKey, BreakoutPrompt, BreakoutBox string
-	// Callback (migration 00054): offered once the estimated wait exceeds
+	// Callback (migration 00049): offered once the estimated wait exceeds
 	// CallbackOfferAfter seconds, accepted (or asked for) with CallbackDigit.
 	CallbackEnabled    bool
 	CallbackOfferAfter int

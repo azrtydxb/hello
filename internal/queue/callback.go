@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Queue callback (pbx-gaps S-9, S-10, migration 00054). A caller who would
+// Queue callback (pbx-gaps S-9, S-10, migration 00049). A caller who would
 // wait long can ask to be called back: the request is a durable row, so it
 // survives the call, a restart and the loss of a node. A sweep on every SIP
 // node claims the head request when an agent could take it, rings the caller

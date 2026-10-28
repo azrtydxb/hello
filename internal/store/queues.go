@@ -81,7 +81,7 @@ type Queue struct {
 	BreakoutPromptID   *int64         `json:"breakoutPromptId"`
 	BreakoutPromptName string         `json:"breakoutPromptName"`
 	BreakoutVoicemail  string         `json:"breakoutVoicemail"`
-	// Callback (migration 00054, S-9): offer a caller a call back instead of
+	// Callback (migration 00049, S-9): offer a caller a call back instead of
 	// holding the line.
 	CallbackEnabled    bool   `json:"callbackEnabled"`
 	CallbackOfferAfter int    `json:"callbackOfferAfterSeconds"`
