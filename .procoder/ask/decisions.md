@@ -835,7 +835,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
 
 ## Ring map provisioning, phone-feature-parity S-42 and S-44 (2026-10-27)
 
-- Storage: `ring_map` (migration 00047) holds explicit choices only, keyed by
+- Storage: `ring_map` (migration 00051) holds explicit choices only, keyed by
   (group or global, tag, vendor), tone being a vendor ringer id. A tag and
   vendor with no row use the vendor's default for the tag's current Bellcore
   slot, so the map needs no seeding and a new custom tag works at once. The

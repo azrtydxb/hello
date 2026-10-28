@@ -1,6 +1,6 @@
 package store
 
-// The ring map (migration 00047, spec phone-feature-parity S-42 and S-44): a
+// The ring map (migration 00051, spec phone-feature-parity S-42 and S-44): a
 // tone per ring tag and vendor, global with an optional override per phone
 // group. It is read only by provisioning (RenderData.Ring), so a change does
 // not bump the configuration revision: the automatic resync notices that the
