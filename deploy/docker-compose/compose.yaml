@@ -55,6 +55,10 @@ x-prov-env: &prov-env
   HELLO_PROV_CA_CERT: /etc/hello/prov/ca.crt
   HELLO_PROV_TLS_CERT: /etc/hello/prov/tls.crt
   HELLO_PROV_TLS_KEY: /etc/hello/prov/tls.key
+  # Every lab phone fetches from the one host IP, and the vendor matrix walks
+  # one phone per model back to back; the production 60/min per-IP limit
+  # answers 429 once the matrix passes six models.
+  HELLO_PROV_RATE_IP_PER_MIN: "6000"
 
 # External AI access (.procoder/specs/ai-external-access.md): the lab's
 # public URL is the console on this host (hello-ui proxies /mcp, /oauth/
