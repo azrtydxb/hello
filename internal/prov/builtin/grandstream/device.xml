@@ -39,6 +39,12 @@
 {{- /* MWI (spec S-1): P99 = Subscribe for MWI [R8x6 TPL, R8x6 section 5; WP822 same key]; P33 = voicemail access number, defaulting to Hello's voicemail feature code. */}}
     <P99>1</P99>
     <P33>{{xml (or .Line.VoicemailCode "*97")}}</P33>
+{{- /* Keep-alive on Wi-Fi sleep (phone-feature-parity S-9, S-3): a handset that sleeps loses its NAT mapping and its registration unless the phone pings. WP8x6 P2397 = 1 enables the SIP OPTIONS keep-alive (R8x6 TPL, section 2); the interval (30 s) and max-tries keys are not in the vendor template and stay at their defaults until the lab confirms them (verify). The WP822 has the RFC 5626 CRLF keep-alive as P84989; it is written 0 (off) because the OPTIONS keep-alive and the registration refresh already hold the flow, and Hello answers a double CRLF only over TCP and TLS (R822 section 2; verify the key on a phone's exported XML). */}}
+{{- if eq .Phone.Family "8x6"}}
+    <P2397>1</P2397>
+{{- else if eq .Phone.Family "8xx"}}
+    <P84989>0</P84989>
+{{- end}}
 {{- /* Text messages (SIP MESSAGE, RFC 3428): P22650 = 1 makes account 1 the designated account for instant messaging (WP8x6 Administration Guide "Instant Message" and the phone-feature-parity spec S-8, R8x6 section 5). Hello answers 202/200 and delivers to every phone of the extension. UNVERIFIED on hardware: not confirmed on a WP826 or WP822, and the value (1 = account 1) is read from the guide, not from a phone's exported configuration. Phones without the key ignore it. */}}
     <P22650>1</P22650>
 {{- /* Call waiting (phone-feature-parity S-18), written from the extension's flag so the phone agrees with Hello. P26063 = account 1 "Enable Call Waiting" (WP8x6) / "Disable Call Waiting" (WP822): 1 = on, 2 = off in both templates (wp8x6_config_1.0.3.39 reads 0 Default, 1 Yes, 2 No; wp810_822_825_config_1.0.11.83 reads 0 Default, 1 No, 2 Yes, the question inverted). P91 = the phone-wide switch: 0 = on, 1 = off in both. P186 = "Enable Call Waiting Tone" (WP8x6 and WP820 templates): 0 = tone, 1 = no tone; the WP822 template has no such key and ignores it, its tone is P347/P1555 which stay at the phone default. Taken from Grandstream's published config templates, not yet confirmed on a phone (verify, lab item 26). */}}
