@@ -496,7 +496,7 @@ func SampleData(full bool) RenderData {
 		Phone:  Phone{MAC: "0015651234ab", MACUpper: "0015651234AB", Vendor: Generic, Model: "MODEL", AdminPassword: "sample-admin-password"},
 		Line:   Line{Username: "1001-1234ab", AuthName: "1001-1234ab", Password: "sample-secret", DisplayName: "Sample User", Label: "1001", Domain: "hello.example", CallWaiting: true},
 		Server: Server{Host: "sip.hello.example", Port: 5060, Transport: "udp", Expiry: 3600},
-		Prov: ProvInfo{URL: "https://prov.hello.example/p/sample/", CAURL: "http://prov.hello.example/p/ca.crt", ResyncSeconds: 86400,
+		Prov: ProvInfo{URL: "https://prov.hello.example/p/sample/", CAURL: "http://prov.hello.example/p/ca.crt", ResyncSeconds: 86400, DSCPSIP: 26, DSCPRTP: 46,
 			CACertPEM: "-----BEGIN CERTIFICATE-----\nU0FNUExF\n-----END CERTIFICATE-----"},
 		Time: NewTimeInfo("UTC", "pool.ntp.org", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 	}

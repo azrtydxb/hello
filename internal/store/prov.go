@@ -46,6 +46,8 @@ type ProvSettings struct {
 	Domain string
 	Expiry time.Duration
 	Resync time.Duration
+	// DSCPSIP and DSCPRTP are the QoS values written to phones (S-21).
+	DSCPSIP, DSCPRTP int
 	// BookRefresh is HELLO_PROV_BOOK_REFRESH; zero means 15 minutes.
 	BookRefresh time.Duration
 	Timezone    string
@@ -108,7 +110,7 @@ func (p ProvSettings) plainBase() string {
 // info is the ProvInfo of a phone whose current token is token.
 func (p ProvSettings) info(token, mac string) prov.ProvInfo {
 	return prov.ProvInfo{URL: p.phoneBase(token), CAURL: p.CAURL(), ResyncSeconds: p.resyncSeconds(mac),
-		CACertPEM: prov.CACertPEM(p.CACertFile)}
+		CACertPEM: prov.CACertPEM(p.CACertFile), DSCPSIP: p.DSCPSIP, DSCPRTP: p.DSCPRTP}
 }
 
 // CAURL is the plain-HTTP URL of Hello's provisioning CA.

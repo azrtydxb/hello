@@ -200,6 +200,11 @@ type Prov struct {
 	// prefixes ("grandstream:WP8") provisioned for TLS once SIPTLSServer is
 	// set. Taking a model out switches it back to UDP at its next resync.
 	SIPTLSModels []string
+	// DSCPSIP and DSCPRTP (HELLO_DSCP_SIP, HELLO_DSCP_RTP; defaults 26 and
+	// 46) are the QoS values rendered configs carry, the same ones hello-sip
+	// marks its sockets with (spec phone-feature-parity S-21).
+	DSCPSIP int
+	DSCPRTP int
 	// RegisterExpiry is the registration expiry rendered configs carry:
 	// HELLO_SIP_REGISTER_MAX_EXPIRES (default 1h), the same value hello-sip
 	// caps registrations at, so it is always inside its window.
@@ -345,6 +350,11 @@ type SIP struct {
 	// their relay sockets from.
 	RTPPortMin int
 	RTPPortMax int
+	// DSCPSIP (HELLO_DSCP_SIP, default 26, CS3) marks the SIP socket and
+	// DSCPRTP (HELLO_DSCP_RTP, default 46, EF) the relay RTP sockets; 0 to
+	// 63 (spec phone-feature-parity S-21).
+	DSCPSIP int
+	DSCPRTP int
 	// MediaForceAnchor (HELLO_MEDIA_FORCE_ANCHOR, default false) anchors
 	// every call's media regardless of the per-call triggers (spec S-1d).
 	MediaForceAnchor bool
@@ -595,6 +605,8 @@ func (r *reader) prov() Prov {
 		SIPTLSModels:       r.tlsModels("HELLO_PROV_SIP_TLS_MODELS", "grandstream:WP"),
 		TrustedProxies:     r.prefixes("HELLO_PROV_TRUSTED_PROXIES"),
 		TokenGrace:         r.days("HELLO_PROV_TOKEN_GRACE", 7*24*time.Hour),
+		DSCPSIP:            r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP),
+		DSCPRTP:            r.dscp("HELLO_DSCP_RTP", DefaultDSCPRTP),
 		Resync:             r.days("HELLO_PROV_RESYNC", 24*time.Hour),
 		BookRefresh:        r.days("HELLO_PROV_BOOK_REFRESH", 15*time.Minute),
 		Timezone:           r.optional("HELLO_PROV_TIMEZONE", "UTC"),
@@ -791,6 +803,8 @@ func LoadSIP(getenv func(string) string) (SIP, error) {
 	c.PageMulticastTTL = r.positiveInt("HELLO_PAGE_MULTICAST_TTL", 1)
 	c.RTPPortMin = r.port("HELLO_RTP_PORT_MIN", 20000)
 	c.RTPPortMax = r.port("HELLO_RTP_PORT_MAX", 21000)
+	c.DSCPSIP = r.dscp("HELLO_DSCP_SIP", DefaultDSCPSIP)
+	c.DSCPRTP = r.dscp("HELLO_DSCP_RTP", DefaultDSCPRTP)
 	c.MediaForceAnchor = r.getenv("HELLO_MEDIA_FORCE_ANCHOR") == "true"
 	c.MediaRecordingNotice = r.getenv("HELLO_MEDIA_RECORDING_NOTICE") != "false"
 	c.MediaAnchorHost = r.optional("HELLO_MEDIA_ANCHOR_HOST", "")
@@ -1036,6 +1050,27 @@ func (r *reader) port(key string, def int) int {
 	n, err := strconv.Atoi(v)
 	if err != nil || n < 1 || n > 65535 {
 		r.fail(key, errors.New("must be a port number"))
+		return def
+	}
+	return n
+}
+
+// Default DSCP values (spec phone-feature-parity S-21): SIP signalling CS3,
+// RTP EF.
+const (
+	DefaultDSCPSIP = 26
+	DefaultDSCPRTP = 46
+)
+
+// dscp reads a DSCP value, 0 to 63.
+func (r *reader) dscp(key string, def int) int {
+	v := r.getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 || n > 63 {
+		r.fail(key, errors.New("must be a DSCP value from 0 to 63"))
 		return def
 	}
 	return n

@@ -227,6 +227,10 @@ type ProvInfo struct {
 	// type="base64"> element. Render fills it from CACertPEM.
 	CACertBase64  string
 	ResyncSeconds int // re-check interval, jitter from the MAC included
+	// DSCPSIP and DSCPRTP are the DSCP values (0 to 63) phones mark their
+	// SIP and RTP packets with (HELLO_DSCP_SIP, HELLO_DSCP_RTP; spec S-21).
+	DSCPSIP int
+	DSCPRTP int
 }
 
 // BookInfo is where a phone fetches its address book (spec P-4). The URLs
