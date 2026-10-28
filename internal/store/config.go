@@ -40,7 +40,7 @@ type Extension struct {
 	// MOHClassID is the music on hold class callers hear while this
 	// extension holds them (migration 00021); nil uses the global default.
 	MOHClassID *int64 `json:"mohClassId"`
-	// Kind is user (default) or door (migration 00047, spec S-45): a door
+	// Kind is user (default) or door (migration 00053, spec S-45): a door
 	// station has no voicemail, joins no group, receives no pickup, page,
 	// intercom or MESSAGE, and may call only DoorTargets and the Door groups.
 	Kind        string      `json:"kind"`

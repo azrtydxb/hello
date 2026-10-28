@@ -8,7 +8,7 @@ import (
 	"slices"
 )
 
-// Door stations (migration 00047, spec phone-feature-parity S-45 and S-46).
+// Door stations (migration 00053, spec phone-feature-parity S-45 and S-46).
 
 // Extension kinds.
 const (

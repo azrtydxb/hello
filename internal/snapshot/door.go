@@ -6,7 +6,7 @@ import (
 	"slices"
 )
 
-// Door stations (migration 00047, spec phone-feature-parity S-45 and S-46).
+// Door stations (migration 00053, spec phone-feature-parity S-45 and S-46).
 // The station's targets ride the snapshot, so the check that keeps a door
 // unit from dialling out never reads PostgreSQL on the SIP path.
 

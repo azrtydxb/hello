@@ -835,7 +835,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
 
 ## Door station extension kind and Door group (2026-10-27) — phone-feature-parity item 13 (S-45, S-46)
 
-- Migration `00047_door_station`: `extensions.kind` (user/door, default user),
+- Migration `00053_door_station`: `extensions.kind` (user/door, default user),
   `extensions.door_targets` (jsonb `{"extensions":[ids],"ringGroups":[ids]}`, ids
   not foreign keys; the snapshot drops an id that no longer exists),
   `ring_groups.is_door`, and `door` added to `cdrs_kind_check` through

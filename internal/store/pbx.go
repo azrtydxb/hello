@@ -485,9 +485,9 @@ type RingGroup struct {
 	MOHClassID  *int64 `json:"mohClassId"`
 	MOHRingback bool   `json:"mohRingback"`
 	// RingTag overrides the ringgroup ring tag for calls through the group
-	// (empty: ringgroup; migration 00046).
+	// (empty: ringgroup; migration 00050).
 	RingTag string `json:"ringTag"`
-	// IsDoor marks the Door group (migration 00047, spec S-46): its calls
+	// IsDoor marks the Door group (migration 00053, spec S-46): its calls
 	// carry kind door and the doorbell tag, and a door station may call it.
 	IsDoor    bool              `json:"isDoor"`
 	Members   []RingGroupMember `json:"members"`

@@ -34,7 +34,7 @@ const (
 	KindPage       = "page"
 	KindIntercom   = "intercom"
 	KindConference = "conference"
-	KindDoor       = "door" // a door station's call or a call to a Door group (migration 00047)
+	KindDoor       = "door" // a door station's call or a call to a Door group (migration 00053)
 )
 
 // Termination sides.
@@ -77,7 +77,7 @@ type Record struct {
 	// Kind is call (default), page or intercom.
 	Kind string
 	// RingTag is the ring tag the call's device legs carried and RingRule
-	// what chose it (migration 00046); empty for a call that rang no
+	// what chose it (migration 00050); empty for a call that rang no
 	// internal device.
 	RingTag, RingRule string
 	// PageLegs is a page's outcome per member (migration 00014), one row

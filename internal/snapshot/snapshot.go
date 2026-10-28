@@ -70,7 +70,7 @@ type Extension struct {
 	// NoAnswerRings is the ring count before the no-answer forward
 	// (migration 00035); 0 uses the system ring timeout.
 	NoAnswerRings int
-	// Door marks a door station (migration 00047, spec S-45); DoorExtensions
+	// Door marks a door station (migration 00053, spec S-45); DoorExtensions
 	// and DoorGroups are the extension numbers and ring group names it may
 	// call besides every Door group.
 	Door           bool
@@ -100,9 +100,9 @@ type RingGroup struct {
 	MOHClassID  int64
 	MOHRingback bool
 	// RingTag overrides the ringgroup ring tag for calls through the group
-	// ("" keeps ringgroup; migration 00046).
+	// ("" keeps ringgroup; migration 00050).
 	RingTag string
-	// IsDoor marks the Door group (migration 00047, spec S-46).
+	// IsDoor marks the Door group (migration 00053, spec S-46).
 	IsDoor bool
 }
 
@@ -227,7 +227,7 @@ type Snapshot struct {
 	// global default class (0 when none is set).
 	mohs       map[int64]MOHClass
 	mohDefault int64
-	// ringTags are the ring tags and rules (migration 00046); nil means the
+	// ringTags are the ring tags and rules (migration 00050); nil means the
 	// built-in tags and no rules.
 	ringTags *ringtag.Table
 	// routing is the trunk and route state; nil for a snapshot from New.
