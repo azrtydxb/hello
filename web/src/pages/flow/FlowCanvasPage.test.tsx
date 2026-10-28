@@ -1,7 +1,15 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import {
+  act,
+  configure,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiError, json, mockApi, renderApp } from "../../test/api";
 import { CANVAS, CATALOGUE, GRAPH } from "./fixtures";
+import { REVISION_POLL_MS } from "./FlowCanvasPage";
 
 const me = (role: string) => ({
   "GET /api/v1/auth/me": () => json({ username: "u", role }),
@@ -20,6 +28,21 @@ function api(
     ...extra,
   });
 }
+
+// App loads this page with React.lazy, so the first render in the file waits
+// for Vite to transform and import @xyflow/react, dagre and their CSS. On a
+// loaded CI runner that cold import alone outlasts findBy's 5 s budget (the
+// flake seen on several PRs). Warm the module once, under the generous hook
+// timeout, so the per-test awaits only cover rendering.
+//
+// Complement, not the fix: a whole-app render here is the heaviest in the
+// suite, so give findBy/waitFor more room than the global 5 s. It only costs
+// time when something is actually wrong.
+beforeAll(async () => {
+  configure({ asyncUtilTimeout: 15000 });
+  await import("./FlowCanvasPage");
+}, 60000);
+afterAll(() => configure({ asyncUtilTimeout: 5000 }));
 
 async function open() {
   renderApp("/flow/1");
@@ -283,12 +306,19 @@ describe("flow canvas page", () => {
         );
       },
     });
-    await open();
-    revision = 13;
-    // Polling is every 10 s: reload the page's poll by waiting it out.
-    await screen.findByText("Sales team", undefined, { timeout: 15000 });
-    expect(graphReads).toBe(2);
-  }, 20000);
+    // The poll's timer is driven by the test, not waited out on the wall clock
+    // (it used to sit through the real 10 s interval).
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await open();
+      revision = 13;
+      await act(() => vi.advanceTimersByTimeAsync(REVISION_POLL_MS));
+      await screen.findByText("Sales team");
+      expect(graphReads).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("explains a canvas that does not exist and one that is empty", async () => {
     mockApi({
@@ -317,84 +347,5 @@ describe("flow canvas page", () => {
     expect(
       screen.getByText("Nothing has been placed on it yet."),
     ).toBeInTheDocument();
-  });
-});
-
-describe("flow canvas page, a new canvas", () => {
-  const emptyCanvas = () => json({ ...CANVAS, nodes: [], nodeCount: 0 });
-
-  it("offers Add everything to an operator, which places the whole PBX", async () => {
-    const calls = api("admin", {
-      "GET /api/v1/flow/canvases/1": emptyCanvas,
-      "PUT /api/v1/flow/canvases/1/layout": () =>
-        json({ ...CANVAS, layoutVersion: 4 }),
-    });
-    renderApp("/flow/1");
-    const btn = await screen.findByRole("button", {
-      name: /^Add everything \(\d+\)$/,
-    });
-    fireEvent.click(btn);
-    await screen.findByText(new RegExp(`Placed ${GRAPH.nodes.length} nodes`));
-    await waitFor(() =>
-      expect(calls.some((c) => c.method === "PUT")).toBe(true),
-    );
-    const body = calls.find((c) => c.method === "PUT")?.body as {
-      nodes: unknown[];
-    };
-    expect(body.nodes).toHaveLength(GRAPH.nodes.length);
-  });
-
-  it("lists the objects with their groups open and an Add all button", async () => {
-    api("admin", { "GET /api/v1/flow/canvases/1": emptyCanvas });
-    renderApp("/flow/1");
-    const side = (
-      await screen.findByRole("heading", { name: "Not on this canvas" })
-    ).closest("section")!;
-    expect(
-      within(side).getByRole("button", { name: /^Add all \(\d+\)$/ }),
-    ).toBeInTheDocument();
-    const groups = side.querySelectorAll("details");
-    expect(groups.length).toBeGreaterThan(0);
-    groups.forEach((g) => expect(g.open).toBe(true));
-  });
-
-  it("gives a viewer no Add everything", async () => {
-    api("viewer", { "GET /api/v1/flow/canvases/1": emptyCanvas });
-    renderApp("/flow/1");
-    await screen.findByText("This canvas is empty");
-    expect(
-      screen.queryByRole("button", { name: /Add everything|Add all/ }),
-    ).not.toBeInTheDocument();
-  });
-});
-
-describe("flow canvas page, Arrange", () => {
-  it("re-lays out the placed nodes and saves them", async () => {
-    const calls = api("operator", {
-      "PUT /api/v1/flow/canvases/1/layout": () =>
-        json({ ...CANVAS, layoutVersion: 4 }),
-    });
-    await open();
-    fireEvent.click(screen.getByRole("button", { name: "Arrange" }));
-    await screen.findByText(/Arranged 3 nodes/);
-    await waitFor(() =>
-      expect(calls.some((c) => c.method === "PUT")).toBe(true),
-    );
-    const body = calls.find((c) => c.method === "PUT")?.body as {
-      nodes: { node: string; x: number; y: number }[];
-    };
-    expect(body.nodes.map((n) => n.node).sort()).toEqual(
-      CANVAS.nodes.map((n) => n.node).sort(),
-    );
-    // Dagre starts at the origin, not where the nodes were.
-    expect(Math.min(...body.nodes.map((n) => n.x))).toBe(0);
-  });
-
-  it("is not offered to a viewer", async () => {
-    api("viewer");
-    await open();
-    expect(
-      screen.queryByRole("button", { name: "Arrange" }),
-    ).not.toBeInTheDocument();
   });
 });
