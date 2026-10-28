@@ -16,8 +16,9 @@ import (
 const defaultExpires = 3600
 
 type contactReq struct {
-	uri     string
-	expires int
+	uri      string
+	expires  int
+	instance string // the Contact's +sip.instance, "" when it names none
 }
 
 // handleRegister authenticates the device, applies its contacts to the AOR
@@ -62,7 +63,7 @@ func (s *Server) handleRegister(req *sip.Request, tx sip.ServerTransaction) {
 		s.respond(tx, req, sip.StatusOK, "OK")
 		return
 	}
-	if over, err := s.tooManyContacts(aor, contacts); err != nil {
+	if over, err := s.tooManyContacts(aor, contacts, req.CallID().Value()); err != nil {
 		s.stateDown(tx, req, "bindings", err)
 		return
 	} else if over {
@@ -139,7 +140,8 @@ func (s *Server) parseContacts(req *sip.Request) (contacts []contactReq, wildcar
 		if exp < 0 {
 			exp = defaultExpires
 		}
-		contacts = append(contacts, contactReq{uri: c.Address.String(), expires: exp})
+		inst, _ := c.Params.Get("+sip.instance")
+		contacts = append(contacts, contactReq{uri: c.Address.String(), expires: exp, instance: strings.Trim(inst, `"<> `)})
 	}
 	if wildcard && (len(contacts) > 0 || reqExpires != 0) {
 		return nil, false, sip.StatusBadRequest, "Contact * requires Expires: 0 and no other Contact"
@@ -159,8 +161,9 @@ func (s *Server) parseContacts(req *sip.Request) (contacts []contactReq, wildcar
 const maxContacts = 10
 
 // tooManyContacts reports whether applying contacts would leave aor with
-// more than maxContacts bindings.
-func (s *Server) tooManyContacts(aor string, contacts []contactReq) (bool, error) {
+// more than maxContacts bindings. A binding the request replaces (a roamed
+// phone's old contact) does not count.
+func (s *Server) tooManyContacts(aor string, contacts []contactReq, callID string) (bool, error) {
 	ctx, cancel := s.stateCtx()
 	existing, err := s.deps.State.Bindings(ctx, aor)
 	cancel()
@@ -171,6 +174,9 @@ func (s *Server) tooManyContacts(aor string, contacts []contactReq) (bool, error
 	for _, b := range existing {
 		set[b.ContactURI] = true
 	}
+	for _, uri := range replacedBindings(existing, contacts, callID) {
+		delete(set, uri)
+	}
 	for _, c := range contacts {
 		if c.expires == 0 {
 			delete(set, c.uri)
@@ -179,6 +185,42 @@ func (s *Server) tooManyContacts(aor string, contacts []contactReq) (bool, error
 		}
 	}
 	return len(set) > maxContacts, nil
+}
+
+// replacedBindings lists the contact URIs of existing bindings a REGISTER
+// replaces (phone-feature-parity S-9): a phone that roamed to another IP
+// registers a new Contact URI, and its old one must not keep ringing a dead
+// address until it expires. A binding is replaced when a refreshed or new
+// contact of the request names the same +sip.instance, or the request has the
+// binding's Call-ID (a phone registers with one Call-ID for as long as it
+// runs), and the binding's own URI is not one the request registers or
+// removes.
+func replacedBindings(existing []livestate.Binding, contacts []contactReq, callID string) []string {
+	keep := make(map[string]bool, len(contacts))
+	instances := map[string]bool{}
+	registering := false
+	for _, c := range contacts {
+		keep[c.uri] = true
+		if c.expires > 0 {
+			registering = true
+			if c.instance != "" {
+				instances[c.instance] = true
+			}
+		}
+	}
+	if !registering {
+		return nil
+	}
+	var out []string
+	for _, b := range existing {
+		if keep[b.ContactURI] {
+			continue
+		}
+		if (b.Instance != "" && instances[b.Instance]) || (callID != "" && b.CallID == callID) {
+			out = append(out, b.ContactURI)
+		}
+	}
+	return out
 }
 
 // applyContacts stores or removes each contact's binding.
@@ -192,6 +234,22 @@ func (s *Server) applyContacts(req *sip.Request, dev snapshot.Device, aor string
 	// the flow it registered on (RFC 3327, RFC 5626 flow token). A Path the
 	// client sent is dropped; phones register directly, and honouring one
 	// would let a client choose where other nodes send its calls.
+	callID := req.CallID().Value()
+	ctx0, cancel0 := s.stateCtx()
+	existing, err := s.deps.State.Bindings(ctx0, aor)
+	cancel0()
+	if err != nil {
+		return err
+	}
+	for _, uri := range replacedBindings(existing, contacts, callID) {
+		ctx, cancel := s.stateCtx()
+		err := s.deps.State.DeleteBinding(ctx, aor, uri)
+		cancel()
+		if err != nil {
+			return err
+		}
+		s.log.Info("registration replaced by a new address", "device", dev.Username, "old_contact", uri)
+	}
 	for _, c := range contacts {
 		ctx, cancel := s.stateCtx()
 		var err error
@@ -209,6 +267,8 @@ func (s *Server) applyContacts(req *sip.Request, dev snapshot.Device, aor string
 				UserAgent:    userAgent,
 				Path:         s.bindingPath(req, exp),
 				ReceivedNode: s.cfg.NodeID,
+				Instance:     c.instance,
+				CallID:       callID,
 				Expires:      exp,
 				UpdatedAt:    now,
 			})
