@@ -421,6 +421,55 @@ jobs:
       - name: Chart invariants and kubeconform
         run: go test -count=1 -v -run 'TestChart|TestKubernetesGuide' ./test/deploy/
 
+  kamailio-config:
+    # `kamailio -c` over deploy/kamailio/kamailio.cfg in the real image, with
+    # the lab's defaults and with the exact environment the kw kamailio
+    # Deployment sets (test/deploy TestKamailioConfigSyntax). The Kamailio
+    # config is the one thing no other PR-time job parses, so a cfg or env
+    # change Kamailio rejects would otherwise reach the nodes. Needs the
+    # runner's Docker daemon (as kind-upgrade does) to build and run the
+    # image; the build reads the shared cache and never writes it from a PR.
+    runs-on: arc-azrtydxb
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          buildkitd-config-inline: |
+            [registry."192.168.10.131"]
+              insecure = true
+            [registry."192.168.10.131:5000"]
+              insecure = true
+            [registry."docker.io"]
+              mirrors = ["ant.azrty.com"]
+      - id: ant-cache-kc
+        uses: azrtydxb/ant-setup-action@37005b6568d80864a713c00ceafef6cda19fcde4 # v1
+        with:
+          build-cache: "true"
+          cache-name: kamailio
+          cache-write: ${{ github.event_name == 'push' }}
+          sccache: "false"
+          go: "false"
+          npm: "false"
+          cargo: "false"
+          pip: "false"
+      - name: Build kamailio
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: docker/kamailio
+          load: true
+          tags: hello.local/kamailio:cfgcheck
+          cache-from: ${{ steps.ant-cache-kc.outputs.cache-from }}
+          cache-to: ${{ steps.ant-cache-kc.outputs.cache-to }}
+      - name: kamailio -c
+        env:
+          HELLO_KAMAILIO_IMAGE: hello.local/kamailio:cfgcheck
+          HELLO_REQUIRE_KAMAILIO: "1"
+        run: go test -count=1 -v -run 'TestKamailioConfigSyntax' ./test/deploy/
+
   kind-upgrade:
     # Rolling upgrade with an active call (docs/kubernetes.md, "Upgrades"):
     # builds the images from this commit, creates a kind cluster, installs

@@ -136,6 +136,23 @@ Until encrypted, each file is a comment-only skeleton; `render-private.py`
 fails on it (SOPS decryption failed) rather than rendering plaintext. Never
 commit a decrypted file or put credentials in shell arguments.
 
+## Kamailio HA: extra grants for the deployer
+
+Two Kamailio run behind a PodDisruptionBudget (`kamailio` in `kw/`), and
+the VIP phases add a Role for kube-vip's lease. The deployer Role of the
+bootstrap grants neither (`policy/poddisruptionbudgets`,
+`coordination.k8s.io/leases`), and it cannot grant itself rules it does not
+hold. A cluster admin applies `deploy/kuvryn-sync/rbac-kamailio-ha.yaml` once,
+before the release that carries them (it adds a second Role and RoleBinding,
+the original ones stay as bootstrapped):
+
+```sh
+kubectl --context kw apply -f deploy/kuvryn-sync/rbac-kamailio-ha.yaml
+```
+
+`test/deploy` (`TestKamailioHARBAC`) fails when `kw/` carries a kind that
+neither the original Role nor that file covers.
+
 ## Bootstrap (one-time, admin)
 
 Nothing here creates the namespace or the Sync objects; they bootstrap
