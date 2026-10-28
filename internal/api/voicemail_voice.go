@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/store"
 	"github.com/azrtydxb/hello/internal/ttscache"
 	"github.com/azrtydxb/hello/internal/voiceprompt"
@@ -57,29 +58,76 @@ func newSpeechCache(c Config) *ttscache.Cache {
 	}
 }
 
-// prewarmVoicemail generates every static prompt of the configured language
-// that is not stored yet. Dynamic sentences (counts, message headers, a
-// greeting naming its owner) are generated on first use instead.
-func (s *server) prewarmVoicemail() {
-	if s.PromptLanguage == "" {
-		return // no language configured: nothing is pre-generated
+// prewarmLanguages starts the pre-generation in the background; the caller
+// is a request that must not wait for it.
+func (s *server) prewarmLanguages() {
+	t, err := s.Store.GetTTSSettings(context.Background())
+	if err != nil || !t.Configured {
+		return
 	}
+	go s.prewarmVoicemail() //nolint:gosec // G118: it must outlive the request that triggered it
+}
+
+// promptLanguagesInUse is every language a call can need: the deployment
+// language (when one is configured) and each language a box or a queue set for itself.
+// Each is a language with a complete table, once, sorted.
+func (s *server) promptLanguagesInUse(ctx context.Context) []voiceprompt.Lang {
+	seen := map[voiceprompt.Lang]bool{}
+	if s.PromptLanguage != "" {
+		seen[voiceprompt.Parse(s.PromptLanguage)] = true
+	}
+	boxes, err := s.Store.VoicemailPromptLanguages(ctx)
+	if err != nil {
+		s.Log.Warn("tts: reading the box languages", "error", err)
+	}
+	for _, l := range boxes {
+		if voiceprompt.Valid(l) {
+			seen[voiceprompt.Parse(l)] = true
+		}
+	}
+	queues, err := s.Store.QueuePromptLanguages(ctx)
+	if err != nil {
+		s.Log.Warn("tts: reading the queue languages", "error", err)
+	}
+	for _, l := range queues {
+		if voiceprompt.Valid(l) {
+			seen[voiceprompt.Parse(l)] = true
+		}
+	}
+	out := make([]voiceprompt.Lang, 0, len(seen))
+	for l := range seen {
+		out = append(out, l)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// prewarmVoicemail generates every static prompt, in each language a call can
+// use (the deployment language and every box's own), that is not stored yet.
+// Stored clips are keyed by their text, so each language has its own. Dynamic
+// sentences (counts, message headers, a greeting naming its owner) are
+// generated on first use instead.
+func (s *server) prewarmVoicemail() {
 	s.prewarmMu.Lock()
 	defer s.prewarmMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	lang := voiceprompt.Parse(s.PromptLanguage)
-	var texts []string
-	for _, e := range voiceprompt.Static(lang) {
-		texts = append(texts, e.Text)
+	for _, lang := range s.promptLanguagesInUse(ctx) {
+		var texts []string
+		for _, e := range voiceprompt.Static(lang) {
+			texts = append(texts, e.Text)
+		}
+		// The callback offer names its key, so it is not static; the default
+		// key is spoken ahead (another key is generated on first use).
+		texts = append(texts, voiceprompt.CallbackOffer(lang, queue.DefaultCallbackDigit))
+		res, err := s.speech.Prewarm(ctx, texts, 3)
+		if err != nil {
+			s.Log.Warn("tts: pre-generating the voicemail prompts stopped", "language", string(lang),
+				"made", res.Made, "already_stored", res.Cached, "error", err)
+			return
+		}
+		s.Log.Info("tts: voicemail prompts ready", "language", string(lang), "made", res.Made, "already_stored", res.Cached)
 	}
-	res, err := s.speech.Prewarm(ctx, texts, 3)
-	if err != nil {
-		s.Log.Warn("tts: pre-generating the voicemail prompts stopped", "language", string(lang),
-			"made", res.Made, "already_stored", res.Cached, "error", err)
-		return
-	}
-	s.Log.Info("tts: voicemail prompts ready", "language", string(lang), "made", res.Made, "already_stored", res.Cached)
 }
 
 // previewVoicemailGreeting is POST /api/v1/extensions/{id}/voicemail/greeting/preview:
@@ -122,6 +170,9 @@ func (s *server) previewVoicemailGreeting(w http.ResponseWriter, r *http.Request
 		return
 	}
 	lang := voiceprompt.Parse(s.PromptLanguage)
+	if box, err := s.Store.GetVoicemailBox(r.Context(), id); err == nil {
+		lang = voiceprompt.Resolve(box.PromptLanguage, s.PromptLanguage)
+	}
 	text := voiceprompt.GreetingText(lang, v, voiceprompt.Owner(lang, ext.Name, ext.Number))
 	wav, err := s.speech.Speak(r.Context(), text)
 	switch {

@@ -89,6 +89,7 @@ import { Paging } from "./pages/Paging";
 import { Conferences } from "./pages/Conferences";
 import { Ivr } from "./pages/Ivr";
 import { Queues } from "./pages/Queues";
+import { QueueCallbacks } from "./pages/QueueCallbacks";
 import { Wallboard } from "./pages/Wallboard";
 import { TimeConditions } from "./pages/TimeConditions";
 import { ParkPickup } from "./pages/ParkPickup";
@@ -331,6 +332,7 @@ export function App() {
               }
             />
             <Route path="/history/:id" element={<CallDetail />} />
+            <Route path="/queues/:id/callbacks" element={<QueueCallbacks />} />
             <Route path="/ai/assistant/:id" element={<AIAssistant />} />
             <Route path="/ai/proposals/:id" element={<AIProposalDetail />} />
             {/* Phones sections; static paths outrank /phones/:id. */}

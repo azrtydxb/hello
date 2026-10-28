@@ -31,6 +31,9 @@ type VoicemailBox struct {
 	// default spoken prompt.
 	BusyObject string
 	NameObject string
+	// PromptLanguage is the box's own prompt language ("en", "nl"; "" means
+	// inherit the deployment language), migration 00047.
+	PromptLanguage string
 }
 
 // VoicemailStore is the voicemail metadata store (PostgreSQL, implemented by
@@ -499,10 +502,12 @@ func (c *call) playDefaultGreeting(ctx context.Context, sess media.Session, box 
 	if c.s.deps.Speech == nil {
 		return
 	}
-	lang := c.s.promptLang()
+	lang := c.s.boxLang(box)
 	ext := c.mailboxExt(vmLeave)
 	if box.NameObject != "" && c.s.deps.Objects != nil && c.playObject(ctx, sess, box.NameObject) {
-		c.speakOnce(ctx, sess, voiceprompt.GreetingTail(lang, v))
+		if !c.speakOnce(ctx, sess, voiceprompt.GreetingTail(lang, v)) && lang != voiceprompt.Default {
+			c.speakOnce(ctx, sess, voiceprompt.GreetingTail(voiceprompt.Default, v))
+		}
 		return
 	}
 	name := ""
@@ -511,7 +516,10 @@ func (c *call) playDefaultGreeting(ctx context.Context, sess media.Session, box 
 			name = e.Name
 		}
 	}
-	c.speakOnce(ctx, sess, voiceprompt.GreetingText(lang, v, voiceprompt.Owner(lang, name, ext)))
+	if !c.speakOnce(ctx, sess, voiceprompt.GreetingText(lang, v, voiceprompt.Owner(lang, name, ext))) && lang != voiceprompt.Default {
+		en := voiceprompt.Default
+		c.speakOnce(ctx, sess, voiceprompt.GreetingText(en, v, voiceprompt.Owner(en, name, ext)))
+	}
 }
 
 // recordMessage runs the record loop: DTMF '#' finishes, '*' retries (at
@@ -605,7 +613,7 @@ func (c *call) vmRetrieve(ctx context.Context, sess media.Session, box Voicemail
 		}
 		return
 	}
-	lang := s.promptLang()
+	lang := s.boxLang(box)
 	if s.deps.Speech != nil {
 		// The first prompt decides: if it cannot be spoken, fall back before
 		// the caller has heard anything.
@@ -613,6 +621,15 @@ func (c *call) vmRetrieve(ctx context.Context, sess media.Session, box Voicemail
 		wctx, cancel := context.WithTimeout(ctx, vmSpeakWait)
 		_, err := s.deps.Speech.Speak(wctx, pinText)
 		cancel()
+		if err != nil && lang != voiceprompt.Default {
+			// No clip in the box's language: speak English rather than
+			// drop to the plain flow (S-21).
+			s.log.Warn("voicemail: prompts in the box language unavailable; using English", "language", string(lang), "error", err)
+			lang = voiceprompt.Default
+			wctx, cancel = context.WithTimeout(ctx, vmSpeakWait)
+			_, err = s.deps.Speech.Speak(wctx, voiceprompt.Text(lang, voiceprompt.PINEnter, nil))
+			cancel()
+		}
 		if err == nil {
 			ui := newCallUI(ctx, c, sess, s.deps.Speech)
 			defer ui.close()
@@ -745,6 +762,12 @@ func (c *call) removeObject(ctx context.Context, key string) {
 
 // promptLang is the language of the spoken prompts.
 func (s *Server) promptLang() voiceprompt.Lang { return voiceprompt.Parse(s.cfg.PromptLanguage) }
+
+// boxLang is the language a box speaks: its own setting, else the
+// deployment language, else English (pbx-gaps S-20).
+func (s *Server) boxLang(box VoicemailBox) voiceprompt.Lang {
+	return voiceprompt.Resolve(box.PromptLanguage, s.cfg.PromptLanguage)
+}
 
 // timeLocation is the zone message times are spoken in (UTC when unset or
 // unknown).

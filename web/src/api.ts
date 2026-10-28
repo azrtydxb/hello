@@ -1634,6 +1634,14 @@ export interface QueueFields {
   breakoutKey: string;
   breakoutPromptId: Id | null;
   breakoutVoicemail: string;
+  /** Offer a waiting caller a call back instead of holding the line. */
+  callbackEnabled: boolean;
+  /** Offer once the estimated wait exceeds this many seconds. */
+  callbackOfferAfterSeconds: number;
+  /** The key that accepts the offer, or asks for a callback. */
+  callbackDigit: string;
+  /** The queue's prompt language; "" inherits. */
+  promptLanguage: string;
   members: QueueMember[];
 }
 
@@ -1660,6 +1668,38 @@ export const putQueue = (queueId: Id, input: QueueFields) =>
 
 export const deleteQueue = (queueId: Id) =>
   request<void>("DELETE", `/api/v1/queues/${id(queueId)}`);
+
+export type QueueCallbackStatus =
+  "waiting" | "dialling" | "connected" | "failed" | "cancelled" | "expired";
+
+/** A callback request of a queue: GET /api/v1/queues/{id}/callbacks. */
+export interface QueueCallback {
+  id: Id;
+  queueId: Id;
+  number: string;
+  callerName: string;
+  status: QueueCallbackStatus;
+  attempts: number;
+  /** The caller's original enqueue time (Unix ms): its place in the queue. */
+  positionKey: number;
+  nextAttemptAt: string;
+  claimedBy: string;
+  leaseUntil?: string;
+  agent: string;
+  result: string;
+  createdAt: string;
+  expiresAt: string;
+  finishedAt?: string;
+}
+
+export const listQueueCallbacks = (queueId: Id, signal?: AbortSignal) =>
+  list<QueueCallback>(`/api/v1/queues/${id(queueId)}/callbacks`, signal);
+
+export const cancelQueueCallback = (queueId: Id, callbackId: Id) =>
+  request<void>(
+    "DELETE",
+    `/api/v1/queues/${id(queueId)}/callbacks/${id(callbackId)}`,
+  );
 
 /** An agent's state on the wallboard. */
 export type QueueAgentState =

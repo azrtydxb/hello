@@ -125,6 +125,9 @@ type Config struct {
 	HATakeoverPoll    time.Duration
 	HATakeoverJitter  time.Duration
 
+	// CallbackInterval is how often this node sweeps the queues' callback
+	// requests; zero means every 3 s.
+	CallbackInterval time.Duration
 	// PromptLanguage is the language of the spoken voicemail prompts ("en",
 	// "nl"; empty is English) and Timezone the IANA zone message times are
 	// spoken in (empty is UTC).
@@ -193,6 +196,9 @@ type Deps struct {
 	// Queues is the call queues' shared state (Valkey); nil disables call
 	// queues (a call to a queue is refused with 503).
 	Queues queue.Store
+	// Callbacks is the queue callback requests (PostgreSQL); nil turns the
+	// callback offer off.
+	Callbacks queue.CallbackStore
 	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
 	// MESSAGE 503.
 	Messages MessageQueue
@@ -273,6 +279,10 @@ type Server struct {
 	// this node sent per dialog Call-ID, so replicated CSeqs continue past
 	// it; entries go with the dialog's binding.
 	haSent sync.Map
+	// cbHold is the lowest place of a due callback request, per queue id
+	// (map[int64]int64, replaced by each sweep): a waiting call that entered
+	// later does not take an agent ahead of it (queue_callback.go).
+	cbHold atomic.Value
 	// haGone holds the dialog Call-IDs of calls this node yielded to a
 	// taker (the value is the taker): their in-dialog requests get 503 so
 	// the edge retries them on a survivor.
@@ -508,6 +518,7 @@ func (s *Server) Serve(ctx context.Context, conn net.PacketConn) error {
 	s.bg.Go(func() { s.subExpireLoop(rctx) })
 	s.bg.Go(func() { s.mwiPollLoop(rctx) })
 	s.bg.Go(func() { s.queueLoop(rctx) })
+	s.bg.Go(func() { s.callbackLoop(rctx) })
 	if s.deps.MailboxEvents != nil {
 		s.bg.Go(func() { s.deps.MailboxEvents.Watch(rctx, s.mailboxChanged) })
 	}

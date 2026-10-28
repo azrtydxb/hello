@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -80,41 +81,52 @@ type Queue struct {
 	BreakoutPromptID   *int64         `json:"breakoutPromptId"`
 	BreakoutPromptName string         `json:"breakoutPromptName"`
 	BreakoutVoicemail  string         `json:"breakoutVoicemail"`
-	Members            []QueueMember  `json:"members"`
-	CreatedAt          time.Time      `json:"createdAt"`
-	UpdatedAt          time.Time      `json:"updatedAt"`
+	// Callback (migration 00049, S-9): offer a caller a call back instead of
+	// holding the line.
+	CallbackEnabled    bool   `json:"callbackEnabled"`
+	CallbackOfferAfter int    `json:"callbackOfferAfterSeconds"`
+	CallbackDigit      string `json:"callbackDigit"`
+	// PromptLanguage is the queue's own prompt language; "" inherits (S-20).
+	PromptLanguage string        `json:"promptLanguage"`
+	Members        []QueueMember `json:"members"`
+	CreatedAt      time.Time     `json:"createdAt"`
+	UpdatedAt      time.Time     `json:"updatedAt"`
 }
 
 // QueueInput is the writable shape of a queue; an update replaces the whole
 // queue, its members included.
 type QueueInput struct {
-	Name              string
-	Number            string
-	Enabled           bool
-	Strategy          string
-	AgentTimeout      int
-	RetryDelay        int
-	WrapUp            int
-	MaxCallers        int
-	MaxWait           int
-	JoinEmpty         bool
-	LeaveEmpty        bool
-	Timeout           IVRDestination
-	Full              IVRDestination
-	NoAgents          IVRDestination
-	MOHClassID        *int64
-	AnnounceFrequency int
-	AnnouncePosition  bool
-	AnnounceWait      bool
-	PeriodicPromptID  *int64
-	PositionPromptID  *int64
-	WaitPromptID      *int64
-	MinutesPromptID   *int64
-	DigitsPrefix      string
-	BreakoutKey       string
-	BreakoutPromptID  *int64
-	BreakoutVoicemail string
-	Members           []QueueMember
+	Name               string
+	Number             string
+	Enabled            bool
+	Strategy           string
+	AgentTimeout       int
+	RetryDelay         int
+	WrapUp             int
+	MaxCallers         int
+	MaxWait            int
+	JoinEmpty          bool
+	LeaveEmpty         bool
+	Timeout            IVRDestination
+	Full               IVRDestination
+	NoAgents           IVRDestination
+	MOHClassID         *int64
+	AnnounceFrequency  int
+	AnnouncePosition   bool
+	AnnounceWait       bool
+	PeriodicPromptID   *int64
+	PositionPromptID   *int64
+	WaitPromptID       *int64
+	MinutesPromptID    *int64
+	DigitsPrefix       string
+	BreakoutKey        string
+	BreakoutPromptID   *int64
+	BreakoutVoicemail  string
+	CallbackEnabled    bool
+	CallbackOfferAfter int
+	CallbackDigit      string
+	PromptLanguage     string
+	Members            []QueueMember
 }
 
 const queueCols = `q.id, q.name, q.number, q.enabled, q.strategy, q.agent_timeout, q.retry_delay, q.wrap_up,
@@ -123,7 +135,8 @@ const queueCols = `q.id, q.name, q.number, q.enabled, q.strategy, q.agent_timeou
 	q.announce_frequency, q.announce_position, q.announce_wait,
 	q.periodic_prompt_id, COALESCE(pp.name, ''), q.position_prompt_id, COALESCE(po.name, ''),
 	q.wait_prompt_id, COALESCE(wp.name, ''), q.minutes_prompt_id, COALESCE(mp.name, ''), q.digits_prefix,
-	q.breakout_key, q.breakout_prompt_id, COALESCE(bp.name, ''), q.breakout_voicemail, q.created_at, q.updated_at`
+	q.breakout_key, q.breakout_prompt_id, COALESCE(bp.name, ''), q.breakout_voicemail,
+	q.callback_enabled, q.callback_offer_after_seconds, q.callback_digit, COALESCE(q.prompt_language, ''), q.created_at, q.updated_at`
 
 const queueFrom = ` FROM queues q
 	LEFT JOIN announcements pp ON pp.id = q.periodic_prompt_id
@@ -148,7 +161,8 @@ func listQueues(ctx context.Context, q querier, where string, args ...any) ([]Qu
 			&x.AnnounceFrequency, &x.AnnouncePosition, &x.AnnounceWait,
 			&x.PeriodicPromptID, &x.PeriodicPromptName, &x.PositionPromptID, &x.PositionPromptName,
 			&x.WaitPromptID, &x.WaitPromptName, &x.MinutesPromptID, &x.MinutesPromptName, &x.DigitsPrefix,
-			&x.BreakoutKey, &x.BreakoutPromptID, &x.BreakoutPromptName, &x.BreakoutVoicemail, &x.CreatedAt, &x.UpdatedAt); err != nil {
+			&x.BreakoutKey, &x.BreakoutPromptID, &x.BreakoutPromptName, &x.BreakoutVoicemail,
+			&x.CallbackEnabled, &x.CallbackOfferAfter, &x.CallbackDigit, &x.PromptLanguage, &x.CreatedAt, &x.UpdatedAt); err != nil {
 			return nil, err
 		}
 		x.Members = []QueueMember{}
@@ -330,13 +344,29 @@ func queueFK(err error) error {
 const queueWriteCols = `name, number, enabled, strategy, agent_timeout, retry_delay, wrap_up, max_callers, max_wait,
 	join_empty, leave_empty, timeout_kind, timeout_target, full_kind, full_target, no_agents_kind, no_agents_target,
 	moh_class_id, announce_frequency, announce_position, announce_wait, periodic_prompt_id, position_prompt_id,
-	wait_prompt_id, minutes_prompt_id, digits_prefix, breakout_key, breakout_prompt_id, breakout_voicemail`
+	wait_prompt_id, minutes_prompt_id, digits_prefix, breakout_key, breakout_prompt_id, breakout_voicemail,
+	callback_enabled, callback_offer_after_seconds, callback_digit, prompt_language`
+
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func orDefaultStr(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
+}
 
 func (in QueueInput) args() []any {
 	return []any{in.Name, in.Number, in.Enabled, in.Strategy, in.AgentTimeout, in.RetryDelay, in.WrapUp, in.MaxCallers, in.MaxWait,
 		in.JoinEmpty, in.LeaveEmpty, in.Timeout.Kind, in.Timeout.Target, in.Full.Kind, in.Full.Target, in.NoAgents.Kind, in.NoAgents.Target,
 		in.MOHClassID, in.AnnounceFrequency, in.AnnouncePosition, in.AnnounceWait, in.PeriodicPromptID, in.PositionPromptID,
-		in.WaitPromptID, in.MinutesPromptID, in.DigitsPrefix, in.BreakoutKey, in.BreakoutPromptID, in.BreakoutVoicemail}
+		in.WaitPromptID, in.MinutesPromptID, in.DigitsPrefix, in.BreakoutKey, in.BreakoutPromptID, in.BreakoutVoicemail,
+		in.CallbackEnabled, in.CallbackOfferAfter, orDefaultStr(in.CallbackDigit, queue.DefaultCallbackDigit), nullIfEmpty(in.PromptLanguage)}
 }
 
 // CreateQueue inserts a queue with its members.
@@ -353,7 +383,7 @@ func (s *Store) CreateQueue(ctx context.Context, actor string, in QueueInput, ch
 		if err := checkQueue(ctx, tx, 0, in); err != nil {
 			return 0, err
 		}
-		ph := make([]string, 29)
+		ph := make([]string, 33)
 		for i := range ph {
 			ph[i] = fmt.Sprintf("$%d", i+1)
 		}

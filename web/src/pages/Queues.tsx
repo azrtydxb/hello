@@ -38,6 +38,7 @@ import {
   EmptyState,
   IconButton,
   Input,
+  LinkButton,
   PageHeader,
   Select,
   Spinner,
@@ -49,6 +50,7 @@ import {
   DestinationPicker,
   type DestinationChoices,
 } from "../components/IvrDestination";
+import { PROMPT_LANGUAGE_LABELS, promptLanguageLabel } from "../api/media";
 import { listTimeConditions, type TimeCondition } from "../api/timecond";
 import { mapFieldErrors, type ErrorMap } from "../forms";
 import { FormAlert } from "./callflow/ui";
@@ -303,6 +305,17 @@ function QueueCard({
         <strong>{destinationText(q.noAgents)}</strong>
       </div>
       <div className="cf-card__foot">
+        {q.callbackEnabled && (
+          <LinkButton
+            to={`/queues/${String(q.id)}/callbacks`}
+            variant="ghost"
+            size="sm"
+            icon="phone-call"
+            aria-label={`Callbacks of queue ${q.name}`}
+          >
+            Callbacks
+          </LinkButton>
+        )}
         <Button
           variant="secondary"
           size="sm"
@@ -356,6 +369,10 @@ interface Draft {
   breakoutKey: string;
   breakoutPromptId: string;
   breakoutVoicemail: string;
+  callbackEnabled: boolean;
+  callbackOfferAfterSeconds: string;
+  callbackDigit: string;
+  promptLanguage: string;
   members: QueueMember[];
 }
 
@@ -388,6 +405,10 @@ const draftOf = (q: Queue | null): Draft => ({
   breakoutKey: q?.breakoutKey ?? "",
   breakoutPromptId: idStr(q?.breakoutPromptId),
   breakoutVoicemail: q?.breakoutVoicemail ?? "",
+  callbackEnabled: q?.callbackEnabled ?? false,
+  callbackOfferAfterSeconds: String(q?.callbackOfferAfterSeconds ?? 120),
+  callbackDigit: q?.callbackDigit ?? "2",
+  promptLanguage: q?.promptLanguage ?? "",
   members: q?.members ?? [],
 });
 
@@ -418,6 +439,10 @@ const KEYS = [
   "breakoutKey",
   "breakoutPromptId",
   "breakoutVoicemail",
+  "callbackEnabled",
+  "callbackOfferAfterSeconds",
+  "callbackDigit",
+  "promptLanguage",
   "members",
 ];
 
@@ -477,6 +502,20 @@ function validate(d: Draft): Record<string, string> {
   }
   if (d.breakoutKey !== "" && d.breakoutVoicemail === "") {
     out.breakoutVoicemail = "Choose whose voicemail box takes the message.";
+  }
+  if (d.callbackEnabled) {
+    if (!/^[0-9*#]$/.test(d.callbackDigit)) {
+      out.callbackDigit = "One of 0-9, * or #.";
+    } else if (d.breakoutKey !== "" && d.breakoutKey === d.callbackDigit) {
+      out.callbackDigit = "Must differ from the voicemail key.";
+    }
+    range(
+      out,
+      "callbackOfferAfterSeconds",
+      d.callbackOfferAfterSeconds,
+      0,
+      3600,
+    );
   }
   validateDest(out, "timeout", d.timeout);
   validateDest(out, "full", d.full);
@@ -605,6 +644,10 @@ function QueueDrawer({
         breakoutKey: d.breakoutKey,
         breakoutPromptId: prompt(d.breakoutPromptId),
         breakoutVoicemail: d.breakoutVoicemail,
+        callbackEnabled: d.callbackEnabled,
+        callbackOfferAfterSeconds: Number(d.callbackOfferAfterSeconds),
+        callbackDigit: d.callbackDigit,
+        promptLanguage: d.promptLanguage,
         members: d.members.map((m, i) => ({
           extensionId: m.extensionId,
           dynamic: m.dynamic,
@@ -879,6 +922,53 @@ function QueueDrawer({
             />
           </div>
           {prompt("breakoutPromptId", "“Press 1 to leave a voicemail”")}
+        </fieldset>
+
+        <fieldset className="cf-form__section">
+          <legend className="az-eyebrow">Callback</legend>
+          <Switch
+            label="Offer a callback to callers who would wait long"
+            labelPosition="end"
+            checked={d.callbackEnabled}
+            onChange={(e) => set("callbackEnabled", e.target.checked)}
+          />
+          <div className="cf-two">
+            <Input
+              id="queue-callbackOfferAfterSeconds"
+              label="Offer after (s)"
+              mono
+              value={d.callbackOfferAfterSeconds}
+              error={errors.callbackOfferAfterSeconds}
+              hint="When the estimated wait exceeds this."
+              disabled={!d.callbackEnabled}
+              onChange={(e) => set("callbackOfferAfterSeconds", e.target.value)}
+            />
+            <Input
+              id="queue-callbackDigit"
+              label="Callback key"
+              mono
+              value={d.callbackDigit}
+              error={errors.callbackDigit}
+              hint="Accepts the offer; pressed at any time it asks for one."
+              disabled={!d.callbackEnabled}
+              onChange={(e) => set("callbackDigit", e.target.value)}
+            />
+          </div>
+          <Select
+            id="queue-promptLanguage"
+            label="Prompt language"
+            hint="The language of the callback prompts. Default follows the system language, English unless set."
+            value={d.promptLanguage}
+            error={errors.promptLanguage}
+            options={[
+              { value: "", label: "Default" },
+              ...Object.keys(PROMPT_LANGUAGE_LABELS).map((code) => ({
+                value: code,
+                label: promptLanguageLabel(code),
+              })),
+            ]}
+            onChange={(e) => set("promptLanguage", e.target.value)}
+          />
         </fieldset>
 
         <fieldset className="cf-form__section">

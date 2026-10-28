@@ -80,4 +80,11 @@ var english = map[Key]string{
 	GreetUnavailableTail: "is not available. Please leave a message after the tone.",
 	GreetBusyTail:        "is busy at the moment. Please leave a message after the tone.",
 	GreetUnreachableTail: "cannot be reached at the moment. Please leave a message after the tone.",
+
+	QueueCallbackOffer:   "To be called back when an agent is free, and keep your place in line, press {digit}.",
+	QueueCallbackConfirm: "Thank you. We will call you back on this number as soon as an agent is free. You keep your place in line. Goodbye.",
+	QueueCallbackFull:    "Sorry, a callback cannot be arranged right now. Please stay on the line.",
+	QueueCallbackWelcome: "This is the call back you asked for. Please hold while we connect you to an agent.",
+	WordStar:             "star",
+	WordPound:            "pound",
 }

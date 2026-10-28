@@ -25,6 +25,7 @@ import (
 	"github.com/azrtydxb/hello/internal/cdr"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/snapshot"
+	"github.com/azrtydxb/hello/internal/voiceprompt"
 	"github.com/emiago/sipgo/sip"
 )
 
@@ -96,10 +97,12 @@ func (c *call) startQueue(tx sip.ServerTransaction, snap *snapshot.Snapshot, q s
 // queue (its entry, with the original time, is restored if it was dropped)
 // and hears the music again.
 func (c *call) queueResume(detail string) {
-	parts := strings.SplitN(strings.TrimPrefix(detail, haQueueDetailPrefix), ":", 2)
-	name, entered := parts[0], int64(0)
-	if len(parts) == 2 {
-		entered, _ = strconv.ParseInt(parts[1], 10, 64)
+	name, entered, cbID := parseQueueDetail(detail)
+	if cbID != 0 {
+		// A callback request this call serves: the survivor adopts it.
+		c.mu.Lock()
+		c.cbID, c.cbQueue = cbID, name
+		c.mu.Unlock()
 	}
 	relay := c.anchorRelay()
 	snap := c.s.deps.Snapshots.Current()
@@ -217,8 +220,15 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 		c.queueLeave(ctx, snap, q, menu, "no_agents", q.NoAgents, 0)
 		return
 	}
+	c.mu.Lock()
+	cbID := c.cbID
+	c.mu.Unlock()
+	maxCallers := q.MaxCallers
+	if cbID != 0 {
+		maxCallers = 0 // a callback already holds its place: the cap does not apply
+	}
 	entry, err := st.Join(ctx, queue.Entry{CallID: c.id, Queue: q.Name, Caller: c.callerNum, CallerName: c.callerName,
-		Node: s.cfg.NodeID, EnteredMs: entered}, q.MaxCallers)
+		Node: s.cfg.NodeID, EnteredMs: entered}, maxCallers)
 	switch {
 	case errors.Is(err, queue.ErrFull):
 		c.queueLog("queue full", q.Name)
@@ -234,11 +244,17 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 		return
 	}
 	enteredAt := entry.Entered()
+	if cbID != 0 {
+		// The place is the request's original one, but the caller has only
+		// been on the line since it answered: the wait, and the maximum
+		// wait, count from now.
+		enteredAt = time.Now()
+	}
 	c.mu.Lock()
 	c.qWaiting, c.qEnteredAt = true, enteredAt
 	c.qName, c.qWrap = q.Name, time.Duration(q.WrapUp)*time.Second
 	if c.haPhase == haPhaseQueue {
-		c.haDetail = haQueueDetailPrefix + q.Name + ":" + strconv.FormatInt(entry.EnteredMs, 10)
+		c.haDetail = queueDetail(q.Name, entry.EnteredMs, cbID)
 	}
 	c.mu.Unlock()
 	c.queueLog("queue entered", q.Name, "staffed", staffed, "free", len(free))
@@ -278,6 +294,10 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 
 	moh := &queueMusic{c: c, classID: musicFor(snap, q)}
 	defer moh.halt()
+	if cbID != 0 {
+		c.queueSpeakKey(ctx, q, voiceprompt.QueueCallbackWelcome, false)
+		c.cbRenew() // adopts the request on a survivor, extends the lease on the owner
+	}
 	moh.start()
 
 	c.mu.Lock()
@@ -286,7 +306,8 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 	tick := time.NewTicker(queueTick)
 	defer tick.Stop()
 	start := time.Now()
-	lastTouch, lastAnn, lastEmpty := start, start, start
+	lastTouch, lastAnn, lastEmpty, lastRenew, lastCB := start, start, start, start, start
+	callbackOffered := false
 	nextOffer := start
 	for {
 		select {
@@ -298,10 +319,18 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 			left = true
 			return
 		case d := <-digits:
-			if c.queueBreakout(snap, q, d) {
+			switch c.keyFor(snap, q, d) {
+			case keyBreakout:
 				moh.halt()
 				leave("breakout", snapshot.QueueDest{Kind: snapshot.IVRVoicemail, Target: q.BreakoutBox})
 				return
+			case keyCallback:
+				moh.halt()
+				if c.queueCallbackAccept(ctx, q, entry) {
+					leave("callback", snapshot.QueueDest{Kind: snapshot.IVRHangup})
+					return
+				}
+				moh.start()
 			}
 		case <-tick.C:
 		}
@@ -326,6 +355,37 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 				s.log.Warn("queue heartbeat failed", "queue", q.Name, "correlation_id", c.id, "error", err)
 			}
 		}
+		if cbID != 0 && now.Sub(lastRenew) >= callbackWatchEvery {
+			lastRenew = now
+			if !c.cbRenew() {
+				// An operator cancelled the request: hang up on the caller.
+				moh.halt()
+				c.cbFinish("cancelled", "")
+				leave("cancelled", snapshot.QueueDest{Kind: snapshot.IVRHangup})
+				return
+			}
+		}
+		if !callbackOffered && now.Sub(lastCB) >= callbackOfferCheck && c.callbackOffered(q) {
+			lastCB = now
+			if c.callbackDue(ctx, snap, q, enteredAt) {
+				callbackOffered = true
+				moh.halt()
+				switch c.queueCallbackOffer(ctx, snap, q) {
+				case keyCallback:
+					if c.queueCallbackAccept(ctx, q, entry) {
+						leave("callback", snapshot.QueueDest{Kind: snapshot.IVRHangup})
+						return
+					}
+				case keyBreakout:
+					leave("breakout", snapshot.QueueDest{Kind: snapshot.IVRVoicemail, Target: q.BreakoutBox})
+					return
+				}
+				if ctx.Err() != nil {
+					return
+				}
+				moh.start()
+			}
+		}
 		if q.LeaveEmpty && now.Sub(lastEmpty) >= queueEmptyCheck {
 			lastEmpty = now
 			if n, _ := c.queueAgents(ctx, snap, q); n == 0 {
@@ -336,9 +396,15 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 		}
 		if q.AnnounceFrequency > 0 && now.Sub(lastAnn) >= time.Duration(q.AnnounceFrequency)*time.Second {
 			moh.halt()
-			if broke := c.queueAnnounce(ctx, snap, q, entry); broke {
+			switch c.queueAnnounce(ctx, snap, q, entry) {
+			case keyBreakout:
 				leave("breakout", snapshot.QueueDest{Kind: snapshot.IVRVoicemail, Target: q.BreakoutBox})
 				return
+			case keyCallback:
+				if c.queueCallbackAccept(ctx, q, entry) {
+					leave("callback", snapshot.QueueDest{Kind: snapshot.IVRHangup})
+					return
+				}
 			}
 			lastAnn = time.Now()
 			moh.start()
@@ -376,6 +442,7 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 		c.queueLog("queue answered", q.Name, "agent", ext, "wait", wait.String())
 		c.addTrace(fmt.Sprintf("Queue %s: answered by %s after %s", q.Name, ext, wait.Round(time.Second)))
 		c.ivrConnect(w, ext)
+		c.cbFinish("connected", ext)
 		release() // the agent shows as busy now
 		return
 	}
@@ -384,6 +451,12 @@ func (c *call) queueRun(ctx context.Context, snap *snapshot.Snapshot, q snapshot
 // queueBreakout reports whether the key is the queue's voicemail breakout and
 // a box is there to take the message.
 func (c *call) queueBreakout(snap *snapshot.Snapshot, q snapshot.Queue, d byte) bool {
+	c.mu.Lock()
+	cb := c.cbID
+	c.mu.Unlock()
+	if cb != 0 { // the caller asked to be called, not to leave a message
+		return false
+	}
 	if q.BreakoutKey == "" || q.BreakoutBox == "" || q.BreakoutKey[0] != d {
 		return false
 	}
@@ -399,6 +472,24 @@ func (c *call) queueLeave(ctx context.Context, snap *snapshot.Snapshot, q snapsh
 	c.qLeg(cdr.QueueExit, q.Name, "", wait, why)
 	s.m.QueueWait.WithLabelValues(q.Name, why).Observe(wait.Seconds())
 	s.m.QueueCalls.WithLabelValues(q.Name, "exit_"+why).Inc()
+	c.mu.Lock()
+	cbID := c.cbID
+	c.mu.Unlock()
+	if cbID != 0 {
+		// A called-back caller leaves when no agent took it in time: the
+		// attempt failed and the request waits for the next one.
+		c.queueLog("queue exit", q.Name, "reason", why, "wait", wait.String(), "callback", cbID)
+		c.cbFinish("no_agent", "")
+		c.ivrHangup()
+		return
+	}
+	if why == "callback" {
+		// The caller asked to be called back: the call is over, the request
+		// is the caller's place.
+		c.queueLog("queue exit", q.Name, "reason", why, "wait", wait.String())
+		c.ivrHangup()
+		return
+	}
 	c.queueLog("queue exit", q.Name, "reason", why, "kind", dest.Kind, "target", dest.Target, "wait", wait.String())
 	next, done := c.ivrLeave(ctx, snap, menu, ivrExit{dest: dest, why: "queue " + q.Name + " " + why, auto: true})
 	switch {
@@ -469,6 +560,11 @@ func (c *call) queueOffer(ctx context.Context, snap *snapshot.Snapshot, q snapsh
 	cancel()
 	if err != nil || !queue.NextInLine(waiting, c.id) {
 		return nil, "", nil
+	}
+	for _, e := range waiting {
+		if e.CallID == c.id && s.callbackHeld(q.ID, e.EnteredMs) {
+			return nil, "", nil // a callback with an earlier place goes first
+		}
 	}
 	_, free := c.queueAgents(ctx, snap, q)
 	if len(free) == 0 {
@@ -611,7 +707,7 @@ func (c *call) queueEnded() {
 
 // queueAnnounce plays the periodic prompt, the caller's position and the
 // estimated wait. A press of the breakout key interrupts it and reports true.
-func (c *call) queueAnnounce(ctx context.Context, snap *snapshot.Snapshot, q snapshot.Queue, entry queue.Entry) bool {
+func (c *call) queueAnnounce(ctx context.Context, snap *snapshot.Snapshot, q snapshot.Queue, entry queue.Entry) queueKey {
 	s := c.s
 	st := s.queueStore()
 	lctx, cancel := s.stateCtx()
@@ -632,20 +728,22 @@ func (c *call) queueAnnounce(ctx context.Context, snap *snapshot.Snapshot, q sna
 		seq = append(seq, numberPrompts(q.DigitsPrefix, queue.Minutes(est))...)
 		seq = append(seq, q.MinutesPrompt)
 	}
-	if q.BreakoutKey != "" {
+	if q.BreakoutKey != "" && !c.isCallback() {
 		seq = append(seq, q.BreakoutPrompt)
 	}
 	c.addTrace(fmt.Sprintf("Queue %s: announcing position %d, about %d min", q.Name, pos, queue.Minutes(est)))
 	for _, name := range ivrPrompts(seq...) {
 		d, hit, alive := c.ivrPlay(ctx, snap, name, true)
 		if !alive {
-			return false
+			return keyNone
 		}
-		if hit && c.queueBreakout(snap, q, d) {
-			return true
+		if hit {
+			if k := c.keyFor(snap, q, d); k != keyNone {
+				return k
+			}
 		}
 	}
-	return false
+	return keyNone
 }
 
 // numberPrompts names the announcements that speak n digit by digit:
@@ -767,6 +865,16 @@ func (c *call) queueAbandoned() {
 	c.mu.Unlock()
 	wait := time.Since(since)
 	c.qLeg(cdr.QueueWait, name, "", wait, "abandoned")
+	c.mu.Lock()
+	cbID := c.cbID
+	c.mu.Unlock()
+	if cbID != 0 {
+		// A called-back caller who hangs up before an agent is rung: the
+		// attempt failed, which is not an abandon (S-10).
+		c.cbFinish("abandoned", "")
+		c.queueLog("queue callback abandoned", name, "wait", wait.String())
+		return
+	}
 	c.qLeg(cdr.QueueAbandon, name, "", wait, "")
 	c.s.m.QueueAbandoned.WithLabelValues(name).Inc()
 	c.s.m.QueueWait.WithLabelValues(name, "abandoned").Observe(wait.Seconds())

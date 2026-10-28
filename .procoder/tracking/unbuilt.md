@@ -120,7 +120,7 @@ Source: the 2026-10-26 audit of every spec, decisions.md and the conversation ag
 | Backup and restore                            | wip (#219, A2)                 |
 | Follow-me                                     | todo (spec done #199)          |
 | Blocklist, anonymous reject, country limits   | wip (#210, A1)                 |
-| Queue callback                                | todo (spec done #199)          |
+| Queue callback                                | wip (#237, B4)                 |
 | 2FA                                           | done (#209)                    |
 | Dial-by-name                                  | todo (spec done #199)          |
 | Voicemail groups                              | wip (gaps-vmgroups, A6)        |
