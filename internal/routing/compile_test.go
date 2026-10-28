@@ -163,7 +163,7 @@ func TestCompileValidation(t *testing.T) {
 			fe(I("schedule.timeZone"), `unknown time zone "Nowhere/City"`)}},
 		{"inbound caller-ID transform", in(func(r *InboundRoute) { r.CallerID = Transform{Regex: "^(0)", Template: "${x}"} }), []FieldError{
 			fe(I("callerIdTransform.template"), "references group ${x}, which the regex does not define")}},
-		{"destination kind", in(func(r *InboundRoute) { r.DestinationKind = "park" }), []FieldError{fe(I("destinationKind"), `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "announcement" or "paging"`)}},
+		{"destination kind", in(func(r *InboundRoute) { r.DestinationKind = "park" }), []FieldError{fe(I("destinationKind"), `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "voicemail_group", "announcement" or "paging"`)}},
 		{"ring group destination must exist", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "ring_group", "sales" }), []FieldError{fe(I("destination"), `ring group "sales" does not exist`)}},
 		{"voicemail destination must exist", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "voicemail", "101" }), []FieldError{fe(I("destination"), `voicemail box of extension "101" does not exist`)}},
 		{"announcement destination must exist", in(func(r *InboundRoute) { r.DestinationKind, r.Destination = "announcement", "closed" }), []FieldError{fe(I("destination"), `announcement "closed" does not exist`)}},

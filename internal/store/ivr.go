@@ -44,7 +44,7 @@ const (
 // IVRDestinationKinds lists the destination kinds, in the order the UI shows
 // them.
 var IVRDestinationKinds = []string{IVRHangup, IVRExtension, IVRRingGroup, IVRVoicemail, IVRAnnouncement,
-	IVRPaging, IVRMenuDest, IVRExternal, IVRQueueDest, IVRTimeCondition}
+	IVRPaging, IVRMenuDest, IVRExternal, IVRQueueDest, IVRTimeCondition, IVRVoicemailGroup}
 
 // IVRDestination is where an option, a timeout or an invalid choice sends
 // the call.
@@ -223,6 +223,8 @@ func checkIVRDestination(ctx context.Context, tx *sql.Tx, d ivrDest) error {
 	case IVRVoicemail:
 		return exists(`SELECT count(*) FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
 			WHERE e.number = $1`, "voicemail box of extension")
+	case IVRVoicemailGroup:
+		return exists(`SELECT count(*) FROM voicemail_groups WHERE number = $1`, "voicemail group with number")
 	case IVRRingGroup:
 		return exists(`SELECT count(*) FROM ring_groups WHERE name = $1`, "ring group")
 	case IVRAnnouncement:

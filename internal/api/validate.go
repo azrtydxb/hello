@@ -403,6 +403,10 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 		if !numberRe.MatchString(in.Destination) {
 			f.add("destination", "must be the extension number of a voicemail box")
 		}
+	case "voicemail_group":
+		if !voicemailGroupNumberRe.MatchString(in.Destination) {
+			f.add("destination", "must be the number of a voicemail group")
+		}
 	case "paging":
 		if !pageCodeRe.MatchString(in.Destination) {
 			f.add("destination", "must be the code of a paging group")
@@ -429,7 +433,7 @@ func validateInbound(in *store.InboundRoute) fieldErrs {
 			f.add("destination", "must be a sip: URI of at most 255 characters")
 		}
 	default:
-		f.add("destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "announcement" or "paging"`)
+		f.add("destinationKind", `must be "extension", "external", "internal", "ivr", "conference", "queue", "sip_uri", "time_condition", "ring_group", "voicemail", "voicemail_group", "announcement" or "paging"`)
 	}
 	return f
 }

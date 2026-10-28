@@ -231,6 +231,7 @@ type call struct {
 	ivrCancel   context.CancelFunc
 	ivrAnswered time.Time
 	vmExt       string
+	vmGroup     *snapshot.VoicemailGroup // the group a message is being left for, or nil
 	vmTap       func(leg string, pkt *media.RTPPacket)
 	bridgedExt  string
 
@@ -407,6 +408,11 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 	// A queue's number answers and queues the caller.
 	if q, ok := snap.QueueByNumber(c.dialled); ok {
 		c.startQueue(tx, snap, q)
+		return
+	}
+	// A voicemail group's number takes a message for its members.
+	if g, ok := snap.VoicemailGroup(c.dialled); ok {
+		c.startVoicemailGroup(tx, g, false)
 		return
 	}
 	// A park slot dialled as a number retrieves the call parked there, and

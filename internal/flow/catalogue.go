@@ -52,6 +52,7 @@ const (
 	KindConference    = "conference"
 	KindParkLot       = "parkLot"
 	KindPickupGroup   = "pickupGroup"
+	KindVMGroup       = "voicemailGroup"
 	KindFeatureCode   = "featureCode"
 	KindTimeCond      = "timeCondition"
 	KindSchedule      = "schedule"
@@ -150,6 +151,7 @@ func (t Target) note(n string) Target { t.Note = n; return t }
 var (
 	tExt       = tg(KindExtension, "ring")
 	tVoicemail = tg(KindExtension, "voicemail")
+	tVMGroup   = tg(KindVMGroup, "call")
 	tGroup     = tg(KindRingGroup, "ring")
 	tIVR       = tg(KindIVR, "call")
 	tQueue     = tg(KindQueue, "call")
@@ -168,7 +170,7 @@ func buildCatalogue() Catalogue {
 	// Inbound routes store every kind. An "extension" route may also name a
 	// numeric ring group (the older way); a "ring_group" route names it
 	// directly.
-	inboundDest := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tPaging, tConf, tTC, tExternal, tSIPURI, tDID}
+	inboundDest := []Target{tExt, tVoicemail, tVMGroup, tGroup, tIVR, tQueue, tAnn, tPaging, tConf, tTC, tExternal, tSIPURI, tDID}
 	// Extension forwards store a number: an extension, a numeric ring group
 	// or an external number.
 	forward := []Target{tExt, tGroup.note("Ring group names must be numeric to be dialled from a forward"), tExternal}
@@ -179,8 +181,8 @@ func buildCatalogue() Catalogue {
 	groupNoAnswer := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tTC, tExternal}
 	// IVR keys and exits, time condition branches and queue exits store the
 	// same set: hangup, extension, ring group, voicemail, announcement,
-	// paging, IVR, queue, time condition and external number.
-	exit := []Target{tExt, tVoicemail, tGroup, tIVR, tQueue, tAnn, tPaging, tTC, tExternal}
+	// paging, IVR, queue, time condition, voicemail group and external number.
+	exit := []Target{tExt, tVoicemail, tVMGroup, tGroup, tIVR, tQueue, tAnn, tPaging, tTC, tExternal}
 
 	c := Catalogue{
 		PortTypes: []PortStyle{
@@ -223,7 +225,7 @@ func buildCatalogue() Catalogue {
 				out("forwardNoAnswer", PortCall, false, "Forward on no answer", "forwardNoAnswer", forward...),
 				out("member", PortMember, true, "Member of", "members",
 					tg(KindRingGroup, "members"), tg(KindPagingGroup, "members"), tg(KindPagingGroup, "callers"),
-					tg(KindQueue, "members"), tg(KindPickupGroup, "members")),
+					tg(KindQueue, "members"), tg(KindPickupGroup, "members"), tg(KindVMGroup, "members")),
 			}},
 			{Kind: KindDevice, Label: "Device", Ports: []Port{
 				in("phone", PortDevice, false, "Phone"),
@@ -286,6 +288,10 @@ func buildCatalogue() Catalogue {
 			}},
 			{Kind: KindParkLot, Label: "Park lot", Ports: []Port{}},
 			{Kind: KindPickupGroup, Label: "Pickup group", Ports: []Port{
+				in("members", PortMember, true, "Members"),
+			}},
+			{Kind: KindVMGroup, Label: "Voicemail group", Ports: []Port{
+				in("call", PortCall, true, "Leave a message"),
 				in("members", PortMember, true, "Members"),
 			}},
 			{Kind: KindFeatureCode, Label: "Feature code", Ports: []Port{

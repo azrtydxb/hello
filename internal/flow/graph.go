@@ -25,6 +25,7 @@ type Input struct {
 	Conferences       []store.Conference
 	ParkLots          []store.ParkLot
 	PickupGroups      []store.PickupGroup
+	VoicemailGroups   []store.VoicemailGroup
 	Announcements     []store.Announcement
 	TimeConditions    []store.TimeCondition
 	Schedules         []store.Schedule

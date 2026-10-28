@@ -38,6 +38,9 @@ const (
 	ActionQueueLogout  = "queue_logout"
 	ActionQueuePause   = "queue_pause"
 	ActionQueueUnpause = "queue_unpause"
+	// ActionVoicemailBroadcast is *63<group number>: a member records a
+	// message that is delivered to every member's box (spec pbx-gaps S-14).
+	ActionVoicemailBroadcast = "voicemail_broadcast"
 	// ActionCallWaitingOn and ActionCallWaitingOff toggle the extension's
 	// call-waiting flag (migration 00026, spec S-18).
 	ActionCallWaitingOn  = "call_waiting_on"
@@ -131,6 +134,9 @@ func (c *call) handleFeatureInvite(tx sip.ServerTransaction, fc snapshot.Feature
 			return true
 		}
 		c.voicemailOwnBox(fc.Argument)
+		return true
+	case ActionVoicemailBroadcast:
+		c.handleVoicemailBroadcast(tx, arg)
 		return true
 	case ActionIntercom:
 		c.handleIntercom(tx, arg)
@@ -503,8 +509,8 @@ func (s *Server) applyInDialogCode(c *call, fromCaller bool, fc snapshot.Feature
 			}
 		}
 		return
-	case ActionVoicemail:
-		return // dialling *97 mid-call does nothing
+	case ActionVoicemail, ActionVoicemailBroadcast:
+		return // dialling *97 or *63 mid-call does nothing
 	case ActionPark:
 		// The phone that dialled the code is the parker.
 		if slot, err := c.parkCall(fromCaller, arg); err != nil {
@@ -540,4 +546,20 @@ func (c *call) announceDNDChange(upd ExtUpdate) {
 		state = StateDND
 	}
 	c.s.publishDeviceState(c.s.devicesOf(snap, upd.Extension), upd.Extension, state)
+}
+
+// handleVoicemailBroadcast is *63<group number> dialled as a call: a member
+// of the group records a message that goes to every member's box. Nothing
+// rings. An unknown group is a 404 and a caller who is not a member gets a 403
+// (spec S-14).
+func (c *call) handleVoicemailBroadcast(tx sip.ServerTransaction, number string) {
+	snap := c.s.deps.Snapshots.Current()
+	g, ok := snap.VoicemailGroup(number)
+	if !ok {
+		c.s.m.VoicemailGroupDeliveries.WithLabelValues(VMGroupRefused).Inc()
+		c.s.respond(tx, c.inv, sip.StatusNotFound, "Not Found")
+		c.record(sip.StatusNotFound, cdr.SideSystem, "no such voicemail group", ResultNotFound)
+		return
+	}
+	c.startVoicemailGroup(tx, g, true)
 }

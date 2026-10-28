@@ -21,6 +21,9 @@ const (
 	IVRMenuKind     = "ivr"
 	IVRExternal     = "external"
 	IVRQueue        = "queue"
+	// IVRVoicemailGroup names a voicemail group by its number (migration
+	// 00058): the message is left in every member's box.
+	IVRVoicemailGroup = "voicemail_group"
 	// IVRTimeCondition names a time condition (migration 00034).
 	IVRTimeCondition = "time_condition"
 )

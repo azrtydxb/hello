@@ -80,4 +80,8 @@ var english = map[Key]string{
 	GreetUnavailableTail: "is not available. Please leave a message after the tone.",
 	GreetBusyTail:        "is busy at the moment. Please leave a message after the tone.",
 	GreetUnreachableTail: "cannot be reached at the moment. Please leave a message after the tone.",
+
+	GroupLeave:     "Please leave a message for {group} after the tone.",
+	GroupBroadcast: "After the tone, record your message for the group. Press pound when finished.",
+	GroupSent:      "Your message has been sent.",
 }

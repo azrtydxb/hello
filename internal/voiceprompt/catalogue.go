@@ -100,6 +100,12 @@ const (
 	GreetUnavailableTail Key = "greet.unavailable.tail"
 	GreetBusyTail        Key = "greet.busy.tail"
 	GreetUnreachableTail Key = "greet.unreachable.tail"
+
+	// Voicemail groups (S-14): the prompt for a message left for the group,
+	// the one for a member's broadcast, and its confirmation.
+	GroupLeave     Key = "vmgroup.leave"
+	GroupBroadcast Key = "vmgroup.broadcast"
+	GroupSent      Key = "vmgroup.sent"
 )
 
 // tables holds the language tables. Add a language here and in its own file.
