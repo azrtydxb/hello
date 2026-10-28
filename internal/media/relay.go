@@ -83,6 +83,11 @@ type Relay struct {
 	onPacket func(leg string, pkt *RTPPacket)
 
 	started bool
+	// lastRx is when a datagram from a leg's accepted peer last arrived
+	// (unix nanoseconds, 0 before any); startedAt is when Start ran. They
+	// let a call detect dead media (LastRTP).
+	lastRx    atomic.Int64
+	startedAt atomic.Int64
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -452,6 +457,7 @@ func (r *Relay) Start() {
 		return
 	}
 	r.started = true
+	r.startedAt.Store(time.Now().UnixNano())
 	r.wg.Add(len(r.legs))
 	for _, l := range r.legs {
 		go r.runLeg(l)
@@ -507,6 +513,7 @@ func (r *Relay) recv(l *relayLeg) {
 			l.rejected.Add(1)
 			continue // not the leg's peer: never counted, tapped or relayed
 		}
+		r.lastRx.Store(time.Now().UnixNano())
 		r.latch(l, from)
 		pkt, ok := ParseRTP(buf[:n])
 		if !ok {
@@ -826,6 +833,19 @@ func (r *Relay) Metrics() RelayStats {
 		out.Directions[l.name+">"+peer.name] = st
 	}
 	return out
+}
+
+// LastRTP is when a datagram from either leg's peer last arrived; before
+// any arrived it is when the relay started (the zero time before Start). A
+// call whose LastRTP is long past carries no media in either direction.
+func (r *Relay) LastRTP() time.Time {
+	if ns := r.lastRx.Load(); ns != 0 {
+		return time.Unix(0, ns)
+	}
+	if ns := r.startedAt.Load(); ns != 0 {
+		return time.Unix(0, ns)
+	}
+	return time.Time{}
 }
 
 // Observe registers the stats callback, invoked each statsInterval and at
