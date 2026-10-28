@@ -85,6 +85,7 @@ func newEnvConfig(t *testing.T, cfg Config, box *secret.Box) *env {
 	cfg.Store, cfg.SIPDomain, cfg.SessionTTL = st, testDomain, sessionTTL
 	cfg.Phonebooks = st
 	cfg.Messages = st
+	cfg.Inbox = st
 	cfg.Conferences = st
 	if box != nil {
 		cfg.ProvStore = st
@@ -324,6 +325,9 @@ func TestAuthRequired(t *testing.T) {
 		}
 		if method == "DELETE" || strings.HasSuffix(path, "/logout") {
 			continue // keep the good token and its state for the other routes
+		}
+		if strings.HasSuffix(path, "/inbox/stream") {
+			continue // an event stream that never ends: TestInboxStream opens it
 		}
 		if r := authed.do(method, path, nil); r.code == http.StatusUnauthorized {
 			t.Errorf("%s with a valid token = 401", op)

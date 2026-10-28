@@ -18,9 +18,15 @@ const AI_ON = {
   "GET /api/v1/ai/status": () => json({ enabled: true, reason: null }),
 };
 
+/** The inbox items show once a channel has a number. */
+const INBOX_ON = {
+  "GET /api/v1/me/inbox/status": () =>
+    json({ enabled: true, unread: 0, unassigned: 0 }),
+};
+
 describe("App navigation", () => {
   it("renders every primary nav item and marks the active one", async () => {
-    mockApi({ ...ME_WITH_EXTENSION, ...AI_ON });
+    mockApi({ ...ME_WITH_EXTENSION, ...AI_ON, ...INBOX_ON });
     renderApp("/diagnostics");
 
     const nav = await screen.findByRole("navigation", { name: "Primary" });
@@ -117,6 +123,7 @@ describe("App navigation", () => {
     mockApi({
       ...ME_WITH_EXTENSION,
       ...AI_ON,
+      ...INBOX_ON,
       "GET /api/v1/trunks": () => json({ items: [] }),
     });
     renderApp("/trunks");
@@ -141,6 +148,7 @@ describe("App navigation", () => {
       "Call flow",
       "Media",
       "Activity",
+      "Messaging",
       "AI",
       "Integrations",
       "Platform",

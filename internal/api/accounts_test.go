@@ -1243,7 +1243,8 @@ func TestAccountRoutesDocumentedStatuses(t *testing.T) {
 		for _, p := range prefixes {
 			match = match || strings.HasPrefix(op.Path, p)
 		}
-		if !match || strings.Contains(op.Path, "/me/contacts") || strings.Contains(op.Path, "/me/messages") {
+		if !match || strings.Contains(op.Path, "/me/contacts") || strings.Contains(op.Path, "/me/messages") ||
+			strings.Contains(op.Path, "/me/inbox") {
 			continue
 		}
 		for status := range conf.spec.Responses(op.ID) {

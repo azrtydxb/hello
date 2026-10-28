@@ -155,6 +155,9 @@ type MessageInput struct {
 	ClaimBy string
 	// Audit writes an audit row (API sends).
 	Audit bool
+	// ConversationMessageID links the queue rows to the inbox message they
+	// carry, so their delivery result reaches the conversation.
+	ConversationMessageID int64
 }
 
 // MessageJob is a claimed message with what the SIP node needs to send it.
@@ -370,124 +373,130 @@ func (s *Store) SendMessage(ctx context.Context, in MessageInput) (MessageSent, 
 	text, raw := splitBody(in.ContentType, in.Body)
 	err := s.tx(ctx, func(tx *sql.Tx) error {
 		out = MessageSent{}
-		set, err := getMessageSettings(ctx, tx)
-		if err != nil {
-			return err
-		}
-		if !set.Enabled {
-			return ErrMessagesDisabled
-		}
-		if in.SenderKind != MsgSenderSystem {
-			var n int
-			if err := tx.QueryRowContext(ctx, `SELECT count(DISTINCT batch) FROM messages
-				WHERE sender = $1 AND sender_kind = $2 AND created_at > now() - interval '1 minute'`,
-				in.Sender, in.SenderKind).Scan(&n); err != nil {
-				return err
-			}
-			if n >= set.RatePerMinute {
-				return ErrMessageRate
-			}
-		}
-		if in.TargetKind == MsgKindExternal {
-			var ok bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM trunks WHERE enabled AND messaging)`).Scan(&ok); err != nil {
-				return err
-			}
-			if !ok {
-				return ErrNoExternalTrunk
-			}
-		}
-		recipients, scope, ref, err := resolveMessageTargets(ctx, tx, in)
-		if err != nil {
-			return err
-		}
-		if scope != MsgScopeDirect && in.SenderKind == MsgKindExtension {
-			kept := recipients[:0:0]
-			for _, r := range recipients {
-				if r != in.Sender {
-					kept = append(kept, r)
-				}
-			}
-			recipients = kept
-		}
-		if len(recipients) == 0 {
-			return fmt.Errorf("%w: no recipients", ErrMessageTarget)
-		}
-		if len(recipients) > MaxMessageRecipients {
-			recipients = recipients[:MaxMessageRecipients]
-		}
-		recipientKind := MsgKindExtension
-		if in.TargetKind == MsgKindExternal {
-			recipientKind = MsgKindExternal
-		}
-		claimed := in.ClaimBy != "" && len(recipients) == 1
-		status, claimBy := MsgPending, ""
-		if claimed {
-			status, claimBy = MsgSending, in.ClaimBy
-		}
-		var trunk any
-		if in.TrunkID > 0 {
-			trunk = in.TrunkID
-		}
-		batch := newBatch()
-		rows, err := tx.QueryContext(ctx, `
-			INSERT INTO messages (batch, sender, sender_kind, sender_name, actor, recipient, recipient_kind, scope, scope_ref,
-				trunk_id, content_type, body_text, body_raw, status, claimed_by, claimed_at, expires_at)
-			SELECT $1, $2, $3, $4, $5, r, $6, $7, $8, $9::bigint, $10, $11::text, $12::bytea, $13::text, $14,
-				CASE WHEN $13::text = 'sending' THEN now() END, now() + make_interval(hours => $15::int)
-			FROM unnest($16::text[]) WITH ORDINALITY AS t(r, ord) ORDER BY ord
-			RETURNING id, recipient, created_at`,
-			batch, in.Sender, in.SenderKind, in.SenderName, in.Actor, recipientKind, scope, ref,
-			trunk, in.ContentType, text, raw, status, claimBy, set.TTLHours, recipients)
-		if err != nil {
-			return err
-		}
-		var jobs []MessageJob
-		for rows.Next() {
-			var j MessageJob
-			if err := rows.Scan(&j.ID, &j.Recipient, &j.CreatedAt); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			jobs = append(jobs, j)
-		}
-		if err := rows.Close(); err != nil {
-			return err
-		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-		if recipientKind == MsgKindExtension {
-			if _, err := tx.ExecContext(ctx, `
-				UPDATE messages SET status = 'failed', detail = 'queue full: dropped'
-				WHERE id IN (SELECT id FROM (
-					SELECT id, row_number() OVER (PARTITION BY recipient ORDER BY id DESC) AS rn FROM messages
-					WHERE status = 'pending' AND recipient_kind = 'extension' AND recipient = ANY($1)) q
-					WHERE rn > $2)`, recipients, set.MaxQueuedPerExtension); err != nil {
-				return err
-			}
-		}
-		if !claimed {
-			if _, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2)`, MessageChannel, batch); err != nil {
-				return err
-			}
-		}
-		out.Batch, out.Scope, out.Recipients = batch, scope, len(jobs)
-		if claimed {
-			for i := range jobs {
-				jobs[i].Batch, jobs[i].Sender, jobs[i].SenderKind, jobs[i].SenderName = batch, in.Sender, in.SenderKind, in.SenderName
-				jobs[i].RecipientKind, jobs[i].Scope, jobs[i].ContentType = recipientKind, scope, in.ContentType
-				jobs[i].ScopeRef = ref
-				jobs[i].Body, jobs[i].TrunkID = in.Body, in.TrunkID
-			}
-			out.Jobs = jobs
-		}
-		if in.Audit {
-			return insertAudit(ctx, tx, in.Actor, "send_"+scope, "message", batch)
-		}
-		return nil
+		return s.sendMessageTx(ctx, tx, in, text, raw, &out)
 	})
 	return out, err
+}
+
+// sendMessageTx is SendMessage inside the caller's transaction, so a send
+// can commit together with the row that caused it (an inbox reply).
+func (s *Store) sendMessageTx(ctx context.Context, tx *sql.Tx, in MessageInput, text *string, raw []byte, out *MessageSent) error {
+	set, err := getMessageSettings(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if !set.Enabled {
+		return ErrMessagesDisabled
+	}
+	if in.SenderKind != MsgSenderSystem {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT count(DISTINCT batch) FROM messages
+			WHERE sender = $1 AND sender_kind = $2 AND created_at > now() - interval '1 minute'`,
+			in.Sender, in.SenderKind).Scan(&n); err != nil {
+			return err
+		}
+		if n >= set.RatePerMinute {
+			return ErrMessageRate
+		}
+	}
+	if in.TargetKind == MsgKindExternal {
+		var ok bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM trunks WHERE enabled AND messaging)`).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return ErrNoExternalTrunk
+		}
+	}
+	recipients, scope, ref, err := resolveMessageTargets(ctx, tx, in)
+	if err != nil {
+		return err
+	}
+	if scope != MsgScopeDirect && in.SenderKind == MsgKindExtension {
+		kept := recipients[:0:0]
+		for _, r := range recipients {
+			if r != in.Sender {
+				kept = append(kept, r)
+			}
+		}
+		recipients = kept
+	}
+	if len(recipients) == 0 {
+		return fmt.Errorf("%w: no recipients", ErrMessageTarget)
+	}
+	if len(recipients) > MaxMessageRecipients {
+		recipients = recipients[:MaxMessageRecipients]
+	}
+	recipientKind := MsgKindExtension
+	if in.TargetKind == MsgKindExternal {
+		recipientKind = MsgKindExternal
+	}
+	claimed := in.ClaimBy != "" && len(recipients) == 1
+	status, claimBy := MsgPending, ""
+	if claimed {
+		status, claimBy = MsgSending, in.ClaimBy
+	}
+	var trunk any
+	if in.TrunkID > 0 {
+		trunk = in.TrunkID
+	}
+	batch := newBatch()
+	rows, err := tx.QueryContext(ctx, `
+		INSERT INTO messages (batch, sender, sender_kind, sender_name, actor, recipient, recipient_kind, scope, scope_ref,
+			trunk_id, content_type, body_text, body_raw, status, claimed_by, claimed_at, expires_at, conversation_message_id)
+		SELECT $1, $2, $3, $4, $5, r, $6, $7, $8, $9::bigint, $10, $11::text, $12::bytea, $13::text, $14,
+			CASE WHEN $13::text = 'sending' THEN now() END, now() + make_interval(hours => $15::int), NULLIF($17::bigint, 0)
+		FROM unnest($16::text[]) WITH ORDINALITY AS t(r, ord) ORDER BY ord
+		RETURNING id, recipient, created_at`,
+		batch, in.Sender, in.SenderKind, in.SenderName, in.Actor, recipientKind, scope, ref,
+		trunk, in.ContentType, text, raw, status, claimBy, set.TTLHours, recipients, in.ConversationMessageID)
+	if err != nil {
+		return err
+	}
+	var jobs []MessageJob
+	for rows.Next() {
+		var j MessageJob
+		if err := rows.Scan(&j.ID, &j.Recipient, &j.CreatedAt); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		jobs = append(jobs, j)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if recipientKind == MsgKindExtension {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE messages SET status = 'failed', detail = 'queue full: dropped'
+			WHERE id IN (SELECT id FROM (
+				SELECT id, row_number() OVER (PARTITION BY recipient ORDER BY id DESC) AS rn FROM messages
+				WHERE status = 'pending' AND recipient_kind = 'extension' AND recipient = ANY($1)) q
+				WHERE rn > $2)`, recipients, set.MaxQueuedPerExtension); err != nil {
+			return err
+		}
+	}
+	if !claimed {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_notify($1, $2)`, MessageChannel, batch); err != nil {
+			return err
+		}
+	}
+	out.Batch, out.Scope, out.Recipients = batch, scope, len(jobs)
+	if claimed {
+		for i := range jobs {
+			jobs[i].Batch, jobs[i].Sender, jobs[i].SenderKind, jobs[i].SenderName = batch, in.Sender, in.SenderKind, in.SenderName
+			jobs[i].RecipientKind, jobs[i].Scope, jobs[i].ContentType = recipientKind, scope, in.ContentType
+			jobs[i].ScopeRef = ref
+			jobs[i].Body, jobs[i].TrunkID = in.Body, in.TrunkID
+		}
+		out.Jobs = jobs
+	}
+	if in.Audit {
+		return insertAudit(ctx, tx, in.Actor, "send_"+scope, "message", batch)
+	}
+	return nil
 }
 
 // ExternalMessagingEnabled reports whether any enabled trunk has messaging
@@ -663,7 +672,10 @@ func (s *Store) FinishMessage(ctx context.Context, id int64, result, detail stri
 	if err != nil {
 		return err
 	}
-	return requireRow(res)
+	if err := requireRow(res); err != nil {
+		return err
+	}
+	return s.syncOneConversationMessage(ctx, id)
 }
 
 // MaintainMessages expires undelivered messages past their TTL, returns
@@ -680,6 +692,9 @@ func (s *Store) MaintainMessages(ctx context.Context) (expired, purged int64, er
 		return 0, 0, err
 	}
 	expired, _ = res.RowsAffected()
+	if err = s.syncStuckConversationMessages(ctx); err != nil {
+		return expired, 0, err
+	}
 	if _, err = s.db.ExecContext(ctx, `
 		UPDATE messages SET attempts = attempts + 1, detail = 'node lost',
 			status = CASE WHEN attempts + 1 >= $2 THEN 'failed' ELSE 'pending' END, next_attempt_at = now()

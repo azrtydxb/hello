@@ -44,7 +44,7 @@ func below(s auth.Scope) auth.Scopes {
 		return auth.Scopes{auth.ScopeWrite, auth.ScopeSecrets}
 	case auth.ScopeSecrets:
 		return auth.Scopes{auth.ScopeRead, auth.ScopeWrite, auth.ScopeAdmin}
-	case auth.ScopeEvents:
+	case auth.ScopeEvents, auth.ScopeMessages:
 		return auth.Scopes{auth.ScopeRead, auth.ScopeWrite, auth.ScopeAdmin, auth.ScopeSecrets}
 	}
 	return slices.Clone(auth.AllScopes) // session: every scope a token can hold
@@ -68,7 +68,7 @@ func TestScopeEnforcement(t *testing.T) {
 		}
 		return name
 	}
-	for _, s := range []auth.Scope{auth.ScopeRead, auth.ScopeWrite, auth.ScopeAdmin, auth.ScopeSecrets, auth.ScopeEvents, auth.ScopeSession} {
+	for _, s := range []auth.Scope{auth.ScopeRead, auth.ScopeWrite, auth.ScopeAdmin, auth.ScopeSecrets, auth.ScopeEvents, auth.ScopeMessages, auth.ScopeSession} {
 		token("below-"+string(s), auth.KindOAuth, below(s))
 		token("exact-"+string(s), auth.KindOAuth, auth.Scopes{s})
 	}

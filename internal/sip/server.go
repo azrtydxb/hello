@@ -184,6 +184,11 @@ type Deps struct {
 	// Messages is the SIP MESSAGE queue (PostgreSQL); nil answers every
 	// MESSAGE 503.
 	Messages MessageQueue
+	// Conversations is the messaging inbox's gateway: a text a trunk
+	// delivers to one of its numbers becomes a conversation instead of
+	// going to an extension. nil leaves every trunk text to the extension
+	// route.
+	Conversations ConversationGateway
 	// Conferences is the shared conference state (room ownership, live state,
 	// control commands); nil keeps every room on this node alone.
 	Conferences Conferences

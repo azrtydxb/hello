@@ -23,6 +23,7 @@ import (
 	"github.com/azrtydxb/hello/internal/lifecycle"
 	"github.com/azrtydxb/hello/internal/livestate"
 	"github.com/azrtydxb/hello/internal/media"
+	"github.com/azrtydxb/hello/internal/messaging"
 	"github.com/azrtydxb/hello/internal/ops"
 	"github.com/azrtydxb/hello/internal/queue"
 	"github.com/azrtydxb/hello/internal/secret"
@@ -181,6 +182,7 @@ func run(args []string) error {
 		MailboxEvents: mailboxEvents{cfg: cfg.Database, log: log.With("component", "mailbox")},
 		Pushes:        pushQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "checksync")},
 		Messages:      messageQueue{st: controlStore, cfg: cfg.Database, log: log.With("component", "messages")},
+		Conversations: conversations{st: controlStore, dial: cfg.Dial, log: log.With("component", "inbox"), metrics: messaging.NewMetrics(metrics.Registry)},
 		Voicemails:    voicemails{st: controlStore, dial: cfg.Dial}, Objects: voicemailObjects, Settings: settings, TimeConditions: timeConditions{st: controlStore},
 		Speech:     newSpeech(controlStore, voicemailObjects, log.With("component", "tts")),
 		Recordings: controlStore, Media: media.NewMetrics(metrics.Registry),

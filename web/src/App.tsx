@@ -1,4 +1,4 @@
-import { lazy, Suspense, type ComponentType } from "react";
+import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import {
   Navigate,
   NavLink,
@@ -57,6 +57,11 @@ import { PhoneDetail } from "./pages/PhoneDetail";
 import { PhoneGroups } from "./pages/PhoneGroups";
 import { MyContacts } from "./pages/MyContacts";
 import { MyMessages } from "./pages/MyMessages";
+import { Inbox, MyInbox } from "./pages/Inbox";
+import { MessagingChannels } from "./pages/MessagingChannels";
+import { MessagingOptOuts } from "./pages/MessagingOptOuts";
+import { MessagingSettings } from "./pages/MessagingSettings";
+import { getInboxStatus } from "./api/inbox";
 import { Messages } from "./pages/Messages";
 import { Phonebooks } from "./pages/Phonebooks";
 import { Onboarding } from "./pages/Onboarding";
@@ -109,6 +114,11 @@ const PAGES: Readonly<Record<string, ComponentType>> = {
   "/me/contacts": MyContacts,
   "/me/messages": MyMessages,
   "/messages": Messages,
+  "/me/inbox": MyInbox,
+  "/inbox": Inbox,
+  "/messaging/channels": MessagingChannels,
+  "/messaging/optouts": MessagingOptOuts,
+  "/messaging/settings": MessagingSettings,
   "/me/voicemail": MyVoicemail,
   "/me/forwarding": MyForwarding,
   "/me/history": MyHistory,
@@ -168,7 +178,23 @@ function Shell() {
   const isUser = state.status === "signedIn" && state.role === "user";
   const platformBadges = usePlatformBadges(!isUser);
   const onboardingBadges = useOnboardingBadge();
-  const badges = { ...platformBadges, ...onboardingBadges };
+  // The inbox shows once a channel has a number; its badge counts the
+  // caller's conversations with unread customer text.
+  const inbox = usePolling(getInboxStatus, 30_000);
+  const inboxEnabled = inbox.status === "ready" && inbox.data.enabled;
+  const inboxUnread = inbox.status === "ready" ? inbox.data.unread : 0;
+  const unreadBadge =
+    inboxUnread > 0 ? (
+      <>
+        <span aria-hidden="true">{inboxUnread}</span>
+        <span className="visually-hidden">, {inboxUnread} unread</span>
+      </>
+    ) : null;
+  const badges: Record<string, ReactNode> = {
+    ...platformBadges,
+    ...onboardingBadges,
+    ...(unreadBadge ? { "/inbox": unreadBadge, "/me/inbox": unreadBadge } : {}),
+  };
   // The AI status is a viewer-level read; a self-service user has no access.
   const aiStatus = usePolling(isUser ? idleStatus : getAIStatus, 60_000);
   const aiEnabled = aiStatus.status !== "loading" && !!aiStatus.data?.enabled;
@@ -183,6 +209,7 @@ function Shell() {
     state.status === "signedIn" ? state.role : undefined,
     aiEnabled,
     hasExtensions,
+    inboxEnabled,
   );
   const { isExpanded, toggle } = useNavGroups(
     state.status === "signedIn" ? state.username : "",
