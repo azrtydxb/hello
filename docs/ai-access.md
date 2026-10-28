@@ -181,8 +181,13 @@ operation's parameters (and a `body` for its JSON request body) as input;
 annotated read-only, `DELETE` tools destructive. Some operations are
 deliberately not tools: credential, user and role management (they stay
 in the console, so an agent never manages its own access), browser
-sessions, file uploads and binary or CSV downloads, and the few
-`secrets`-scoped operations whose whole answer is a secret. The tables are generated
+sessions, binary or CSV downloads, firmware images (tens of megabytes, far over
+the 1 MiB of an MCP request), and the few `secrets`-scoped operations whose
+whole answer is a secret. A body that is multipart or CSV is never a reason to
+leave an operation out: such an operation also accepts JSON, which is what its
+tool sends (announcements take `{name, audioBase64}` of at most 700 KiB,
+phone and phonebook imports take `{rows: [...]}`). Every exclusion in the API
+document carries a `category` from a fixed list that a test enforces. The tables are generated
 by `go run ./internal/mcp/cmd/doctable` and `TestDocsAIAccess` keeps them
 current.
 
@@ -201,6 +206,8 @@ current.
 | `getAIStatus`                   | read   | `GET /api/v1/ai/status`                                    | AI agent status                                                                                                                          |
 | `getAITask`                     | read   | `GET /api/v1/ai/tasks/{id}`                                | An AI task                                                                                                                               |
 | `listAnnouncements`             | read   | `GET /api/v1/announcements`                                | List announcements                                                                                                                       |
+| `createAnnouncement`            | write  | `POST /api/v1/announcements`                               | Upload an announcement                                                                                                                   |
+| `replaceAnnouncement`           | write  | `PUT /api/v1/announcements/{id}`                           | Replace an announcement's audio                                                                                                          |
 | `saveAnnouncementPrompt`        | write  | `PATCH /api/v1/announcements/{id}`                         | Save an announcement's prompt text                                                                                                       |
 | `deleteAnnouncement`            | write  | `DELETE /api/v1/announcements/{id}`                        | Delete an announcement                                                                                                                   |
 | `getMe`                         | read   | `GET /api/v1/auth/me`                                      | The authenticated user                                                                                                                   |
@@ -313,8 +320,10 @@ current.
 | `createPhonebookEntry`          | write  | `POST /api/v1/phonebooks/{id}/entries`                     | Add an entry to an address book                                                                                                          |
 | `updatePhonebookEntry`          | write  | `PUT /api/v1/phonebooks/{id}/entries/{entryId}`            | Replace an entry                                                                                                                         |
 | `deletePhonebookEntry`          | write  | `DELETE /api/v1/phonebooks/{id}/entries/{entryId}`         | Delete an entry                                                                                                                          |
+| `importPhonebook`               | write  | `POST /api/v1/phonebooks/{id}/import`                      | Import entries from CSV                                                                                                                  |
 | `listPhones`                    | read   | `GET /api/v1/phones`                                       | Every provisioned phone, ordered by MAC                                                                                                  |
 | `createPhone`                   | write  | `POST /api/v1/phones`                                      | Add a phone; binding an existing device rotates its secret. The provisioning URL with the token is returned only here                    |
+| `importPhones`                  | write  | `POST /api/v1/phones/import`                               | Import phones from rows                                                                                                                  |
 | `resyncAllPhones`               | write  | `POST /api/v1/phones/resync`                               | Ask every phone to re-fetch its configuration                                                                                            |
 | `getPhone`                      | read   | `GET /api/v1/phones/{id}`                                  | One phone                                                                                                                                |
 | `updatePhone`                   | write  | `PATCH /api/v1/phones/{id}`                                | Change a phone; deviceId null unbinds (and disables) it, a new deviceId or extensionId rebinds it and rotates that device's secret       |
@@ -425,16 +434,23 @@ Hello ships agent skills (agentskills.io format) that teach an agent its
 workflows on top of the tools: `hello-setup` (users: extensions, SIP
 devices, voicemail boxes and auto-provisioned desk phones),
 `hello-routing` (trunks, inbound and outbound routes, route order, ring
-groups) and `hello-troubleshoot` (a call that failed, a phone that does
-not register). Download them under **AI access → Agent skills**, or with
+groups), `hello-ivr-and-hours` (IVR menus, schedules, calendars, time
+conditions, announcements, music on hold), `hello-call-handling` (queues and
+agents, conferences, park and pickup, paging and multicast, messaging,
+presence, voicemail messages, recordings), `hello-phones` (provisioning,
+bulk import, onboarding, phone groups, firmware, phonebooks),
+`hello-flow-graph` (read and verify the call flow) and `hello-troubleshoot`
+(a call that failed, a phone that does not register, cluster and AI
+findings). Download them under **AI access → Agent skills**, or with
 `GET /api/v1/skills/{name}/download` (a zip), and unpack each into:
 
 - **Claude Code:** `~/.claude/skills/` (or `.claude/skills/` in a project).
 - **Claude Desktop:** Settings → Capabilities → Skills → upload the zip.
 - **Other clients:** their skills folder; the zip is the skill folder itself.
 
-The sources are in [skills/](../skills/); a test fails if a skill names a
-tool that does not exist.
+The sources are in [skills/](../skills/). Tests fail if a skill names a
+tool that does not exist, and if a tool (or a whole API area) is named by no
+skill, so the skills stay complete as the API grows.
 
 ## Security model
 
