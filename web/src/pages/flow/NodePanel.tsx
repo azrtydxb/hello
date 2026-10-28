@@ -12,6 +12,8 @@ import {
   PropertyList,
 } from "../../design/azrty/components";
 import { formPageFor, kindLabel, nodeTypeOf, summaryEntries } from "./model";
+import { NodeEditor, type NodeEditApi } from "./NodeEditor";
+import { adapterFor } from "./objects";
 
 export interface NodePanelProps {
   node: FlowNode;
@@ -23,6 +25,8 @@ export interface NodePanelProps {
   onClose: () => void;
   /** Takes the node off this canvas; absent for a viewer. */
   onRemove?: () => void;
+  /** The editing controls; absent for a viewer. */
+  edit?: NodeEditApi;
 }
 
 export function NodePanel({
@@ -33,6 +37,7 @@ export function NodePanel({
   onSelect,
   onClose,
   onRemove,
+  edit,
 }: NodePanelProps) {
   // The inline drawer does not bind Escape (it is not a modal): the panel does.
   useEffect(() => {
@@ -98,9 +103,13 @@ export function NodePanel({
           </>
         }
       >
-        <Alert tone="info">
-          View only. Change this object on its own page.
-        </Alert>
+        {edit ? (
+          <NodeEditor node={node} edit={edit} />
+        ) : (
+          <Alert tone="info">
+            View only. Change this object on its own page.
+          </Alert>
+        )}
         {warnings.length > 0 && (
           <div className="flow-panel__section">
             <h3>Warnings</h3>
@@ -112,7 +121,7 @@ export function NodePanel({
           </div>
         )}
         <div className="flow-panel__section">
-          <h3>Settings</h3>
+          <h3>{edit ? "Summary" : "Settings"}</h3>
           {settings.length > 0 ? (
             <PropertyList
               items={settings.map((s) => ({ label: s.label, value: s.value }))}
@@ -149,6 +158,24 @@ export function NodePanel({
                     byId.get(e.source.node)?.kind ?? "",
                     e.source.port,
                   )}
+                  {edit &&
+                    !e.implicit &&
+                    adapterFor(
+                      byId.get(e.source.node)?.kind ?? "",
+                      e.source.port,
+                      node.kind,
+                      e.target.port,
+                    )?.disconnect && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="unlink"
+                        aria-label={`Disconnect ${byId.get(e.source.node)?.label ?? e.source.node}`}
+                        onClick={() => void edit.onDisconnect(e)}
+                      >
+                        Disconnect
+                      </Button>
+                    )}
                 </li>
               ))}
             </ul>

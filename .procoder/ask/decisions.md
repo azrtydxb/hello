@@ -943,6 +943,118 @@ conflict`), and a batch that deleted a device or phone (which a batch cannot
   `hello_config_batch_ops`. The graph build and trace metrics belong to their
   phases.
 
+## Flow canvas P4: the editing UI (2026-10-27)
+
+- **The draft is a list of batch operations, not a copy of the graph.** Each
+  staged gesture becomes `DraftOp`s (`web/src/pages/flow/draft.ts`): the
+  operation, its `expect` version and the versions of every node it read.
+  Edits to the same object merge into one operation (key `upd|<node>`), so two
+  changes to one ring group, or a rename and a referrer update that touch the
+  same IVR, are one `PUT` and cannot overwrite each other. All feature-code
+  edits share the key `list|putFeatureCodes` (one `PUT` of the whole table).
+  An edit of a node that only exists in the draft is folded into its create
+  operation, and deleting such a node forgets it and its edits.
+- **The canvas draws the draft.** `project(graph, draft)` returns the graph as
+  it will be once applied (new nodes, deleted nodes, rewired edges, renamed
+  labels); the canvas, the panel and the pickers all read that, so what the
+  user sees is what the dry run checks.
+- **The catalogue decides, objects.ts only says how.** Whether an output may
+  connect to an input is `canConnect` over the catalogue's target lists
+  (the UI never hard-codes compatibility, spec constraint). `objects.ts` holds
+  only how an allowed connection is written into the owner's body (an adapter
+  per output port) and which settings the panel edits. A connection with no
+  adapter (outbound trunk order, hold music, prompts, device binding, schedule
+  calendars) is drawn but its handle is not connectable and the panel says to
+  use the object's own page. This is scoped to the "call goes to" fields,
+  forwards, group and queue members, inbound trunk, feature-code targets and
+  the IVR keys, which is what spec S-10 to S-12 name.
+- **PATCH sends only what changed; PUT sends the whole object.** The base of a
+  PUT (IVR, queue, time condition, feature codes) is the GET answer pruned to
+  the request's writable keys; PATCH objects (extension, ring group, inbound
+  route) send only the changed fields, so the id and timestamps never reach an
+  `additionalProperties: false` body.
+- **Names, not ids, in destinations.** Destinations store the target's name,
+  number or code, so a rename stages the renamed object plus an update of
+  every referrer (found from the graph's edges, written through the same
+  adapters) in one gesture. A referrer that cannot store the new name refuses
+  the rename with the reason. A forward to a ring group whose name is not
+  numeric is refused with the reason (spec edge case).
+- **Delete lists referrers and clears them first.** `referrersOf` walks the
+  edges that point at the node and are owned by another object; the confirm
+  dialog lists them; the delete stages the referrer updates, then the delete.
+  A referrer that cannot be cleared (an inbound route always needs a
+  destination) blocks the delete and is named.
+- **Gestures stand or fall together on a rebase.** Every op carries the ids of
+  the gestures that staged it. On a revision change `rebase` drops an op whose
+  touched node changed or vanished, and every op that shares a gesture with a
+  dropped one (a rename without its referrers would leave them dangling). The
+  dropped changes are listed in a warning; nothing conflicting is kept. History
+  is cleared by a rebase, since old steps would bring back what was dropped.
+- **Live validation is the server's dry run.** 500 ms after the last change the
+  whole draft is sent with `dryRun: true`; `422` problems are drawn on their
+  node (the `node` of the problem, else the op index), a `409 config_stale`
+  reloads the graph (which rebases), and Apply is enabled only once the check
+  answers for the current draft. "Checking" is derived (the check records the
+  draft it was for), not stored.
+- **Apply always goes through the review dialog** with the dry run's
+  field-level diff and warnings; the only apply call is the dialog's confirm.
+  On `409 config_stale` at apply nothing was applied: the dialog closes, the
+  graph reloads, the draft is rebased and the dropped changes are reported.
+- **Layout of new nodes.** A new node has the id `<kind>:~<ref>` in the draft
+  and a position in the layout reducer, but the layout PUT skips it. At apply
+  its position goes in the batch's `layout` as `<kind>:${ref.id}`, so the
+  server places it once the id exists. A discard or a rebase forgets it.
+- **The draft is kept in `localStorage`** under
+  `hello.flow.draft.<canvasId>.<user>` as `{baseRevision, ops, history}` and
+  rebased when the canvas opens on a newer revision. Positions of draft nodes
+  are not kept; they come back in "Not on this canvas".
+- **Undo and redo restore the exact op list** (a snapshot per gesture, 60
+  deep) and are bound to Ctrl/Cmd+Z outside text fields. A new gesture ends
+  the redo line.
+- **Accessibility.** Every connection can be made in the panel (a select of the
+  catalogue's targets per output, a key field for IVR keys, a typed external
+  number or SIP URI) and removed with a Disconnect button; the pointer drag
+  and the Delete key on a selected edge are shortcuts to the same operations.
+  Objects are not deleted with the key: they have a confirmation.
+- **Forms are shared (spec S-15).** The create/edit drawers of ring groups,
+  IVR menus, queues, time conditions, conferences, inbound and outbound routes,
+  extensions and the text prompt editor moved from `web/src/pages/*.tsx` to
+  `web/src/forms/*Form.tsx` unchanged (their page tests pass unmodified). Each
+  drawer that the canvas uses got one optional prop, `commit(body)`: when set
+  the drawer hands its validated body to the caller instead of calling the
+  API. The canvas panel's "Edit all settings" opens the same drawer
+  (`FormHost`) with the object's GET (plus what the draft already changes) and
+  stages the result with `stageBody`.
+- **`stageBody`** keeps only the fields that differ from the object as it
+  stands, runs the rename cascade when the name changed, and recomputes the
+  edges the new values draw (`wanted.ts` reads the stored fields the way the
+  graph builder does, per owner-field group; groups it does not cover are left
+  alone) so the projected graph is right without a round trip.
+- **Every connection with a stored form is wirable.** Adapters were added for
+  outbound trunk order (`trunks`, ordered ids), hold music (`mohClassId` on
+  extension, ring group, inbound route and queue), prompts (IVR
+  `greetingId`/`invalidPromptId`/`timeoutPromptId`, queue prompt ids,
+  conference entry/exit announcement names, hold music `announcementIds`),
+  device to extension (`extensionId`), phone to device (`deviceId`), calendars
+  to schedules (`calendarIds`), schedule to time condition (`scheduleId`),
+  paging group multicast channel and paging members/callers. All use existing
+  batchable operations, so no backend change was needed. Required fields
+  (an IVR greeting, a device's extension, a time condition's schedule) can be
+  re-pointed but not cleared; the panel says why. None of these truly cannot
+  be stored.
+- **Draft node positions** are persisted with the draft
+  (`{baseRevision, ops, history, positions}`) and restored into the layout
+  reducer on load, for nodes whose create operation survived the rebase.
+- **Generate prompt** (tts-prompts is on main, PR #139): the panel's
+  announcement section and a toolbar button open the Announcements page's
+  prompt editor (`PromptHost`). Generation calls the speech provider and
+  stores audio, which a batch cannot roll back, so it runs immediately and is
+  not staged; the canvas then reloads and places the announcement.
+- **Still out of scope.** Creating devices, phones and trunks with credentials
+  (spec). The extension drawer is shared but not wired to `commit` (its
+  voicemail, device and live panes act on the server at once); the panel edits
+  an extension's name and DND and its forwards and hold music as connections.
+
 ## DSCP marking, parity item 28 (S-21) (2026-10-27)
 
 Built to the spec: SIP socket DSCP 26, relay/anchor/fanout/party RTP sockets

@@ -14,6 +14,7 @@ import type {
   FlowWarning,
 } from "../../api/flow";
 import type { Pos } from "./layoutState";
+import { portIsEditable } from "./objects";
 
 export const NODE_WIDTH = 248;
 const HEADER_HEIGHT = 58;
@@ -41,6 +42,8 @@ export interface PortView {
   label: string;
   type: string;
   direction: "in" | "out";
+  /** The port can be wired on the canvas (editing, and the connection is stored). */
+  editable?: boolean;
 }
 
 /** The data of a drawn node. */
@@ -53,6 +56,10 @@ export interface FlowNodeData extends Record<string, unknown> {
   /** One line of the node's summary fields. */
   summary: string;
   pseudo: boolean;
+  /** What the draft does to the node. */
+  draft?: "new" | "changed";
+  /** Problems the last check of the draft found on this node. */
+  errors: string[];
 }
 
 /** The data of a stub: a node that is not on this canvas. */
@@ -221,6 +228,10 @@ export interface ViewInput {
   catalogue: FlowCatalogue | undefined;
   positions: Record<string, Pos>;
   selected?: string | null;
+  /** The user may edit: ports that can be wired are marked. */
+  edit?: boolean;
+  marks?: Record<string, "new" | "changed" | "deleted">;
+  errors?: Record<string, string[]>;
 }
 
 /** The label of an edge: its try order or position, when it has one. */
@@ -229,11 +240,20 @@ export function edgeLabel(e: FlowEdge): string | undefined {
   return typeof v === "number" ? `#${v}` : undefined;
 }
 
+function draftMark(
+  m: "new" | "changed" | "deleted" | undefined,
+): "new" | "changed" | undefined {
+  return m === "new" || m === "changed" ? m : undefined;
+}
+
 export function buildView({
   graph,
   catalogue,
   positions,
   selected,
+  edit,
+  marks,
+  errors,
 }: ViewInput): CanvasView {
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
   const onCanvas = (id: string) => byId.has(id) && positions[id] !== undefined;
@@ -253,6 +273,10 @@ export function buildView({
       (e) => e.source.node === n.id || e.target.node === n.id,
     );
     const { inputs, outputs } = portsFor(type, n.id, own);
+    if (edit) {
+      for (const p of inputs) p.editable = true;
+      for (const p of outputs) p.editable = portIsEditable(n.kind, p.id);
+    }
     for (const p of outputs) typeOfPort.set(`${n.id}|${p.id}`, p.type);
     const h = nodeHeight(inputs.length, outputs.length);
     sizes.set(n.id, { w: NODE_WIDTH, h });
@@ -276,12 +300,30 @@ export function buildView({
         warnings: warnings.get(n.id) ?? [],
         summary: summaryLine(n),
         pseudo: Boolean(type?.pseudo),
+        draft: draftMark(marks?.[n.id]),
+        errors: errors?.[n.id] ?? [],
       },
     });
   }
 
   const edges: Edge[] = [];
-  const stubSlots = new Map<string, number>();
+  // Boxes already used: every placed node, then each stub as it is put down.
+  const taken = nodes.map((n) => ({
+    x: n.position.x,
+    y: n.position.y,
+    w: NODE_WIDTH,
+    h: sizes.get(n.id)?.h ?? 0,
+  }));
+  // Edges meeting at one port: their labels are spread so none hides another.
+  const labelSlots = new Map<string, number>();
+  const labelOffset = (e: FlowEdge): Record<string, string> => {
+    if (edgeLabel(e) === undefined) return {};
+    const key = `${e.target.node}|${e.target.port}`;
+    const k = labelSlots.get(key) ?? 0;
+    labelSlots.set(key, k + 1);
+    if (k === 0) return {};
+    return { transform: `translate(${-k * 34}px, 0px)` };
+  };
   let stubs = 0;
   let hidden = 0;
   const addStub = (e: FlowEdge, dir: "in" | "out"): string | null => {
@@ -295,21 +337,30 @@ export function buildView({
       return null;
     }
     stubs++;
-    const slotKey = `${anchorId}|${dir}`;
-    const slot = stubSlots.get(slotKey) ?? 0;
-    stubSlots.set(slotKey, slot + 1);
     const size = sizes.get(anchorId);
     const id = `stub:${dir}:${e.id}`;
+    const x =
+      dir === "out"
+        ? anchor.x + (size?.w ?? NODE_WIDTH) + STUB_GAP
+        : anchor.x - STUB_WIDTH - STUB_GAP;
+    // The next free slot down the column: never on a placed node or stub.
+    let y = anchor.y;
+    while (
+      taken.some(
+        (r) =>
+          x < r.x + r.w &&
+          r.x < x + STUB_WIDTH &&
+          y < r.y + r.h &&
+          r.y < y + STUB_HEIGHT,
+      )
+    ) {
+      y += STUB_HEIGHT + 12;
+    }
+    taken.push({ x, y, w: STUB_WIDTH, h: STUB_HEIGHT });
     nodes.push({
       id,
       type: "stub",
-      position: {
-        x:
-          dir === "out"
-            ? anchor.x + (size?.w ?? NODE_WIDTH) + STUB_GAP
-            : anchor.x - STUB_WIDTH - STUB_GAP,
-        y: anchor.y + slot * (STUB_HEIGHT + 12),
-      },
+      position: { x, y },
       initialWidth: STUB_WIDTH,
       initialHeight: STUB_HEIGHT,
       draggable: false,
@@ -330,8 +381,11 @@ export function buildView({
     const dst = onCanvas(e.target.node);
     if (!src && !dst) continue;
     const type = typeOfPort.get(`${e.source.node}|${e.source.port}`) ?? "call";
+    const shift = labelOffset(e);
     const base = {
       label: edgeLabel(e),
+      labelStyle: shift,
+      labelBgStyle: shift,
       data: { implicit: Boolean(e.implicit), type },
       className: e.implicit ? "flow-edge flow-edge--implicit" : "flow-edge",
       style: { stroke: `var(--flow-port-${type}, var(--az-muted))` },
