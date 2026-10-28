@@ -251,10 +251,33 @@ func (s *Server) haBye(l *haLeg) {
 	l.useCSeq()
 	ctx, cancel := context.WithTimeout(context.Background(), byeTimeout)
 	defer cancel()
-	if res, err := s.do(ctx, req); err == nil && res != nil {
-		s.m.response(res.StatusCode)
+	// A BYE that failed to go out (a transaction the transport cancelled)
+	// left the far end on a dead call with nothing said. Send it again,
+	// as a new transaction, a few times while the node serves.
+	for attempt := 0; ; attempt++ {
+		res, err := s.do(ctx, req)
+		if err == nil {
+			if res != nil {
+				s.m.response(res.StatusCode)
+			}
+			return
+		}
+		if attempt >= haByeAttempts-1 || !s.serving.Load() || ctx.Err() != nil {
+			s.log.Warn("BYE to a taken-over leg failed", "call_id", l.callID, "error", err)
+			return
+		}
+		time.Sleep(haByeRetryDelay)
+		if req, err = l.request(s, sip.BYE, nil, ""); err != nil {
+			return
+		}
 	}
 }
+
+// haByeAttempts and haByeRetryDelay bound haBye's resends.
+const (
+	haByeAttempts   = 3
+	haByeRetryDelay = 200 * time.Millisecond
+)
 
 // --- the poller ---------------------------------------------------------------
 
