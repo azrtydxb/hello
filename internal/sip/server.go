@@ -52,6 +52,18 @@ type Config struct {
 	RecountInterval time.Duration
 	// MaxCallDuration ends a connected call with BYE to both legs (4h).
 	MaxCallDuration time.Duration
+	// SessionExpires is the RFC 4028 interval Hello requests on legs to
+	// phones and applies when a phone's call names none (30m); 0 turns
+	// session timers off. SessionMinSE is the smallest interval accepted
+	// from a peer (90s). MediaDeadAfter ends an anchored call with no RTP in
+	// either direction for this long, unless held (60s); 0 turns it off.
+	// Unset (zero) in a Config means off: only the daemon's environment
+	// supplies the defaults.
+	SessionExpires time.Duration
+	SessionMinSE   time.Duration
+	MediaDeadAfter time.Duration
+	// SessionRefreshTimeout bounds one session refresh transaction (8s).
+	SessionRefreshTimeout time.Duration
 	// Server paging (spec P-12): PageMaxDuration ends a page (120s),
 	// PageAnswerTimeout gives up when no member answers (10s), PageFanout
 	// caps the legs of one page (200) and PageConcurrent the pages a node
@@ -751,13 +763,17 @@ func (s *Server) verify(req *sip.Request, tx sip.ServerTransaction, snap *snapsh
 		s.authFailed(tx, req, ip, "unknown or disabled device", false)
 		return snapshot.Device{}, false
 	}
-	switch s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256) {
+	verdict, check := s.digest.Verify(creds, req.Method.String(), req.Recipient, ip, dev.HA1MD5, dev.HA1SHA256)
+	switch verdict {
 	case OK:
 		return s.checkReplay(req, tx, creds.Username, creds.Nonce, creds.Cnonce, creds.Nc, dev)
 	case Stale:
 		s.challenge(tx, req, true)
 	default:
-		s.authFailed(tx, req, ip, "bad credentials", true)
+		// Never log the response, HA1, nonce or cnonce.
+		s.authFailed(tx, req, ip, "bad credentials", true,
+			"check", check, "digest_uri", creds.URI, "request_uri", req.Recipient.String(),
+			"realm", creds.Realm, "algorithm", creds.Algorithm, "qop", creds.QOP, "username", creds.Username)
 	}
 	return snapshot.Device{}, false
 }
@@ -805,12 +821,13 @@ func (s *Server) challenge(tx sip.ServerTransaction, req *sip.Request, stale boo
 }
 
 // authFailed counts a failure for ip and answers 401 (rechallenge) or 403.
+// attrs are extra key/value pairs for the log line; they must not hold secrets.
 //
 // The 401/403 decision uses the count after this failure, so concurrent bad
 // attempts that all passed the precheck cannot all be rechallenged: within
 // one window at most AuthFailLimit failed attempts from an IP get a 401,
 // every later one 403.
-func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why string, rechallenge bool) {
+func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why string, rechallenge bool, attrs ...any) {
 	ctx, cancel := s.stateCtx()
 	n, err := s.deps.Throttle.RecordFailure(ctx, ip)
 	cancel()
@@ -819,7 +836,8 @@ func (s *Server) authFailed(tx sip.ServerTransaction, req *sip.Request, ip, why 
 		s.unavailable(tx, req)
 		return
 	}
-	s.log.Info("SIP authentication failed", "method", req.Method.String(), "source", s.clientSource(req), "reason", why)
+	attrs = append([]any{"method", req.Method.String(), "source", s.clientSource(req), "reason", why}, attrs...)
+	s.log.Info("SIP authentication failed", attrs...)
 	if rechallenge && n <= int64(s.cfg.AuthFailLimit) {
 		s.challenge(tx, req, false)
 		return

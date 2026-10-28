@@ -452,7 +452,7 @@ These items are checked on hardware (two WP836 on 1.0.1.44 and 1.0.1.80, upgrade
   - a body appears in a log line;
   - the 1,300-byte or 30-per-minute limits are not enforced;
   - the 200-and-drop path still exists.
-- [ ] [S-9] `TestSessionTimersAndKeepalive` in `internal/sip` passes. It fails if:
+- [x] [S-9] `TestSessionTimersAndKeepalive` in `internal/sip` passes. It fails if:
   - a CRLF ping produces an error log or no pong on TCP;
   - a call whose session refresh fails is not torn down;
   - a call with no RTP in both directions for `HELLO_MEDIA_DEAD_SECONDS` stays up while not on hold;

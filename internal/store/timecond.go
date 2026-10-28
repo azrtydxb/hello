@@ -117,12 +117,12 @@ func listSchedules(ctx context.Context, q querier, where string, args ...any) ([
 
 // ListSchedules returns every schedule.
 func (s *Store) ListSchedules(ctx context.Context) ([]Schedule, error) {
-	return listSchedules(ctx, s.db, "")
+	return listSchedules(ctx, s.q(ctx), "")
 }
 
 // GetSchedule returns one schedule.
 func (s *Store) GetSchedule(ctx context.Context, id int64) (Schedule, error) {
-	ss, err := listSchedules(ctx, s.db, ` WHERE s.id = $1`, id)
+	ss, err := listSchedules(ctx, s.q(ctx), ` WHERE s.id = $1`, id)
 	if err != nil {
 		return Schedule{}, err
 	}
@@ -367,12 +367,12 @@ func listCalendars(ctx context.Context, q querier, where string, args ...any) ([
 
 // ListCalendars returns every calendar.
 func (s *Store) ListCalendars(ctx context.Context) ([]Calendar, error) {
-	return listCalendars(ctx, s.db, "")
+	return listCalendars(ctx, s.q(ctx), "")
 }
 
 // GetCalendar returns one calendar.
 func (s *Store) GetCalendar(ctx context.Context, id int64) (Calendar, error) {
-	cs, err := listCalendars(ctx, s.db, ` WHERE c.id = $1`, id)
+	cs, err := listCalendars(ctx, s.q(ctx), ` WHERE c.id = $1`, id)
 	if err != nil {
 		return Calendar{}, err
 	}
@@ -584,12 +584,12 @@ func listTimeConditions(ctx context.Context, q querier, where string, args ...an
 
 // ListTimeConditions returns every time condition.
 func (s *Store) ListTimeConditions(ctx context.Context) ([]TimeCondition, error) {
-	return listTimeConditions(ctx, s.db, "")
+	return listTimeConditions(ctx, s.q(ctx), "")
 }
 
 // GetTimeCondition returns one time condition.
 func (s *Store) GetTimeCondition(ctx context.Context, id int64) (TimeCondition, error) {
-	ts, err := listTimeConditions(ctx, s.db, ` WHERE t.id = $1`, id)
+	ts, err := listTimeConditions(ctx, s.q(ctx), ` WHERE t.id = $1`, id)
 	if err != nil {
 		return TimeCondition{}, err
 	}
@@ -1022,7 +1022,7 @@ func (s *Store) EvaluateTimeCondition(ctx context.Context, id int64, at time.Tim
 	if err != nil {
 		return TimeConditionEvaluation{}, err
 	}
-	set, err := loadTimeConditionSet(ctx, s.db)
+	set, err := loadTimeConditionSet(ctx, s.q(ctx))
 	if err != nil {
 		return TimeConditionEvaluation{}, err
 	}

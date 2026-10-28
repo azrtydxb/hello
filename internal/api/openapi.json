@@ -3775,6 +3775,227 @@
         "x-hello-mcp": true
       }
     },
+    "/api/v1/config/batch": {
+      "post": {
+        "operationId": "applyConfigBatch",
+        "summary": "Apply several configuration changes in one transaction",
+        "description": "Replays each operation through the API with your own credentials, in order, inside one database transaction: all of them apply or none does. Every operation needs its own route's scope and role (a batch with `createPagingGroup` needs the admin role) and any 403 rejects the whole batch with nothing applied. The operations are the object writes of the call-flow canvas: extensions, devices, phones, trunks, routes, ring groups, IVR menus, time conditions, schedules, calendars, music on hold classes, queues, park lots, pickup groups, conferences, multicast channels, paging groups, the feature codes and route order. Operations that return a secret (`createDevice`, `createPhone`), take multipart input, touch object storage, a speech provider, a phone or live call state, or need a credential scope are refused with 400 `op_not_batchable`. A `ref` on an operation names its result: later operations and `layout` entries use `${ref.field}` (for example `${rg.id}`) in path parameters and body strings; a string that is exactly one placeholder keeps the type of the value. `baseRevision` is the `configRevision` you read: when the configuration has moved, an operation that carries `expect` (the node `version` from `getFlowGraph`) is checked against the object's current version, and any mismatch answers 409 `config_stale` with nothing applied; operations without `expect` or aimed at an object created in the same batch are not checked. The whole-configuration routing check runs once at the end: an error the batch introduces answers 422 `validation_failed` naming the operation that made it. With `dryRun` everything runs and rolls back: the response is exactly what an apply would return, with `applied` false. `layout` places new nodes on `canvasId` (saving layout is not a configuration change), and the layout of nodes that no longer exist is pruned on every canvas. `warnings` lists the flow warnings the batch introduces. A batch has at most 200 operations; the revision moves once and hello-sip is notified once. Credential values in the stored batch are withheld.",
+        "tags": ["flow"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigBatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The batch applied (or, with dryRun, would apply)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/TooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/config/batches": {
+      "get": {
+        "operationId": "listConfigBatches",
+        "summary": "List applied configuration batches",
+        "description": "Newest first, without their operations and results. Batches are kept for 90 days. `before` (an RFC 3339 time, the `createdAt` of the last batch of the previous page) pages backwards.",
+        "tags": ["flow"],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many batches to return (1-200).",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Only batches older than this time (RFC 3339).",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Batches",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigBatchList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/config/batches/{id}": {
+      "get": {
+        "operationId": "getConfigBatch",
+        "summary": "Get an applied configuration batch with its operations and results",
+        "description": "Returns the operations as they ran (placeholders filled in, credentials withheld) and, per operation, the object before and after with the field-level diff.",
+        "tags": ["flow"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The batch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigBatch"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "read",
+        "x-hello-role": "viewer",
+        "x-hello-mcp": true
+      }
+    },
+    "/api/v1/config/batches/{id}/revert": {
+      "post": {
+        "operationId": "revertConfigBatch",
+        "summary": "Undo an applied configuration batch",
+        "description": "Builds and applies the inverse batch in one transaction: updates restore the recorded before values, created objects are deleted, deleted objects are made again from their before (with a new id, later references follow it, and their position on every canvas moves over). It is checked for staleness like any batch: when an object the batch changed has changed since, the answer is 409 `config_stale` naming the operations and nothing is applied. A batch can be reverted once (409 `conflict` after). Credentials a batch set were never stored, so they are listed in `skipped` and not restored. With `dryRun` the inverse runs and rolls back. The revert is itself a batch (`GET /config/batches` shows what it reverts), and each inverse operation needs its own route's scope and role.",
+        "tags": ["flow"],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/uuid"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigBatchRevertInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The revert applied (or, with dryRun, would apply)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigBatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/Internal"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "x-hello-scope": "write",
+        "x-hello-role": "operator",
+        "x-hello-mcp": true
+      }
+    },
     "/api/v1/cluster": {
       "get": {
         "operationId": "getCluster",
@@ -15034,6 +15255,16 @@
           }
         }
       },
+      "Unprocessable": {
+        "description": "A batch that is not valid: the errors name the operation, node and field (validation_failed)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "Conflict": {
         "description": "A unique value is already taken",
         "content": {
@@ -17896,7 +18127,11 @@
             "enum": [
               "dangling_reference",
               "empty_group",
-              "voicemail_disabled_target"
+              "voicemail_disabled_target",
+              "unreachable",
+              "loop",
+              "shadowed_route",
+              "no_greeting"
             ]
           },
           "message": {
@@ -18110,6 +18345,385 @@
           }
         }
       },
+      "ConfigBatchOp": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["operationId"],
+        "properties": {
+          "ref": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,31}$",
+            "description": "Names this operation's result so later operations can use ${ref.field}."
+          },
+          "operationId": {
+            "type": "string",
+            "description": "The operationId of a batchable write operation."
+          },
+          "pathParams": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Path parameter values (the object id as {\"id\": \"12\"}), or placeholders such as ${rg.id}."
+          },
+          "body": {
+            "description": "The request body of the operation, as the operation documents it."
+          },
+          "expect": {
+            "type": "string",
+            "description": "The version of the target node as read from getFlowGraph; checked when the configuration moved since baseRevision."
+          }
+        }
+      },
+      "ConfigBatchLayoutNode": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["node", "x", "y"],
+        "properties": {
+          "node": {
+            "type": "string",
+            "description": "Graph node id, <kind>:<id|key>; may hold a placeholder such as ringGroup:${rg.id}."
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      },
+      "ConfigBatchRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["baseRevision", "ops"],
+        "properties": {
+          "baseRevision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "The configRevision the batch was prepared against."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Run everything and roll back."
+          },
+          "canvasId": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The canvas layout places new nodes on."
+          },
+          "ops": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/ConfigBatchOp"
+            },
+            "description": "The operations, run in order."
+          },
+          "layout": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "$ref": "#/components/schemas/ConfigBatchLayoutNode"
+            },
+            "description": "Positions of the nodes this batch creates, on canvasId."
+          }
+        }
+      },
+      "ConfigBatchDiff": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "JSON pointer to the field."
+          },
+          "before": {
+            "description": "Absent when the field is new."
+          },
+          "after": {
+            "description": "Absent when the field is gone."
+          }
+        }
+      },
+      "ConfigBatchNodeLayout": {
+        "type": "object",
+        "required": ["canvasId", "x", "y"],
+        "properties": {
+          "canvasId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          },
+          "collapsed": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ConfigBatchResult": {
+        "type": "object",
+        "required": ["operationId", "status", "before", "after", "diff"],
+        "properties": {
+          "ref": {
+            "type": "string"
+          },
+          "operationId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["created", "updated", "deleted", "unchanged"]
+          },
+          "id": {
+            "type": "string",
+            "description": "The id of the object the operation is about; for a create, the new id."
+          },
+          "node": {
+            "type": "string",
+            "description": "The flow node id of that object."
+          },
+          "before": {
+            "description": "The object as its GET returns it before the operation; null for a create."
+          },
+          "after": {
+            "description": "The object after the operation; null for a delete."
+          },
+          "diff": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigBatchDiff"
+            }
+          },
+          "layout": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigBatchNodeLayout"
+            },
+            "description": "Where a deleted node sat on each canvas; a revert puts the node back there."
+          }
+        }
+      },
+      "ConfigBatchResponse": {
+        "type": "object",
+        "required": [
+          "applied",
+          "baseRevision",
+          "revision",
+          "results",
+          "warnings"
+        ],
+        "properties": {
+          "applied": {
+            "type": "boolean",
+            "description": "False for a dry run."
+          },
+          "batchId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The stored batch; absent for a dry run."
+          },
+          "baseRevision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The configRevision after the batch (the current one for a dry run)."
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigBatchResult"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowWarning"
+            },
+            "description": "Flow warnings the batch introduces."
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What a revert could not put back."
+          }
+        }
+      },
+      "ConfigBatchRevertInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dryRun": {
+            "type": "boolean",
+            "description": "Run the inverse and roll it back."
+          }
+        }
+      },
+      "ConfigBatchProblem": {
+        "type": "object",
+        "required": ["opIndex", "path", "message"],
+        "properties": {
+          "opIndex": {
+            "type": "integer",
+            "description": "The operation, or -1 when the problem is the request's or cannot be pinned to one."
+          },
+          "node": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ConfigBatchConflict": {
+        "type": "object",
+        "required": ["opIndex"],
+        "properties": {
+          "opIndex": {
+            "type": "integer"
+          },
+          "node": {
+            "type": "string"
+          }
+        }
+      },
+      "ConfigBatchSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "actor",
+          "via",
+          "baseRevision",
+          "revision",
+          "opCount",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "via": {
+            "type": "string",
+            "description": "The origin: an OAuth client id, ai-proposal:<id> or ai-assistant; empty for the console and API tokens."
+          },
+          "baseRevision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "opCount": {
+            "type": "integer"
+          },
+          "reverts": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The batch this one undoes."
+          },
+          "revertedBy": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The batch that undid this one."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ConfigBatchList": {
+        "type": "object",
+        "required": ["items"],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigBatchSummary"
+            }
+          }
+        }
+      },
+      "ConfigBatch": {
+        "type": "object",
+        "required": [
+          "id",
+          "actor",
+          "via",
+          "baseRevision",
+          "revision",
+          "opCount",
+          "createdAt",
+          "ops",
+          "results"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "via": {
+            "type": "string"
+          },
+          "baseRevision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "opCount": {
+            "type": "integer"
+          },
+          "reverts": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revertedBy": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ops": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigBatchOp"
+            },
+            "description": "The operations as they ran: placeholders filled in, credentials withheld."
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigBatchResult"
+            }
+          }
+        }
+      },
       "FeatureCode": {
         "type": "object",
         "required": ["code", "action", "argument"],
@@ -18286,6 +18900,9 @@
                 "type": "string",
                 "enum": [
                   "bad_request",
+                  "validation_failed",
+                  "config_stale",
+                  "op_not_batchable",
                   "graph_too_large",
                   "layout_stale",
                   "config_changing",
@@ -18335,6 +18952,20 @@
                   "$ref": "#/components/schemas/FieldError"
                 },
                 "description": "Present on validation failures: every failing field."
+              },
+              "errors": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ConfigBatchProblem"
+                },
+                "description": "On a rejected batch (validation_failed, op_not_batchable): every problem with its operation."
+              },
+              "conflicts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ConfigBatchConflict"
+                },
+                "description": "On config_stale: the operations whose target changed."
               }
             }
           }

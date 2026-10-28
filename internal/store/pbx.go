@@ -46,7 +46,7 @@ const boxCols = `id, extension_id, password_hash <> '', email, greeting_object, 
 
 // GetVoicemailBox returns the box of extensionID.
 func (s *Store) GetVoicemailBox(ctx context.Context, extensionID int64) (VoicemailBox, error) {
-	b, err := scanBox(s.db.QueryRowContext(ctx,
+	b, err := scanBox(s.q(ctx).QueryRowContext(ctx,
 		`SELECT `+boxCols+` FROM voicemail_boxes WHERE extension_id = $1`, extensionID))
 	return b, mapErr(err)
 }
@@ -187,7 +187,7 @@ func (s *Store) ListVoicemailMessages(ctx context.Context, boxID int64, unheardO
 	if unheardOnly {
 		where += ` AND NOT heard`
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+messageCols+` FROM voicemail_messages`+where+` ORDER BY id DESC`, boxID)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT `+messageCols+` FROM voicemail_messages`+where+` ORDER BY id DESC`, boxID)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +205,7 @@ func (s *Store) ListVoicemailMessages(ctx context.Context, boxID int64, unheardO
 
 // GetVoicemailMessage returns one message.
 func (s *Store) GetVoicemailMessage(ctx context.Context, id int64) (VoicemailMessage, error) {
-	m, err := scanMessage(s.db.QueryRowContext(ctx,
+	m, err := scanMessage(s.q(ctx).QueryRowContext(ctx,
 		`SELECT `+messageCols+` FROM voicemail_messages WHERE id = $1`, id))
 	return m, mapErr(err)
 }
@@ -256,7 +256,7 @@ func notifyMailbox(ctx context.Context, tx *sql.Tx, box int64) error {
 
 // VoicemailCounts is a box's MWI summary: unheard and total messages.
 func (s *Store) VoicemailCounts(ctx context.Context, boxID int64) (unheard, total int64, err error) {
-	err = s.db.QueryRowContext(ctx,
+	err = s.q(ctx).QueryRowContext(ctx,
 		`SELECT count(*) FILTER (WHERE NOT heard), count(*) FROM voicemail_messages WHERE box_id = $1`, boxID).
 		Scan(&unheard, &total)
 	return unheard, total, err
@@ -278,7 +278,7 @@ type VoicemailBoxSummary struct {
 // ListVoicemailBoxes returns every box with its extension and message
 // counts, ordered by extension number.
 func (s *Store) ListVoicemailBoxes(ctx context.Context) ([]VoicemailBoxSummary, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.q(ctx).QueryContext(ctx, `
 		SELECT b.id, b.extension_id, e.number, e.name,
 			count(m.id) FILTER (WHERE NOT m.heard), count(m.id), COALESCE(b.prompt_language, '')
 		FROM voicemail_boxes b
@@ -311,7 +311,7 @@ func (s *Store) ListVoicemailBoxes(ctx context.Context) ([]VoicemailBoxSummary, 
 // box lookup the *97 application and MWI make by dialled number.
 func (s *Store) VoicemailBoxByNumber(ctx context.Context, number string) (VoicemailBox, bool, error) {
 	var b VoicemailBox
-	err := s.db.QueryRowContext(ctx, `
+	err := s.q(ctx).QueryRowContext(ctx, `
 		SELECT b.id, b.email, b.greeting_object, b.unreachable_object, b.busy_object, b.name_object, COALESCE(b.prompt_language, '')
 		FROM voicemail_boxes b JOIN extensions e ON e.id = b.extension_id
 		WHERE e.number = $1`, number).
@@ -330,7 +330,7 @@ func (s *Store) VoicemailBoxByNumber(ctx context.Context, number string) (Voicem
 // which is constant-time in the password.
 func (s *Store) VerifyVoicemailPassword(ctx context.Context, boxID int64, password string) (bool, error) {
 	var hash string
-	err := s.db.QueryRowContext(ctx,
+	err := s.q(ctx).QueryRowContext(ctx,
 		`SELECT password_hash FROM voicemail_boxes WHERE id = $1`, boxID).Scan(&hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -348,7 +348,7 @@ func (s *Store) VerifyVoicemailPassword(ctx context.Context, boxID int64, passwo
 // callerName is the caller-ID display name, "" when the call carried none.
 func (s *Store) InsertVoicemailMessage(ctx context.Context, boxID int64, object, caller, callerName string, durationMs int64) (int64, error) {
 	var id int64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.q(ctx).QueryRowContext(ctx, `
 		INSERT INTO voicemail_messages (box_id, minio_object, caller, caller_name, duration_ms)
 		VALUES ($1, $2, $3, $4, $5) RETURNING id`,
 		boxID, object, caller, callerName, durationMs).Scan(&id)
@@ -376,7 +376,7 @@ func (s *Store) SetVoicemailGreeting(ctx context.Context, boxID int64, slot, obj
 		return "", errors.New("store: unknown greeting slot " + slot)
 	}
 	var prev string
-	if err := s.db.QueryRowContext(ctx,
+	if err := s.q(ctx).QueryRowContext(ctx,
 		`SELECT `+cols[0]+` FROM voicemail_boxes WHERE id = $1`, boxID).Scan(&prev); err != nil {
 		return "", mapErr(err)
 	}
@@ -384,7 +384,7 @@ func (s *Store) SetVoicemailGreeting(ctx context.Context, boxID int64, slot, obj
 	if cols[1] != "" {
 		set += `, ` + cols[1] + ` = NULL`
 	}
-	if _, err := s.db.ExecContext(ctx,
+	if _, err := s.q(ctx).ExecContext(ctx,
 		`UPDATE voicemail_boxes SET `+set+`, updated_at = now() WHERE id = $1`, boxID, object); err != nil {
 		return "", err
 	}
@@ -414,7 +414,7 @@ func (s *Store) SetVoicemailPIN(ctx context.Context, boxID int64, pin string) er
 	if err != nil {
 		return err
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.q(ctx).ExecContext(ctx,
 		`UPDATE voicemail_boxes SET password_hash = $2, updated_at = now() WHERE id = $1`, boxID, h)
 	if err != nil {
 		return err
@@ -427,7 +427,7 @@ func (s *Store) SetVoicemailPIN(ctx context.Context, boxID int64, pin string) er
 // is not found. Not audited, like the other call-plane paths.
 func (s *Store) RemoveVoicemailMessage(ctx context.Context, boxID, id int64) (string, error) {
 	var object string
-	err := s.db.QueryRowContext(ctx,
+	err := s.q(ctx).QueryRowContext(ctx,
 		`DELETE FROM voicemail_messages WHERE id = $1 AND box_id = $2 RETURNING minio_object`, id, boxID).Scan(&object)
 	return object, mapErr(err)
 }
@@ -435,7 +435,7 @@ func (s *Store) RemoveVoicemailMessage(ctx context.Context, boxID, id int64) (st
 // SetVoicemailMessageHeard sets a message's heard flag after the phone
 // played it (*97). The UI path is UpdateVoicemailMessageHeard, which audits.
 func (s *Store) SetVoicemailMessageHeard(ctx context.Context, id int64, heard bool) error {
-	res, err := s.db.ExecContext(ctx,
+	res, err := s.q(ctx).ExecContext(ctx,
 		`UPDATE voicemail_messages SET heard = $2 WHERE id = $1`, id, heard)
 	if err != nil {
 		return err
@@ -615,12 +615,12 @@ type RingGroupInput struct {
 
 // ListRingGroups returns every group with its members.
 func (s *Store) ListRingGroups(ctx context.Context) ([]RingGroup, error) {
-	return listRingGroups(ctx, s.db, "")
+	return listRingGroups(ctx, s.q(ctx), "")
 }
 
 // GetRingGroup returns one group with its members.
 func (s *Store) GetRingGroup(ctx context.Context, id int64) (RingGroup, error) {
-	gs, err := listRingGroups(ctx, s.db, ` WHERE g.id = $1`, id)
+	gs, err := listRingGroups(ctx, s.q(ctx), ` WHERE g.id = $1`, id)
 	if err != nil {
 		return RingGroup{}, err
 	}
@@ -829,7 +829,7 @@ type FeatureCode struct {
 
 // ListFeatureCodes returns every code ordered by code.
 func (s *Store) ListFeatureCodes(ctx context.Context) ([]FeatureCode, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT code, action, argument FROM feature_codes ORDER BY code`)
+	rows, err := s.q(ctx).QueryContext(ctx, `SELECT code, action, argument FROM feature_codes ORDER BY code`)
 	if err != nil {
 		return nil, err
 	}
@@ -919,7 +919,7 @@ func DefaultFeatureCodes() []FeatureCode {
 // codes an administrator changed or removed. It runs at hello-control start.
 func (s *Store) EnsureFeatureCodes(ctx context.Context, defaults []FeatureCode) error {
 	var n int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM feature_codes`).Scan(&n); err != nil {
+	if err := s.q(ctx).QueryRowContext(ctx, `SELECT count(*) FROM feature_codes`).Scan(&n); err != nil {
 		return err
 	}
 	if n > 0 {

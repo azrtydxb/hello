@@ -832,3 +832,240 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - Not done: `exhausted` after a forward stage still uses the dialled
   extension's box for voicemail (the same class of bug as the group one); it
   is reported, not changed here.
+
+message. `conference` was left for a follow-up (see below).
+
+## Routes form: conference destination (2026-10-26)
+
+The inbound route drawer also offers `conference` ("Conference room"). The target
+is chosen from the rooms list (`GET /api/v1/conferences`) and stored as the room
+number, labelled "number · name"; a stored number the list no longer has stays
+selectable as "(not found)". An empty target is refused with "Choose a conference
+room." This closes the gap noted for flow canvas P1.
+
+## Flow canvas P3: the batch backend (2026-10-26)
+
+Built per `.procoder/specs/flow-canvas.md` (P3). Choices the spec left open:
+
+- **Store shape.** The spec's `store.WithBatch(ctx, tx)` is `Store.RunBatch(ctx,
+dryRun, fn)`: it opens the transaction, takes the configuration lock, reads
+  the revision and the baseline routing configuration, and calls `fn` with a
+  context that carries the batch. Every store write and read made under that
+  context uses the batch's transaction (`Store.q(ctx)` replaces `s.db` in the
+  configuration files, `Store.tx`, `configChangeID` and `provChange` join the
+  batch), so an operation sees the ones before it. `configChangeID` then skips
+  the lock, the per-operation check and the revision bump and records which
+  check functions the batch used; `RunBatch` runs them once at the end against
+  the baseline, bumps the revision once and notifies once. The audit via is
+  `batch:<uuid>`; the outer origin goes on the `config_batches` row.
+- **The batch table** is `00046_config_batches.sql` (`ops`, `results`,
+  `reverts`, 90 days, pruned on insert). `ops` holds the operations as they ran
+  with credential values withheld; `results` holds, per operation, the object
+  before and after as its GET returns it, the diff and, for a delete, the
+  node's canvas positions.
+- **Which operations.** An explicit table (`internal/configbatch/ops.go`), not
+  "everything with write scope": the object writes of the canvas. Refused with
+  `400 op_not_batchable`: operations whose response carries a secret
+  (`createDevice`, `createPhone`, so devices and phones are updated and deleted
+  in a batch but not created), credential scopes (`secrets`, `session`),
+  multipart, and anything that touches MinIO, a speech provider, a phone or
+  Valkey state (announcements, greetings, firmware, queue agent login,
+  conference control, calendar import, the time condition override toggle).
+  Admin-scoped object writes (paging groups, conferences, multicast channels)
+  are allowed: the inner operation still needs its own scope and role.
+  Decision 2 lets credential operations into the AI path once their secret is
+  stripped; that belongs to P6 and is not done here.
+- **Announcements are not batchable** (audio is in MinIO, generation calls a
+  provider). A batch can point at an existing announcement (an IVR greeting)
+  but not create one; the canvas links to the Announcements page.
+- **`baseRevision` is required.** `expect` is the node `version` of the graph
+  (hash of the stored object) and is checked only when the revision moved; an
+  operation without `expect`, or aimed at an object the batch creates, never
+  conflicts. Revert uses its own stricter check (below).
+- **Errors.** The first failing operation stops the batch (later operations
+  depend on earlier ones), so `errors` has the failing operation's fields, not
+  one entry per operation. A refused operation is `403` with the inner code
+  (`forbidden_role`, `insufficient_scope`) and its index in the message. Any
+  other non-success of an operation (400, 404, 409) is `422 validation_failed`
+  with `errors: [{opIndex, node, path, message}]`. The final routing check names
+  the operation that changed the item the error is about, or `-1`.
+- **Placeholders** take any field of the referenced response (checked against
+  the operation's response schema before anything runs). A string that is
+  exactly one placeholder keeps the value's type.
+- **Nested replay.** `replay.Request.Inherit` lets the batch replay its
+  operations inside an MCP replay (the batch route is itself called as an MCP
+  tool); the outer replay marker, and so the OAuth client, is kept.
+- **Layout in a batch.** `canvasId` plus `layout` places new nodes (the node id
+  may hold a placeholder); every applied batch prunes layout of nodes that no
+  longer exist on every canvas. A layout write moves `layout_version` and is
+  audited as `flow_canvas layout`, and is not a configuration change.
+- **Warnings** in the answer are the flow warnings the batch introduces (after
+  minus before), not all of them.
+- **Revert.** The inverse is built from `before`: a PATCH restores only the
+  keys its body set (a key absent in `before` is sent as null); a PUT or create
+  sends the writable fields of the GET (pruned to the request schema, which also
+  drops read-only fields); credentials a batch set are never stored, so they are
+  listed in `skipped`. A deleted object is made again with a new id and later
+  operations of the same revert use it. The staleness check compares, for the
+  last operation that touched each object, the writable fields of its recorded
+  `after` with the object now (fields outside the request schema, such as
+  timestamps and live state, are ignored). A batch reverts once (`409
+conflict`), and a batch that deleted a device or phone (which a batch cannot
+  create) is `422`.
+- **TestEdgeRoundTrip** exercises every connection the catalogue offers from a
+  stored "call goes to" field (inbound route, ring group, IVR keys, timeout and
+  invalid, queue exits, time condition branches), reading the target kinds from
+  the catalogue so a new connection fails until it has a fixture, plus the
+  member ports (`TestEdgeRoundTripMembers`). The `internalDid` target is not
+  exercised (its target is the route's own DID; the golden graph covers it).
+  Resource edges that are plain id lists (outbound trunks, hold music, schedule
+  calendars, device and phone binding, prompts) are drawn from the same
+  `Owner` field table and covered by the golden graph; their batch operations
+  are the ordinary updates.
+- **Metrics:** `hello_config_batches_total{result}` and
+  `hello_config_batch_ops`. The graph build and trace metrics belong to their
+  phases.
+
+## Flow canvas P4: the editing UI (2026-10-27)
+
+- **The draft is a list of batch operations, not a copy of the graph.** Each
+  staged gesture becomes `DraftOp`s (`web/src/pages/flow/draft.ts`): the
+  operation, its `expect` version and the versions of every node it read.
+  Edits to the same object merge into one operation (key `upd|<node>`), so two
+  changes to one ring group, or a rename and a referrer update that touch the
+  same IVR, are one `PUT` and cannot overwrite each other. All feature-code
+  edits share the key `list|putFeatureCodes` (one `PUT` of the whole table).
+  An edit of a node that only exists in the draft is folded into its create
+  operation, and deleting such a node forgets it and its edits.
+- **The canvas draws the draft.** `project(graph, draft)` returns the graph as
+  it will be once applied (new nodes, deleted nodes, rewired edges, renamed
+  labels); the canvas, the panel and the pickers all read that, so what the
+  user sees is what the dry run checks.
+- **The catalogue decides, objects.ts only says how.** Whether an output may
+  connect to an input is `canConnect` over the catalogue's target lists
+  (the UI never hard-codes compatibility, spec constraint). `objects.ts` holds
+  only how an allowed connection is written into the owner's body (an adapter
+  per output port) and which settings the panel edits. A connection with no
+  adapter (outbound trunk order, hold music, prompts, device binding, schedule
+  calendars) is drawn but its handle is not connectable and the panel says to
+  use the object's own page. This is scoped to the "call goes to" fields,
+  forwards, group and queue members, inbound trunk, feature-code targets and
+  the IVR keys, which is what spec S-10 to S-12 name.
+- **PATCH sends only what changed; PUT sends the whole object.** The base of a
+  PUT (IVR, queue, time condition, feature codes) is the GET answer pruned to
+  the request's writable keys; PATCH objects (extension, ring group, inbound
+  route) send only the changed fields, so the id and timestamps never reach an
+  `additionalProperties: false` body.
+- **Names, not ids, in destinations.** Destinations store the target's name,
+  number or code, so a rename stages the renamed object plus an update of
+  every referrer (found from the graph's edges, written through the same
+  adapters) in one gesture. A referrer that cannot store the new name refuses
+  the rename with the reason. A forward to a ring group whose name is not
+  numeric is refused with the reason (spec edge case).
+- **Delete lists referrers and clears them first.** `referrersOf` walks the
+  edges that point at the node and are owned by another object; the confirm
+  dialog lists them; the delete stages the referrer updates, then the delete.
+  A referrer that cannot be cleared (an inbound route always needs a
+  destination) blocks the delete and is named.
+- **Gestures stand or fall together on a rebase.** Every op carries the ids of
+  the gestures that staged it. On a revision change `rebase` drops an op whose
+  touched node changed or vanished, and every op that shares a gesture with a
+  dropped one (a rename without its referrers would leave them dangling). The
+  dropped changes are listed in a warning; nothing conflicting is kept. History
+  is cleared by a rebase, since old steps would bring back what was dropped.
+- **Live validation is the server's dry run.** 500 ms after the last change the
+  whole draft is sent with `dryRun: true`; `422` problems are drawn on their
+  node (the `node` of the problem, else the op index), a `409 config_stale`
+  reloads the graph (which rebases), and Apply is enabled only once the check
+  answers for the current draft. "Checking" is derived (the check records the
+  draft it was for), not stored.
+- **Apply always goes through the review dialog** with the dry run's
+  field-level diff and warnings; the only apply call is the dialog's confirm.
+  On `409 config_stale` at apply nothing was applied: the dialog closes, the
+  graph reloads, the draft is rebased and the dropped changes are reported.
+- **Layout of new nodes.** A new node has the id `<kind>:~<ref>` in the draft
+  and a position in the layout reducer, but the layout PUT skips it. At apply
+  its position goes in the batch's `layout` as `<kind>:${ref.id}`, so the
+  server places it once the id exists. A discard or a rebase forgets it.
+- **The draft is kept in `localStorage`** under
+  `hello.flow.draft.<canvasId>.<user>` as `{baseRevision, ops, history}` and
+  rebased when the canvas opens on a newer revision. Positions of draft nodes
+  are not kept; they come back in "Not on this canvas".
+- **Undo and redo restore the exact op list** (a snapshot per gesture, 60
+  deep) and are bound to Ctrl/Cmd+Z outside text fields. A new gesture ends
+  the redo line.
+- **Accessibility.** Every connection can be made in the panel (a select of the
+  catalogue's targets per output, a key field for IVR keys, a typed external
+  number or SIP URI) and removed with a Disconnect button; the pointer drag
+  and the Delete key on a selected edge are shortcuts to the same operations.
+  Objects are not deleted with the key: they have a confirmation.
+- **Forms are shared (spec S-15).** The create/edit drawers of ring groups,
+  IVR menus, queues, time conditions, conferences, inbound and outbound routes,
+  extensions and the text prompt editor moved from `web/src/pages/*.tsx` to
+  `web/src/forms/*Form.tsx` unchanged (their page tests pass unmodified). Each
+  drawer that the canvas uses got one optional prop, `commit(body)`: when set
+  the drawer hands its validated body to the caller instead of calling the
+  API. The canvas panel's "Edit all settings" opens the same drawer
+  (`FormHost`) with the object's GET (plus what the draft already changes) and
+  stages the result with `stageBody`.
+- **`stageBody`** keeps only the fields that differ from the object as it
+  stands, runs the rename cascade when the name changed, and recomputes the
+  edges the new values draw (`wanted.ts` reads the stored fields the way the
+  graph builder does, per owner-field group; groups it does not cover are left
+  alone) so the projected graph is right without a round trip.
+- **Every connection with a stored form is wirable.** Adapters were added for
+  outbound trunk order (`trunks`, ordered ids), hold music (`mohClassId` on
+  extension, ring group, inbound route and queue), prompts (IVR
+  `greetingId`/`invalidPromptId`/`timeoutPromptId`, queue prompt ids,
+  conference entry/exit announcement names, hold music `announcementIds`),
+  device to extension (`extensionId`), phone to device (`deviceId`), calendars
+  to schedules (`calendarIds`), schedule to time condition (`scheduleId`),
+  paging group multicast channel and paging members/callers. All use existing
+  batchable operations, so no backend change was needed. Required fields
+  (an IVR greeting, a device's extension, a time condition's schedule) can be
+  re-pointed but not cleared; the panel says why. None of these truly cannot
+  be stored.
+- **Draft node positions** are persisted with the draft
+  (`{baseRevision, ops, history, positions}`) and restored into the layout
+  reducer on load, for nodes whose create operation survived the rebase.
+- **Generate prompt** (tts-prompts is on main, PR #139): the panel's
+  announcement section and a toolbar button open the Announcements page's
+  prompt editor (`PromptHost`). Generation calls the speech provider and
+  stores audio, which a batch cannot roll back, so it runs immediately and is
+  not staged; the canvas then reloads and places the announcement.
+- **Still out of scope.** Creating devices, phones and trunks with credentials
+  (spec). The extension drawer is shared but not wired to `commit` (its
+  voicemail, device and live panes act on the server at once); the panel edits
+  an extension's name and DND and its forwards and hold music as connections.
+
+## DSCP marking, parity item 28 (S-21) (2026-10-27)
+
+Built to the spec: SIP socket DSCP 26, relay/anchor/fanout/party RTP sockets
+DSCP 46, `HELLO_DSCP_SIP` / `HELLO_DSCP_RTP` (0 to 63, validated), Grandstream
+P1558 / P1559 from the same two values.
+
+- RTP DSCP is a process-wide setting (`media.SetRTPDSCP`, default 46) read at
+  every bind, not a parameter of each constructor: one value per process, and
+  the six bind sites keep their signatures.
+- hello-control reads the same two env vars so phones are provisioned with the
+  values hello-sip marks with; set both services alike.
+- A refused mark (platform, sandbox) is logged once and never fails SIP or a
+  call.
+- Originated SIP and the mark. Verified by test: sipgo copies the client's
+  forced local address (the listening socket) into a request only when no
+  request options are passed. The six call sites in `edge.go` and
+  `takeover.go` that pass `ClientRequestAddVia` got an ephemeral socket of
+  sipgo's own (v1.6.0 has no socket-control hook or dialer Control), which
+  nothing can mark and which was not on the SIP port. They now use
+  `Server.addViaFromListener` / `fromListener`, which set the request's local
+  address to the listener, so all originated SIP leaves from the marked
+  socket (`TestDSCPOutboundOnMarkedSocket`). A forked sipgo was rejected as
+  too heavy for this.
+- Other vendors, from the vendors' administrator guides (nothing in this repo
+  documents them): Yealink `static.network.qos.signaltos` / `audiotos`, Poly
+  `qos.ip.callControl.dscp` / `qos.ip.rtp.dscp`, written like Grandstream,
+  unverified on hardware. Snom and Fanvil: no documented DSCP provisioning key
+  could be confirmed (snom uses TOS-byte settings whose exact names are not
+  in this repo; Fanvil's are device-specific), so none is written rather than
+  guessed. Revisit with the vendor guides. Site overrides go through S-12.
+- No migration, no API or UI change; TCP/TLS SIP is not served by hello-sip.

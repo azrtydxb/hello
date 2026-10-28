@@ -118,7 +118,7 @@ func TestDigestVerifyUnit(t *testing.T) {
 			chalNow := now
 			d.Now = func() time.Time { return chalNow.Add(tc.at) }
 			creds := credentialsFor(t, req, alg, tc.nonce, "alice", tc.pass)
-			if got := d.Verify(creds, "REGISTER", req.Recipient, tc.from, device.HA1MD5, device.HA1SHA256); got != tc.want {
+			if got, _ := d.Verify(creds, "REGISTER", req.Recipient, tc.from, device.HA1MD5, device.HA1SHA256); got != tc.want {
 				t.Errorf("%s pass=%s at=+%s from=%s: verdict %d, want %d", alg, tc.pass, tc.at, tc.from, got, tc.want)
 			}
 		}
@@ -137,14 +137,27 @@ func TestDigestVerifyUnit(t *testing.T) {
 		if err := sip.ParseUri(ruri, &u); err != nil {
 			t.Fatal(err)
 		}
-		if got := d.Verify(creds, "REGISTER", u, ip, device.HA1MD5, device.HA1SHA256); got != want {
+		got, check := d.Verify(creds, "REGISTER", u, ip, device.HA1MD5, device.HA1SHA256)
+		if got != want {
 			t.Errorf("Request-URI %s: verdict %d, want %d", ruri, got, want)
+		}
+		if want == Bad && check != CheckURI {
+			t.Errorf("Request-URI %s: check %q, want %q", ruri, check, CheckURI)
 		}
 	}
 	d.Now = func() time.Time { return now }
 	future := &Digest{Realm: testDomain, Secret: []byte(testSecret), Now: func() time.Time { return now.Add(time.Hour) }}
-	if got := d.Verify(credentialsFor(t, req, AlgMD5, future.Nonce(ip), "alice", "pw"), "REGISTER", req.Recipient, ip, device.HA1MD5, device.HA1SHA256); got != Bad {
-		t.Errorf("future nonce verdict %d, want Bad", got)
+	if got, check := d.Verify(credentialsFor(t, req, AlgMD5, future.Nonce(ip), "alice", "pw"), "REGISTER", req.Recipient, ip, device.HA1MD5, device.HA1SHA256); got != Bad || check != CheckNonce {
+		t.Errorf("future nonce verdict %d check %q, want Bad/nonce", got, check)
+	}
+	// Realm mismatch and a wrong password name their check.
+	other := &Digest{Realm: "other.test", Secret: []byte(testSecret), Now: d.Now}
+	if got, check := other.Verify(creds, "REGISTER", req.Recipient, ip, device.HA1MD5, device.HA1SHA256); got != Bad || check != CheckRealm {
+		t.Errorf("realm verdict %d check %q, want Bad/realm", got, check)
+	}
+	badpw := credentialsFor(t, req, AlgSHA256, nonce, "alice", "bad")
+	if got, check := d.Verify(badpw, "REGISTER", req.Recipient, ip, device.HA1MD5, device.HA1SHA256); got != Bad || check != CheckResponse {
+		t.Errorf("bad password verdict %d check %q, want Bad/response", got, check)
 	}
 }
 
