@@ -409,7 +409,7 @@ listed). Creating or changing such an endpoint is audited.
 | `hello_webhook_endpoints_disabled`       | endpoints switched off                           |
 | `hello_webhook_dead_dropped_total`       | dead letters dropped by the per-endpoint cap     |
 
-Webhook tables are in migration `00046`; finished deliveries are purged with
+Webhook tables are in migration `00057`; finished deliveries are purged with
 the event retention, dead letters after 30 days, by one replica at a time.
 
 ## What comes next
