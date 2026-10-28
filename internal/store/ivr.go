@@ -39,7 +39,7 @@ const (
 	// IVRTimeCondition names a time condition (migration 00038), which picks
 	// one of its own destinations when the call arrives.
 	IVRTimeCondition = "time_condition"
-	// IVRDirectory is the dial-by-name directory (migration 00052): the
+	// IVRDirectory is the dial-by-name directory (migration 00048): the
 	// caller spells a name on the keypad and is connected to the extension.
 	// It names no object, so its target is empty.
 	IVRDirectory = "directory"

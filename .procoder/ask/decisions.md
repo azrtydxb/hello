@@ -838,7 +838,7 @@ another group) is lifted: the ring state machine can open a new ring stage.
 - A new destination kind `directory` with an empty target, accepted by every
   output that stores a call destination: inbound routes, ring group fallback,
   IVR keys / timeout / invalid, time condition branches, queue exits (decision
-  3), plus the feature-code action `directory`. Migration 00052 (renumbered by
+  3), plus the feature-code action `directory`. Migration 00048 (renumbered by
   the merge captain) widens the CHECK lists additively with
   `pg_temp.hello_check_values`; down removes or hangs up the rows of the kind.
 - Default feature code is `*42`, not `*411` (D11). `*411` extends the default

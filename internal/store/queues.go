@@ -34,7 +34,7 @@ const (
 	ActionQueuePause   = "queue_pause"
 	ActionQueueUnpause = "queue_unpause"
 	// ActionDirectory is the feature-code action of the dial-by-name
-	// directory (migration 00052).
+	// directory (migration 00048).
 	ActionDirectory = "directory"
 )
 
