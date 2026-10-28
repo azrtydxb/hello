@@ -508,6 +508,7 @@ func SampleData(full bool) RenderData {
 		d.Line.PickupGroupCode, d.Line.PickupDirectedCode = "*40", "*41"
 		d.Firmware = &FirmwareInfo{URL: "https://prov.hello.example/p/sample/fw/firmware.rom", Dir: "https://prov.hello.example/p/sample/fw", Via: 2, Version: "1.2.3"}
 		d.Book = NewBookInfo("https://prov.hello.example/p/sample/", []string{"Extensions", "Company", "Warehouse"}, DefaultBookRefresh)
+		d.LDAP = NewLDAPInfo("prov.hello.example", 636, "dc=hello,dc=local", "uid=1,ou=phones,dc=hello,dc=local", "sample-ldap-password")
 		d.Multicast = NewMulticastInfo([]MulticastChannel{
 			{Label: "Warehouse", Address: "239.255.0.1", Port: 5004, Codec: "PCMU", Priority: 1},
 			{Label: "Office", Address: "239.255.0.2", Port: 5006, Codec: "PCMU", Priority: 2},

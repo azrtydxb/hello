@@ -2,6 +2,8 @@
 {{- $ctx := dict "root" . "component" "control" -}}
 {{- $prov := .Values.control.provisioning -}}
 {{- $provOn := ne $prov.publicUrl "" -}}
+{{- $ldap := .Values.control.ldap -}}
+{{- $ldapOn := and $ldap.enabled $provOn -}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -123,6 +125,28 @@ spec:
             - name: HELLO_PROV_CA_CERT
               value: /etc/hello/prov/ca.crt
             {{- end }}
+            {{- if $ldapOn }}
+            - name: HELLO_LDAP_ENABLED
+              value: "true"
+            - name: HELLO_LDAP_ADDR
+              value: ":8636"
+            - name: HELLO_LDAP_BASE
+              value: {{ $ldap.base | quote }}
+            - name: HELLO_LDAP_PUBLIC_PORT
+              value: {{ $ldap.port | quote }}
+            - name: HELLO_LDAP_TLS_CERT
+              value: /etc/hello/ldap/tls.crt
+            - name: HELLO_LDAP_TLS_KEY
+              value: /etc/hello/ldap/tls.key
+            {{- if $ldap.startTls }}
+            - name: HELLO_LDAP_STARTTLS_ADDR
+              value: ":8389"
+            {{- end }}
+            {{- if $ldap.anonymous }}
+            - name: HELLO_LDAP_ANON
+              value: "true"
+            {{- end }}
+            {{- end }}
             {{- range $env, $key := dict "HELLO_PROV_SNOM_KEY_ID" "snomSrapsAccessKeyId" "HELLO_PROV_SNOM_KEY_SECRET" "snomSrapsAccessKeySecret" "HELLO_PROV_YEALINK_KEY" "yealinkRpsAccessKey" "HELLO_PROV_YEALINK_SECRET" "yealinkRpsAccessSecret" "HELLO_PROV_YMCS_CLIENT_ID" "yealinkYmcsClientId" "HELLO_PROV_YMCS_CLIENT_SECRET" "yealinkYmcsClientSecret" "HELLO_PROV_YMCS_REGION" "yealinkYmcsRegion" "HELLO_PROV_GDMS_CLIENT_ID" "gdmsClientId" "HELLO_PROV_GDMS_CLIENT_SECRET" "gdmsClientSecret" "HELLO_PROV_GDMS_USERNAME" "gdmsUsername" "HELLO_PROV_GDMS_PASSWORD" "gdmsPassword" "HELLO_PROV_GDMS_REGION" "gdmsRegion" "HELLO_PROV_GDMS_SITE_ID" "gdmsSiteId" }}
             {{- if $.Values.secrets.provRedirectSecret }}
             {{- include "hello.secretEnv" (dict "root" $ "env" $env "key" $key "optional" true "secret" $.Values.secrets.provRedirectSecret) | nindent 12 }}
@@ -132,11 +156,18 @@ spec:
             {{- with .Values.control.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if and $provOn $prov.caSecret }}
+          {{- if or (and $provOn $prov.caSecret) $ldapOn }}
           volumeMounts:
+            {{- if and $provOn $prov.caSecret }}
             - name: prov-ca
               mountPath: /etc/hello/prov
               readOnly: true
+            {{- end }}
+            {{- if $ldapOn }}
+            - name: ldap-tls
+              mountPath: /etc/hello/ldap
+              readOnly: true
+            {{- end }}
           {{- end }}
           ports:
             - name: http
@@ -144,6 +175,14 @@ spec:
             {{- if $provOn }}
             - name: prov
               containerPort: 8083
+            {{- end }}
+            {{- if $ldapOn }}
+            - name: ldaps
+              containerPort: 8636
+            {{- if $ldap.startTls }}
+            - name: ldap-starttls
+              containerPort: 8389
+            {{- end }}
             {{- end }}
           readinessProbe:
             httpGet:
@@ -161,14 +200,26 @@ spec:
             {{- include "hello.containerSecurity" . | nindent 12 }}
           resources:
             {{- toYaml .Values.control.resources | nindent 12 }}
-      {{- if and $provOn $prov.caSecret }}
+      {{- if or (and $provOn $prov.caSecret) $ldapOn }}
       volumes:
+        {{- if and $provOn $prov.caSecret }}
         - name: prov-ca
           secret:
             secretName: {{ $prov.caSecret }}
             items:
               - key: ca.crt
                 path: ca.crt
+        {{- end }}
+        {{- if $ldapOn }}
+        - name: ldap-tls
+          secret:
+            secretName: {{ required "control.ldap.tlsSecret is required when control.ldap.enabled" $ldap.tlsSecret }}
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+        {{- end }}
       {{- end }}
 ---
 apiVersion: v1
@@ -206,6 +257,36 @@ spec:
       port: 8083
       protocol: TCP
       targetPort: prov
+{{- end }}
+{{- if $ldapOn }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $full }}-ldap
+  labels:
+    {{- include "hello.labels" (dict "root" . "component" "ldap") | nindent 4 }}
+spec:
+  type: {{ $ldap.service.type }}
+  selector:
+    {{- include "hello.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: ldaps
+      port: {{ $ldap.port }}
+      protocol: TCP
+      targetPort: ldaps
+      {{- if and (eq $ldap.service.type "NodePort") $ldap.service.nodePort }}
+      nodePort: {{ $ldap.service.nodePort }}
+      {{- end }}
+    {{- if $ldap.startTls }}
+    - name: ldap-starttls
+      port: 389
+      protocol: TCP
+      targetPort: ldap-starttls
+      {{- if and (eq $ldap.service.type "NodePort") $ldap.service.startTlsNodePort }}
+      nodePort: {{ $ldap.service.startTlsNodePort }}
+      {{- end }}
+    {{- end }}
 {{- end }}
 {{- if and $provOn $prov.ingress.enabled }}
 ---

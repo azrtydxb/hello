@@ -479,7 +479,7 @@ const phoneGroupCols = `g.id, g.name, g.description, g.include_extensions, g.inc
 	g.ptt_enabled, g.ptt_address, g.ptt_codec, g.ptt_default_channel, g.ptt_accept_busy, g.ptt_channel_id,
 	g.ptt_priority_channel, g.ptt_emergency_channel, g.group_paging_enabled, g.group_paging_default,
 	g.group_paging_priority, g.group_paging_emergency, g.paging_allow_in_dnd, g.paging_barge,
-	g.paging_priority_active, g.paging_timeout, g.intercom_barge`
+	g.paging_priority_active, g.paging_timeout, g.intercom_barge, g.ldap_enabled`
 
 func scanPhoneGroup(r interface{ Scan(...any) error }) (phonebook.Group, error) {
 	var (
@@ -491,7 +491,7 @@ func scanPhoneGroup(r interface{ Scan(...any) error }) (phonebook.Group, error) 
 		&g.PTT.Enabled, &g.PTT.Address, &g.PTT.Codec, &g.PTT.DefaultChannel, &g.PTT.AcceptBusy, &ptt,
 		&g.PTT.PriorityChannel, &g.PTT.EmergencyChannel, &g.PTT.GroupPaging, &g.PTT.DefaultGroup,
 		&g.PTT.PriorityGroup, &g.PTT.EmergencyGroup, &g.PagingOptions.AllowInDND, &g.PagingOptions.Barge,
-		&g.PagingOptions.PriorityActive, &g.PagingOptions.Timeout, &g.PagingOptions.IntercomBarge); err != nil {
+		&g.PagingOptions.PriorityActive, &g.PagingOptions.Timeout, &g.PagingOptions.IntercomBarge, &g.LDAPEnabled); err != nil {
 		return g, err
 	}
 	g.PTT.ChannelID = nullInt(ptt)

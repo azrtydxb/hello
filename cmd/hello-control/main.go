@@ -131,6 +131,10 @@ func serve(ctx context.Context, cfg config.Control, log *slog.Logger, db *sql.DB
 	go ensureBuckets(ctx, objs, log)
 	metrics := telemetry.NewMetrics("hello-control", version.Version, version.Commit)
 	provMetrics := prov.NewMetrics(metrics.Registry)
+	if err := startLDAP(ctx, cfg, st, vk, log); err != nil {
+		log.Error("ldap directory", "error", err)
+		os.Exit(1)
+	}
 	if err := startProv(ctx, cfg, st, objs, vk, deployment, provMetrics, log); err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("HELLO_PROV_ADDR: %w", err)

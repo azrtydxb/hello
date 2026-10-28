@@ -185,6 +185,33 @@ export const revealAdminPassword = (phoneId: Id) =>
 export const rotateAdminPassword = (phoneId: Id) =>
   request<void>("POST", `/api/v1/phones/${seg(phoneId)}/admin-password/rotate`);
 
+// --- LDAP directory (pbx-gaps S-24 to S-26) ----------------------------------------
+
+/** GET /api/v1/phones/{id}/ldap: never carries the password. */
+export interface PhoneLdap {
+  served: boolean;
+  supported: boolean;
+  groupEnabled: boolean;
+  host: string;
+  port: number;
+  base: string;
+  bindDn: string;
+  passwordSet: boolean;
+  rotatedAt: string | null;
+  previousValid: boolean;
+  lastBindAt: string | null;
+}
+
+export const getPhoneLdap = (phoneId: Id, signal?: AbortSignal) =>
+  request<PhoneLdap>("GET", `/api/v1/phones/${seg(phoneId)}/ldap`, { signal });
+
+/** POST /api/v1/phones/{id}/ldap/password: the new password, shown once. */
+export const rotatePhoneLdapPassword = (phoneId: Id) =>
+  request<{ bindDn: string; password: string; resyncQueued: boolean }>(
+    "POST",
+    `/api/v1/phones/${seg(phoneId)}/ldap/password`,
+  );
+
 // --- check-sync pushes: resync and reboot ------------------------------------------
 
 export type PushKind = "resync" | "reboot";

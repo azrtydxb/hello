@@ -776,7 +776,8 @@ The token in the per-device URL is the phone's credential.
 Hello keeps the contact data that phones show as a directory, and serves it
 to each phone in its vendor's remote phonebook XML over the provisioning
 endpoint, with the phone's own token. Manage it under **Phonebooks** and
-**Phones > Groups** in the console, or through the API below.
+**Phones > Groups** in the console, or through the API below. Phones can also
+search the same books over LDAPS; see [Phone LDAP directory](ldap.md).
 
 - **Books.** The **company** book and the **extensions** book exist once.
   The extensions book is computed from the extensions (name and number) and

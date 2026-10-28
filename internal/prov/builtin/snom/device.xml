@@ -62,6 +62,21 @@
 {{- with .Book}}
     <dkey_directory perm="R">url {{xml .URL}}</dkey_directory>
 {{- end}}
+{{- /* LDAP directory (pbx-gaps S-26): ldap_* settings of the Snom Service Hub ("LDAP"): server, port, base, username, password, max_hits, search and number filters, name and number attributes, display name. ldaps:// in ldap_server for TLS is not checked on a phone (verify). The CA below (certificates) is what the phone trusts for the server. */}}
+{{- with .LDAP}}
+    <ldap_server perm="R">ldaps://{{xml .Host}}</ldap_server>
+    <ldap_port perm="R">{{.Port}}</ldap_port>
+    <ldap_base perm="R">{{xml .Base}}</ldap_base>
+    <ldap_username perm="R">{{xml .BindDN}}</ldap_username>
+    <ldap_password perm="R">{{xml .Password}}</ldap_password>
+    <ldap_max_hits perm="R">{{.MaxHits}}</ldap_max_hits>
+    <ldap_search_filter perm="R">(|(cn=%)(sn=%))</ldap_search_filter>
+    <ldap_number_filter perm="R">(|(telephoneNumber=%)(mobile=%)(homePhone=%))</ldap_number_filter>
+    <ldap_name_attributes perm="R">cn sn</ldap_name_attributes>
+    <ldap_number_attributes perm="R">telephoneNumber mobile homePhone</ldap_number_attributes>
+    <ldap_display_name perm="R">cn</ldap_display_name>
+    <ldap_sort_results perm="R">on</ldap_sort_results>
+{{- end}}
 {{- with .Firmware}}
     <update_policy perm="R">auto_update</update_policy>
     <firmware perm="R">{{xml .URL}}</firmware>

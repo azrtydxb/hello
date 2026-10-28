@@ -195,6 +195,35 @@ describe("Phone groups", () => {
     );
   });
 
+  it("turns the LDAP directory on for the group", async () => {
+    const calls = api("admin", {
+      "PUT /api/v1/phone-groups/9": () => json(group()),
+      "PUT /api/v1/phone-groups/9/ldap": () =>
+        json({
+          enabled: true,
+          served: true,
+          host: "prov.hello.test",
+          port: 636,
+          base: "ou=phonebook,dc=hello,dc=local",
+          phoneCount: 1,
+        }),
+    });
+    renderApp("/phones/groups");
+    await groupsTable();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Site A" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Site A" });
+    const sw = within(dialog).getByRole("switch", { name: /LDAP directory/ });
+    expect(sw).not.toBeChecked();
+    fireEvent.click(sw);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Edit Site A" })).toBeNull(),
+    );
+    expect(
+      calls.find((c) => c.url === "/api/v1/phone-groups/9/ldap")!.body,
+    ).toEqual({ enabled: true });
+  });
+
   it("saves catalog multicast channels and a PTT channel", async () => {
     const PTT = {
       enabled: true,

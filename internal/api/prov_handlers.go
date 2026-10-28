@@ -34,6 +34,8 @@ type ProvStore interface {
 	RearmPhone(ctx context.Context, actor string, id int64) (store.CreatedPhone, error)
 	RevealAdminPassword(ctx context.Context, actor string, id int64) (string, error)
 	RotateAdminPassword(ctx context.Context, actor string, id int64) error
+	GetPhoneLDAP(ctx context.Context, id int64) (store.PhoneLDAP, error)
+	RotateLDAPPassword(ctx context.Context, actor string, id int64) (string, error)
 	ExistingMACs(ctx context.Context, macs []string) (map[string]int64, error)
 	ListPhoneFetches(ctx context.Context, phoneID, before int64, limit int) ([]store.Fetch, string, error)
 	RenderInputs(ctx context.Context, phoneID int64) (prov.RenderData, prov.Template, error)
@@ -539,6 +541,11 @@ func maskSecrets(d *prov.RenderData) {
 			b.Sources[i].URL = tokenInPathRe.ReplaceAllString(b.Sources[i].URL, "/p/"+mask+"/")
 		}
 		d.Book = &b
+	}
+	if d.LDAP != nil {
+		l := *d.LDAP
+		l.Password = mask
+		d.LDAP = &l
 	}
 	if d.Firmware != nil {
 		fw := *d.Firmware

@@ -341,6 +341,19 @@
     <P330>3</P330>
     <P331>prov.hello.example/p/sample/pb/0.xml</P331>
     <P332>30</P332>
+    <P8020>prov.hello.example</P8020>
+    <P8021>636</P8021>
+    <P8022>ou=phonebook,dc=hello,dc=local</P8022>
+    <P8023>uid=1,ou=phones,dc=hello,dc=local</P8023>
+    <P8024>sample-ldap-password</P8024>
+    <P8025>cn sn</P8025>
+    <P8026>telephoneNumber mobile homePhone</P8026>
+    <P8027>cn</P8027>
+    <P8028>200</P8028>
+    <P8029>3</P8029>
+    <P8030>(|(cn=%)(sn=%))</P8030>
+    <P8031>(|(telephoneNumber=%)(mobile=%)(homePhone=%))</P8031>
+    <P8032>2</P8032>
     <P30>pool.ntp.org</P30>
     <P64>UTC0</P64>
     <P246>UTC0</P246>

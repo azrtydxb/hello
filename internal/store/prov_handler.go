@@ -69,7 +69,9 @@ func (s *Store) MarkFetched(ctx context.Context, phoneID int64, hash []byte, st 
 		UPDATE phones SET first_fetch_at = COALESCE(first_fetch_at, $2), last_fetch_at = $2,
 		       last_fetch_ip = $3::inet, last_fetch_ua = $4, last_fetch_file = $5,
 		       firmware_seen = COALESCE(NULLIF($6, ''), firmware_seen),
-		       ua_mismatch = ua_mismatch OR $7, boot_armed = FALSE
+		       ua_mismatch = ua_mismatch OR $7, boot_armed = FALSE,
+		       ldap_prev_password_enc = CASE WHEN ldap_rotated_at IS NOT NULL AND ldap_rotated_at <= $2 AND $5 NOT LIKE 'pb/%'
+		                                     THEN NULL ELSE ldap_prev_password_enc END
 		WHERE id = $1 AND (token_hash = $8 OR (prev_token_hash = $8 AND prev_token_expires > now()))`,
 		phoneID, st.At, ipArg(st), st.UserAgent, st.File, st.FirmwareSeen, st.UAMismatch, hash)
 	return err
@@ -241,6 +243,9 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	d.Prov = s.prov.info(token, d.Phone.MAC)
 	d.Time = prov.NewTimeInfo(s.prov.Timezone, s.prov.NTP, time.Now())
 	if d.Book, err = s.bookInfo(ctx, phoneID, token); err != nil {
+		return d, prov.Template{}, err
+	}
+	if d.LDAP, err = s.ldapInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {
 		return d, prov.Template{}, err
 	}
 	if d.Multicast, d.PTT, d.Paging, err = s.multicastInfo(ctx, phoneID, d.Phone.Vendor, d.Phone.Model); err != nil {

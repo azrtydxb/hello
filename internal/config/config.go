@@ -78,6 +78,8 @@ type Control struct {
 	SecretKey string
 	// Prov is the phone provisioning listener (HELLO_PROV_*).
 	Prov Prov
+	// LDAP is the phone directory listener (HELLO_LDAP_*, spec pbx-gaps S-24).
+	LDAP LDAP
 	// Dial is the numbering context of the address books (HELLO_DIAL_*,
 	// spec P-8): how a stored or dialled number reduces to a lookup key.
 	Dial phonebook.Dialing
@@ -234,6 +236,29 @@ type Prov struct {
 	AutoResync bool
 	// Redirect holds vendor redirect credentials set by the deployment.
 	Redirect ProvRedirect
+}
+
+// LDAP is the read-only phone directory (spec pbx-gaps S-24): LDAPS on Addr,
+// optionally StartTLS on StartTLSAddr. Plain LDAP is never served.
+type LDAP struct {
+	// Enabled (HELLO_LDAP_ENABLED, default false) turns the listener on.
+	Enabled bool
+	// Addr (HELLO_LDAP_ADDR, default :636) is the LDAPS listener.
+	Addr string
+	// StartTLSAddr (HELLO_LDAP_STARTTLS_ADDR, default unset) is an optional
+	// listener that offers StartTLS and refuses everything else until it.
+	StartTLSAddr string
+	// Base (HELLO_LDAP_BASE, default dc=hello,dc=local) is the base DN.
+	Base string
+	// Anon (HELLO_LDAP_ANON, default false) allows an anonymous bind, which
+	// sees the extensions and company books only.
+	Anon bool
+	// TLSCert and TLSKey (HELLO_LDAP_TLS_CERT, HELLO_LDAP_TLS_KEY) are the
+	// server certificate pair, required when LDAP is enabled.
+	TLSCert, TLSKey string
+	// PublicPort (HELLO_LDAP_PUBLIC_PORT, default 636) is the port phones are
+	// given: the Service's, which can differ from the listener's.
+	PublicPort int
 }
 
 // Enabled reports whether hello-control serves provisioning.
@@ -406,6 +431,7 @@ func LoadControl(getenv func(string) string) (Control, error) {
 		r.fail("HELLO_SESSION_TTL", errors.New("must be positive")) // a zero TTL makes every login expire at once
 	}
 	c.Prov = r.prov()
+	c.LDAP = r.ldap()
 	c.Dial = r.dialing()
 	c.VoicePromptLanguage = r.optional("HELLO_VOICEMAIL_LANGUAGE", "en")
 	c.AI = r.ai()
@@ -564,6 +590,39 @@ func (r *reader) dialing() phonebook.Dialing {
 		r.fail("HELLO_DIAL_COUNTRY_CODE", errors.New("must be a country calling code of 1-3 digits such as 41 or +41"))
 	}
 	return d
+}
+
+// ldapBaseRe is the shape of the base DN: dc=, o= or ou= components.
+var ldapBaseRe = regexp.MustCompile(`^(?:(?:dc|o|ou)=[A-Za-z0-9][A-Za-z0-9 _.-]{0,62})(?:,(?:dc|o|ou)=[A-Za-z0-9][A-Za-z0-9 _.-]{0,62}){0,7}$`)
+
+// ldap reads the HELLO_LDAP_* settings.
+func (r *reader) ldap() LDAP {
+	l := LDAP{
+		Enabled:      r.boolean("HELLO_LDAP_ENABLED"),
+		Addr:         r.optional("HELLO_LDAP_ADDR", ":636"),
+		StartTLSAddr: r.getenv("HELLO_LDAP_STARTTLS_ADDR"),
+		Base:         r.optional("HELLO_LDAP_BASE", "dc=hello,dc=local"),
+		Anon:         r.boolean("HELLO_LDAP_ANON"),
+		TLSCert:      r.getenv("HELLO_LDAP_TLS_CERT"),
+		TLSKey:       r.getenv("HELLO_LDAP_TLS_KEY"),
+		PublicPort:   r.port("HELLO_LDAP_PUBLIC_PORT", 636),
+	}
+	if !ldapBaseRe.MatchString(l.Base) {
+		r.fail("HELLO_LDAP_BASE", errors.New("must be a DN of dc=, o= or ou= components such as dc=hello,dc=local"))
+	}
+	r.hostPort("HELLO_LDAP_ADDR", l.Addr)
+	if l.StartTLSAddr != "" {
+		r.hostPort("HELLO_LDAP_STARTTLS_ADDR", l.StartTLSAddr)
+	}
+	if !l.Enabled {
+		return l
+	}
+	if l.TLSCert == "" || l.TLSKey == "" {
+		r.fail("HELLO_LDAP_TLS_CERT", errors.New("HELLO_LDAP_TLS_CERT and HELLO_LDAP_TLS_KEY are required when LDAP is enabled: plain LDAP is never served"))
+	} else if _, err := tls.LoadX509KeyPair(l.TLSCert, l.TLSKey); err != nil {
+		r.fail("HELLO_LDAP_TLS_CERT", errors.New("the certificate and key do not load as a pair"))
+	}
+	return l
 }
 
 // prov reads the HELLO_PROV_* settings.

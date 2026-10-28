@@ -91,6 +91,11 @@ func (s *Store) DeliveredBooks(ctx context.Context, phoneID int64) ([]provbook.B
 	if err != nil {
 		return nil, err
 	}
+	return s.booksOf(ctx, refs)
+}
+
+// booksOf reads the books of a set of references.
+func (s *Store) booksOf(ctx context.Context, refs []bookRef) ([]provbook.Book, error) {
 	out := make([]provbook.Book, 0, len(refs))
 	for _, r := range refs {
 		entries, err := s.bookEntries(ctx, r.id, r.kind)
@@ -117,6 +122,11 @@ func (s *Store) DeliveredVersion(ctx context.Context, phoneID int64) (prov.Books
 	if err != nil {
 		return prov.BooksVersion{}, err
 	}
+	return s.versionOf(ctx, refs)
+}
+
+// versionOf is the version of a set of references.
+func (s *Store) versionOf(ctx context.Context, refs []bookRef) (prov.BooksVersion, error) {
 	var (
 		b   strings.Builder
 		out prov.BooksVersion

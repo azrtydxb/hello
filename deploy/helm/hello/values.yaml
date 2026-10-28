@@ -68,6 +68,23 @@ control:
       annotations:
         nginx.ingress.kubernetes.io/ssl-redirect: "false"
         nginx.ingress.kubernetes.io/enable-access-log: "false"
+  # Phone LDAP directory (pbx-gaps S-24): read-only, LDAPS only. Needs
+  # control.provisioning.publicUrl (phones are given its host) and a TLS
+  # Secret (tls.crt, tls.key; cert-manager writes it) for the listener.
+  ldap:
+    enabled: false
+    tlsSecret: ""
+    base: dc=hello,dc=local
+    # The Service port phones are given (HELLO_LDAP_PUBLIC_PORT).
+    port: 636
+    # Also offer StartTLS on a second Service port (389).
+    startTls: false
+    # Allow an anonymous bind (extensions and company books only).
+    anonymous: false
+    service:
+      type: ClusterIP
+      nodePort: null
+      startTlsNodePort: null
   oauthDynamicClientRegistration: false
   # The API's Service. ClusterIP unless something outside the cluster
   # (a test harness, a load balancer) must reach the API directly.

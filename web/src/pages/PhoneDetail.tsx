@@ -52,6 +52,7 @@ import {
   RedirectBadge,
   vendorModel,
 } from "./phones/ui";
+import { PhoneLdap } from "./phones/PhoneLdap";
 import { PushLine, RebootDialog } from "./phones/push";
 import { hasPttKey, PttOverride } from "./phones/PttOverride";
 import "./phones/inventory.css";
@@ -368,6 +369,8 @@ export function PhoneDetail() {
                 </Can>
               </div>
             </div>
+
+            <PhoneLdap phoneId={phone.id} />
 
             <Tabs<Tab>
               aria-label="Phone activity"
