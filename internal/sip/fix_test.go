@@ -160,7 +160,8 @@ func seriesExists(t *testing.T, pbx *testPBX, name string, labels map[string]str
 }
 
 // TestSIPSDestinationRejected fails if an inbound route to a sips: URI is
-// attempted over UDP instead of refused with a clear trace step.
+// attempted over UDP instead of refused (480, no TLS path) with a clear
+// trace step.
 func TestSIPSDestinationRejected(t *testing.T) {
 	r := &fakeRouter{trunks: []routing.Trunk{{ID: 7, Name: "carrier-in", Mode: "ip", Enabled: true}}}
 	r.decide = func(routing.Call, routing.TrunkUsability) routing.Decision {
@@ -173,10 +174,10 @@ func TestSIPSDestinationRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := dcs.WaitAnswer(t.Context(), sipgo.AnswerOptions{}); responseCode(err) != 503 {
-		t.Fatalf("sips: destination = %v, want 503", err)
+	if err := dcs.WaitAnswer(t.Context(), sipgo.AnswerOptions{}); responseCode(err) != 480 {
+		t.Fatalf("sips: destination = %v, want 480", err)
 	}
-	wantTrace(t, pbx.nextCDR(t).Trace, "SIP URI destination sips:agent@voice.example uses sips:, which needs TLS; Hello only sends UDP")
+	wantTrace(t, pbx.nextCDR(t).Trace, "SIP URI destination sips:agent@voice.example uses sips:, which needs TLS; Hello has no TLS path to an external destination")
 }
 
 func mustAddr(t *testing.T, hostport string) netip.Addr {

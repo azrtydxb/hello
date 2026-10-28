@@ -34,9 +34,13 @@ type call struct {
 	callerName   string
 	callerDevice string
 	dialled      string
-	start        time.Time
-	inv          *sip.Request
-	dss          *sipgo.DialogServerSession
+	// secure marks a sips: call: it forks only onto bindings registered over
+	// TLS and never leaves for a trunk or an external URI (phone-feature-
+	// parity S-14).
+	secure bool
+	start  time.Time
+	inv    *sip.Request
+	dss    *sipgo.DialogServerSession
 
 	events    chan legEvent
 	setupDone chan struct{} // closed when setup stops reading events
@@ -364,6 +368,12 @@ func (s *Server) handleInvite(req *sip.Request, tx sip.ServerTransaction) {
 		s.unavailable(tx, req)
 		return
 	}
+	// A sips: request is secure end to end (RFC 3261 26.2.2): its caller must
+	// be on TLS, and every leg it forks onto must be too (see c.secure).
+	if isSIPS(req) && s.clientTransport(req) != transportTLS {
+		s.refuseSecure(req, tx, secureCallerNotTLS, "sips: caller is not on TLS")
+		return
+	}
 	if node, ok := s.confForwardFrom(req); ok {
 		// Another node reached the caller and sends the call here, to the
 		// node that mixes the room (spec S-34).
@@ -476,6 +486,7 @@ func (s *Server) newCall(req *sip.Request) *call {
 	return &call{
 		s: s, id: newID(), callID: req.CallID().Value(),
 		dialled: req.Recipient.User, start: time.Now(), inv: req, direction: cdr.DirectionInternal,
+		secure:   isSIPS(req),
 		canceled: make(chan struct{}), stopHB: make(chan struct{}), setupDone: make(chan struct{}),
 		aborted: make(chan struct{}), haStop: make(chan struct{}),
 		pickupCh: make(chan *pickupReq, 1),
@@ -504,6 +515,12 @@ func (s *Server) dispatch(c *call, req *sip.Request, tx sip.ServerTransaction, s
 	c.trace = append(c.trace, dec.Trace...)
 	c.route, c.rewritten = dec.Route, dec.Number
 	c.noteMOHRoute(dec)
+	if c.secure && (dec.Kind == routing.KindOutbound || (dec.Kind == routing.KindInbound && dec.SIPURI != "")) {
+		// Trunks and external URIs are reached over UDP: no TLS path.
+		s.refuseSecure(req, tx, secureNoTLSRoute, "sips: the route leaves over a non-TLS hop")
+		c.record(sip.StatusTemporarilyUnavailable, cdr.SideSystem, "sips: no TLS route", ResultUnavailable)
+		return
+	}
 	switch {
 	case dec.Kind == routing.KindOutbound:
 		if c.direction == cdr.DirectionInternal {
@@ -582,10 +599,11 @@ func (c *call) ringURI(req *sip.Request, tx sip.ServerTransaction, dec routing.D
 		return
 	}
 	if u.IsEncrypted() {
-		// sips: requires TLS end to end; Hello sends SIP over UDP only.
-		c.addTrace(fmt.Sprintf("SIP URI destination %s uses sips:, which needs TLS; Hello only sends UDP", raw))
-		c.s.respond(tx, req, sip.StatusServiceUnavailable, "Service Unavailable")
-		c.record(sip.StatusServiceUnavailable, cdr.SideSystem, "sips: destinations are not supported", ResultFailed)
+		// sips: requires TLS on every hop; Hello reaches an external SIP URI
+		// over UDP only, so there is no TLS path to it.
+		c.addTrace(fmt.Sprintf("SIP URI destination %s uses sips:, which needs TLS; Hello has no TLS path to an external destination", raw))
+		c.s.refuseSecure(req, tx, secureNoTLSRoute, "sips: destination has no TLS path")
+		c.record(sip.StatusTemporarilyUnavailable, cdr.SideSystem, "sips: destinations are not supported", ResultUnavailable)
 		return
 	}
 	if !c.begin(req, tx) {

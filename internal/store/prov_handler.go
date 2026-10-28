@@ -236,8 +236,7 @@ func (s *Store) RenderInputs(ctx context.Context, phoneID int64) (prov.RenderDat
 	if d.Codes, err = s.featureCodes(ctx); err != nil {
 		return d, prov.Template{}, err
 	}
-	host, port := splitHostPort(s.prov.SIPServer)
-	d.Server = prov.Server{Host: host, Port: port, Transport: "udp", Expiry: int(s.prov.Expiry / time.Second)}
+	d.Server = s.prov.server(d.Phone.Vendor, d.Phone.Model)
 	d.Prov = s.prov.info(token, d.Phone.MAC)
 	d.Time = prov.NewTimeInfo(s.prov.Timezone, s.prov.NTP, time.Now())
 	if d.Book, err = s.bookInfo(ctx, phoneID, token); err != nil {
