@@ -855,6 +855,16 @@ Choices:
   (Yealink type 3, Snom `transfer`, Fanvil memory key `/f`, Poly efk macro).
   The provclient Fanvil parser now counts only `/b` memory keys as BLF.
 
+message. `conference` was left for a follow-up (see below).
+
+## Routes form: conference destination (2026-10-26)
+
+The inbound route drawer also offers `conference` ("Conference room"). The target
+is chosen from the rooms list (`GET /api/v1/conferences`) and stored as the room
+number, labelled "number · name"; a stored number the list no longer has stays
+selectable as "(not found)". An empty target is refused with "Choose a conference
+room." This closes the gap noted for flow canvas P1.
+
 ## DSCP marking, parity item 28 (S-21) (2026-10-27)
 
 Built to the spec: SIP socket DSCP 26, relay/anchor/fanout/party RTP sockets
